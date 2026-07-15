@@ -10,7 +10,7 @@ Diagramas: `2026-07-13_autohost-c4-contenedores.png`, `-hexagonal-dominios.png`,
 
 **Monolito modular** con arquitectura hexagonal, separado por dominios de negocio (PRD §3.2): `auth`, `tenants`, `properties`, `reservations`, `guests`, `cleaning`, `maintenance`, `messaging`, `access`, `pricing`, `statements`, `notifications`, `timeline`, `integrations`. Sin microservicios en MVP; el código debe permitir extraer servicios en el futuro.
 
-Monorepo: `/backend` (FastAPI + Celery, con `backend/devops/Dockerfile`), `/frontend` (Next.js, con `frontend/devops/Dockerfile`). Sin `/docker` a nivel de raíz — `docker-compose.yml` y `Makefile` orquestando todo el stack viven en la raíz del repo (change `dev-environment`).
+Monorepo: `/backend` (FastAPI + Celery, con `backend/devops/Dockerfile`), `/frontend` (Next.js, con `frontend/devops/Dockerfile`). Sin `/docker` a nivel de raíz — `docker-compose.yml` y `Makefile` orquestando todo el stack viven en la raíz del repo (change `local-environment`).
 
 ## Decisiones firmes
 

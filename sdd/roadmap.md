@@ -5,8 +5,9 @@
      Al empezar una entrada, /sdd-new añade "→ changes/<feature>/"; al archivarla,
      /sdd-archive la marca [x]. -->
 
-- [x] dev-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/archive/2026-07-15-dev-environment/
-- [ ] domain-foundation — modelos de dominio + enums, esquema DB + Alembic, sobre el scaffold de `dev-environment` (PRD §26.2-3, §7)
+- [x] local-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/archive/2026-07-15-local-environment/
+- [ ] infra-scaffold — convención de /infra por entorno (no por dominio), criterio de decisión de proveedor cloud (AWS/GCP/Vercel/Railway), sin IaC real ni proveedor elegido todavía (no está en el PRD original, añadido tras `local-environment`) → changes/infra-scaffold/
+- [ ] domain-foundation — modelos de dominio + enums, esquema DB + Alembic, sobre el scaffold de `local-environment` (PRD §26.2-3, §7)
 - [ ] auth-tenancy — JWT + RBAC + middleware, tenant isolation con tests (PRD §26.4-5, §6, §22)
 - [ ] timeline-state-machine — TimelineService central + PropertyStateMachine con todas las transiciones (PRD §26.6-7, §8, §10)
 - [ ] celery-jobs — scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14)

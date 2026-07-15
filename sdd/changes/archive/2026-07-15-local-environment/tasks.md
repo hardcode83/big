@@ -1,4 +1,4 @@
-# Tasks: dev-environment
+# Tasks: local-environment
 
 ## 1. Root scaffold & shared config
 

@@ -1,4 +1,4 @@
-# Proposal: dev-environment
+# Proposal: local-environment
 
 ## Why
 
@@ -76,4 +76,4 @@ Acceptance criteria:
 
 ## Affected specs
 
-- `sdd/specs/dev-environment.md` (no existe aún — se creará al archivar este change).
+- `sdd/specs/local-environment.md` (no existe aún — se creará al archivar este change).

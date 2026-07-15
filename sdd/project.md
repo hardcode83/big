@@ -11,7 +11,7 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 - **Backend**: Python 3.12+, FastAPI, SQLAlchemy 2.x async, Alembic, Pydantic v2, PostgreSQL 16, Redis 7, Celery.
 - **Frontend**: Next.js 14+ (App Router), TypeScript strict, Tailwind, shadcn/ui, TanStack Query v5, Zustand, react-i18next (ES/EN), mobile-first.
 - **Auth**: JWT (access 15 min + refresh 7 días con rotation), RBAC en backend, bcrypt.
-- **Infra dev**: docker-compose (postgres:16, redis:7, backend+worker, frontend). Monorepo: `/backend`, `/frontend`, `/docker`.
+- **Infra dev**: docker-compose (postgres:16, redis:7, backend+worker, frontend). Monorepo: `/backend` (con `backend/devops/Dockerfile`), `/frontend` (con `frontend/devops/Dockerfile`); `docker-compose.yml`/`Makefile` en la raíz.
 - **Arquitectura**: monolito modular hexagonal por dominios; todo sistema externo detrás de adapter (mocks en MVP). Ver `steering/architecture.md`.
 
 ## Commands
@@ -34,4 +34,4 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 - Roadmap: `sdd/roadmap.md` (13 changes desde PRD §26).
 - MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` pendiente de añadir cuando exista la DB.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).
-- Repo git inicializado (rama `main`) en el change `dev-environment`.
+- Repo git inicializado (rama `main`) en el change `local-environment`.
