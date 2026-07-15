@@ -5,6 +5,8 @@ Two modes, chosen by argument:
 - no argument — **drift check**: compare `sdd/specs/` against the codebase.
 - `<feature>` — **change review**: verify the implementation of `sdd/changes/<feature>/` against its proposal.
 
+**Fallback when drift check would be vacuous:** if no argument was given and `sdd/specs/` is missing or empty, there's nothing to drift-check. If exactly one non-archived change exists in `sdd/changes/`, do a change review of it instead (say so explicitly). Otherwise, report that there's nothing to check yet and point to the `new` phase.
+
 ## Drift check
 
 1. Read `sdd/project.md` and every file in `sdd/specs/`.

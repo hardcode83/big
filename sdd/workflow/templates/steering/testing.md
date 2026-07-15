@@ -10,6 +10,12 @@ phases: [tasks, run]
 <!-- - Business logic: unit test next to the module. -->
 <!-- - Anything crossing a boundary (DB, HTTP, queue): integration test. -->
 <!-- - E2E only for the critical user flows listed below. -->
+<!-- - Infra/dev-environment changes (docker-compose, Dockerfiles, CI config): -->
+<!--   unit tests don't catch this. Verify by actually building the images and -->
+<!--   running the real stack end-to-end (bring it up, hit the endpoints, check -->
+<!--   logs) — that's what catches race conditions, bad depends_on/healthchecks, -->
+<!--   wrong env wiring. Encode it as an explicit tasks.md Verification step, -->
+<!--   not just "run the test suite". -->
 
 ## Conventions
 
