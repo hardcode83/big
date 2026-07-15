@@ -12,6 +12,7 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 - **Frontend**: Next.js 14+ (App Router), TypeScript strict, Tailwind, shadcn/ui, TanStack Query v5, Zustand, react-i18next (ES/EN), mobile-first.
 - **Auth**: JWT (access 15 min + refresh 7 días con rotation), RBAC en backend, bcrypt.
 - **Infra dev**: docker-compose (postgres:16, redis:7, backend+worker, frontend). Monorepo: `/backend` (con `backend/devops/Dockerfile`), `/frontend` (con `frontend/devops/Dockerfile`); `docker-compose.yml`/`Makefile` en la raíz.
+- **Infra remota**: Terraform + GitHub Actions confirmados; proveedor cloud (AWS/GCP/Vercel/Railway) pendiente de decisión. Ver `steering/infra.md`.
 - **Arquitectura**: monolito modular hexagonal por dominios; todo sistema externo detrás de adapter (mocks en MVP). Ver `steering/architecture.md`.
 
 ## Commands
@@ -26,7 +27,7 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 - Nombres canónicos exactos del PRD en código: estados operacionales (`VACANT_READY`…), enums, entidades (§7-8).
 - Mensajes de sistema/logs/errores backend en **inglés**; UI con traducciones ES/EN en `locales/`.
 - Marcar supuestos como `ASSUMPTION` y dependencias sin credenciales como `EXTERNAL_DEPENDENCY` en el código/docs.
-- Reglas duras en `steering/`: architecture (vinculante en design), security (design/run), testing (tasks/run), documentation (tasks/archive), backend/frontend por paths.
+- Reglas duras en `steering/`: architecture (vinculante en design), security (design/run), testing (tasks/run), documentation (tasks/archive), backend/frontend/infra por paths.
 
 ## Context
 
