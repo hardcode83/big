@@ -32,6 +32,15 @@ Keep exploration proportional — this is a steering summary, not an audit.
 
 Do NOT turn the plan's features into proposals now — proposals are written just-in-time by the `new` phase, one at a time, when their turn comes.
 
+**Re-ingesting an updated plan** (project already initialized): merge, never regenerate. Diff the plan against the current `sdd/roadmap.md` and steering, then:
+
+- Checked (`[x]`) and in-progress (`→ changes/…`) entries are history — never rewrite or reorder them.
+- New features → new `- [ ]` entries, inserted where they belong in the order.
+- Dropped features → remove their pending entries (confirm first).
+- Changed features not yet started → edit their pending line.
+- Changes that contradict behavior already built (there's a spec in `sdd/specs/` for it) → don't just edit the roadmap: flag them explicitly as `/sdd-new` candidates, because reality now disagrees with the plan.
+- Vision/architecture deltas → update the affected steering docs, showing the user the diff.
+
 ### 3. Write the core scaffold
 
 Create if missing: `sdd/specs/` and `sdd/changes/archive/`.
