@@ -5,7 +5,7 @@
      Al empezar una entrada, /sdd-new añade "→ changes/<feature>/"; al archivarla,
      /sdd-archive la marca [x]. -->
 
-- [ ] dev-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/dev-environment/
+- [x] dev-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/archive/2026-07-15-dev-environment/
 - [ ] domain-foundation — modelos de dominio + enums, esquema DB + Alembic, sobre el scaffold de `dev-environment` (PRD §26.2-3, §7)
 - [ ] auth-tenancy — JWT + RBAC + middleware, tenant isolation con tests (PRD §26.4-5, §6, §22)
 - [ ] timeline-state-machine — TimelineService central + PropertyStateMachine con todas las transiciones (PRD §26.6-7, §8, §10)

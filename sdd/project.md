@@ -34,4 +34,4 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 - Roadmap: `sdd/roadmap.md` (13 changes desde PRD §26).
 - MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` pendiente de añadir cuando exista la DB.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).
-- Sin repo git aún — pendiente `git init` en el primer change.
+- Repo git inicializado (rama `main`) en el change `dev-environment`.

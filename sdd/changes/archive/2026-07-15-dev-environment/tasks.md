@@ -33,13 +33,13 @@
 
 ## 6. Git init & documentación
 
-- [ ] 6.1 `git init` en la raíz, `git add -A`, commit inicial `chore: scaffold monorepo + docker-compose dev stack` (después de que 1.1–5.1 existan) (D11) — [R6]
-- [ ] 6.2 `README.md` raíz: cómo arrancar (`make up`), URLs locales (`localhost:8000`, `localhost:3000`), variables de `.env.example` y su propósito, cómo levantar un componente suelto (`make up SERVICE=...`) (documentation.md) — files: `README.md` [R2, R3, R5]
+- [x] 6.1 `git init` en la raíz, `git add -A`, commit inicial `chore: scaffold monorepo + docker-compose dev stack` (después de que 1.1–5.1 existan) (D11) — [R6]
+- [x] 6.2 `README.md` raíz: cómo arrancar (`make up`), URLs locales (`localhost:8000`, `localhost:3000`), variables de `.env.example` y su propósito, cómo levantar un componente suelto (`make up SERVICE=...`) (documentation.md) — files: `README.md` [R2, R3, R5]
 
 ## 7. Verification
 
-- [ ] 7.1 `make up` levanta postgres+redis+backend+worker+frontend sin errores; `curl localhost:8000/health` → `200 {"status":"ok"}`; `localhost:3000` muestra "backend: ok" [R2, R5]
-- [ ] 7.2 `make up SERVICE=backend` levanta backend+postgres+redis únicamente (frontend no arranca) [R3]
-- [ ] 7.3 Con el stack arriba, editar `backend/app/main.py` y `frontend/app/page.tsx`: el cambio se refleja sin rebuild manual (hot reload) [R2]
-- [ ] 7.4 Test suite backend: `cd backend && uv run pytest`; test suite frontend: `cd frontend && npm test` — ambas en verde [R5]
-- [ ] 7.5 `git log`/`git status`: un único commit inicial, sin `.env`/`node_modules`/`__pycache__`/`.venv` trackeados [R6]
+- [x] 7.1 `make up` levanta postgres+redis+backend+worker+frontend sin errores; `curl localhost:8000/health` → `200 {"status":"ok"}`; `localhost:3000` muestra "backend: ok" [R2, R5]
+- [x] 7.2 `make up SERVICE=backend` levanta backend+postgres+redis únicamente (frontend no arranca) [R3]
+- [x] 7.3 Con el stack arriba, editar `backend/app/main.py` y `frontend/app/page.tsx`: el cambio se refleja sin rebuild manual (hot reload) [R2]
+- [x] 7.4 Test suite backend: `cd backend && uv run pytest`; test suite frontend: `cd frontend && npm test` — ambas en verde [R5]
+- [x] 7.5 `git log`/`git status`: un único commit inicial, sin `.env`/`node_modules`/`__pycache__`/`.venv` trackeados [R6]
