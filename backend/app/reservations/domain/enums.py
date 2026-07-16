@@ -1,0 +1,36 @@
+import enum
+
+
+class ReservationChannel(str, enum.Enum):
+    AIRBNB = "AIRBNB"
+    BOOKING = "BOOKING"
+    EXPEDIA = "EXPEDIA"
+    DIRECT = "DIRECT"
+    MANUAL = "MANUAL"
+    OTHER = "OTHER"
+
+
+class ReservationStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    CONFIRMED = "CONFIRMED"
+    CANCELLED = "CANCELLED"
+    CHECKED_IN_ESTIMATED = "CHECKED_IN_ESTIMATED"
+    CHECKED_OUT_ESTIMATED = "CHECKED_OUT_ESTIMATED"
+    COMPLETED = "COMPLETED"
+    NO_SHOW = "NO_SHOW"
+
+
+class PaymentStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    PAID = "PAID"
+    PARTIALLY_PAID = "PARTIALLY_PAID"
+    REFUNDED = "REFUNDED"
+
+
+class ReservationAccessStatus(str, enum.Enum):
+    PENDING = "PENDING"
+    CREATED_EXTERNAL = "CREATED_EXTERNAL"
+    MANUAL_ADDED = "MANUAL_ADDED"
+    DELIVERED = "DELIVERED"
+    EXPIRED = "EXPIRED"
+    NOT_REQUIRED = "NOT_REQUIRED"

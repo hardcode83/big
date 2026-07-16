@@ -1,6 +1,6 @@
 # AutoHostAI
 
-Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas turísticas. Ver `AutoHostAI_PRD_v5_Claude (1).md` para el PRD completo y `sdd/` para el flujo de desarrollo (Spec-Driven Development).
+Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas turísticas. Ver `docs/AutoHostAI_PRD_v5_Claude.md` para el PRD completo y `sdd/` para el flujo de desarrollo (Spec-Driven Development).
 
 ## Arrancar en local
 
@@ -10,13 +10,13 @@ Requisitos: Docker + Docker Compose v2, `make`.
 make up   # levanta todo el stack: postgres, redis, backend, worker, frontend
 ```
 
-Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (valores locales por defecto, sin secretos reales) si no existe todavía.
+Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (valores locales por defecto, sin secretos reales) si no existe todavía. Las migraciones de base de datos (Alembic) también se aplican solas — un servicio `migrate` corre `alembic upgrade head` antes de que `backend`/`worker` arranquen.
 
 Al cabo de unos segundos:
 
 - Backend (FastAPI): http://localhost:8000/health
 - Frontend (Next.js): http://localhost:3000 — muestra "backend: ok" cuando el backend responde
-- Postgres: localhost:5432
+- Postgres: localhost:5432 — ya con el esquema de dominio creado (`tenants`, `users`, `properties`, `guests`, `reservations`, `timeline_events`, ...)
 - Redis: localhost:6379
 
 ```bash
@@ -35,13 +35,26 @@ make up SERVICE=frontend   # frontend + backend + sus dependencias
 make sh SERVICE=backend    # shell dentro del contenedor de backend
 ```
 
+## Migraciones (Alembic)
+
+El esquema se aplica solo al arrancar (`make up` → servicio `migrate`). Para cambiarlo:
+
+```bash
+cd backend
+uv run alembic revision --autogenerate -m "descripción del cambio"   # genera una migración
+uv run alembic upgrade head                                          # aplica pendientes
+uv run alembic downgrade -1                                           # revierte la última
+```
+
+Requiere Postgres alcanzable (`make up` levantado, o al menos `docker compose up -d postgres`).
+
 ## Variables de entorno
 
 Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real (Postgres solo alcanzable dentro de la red de compose). Los secretos reales futuros (credenciales de proveedores externos) nunca llevarán valor por defecto ahí — solo el nombre (`security.md` #8).
 
 ## Estructura
 
-- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`.
+- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` (`domain/`, `infrastructure/`, ver `sdd/steering/backend-architecture.md`); migraciones en `backend/alembic/`.
 - `frontend/` — Next.js App Router (TypeScript, Tailwind). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack local, en la raíz.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
@@ -80,6 +93,6 @@ Este proyecto se desarrolla con **Spec-Driven Development**: cada feature pasa p
 
 - Los cambios no triviales entran por `/sdd:new`, nunca directo a código — así `sdd/specs/` sigue siendo la verdad de lo construido.
 - Las reglas de arquitectura/seguridad/testing viven en `sdd/steering/` — son vinculantes para agentes (las carga cada fase y las verifica el panel) y para humanos.
-- El PRD (`AutoHostAI_PRD_v5_Claude (1).md`) es la referencia funcional origen; el estado real del sistema son las specs.
+- El PRD (`docs/AutoHostAI_PRD_v5_Claude.md`) es la referencia funcional origen; el estado real del sistema son las specs.
 
 Para aprender el flujo completo: [guía paso a paso](https://github.com/hardcode83/sdd-toolkit/blob/main/docs/guide.md) (10 min).

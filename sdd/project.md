@@ -4,7 +4,7 @@
 
 AutoHostAI es una **capa operativa inteligente sobre un PMS/Channel Manager externo** para viviendas turísticas: sustituye el trabajo de la gestora (MAGNO) — limpiezas, mantenimiento, mensajería con IA, accesos, reporting — empezando con 2 viviendas en Madrid y escalando después a SaaS. **No es un PMS ni un Channel Manager.**
 
-Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, cerrado). Los proposals citan sus secciones.
+Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5, cerrado). Los proposals citan sus secciones.
 
 ## Stack
 
@@ -31,8 +31,10 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 
 ## Context
 
-- PRD: `AutoHostAI_PRD_v5_Claude (1).md` + diagramas en `docs/diagrams/` (C4, hexagonal, ER, state machine, secuencias).
-- Roadmap: `sdd/roadmap.md` (13 changes desde PRD §26).
-- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` pendiente de añadir cuando exista la DB.
+- PRD: `docs/AutoHostAI_PRD_v5_Claude.md` + diagramas en `docs/diagrams/` (C4, hexagonal, ER, state machine, secuencias).
+- Roadmap: `sdd/roadmap.md` (16 changes desde PRD §26; `domain-foundation` se dividió en `-core`/`-ops`/`-financial`).
+- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` todavía no añadido — la DB ya existe (`domain-foundation-core`, 8 tablas), se puede añadir con `/sdd:init extras` cuando se quiera.
+- LSPs activados: `pyright-lsp` (Python/backend), `typescript-lsp` (TypeScript/frontend) — binarios instalados; falta ejecutar `/plugin install pyright-lsp` y `/plugin install typescript-lsp`.
+- Usage metrics: activado (OTEL → `http://127.0.0.1:4318`, `.sdd-usage/` en `.gitignore`). Efectivo a partir de la próxima sesión.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).
 - Repo git inicializado (rama `main`) en el change `local-environment`.

@@ -21,3 +21,6 @@ npm-debug.log*
 .DS_Store
 .vscode/
 .idea/
+
+# SDD usage metrics
+.sdd-usage/

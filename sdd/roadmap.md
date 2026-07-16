@@ -7,7 +7,9 @@
 
 - [x] local-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/archive/2026-07-15-local-environment/
 - [x] infra-scaffold — convención de /infra por entorno (no por dominio), criterio de decisión de proveedor cloud (AWS/GCP/Vercel/Railway), sin IaC real ni proveedor elegido todavía (no está en el PRD original, añadido tras `local-environment`) → changes/archive/2026-07-15-infra-scaffold/
-- [ ] domain-foundation — modelos de dominio + enums, esquema DB + Alembic, sobre el scaffold de `local-environment` (PRD §26.2-3, §7)
+- [x] domain-foundation-core — entidades + enums + esquema DB/Alembic de Tenant, TenantConfig, User, Property, PropertyStateTransition, TimelineEvent, Guest, Reservation — backbone de identidad/tenencia/propiedad/reserva (PRD §26.2-3, §7.1-7.8) → changes/archive/2026-07-17-domain-foundation-core/
+- [ ] domain-foundation-ops — entidades + enums + esquema DB/Alembic de CleaningTask, CleaningChecklistTemplate, CleaningChecklistCompletion, CleaningPhoto, Incident, Conversation, Message, AccessRecord — dominios operativos, sobre `domain-foundation-core` (PRD §26.2-3, §7.9-7.16)
+- [ ] domain-foundation-financial — entidades + enums + esquema DB/Alembic de PricingRule, PriceRecommendation, OwnerApproval, Review, ReviewResponseDraft, OwnerStatement, Expense, NotificationLog, AuditLog, WebhookEvent — pricing/financiero + logs de sistema, sobre `domain-foundation-core`/`domain-foundation-ops` (PRD §26.2-3, §7.17-7.26)
 - [ ] auth-tenancy — JWT + RBAC + middleware, tenant isolation con tests (PRD §26.4-5, §6, §22)
 - [ ] timeline-state-machine — TimelineService central + PropertyStateMachine con todas las transiciones (PRD §26.6-7, §8, §10)
 - [ ] celery-jobs — scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14)
