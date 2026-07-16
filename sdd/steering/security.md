@@ -17,7 +17,7 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 5. **Fotos por signed URL** (`StorageAdapter.get_signed_url`, expiry 3600 s). Nunca exponer paths internos.
 6. **Uploads**: validar MIME, tamaño máx. configurable (default 10 MB).
 7. **Auth**: rate limiting 10 intentos/min/IP y bloqueo tras 10 fallos; refresh token rotation.
-8. **Secrets**: cero secretos en repo; `.env.example` solo con nombres.
+8. **Secrets**: cero secretos *reales* en repo — credenciales de PMS/WhatsApp/Email/Phone/SES.Hospedajes, `ENCRYPTION_KEY`, JWT signing key: solo el nombre en `.env.example`, nunca un valor, y deben fallar rápido si faltan (`${VAR:?...}` en compose). No aplica a config puramente local sin sensibilidad real (p. ej. la contraseña del Postgres de desarrollo, que solo existe dentro de la red de docker-compose, inalcanzable desde fuera de `localhost`, sin datos reales) — esa sí puede llevar un valor por defecto funcional en `.env.example` para que `make up` arranque sin pasos manuales.
 9. **AuditLog** para: Reservation, estados de propiedad, acceso/modificación de documentos de Guest, AccessRecord, PricingRule/PriceRecommendation, OwnerApproval, roles de User, Incident (PRD §7.25).
 10. **Reglas de seguridad de la IA** (PRD §13): nunca prometer reembolsos/compensaciones, admitir responsabilidad, dar asesoría legal, revelar datos de otros huéspedes, inventar códigos/disponibilidad/precios, ni afirmar que un técnico va sin assignment real.
 

@@ -7,9 +7,10 @@ Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas t
 Requisitos: Docker + Docker Compose v2, `make`.
 
 ```bash
-cp .env.example .env   # rellena los valores (ver comentarios en el propio fichero)
-make up                # levanta todo el stack: postgres, redis, backend, worker, frontend
+make up   # levanta todo el stack: postgres, redis, backend, worker, frontend
 ```
+
+Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (valores locales por defecto, sin secretos reales) si no existe todavía.
 
 Al cabo de unos segundos:
 
@@ -36,7 +37,7 @@ make sh SERVICE=backend    # shell dentro del contenedor de backend
 
 ## Variables de entorno
 
-Ver `.env.example` — nombres y formato esperado de cada variable, sin valores reales (nunca se commitea `.env`).
+Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real (Postgres solo alcanzable dentro de la red de compose). Los secretos reales futuros (credenciales de proveedores externos) nunca llevarán valor por defecto ahí — solo el nombre (`security.md` #8).
 
 ## Estructura
 
