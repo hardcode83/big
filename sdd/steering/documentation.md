@@ -16,7 +16,7 @@ phases: [tasks, archive]
 - Cambio en arranque local → `README.md` de raíz (objetivo: `docker compose up` y listo, DoD §28.20).
 - **README raíz al día por change**: si el change añade un módulo/servicio, comando de Makefile, o cambia la estructura de carpetas → actualizar las secciones Estructura/Arrancar/Tests del README. El README describe el sistema *actual*, nunca el planeado.
 - **`docs/` — documentación extendida por capability**: al archivar un change que introduce o cambia una capability de cara a usuarios/operación (flujos de limpieza, incidencias, dashboard…), crear o actualizar su página `docs/<capability>.md` — orientada a *cómo se usa/opera* (las specs EARS de `sdd/specs/` ya cubren el *qué hace*; no duplicar, enlazar).
-- **Diagramas en `docs/diagrams/`**: los diagramas viven ahí (nombrado `{YYYY-MM-DD}_{slug}.png`), nunca en la raíz. Si el change altera arquitectura, flujos o modelo de datos de forma que un diagrama existente queda obsoleto → regenerarlo con `/sdd-toolkit:diagram` y reemplazar la referencia; los obsoletos se borran, no se acumulan.
+- **Diagramas en `docs/diagrams/`**: los diagramas viven ahí (nombrado `{YYYY-MM-DD}_{slug}.png`), nunca en la raíz. Si el change altera arquitectura, flujos o modelo de datos de forma que un diagrama existente queda obsoleto → regenerarlo con `/sdd:diagram` y reemplazar la referencia; los obsoletos se borran, no se acumulan.
 
 ## Audiencias
 
