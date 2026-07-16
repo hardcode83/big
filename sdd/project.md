@@ -31,7 +31,7 @@ Fuente de verdad funcional: `AutoHostAI_PRD_v5_Claude (1).md` (PRD técnico v5, 
 
 ## Context
 
-- PRD: `AutoHostAI_PRD_v5_Claude (1).md` + diagramas `2026-07-13_autohost-*.png` (C4, hexagonal, ER, state machine, secuencias).
+- PRD: `AutoHostAI_PRD_v5_Claude (1).md` + diagramas en `docs/diagrams/` (C4, hexagonal, ER, state machine, secuencias).
 - Roadmap: `sdd/roadmap.md` (13 changes desde PRD §26).
 - MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` pendiente de añadir cuando exista la DB.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).

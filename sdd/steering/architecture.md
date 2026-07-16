@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `2026-07-13_autohost-c4-contenedores.png`, `-hexagonal-dominios.png`, `-er-entidades-core.png`, `-maquina-estados.png`, `-secuencia-{limpieza,mantenimiento}.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,er-entidades-core,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`.
 
 ## Forma del sistema
 

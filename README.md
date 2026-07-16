@@ -44,6 +44,7 @@ Ver `.env.example` — nombres y formato esperado de cada variable, sin valores 
 - `frontend/` — Next.js App Router (TypeScript, Tailwind). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack local, en la raíz.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
+- `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
 
 ## Tests
 
@@ -54,13 +55,30 @@ cd frontend && npm test
 
 ## Desarrollo con SDD
 
-Este proyecto se desarrolla con **Spec-Driven Development**: cada feature pasa por proposal (requisitos EARS) → design → tasks → implementación con panel de revisión → archivado en las specs vivas. Todo el estado vive en [`sdd/`](sdd/README.md); las specs de lo ya construido están en `sdd/specs/` y el plan en `sdd/roadmap.md`.
+Este proyecto se desarrolla con **Spec-Driven Development**: cada feature pasa por fases con aprobación humana entre ellas, y el estado completo vive versionado en [`sdd/`](sdd/README.md) — cualquier sesión de agente puede continuar donde lo dejó la anterior.
 
-Los comandos (`/sdd-toolkit:*`) los proporciona el plugin [sdd-toolkit](https://github.com/hardcode83/sdd-toolkit) de Claude Code:
+**Setup (una vez):** los comandos `/sdd-toolkit:*` los da el plugin [sdd-toolkit](https://github.com/hardcode83/sdd-toolkit) de Claude Code:
 
 ```
 /plugin marketplace add hardcode83/sdd-toolkit
 /plugin install sdd-toolkit@sdd-toolkit
 ```
 
-Para aprender el flujo: [guía de uso paso a paso](https://github.com/hardcode83/sdd-toolkit/blob/main/docs/guide.md) (10 min). Regla de oro del repo: los cambios no triviales entran por `/sdd-toolkit:new`, nunca directo a código — así las specs siguen siendo verdad.
+**El ciclo de cada feature:**
+
+| Paso | Comando | Resultado |
+|---|---|---|
+| 1 | `/sdd-toolkit:status` | ¿Dónde estamos? Changes activos + roadmap como to-do list |
+| 2 | `/sdd-toolkit:new` | Proposal con requisitos EARS desde la siguiente entrada del roadmap (`sdd/roadmap.md`) — **apruebas tú** |
+| 3 | `/sdd-toolkit:design` | Decisiones técnicas (se salta si el cambio es trivial) — **apruebas tú** |
+| 4 | `/sdd-toolkit:tasks` | Checklist de tareas verificables — **apruebas tú** |
+| 5 | `/sdd-toolkit:run` | Implementa en orden; panel de revisores (architect/security/qa) por sección |
+| 6 | `/sdd-toolkit:archive` | Fusiona en `sdd/specs/`, actualiza README/`docs/`, archiva el change |
+
+**Reglas del repo:**
+
+- Los cambios no triviales entran por `/sdd-toolkit:new`, nunca directo a código — así `sdd/specs/` sigue siendo la verdad de lo construido.
+- Las reglas de arquitectura/seguridad/testing viven en `sdd/steering/` — son vinculantes para agentes (las carga cada fase y las verifica el panel) y para humanos.
+- El PRD (`AutoHostAI_PRD_v5_Claude (1).md`) es la referencia funcional origen; el estado real del sistema son las specs.
+
+Para aprender el flujo completo: [guía paso a paso](https://github.com/hardcode83/sdd-toolkit/blob/main/docs/guide.md) (10 min).
