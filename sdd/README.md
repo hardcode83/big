@@ -1,6 +1,15 @@
 # SDD — Spec-Driven Development
 
-Este directorio es la **capa de persistencia** del proyecto para el flujo SDD (plugin `sdd` de Claude Code): specs, cambios en curso, reglas y roadmap viven en archivos, no en la sesión. Convenciones para humanos y agentes:
+Este directorio es la **capa de persistencia** del proyecto para el flujo SDD (plugin [`sdd-toolkit`](https://github.com/hardcode83/sdd-toolkit) de Claude Code): specs, cambios en curso, reglas y roadmap viven en archivos, no en la sesión.
+
+**¿Nuevo en el flujo?** Empieza por la [guía de uso paso a paso](https://github.com/hardcode83/sdd-toolkit/blob/main/docs/guide.md); la referencia completa está en el [README del plugin](https://github.com/hardcode83/sdd-toolkit#readme). Para tener los comandos `/sdd-toolkit:*` en tu Claude Code:
+
+```
+/plugin marketplace add hardcode83/sdd-toolkit
+/plugin install sdd-toolkit@sdd-toolkit
+```
+
+Convenciones para humanos y agentes:
 
 - `project.md` — steering core: stack, comandos de build/test/lint, convenciones. Generado por `/sdd-toolkit:init`, editable a mano. Se lee al inicio de toda fase SDD.
 - `steering/` — reglas permanentes ricas: `product.md` (visión), `architecture.md`, `security.md`, `testing.md`, `documentation.md`, docs por componente/lenguaje. Cada doc declara en su frontmatter (`applies_to`, `phases`) cuándo se carga — las fases SDD solo leen los que aplican al cambio en curso.

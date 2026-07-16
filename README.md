@@ -51,3 +51,16 @@ Ver `.env.example` — nombres y formato esperado de cada variable, sin valores 
 cd backend && uv run pytest
 cd frontend && npm test
 ```
+
+## Desarrollo con SDD
+
+Este proyecto se desarrolla con **Spec-Driven Development**: cada feature pasa por proposal (requisitos EARS) → design → tasks → implementación con panel de revisión → archivado en las specs vivas. Todo el estado vive en [`sdd/`](sdd/README.md); las specs de lo ya construido están en `sdd/specs/` y el plan en `sdd/roadmap.md`.
+
+Los comandos (`/sdd-toolkit:*`) los proporciona el plugin [sdd-toolkit](https://github.com/hardcode83/sdd-toolkit) de Claude Code:
+
+```
+/plugin marketplace add hardcode83/sdd-toolkit
+/plugin install sdd-toolkit@sdd-toolkit
+```
+
+Para aprender el flujo: [guía de uso paso a paso](https://github.com/hardcode83/sdd-toolkit/blob/main/docs/guide.md) (10 min). Regla de oro del repo: los cambios no triviales entran por `/sdd-toolkit:new`, nunca directo a código — así las specs siguen siendo verdad.
