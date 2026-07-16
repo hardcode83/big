@@ -8,6 +8,8 @@ applies_to: ["backend/**"]
 
 `backend/app/<dominio>/` con separación puertos/adaptadores: `domain/` (entidades, servicios puros), `application/` (casos de uso), `infrastructure/` (repositorios SQLAlchemy, adapters), `api/` (routers FastAPI). Adapters externos compartidos en `app/integrations/`.
 
+Reglas de diseño dentro de cada capa (DDD + SOLID + regla de dependencia, con ejemplos): ver `steering/backend-architecture.md`.
+
 ## Patrones
 
 - SQLAlchemy 2.x **async** + Alembic; toda entidad con `tenant_id`, `created_at`, `updated_at` (TIMESTAMPTZ), UUID PK — esquemas exactos del PRD §7.
