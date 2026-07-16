@@ -23,3 +23,4 @@ phases: [tasks, run]
 - Tests junto al dominio que cubren (`backend/tests/<dominio>/`), fixtures compartidas en `conftest.py` (tenant, users por rol, properties seed).
 - Mockear solo en la frontera de adapters — nunca mockear repositorios ni la state machine en tests de dominio.
 - Cada tarea de implementación incluye su test (regla del flujo SDD); la sección Verification corre la suite completa.
+- **TDD (test primero) en `domain/` con invariante real** — state machine, guardrails de pricing, checklist de limpieza (ver `backend-architecture.md` § "Cuándo simplificar"): escribe el test que exige la regla antes de implementarla, es barato porque `domain/` es Python puro sin infra que montar. No forzar TDD en `infrastructure/` (integration tests, más caro escribir-primero) ni en UI exploratoria de frontend.
