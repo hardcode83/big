@@ -1,9 +1,9 @@
 # Roadmap
 
 <!-- Backlog ordenado de changes, agrupando los 28 pasos del PRD §26 por módulo.
-     /sdd-new coge la siguiente entrada y la convierte en proposal just-in-time.
-     Al empezar una entrada, /sdd-new añade "→ changes/<feature>/"; al archivarla,
-     /sdd-archive la marca [x]. -->
+     /sdd-toolkit:new coge la siguiente entrada y la convierte en proposal
+     just-in-time. Al empezar una entrada, /sdd-toolkit:new añade
+     "→ changes/<feature>/"; al archivarla, /sdd-toolkit:archive la marca [x]. -->
 
 - [x] local-environment — monorepo scaffold (/backend, /frontend, cada uno con su Dockerfile), docker-compose + Makefile, esqueleto mínimo ejecutable, git init (PRD §26.1, §25) → changes/archive/2026-07-15-local-environment/
 - [x] infra-scaffold — convención de /infra por entorno (no por dominio), criterio de decisión de proveedor cloud (AWS/GCP/Vercel/Railway), sin IaC real ni proveedor elegido todavía (no está en el PRD original, añadido tras `local-environment`) → changes/archive/2026-07-15-infra-scaffold/
