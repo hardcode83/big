@@ -16,6 +16,10 @@ import app.properties.infrastructure.models  # noqa: E402,F401
 import app.guests.infrastructure.models  # noqa: E402,F401
 import app.reservations.infrastructure.models  # noqa: E402,F401
 import app.timeline.infrastructure.models  # noqa: E402,F401
+import app.cleaning.infrastructure.models  # noqa: E402,F401
+import app.maintenance.infrastructure.models  # noqa: E402,F401
+import app.messaging.infrastructure.models  # noqa: E402,F401
+import app.access.infrastructure.models  # noqa: E402,F401
 from app.core.config import settings
 from app.core.db import Base
 

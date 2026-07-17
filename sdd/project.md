@@ -33,8 +33,9 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 
 - PRD: `docs/AutoHostAI_PRD_v5_Claude.md` + diagramas en `docs/diagrams/` (C4, hexagonal, ER, state machine, secuencias).
 - Roadmap: `sdd/roadmap.md` (16 changes desde PRD §26; `domain-foundation` se dividió en `-core`/`-ops`/`-financial`).
-- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` todavía no añadido — la DB ya existe (`domain-foundation-core`, 8 tablas), se puede añadir con `/sdd:init extras` cuando se quiera.
+- MCPs activados: `playwright` (verificación E2E en run), `context7` (docs de stack). `postgres` todavía no añadido — la DB ya existe (`domain-foundation-core`, 8 tablas), se puede añadir con `/sdd:init` cuando se quiera (declinado de nuevo en el re-run de 2026-07-17).
 - LSPs activados: `pyright-lsp` (Python/backend), `typescript-lsp` (TypeScript/frontend) — binarios instalados; falta ejecutar `/plugin install pyright-lsp` y `/plugin install typescript-lsp`.
+- Reviewers de proyecto: `.claude/agents/sdd-review-tenancy.md` (tenant isolation, `steering/security.md` regla 1) y `sdd-review-i18n.md` (i18n es/en, `steering/frontend.md`) — añadidos 2026-07-17, descubiertos automáticamente por `/sdd:run` y `/sdd:review`.
 - Usage metrics: activado (OTEL → `http://127.0.0.1:4318`, `.sdd-usage/` en `.gitignore`). Efectivo a partir de la próxima sesión.
 - Perfil de modelos SDD: **Mixto** (opus new/design, sonnet grueso, haiku archive/status).
 - Repo git inicializado (rama `main`) en el change `local-environment`.
