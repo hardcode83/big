@@ -9,5 +9,13 @@
     "OTEL_EXPORTER_OTLP_ENDPOINT": "http://127.0.0.1:4318",
     "OTEL_METRIC_EXPORT_INTERVAL": "10000"
   },
-  "includeCoAuthoredBy": false
+  "includeCoAuthoredBy": false,
+  "extraKnownMarketplaces": {
+    "sdd-toolkit": {
+      "source": {
+        "source": "github",
+        "repo": "hardcode83/sdd-toolkit"
+      }
+    }
+  }
 }
