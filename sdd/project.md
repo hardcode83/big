@@ -18,7 +18,7 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 ## Commands
 
 - Arranque completo local: `make up` (copiar `.env.example` a `.env` antes). Por componente: `make up SERVICE=backend|frontend`.
-- Backend tests: `cd backend && uv run pytest`
+- Backend tests: `docker compose exec backend uv run pytest` (el backend corre en Docker; `uv` no está instalado en el host). Con el stack parado: `docker compose run --rm backend uv run pytest`.
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 
