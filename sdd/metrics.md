@@ -3,3 +3,4 @@
 | feature | phases | tokens in | tokens out | tokens cache | cost USD (est) | started | archived |
 |---|---|---|---|---|---|---|---|
 | domain-foundation-ops | new, design, tasks, run, archive | 117374 | 289414 | 60844053 | 29.3471 | 2026-07-17 | 2026-07-17 |
+| dev-hosting-provider | design, tasks, run, archive | 1567005 | 201087 | 11289586 | 10.4015 | 2026-07-19 | 2026-07-19 |
