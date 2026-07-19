@@ -12,7 +12,7 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 - **Frontend**: Next.js 14+ (App Router), TypeScript strict, Tailwind, shadcn/ui, TanStack Query v5, Zustand, react-i18next (ES/EN), mobile-first.
 - **Auth**: JWT (access 15 min + refresh 7 días con rotation), RBAC en backend, bcrypt.
 - **Infra dev**: docker-compose (postgres:16, redis:7, backend+worker, frontend). Monorepo: `/backend` (con `backend/devops/Dockerfile`), `/frontend` (con `frontend/devops/Dockerfile`); `docker-compose.yml`/`Makefile` en la raíz.
-- **Infra remota**: Terraform + GitHub Actions confirmados; proveedor cloud (AWS/GCP/Vercel/Railway) pendiente de decisión. Ver `steering/infra.md`.
+- **Infra remota**: Terraform + GitHub Actions confirmados; proveedor cloud decidido para dev (Oracle Cloud, VM única + docker-compose — `docs/adr/0001-dev-hosting-provider.md`), staging/prod pendientes de decisión propia. Ver `steering/infra.md`.
 - **Arquitectura**: monolito modular hexagonal por dominios; todo sistema externo detrás de adapter (mocks en MVP). Ver `steering/architecture.md`.
 
 ## Commands
