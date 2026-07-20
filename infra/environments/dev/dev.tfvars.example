@@ -10,5 +10,9 @@ compartment_ocid = "<compartment OCID (raíz de la tenancy, para empezar)>"
 
 allowed_ssh_cidr = "<tu IP pública>/32"
 
+# Par dedicado a esta VM (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca
+# reutilizar la API key de OCI. Solo el contenido de la .pub va aquí, la privada se queda en tu máquina.
+ssh_public_key = "<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohostai-dev-vm>"
+
 budget_alert_email = "<tu email>"
 # budget_amount y budget_alert_threshold_percent tienen defaults razonables — sobreescribe si hace falta.

@@ -130,6 +130,7 @@ resource "oci_core_instance" "dev" {
   }
 
   metadata = {
+    ssh_authorized_keys = var.ssh_public_key # par dedicado a esta VM, distinto de la API key de OCI
     user_data = base64encode(<<-CLOUDINIT
       #cloud-config
       package_update: true

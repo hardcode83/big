@@ -55,6 +55,16 @@ variable "allowed_ssh_cidr" {
   }
 }
 
+variable "ssh_public_key" {
+  description = "Clave pública SSH (contenido, p. ej. de un fichero .pub) inyectada vía cloud-init para el usuario por defecto de la imagen (ubuntu). Par de claves dedicado a esta VM — distinto de la API key de OCI que usa el provider/backend de Terraform, nunca reutilizar la misma."
+  type        = string
+
+  validation {
+    condition     = can(regex("^ssh-(ed25519|rsa) ", var.ssh_public_key))
+    error_message = "ssh_public_key debe ser el contenido de una clave pública SSH válida (empieza por 'ssh-ed25519 ' o 'ssh-rsa ')."
+  }
+}
+
 # Presupuesto (R5)
 
 variable "budget_alert_email" {

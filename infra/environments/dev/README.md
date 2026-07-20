@@ -14,6 +14,22 @@
 
 Lo que este Terraform **no** hace: desplegar la aplicación en sí (`docker compose pull && up -d` dentro de la VM). Eso es un workflow/step futuro, fuera de alcance de este change, que usa la IP pública de salida (`output "instance_public_ip"`) como input.
 
+## Acceso SSH a la instancia
+
+**Par de claves dedicado a la VM** — nunca la API key de OCI que usa Terraform para hablar con la cuenta, son cosas distintas:
+
+```bash
+ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm -C "autohostai-dev-vm"
+```
+
+El contenido del `.pub` va en la variable `ssh_public_key` (Terraform lo inyecta vía `cloud-init`, campo `ssh_authorized_keys`, al usuario por defecto de la imagen Ubuntu). La privada se queda en tu máquina, nunca en el repo ni en ningún secret — solo hace falta en el momento de conectarte.
+
+Una vez aplicado y con la IP pública (`terraform output instance_public_ip`):
+
+```bash
+ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<instance_public_ip>
+```
+
 ## Backend de state: `oci` nativo
 
 El state vive en un bucket de OCI Object Storage (backend nativo `oci` de Terraform, no el shim S3-compatible). Requiere **Terraform >= 1.12**.
@@ -44,7 +60,7 @@ terraform plan -var-file=dev.tfvars
 
 ## Secrets de GitHub Actions esperados
 
-El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions). **Estado: los 10 ya están configurados en este repo** (`gh secret list` los confirma) — el paso "cargar secrets" descrito abajo ya se ha ejecutado, no queda pendiente:
+El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions). **Estado: 11 secrets esperados** — verificar con `gh secret list` cuáles faltan (`SSH_PUBLIC_KEY` se añadió después de los primeros 10, al detectar que faltaba una estrategia de acceso SSH a la instancia):
 
 | Secret | Para qué |
 |---|---|
@@ -53,6 +69,7 @@ El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `wor
 | `OCI_COMPARTMENT_OCID` | Compartment donde se crean los recursos. |
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
 | `ALLOWED_SSH_CIDR` | CIDR IPv4 restringido (`>= /24`, nunca abierto) permitido para SSH — hoy apunta a la IP del usuario, que es dinámica: si cambia, hay que actualizar este secret y volver a aplicar. |
+| `SSH_PUBLIC_KEY` | Contenido de la clave **pública** SSH dedicada a la VM (no sensible, pero se guarda como secret por consistencia) — la privada nunca sale de la máquina del usuario. |
 | `BUDGET_ALERT_EMAIL` | Destinatario de la alerta de presupuesto. |
 
 ## Ejecutar el pipeline

@@ -105,6 +105,7 @@ jobs:
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
           TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: terraform plan -input=false -out=tfplan
 
       - name: terraform apply
@@ -119,4 +120,5 @@ jobs:
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
           TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
+          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
         run: terraform apply -input=false -auto-approve tfplan
