@@ -44,22 +44,24 @@ terraform plan -var-file=dev.tfvars
 
 ## Secrets de GitHub Actions esperados
 
-El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions):
+El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions). **Estado: los 10 ya están configurados en este repo** (`gh secret list` los confirma) — el paso "cargar secrets" descrito abajo ya se ha ejecutado, no queda pendiente:
 
 | Secret | Para qué |
 |---|---|
-| `OCI_TENANCY_OCID`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION` | Autenticación del provider **y** del backend (el backend `oci` necesita sus propias credenciales, no puede leer `var.*`). |
+| `OCI_TENANCY_OCID`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_REGION` | Autenticación del provider **y** del backend (el backend `oci` necesita sus propias credenciales, no puede leer `var.*`). |
+| `OCI_PRIVATE_KEY` | Contenido del `.pem` privado. El workflow lo escribe a un fichero en `$RUNNER_TEMP` y pasa la **ruta** (`private_key_path`) a Terraform — nunca el contenido inline en un string/heredoc HCL (más frágil, ver `design.md` D2). |
 | `OCI_COMPARTMENT_OCID` | Compartment donde se crean los recursos. |
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
-| `ALLOWED_SSH_CIDR` | CIDR IPv4 restringido (`>= /24`, nunca abierto) permitido para SSH. |
+| `ALLOWED_SSH_CIDR` | CIDR IPv4 restringido (`>= /24`, nunca abierto) permitido para SSH — hoy apunta a la IP del usuario, que es dinámica: si cambia, hay que actualizar este secret y volver a aplicar. |
 | `BUDGET_ALERT_EMAIL` | Destinatario de la alerta de presupuesto. |
 
 ## Ejecutar el pipeline
 
 - **En cualquier PR** que toque `infra/environments/dev/**`: el job `check` corre `fmt`/`validate` automáticamente, sin credenciales.
 - **Para `plan`/`apply` reales**: pestaña Actions → workflow `infra-dev` → **Run workflow** → elegir `plan` o `apply`. `apply` solo se ejecuta si el `plan` previo del mismo run fue exitoso.
+- **Ya verificado en vivo**: un `workflow_dispatch` con `action: plan` corrió contra la cuenta real — `init`/`validate`/`plan` en verde, 9 recursos a crear, 0 errores ([run 29728765058](https://github.com/mreyesojeda/AutoHostAI/actions/runs/29728765058)).
 
 ## Pendiente (no automatizable por este change)
 
-- **`terraform apply` inicial**: requiere confirmación explícita del usuario — no se dispara solo.
+- **`terraform apply` inicial**: los secrets ya están cargados y el `plan` ya se ha verificado en vivo — solo falta la confirmación explícita del usuario para disparar `action: apply`. No se dispara solo.
 - Una vez aplicado: desplegar la app en la VM (`docker compose pull && up -d` vía SSH) — workflow futuro, fuera de alcance.

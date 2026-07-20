@@ -42,7 +42,7 @@ Rejected: alerta configurada manualmente en la consola de Oracle — no es repro
 
 ### D7 — Backend de state remoto: `oci` nativo (R2)
 
-**Chosen:** backend nativo `oci` (state en un bucket de OCI Object Storage) — decisión del usuario tras revisar la investigación de `BLOCKED.md` (coste $0 dentro del Always Free, locking nativo vía escritura condicional `If-None-Match`, sin cuenta de terceros nueva, reutiliza las mismas credenciales que ya exige el provider `oracle/oci`). Requisitos concretos:
+**Chosen:** backend nativo `oci` (state en un bucket de OCI Object Storage) — decisión del usuario tras revisar la investigación de `BLOCKED.md` (archivo ya borrado al resolverse la decisión, por convención SDD — la investigación completa queda en el historial de git, commits `eb4e432`/`0c78808`) (coste $0 dentro del Always Free, locking nativo vía escritura condicional `If-None-Match`, sin cuenta de terceros nueva, reutiliza las mismas credenciales que ya exige el provider `oracle/oci`). Requisitos concretos:
 - Fijar `required_version = ">= 1.12"` en `main.tf` (el backend `oci` es reciente).
 - `backend.tf` declara `terraform { backend "oci" {} }` con **configuración parcial** — sin `namespace`/`bucket`/`region` hardcodeados en el archivo. Esos valores se pasan en `terraform init -backend-config=...` (flags en CI, o un `backend.hcl` local no versionado) — mismo patrón que el resto de credenciales: el nombre se documenta, el valor nunca vive en el repo.
 - **Bootstrap manual, una sola vez, fuera de este Terraform**: crear el bucket de Object Storage (p. ej. `autohostai-tfstate-dev`) vía consola o CLI de OCI antes del primer `terraform init` — no puede crearlo el mismo Terraform que lo usará después como backend (dependencia circular). Se documenta paso a paso en el README (D6).
@@ -83,4 +83,4 @@ Variables de Terraform (ver D2). Secrets/valores de GitHub Actions esperados (no
 
 ## Open questions
 
-Ninguna abierta. La única pregunta de diseño pendiente (R2, backend de state) quedó resuelta por el usuario — ver D7 y `BLOCKED.md` (entrada 1, cerrada).
+Ninguna abierta. La única pregunta de diseño pendiente (R2, backend de state) quedó resuelta por el usuario — ver D7 y el historial de `BLOCKED.md` (entrada 1, cerrada y borrada; contenido recuperable en `git log --all -- sdd/changes/infra-dev-terraform/BLOCKED.md`).

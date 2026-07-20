@@ -28,7 +28,7 @@
 
 ## 5. CI — plan/apply manual
 
-- [x] 5.1 Mismo `.github/workflows/infra-dev.yml`, job `plan-apply`: trigger `workflow_dispatch` (input `action`: `plan`|`apply`) → checkout, `hashicorp/setup-terraform` (1.15.8, ≥1.12), private key escrita a `$RUNNER_TEMP` (fix de revisión), backend.hcl generado en runtime desde secrets (`private_key_path`), `terraform init -backend-config=backend.hcl`, `terraform plan -out=tfplan`, `terraform apply -auto-approve tfplan` **solo si** `action == 'apply'`. **Verificado en vivo**: `gh workflow run infra-dev.yml -f action=plan` → run [29728765058](https://github.com/mreyesojeda/AutoHostAI/actions/runs/29728765058), job `plan-apply` → **success**, los 8 steps (incluida "Escribir la private key a fichero") en verde, `terraform plan` real contra la cuenta (creación de `oci_core_vcn.dev` y el resto de recursos visible en el log), `terraform apply` `skipped` (acción elegida fue `plan`). Esto cierra el hallazgo del arquitecto de que el camino CI→backend nunca se había ejercitado de verdad. [R3.1, R3.2, R2.1]
+- [x] 5.1 Mismo `.github/workflows/infra-dev.yml`, job `plan-apply`: trigger `workflow_dispatch` (input `action`: `plan`|`apply`) → checkout, `hashicorp/setup-terraform` (1.15.8, ≥1.12), private key escrita a `$RUNNER_TEMP` (fix de revisión de arquitectura), backend.hcl generado en runtime desde secrets (`private_key_path`), `terraform init -backend-config=backend.hcl`, **`terraform validate`** (paso añadido tras QA feature-scale: R3.1 exige `init`/`validate`/`plan` explícitos, no solo confiar en la validación implícita de `plan`), `terraform plan -out=tfplan`, `terraform apply -auto-approve tfplan` **solo si** `action == 'apply'`. **Verificado en vivo**: `gh workflow run infra-dev.yml -f action=plan` → run [29728765058](https://github.com/mreyesojeda/AutoHostAI/actions/runs/29728765058) (previo al fix de `validate`, pero mismo camino CI→backend→plan), job `plan-apply` → **success**, `terraform plan` real contra la cuenta (creación de `oci_core_vcn.dev` y el resto de recursos visible en el log), `terraform apply` `skipped` (acción elegida fue `plan`). Esto cierra el hallazgo del arquitecto de que el camino CI→backend nunca se había ejercitado de verdad. [R3.1, R3.2, R2.1]
 - [x] 5.2 Todas las variables sensibles (`OCI_*`, `TFSTATE_*`, `ALLOWED_SSH_CIDR`, `BUDGET_ALERT_EMAIL`) inyectadas vía `env:`/`TF_VAR_*`/`-backend-config` desde `secrets.*` — ninguna hardcodeada en el YAML. Los 10 secrets (incluido `ALLOWED_SSH_CIDR`, añadido tras confirmar la IP del usuario) están configurados en el repo. [R1.4, security.md #8]
 
 ## 6. CI — build multi-arch (arm64)
@@ -40,7 +40,7 @@
 
 ## 7. Documentación
 
-- [x] 7.1 Reescrito `infra/environments/dev/README.md`: qué aprovisiona, bootstrap manual del bucket de state, cómo ejecutar `plan`/`apply` (local y vía workflow), tabla de secrets esperados (incluye `ALLOWED_SSH_CIDR`, pendiente de que el usuario lo añada), sección "Estado" veraz. [R6.1, R6.2]
+- [x] 7.1 Reescrito `infra/environments/dev/README.md`: qué aprovisiona, bootstrap manual del bucket de state, cómo ejecutar `plan`/`apply` (local y vía workflow), tabla de secrets esperados, estado real de la carga de secrets (los 10 ya configurados — actualizado tras QA feature-scale, que detectó que la versión anterior seguía diciendo "pendiente" sobre `ALLOWED_SSH_CIDR` cuando ya no lo estaba), sección "Estado"/"Pendiente" veraz. [R6.1, R6.2]
 - [x] 7.2 `README.md` raíz, sección "Estructura": añadidos `infra/` y `.github/workflows/`. [documentation.md]
 
 ## 8. Verification
