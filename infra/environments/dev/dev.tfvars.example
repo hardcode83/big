@@ -4,7 +4,7 @@
 tenancy_ocid     = "<tenancy OCID>"
 user_ocid        = "<user OCID>"
 fingerprint      = "<fingerprint de la API key>"
-private_key      = "<contenido del .pem privado>"
+private_key_path = "<ruta a tu .pem privado, p.ej. ~/.oci/oci_api_key.pem>"
 region           = "<p.ej. eu-frankfurt-1>"
 compartment_ocid = "<compartment OCID (raíz de la tenancy, para empezar)>"
 

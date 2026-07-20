@@ -51,6 +51,15 @@ jobs:
         with:
           terraform_version: "1.15.8"
 
+      # La private key se escribe a su propio fichero (fuera del checkout, en RUNNER_TEMP) y se
+      # referencia por RUTA (private_key_path) — nunca inline en un string/heredoc HCL. Embeber un
+      # PEM multilínea como valor de string es fragil (depende de que el secret termine en salto de
+      # línea para que el heredoc cierre bien) y así se evita del todo. [fix de revisión de arquitectura]
+      - name: Escribir la private key a fichero
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+
       # Config parcial del backend oci — sus propias credenciales, no puede leer var.*
       # (los backends se configuran antes de que existan variables de Terraform).
       - name: Escribir configuración del backend
@@ -61,19 +70,17 @@ jobs:
           OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
           OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
           OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
-          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+          PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
         run: |
           cat > backend.hcl <<EOF
-          bucket       = "${TFSTATE_BUCKET}"
-          namespace    = "${TFSTATE_NAMESPACE}"
-          key          = "dev.tfstate"
-          region       = "${OCI_REGION}"
-          tenancy_ocid = "${OCI_TENANCY_OCID}"
-          user_ocid    = "${OCI_USER_OCID}"
-          fingerprint  = "${OCI_FINGERPRINT}"
-          private_key  = <<PRIVATEKEY
-          ${OCI_PRIVATE_KEY}
-          PRIVATEKEY
+          bucket           = "${TFSTATE_BUCKET}"
+          namespace        = "${TFSTATE_NAMESPACE}"
+          key              = "dev.tfstate"
+          region           = "${OCI_REGION}"
+          tenancy_ocid     = "${OCI_TENANCY_OCID}"
+          user_ocid        = "${OCI_USER_OCID}"
+          fingerprint      = "${OCI_FINGERPRINT}"
+          private_key_path = "${PRIVATE_KEY_PATH}"
           EOF
 
       - name: terraform init
@@ -84,7 +91,7 @@ jobs:
           TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
           TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
           TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
-          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
@@ -97,7 +104,7 @@ jobs:
           TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
           TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
           TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
-          TF_VAR_private_key: ${{ secrets.OCI_PRIVATE_KEY }}
+          TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}

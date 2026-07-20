@@ -16,10 +16,9 @@ variable "fingerprint" {
   type        = string
 }
 
-variable "private_key" {
-  description = "Contenido de la clave privada de la API key (PEM)."
+variable "private_key_path" {
+  description = "Ruta al fichero .pem de la clave privada de la API key. Se usa por ruta, no por contenido inline: evita el riesgo de sintaxis HCL de embeber un PEM multilínea en un string/heredoc (hallazgo de revisión — ver design.md)."
   type        = string
-  sensitive   = true
 }
 
 variable "region" {

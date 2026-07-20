@@ -2,7 +2,7 @@
 
 ## 1. Root module — red y cómputo <!-- panel: PASS 2026-07-20 (sdd-architect, sdd-security, sdd-qa) -->
 
-- [x] 1.1 `infra/environments/dev/variables.tf`: declarar `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key` (`sensitive = true`), `region`, `compartment_ocid`, `allowed_ssh_cidr` (sin default abierto a `0.0.0.0/0`, con `validation` block que lo rechaza) — ninguna con valor por defecto real. [R1.4]
+- [x] 1.1 `infra/environments/dev/variables.tf`: declarar `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key_path` (ruta a fichero, no contenido inline — fix de revisión de arquitectura), `region`, `compartment_ocid`, `allowed_ssh_cidr` (sin default abierto a `0.0.0.0/0`, con `validation` block que lo rechaza) — ninguna con valor por defecto real. [R1.4]
 - [x] 1.2 `infra/environments/dev/main.tf`: bloque `terraform { required_version = ">= 1.12", required_providers { oci = { source = "oracle/oci" } } }` y bloque `provider "oci"`. [R1.1]
 - [x] 1.3 `infra/environments/dev/main.tf`: VCN `10.0.0.0/16` + subred pública `10.0.1.0/24` (`oci_core_vcn`, `oci_core_subnet`, internet gateway + route table). [R1.1]
 - [x] 1.4 `infra/environments/dev/main.tf`: security list con ingress TCP 22 (restringido por `var.allowed_ssh_cidr`), 8000, 3000; egress abierto. Exactamente estos puertos, ninguno más (`docker-compose.yml`). [R1.1]
@@ -13,7 +13,7 @@
 ## 2. Backend de state remoto (`oci` nativo) <!-- panel: PASS 2026-07-20 (sdd-architect, sdd-security, sdd-qa; R2.3 doc gap fixed in design.md D7 + README) -->
 
 - [x] 2.1 `infra/environments/dev/backend.tf`: `terraform { backend "oci" {} }` con configuración parcial (sin namespace/bucket/región hardcodeados). [R2, D7]
-- [x] 2.2 `infra/environments/dev/backend.hcl.example`: documenta las claves de `-backend-config` reales (`bucket`, `namespace`, `key`, `region`, más `tenancy_ocid`/`user_ocid`/`fingerprint`/`private_key` — confirmado empíricamente que el backend `oci` necesita su propia autenticación, no puede leer `var.*` del provider), sin valores reales. [R2, D7]
+- [x] 2.2 `infra/environments/dev/backend.hcl.example`: documenta las claves de `-backend-config` reales (`bucket`, `namespace`, `key`, `region`, más `tenancy_ocid`/`user_ocid`/`fingerprint`/`private_key_path` — confirmado empíricamente que el backend `oci` necesita su propia autenticación, no puede leer `var.*` del provider, y que acepta `private_key_path` igual que el provider), sin valores reales. [R2, D7]
 - [x] 2.3 Verificado con `terraform init -backend-config=...` real (namespace `frag3zplc9up`, bucket `autohostai-tfstate-dev`, credenciales reales pasadas por archivo temporal fuera del repo, nunca mostradas): **"Successfully configured the backend oci!"** contra el bucket ya creado por el usuario. [R2]
 
 ## 3. Alerta de presupuesto <!-- panel: PASS 2026-07-20 (sdd-architect, sdd-security, sdd-qa; R5.2 validation dynamically confirmed with a standalone terraform plan probe) -->

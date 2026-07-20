@@ -14,7 +14,7 @@ Rejected: instancia AMD micro (1 OCPU/1GB, también Always Free) — insuficient
 
 ### D2 — Gestión de secretos y variables (R1.4, security.md regla 8)
 
-**Chosen:** `variables.tf` declara `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key` (marcada `sensitive = true`), `region`, `compartment_ocid`, `allowed_ssh_cidr`, `budget_alert_email` — todas sin default. El workflow de GitHub Actions las inyecta desde secrets del repo (`OCI_TENANCY_OCID`, `OCI_USER_OCID`, etc.) vía `TF_VAR_*` en el step de `plan`/`apply`. Ningún valor real vive en el repo ni en `.tfvars` versionado; un `dev.tfvars.example` documenta los nombres esperados (mismo patrón que `.env.example`, security.md regla 8).
+**Chosen:** `variables.tf` declara `tenancy_ocid`, `user_ocid`, `fingerprint`, `private_key_path`, `region`, `compartment_ocid`, `allowed_ssh_cidr`, `budget_alert_email` — todas sin default. La clave privada se pasa **por ruta a fichero, nunca por contenido inline** — evita el riesgo de sintaxis HCL de embeber un PEM multilínea en un string/heredoc (hallazgo de revisión de arquitectura, corregido: el workflow ahora escribe el secret `OCI_PRIVATE_KEY` a un fichero en `RUNNER_TEMP` con `printf '%s\n'`, garantizando el salto de línea final, y solo la ruta llega a Terraform). El resto de variables se inyectan desde secrets del repo (`OCI_TENANCY_OCID`, `OCI_USER_OCID`, etc.) vía `TF_VAR_*` en el step de `plan`/`apply`. Ningún valor real vive en el repo ni en `.tfvars` versionado; un `dev.tfvars.example` documenta los nombres esperados (mismo patrón que `.env.example`, security.md regla 8).
 
 Rejected: `.tfvars` real committeado (aunque fuera `.gitignore`d, invita a errores) — se prefiere el patrón ya establecido de "solo el nombre, nunca el valor".
 

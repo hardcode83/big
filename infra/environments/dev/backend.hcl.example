@@ -12,11 +12,11 @@
 # En CI, este archivo se genera en tiempo de ejecución a partir de los
 # secrets de GitHub Actions (nunca se commitea con valores reales).
 
-bucket      = "autohostai-tfstate-dev"
-namespace   = "<tu-namespace-de-object-storage>"
-key         = "dev.tfstate"
-region      = "<tu-region, p.ej. eu-frankfurt-1>"
-tenancy_ocid = "<tenancy OCID>"
-user_ocid    = "<user OCID>"
-fingerprint  = "<fingerprint de la API key>"
-private_key  = "<contenido del .pem privado>"
+bucket           = "autohostai-tfstate-dev"
+namespace        = "<tu-namespace-de-object-storage>"
+key              = "dev.tfstate"
+region           = "<tu-region, p.ej. eu-frankfurt-1>"
+tenancy_ocid     = "<tenancy OCID>"
+user_ocid        = "<user OCID>"
+fingerprint      = "<fingerprint de la API key>"
+private_key_path = "<ruta a tu .pem privado, p.ej. ~/.oci/oci_api_key.pem>"
