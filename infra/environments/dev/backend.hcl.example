@@ -1,0 +1,22 @@
+# Copia este archivo como backend.hcl (NO versionado — añadido a .gitignore) y rellena
+# los valores reales para inicializar el backend nativo `oci` localmente:
+#
+#   terraform init -backend-config=backend.hcl
+#
+# El backend "oci" no puede leer terraform.tfvars ni `var.*` (los backends se
+# configuran antes de que existan variables) — por eso necesita SUS PROPIAS
+# claves de autenticación aquí, aunque sean las mismas que ya usa el provider
+# en variables.tf. Verificado contra el binario real de Terraform (>=1.12):
+# estas son las claves de configuración de backend "oci" reconocidas.
+#
+# En CI, este archivo se genera en tiempo de ejecución a partir de los
+# secrets de GitHub Actions (nunca se commitea con valores reales).
+
+bucket      = "autohostai-tfstate-dev"
+namespace   = "<tu-namespace-de-object-storage>"
+key         = "dev.tfstate"
+region      = "<tu-region, p.ej. eu-frankfurt-1>"
+tenancy_ocid = "<tenancy OCID>"
+user_ocid    = "<user OCID>"
+fingerprint  = "<fingerprint de la API key>"
+private_key  = "<contenido del .pem privado>"
