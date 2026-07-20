@@ -31,6 +31,12 @@ variable "compartment_ocid" {
   type        = string
 }
 
+variable "ad_number" {
+  description = "Número de Availability Domain (1-based) dentro de la región donde crear la instancia. Configurable para reintentar en otra AD si Oracle devuelve 'Out of host capacity' en la elegida — riesgo ya documentado en el ADR 0001. No hay reintento automático nativo en Terraform/OCI (a diferencia de un ASG en AWS); se reintenta cambiando este valor."
+  type        = number
+  default     = 1
+}
+
 # Red
 
 variable "allowed_ssh_cidr" {

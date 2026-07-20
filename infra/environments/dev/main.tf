@@ -145,7 +145,7 @@ resource "oci_core_instance" "dev" {
 
 data "oci_identity_availability_domain" "dev" {
   compartment_id = var.tenancy_ocid
-  ad_number      = 1
+  ad_number      = var.ad_number
 }
 
 data "oci_core_private_ips" "dev" {
