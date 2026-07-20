@@ -24,7 +24,7 @@
 ## 4. CI — validación en PR (sin credenciales)
 
 - [x] 4.1 `.github/workflows/infra-dev.yml`, job `check`: trigger `pull_request` (paths: `infra/environments/dev/**`) → `terraform fmt -check`, `terraform init -backend=false`, `terraform validate`. [R3.3]
-- [ ] 4.2 Verificar abriendo un PR real de esta rama que el job `check` completa sin necesitar ningún secret. [R3.3] — pendiente de abrir el PR (sección 8).
+- [x] 4.2 Verificado en PR real (#7, https://github.com/mreyesojeda/AutoHostAI/pull/7): job `check` → **PASS en 15s**, sin ningún secret configurado. [R3.3]
 
 ## 5. CI — plan/apply manual
 
@@ -35,7 +35,7 @@
 
 - [x] 6.1 `.github/workflows/multiarch-build-check.yml`: `docker/setup-qemu-action` + `docker/setup-buildx-action` + `docker/build-push-action` `--platform linux/amd64,linux/arm64` contra `backend/devops/Dockerfile` (target `prod`), `push: false`. [R4.1]
 - [x] 6.2 Mismo workflow, build `frontend/devops/Dockerfile` (target `prod`) para ambas plataformas, `push: false`. [R4.2]
-- [ ] 6.3 Si el build `arm64` falla en CI por algo específico de una capa, corregir `backend/devops/Dockerfile`/`frontend/devops/Dockerfile` mínimamente. [R4.1, R4.2] — no verificable localmente (Docker daemon no disponible en esta sesión); se confirma al abrir el PR (sección 8).
+- [x] 6.3 Verificado en PR real (#7): `build-backend` → **PASS en 1m47s**, `build-frontend` → **PASS en 4m5s**, ambas plataformas (`amd64`+`arm64`), sin necesitar ningún cambio en los Dockerfiles — las imágenes base (`python:3.12-slim`, `astral-sh/uv`, `node:22-slim`) construyeron limpio en `arm64` a la primera, confirmando el riesgo que el ADR marcó como "a verificar". [R4.1, R4.2]
 - [x] 6.4 Trigger `pull_request` (paths acotados a los Dockerfiles/lockfiles relevantes) — verificación repetible en cada PR, no manual-una-vez. [R4.3]
 
 ## 7. Documentación
@@ -45,8 +45,8 @@
 
 ## 8. Verification
 
-- [ ] 8.1 `cd infra/environments/dev && terraform fmt -check && terraform validate` (con `-backend=false`) — sin errores. [R1.2]
-- [ ] 8.2 `terraform init` con el backend real (`-backend-config` con los valores del usuario) y `terraform plan` contra la cuenta real — completa sin errores de sintaxis/referencia (esto es una lectura contra la API de OCI, no crea recursos). [R2, R1]
-- [ ] 8.3 Build multi-arch local de verificación: `docker buildx build --platform linux/amd64,linux/arm64 -f backend/devops/Dockerfile --target prod backend/` y lo mismo para `frontend` — ambos sin error. [R4]
-- [ ] 8.4 Revisión manual del YAML de ambos workflows: ningún secret expuesto en logs (`set -x` evitado en steps con variables sensibles), ningún trigger automático de `apply`. [security.md #8, R3.2]
-- [ ] 8.5 `terraform apply` real: **no se ejecuta como parte de esta verificación automática** — queda como acción explícita, confirmada por el usuario, después de este change (ver proposal.md, Out of scope).
+- [x] 8.1 `terraform fmt -check` + `terraform validate` (`-backend=false`) — **PASS**, sin errores (Terraform 1.15.8, provider `oracle/oci` v8.23.0). [R1.2]
+- [x] 8.2 `terraform init` con el backend real + `terraform plan` contra la cuenta real (credenciales pasadas por archivo temporal fuera del repo, nunca mostradas ni commiteadas) — **PASS**: backend inicializado ("Successfully configured the backend oci!"), plan **9 to add, 0 to change, 0 to destroy**, sin warnings tras corregir la deprecación de `target_compartment_id`. [R2, R1]
+- [x] 8.3 Build multi-arch: no disponible localmente (Docker daemon no corriendo en esta sesión) — verificado en su lugar en CI real (PR #7): `build-backend` PASS (1m47s), `build-frontend` PASS (4m5s), ambas plataformas, sin cambios necesarios en los Dockerfiles. [R4]
+- [x] 8.4 Revisión manual de ambos workflows: secrets solo vía `env:`/`-backend-config`, nunca interpolados directamente en el texto de un `run:` step; ningún `set -x`/`echo` de variables sensibles; `apply` solo alcanzable por `workflow_dispatch` con `action: apply` explícito — nunca automático. [security.md #8, R3.2]
+- [x] 8.5 `terraform apply` real: **no ejecutado**, como estaba previsto — el `plan` de 8.2 ya demuestra que el `apply` sería viable (9 recursos, sin errores), pero la ejecución real queda pendiente de confirmación explícita del usuario. [Out of scope, proposal.md]
