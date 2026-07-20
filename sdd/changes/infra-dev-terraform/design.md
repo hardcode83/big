@@ -40,9 +40,19 @@ Rejected: verificarlo solo manualmente una vez en un portátil — no queda como
 
 Rejected: alerta configurada manualmente en la consola de Oracle — no es reproducible ni versionada, y el ADR pide explícitamente que esto exista "desde el primer día", lo que encaja mejor con IaC que con un paso manual olvidable.
 
+### D7 — Backend de state remoto: `oci` nativo (R2)
+
+**Chosen:** backend nativo `oci` (state en un bucket de OCI Object Storage) — decisión del usuario tras revisar la investigación de `BLOCKED.md` (coste $0 dentro del Always Free, locking nativo vía escritura condicional `If-None-Match`, sin cuenta de terceros nueva, reutiliza las mismas credenciales que ya exige el provider `oracle/oci`). Requisitos concretos:
+- Fijar `required_version = ">= 1.12"` en `main.tf` (el backend `oci` es reciente).
+- `backend.tf` declara `terraform { backend "oci" {} }` con **configuración parcial** — sin `namespace`/`bucket`/`region` hardcodeados en el archivo. Esos valores se pasan en `terraform init -backend-config=...` (flags en CI, o un `backend.hcl` local no versionado) — mismo patrón que el resto de credenciales: el nombre se documenta, el valor nunca vive en el repo.
+- **Bootstrap manual, una sola vez, fuera de este Terraform**: crear el bucket de Object Storage (p. ej. `autohostai-tfstate-dev`) vía consola o CLI de OCI antes del primer `terraform init` — no puede crearlo el mismo Terraform que lo usará después como backend (dependencia circular). Se documenta paso a paso en el README (D6).
+- El workflow de GitHub Actions (D3) añade los valores de `-backend-config` (namespace, bucket, región) junto a las credenciales del provider ya previstas en D2.
+
+Rejected: HCP Terraform (Terraform Cloud) free tier — añadía una cuenta de terceros nueva y el riesgo del token de 30 días sin necesidad, dado que el backend nativo cubre lo mismo sin coste ni superficie nueva.
+
 ### D6 — Documentación (R6)
 
-**Chosen:** Reescribir `infra/environments/dev/README.md`: qué aprovisiona, cómo ejecutar `terraform plan/apply` (local, con `dev.tfvars.example` como referencia, y vía el workflow), qué secrets de GitHub Actions hacen falta, y una sección "Estado" explícita: *"Código y pipeline listos y verificados (`validate`/`fmt`/`plan` sin credenciales, build multi-arch en CI). `apply` real pendiente — requiere tenancy de Oracle Cloud (`EXTERNAL_DEPENDENCY`, ver ADR 0001) y configuración de secrets, ambos manuales."*
+**Chosen:** Reescribir `infra/environments/dev/README.md`: qué aprovisiona, el paso de **bootstrap manual del bucket de state** (D7, con los comandos exactos de la OCI CLI), cómo ejecutar `terraform plan/apply` (local, con `dev.tfvars.example`/`backend.hcl.example` como referencia, y vía el workflow), qué secrets de GitHub Actions hacen falta, y una sección "Estado" explícita: *"Código y pipeline listos y verificados (`validate`/`fmt`/`plan` sin credenciales, build multi-arch en CI). `apply` real pendiente — requiere tenancy de Oracle Cloud (`EXTERNAL_DEPENDENCY`, ver ADR 0001), el bootstrap del bucket de state, y configuración de secrets, todo manual."*
 
 Rejected: describir el entorno como "desplegado" u omitir el estado real — violaría la regla de mantener specs/docs veraces (shared rule 1).
 
@@ -50,7 +60,7 @@ Rejected: describir el entorno como "desplegado" u omitir el estado real — vio
 
 | Area | Files | Change |
 |---|---|---|
-| Infra (dev) | `infra/environments/dev/{main.tf,variables.tf,outputs.tf,backend.tf,dev.tfvars.example}` | Nuevos — red, cómputo, presupuesto, backend de state |
+| Infra (dev) | `infra/environments/dev/{main.tf,variables.tf,outputs.tf,backend.tf,dev.tfvars.example,backend.hcl.example}` | Nuevos — red, cómputo, presupuesto, backend de state `oci` (config parcial) |
 | Infra (docs) | `infra/environments/dev/README.md` | Reescrito — de placeholder a instrucciones reales |
 | CI | `.github/workflows/infra-dev.yml` | Nuevo — plan/apply manual |
 | CI | `.github/workflows/multiarch-build-check.yml` (o job añadido a workflow existente si aplica) | Nuevo — build `arm64`+`amd64` sin publish |
@@ -60,17 +70,16 @@ Rejected: describir el entorno como "desplegado" u omitir el estado real — vio
 
 ## Data & interfaces
 
-Variables de Terraform (ver D2). Secrets de GitHub Actions esperados (nombres, no valores): `OCI_TENANCY_OCID`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_OCID`, `BUDGET_ALERT_EMAIL`, más lo que exija el backend de state elegido (ver Open Questions). Ninguna entidad de dominio ni API afectada — este change es puramente infraestructura/CI.
+Variables de Terraform (ver D2). Secrets/valores de GitHub Actions esperados (nombres, no valores): `OCI_TENANCY_OCID`, `OCI_USER_OCID`, `OCI_FINGERPRINT`, `OCI_PRIVATE_KEY`, `OCI_REGION`, `OCI_COMPARTMENT_OCID`, `BUDGET_ALERT_EMAIL`, más `TFSTATE_NAMESPACE`/`TFSTATE_BUCKET` para la configuración parcial del backend `oci` (D7). Ninguna entidad de dominio ni API afectada — este change es puramente infraestructura/CI.
 
 ## Risks & mitigations
 
 - **Riesgo ARM64 (ya señalado en el ADR)**: mitigado por D4 — verificación en CI antes de aprovisionar, no al primer despliegue real.
 - **"Out of host capacity" de Oracle para Ampere A1** (documentado en el ADR): fuera del control de este change; el `apply` real puede fallar por esto la primera vez — el README (D6) debe mencionar Frankfurt/Singapur como regiones recomendadas, ya señalado en el ADR.
 - **Verificación limitada sin credenciales reales**: `validate`/`fmt`/`plan` no capturan todos los errores posibles de un `apply` real (p. ej. cuotas exactas, nombres de imagen exactos disponibles en la región). Se acepta explícitamente (ver proposal, Out of scope) — el primer `apply` real seguirá siendo el punto donde puede aparecer un problema no visto aquí.
-- **Bootstrap del backend de state**: cualquier backend remoto elegido (ver Open Questions) necesita existir *antes* de que este Terraform pueda inicializarse contra él — es un paso de bootstrap único, no resuelto por este mismo `.tf` (no se puede usar Terraform para crear el almacén de su propio state antes de tenerlo). Se documenta como parte de la respuesta a la pregunta abierta.
+- **Bootstrap del backend de state** (D7): el bucket de Object Storage necesita existir *antes* de que este Terraform pueda inicializarse contra él — paso manual único, documentado en el README, no resuelto por este mismo `.tf` (no se puede usar Terraform para crear el almacén de su propio state antes de tenerlo).
+- **Versión de Terraform**: el backend `oci` nativo exige `>= 1.12` — fijar esa versión tanto en `hashicorp/setup-terraform` (CI) como en cualquier ejecución local, documentado en el README, para evitar un `init` que funcione en una máquina y falle en otra.
 
 ## Open questions
 
-### Backend de state remoto (R2) — bloquea el resto de tasks/run hasta decidirse
-
-El usuario planteó dudas explícitas sobre esto al pedir este change: si Terraform Cloud (capa gratuita) basta para el volumen de recursos, o si conviene otra opción. Investigación específica para esta decisión (candidatos, coste, locking, complejidad de bootstrap, lock-in) se entrega en `sdd/changes/infra-dev-terraform/BLOCKED.md` — no se decide aquí porque cambia `backend.tf` (D1-D6 asumen que existe un backend remoto, pero no cuál).
+Ninguna abierta. La única pregunta de diseño pendiente (R2, backend de state) quedó resuelta por el usuario — ver D7 y `BLOCKED.md` (entrada 1, cerrada).
