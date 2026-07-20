@@ -1,0 +1,115 @@
+name: infra-dev
+
+on:
+  pull_request:
+    paths:
+      - "infra/environments/dev/**"
+  workflow_dispatch:
+    inputs:
+      action:
+        description: "Acción a ejecutar contra el entorno dev real"
+        required: true
+        type: choice
+        options:
+          - plan
+          - apply
+
+defaults:
+  run:
+    working-directory: infra/environments/dev
+
+jobs:
+  # Se ejecuta en cualquier PR que toque infra/environments/dev/**, sin credenciales de
+  # OCI — terraform init -backend=false salta por completo el backend remoto. [R3.3]
+  check:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      - name: terraform fmt
+        run: terraform fmt -check -diff
+
+      - name: terraform init (sin backend)
+        run: terraform init -backend=false -input=false
+
+      - name: terraform validate
+        run: terraform validate
+
+  # Único disparador que puede tocar recursos reales — nunca automático en push/merge. [R3.1, R3.2]
+  plan-apply:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: "1.15.8"
+
+      # La private key se escribe a su propio fichero (fuera del checkout, en RUNNER_TEMP) y se
+      # referencia por RUTA (private_key_path) — nunca inline en un string/heredoc HCL. Embeber un
+      # PEM multilínea como valor de string es fragil (depende de que el secret termine en salto de
+      # línea para que el heredoc cierre bien) y así se evita del todo. [fix de revisión de arquitectura]
+      - name: Escribir la private key a fichero
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+
+      # Config parcial del backend oci — sus propias credenciales, no puede leer var.*
+      # (los backends se configuran antes de que existan variables de Terraform).
+      - name: Escribir configuración del backend
+        env:
+          TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
+          TFSTATE_NAMESPACE: ${{ secrets.TFSTATE_NAMESPACE }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        run: |
+          cat > backend.hcl <<EOF
+          bucket           = "${TFSTATE_BUCKET}"
+          namespace        = "${TFSTATE_NAMESPACE}"
+          key              = "dev.tfstate"
+          region           = "${OCI_REGION}"
+          tenancy_ocid     = "${OCI_TENANCY_OCID}"
+          user_ocid        = "${OCI_USER_OCID}"
+          fingerprint      = "${OCI_FINGERPRINT}"
+          private_key_path = "${PRIVATE_KEY_PATH}"
+          EOF
+
+      - name: terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+
+      - name: terraform validate
+        run: terraform validate
+
+      - name: terraform plan
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
+          TF_VAR_region: ${{ secrets.OCI_REGION }}
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: terraform plan -input=false -out=tfplan
+
+      - name: terraform apply
+        if: ${{ github.event.inputs.action == 'apply' }}
+        env:
+          TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
+          TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
+          TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
+          TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
+          TF_VAR_region: ${{ secrets.OCI_REGION }}
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
+          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+        run: terraform apply -input=false -auto-approve tfplan

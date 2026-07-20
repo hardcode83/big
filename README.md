@@ -59,6 +59,8 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 - `docker-compose.yml` / `Makefile` — orquestación del stack local, en la raíz.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
 - `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
+- `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
+- `.github/workflows/` — pipelines de CI/CD (GitHub Actions).
 
 ## Tests
 
