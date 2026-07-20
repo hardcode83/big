@@ -13,6 +13,11 @@ on:
         options:
           - plan
           - apply
+      ad_number:
+        description: "Availability Domain (1-based) donde crear la instancia — cambiar y reintentar si Oracle devuelve 'Out of host capacity' en la actual"
+        required: false
+        default: "1"
+        type: string
 
 defaults:
   run:
@@ -99,6 +104,7 @@ jobs:
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
           TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
         run: terraform plan -input=false -out=tfplan
 
       - name: terraform apply
@@ -112,4 +118,5 @@ jobs:
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
           TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
           TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
         run: terraform apply -input=false -auto-approve tfplan
