@@ -1,6 +1,7 @@
 services:
   postgres:
     image: postgres:16
+    restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Falta POSTGRES_DB en .env}
       POSTGRES_USER: ${POSTGRES_USER:?Falta POSTGRES_USER en .env}
@@ -17,6 +18,7 @@ services:
 
   redis:
     image: redis:7
+    restart: unless-stopped
     ports:
       - "6379:6379"
     healthcheck:
@@ -46,6 +48,7 @@ services:
       context: ./backend
       dockerfile: devops/Dockerfile
       target: dev
+    restart: unless-stopped
     env_file: .env
     environment:
       REDIS_URL: redis://redis:6379/0
@@ -73,6 +76,7 @@ services:
       context: ./backend
       dockerfile: devops/Dockerfile
       target: dev
+    restart: unless-stopped
     command: uv run celery -A app.worker worker -l info
     env_file: .env
     environment:
@@ -94,6 +98,7 @@ services:
       context: ./frontend
       dockerfile: devops/Dockerfile
       target: dev
+    restart: unless-stopped
     env_file: .env
     environment:
       BACKEND_INTERNAL_URL: http://backend:8000
