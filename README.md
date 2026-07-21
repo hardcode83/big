@@ -15,7 +15,7 @@ Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (
 Al cabo de unos segundos:
 
 - Backend (FastAPI): http://localhost:8000/health
-- Frontend (Next.js): http://localhost:3000 — muestra "backend: ok" cuando el backend responde
+- Frontend (Next.js): http://localhost:3000 — Application Shell; `/` redirige a `/dashboard` y las rutas de módulos muestran un placeholder "en preparación" (todavía sin funcionalidad). No requiere backend para renderizar.
 - Postgres: localhost:5432 — ya con el esquema de dominio creado (`tenants`, `users`, `properties`, `guests`, `reservations`, `timeline_events`, ...)
 - Redis: localhost:6379
 
@@ -55,7 +55,7 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 ## Estructura
 
 - `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` (`domain/`, `infrastructure/`, ver `sdd/steering/backend-architecture.md`); migraciones en `backend/alembic/`.
-- `frontend/` — Next.js App Router (TypeScript, Tailwind). Dockerfile en `frontend/devops/Dockerfile`.
+- `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack local, en la raíz.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
 - `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
@@ -67,6 +67,17 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 ```bash
 cd backend && uv run pytest
 cd frontend && npm test
+```
+
+### Verificación del frontend
+
+```bash
+cd frontend
+npm run dev         # servidor de desarrollo (http://localhost:3000)
+npm run typecheck   # TypeScript strict, sin emitir
+npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
+npm test            # Vitest + Testing Library
+npm run build       # build de producción
 ```
 
 ## Desarrollo con SDD
