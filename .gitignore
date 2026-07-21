@@ -24,3 +24,12 @@ npm-debug.log*
 
 # SDD usage metrics
 .sdd-usage/
+
+# Terraform (el lock file .terraform.lock.hcl SÍ se versiona, a propósito)
+**/.terraform/
+**/*.tfstate
+**/*.tfstate.*
+**/*.tfvars
+**/backend.hcl
+!**/*.tfvars.example
+!**/backend.hcl.example

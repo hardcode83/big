@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Convención de despliegue remoto para AutoHostAI: dónde vive el código de IaC, cómo se organiza (por entorno, no por dominio de negocio), qué herramientas se usan, y el criterio para elegir proveedor cloud cuando llegue el momento — sin comprometerse todavía a un proveedor concreto ni a código de IaC real.
+Convención de despliegue remoto para AutoHostAI: dónde vive el código de IaC, cómo se organiza (por entorno, no por dominio de negocio), qué herramientas se usan, y el proveedor cloud por entorno. **`dev` tiene ya Terraform real y un pipeline de CI/CD real** (ver spec `infra-dev-terraform`); `staging`/`prod` siguen siendo placeholders, sin proveedor elegido.
 
 ## Requirements
 
@@ -12,24 +12,26 @@ Convención de despliegue remoto para AutoHostAI: dónde vive el código de IaC,
 - Ningún directorio de `infra/` se organiza por dominio de negocio (`auth`, `cleaning`, `reservations`, ...) — es ortogonal al layout hexagonal de `backend`/`frontend` documentado en `architecture.md`.
 - WHEN exista código Terraform compartido entre entornos (red, base de datos, DNS...), THE SYSTEM SHALL alojarlo en `infra/modules/` — no existe todavía, se crea con el primer módulo real.
 
-### Herramientas confirmadas, proveedor pendiente
+### Herramientas confirmadas, proveedor decidido para dev
 
 - **Terraform** es la herramienta de IaC confirmada; **GitHub Actions** es el CI/CD confirmado.
-- El proveedor cloud (AWS, Google Cloud, Vercel, Railway) está **pendiente de decisión**. `sdd/steering/infra.md` documenta una tabla comparativa de 6 criterios (coste, Postgres/Redis gestionado, migración desde Docker, integración CI/CD, vendor lock-in, madurez del provider de Terraform) sin rellenar veredicto.
+- El proveedor cloud para **dev** está **decidido**: Oracle Cloud Infrastructure, VM única (Ampere A1, Always Free) + docker-compose — ver `docs/adr/0001-dev-hosting-provider.md` (justificación, alternativas consideradas y riesgos aceptados) y `sdd/steering/infra.md` (tabla comparativa completa de todos los candidatos investigados, mantenida como histórico).
+- **Staging y prod siguen pendientes de decisión propia** — no heredan el veredicto de dev; cada entorno tiene su root module de Terraform independiente (ver "Estructura de `/infra` por entorno" arriba).
 
-### Placeholders sin IaC real
+### Estado por entorno
 
-- Cada `README.md` de entorno indica su propósito, su estado ("sin proveedor elegido; sin Terraform real todavía") y enlaza a `sdd/steering/infra.md`.
-- IF se necesita IaC real para cualquier entorno, THEN THE SYSTEM SHALL requerir un change SDD propio (`/sdd-new`) una vez elegido proveedor — nunca escribirse directamente sobre los placeholders.
-- No existe ningún fichero `.tf` ni `.github/workflows/*.yml` en el repo todavía.
+- **`dev`**: Terraform real (red, cómputo, backend de state, presupuesto — ver spec `infra-dev-terraform`) y dos workflows de GitHub Actions reales (`.github/workflows/infra-dev.yml`, `.github/workflows/multiarch-build-check.yml`).
+- **`staging`/`prod`**: siguen siendo placeholders — "sin proveedor elegido; sin Terraform real todavía". Cada `README.md` de entorno indica su propósito, su estado, y enlaza a `sdd/steering/infra.md`.
+- IF se necesita IaC real para `staging`/`prod`, THEN THE SYSTEM SHALL requerir un change SDD propio (`/sdd-new`) una vez elegido proveedor — nunca escribirse directamente sobre esos placeholders. No heredan el veredicto de `dev`.
 
 ### Punto de conexión con CI/CD
 
-- `sdd/steering/infra.md` documenta que un futuro workflow de GitHub Actions ejecutará `terraform plan`/`terraform apply` contra `infra/environments/<entorno>/`, parametrizado por entorno.
-- El disparador exacto (qué rama/evento dispara qué entorno) no está decidido — se fija cuando exista el pipeline real.
+- Para `dev`, el disparador real está decidido y en producción: `pull_request` (paths `infra/environments/dev/**`) ejecuta solo `fmt`/`validate`/`init -backend=false`, sin credenciales; `workflow_dispatch` con input `action` (`plan`|`apply`) es el único camino que puede tocar recursos reales — nunca automático en push/merge. Ver spec `infra-dev-terraform` para el detalle completo.
+- Para `staging`/`prod`, el disparador sigue sin decidir — se fija cuando exista Terraform real para esos entornos.
 
 ## Key files
 
-- `sdd/steering/infra.md` — convención completa, criterio de decisión de proveedor, integración CI/CD futura.
-- `infra/README.md`, `infra/environments/{dev,staging,prod}/README.md` — placeholders.
+- `sdd/steering/infra.md` — convención completa, criterio de decisión de proveedor, tabla histórica de candidatos.
+- `infra/README.md`, `infra/environments/{staging,prod}/README.md` — placeholders.
+- `infra/environments/dev/` — Terraform real, ver spec `infra-dev-terraform`.
 - `sdd/steering/architecture.md`, `sdd/project.md` — referencias cruzadas a `infra.md`.
