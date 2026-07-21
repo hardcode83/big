@@ -78,7 +78,10 @@ npm run typecheck   # TypeScript strict, sin emitir
 npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
 npm test            # Vitest + Testing Library
 npm run build       # build de producción
+npm run test:entrypoint  # test del entrypoint de dev (sincronización de node_modules)
 ```
+
+> Al añadir o actualizar una dependencia del frontend basta con `docker compose up` (o `make up SERVICE=frontend`): el contenedor de dev sincroniza `node_modules` con `package-lock.json` en el arranque, sin `npm install` manual ni reconstruir la imagen.
 
 ## Desarrollo con SDD
 

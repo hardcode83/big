@@ -6,3 +6,4 @@
 | dev-hosting-provider | design, tasks, run, archive | 1567005 | 201087 | 11289586 | 10.4015 | 2026-07-19 | 2026-07-19 |
 | infra-dev-terraform | new, tasks | 24 | 18273 | 1617049 | 0.9104 | 2026-07-19 | 2026-07-20 |
 | frontend-foundation | run, archive | 19001 | 401889 | 61077281 | 58.4514 | 2026-07-18 | 2026-07-21 |
+| frontend-docker-deps-autosync | new, design, tasks, run, review, archive | 16240 | 71311 | 6854270 | 5.6616 | 2026-07-21 | 2026-07-21 |
