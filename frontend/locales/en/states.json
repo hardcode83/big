@@ -1,0 +1,18 @@
+{
+  "loading": {
+    "label": "Loading…"
+  },
+  "error": {
+    "title": "Something went wrong",
+    "description": "We couldn't complete the operation.",
+    "retry": "Retry"
+  },
+  "empty": {
+    "title": "No results",
+    "description": "There are no items to show."
+  },
+  "placeholder": {
+    "badge": "In preparation",
+    "explanation": "This section is planned but not yet available."
+  }
+}

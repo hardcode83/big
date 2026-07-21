@@ -3,13 +3,13 @@
 ## Ownership
 
 - **Propietaria del change:** Marta.
-- **Coordinación:** Jose Ignacio trabaja en `infra-scaffold`; este change no duplica, anticipa ni modifica ese trabajo.
+- **Coordinación:** las dependencias de este change ya están mergeadas en `origin/main`: `infra-scaffold` (que entrega `infra/`: IaC/CI-CD; archivado el 2026-07-15) y `local-environment` (que entrega el scaffold Next.js: `package.json`, `next.config`, Vitest, además de Compose y Dockerfile de orquestación). Este change no duplica, anticipa ni modifica ese trabajo.
 
 ## Why
 
 AutoHostAI necesita un Application Shell completo, coherente y verificable sobre el que construir progresivamente todas sus interfaces funcionales. Este contenedor debe entregar desde el inicio la estructura visual común, la navegación y las rutas base de la aplicación, y permitir priorizar la visibilidad del estado operacional indicada en la [sección 30 del PRD](../../../docs/AutoHostAI_PRD_v5_Claude.md#30-instrucción-final-para-claude) —dashboard y estado, timeline y después los flujos operativos— por encima del orden literal de construcción de la sección 26, sin implementar todavía esas funcionalidades.
 
-El change construye ese Application Shell y su fundación técnica conforme al stack de la [sección 4](../../../docs/AutoHostAI_PRD_v5_Claude.md#4-stack-tecnológico), las superficies previstas en la [sección 24](../../../docs/AutoHostAI_PRD_v5_Claude.md#24-frontend--páginas) y los steering documents aplicables. El resultado será una aplicación Next.js ejecutable y preparada para recibir módulos funcionales sin contener lógica de negocio, workflows ni integraciones backend. Su implementación solo podrá comenzar cuando `infra-scaffold` esté integrado en `origin/main`.
+El change construye ese Application Shell y su fundación técnica conforme al stack de la [sección 4](../../../docs/AutoHostAI_PRD_v5_Claude.md#4-stack-tecnológico), las superficies previstas en la [sección 24](../../../docs/AutoHostAI_PRD_v5_Claude.md#24-frontend--páginas) y los steering documents aplicables. El resultado será una aplicación Next.js ejecutable y preparada para recibir módulos funcionales sin contener lógica de negocio, workflows ni integraciones backend. Se construye sobre el scaffold Next.js entregado por `local-environment` (ver `sdd/specs/local-environment.md`); esa dependencia, junto con `infra-scaffold`, ya está integrada en `origin/main`, por lo que no existe bloqueo remoto activo.
 
 ## What changes
 
@@ -19,7 +19,7 @@ El shell se apoyará en la fundación técnica ya definida: TypeScript strict, o
 
 ## Dependencies and coordination constraints
 
-- **Bloqueo de implementación:** `infra-scaffold` debe estar mergeado en `origin/main` antes de instalar, inicializar o modificar la aplicación Next.js. La existencia de artefactos locales no sustituye esta condición remota.
+- **Dependencias de implementación (ya resueltas):** el scaffold Next.js sobre el que se construye (`package.json`, `next.config`, Vitest, más Compose y Dockerfile de orquestación) lo entregó `local-environment` (commit `6d2cfdf`; `sdd/specs/local-environment.md` líneas 41/53), mientras que `infra-scaffold` entrega `infra/` (IaC/CI-CD), ortogonal al frontend. Ambos changes están mergeados en `origin/main`, por lo que no existe bloqueo remoto activo; la verificación del gate (tarea 1.1) debe confirmar esa integración contra `origin/main`, sin aceptar como prueba artefactos exclusivamente locales.
 - **Límite de ownership:** este change no crea ni modifica monorepo, Docker, Compose, Makefile, CI/CD, IaC ni ningún otro artefacto de infraestructura propiedad del trabajo de Jose Ignacio.
 - **Contratos backend:** cada módulo funcional futuro dependerá de contratos API definidos por backend. Esta fundación no inventa endpoints, DTOs, payloads ni reglas de negocio para adelantarlos.
 - **Gates SDD:** esta propuesta requiere revisión y aprobación antes de ejecutar `/sdd:design`, `/sdd:tasks` o `/sdd:run`.
@@ -138,7 +138,7 @@ Acceptance criteria:
 ## Out of scope
 
 - Crear o modificar el monorepo, Docker, Docker Compose, Makefile, IaC, CI/CD o cualquier parte de `infra-scaffold`.
-- Instalar o inicializar Next.js mientras `infra-scaffold` no esté mergeado en `origin/main`.
+- Re-crear o re-inicializar desde cero el scaffold Next.js (`package.json`, `next.config`, Vitest, Compose, Dockerfile) que ya entregó `local-environment`; este change se construye sobre ese scaffold ya integrado en `origin/main`.
 - Implementar login, recuperación de contraseña, sesión, JWT, refresh de tokens, RBAC o protección efectiva de rutas.
 - Implementar dashboard funcional, property cards, property detail funcional o timeline.
 - Implementar módulos o interfaces funcionales de limpieza, incidencias/mantenimiento, conversaciones, pricing, statements, reservas, accesos, reviews, approvals o settings; sus rutas y placeholders dentro del shell sí forman parte de este change.

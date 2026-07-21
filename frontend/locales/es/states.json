@@ -1,0 +1,18 @@
+{
+  "loading": {
+    "label": "Cargando…"
+  },
+  "error": {
+    "title": "Algo ha salido mal",
+    "description": "No hemos podido completar la operación.",
+    "retry": "Reintentar"
+  },
+  "empty": {
+    "title": "Sin resultados",
+    "description": "No hay elementos para mostrar."
+  },
+  "placeholder": {
+    "badge": "En preparación",
+    "explanation": "Esta sección está prevista pero todavía no está disponible."
+  }
+}

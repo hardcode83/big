@@ -1,0 +1,107 @@
+{
+  "groups": {
+    "operation": "Operation",
+    "work": "Work",
+    "revenue": "Revenue",
+    "administration": "Administration"
+  },
+  "routes": {
+    "dashboard": {
+      "title": "Dashboard",
+      "description": "Operational overview of your properties."
+    },
+    "timeline": {
+      "title": "Timeline",
+      "description": "Operational event history across all properties."
+    },
+    "properties": {
+      "title": "Properties",
+      "description": "List of your managed properties."
+    },
+    "property-detail": {
+      "title": "Property detail",
+      "description": "Detailed information for a property."
+    },
+    "reservations": {
+      "title": "Reservations",
+      "description": "Reservation list and detail."
+    },
+    "cleaning": {
+      "title": "Cleaning",
+      "description": "Cleaning tasks and their coordination."
+    },
+    "incidents": {
+      "title": "Incidents",
+      "description": "Property incidents and maintenance."
+    },
+    "conversations": {
+      "title": "Conversations",
+      "description": "Message inbox with guests and team."
+    },
+    "approvals": {
+      "title": "Approvals",
+      "description": "Actions awaiting approval."
+    },
+    "pricing": {
+      "title": "Pricing",
+      "description": "Pricing rules and recommendations."
+    },
+    "statements": {
+      "title": "Statements",
+      "description": "Financial statements and exports."
+    },
+    "reviews": {
+      "title": "Reviews",
+      "description": "Guest review management."
+    },
+    "settings": {
+      "title": "Settings",
+      "description": "Tenant and account settings."
+    },
+    "settings-integrations": {
+      "title": "Integrations",
+      "description": "Status of connected integrations."
+    },
+    "login": {
+      "title": "Log in",
+      "description": "Access your AutoHostAI account."
+    },
+    "forgot-password": {
+      "title": "Reset password",
+      "description": "Restore access to your account."
+    },
+    "cleaner": {
+      "title": "My tasks",
+      "description": "Assigned cleaning tasks."
+    },
+    "cleaner-task": {
+      "title": "Task detail",
+      "description": "Detail of a cleaning task."
+    },
+    "tech": {
+      "title": "My incidents",
+      "description": "Incidents assigned for maintenance."
+    },
+    "tech-incident": {
+      "title": "Incident detail",
+      "description": "Detail of a maintenance incident."
+    },
+    "guest": {
+      "title": "Guest portal",
+      "description": "Instructions and support for your stay."
+    }
+  },
+  "more": "More",
+  "skipToContent": "Skip to content",
+  "primaryNavigation": "Primary navigation",
+  "breadcrumb": "Breadcrumb",
+  "openMenu": "Open menu",
+  "closeMenu": "Close menu",
+  "expandSidebar": "Expand sidebar",
+  "collapseSidebar": "Collapse sidebar",
+  "localeSwitcher": {
+    "label": "Language",
+    "es": "Español",
+    "en": "English"
+  }
+}

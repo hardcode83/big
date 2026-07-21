@@ -1,0 +1,107 @@
+{
+  "groups": {
+    "operation": "Operación",
+    "work": "Trabajo",
+    "revenue": "Ingresos",
+    "administration": "Administración"
+  },
+  "routes": {
+    "dashboard": {
+      "title": "Panel",
+      "description": "Vista general del estado operativo de tus propiedades."
+    },
+    "timeline": {
+      "title": "Cronología",
+      "description": "Historial de eventos operativos de todas las propiedades."
+    },
+    "properties": {
+      "title": "Propiedades",
+      "description": "Listado de tus propiedades gestionadas."
+    },
+    "property-detail": {
+      "title": "Detalle de propiedad",
+      "description": "Información detallada de una propiedad."
+    },
+    "reservations": {
+      "title": "Reservas",
+      "description": "Listado y detalle de reservas."
+    },
+    "cleaning": {
+      "title": "Limpieza",
+      "description": "Tareas de limpieza y su coordinación."
+    },
+    "incidents": {
+      "title": "Incidencias",
+      "description": "Incidencias y mantenimiento de las propiedades."
+    },
+    "conversations": {
+      "title": "Conversaciones",
+      "description": "Bandeja de mensajes con huéspedes y equipo."
+    },
+    "approvals": {
+      "title": "Aprobaciones",
+      "description": "Acciones pendientes de aprobación."
+    },
+    "pricing": {
+      "title": "Precios",
+      "description": "Reglas y recomendaciones de precios."
+    },
+    "statements": {
+      "title": "Liquidaciones",
+      "description": "Liquidaciones y exportaciones financieras."
+    },
+    "reviews": {
+      "title": "Reseñas",
+      "description": "Gestión de reseñas de huéspedes."
+    },
+    "settings": {
+      "title": "Configuración",
+      "description": "Configuración del tenant y de la cuenta."
+    },
+    "settings-integrations": {
+      "title": "Integraciones",
+      "description": "Estado de las integraciones conectadas."
+    },
+    "login": {
+      "title": "Iniciar sesión",
+      "description": "Accede a tu cuenta de AutoHostAI."
+    },
+    "forgot-password": {
+      "title": "Recuperar contraseña",
+      "description": "Restablece el acceso a tu cuenta."
+    },
+    "cleaner": {
+      "title": "Mis tareas",
+      "description": "Tareas de limpieza asignadas."
+    },
+    "cleaner-task": {
+      "title": "Detalle de tarea",
+      "description": "Detalle de una tarea de limpieza."
+    },
+    "tech": {
+      "title": "Mis incidencias",
+      "description": "Incidencias asignadas para mantenimiento."
+    },
+    "tech-incident": {
+      "title": "Detalle de incidencia",
+      "description": "Detalle de una incidencia de mantenimiento."
+    },
+    "guest": {
+      "title": "Portal del huésped",
+      "description": "Instrucciones y soporte para tu estancia."
+    }
+  },
+  "more": "Más",
+  "skipToContent": "Saltar al contenido",
+  "primaryNavigation": "Navegación principal",
+  "breadcrumb": "Ruta de navegación",
+  "openMenu": "Abrir menú",
+  "closeMenu": "Cerrar menú",
+  "expandSidebar": "Expandir barra lateral",
+  "collapseSidebar": "Colapsar barra lateral",
+  "localeSwitcher": {
+    "label": "Idioma",
+    "es": "Español",
+    "en": "English"
+  }
+}
