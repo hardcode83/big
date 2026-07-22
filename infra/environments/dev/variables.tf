@@ -65,24 +65,19 @@ variable "ssh_authorized_keys" {
 
 # Presupuesto (R5)
 
-variable "budget_alert_email" {
-  description = "Destinatario de la alerta de presupuesto. Obligatoria: sin destinatario no se despliega la alerta."
-  type        = string
+variable "budget_alert_recipients" {
+  description = "Lista de correos que reciben las alertas de presupuesto (ACTUAL y FORECAST). Obligatoria: sin destinatarios no se despliegan las alertas."
+  type        = list(string)
+  default     = ["josegascon@gmail.com", "mreyesojeda@gmail.com"]
 
   validation {
-    condition     = length(trimspace(var.budget_alert_email)) > 0
-    error_message = "budget_alert_email es obligatorio — no se despliega una alerta de presupuesto sin destinatario."
+    condition     = length(var.budget_alert_recipients) > 0 && alltrue([for e in var.budget_alert_recipients : can(regex("^[^@[:space:]]+@[^@[:space:]]+$", e))])
+    error_message = "budget_alert_recipients no puede estar vacía y cada entrada debe ser un email válido."
   }
 }
 
 variable "budget_amount" {
-  description = "Umbral de presupuesto mensual (USD) sobre el que se calcula la alerta."
+  description = "Presupuesto mensual (unidad de la tenancy) — límite absoluto sobre el que disparan las alertas ACTUAL y FORECAST."
   type        = number
-  default     = 10
-}
-
-variable "budget_alert_threshold_percent" {
-  description = "Porcentaje del presupuesto que dispara la alerta (tipo ACTUAL)."
-  type        = number
-  default     = 80
+  default     = 1
 }

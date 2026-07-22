@@ -15,9 +15,9 @@
 
 ## 3. Presupuesto €1 con alertas ACTUAL + FORECAST (R6)
 
-- [ ] 3.1 `variables.tf`: `budget_amount` default → **1**; `budget_alert_email` (string) → `budget_alert_recipients` (`list(string)`, default `["josegascon@gmail.com","mreyesojeda@gmail.com"]`); actualizar plantilla — **Files:** `infra/environments/dev/variables.tf`, `infra/environments/dev/dev.tfvars.example` — [R6]
-- [ ] 3.2 `main.tf`: budget importe 1; regla **ACTUAL** `threshold_type=ABSOLUTE threshold=1`; **añadir** regla **FORECAST** `threshold_type=ABSOLUTE threshold=1`; `recipients = join(",", var.budget_alert_recipients)` — **Files:** `infra/environments/dev/main.tf` — [R6]
-- [ ] 3.3 Reconciliar el drift: eliminar en la consola OCI la alerta/budget creada a mano **antes** del apply, para que Terraform recree sin duplicar — **Files:** ninguno (op. OCI) — [R6]
+- [x] 3.1 `variables.tf`: `budget_amount` default → **1**; `budget_alert_email` (string) → `budget_alert_recipients` (`list(string)`, default `["josegascon@gmail.com","mreyesojeda@gmail.com"]`); actualizar plantilla — **Files:** `infra/environments/dev/variables.tf`, `infra/environments/dev/dev.tfvars.example` — [R6]
+- [x] 3.2 `main.tf`: budget importe 1; regla **ACTUAL** `threshold_type=ABSOLUTE threshold=1`; **añadir** regla **FORECAST** `threshold_type=ABSOLUTE threshold=1`; `recipients = join(",", var.budget_alert_recipients)` — **Files:** `infra/environments/dev/main.tf` — [R6]
+- [ ] 3.3 Reconciliar el drift: eliminar en la consola OCI la alerta/budget creada a mano **antes** del apply, para que Terraform recree sin duplicar — **Files:** ninguno (op. OCI) — [R6] (pendiente: acción tuya en consola antes del apply)
 
 ## 4. OCI Vault — backup de la clave SSH (R7)
 

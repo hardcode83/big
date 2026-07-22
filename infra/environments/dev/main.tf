@@ -191,12 +191,24 @@ resource "oci_budget_budget" "dev" {
   targets        = [var.compartment_ocid] # target_compartment_id está deprecado en favor de targets
 }
 
-resource "oci_budget_alert_rule" "dev" {
+# Dos alertas: ACTUAL (gasto real alcanza el presupuesto) y FORECAST (previsión del mes lo alcanza),
+# ambas ABSOLUTE al importe del presupuesto, a los correos de Jose y Marta.
+resource "oci_budget_alert_rule" "dev_actual" {
   budget_id      = oci_budget_budget.dev.id
-  display_name   = "autohostai-dev-budget-alert"
+  display_name   = "autohostai-dev-budget-alert-actual"
   type           = "ACTUAL"
-  threshold_type = "PERCENTAGE"
-  threshold      = var.budget_alert_threshold_percent
-  recipients     = var.budget_alert_email
-  message        = "AutoHostAI dev: el gasto real ha superado ${var.budget_alert_threshold_percent}% del presupuesto mensual (${var.budget_amount} USD)."
+  threshold_type = "ABSOLUTE"
+  threshold      = var.budget_amount
+  recipients     = join(",", var.budget_alert_recipients)
+  message        = "AutoHostAI dev: el gasto REAL ha alcanzado el presupuesto mensual (${var.budget_amount})."
+}
+
+resource "oci_budget_alert_rule" "dev_forecast" {
+  budget_id      = oci_budget_budget.dev.id
+  display_name   = "autohostai-dev-budget-alert-forecast"
+  type           = "FORECAST"
+  threshold_type = "ABSOLUTE"
+  threshold      = var.budget_amount
+  recipients     = join(",", var.budget_alert_recipients)
+  message        = "AutoHostAI dev: el gasto PREVISTO del mes alcanzará el presupuesto (${var.budget_amount})."
 }
