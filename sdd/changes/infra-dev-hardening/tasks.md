@@ -33,8 +33,8 @@
 
 ## 6. IAM mínimo + state backend (R4)
 
-- [ ] 6.1 Definir el grupo `autohostai-dev-terraform` + policy IAM acotada al compartment de dev (verbos exactos derivados de los recursos del `main.tf`: instance-family, virtual-network-family, budgets, object-family solo del bucket del state, y vault/keys/secrets de R7) — **Files:** doc de policy (aplicada por admin de tenancy, fuera del root module) — [R4]
-- [ ] 6.2 Aplicar la policy (admin de tenancy), mover el usuario de Terraform al grupo y **verificar `plan`/`apply` con los permisos acotados** antes de retirar los amplios — **Files:** ninguno (op. OCI) — [R4]
+- [x] 6.1 Definir el grupo `autohostai-dev-terraform` + policy IAM acotada al compartment de dev (verbos exactos derivados de los recursos del `main.tf`: instance-family, virtual-network-family, budgets, object-family solo del bucket del state, y vault/keys/secrets de R7) — **Files:** doc de policy (aplicada por admin de tenancy, fuera del root module) — [R4]
+- [x] 6.2 Aplicar la policy (admin de tenancy), mover el usuario de Terraform al grupo y **verificar `plan`/`apply` con los permisos acotados** antes de retirar los amplios — **Files:** ninguno (op. OCI) — [R4] (verificado: plan del provider + init del backend con svc-terraform-dev, sin errores de autorización)
 - [ ] 6.3 Activar **versioning** en el bucket `autohostai-tfstate-dev` (OCI CLI/consola) — **Files:** ninguno (op. OCI) — [R4]
 
 ## 7. Runbook operativo (R5)
