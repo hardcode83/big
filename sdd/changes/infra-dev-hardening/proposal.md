@@ -30,14 +30,16 @@ Acceptance criteria:
 3. THE SYSTEM SHALL declarar `concurrency` en el workflow de forma que dos `apply` no se ejecuten en paralelo sobre el mismo state, y un `timeout-minutes` acotado en los jobs.
 4. THE SYSTEM SHALL fijar todas las GitHub Actions usadas (p. ej. `actions/checkout`, `hashicorp/setup-terraform`) por **SHA de commit**, no por tag, con el tag anotado en comentario.
 
-### R2 — Gestión y documentación del acceso SSH
+### R2 — Acceso SSH multi-operador (claves y orígenes por persona)
 
-**As a** operador, **I want** entender y controlar cómo se autoriza el SSH a la VM, **so that** el acceso inicial es reproducible y auditable.
+**As a** operador, **I want** que cada persona del equipo (p. ej. Jose y Marta) acceda con su **propia** clave y desde su propia IP, **so that** el acceso es individual, revocable por persona y sin compartir ninguna clave privada.
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL documentar el procedimiento de acceso inicial por SSH a la VM (usuario, origen de la clave `var.ssh_public_key`, IP, restricción por `allowed_ssh_cidr`).
-2. WHERE la clave pública SSH se inyecta por cloud-init, THE SYSTEM SHALL dejar constancia de cómo rotarla/añadir claves sin recrear la instancia.
+1. THE SYSTEM SHALL autorizar **múltiples claves públicas SSH** (Jose y Marta como mínimo), provisionadas declarativamente (variable de lista de claves inyectada a `authorized_keys` vía cloud-init), de modo que cada persona use su propia clave privada — nunca se comparte un `.pem`.
+2. THE SYSTEM SHALL permitir SSH desde **varios orígenes CIDR** (la IP de cada operador), no un único `/32`, manteniendo la validación de cada CIDR (IPv4, prefijo ≥ /24, sin rangos abiertos) — porque con un solo `/32` la clave de Marta no bastaría, su IP quedaría bloqueada por el security list.
+3. THE SYSTEM SHALL documentar el procedimiento de acceso (usuario `ubuntu`, IP de la VM, clave por persona) y **cómo añadir/rotar/revocar una clave o una IP sin recrear la instancia**.
+4. WHERE la clave privada solo la necesita el pipeline de CI/CD (no un humano), THE SYSTEM SHALL indicar que ese secreto vive en GitHub Actions Secrets (write-only, no recuperable por personas) — el acceso humano se resuelve con la clave propia de cada operador, no recuperando un secreto compartido.
 
 ### R3 — cloud-init y Docker Compose operativos en Ubuntu 22.04 ARM64 (bug confirmado)
 
