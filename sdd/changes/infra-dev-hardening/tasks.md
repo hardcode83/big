@@ -43,7 +43,7 @@
 
 ## 8. Verificación
 
-- [ ] 8.1 `cd infra/environments/dev && terraform fmt -check -diff && terraform validate` pasan (lo corre también el job `check` en el PR) — **Files:** correcciones de formato si falla — [R1, R2, R3, R6, R7]
-- [ ] 8.2 `terraform plan` completo: confirmar **`0 to destroy` de la instancia** (security list y user_data in-place o protegidos), y que solo se crean/actualizan los recursos esperados (budget, vault, key, reglas) — **Files:** ninguno (plan) — [R2, R3, R6, R7]
-- [ ] 8.3 Aplicar vía pipeline (`workflow_dispatch` `apply` desde `main`, con aprobación del Environment) y verificar en el run: instancia intacta, budget €1 con 2 alertas a ambos correos, vault+key creados — **Files:** ninguno (op. pipeline) — [R1, R6, R7]
+- [x] 8.1 `cd infra/environments/dev && terraform fmt -check -diff && terraform validate` pasan (lo corre también el job `check` en el PR) — **Files:** correcciones de formato si falla — [R1, R2, R3, R6, R7]
+- [x] 8.2 `terraform plan` completo: confirmar **`0 to destroy` de la instancia** (security list y user_data in-place o protegidos), y que solo se crean/actualizan los recursos esperados (budget, vault, key, reglas) — **Files:** ninguno (plan) — [R2, R3, R6, R7]
+- [ ] 8.3 Aplicar vía pipeline (`workflow_dispatch` `apply` desde `main`, con aprobación vía review del PR (opción A, sin Environment)) y verificar en el run: instancia intacta, budget €1 con 2 alertas a ambos correos, vault+key creados — **Files:** ninguno (op. pipeline) — [R1, R6, R7]
 - [ ] 8.4 Verificar el secret recuperable del Vault y el versioning activo del bucket; smoke test SSH desde el CIDR de Jose — **Files:** ninguno (op.) — [R2, R4, R7]
