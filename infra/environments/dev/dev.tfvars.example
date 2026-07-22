@@ -8,11 +8,14 @@ private_key_path = "<ruta a tu .pem privado, p.ej. ~/.oci/oci_api_key.pem>"
 region           = "<p.ej. eu-frankfurt-1>"
 compartment_ocid = "<compartment OCID (raíz de la tenancy, para empezar)>"
 
-allowed_ssh_cidr = "<tu IP pública>/32"
+# CIDRs de operadores permitidos para SSH (22) y los puertos de app (8000/3000). Uno por IP, prefijo >= /24.
+allowed_ssh_cidrs = ["<tu IP pública>/32"]
 
-# Par dedicado a esta VM (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca
-# reutilizar la API key de OCI. Solo el contenido de la .pub va aquí, la privada se queda en tu máquina.
-ssh_public_key = "<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohostai-dev-vm>"
+# Lista de claves públicas SSH autorizadas (una por operador). Par dedicado a esta VM
+# (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca reutilizar la API key de OCI.
+# Solo el contenido de la(s) .pub va aquí; la privada se queda en tu máquina (y copia recuperable en OCI Vault).
+ssh_authorized_keys = ["<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohostai-dev-vm>"]
 
-budget_alert_email = "<tu email>"
-# budget_amount y budget_alert_threshold_percent tienen defaults razonables — sobreescribe si hace falta.
+# Correos de las alertas de presupuesto (ACTUAL y FORECAST). Tiene default (Jose+Marta); sobreescribe si hace falta.
+budget_alert_recipients = ["<email 1>", "<email 2>"]
+# budget_amount tiene default 1 — sobreescribe si hace falta.
