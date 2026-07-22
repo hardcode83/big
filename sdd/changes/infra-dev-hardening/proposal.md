@@ -39,14 +39,17 @@ Acceptance criteria:
 1. THE SYSTEM SHALL documentar el procedimiento de acceso inicial por SSH a la VM (usuario, origen de la clave `var.ssh_public_key`, IP, restricción por `allowed_ssh_cidr`).
 2. WHERE la clave pública SSH se inyecta por cloud-init, THE SYSTEM SHALL dejar constancia de cómo rotarla/añadir claves sin recrear la instancia.
 
-### R3 — cloud-init correcto en Ubuntu 22.04 ARM64 (bug)
+### R3 — cloud-init y Docker Compose operativos en Ubuntu 22.04 ARM64 (bug confirmado)
 
-**As a** operador, **I want** que Docker y Docker Compose queden instalados y operativos al arrancar la VM, **so that** el despliegue de la app no falle por una instalación rota.
+**As a** operador, **I want** que Docker y Docker Compose queden instalados y operativos, tanto en arranques futuros como en la VM ya desplegada, **so that** el despliegue de la app no falle por una instalación rota.
+
+Diagnóstico en vivo (2026-07-22): en la VM actual Docker está instalado y activo (v29.1.3), **pero `docker compose` (plugin v2) NO existe** (`docker: unknown command: docker compose`); el log de cloud-init muestra `Failure when attempting to install packages: ['docker.io','docker-compose-plugin']` — el paquete `docker-compose-plugin` no está en los repos por defecto de Ubuntu 22.04.
 
 Acceptance criteria:
 
 1. THE SYSTEM SHALL instalar Docker Engine y el plugin de Compose por un método válido en Ubuntu 22.04 ARM64 (añadiendo el repositorio APT oficial de Docker, o método equivalente verificado), no asumiendo que `docker-compose-plugin` está en los repos por defecto.
-2. WHEN la VM termina el arranque (cloud-init), THE SYSTEM SHALL tener `docker` y `docker compose` disponibles y el servicio Docker activo, verificado en la arquitectura ARM64 real.
+2. WHEN una VM nueva termina el arranque (cloud-init), THE SYSTEM SHALL tener `docker` y `docker compose` disponibles y el servicio Docker activo, verificado en la arquitectura ARM64 real.
+3. WHERE la instancia ya desplegada arrancó con el cloud-init roto (cloud-init solo corre en el primer boot), THE SYSTEM SHALL dejar `docker compose` instalado y verificado en esa VM (`docker compose version` responde), no solo corregido el template para VMs futuras.
 
 ### R4 — Backend de state: IAM mínimo, versioning y recuperación
 
@@ -80,7 +83,7 @@ Acceptance criteria:
 ## Out of scope
 
 - **Staging/prod**: este change es solo `dev`.
-- **Despliegue de la app por SSH** (`docker compose pull && up -d`): workflow futuro.
+- **Despliegue de la app / CD hacia la VM** (build → registry → SSH `docker compose pull && up -d`, y la estrategia de trigger): capability nueva, va en el change **`app-deploy-dev`**. R3 la desbloquea (deja `docker compose` operativo) pero no la monta.
 - **Cambio de proveedor**: se mantiene Oracle (ver ADR 0001 y su addendum).
 - **La reconciliación a PAYG y el resize 4/24/200**: ya cubiertos por `infra-dev-payg` (PR #13); este change no los repite.
 
