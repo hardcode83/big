@@ -14,9 +14,9 @@ on:
           - plan
           - apply
       ad_number:
-        description: "Availability Domain (1-based) donde crear la instancia — cambiar y reintentar si Oracle devuelve 'Out of host capacity' en la actual"
+        description: "Availability Domain (1-based) de la instancia. La instancia dev vive en AD-3 (donde se encontró capacidad al bootstrap). NO lo cambies para operar la máquina existente: mover de AD = destruir + recrear (vuelta a la ruleta de capacidad). Solo súbelo para un bootstrap nuevo si AD-3 diera 'Out of host capacity'."
         required: false
-        default: "1"
+        default: "3"
         type: string
 
 defaults:

@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle Cloud Infrastructure, según la decisión de `docs/adr/0001-dev-hosting-provider.md`: una VM única (Ampere A1, Always Free) ejecutando el `docker-compose.yml` del repo. Cubre red, cómputo, backend de state remoto, alerta de presupuesto, y los workflows de GitHub Actions que validan y aplican ese Terraform — sin desplegar todavía la aplicación en sí ni tocar `staging`/`prod`.
+Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle Cloud Infrastructure, según la decisión de `docs/adr/0001-dev-hosting-provider.md` (con el addendum 2026-07-21: tenancy en Pay-As-You-Go conservando la capa gratuita a $0, tras el bloqueo de capacidad de la Always Free — ver change `infra-dev-payg`): una VM única (Ampere A1) ejecutando el `docker-compose.yml` del repo. Cubre red, cómputo, backend de state remoto, alerta de presupuesto, y los workflows de GitHub Actions que validan y aplican ese Terraform — sin desplegar todavía la aplicación en sí ni tocar `staging`/`prod`.
 
 ## Requirements
 
@@ -10,7 +10,7 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 - THE SYSTEM SHALL aprovisionar una VCN (`10.0.0.0/16`) con una subred pública (`10.0.1.0/24`), internet gateway y route table.
 - THE SYSTEM SHALL restringir el security list de la subred a exactamente: SSH (puerto 22, origen acotado por `var.allowed_ssh_cidr`, CIDR IPv4 con prefijo ≥ /24), 8000 (backend) y 3000 (frontend) — los mismos puertos que publica `docker-compose.yml`, ningún otro.
-- THE SYSTEM SHALL aprovisionar una única instancia `VM.Standard.A1.Flex` (2 OCPU/12 GB, cupo Always Free) con una imagen Ubuntu 22.04 ARM64 resuelta dinámicamente vía `data.oci_core_images` — nunca un OCID de imagen hardcodeado.
+- THE SYSTEM SHALL aprovisionar una única instancia `VM.Standard.A1.Flex` (4 OCPU/24 GB con boot volume de 200 GB, dentro del grant Always Free que la tenancy PAYG conserva a $0), fijada en AD-3 vía `var.ad_number` (default 3, el AD donde se encontró capacidad), con una imagen Ubuntu 22.04 ARM64 resuelta dinámicamente vía `data.oci_core_images` — nunca un OCID de imagen hardcodeado.
 - THE SYSTEM SHALL asociar una IP pública reservada (no efímera) a la instancia.
 - WHEN `var.allowed_ssh_cidr` no es un CIDR IPv4 válido con prefijo ≥ /24, THE SYSTEM SHALL rechazar el `plan`/`apply` en la fase de validación de variables.
 

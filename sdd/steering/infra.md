@@ -16,7 +16,7 @@ Cuando exista código compartido entre entornos (red, base de datos, DNS...), ir
 
 ### Decisión (dev)
 
-**Oracle Cloud Infrastructure, VM única (Ampere A1, Always Free) + docker-compose.** Justificación completa, alternativas consideradas (incluyendo Kubernetes) y riesgos aceptados en **`docs/adr/0001-dev-hosting-provider.md`**. Fallback operativo documentado si el free tier de Oracle deja de ser fiable: Hetzner Cloud (fallback primario) o AWS Lightsail (fallback secundario, provider Terraform en tier oficial) — mismo modelo, sin cambio de ADR.
+**Oracle Cloud Infrastructure, VM única (Ampere A1) + docker-compose.** Justificación completa, alternativas consideradas (incluyendo Kubernetes) y riesgos aceptados en **`docs/adr/0001-dev-hosting-provider.md`**. **Addendum 2026-07-21** (change `infra-dev-payg`): ante el bloqueo persistente de capacidad de la Always Free (incluso en Frankfurt), la tenancy pasó a **Pay-As-You-Go conservando la capa gratuita a $0** (prioridad de capacidad A1); la instancia quedó en **4 OCPU/24 GB/200 GB, AD-3**. La tabla comparativa de abajo se mantiene como histórico de la investigación original. Fallback operativo documentado si el free tier de Oracle deja de ser fiable: Hetzner Cloud (fallback primario) o AWS Lightsail (fallback secundario, provider Terraform en tier oficial) — mismo modelo, sin cambio de ADR.
 
 **Staging/prod: pendientes de decisión propia**, no asumir que esta elección se extiende a ellos — el ADR es explícito en que su alcance es solo `dev` (root module de Terraform independiente por entorno, ver "Convención de layout" arriba).
 

@@ -115,8 +115,8 @@ resource "oci_core_instance" "dev" {
   shape               = "VM.Standard.A1.Flex"
 
   shape_config {
-    ocpus         = 2
-    memory_in_gbs = 12
+    ocpus         = 4
+    memory_in_gbs = 24
   }
 
   create_vnic_details {
@@ -125,8 +125,9 @@ resource "oci_core_instance" "dev" {
   }
 
   source_details {
-    source_type = "image"
-    source_id   = data.oci_core_images.ubuntu_arm.images[0].id
+    source_type             = "image"
+    source_id               = data.oci_core_images.ubuntu_arm.images[0].id
+    boot_volume_size_in_gbs = 200 # cupo free de block storage completo (200 GB); crecer la partición en el SO tras aplicar
   }
 
   metadata = {
