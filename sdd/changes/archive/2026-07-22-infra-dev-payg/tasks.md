@@ -28,6 +28,6 @@
 ## 5. Verificación
 
 - [x] 5.1 `terraform fmt -check -diff` y `terraform validate` pasan en `infra/environments/dev/` (los ejecuta el job `check` del workflow en el PR) — **Files:** solo correcciones de formato si falla — [R2, R3]
-- [ ] 5.2 Ejecutar el `workflow_dispatch` (`action=apply`, `ad_number=3`) tras el merge y confirmar en el run que el plan es `0 to destroy` y la instancia queda en 4 OCPU / 24 GB — **Files:** ninguno (operación vía pipeline) — [R2, R3]
-- [ ] 5.3 Tras el apply, expandir la partición en el SO por SSH (`sudo /usr/libexec/oci-growfs -y`, o `sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1`) y verificar 200 GB usables (`df -h`) — **Files:** ninguno (operación en la VM) — [R2]
+- [x] 5.2 Ejecutar el `workflow_dispatch` (`action=apply`, `ad_number=3`) tras el merge y confirmar en el run que el plan es `0 to destroy` y la instancia queda en 4 OCPU / 24 GB — (verificado: instancia a 4/24/200 en state y plan refresh `0 to change`) — **Files:** ninguno (operación vía pipeline) — [R2, R3]
+- [x] 5.3 Tras el apply, expandir la partición en el SO por SSH (`sudo /usr/libexec/oci-growfs -y`, o `sudo growpart /dev/sda 1 && sudo resize2fs /dev/sda1`) y verificar 200 GB usables (`df -h`) — (verificado: `/dev/sda1` 194G) — **Files:** ninguno (operación en la VM) — [R2]
 - [x] 5.4 Confirmar `git status` limpio: sin secretos ni cruft trackeados; `dev.tfvars`, `backend.hcl`, `*.pem`, `*.log` y `apply_loop.sh` efectivamente ignorados (`git check-ignore -v`) — **Files:** ninguno (verificación) — [R5]

@@ -47,5 +47,5 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 ## Estado y pendientes
 
-- El `apply` real contra la cuenta y el primer despliegue de la aplicación en la VM quedan como acción explícita del usuario — no se ejecutan automáticamente. Un `terraform plan` real ya se ha verificado en vivo (vía CI y localmente): 9 recursos a crear, 0 errores.
+- La instancia está **desplegada y operativa** en AD-3 (tenancy PAYG, capa gratuita a $0), redimensionada a 4 OCPU / 24 GB / 200 GB (partición del SO expandida). Los cambios de infra se aplican vía el `workflow_dispatch` de GitHub Actions (`action=apply`), no en local.
 - El despliegue de la aplicación (`docker compose pull && up -d` dentro de la VM) es un workflow/step futuro, fuera de este spec.
