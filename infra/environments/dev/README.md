@@ -4,10 +4,12 @@
 
 **Estado:** código y pipeline listos y verificados (`terraform validate`/`fmt`, un `terraform plan` real contra la cuenta, y build multi-arch en CI). El `apply` real y la primera puesta en marcha de la app quedan como paso explícito, confirmado por el usuario — no se ejecutan solos como parte de este change. Ver `docs/adr/0001-dev-hosting-provider.md` para la decisión de proveedor (Oracle Cloud, Ampere A1 Always Free + docker-compose) y `sdd/steering/infra.md` para la convención completa.
 
+**Operación:** procedimientos de mantenimiento y recuperación (acceso SSH y gestión de claves, backup/recuperación de la clave en OCI Vault, recuperación del state, destroy, diagnóstico de cloud-init) en [`RUNBOOK.md`](./RUNBOOK.md).
+
 ## Qué aprovisiona el Terraform
 
 - Red: una VCN (`10.0.0.0/16`) con una subred pública (`10.0.1.0/24`), internet gateway y route table.
-- Security list: solo SSH (restringido a `var.allowed_ssh_cidr`), 8000 (backend) y 3000 (frontend) — los puertos que `docker-compose.yml` ya publica, nada más.
+- Security list: SSH (22), 8000 (backend) y 3000 (frontend) — los puertos que `docker-compose.yml` publica — todos **acotados a los CIDRs de operadores** (`var.allowed_ssh_cidrs`, lista), sin ningún `0.0.0.0/0` de entrada.
 - Una instancia `VM.Standard.A1.Flex` (2 OCPU/12 GB, cupo Always Free completo) con una imagen Ubuntu 22.04 ARM64 resuelta dinámicamente (nunca un OCID hardcodeado), con `cloud-init` que instala Docker + el plugin de Compose.
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.

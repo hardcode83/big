@@ -21,15 +21,15 @@
 
 ## 4. OCI Vault — backup de la clave SSH (R7)
 
-- [ ] 4.1 `main.tf`: crear `oci_kms_vault` (tipo DEFAULT) + `oci_kms_key` **software-protected** (`protection_mode = "SOFTWARE"`), dentro del cupo Always Free — **Files:** `infra/environments/dev/main.tf` (+ `variables.tf`/outputs si procede) — [R7]
-- [ ] 4.2 Subir la clave privada SSH como secret **out-of-band** con OCI CLI (`oci vault secret create-base64 …`), NUNCA como recurso Terraform con el contenido inline (para no filtrar el plaintext al `tfstate`); verificar que se recupera — **Files:** ninguno (op. OCI); procedimiento en el RUNBOOK — [R7]
+- [x] 4.1 `main.tf`: crear `oci_kms_vault` (tipo DEFAULT) + `oci_kms_key` **software-protected** (`protection_mode = "SOFTWARE"`), dentro del cupo Always Free — **Files:** `infra/environments/dev/main.tf` (+ `variables.tf`/outputs si procede) — [R7]
+- [ ] 4.2 Subir la clave privada SSH como secret **out-of-band** con OCI CLI (`oci vault secret create-base64 …`), NUNCA como recurso Terraform con el contenido inline (para no filtrar el plaintext al `tfstate`); verificar que se recupera — **Files:** ninguno (op. OCI); procedimiento en el RUNBOOK — [R7] (pendiente: op tuya — OCI CLI)
 
 ## 5. Endurecimiento del workflow de apply (R1)
 
-- [ ] 5.1 `infra-dev.yml`: dividir `plan-apply` en dos jobs — `plan` (init→validate→plan, sube `tfplan` como artifact) y `apply` (descarga el artifact y aplica) — **Files:** `.github/workflows/infra-dev.yml` — [R1]
-- [ ] 5.2 En el job `apply`: `environment: dev-apply`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: infra-dev-apply, cancel-in-progress: false }`, `timeout-minutes` en ambos jobs — **Files:** `.github/workflows/infra-dev.yml` — [R1]
-- [ ] 5.3 Fijar todas las GitHub Actions por **SHA de commit** (checkout, setup-terraform, upload/download-artifact) con el tag en comentario — **Files:** `.github/workflows/infra-dev.yml` — [R1]
-- [ ] 5.4 Configurar el GitHub Environment `dev-apply` con required reviewers **Jose + Marta** en Settings del repo — **Files:** ninguno (op. GitHub) — [R1]
+- [x] 5.1 `infra-dev.yml`: dividir `plan-apply` en dos jobs — `plan` (init→validate→plan, sube `tfplan` como artifact) y `apply` (descarga el artifact y aplica) — **Files:** `.github/workflows/infra-dev.yml` — [R1]
+- [x] 5.2 En el job `apply`: `environment: dev-apply`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: infra-dev-apply, cancel-in-progress: false }`, `timeout-minutes` en ambos jobs — **Files:** `.github/workflows/infra-dev.yml` — [R1]
+- [x] 5.3 Fijar todas las GitHub Actions por **SHA de commit** (checkout, setup-terraform, upload/download-artifact) con el tag en comentario — **Files:** `.github/workflows/infra-dev.yml` — [R1]
+- [ ] 5.4 Configurar el GitHub Environment `dev-apply` con required reviewers **Jose + Marta** en Settings del repo — **Files:** ninguno (op. GitHub) — [R1] (pendiente: op tuya — GitHub Settings)
 
 ## 6. IAM mínimo + state backend (R4)
 
@@ -39,7 +39,7 @@
 
 ## 7. Runbook operativo (R5)
 
-- [ ] 7.1 Crear `infra/environments/dev/RUNBOOK.md` con: `destroy` controlado, **recuperación del state** (listar/restaurar versión del objeto), **acceso SSH** (usuario `ubuntu`, IP, clave por persona, alta/rotación/revocación de claves y CIDRs, **recuperar la clave del Vault**), y **diagnóstico de cloud-init** (`cloud-init status`, `/var/log/cloud-init-output.log`, reintento); enlazarlo desde `README.md` — **Files:** `infra/environments/dev/RUNBOOK.md` (nuevo), `README.md` — [R2, R4, R5, R7]
+- [x] 7.1 Crear `infra/environments/dev/RUNBOOK.md` con: `destroy` controlado, **recuperación del state** (listar/restaurar versión del objeto), **acceso SSH** (usuario `ubuntu`, IP, clave por persona, alta/rotación/revocación de claves y CIDRs, **recuperar la clave del Vault**), y **diagnóstico de cloud-init** (`cloud-init status`, `/var/log/cloud-init-output.log`, reintento); enlazarlo desde `README.md` — **Files:** `infra/environments/dev/RUNBOOK.md` (nuevo), `README.md` — [R2, R4, R5, R7]
 
 ## 8. Verificación
 

@@ -212,3 +212,26 @@ resource "oci_budget_alert_rule" "dev_forecast" {
   recipients     = join(",", var.budget_alert_recipients)
   message        = "AutoHostAI dev: el gasto PREVISTO del mes alcanzará el presupuesto (${var.budget_amount})."
 }
+
+# --- Vault (R7): backup recuperable de la clave SSH ---
+# Vault DEFAULT (partición compartida) + master key SOFTWARE → ambos Always Free (0€).
+# El SECRET (la clave privada) NO se crea aquí: se sube out-of-band con OCI CLI para que
+# el valor en claro no toque el tfstate (ver RUNBOOK). La policy de lectura para Jose/Marta
+# va en la policy IAM del compartment (sección IAM / §6, aplicada por admin de tenancy).
+resource "oci_kms_vault" "dev" {
+  compartment_id = var.compartment_ocid
+  display_name   = "autohostai-dev-vault"
+  vault_type     = "DEFAULT"
+}
+
+resource "oci_kms_key" "dev_secrets" {
+  compartment_id      = var.compartment_ocid
+  display_name        = "autohostai-dev-secrets-key"
+  management_endpoint = oci_kms_vault.dev.management_endpoint
+  protection_mode     = "SOFTWARE"
+
+  key_shape {
+    algorithm = "AES"
+    length    = 32
+  }
+}
