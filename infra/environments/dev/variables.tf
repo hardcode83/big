@@ -39,29 +39,27 @@ variable "ad_number" {
 
 # Red
 
-variable "allowed_ssh_cidr" {
-  description = "CIDR IPv4 permitido para SSH (puerto 22) a la instancia — origen conocido y acotado, nunca un rango abierto."
-  type        = string
+variable "allowed_ssh_cidrs" {
+  description = "Lista de CIDRs IPv4 de operadores permitidos para SSH (22) y los puertos de app (8000/3000). Cada origen acotado (prefijo >= /24), nunca un rango abierto. Añadir un operador no requiere recrear la instancia."
+  type        = list(string)
 
   validation {
-    # Formato estricto n.n.n.n/n (rechaza IPv6 tipo ::/0 y espacios finales por el anclado ^...$)
-    # + prefijo >= /24: excluye estructuralmente 0.0.0.0/0, 0.0.0.0/1 y cualquier rango igual de amplio,
-    # en vez de comparar solo contra el literal "0.0.0.0/0".
-    condition = (
-      can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$", var.allowed_ssh_cidr)) &&
-      tonumber(split("/", var.allowed_ssh_cidr)[1]) >= 24
-    )
-    error_message = "allowed_ssh_cidr debe ser un CIDR IPv4 válido con prefijo >= /24 (origen conocido y acotado) — rangos abiertos como 0.0.0.0/0 no están permitidos."
+    # Cada elemento: formato estricto n.n.n.n/n (rechaza IPv6 y rangos amplios por el prefijo >= /24).
+    condition = alltrue([
+      for c in var.allowed_ssh_cidrs :
+      can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$", c)) && tonumber(split("/", c)[1]) >= 24
+    ])
+    error_message = "Cada CIDR de allowed_ssh_cidrs debe ser IPv4 válido con prefijo >= /24 — rangos abiertos como 0.0.0.0/0 no están permitidos."
   }
 }
 
-variable "ssh_public_key" {
-  description = "Clave pública SSH (contenido, p. ej. de un fichero .pub) inyectada vía cloud-init para el usuario por defecto de la imagen (ubuntu). Par de claves dedicado a esta VM — distinto de la API key de OCI que usa el provider/backend de Terraform, nunca reutilizar la misma."
-  type        = string
+variable "ssh_authorized_keys" {
+  description = "Lista de claves públicas SSH autorizadas (una por operador), inyectadas vía cloud-init al usuario por defecto de la imagen (ubuntu). Cada par dedicado a esta VM — distinto de la API key de OCI del provider/backend, nunca reutilizar. Por ahora solo la de Jose; añadir más no requiere recrear."
+  type        = list(string)
 
   validation {
-    condition     = can(regex("^ssh-(ed25519|rsa) ", var.ssh_public_key))
-    error_message = "ssh_public_key debe ser el contenido de una clave pública SSH válida (empieza por 'ssh-ed25519 ' o 'ssh-rsa ')."
+    condition     = length(var.ssh_authorized_keys) > 0 && alltrue([for k in var.ssh_authorized_keys : can(regex("^ssh-(ed25519|rsa) ", k))])
+    error_message = "ssh_authorized_keys no puede estar vacía y cada clave debe empezar por 'ssh-ed25519 ' o 'ssh-rsa '."
   }
 }
 

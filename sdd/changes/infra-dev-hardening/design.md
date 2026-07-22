@@ -21,7 +21,8 @@ Rejected: mantener un solo job — un Environment protege un *job* entero, así 
 ### D2 — SSH multi-operador declarativo (R2)
 
 **Chosen:** convertir las variables a listas:
-- `ssh_public_key: string` → `ssh_authorized_keys: list(string)` — el cloud-init inyecta todas al `authorized_keys` del usuario `ubuntu` (una por línea). **Por ahora solo la clave de Jose**; la lista deja añadir operadores futuros sin recrear. El acceso de Marta se cubre recuperando la clave del Vault (D7), no con una clave propia.
+- `ssh_public_key: string` → `ssh_authorized_keys: list(string)` — el cloud-init inyecta todas al `authorized_keys` del usuario `ubuntu` (una por línea). **Por ahora solo la clave de Jose**; el acceso de Marta se cubre recuperando la clave del Vault (D7), no con una clave propia.
+- **Descubierto en el run — `metadata` es ForceNew en el provider `oci`**: cambiar `user_data` o `ssh_authorized_keys` **recrearía la instancia** (verificado por `plan`). Por eso el `oci_core_instance` lleva `lifecycle { ignore_changes = [metadata] }`: la lista de claves y el cloud-init de este código definen el arranque de una **VM nueva** (rebuild desde 0 correcto), pero **sobre la instancia viva las altas/rotaciones de clave se hacen out-of-band por SSH** (append a `~/.ssh/authorized_keys`, documentado en el RUNBOOK) — no vía Terraform.
 - `allowed_ssh_cidr: string` → `allowed_ssh_cidrs: list(string)` — el security list genera una `ingress_security_rules` por CIDR con un `dynamic` block. Validación por elemento (IPv4, prefijo ≥ /24), rechazando rangos abiertos.
 - **Los puertos 8000 (backend) y 3000 (frontend) dejan de estar abiertos a `0.0.0.0/0`** y se acotan a los mismos CIDR de operadores (decisión del gate) — mismo `dynamic` sobre la lista, aplicado a los tres puertos.
 

@@ -16,6 +16,17 @@ provider "oci" {
   region           = var.region
 }
 
+locals {
+  # Puertos publicados por docker-compose.yml (8000 backend, 3000 frontend) + SSH (22),
+  # todos acotados a los CIDRs de operadores (ningún 0.0.0.0/0). Producto cartesiano CIDR × puerto.
+  ingress_ports = [22, 8000, 3000]
+  ingress_rules = flatten([
+    for cidr in var.allowed_ssh_cidrs : [
+      for port in local.ingress_ports : { cidr = cidr, port = port }
+    ]
+  ])
+}
+
 # --- Red ---
 # Modelo VM única + docker-compose (ADR 0001) — una sola instancia, sin fragmentar en microservicios.
 
@@ -45,7 +56,8 @@ resource "oci_core_route_table" "dev_public" {
   }
 }
 
-# Puertos exactos de docker-compose.yml: backend 8000, frontend 3000, más SSH restringido.
+# Puertos de docker-compose.yml (8000 backend, 3000 frontend) + SSH (22), todos acotados
+# por CIDR de operador — una regla por (CIDR × puerto), sin ningún 0.0.0.0/0 de entrada.
 resource "oci_core_security_list" "dev_public" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.dev.id
@@ -56,30 +68,15 @@ resource "oci_core_security_list" "dev_public" {
     destination = "0.0.0.0/0"
   }
 
-  ingress_security_rules {
-    protocol = "6" # TCP
-    source   = var.allowed_ssh_cidr
-    tcp_options {
-      min = 22
-      max = 22
-    }
-  }
-
-  ingress_security_rules {
-    protocol = "6"
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 8000
-      max = 8000
-    }
-  }
-
-  ingress_security_rules {
-    protocol = "6"
-    source   = "0.0.0.0/0"
-    tcp_options {
-      min = 3000
-      max = 3000
+  dynamic "ingress_security_rules" {
+    for_each = local.ingress_rules
+    content {
+      protocol = "6" # TCP
+      source   = ingress_security_rules.value.cidr
+      tcp_options {
+        min = ingress_security_rules.value.port
+        max = ingress_security_rules.value.port
+      }
     }
   }
 }
@@ -131,17 +128,37 @@ resource "oci_core_instance" "dev" {
   }
 
   metadata = {
-    ssh_authorized_keys = var.ssh_public_key # par dedicado a esta VM, distinto de la API key de OCI
+    ssh_authorized_keys = join("\n", var.ssh_authorized_keys) # claves de todos los operadores; par(es) dedicado(s) a esta VM, distinto de la API key de OCI
+    # Docker desde el repo APT OFICIAL de Docker (arm64): docker-compose-plugin NO está en los
+    # repos por defecto de Ubuntu 22.04 (bug del cloud-init anterior). cloud-init sustituye
+    # $RELEASE (codename) y $KEY_FILE (ruta donde guarda la clave del keyid).
     user_data = base64encode(<<-CLOUDINIT
       #cloud-config
       package_update: true
+      apt:
+        sources:
+          docker:
+            source: "deb [arch=arm64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable"
+            keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
       packages:
-        - docker.io
+        - docker-ce
+        - docker-ce-cli
+        - containerd.io
+        - docker-buildx-plugin
         - docker-compose-plugin
       runcmd:
         - systemctl enable --now docker
+        - usermod -aG docker ubuntu
     CLOUDINIT
     )
+  }
+
+  lifecycle {
+    # `metadata` (user_data/ssh_authorized_keys) es ForceNew en el provider oci: cambiarlo
+    # recrearía la instancia (ruleta de capacidad + pérdida de datos). El cloud-init de aquí
+    # define el arranque de una VM NUEVA (rebuild desde 0 correcto); sobre la instancia viva,
+    # altas/rotaciones de clave y remediaciones se hacen out-of-band por SSH (ver RUNBOOK).
+    ignore_changes = [metadata]
   }
 }
 
