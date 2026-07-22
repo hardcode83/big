@@ -27,9 +27,9 @@
 ## 5. Endurecimiento del workflow de apply (R1)
 
 - [x] 5.1 `infra-dev.yml`: dividir `plan-apply` en dos jobs — `plan` (init→validate→plan, sube `tfplan` como artifact) y `apply` (descarga el artifact y aplica) — **Files:** `.github/workflows/infra-dev.yml` — [R1]
-- [x] 5.2 En el job `apply`: `environment: dev-apply`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: infra-dev-apply, cancel-in-progress: false }`, `timeout-minutes` en ambos jobs — **Files:** `.github/workflows/infra-dev.yml` — [R1]
+- [x] 5.2 En el job `apply`: `if: github.ref == 'refs/heads/main'`, `concurrency: { group: infra-dev-apply, cancel-in-progress: false }`, `timeout-minutes` en ambos jobs (sin `environment:` — ver 5.4/opción A) — **Files:** `.github/workflows/infra-dev.yml` — [R1]
 - [x] 5.3 Fijar todas las GitHub Actions por **SHA de commit** (checkout, setup-terraform, upload/download-artifact) con el tag en comentario — **Files:** `.github/workflows/infra-dev.yml` — [R1]
-- [ ] 5.4 Configurar el GitHub Environment `dev-apply` con required reviewers **Jose + Marta** en Settings del repo — **Files:** ninguno (op. GitHub) — [R1] (pendiente: op tuya — GitHub Settings)
+- [x] 5.4 Gate de aprobación: en repo privado + plan Free los Environments con required reviewers no están disponibles (API 404) → **opción A**: review del PR + `apply` manual solo desde `main`. No hay Environment que configurar; se quitó `environment:` del workflow y se documentó en RUNBOOK §0 y README — **Files:** `.github/workflows/infra-dev.yml`, `RUNBOOK.md`, `README.md` — [R1]
 
 ## 6. IAM mínimo + state backend (R4)
 

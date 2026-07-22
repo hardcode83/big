@@ -26,7 +26,7 @@ Tras este change, el `apply` de infra solo es lanzable desde `main`, protegido p
 Acceptance criteria:
 
 1. WHEN se dispara `workflow_dispatch` con `action=apply` desde una rama distinta de `main`, THE SYSTEM SHALL rechazar/omitir el job de `apply`.
-2. THE SYSTEM SHALL exigir la aprobación manual de un GitHub Environment (required reviewers) antes de ejecutar el `apply`.
+2. THE SYSTEM SHALL exigir aprobación antes del `apply`. NOTA (verificada en implementación): en repo privado + plan Free los GitHub Environments con *required reviewers* no están disponibles; el gate es entonces **review del PR (el código llega a `main` revisado) + `apply` manual solo desde `main`** — solo se aplica lo revisado y solo un colaborador con push puede lanzarlo.
 3. THE SYSTEM SHALL declarar `concurrency` en el workflow de forma que dos `apply` no se ejecuten en paralelo sobre el mismo state, y un `timeout-minutes` acotado en los jobs.
 4. THE SYSTEM SHALL fijar todas las GitHub Actions usadas (p. ej. `actions/checkout`, `hashicorp/setup-terraform`) por **SHA de commit**, no por tag, con el tag anotado en comentario.
 

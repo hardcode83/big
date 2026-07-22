@@ -9,7 +9,7 @@ La infra dev vive en `infra/environments/dev/` (`main.tf`, `variables.tf`, `outp
 ### D1 — Split `plan`/`apply` + gate del apply (R1)
 
 **Chosen:** dividir el job `plan-apply` en dos jobs: **`plan`** (init→validate→plan, sube `tfplan` como artifact) y **`apply`** (descarga el artifact y aplica). El `apply` lleva:
-- `environment: dev-apply` → la *required reviewers* del Environment (configurada en Settings del repo) **pausa el run** pidiendo aprobación manual antes de aplicar. **Reviewers: Jose + Marta** (cualquiera aprueba).
+- **Gate de aprobación (opción A — descubierto en el run)**: el repo es **privado + plan Free**, donde los Environments con *required reviewers* NO están disponibles (la API devuelve 404). En vez de un Environment, la aprobación es: el código llega a `main` **revisado vía PR** + el `apply` es un `workflow_dispatch` **manual y solo desde `main`** → solo se aplica lo ya revisado, y solo un colaborador con push puede lanzarlo. (Alternativas descartadas: repo público, o subir a GitHub Pro.)
 - `if: github.ref == 'refs/heads/main'` → solo aplica si el dispatch se lanzó sobre `main` (workflow_dispatch permite lanzar desde cualquier rama; el guard va en el job, no en el trigger).
 - `concurrency: { group: infra-dev-apply, cancel-in-progress: false }` → serializa applies, nunca dos sobre el mismo state.
 - `timeout-minutes` acotado (p. ej. 15) en ambos jobs.

@@ -4,7 +4,7 @@
 
 **Estado:** código y pipeline listos y verificados (`terraform validate`/`fmt`, un `terraform plan` real contra la cuenta, y build multi-arch en CI). El `apply` real y la primera puesta en marcha de la app quedan como paso explícito, confirmado por el usuario — no se ejecutan solos como parte de este change. Ver `docs/adr/0001-dev-hosting-provider.md` para la decisión de proveedor (Oracle Cloud, Ampere A1 Always Free + docker-compose) y `sdd/steering/infra.md` para la convención completa.
 
-**Operación:** procedimientos de mantenimiento y recuperación (acceso SSH y gestión de claves, backup/recuperación de la clave en OCI Vault, recuperación del state, destroy, diagnóstico de cloud-init) en [`RUNBOOK.md`](./RUNBOOK.md).
+**Operación:** procedimientos de mantenimiento y recuperación (acceso SSH y gestión de claves, backup/recuperación de la clave en OCI Vault, recuperación del state, destroy, diagnóstico de cloud-init) en [`RUNBOOK.md`](./RUNBOOK.md). Los cambios de infra se aplican **solo por el pipeline** (`workflow_dispatch`), con el gate de aprobación = **review del PR + `apply` manual desde `main`** (repo privado + plan Free, sin Environments con required reviewers — ver RUNBOOK §0).
 
 ## Qué aprovisiona el Terraform
 

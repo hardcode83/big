@@ -101,14 +101,15 @@ jobs:
           path: infra/environments/dev/tfplan
           retention-days: 1
 
-  # apply: solo desde main, solo si action=apply, protegido por el Environment dev-apply
-  # (aprobación manual de Jose/Marta). concurrency serializa applies sobre el mismo state. [R1]
+  # apply: solo desde main y solo si action=apply. En repo privado + plan Free NO hay Environment
+  # con required reviewers, así que el gate de aprobación es (opción A): el código llega a main
+  # revisado vía PR + el dispatch de apply es manual y solo desde main → solo se aplica lo revisado.
+  # concurrency serializa applies sobre el mismo state. [R1]
   apply:
     if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
     needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 15
-    environment: dev-apply
     concurrency:
       group: infra-dev-apply
       cancel-in-progress: false

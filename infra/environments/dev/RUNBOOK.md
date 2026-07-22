@@ -4,6 +4,16 @@ Procedimientos de operación/recuperación del entorno `dev`. Complementa al `RE
 
 Referencias rápidas: usuario SSH `ubuntu` · clave local `~/.ssh/autohostai_dev_vm` · bucket de state `autohostai-tfstate-dev` (objeto `dev.tfstate`) · la instancia vive en **AD-3**.
 
+## 0. Aplicar cambios de infra (modelo de aprobación)
+
+Los cambios se aplican **solo por el pipeline** (`.github/workflows/infra-dev.yml`), nunca con `terraform apply` local salvo bootstrap excepcional. El modelo de aprobación (repo privado + plan Free, sin Environments con required reviewers):
+
+1. El cambio de Terraform va en un **PR revisado** → merge a `main`.
+2. En Actions, lanzar **Run workflow** de `infra-dev` con `action=plan` desde `main` y revisar el plan.
+3. Repetir con `action=apply` desde `main`: solo aplica lo que está en `main` (ya revisado), solo lo lanza un colaborador con push, y `concurrency` impide dos apply simultáneos.
+
+Es decir, la "aprobación" es el **review del PR + el dispatch manual desde `main`** (no un Environment). Si en el futuro el repo pasa a Pro/Team o público, se puede reintroducir el Environment `dev-apply` con required reviewers.
+
 ## 1. Acceso SSH
 
 ```bash
