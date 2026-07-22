@@ -36,7 +36,7 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL autorizar **múltiples claves públicas SSH** (Jose y Marta como mínimo), provisionadas declarativamente (variable de lista de claves inyectada a `authorized_keys` vía cloud-init), de modo que cada persona use su propia clave privada — nunca se comparte un `.pem`.
+1. THE SYSTEM SHALL soportar **una lista** de claves públicas SSH autorizadas (variable de lista inyectada a `authorized_keys` vía cloud-init), de modo que añadir un operador futuro no requiera recrear la instancia. Por ahora se puebla **solo la clave de Jose**; el acceso de Marta se resuelve recuperando la clave del Vault (R7), no con una clave propia en la VM.
 2. THE SYSTEM SHALL permitir SSH desde **varios orígenes CIDR** (la IP de cada operador), no un único `/32`, manteniendo la validación de cada CIDR (IPv4, prefijo ≥ /24, sin rangos abiertos) — porque con un solo `/32` la clave de Marta no bastaría, su IP quedaría bloqueada por el security list.
 3. THE SYSTEM SHALL documentar el procedimiento de acceso (usuario `ubuntu`, IP de la VM, clave por persona) y **cómo añadir/rotar/revocar una clave o una IP sin recrear la instancia**.
 4. WHERE la clave privada solo la necesita el pipeline de CI/CD (no un humano), THE SYSTEM SHALL indicar que ese secreto vive en GitHub Actions Secrets (write-only, no recuperable por personas) — el acceso humano se resuelve con la clave propia de cada operador, no recuperando un secreto compartido.
@@ -59,7 +59,7 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL documentar el IAM mínimo del usuario/credenciales que Terraform usa para el backend y el `apply` (principio de menor privilegio).
+1. THE SYSTEM SHALL crear y aplicar una **policy IAM de mínimo privilegio** (grupo + policy acotados al compartment de `dev`) para el usuario de Terraform, cubriendo exactamente los recursos que gestiona (compute, red, budgets, object storage del state y Vault de R7) y **verificando que `plan`/`apply` siguen funcionando** con esos permisos acotados.
 2. THE SYSTEM SHALL tener activado el versioning en el bucket de Object Storage del state.
 3. THE SYSTEM SHALL documentar el procedimiento de recuperación del state (restaurar una versión previa del objeto de state).
 
@@ -81,6 +81,16 @@ Acceptance criteria:
 2. THE SYSTEM SHALL desplegar **dos** `oci_budget_alert_rule`: una de tipo `ACTUAL` (se mantiene) y otra de tipo `FORECAST` con `threshold_type = ABSOLUTE` y `threshold = 1`.
 3. THE SYSTEM SHALL enviar ambas alertas a los destinatarios `josegascon@gmail.com` y `mreyesojeda@gmail.com`.
 4. WHEN se aplique este change por el pipeline, THE SYSTEM SHALL reconciliar el drift dejado por el borrado manual (la alerta manual se elimina previamente en la consola), quedando el presupuesto de nuevo bajo Terraform sin duplicados.
+
+### R7 — Backup recuperable de la clave SSH en OCI Vault (Always Free, €0)
+
+**As a** operador, **I want** una copia recuperable de la clave privada SSH (la de deploy/break-glass) en un baúl del que el equipo pueda sacarla, **so that** si se pierde localmente se recupera, sin depender de GitHub Secrets (que es write-only y no permite recuperación por personas).
+
+Acceptance criteria:
+
+1. THE SYSTEM SHALL almacenar la clave privada SSH como un secret en **OCI Vault** usando una master key **software-protected** y un secret dentro del cupo **Always Free** (coste €0), recuperable por las personas autorizadas del equipo (Jose, Marta).
+2. THE SYSTEM SHALL mantener además la clave en **GitHub Secrets** (write-only) para el consumo del pipeline de CD — el Vault es la copia recuperable, GitHub el consumidor de CI.
+3. WHERE el secret se sube al Vault, THE SYSTEM SHALL hacerlo sin que el valor en claro quede en el repositorio ni en el `tfstate` (subida out-of-band, no como recurso Terraform con el contenido inline).
 
 ## Out of scope
 

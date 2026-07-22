@@ -21,7 +21,7 @@ Rejected: mantener un solo job — un Environment protege un *job* entero, así 
 ### D2 — SSH multi-operador declarativo (R2)
 
 **Chosen:** convertir las variables a listas:
-- `ssh_public_key: string` → `ssh_authorized_keys: list(string)` — el cloud-init inyecta todas al `authorized_keys` del usuario `ubuntu` (una por línea). Cada persona (Jose, Marta) su propia clave; ninguna privada se comparte.
+- `ssh_public_key: string` → `ssh_authorized_keys: list(string)` — el cloud-init inyecta todas al `authorized_keys` del usuario `ubuntu` (una por línea). **Por ahora solo la clave de Jose**; la lista deja añadir operadores futuros sin recrear. El acceso de Marta se cubre recuperando la clave del Vault (D7), no con una clave propia.
 - `allowed_ssh_cidr: string` → `allowed_ssh_cidrs: list(string)` — el security list genera una `ingress_security_rules` por CIDR con un `dynamic` block. Validación por elemento (IPv4, prefijo ≥ /24), rechazando rangos abiertos.
 - **Los puertos 8000 (backend) y 3000 (frontend) dejan de estar abiertos a `0.0.0.0/0`** y se acotan a los mismos CIDR de operadores (decisión del gate) — mismo `dynamic` sobre la lista, aplicado a los tres puertos.
 
@@ -37,7 +37,7 @@ Rejected: `docker.io` + `docker-compose-plugin` de repos Ubuntu (el bug — el p
 
 **Chosen:** documentar/aplicar tres cosas, ninguna gestionable por este propio Terraform (el bucket contiene su propio state → dependencia circular):
 - **Versioning** activado en el bucket `autohostai-tfstate-dev` (OCI CLI/consola, una vez), documentado.
-- **Policy IAM de mínimo privilegio** para el usuario/grupo de Terraform, acotada al compartment de dev (`manage` de instance-family, virtual-network-family, budgets, y object-family solo del bucket del state) — como documento aplicado por un admin de la tenancy (el usuario de TF no puede auto-otorgarse permisos).
+- **Policy IAM de mínimo privilegio creada y aplicada** (decisión del gate): un grupo `autohostai-dev-terraform` + policy acotada al compartment de dev — `manage` de instance-family, virtual-network-family, budgets, object-family (solo el bucket del state) y los verbos de Vault/keys/secrets que exige R7. La crea un **admin de la tenancy** (el usuario de TF no puede auto-otorgarse IAM, y darle `manage` de IAM contradiría el mínimo privilegio) — fuera del root module de dev, como config de admin/manual. Se **verifica con un `plan` (y apply) usando el usuario acotado** antes de retirar permisos amplios, derivando la lista exacta de verbos de los recursos reales del `main.tf` para no romper el apply.
 - **Procedimiento de recuperación** del state (listar versiones del objeto `dev.tfstate` y restaurar una previa vía OCI CLI), en el runbook.
 
 Rejected: gestionar el bucket en este Terraform — dependencia circular. · Migrar el state a otro backend (S3-compat) — innecesario, el `oci` nativo funciona.
@@ -100,5 +100,5 @@ CI: el workflow pasa estas vars como `TF_VAR_*` desde secrets; los secrets multi
 Resueltas en el gate: **(1)** Environment `dev-apply`, reviewers **Jose + Marta**. · **(2)** Alerta ACTUAL → **ABSOLUTE €1**. · **(4)** Remediación de la VM viva → **ejecutada por SSH ahora** + cloud-init corregido para máquinas nuevas. · **(6)** Puertos 8000/3000 → **acotados por CIDR** como el 22.
 
 Pendientes (implementación):
-3. **Policy IAM**: la aplica un admin de la tenancy; derivar los permisos de los recursos reales del `main.tf` y probar un `plan` con el usuario acotado antes de retirar permisos amplios (para no romper el `apply`).
-5. **Valores**: clave pública SSH de Marta y su CIDR de origen para `ssh_authorized_keys`/`allowed_ssh_cidrs` (y de 8000/3000).
+3. **Policy IAM** (decidido: aplicar de verdad — D4): pendiente solo el detalle de implementación — la aplica un admin de la tenancy, derivando los verbos de los recursos reales del `main.tf` y probando `plan`/`apply` con el usuario acotado antes de retirar permisos amplios.
+5. **Valores**: por ahora solo la clave/CIDR de Jose (ya conocidos). La clave/CIDR propios de Marta quedan **fuera del plan** (accede recuperando la clave del Vault); se añaden a las listas cuando haga falta, sin recrear.
