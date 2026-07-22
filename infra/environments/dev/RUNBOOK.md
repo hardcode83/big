@@ -50,7 +50,7 @@ oci vault secret create-base64 \
 
 # Recuperar (si se pierde localmente):
 oci secrets secret-bundle get --raw-output \
-  --secret-id <secret_ocid> \
+  --secret-id ocid1.vaultsecret.oc1.eu-frankfurt-1.amaaaaaa2r32b6yaq2vmuzumiynmonnbvbta7qgz23x6yoxssyhxt5q3mgrq \
   --query 'data."secret-bundle-content".content' | base64 -d > ~/.ssh/autohostai_dev_vm
 chmod 600 ~/.ssh/autohostai_dev_vm
 ```
