@@ -9,6 +9,7 @@ Revisión de infraestructura (comentarios de Marta) antes de dar por cerrada la 
 - **cloud-init instala `docker-compose-plugin` vía `packages:`, pero ese paquete no está en los repos por defecto de Ubuntu 22.04** (viene del apt oficial de Docker) → la instalación fallaría y `docker compose` no estaría disponible. Bug que rompería el despliegue de la app.
 - El backend de state (bucket manual) no tiene IAM mínimo, versioning ni procedimiento de recuperación documentados.
 - No existe un runbook operativo (destroy, recuperación de state, acceso a la VM, diagnóstico de cloud-init).
+- La alerta de presupuesto que gestionaba Terraform (€10, `ACTUAL`, 80%, un solo email) se borró a mano en la consola y se sustituyó por una manual — dejando **drift**: Terraform la recrearía con la config vieja en el próximo `apply`. Se quiere en su lugar un presupuesto de **€1/mes** con alerta `ACTUAL` **y** `FORECAST` (absoluta a €1), avisando a los correos de Jose y Marta, gestionado por IaC.
 
 Este change endurece esos puntos. **Toca los mismos ficheros que `infra-dev-payg`** (`.github/workflows/infra-dev.yml`, `infra/environments/dev/main.tf`), así que su implementación debe rebasar sobre `main` una vez `infra-dev-payg` (PR #13) esté mergeado.
 
@@ -64,6 +65,17 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. THE SYSTEM SHALL documentar (en `infra/environments/dev/README.md` o un `RUNBOOK.md`) al menos: `destroy` controlado, recuperación del state, acceso a la VM por SSH, y diagnóstico de cloud-init (dónde ver sus logs, cómo reintentar).
+
+### R6 — Presupuesto de €1 con alertas ACTUAL + FORECAST, gestionado por IaC
+
+**As a** responsable de coste, **I want** un presupuesto ajustado con alertas actual y de previsión a los dos responsables, **so that** cualquier cargo bajo PAYG se detecta al instante y el budget vuelve a estar bajo control de Terraform (no manual).
+
+Acceptance criteria:
+
+1. THE SYSTEM SHALL definir el `oci_budget_budget` con importe **1** (€1/mes) en lugar del valor anterior.
+2. THE SYSTEM SHALL desplegar **dos** `oci_budget_alert_rule`: una de tipo `ACTUAL` (se mantiene) y otra de tipo `FORECAST` con `threshold_type = ABSOLUTE` y `threshold = 1`.
+3. THE SYSTEM SHALL enviar ambas alertas a los destinatarios `josegascon@gmail.com` y `mreyesojeda@gmail.com`.
+4. WHEN se aplique este change por el pipeline, THE SYSTEM SHALL reconciliar el drift dejado por el borrado manual (la alerta manual se elimina previamente en la consola), quedando el presupuesto de nuevo bajo Terraform sin duplicados.
 
 ## Out of scope
 
