@@ -22,7 +22,7 @@
 ## 4. OCI Vault — backup de la clave SSH (R7)
 
 - [x] 4.1 `main.tf`: crear `oci_kms_vault` (tipo DEFAULT) + `oci_kms_key` **software-protected** (`protection_mode = "SOFTWARE"`), dentro del cupo Always Free — **Files:** `infra/environments/dev/main.tf` (+ `variables.tf`/outputs si procede) — [R7]
-- [ ] 4.2 Subir la clave privada SSH como secret **out-of-band** con OCI CLI (`oci vault secret create-base64 …`), NUNCA como recurso Terraform con el contenido inline (para no filtrar el plaintext al `tfstate`); verificar que se recupera — **Files:** ninguno (op. OCI); procedimiento en el RUNBOOK — [R7] (pendiente: op tuya — OCI CLI)
+- [x] 4.2 Subir la clave privada SSH como secret **out-of-band** con OCI CLI (`oci vault secret create-base64 …`), NUNCA como recurso Terraform con el contenido inline (para no filtrar el plaintext al `tfstate`); verificar que se recupera — **Files:** ninguno (op. OCI); procedimiento en el RUNBOOK — [R7] (hecho: secret autohostai-dev-ssh-key creado por OCI CLI con svc; recuperación verificada == clave original)
 
 ## 5. Endurecimiento del workflow de apply (R1)
 
@@ -35,7 +35,7 @@
 
 - [x] 6.1 Definir el grupo `autohostai-dev-terraform` + policy IAM acotada al compartment de dev (verbos exactos derivados de los recursos del `main.tf`: instance-family, virtual-network-family, budgets, object-family solo del bucket del state, y vault/keys/secrets de R7) — **Files:** doc de policy (aplicada por admin de tenancy, fuera del root module) — [R4]
 - [x] 6.2 Aplicar la policy (admin de tenancy), mover el usuario de Terraform al grupo y **verificar `plan`/`apply` con los permisos acotados** antes de retirar los amplios — **Files:** ninguno (op. OCI) — [R4] (verificado: plan del provider + init del backend con svc-terraform-dev, sin errores de autorización)
-- [ ] 6.3 Activar **versioning** en el bucket `autohostai-tfstate-dev` (OCI CLI/consola) — **Files:** ninguno (op. OCI) — [R4]
+- [x] 6.3 Activar **versioning** en el bucket `autohostai-tfstate-dev` (OCI CLI/consola) — **Files:** ninguno (op. OCI) — [R4]
 
 ## 7. Runbook operativo (R5)
 
@@ -45,5 +45,5 @@
 
 - [x] 8.1 `cd infra/environments/dev && terraform fmt -check -diff && terraform validate` pasan (lo corre también el job `check` en el PR) — **Files:** correcciones de formato si falla — [R1, R2, R3, R6, R7]
 - [x] 8.2 `terraform plan` completo: confirmar **`0 to destroy` de la instancia** (security list y user_data in-place o protegidos), y que solo se crean/actualizan los recursos esperados (budget, vault, key, reglas) — **Files:** ninguno (plan) — [R2, R3, R6, R7]
-- [ ] 8.3 Aplicar vía pipeline (`workflow_dispatch` `apply` desde `main`, con aprobación vía review del PR (opción A, sin Environment)) y verificar en el run: instancia intacta, budget €1 con 2 alertas a ambos correos, vault+key creados — **Files:** ninguno (op. pipeline) — [R1, R6, R7]
-- [ ] 8.4 Verificar el secret recuperable del Vault y el versioning activo del bucket; smoke test SSH desde el CIDR de Jose — **Files:** ninguno (op.) — [R2, R4, R7]
+- [x] 8.3 Aplicar vía pipeline (`workflow_dispatch` `apply` desde `main`, con aprobación vía review del PR (opción A, sin Environment)) y verificar en el run: instancia intacta, budget €1 con 2 alertas a ambos correos, vault+key creados — **Files:** ninguno (op. pipeline) — [R1, R6, R7]
+- [x] 8.4 Verificar el secret recuperable del Vault y el versioning activo del bucket; smoke test SSH desde el CIDR de Jose — **Files:** ninguno (op.) — [R2, R4, R7]
