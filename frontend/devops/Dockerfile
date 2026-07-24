@@ -24,6 +24,11 @@ CMD ["npm", "run", "dev"]
 # --- prod: standalone output for remote deployment, no bind mount ---
 FROM deps AS builder
 
+# NEXT_PUBLIC_* se hornean en el bundle durante `npm run build` (Next standalone).
+# El CD las pasa como build-args; declararlas aquí como ENV para que el build las vea.
+ARG NEXT_PUBLIC_APP_ENV
+ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
+
 COPY . .
 RUN npm run build
 

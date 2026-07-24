@@ -19,3 +19,7 @@ ssh_authorized_keys = ["<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohos
 # Correos de las alertas de presupuesto (ACTUAL y FORECAST). Tiene default (Jose+Marta); sobreescribe si hace falta.
 budget_alert_recipients = ["<email 1>", "<email 2>"]
 # budget_amount tiene default 1 — sobreescribe si hace falta.
+
+# Runner self-hosted (R7): OCID del secret del Vault con el PAT de GitHub (subido out-of-band).
+# Es un identificador, no el secreto. github_repo tiene default (mreyesojeda/AutoHostAI).
+runner_pat_secret_ocid = "<OCID del secret del PAT en el Vault>"

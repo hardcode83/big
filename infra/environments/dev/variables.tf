@@ -81,3 +81,16 @@ variable "budget_amount" {
   type        = number
   default     = 1
 }
+
+# Runner self-hosted (R7 — change app-deploy-dev)
+
+variable "github_repo" {
+  description = "owner/repo del repositorio GitHub cuyo runner self-hosted corre en la VM dev (para la URL de registro del runner)."
+  type        = string
+  default     = "mreyesojeda/AutoHostAI"
+}
+
+variable "runner_pat_secret_ocid" {
+  description = "OCID del secret del OCI Vault que guarda el PAT de GitHub (subido out-of-band) que el cloud-init usa para obtener el registration-token del runner. Es un IDENTIFICADOR, no el secreto — puede vivir en tfvars/tfstate; el valor del PAT nunca toca el tfstate."
+  type        = string
+}

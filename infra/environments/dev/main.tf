@@ -129,28 +129,13 @@ resource "oci_core_instance" "dev" {
 
   metadata = {
     ssh_authorized_keys = join("\n", var.ssh_authorized_keys) # claves de todos los operadores; par(es) dedicado(s) a esta VM, distinto de la API key de OCI
-    # Docker desde el repo APT OFICIAL de Docker (arm64): docker-compose-plugin NO está en los
-    # repos por defecto de Ubuntu 22.04 (bug del cloud-init anterior). cloud-init sustituye
-    # $RELEASE (codename) y $KEY_FILE (ruta donde guarda la clave del keyid).
-    user_data = base64encode(<<-CLOUDINIT
-      #cloud-config
-      package_update: true
-      apt:
-        sources:
-          docker:
-            source: "deb [arch=arm64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable"
-            keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
-      packages:
-        - docker-ce
-        - docker-ce-cli
-        - containerd.io
-        - docker-buildx-plugin
-        - docker-compose-plugin
-      runcmd:
-        - systemctl enable --now docker
-        - usermod -aG docker ubuntu
-    CLOUDINIT
-    )
+    # cloud-init en cloud-init.yaml.tftpl: Docker (repo APT oficial, arm64) + runner self-hosted
+    # (label `dev`) para el CD. El runner lee su PAT del Vault por instance principal (D13/R7).
+    user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
+      github_repo      = var.github_repo
+      pat_secret_ocid  = var.runner_pat_secret_ocid
+      runner_bootstrap = file("${path.module}/runner-bootstrap.sh")
+    }))
   }
 
   lifecycle {
@@ -165,6 +150,26 @@ resource "oci_core_instance" "dev" {
 data "oci_identity_availability_domain" "dev" {
   compartment_id = var.tenancy_ocid
   ad_number      = var.ad_number
+}
+
+# --- Instance principal para el runner self-hosted (R7) ---
+# El cloud-init lee el PAT de GitHub del Vault SIN credenciales en disco: la instancia se
+# autentica como instance principal. Dynamic group (a nivel tenancy) que matchea SOLO esta
+# instancia + policy de mínimo privilegio que la autoriza a leer ÚNICAMENTE el secret del PAT.
+resource "oci_identity_dynamic_group" "dev_runner" {
+  compartment_id = var.tenancy_ocid
+  name           = "autohostai-dev-runner"
+  description    = "Instancia dev que ejecuta el runner self-hosted; lee el PAT de GitHub del Vault por instance principal."
+  matching_rule  = "ALL {instance.id = '${oci_core_instance.dev.id}'}"
+}
+
+resource "oci_identity_policy" "dev_runner_read_pat" {
+  compartment_id = var.compartment_ocid
+  name           = "autohostai-dev-runner-read-pat"
+  description    = "Permite al runner dev leer SOLO el secret del PAT de GitHub en el Vault (mínimo privilegio)."
+  statements = [
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where target.secret.id = '${var.runner_pat_secret_ocid}'"
+  ]
 }
 
 data "oci_core_private_ips" "dev" {
