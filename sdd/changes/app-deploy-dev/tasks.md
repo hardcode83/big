@@ -14,35 +14,41 @@
 - [x] 2.2 Añadir servicio `migrate` one-shot en el compose de deploy: **imagen prod del backend**, `restart: "no"`, `command: alembic upgrade head` (binario de `.venv/bin`, no `uv run`), `depends_on: postgres (healthy)`; backend/worker con `depends_on: migrate (service_completed_successfully)`. — **Files:** `docker-compose.deploy.yml` — [R2]
 - [x] 2.3 Crear `.env.deploy.example` con la lista de claves de runtime esperadas (`POSTGRES_*`, `JWT_*`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, `IMAGE_TAG`, `GHCR_NS`, …) **sin valores**; documentar que las `NEXT_PUBLIC_*` van como build-args (§1.2), no aquí. — **Files:** `.env.deploy.example` — [R4]
 
-## 3. Provisión del runner como IaC (Terraform) <!-- panel: PASS 2026-07-24 -->
+## 3. Provisión del runner + secrets como IaC (Terraform)
 
-- [x] 3.1 Añadir al cloud-init de la instancia (`infra/environments/dev/main.tf`, plantilla `user_data`) el bloque de provisión del runner: descarga del binario, `config.sh --url <repo> --labels dev --unattended`, `svc.sh install && svc.sh start`, usuario del runner en el grupo `docker`; el registration-token se obtiene en arranque leyendo el PAT desde el secret del OCI Vault vía instance principal. — **Files:** `infra/environments/dev/{main.tf,cloud-init.yaml.tftpl,runner-bootstrap.sh}` — [R7] (cloud-init movido a `templatefile()` + script separado para evitar el footgun de escaping heredoc/HCL)
-- [x] 3.2 Declarar `oci_identity_dynamic_group` (matchea la instancia) y `oci_identity_policy` de **mínimo privilegio** (`read secret-bundles` limitado *solo* al secret del PAT); añadir variables para el OCID del secret y la URL del repo. — **Files:** `infra/environments/dev/{main.tf,variables.tf,dev.tfvars.example}` — [R7]
-- [x] 3.3 `terraform fmt -check` + `validate` **hechos** (OK; cloud-init renderizado = YAML válido, `bash -n` OK). El **`plan`** real (confirmar `add` de dynamic group+policy y **0 recreación** de la instancia) necesita creds OCI → se ejecuta en el pipeline, ver §5.3. — **Files:** ninguno (verificación) — [R7]
+<!-- Reabierto 2026-07-24: rediseño "endurecer hacia IaC" — registro vía GitHub App (no PAT) y
+     secrets de runtime generados por Terraform → Vault (D13/D14). El cloud-init (§3.1 estructura)
+     y el patrón templatefile se conservan; cambia la lógica del bootstrap y la IAM/variables. -->
 
-## 4. Job de deploy (runner self-hosted, local) <!-- panel: PASS 2026-07-24 -->
+- [ ] 3.1 Reescribir `runner-bootstrap.sh` para registrar el runner minteando un **installation-token de GitHub App**: leer la clave privada de la App del Vault (instance principal), firmar el JWT de App, obtener installation-token → registration-token, `config.sh --labels dev --unattended`, `svc.sh install/start`. El cloud-init (`cloud-init.yaml.tftpl`) inyecta `app_id`/`installation_id`/OCID de la clave. — **Files:** `infra/environments/dev/{runner-bootstrap.sh,cloud-init.yaml.tftpl,main.tf}` — [R7]
+- [ ] 3.2 Generar los secrets de runtime con Terraform y guardarlos en el Vault: `random_password` (POSTGRES_PASSWORD, JWT_SECRET_KEY) + `random_bytes` → clave Fernet (ENCRYPTION_KEY, base64url); un `oci_vault_secret` por cada uno. `POSTGRES_DB`/`POSTGRES_USER` como variables con default. — **Files:** `infra/environments/dev/{main.tf,variables.tf}` — [R8]
+- [ ] 3.3 Ajustar la IAM del instance principal: `oci_identity_policy` de mínimo privilegio que autorice a leer **la clave de la App + los 3 secrets de runtime** (`where any {target.secret.id = ...}`); sustituir `runner_pat_secret_ocid` por `runner_app_key_secret_ocid` + `github_app_id`/`github_app_installation_id` en variables y `dev.tfvars.example`. — **Files:** `infra/environments/dev/{main.tf,variables.tf,dev.tfvars.example}` — [R7]
+- [ ] 3.4 `terraform fmt -check` + `validate` + render del cloud-init (YAML válido) + `bash -n` del bootstrap. El **`plan`** real (add de policy + `random_*` + `oci_vault_secret`, **0 recreación** de la instancia) → pipeline, §5.3. — **Files:** ninguno (verificación) — [R7, R8]
 
-- [x] 4.1 Añadir job `deploy` a `deploy-dev.yml`: `runs-on: [self-hosted, dev]`, `needs: [build-backend, build-frontend]`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: deploy-dev, cancel-in-progress: false }`, `timeout-minutes`. — **Files:** `.github/workflows/deploy-dev.yml` — [R3]
-- [x] 4.2 Paso de render del `.env` desde GitHub Secrets con **validación previa** (falla nombrando la clave ausente **antes** de tocar contenedores), `chmod 600`; incluye `IMAGE_TAG=sha-<sha>` y `GHCR_NS`. — **Files:** `.github/workflows/deploy-dev.yml` — [R4]
-- [x] 4.3 Paso `docker login ghcr.io` con `GHCR_PULL_TOKEN` (read-only) y `docker logout` al finalizar (sin credenciales persistentes en la VM). — **Files:** `.github/workflows/deploy-dev.yml` — [R3]
-- [x] 4.4 Paso de deploy: `docker compose -f docker-compose.deploy.yml pull` + `up -d --wait --wait-timeout 180`; en fallo, volcar `docker compose logs` y salir ≠0. — **Files:** `.github/workflows/deploy-dev.yml` — [R3, R5]
+## 4. Job de deploy (runner self-hosted, local)
 
-## 5. Operaciones (tu consola — GitHub/OCI/VM)
+- [x] 4.1 Añadir job `deploy` a `deploy-dev.yml`: `runs-on: [self-hosted, dev]`, `needs: [build-backend, build-frontend]`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: deploy-dev, cancel-in-progress: false }`, `timeout-minutes`. — **Files:** `.github/workflows/deploy-dev.yml` — [R3] (sin cambios en el rediseño)
+- [ ] 4.2 Paso de render del `.env` leyendo los secrets del **OCI Vault** (instance principal, `oci secrets secret-bundle get`) con **validación previa** (falla nombrando la clave que no se pudo leer, antes de tocar contenedores), `chmod 600`; añade `IMAGE_TAG=sha-<sha>` y `GHCR_NS`. — **Files:** `.github/workflows/deploy-dev.yml` (+ helper en la VM si aplica) — [R4]
+- [ ] 4.3 Paso `docker login ghcr.io -u x-access-token` con un **installation-token de la GitHub App** minteado en la VM (misma clave del Vault, permiso `packages: read`) y `docker logout` al finalizar. — **Files:** `.github/workflows/deploy-dev.yml` — [R3]
+- [x] 4.4 Paso de deploy: `docker compose -f docker-compose.deploy.yml pull` + `up -d --wait --wait-timeout 180`; en fallo, volcar `docker compose logs` y salir ≠0. — **Files:** `.github/workflows/deploy-dev.yml` — [R3, R5] (sin cambios)
 
-- [ ] 5.1 (op.) Crear en GitHub los secrets/vars: `GHCR_PULL_TOKEN` (scope `read:packages`), las claves de runtime del `.env`, y los build-args `NEXT_PUBLIC_*`. — **Files:** ninguno (op. GitHub) — [R1, R4]
-- [ ] 5.2 (op.) Subir el PAT de GitHub (scope mínimo para registration-token del repo) como secret del **OCI Vault** out-of-band (`oci vault secret create-base64`), y anotar su OCID en `dev.tfvars`. — **Files:** ninguno (op. OCI); procedimiento en RUNBOOK — [R7]
-- [ ] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy. Confirmar en el run **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7]
-- [ ] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (mismos comandos que el cloud-init de §3.1, leyendo el PAT del Vault vía instance principal); verificar que el runner aparece **online con label `dev`** en Settings → Actions → Runners del repo. — **Files:** ninguno (op. VM); procedimiento en RUNBOOK — [R3, R7]
+## 5. Operaciones (tu consola — GitHub/OCI)
 
-## 6. Documentación <!-- panel: PASS 2026-07-24 -->
+- [ ] 5.1 (op.) Crear una **GitHub App** (permisos repo: `Administration: read/write` para runners, `Packages: read` para GHCR), instalarla en el repo, y anotar `app_id` + `installation_id` (van a `dev.tfvars`, no son secretos). — **Files:** ninguno (op. GitHub) — [R7]
+- [ ] 5.2 (op.) Subir la **clave privada (.pem) de la App** al **OCI Vault** out-of-band (`oci vault secret create-base64`) y anotar su OCID en `dev.tfvars` (`runner_app_key_secret_ocid`). Único secret-zero. — **Files:** ninguno (op. OCI); RUNBOOK — [R7]
+- [ ] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy + `random_*` + `oci_vault_secret` de runtime. Confirmar **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7, R8]
+- [ ] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (mismos comandos que el cloud-init de §3.1, minteando el token vía la App desde el Vault); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
+- [ ] 5.5 (op.) Limpiar los 6 GitHub Secrets de app creados en el primer intento (`POSTGRES_*`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) — ya no se usan (el deploy lee del Vault); dejar solo `NEXT_PUBLIC_APP_ENV` como **variable** de repo. — **Files:** ninguno (op. GitHub) — [R8]
 
-- [x] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md`: flujo de deploy (push a `main` → build → deploy local), provisión/recuperación del runner, alta y **rotación del PAT** en Vault, arranque en frío (primer deploy sobre VM sin app), y **rollback manual** (redeploy pineando un `IMAGE_TAG` previo). — **Files:** `infra/environments/dev/RUNBOOK.md` §6 — [R6]
-- [x] 6.2 Actualizar el `README` (raíz y/o `infra/environments/dev/README.md`): sección de deploy dev (trigger, esquema de tags/retención de imágenes, `.env.deploy.example`, secrets esperados). — **Files:** `README.md`, `infra/environments/dev/README.md` — [R6]
+## 6. Documentación
+
+- [ ] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md` §6: flujo de deploy, provisión/recuperación del runner, **GitHub App** (permisos, alta de la clave en Vault, rotación), secrets de runtime generados por TF, arranque en frío, rollback. — **Files:** `infra/environments/dev/RUNBOOK.md` — [R6]
+- [ ] 6.2 Actualizar los READMEs (raíz + dev): deploy dev con GitHub App + secrets desde Vault (sin GitHub Secrets de app). — **Files:** `README.md`, `infra/environments/dev/README.md` — [R6]
 
 ## 7. Verificación end-to-end
 
 - [ ] 7.1 Build: un run (push a `main` o `workflow_dispatch`) publica **ambas imágenes arm64** en GHCR con tags `sha-<commit>` y `dev`. — [R1]
-- [ ] 7.2 Deploy real: el job `deploy` corre en el runner self-hosted, `migrate` aplica migraciones, y `up -d --wait` deja backend/worker/frontend **`healthy`** dentro del timeout. — [R3, R5]
+- [ ] 7.2 Deploy real: el job `deploy` corre en el runner self-hosted, mintea el token GHCR de la App, lee los secrets del Vault, `migrate` aplica migraciones, y `up -d --wait` deja backend/worker/frontend **`healthy`**. — [R3, R4, R5]
 - [ ] 7.3 Smoke: `GET /health` (8000) y el frontend (3000) responden desde un CIDR de operador; los volúmenes de `postgres`/`redis` siguen intactos tras el deploy. — [R5]
 - [ ] 7.4 Rollback: un redeploy con un `IMAGE_TAG` de un SHA previo restaura esa versión de la app. — [R6]
-- [ ] 7.5 Seguridad/reachability: confirmar que el deploy **no requirió abrir puertos** (security list sin cambios) y que el `.env` renderizado tiene permisos restringidos y ningún secreto quedó en el repo/imagen/tfstate. — [R3, R4, R7]
+- [ ] 7.5 Seguridad/reachability: confirmar que el deploy **no requirió abrir puertos** (security list sin cambios), el `.env` renderizado tiene permisos restringidos, la **clave de la App NO** está en el `tfstate` (solo su OCID) y no hay secretos en el repo/imagen. Los secrets de runtime en el `tfstate` son intencionales (D14, dev). — [R3, R4, R7, R8]

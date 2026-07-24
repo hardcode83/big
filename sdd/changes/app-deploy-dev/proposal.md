@@ -6,7 +6,7 @@ La infra dev está desplegada y operativa (spec `infra-dev-terraform`): una VM e
 
 ## What changes
 
-Tras este change, un **push a `main`** que toque `backend/**` o `frontend/**` construirá las imágenes `prod` arm64 de backend y frontend, las publicará en **GHCR** (GitHub Container Registry) etiquetadas por SHA de commit, y desplegará automáticamente en la VM dev mediante un **runner self-hosted que corre en la propia VM** (deploy local, sin SSH ni puertos entrantes nuevos): renderiza el `.env` de runtime desde GitHub Secrets, usa un **docker-compose de deploy** que consume las imágenes del registry (no build local, `postgres:16`/`redis:7` persistentes), aplica migraciones Alembic y hace `docker compose pull && up -d --wait`, verificando que los servicios quedan `healthy`. La provisión del runner se define como **IaC** (cloud-init + instance principal para leer el PAT del Vault), aunque en esta VM viva se ejecute a mano una vez. Existirá un nuevo workflow de deploy y un compose de deploy versionados en el repo, más la documentación operativa (README/RUNBOOK). Staging/prod quedan fuera.
+Tras este change, un **push a `main`** que toque `backend/**` o `frontend/**` construirá las imágenes `prod` arm64 de backend y frontend, las publicará en **GHCR** (GitHub Container Registry) etiquetadas por SHA de commit, y desplegará automáticamente en la VM dev mediante un **runner self-hosted que corre en la propia VM** (deploy local, sin SSH ni puertos entrantes nuevos): renderiza el `.env` de runtime leyendo del **OCI Vault** (secrets generados por Terraform, vía instance principal), usa un **docker-compose de deploy** que consume las imágenes del registry (no build local, `postgres:16`/`redis:7` persistentes), aplica migraciones Alembic y hace `docker compose pull && up -d --wait`, verificando que los servicios quedan `healthy`. La provisión del runner se define como **IaC** (cloud-init + instance principal para leer el PAT del Vault), aunque en esta VM viva se ejecute a mano una vez. Existirá un nuevo workflow de deploy y un compose de deploy versionados en el repo, más la documentación operativa (README/RUNBOOK). Staging/prod quedan fuera.
 
 ## Requirements
 
@@ -50,19 +50,29 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. THE SYSTEM SHALL definir la instalación/registro del runner (binario, `config.sh --labels dev --unattended`, servicio con auto-arranque, usuario en grupo `docker`) en el **cloud-init** de la instancia (`infra/environments/dev/main.tf`), como fuente de verdad para una VM nueva.
-2. THE SYSTEM SHALL obtener el registration-token en arranque leyendo un PAT desde un secret del **OCI Vault** vía **instance principal** — nunca renderizando el credencial en `user_data`/`tfstate`.
-3. THE SYSTEM SHALL declarar como Terraform un `oci_identity_dynamic_group` (la instancia) y un `oci_identity_policy` de **mínimo privilegio** que autorice a leer *solo* ese secret del Vault.
-4. WHERE la VM viva no puede recibir el cloud-init por Terraform (metadata ForceNew + `ignore_changes`), THE SYSTEM SHALL documentar la ejecución **a mano, una sola vez**, del mismo bloque sobre la instancia actual (RUNBOOK).
+2. THE SYSTEM SHALL obtener el registration-token en arranque minteando un **installation-token de una GitHub App** — leyendo la **clave privada de la App** desde un secret del **OCI Vault** vía **instance principal**, nunca renderizando credencial alguno en `user_data`/`tfstate`. Los identificadores no sensibles (`app_id`, `installation_id`) van como variables Terraform.
+3. THE SYSTEM SHALL declarar como Terraform un `oci_identity_dynamic_group` (la instancia) y un `oci_identity_policy` de **mínimo privilegio** que autorice a leer *solo* los secrets necesarios del Vault (clave de la App + secrets de runtime).
+4. WHERE la VM viva no puede recibir el cloud-init por Terraform (metadata ForceNew + `ignore_changes`), THE SYSTEM SHALL documentar la ejecución **a mano, una sola vez**, del mismo bloque sobre la instancia actual (RUNBOOK); un entorno nuevo se aprovisiona 100% del cloud-init.
 
-### R4 — Configuración de runtime en la VM desde Secrets
+### R8 — Secrets de runtime generados por Terraform
 
-**As a** operador de dev, **I want** que el `.env` de runtime se genere desde GitHub Secrets en cada deploy, **so that** no haya secretos en el repo ni en la imagen y la config sea reproducible.
+**As a** operador de dev, **I want** que los secrets de la app se generen y almacenen por código, **so that** no haya valores puestos a mano y un entorno nuevo se autogenere sus credenciales sin drift.
 
 Acceptance criteria:
 
-1. WHEN se ejecuta un deploy, THE SYSTEM SHALL renderizar el `.env` que consume el compose de deploy (creds Postgres, `JWT_SECRET_KEY`/`ENCRYPTION_KEY`, URLs internas como `BACKEND_INTERNAL_URL`, más `IMAGE_TAG`/`GHCR_NS`) a partir de GitHub Secrets, colocándolo en la VM con permisos restringidos. Las `NEXT_PUBLIC_*` **no** van en este `.env`: se hornean en build como build-args (ver R1), porque Next standalone las fija en tiempo de build.
+1. THE SYSTEM SHALL generar `POSTGRES_PASSWORD`, `JWT_SECRET_KEY` y `ENCRYPTION_KEY` con Terraform (`random_password`/`random_bytes`; `ENCRYPTION_KEY` como clave Fernet válida) y guardarlos como `oci_vault_secret` en el Vault dev.
+2. THE SYSTEM SHALL tratar `POSTGRES_DB`/`POSTGRES_USER` como variables no sensibles (con default), no como secretos.
+3. THE SYSTEM SHALL NOT poner a mano ningún secreto de app (ni `gh secret set`, ni en la consola) — la fuente de verdad son los recursos Terraform.
+
+### R4 — Configuración de runtime en la VM desde el Vault
+
+**As a** operador de dev, **I want** que el `.env` de runtime se lea del OCI Vault en cada deploy, **so that** la config sea reproducible por código sin secretos en el repo, la imagen ni GitHub.
+
+Acceptance criteria:
+
+1. WHEN se ejecuta un deploy, THE SYSTEM SHALL renderizar el `.env` que consume el compose de deploy (creds Postgres, `JWT_SECRET_KEY`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, más `IMAGE_TAG`/`GHCR_NS`) leyendo los secrets del **OCI Vault por instance principal**, colocándolo en la VM con permisos restringidos. Las `NEXT_PUBLIC_*` **no** van en este `.env`: se hornean en build como build-args (R1).
 2. THE SYSTEM SHALL NOT versionar ningún valor de secreto en el repo ni hornearlo en las imágenes; el repo solo contiene la plantilla/lista de claves esperadas.
-3. IF falta un secret requerido para el runtime, THEN THE SYSTEM SHALL fallar el deploy con un mensaje que identifique la clave ausente, antes de tocar los contenedores en marcha.
+3. IF no se puede leer un secret requerido del Vault, THEN THE SYSTEM SHALL fallar el deploy con un mensaje que identifique la clave ausente, antes de tocar los contenedores en marcha.
 
 ### R5 — Verificación post-deploy
 
@@ -81,7 +91,7 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. THE SYSTEM SHALL documentar en README/RUNBOOK: el trigger (push a `main`), el esquema de tags de imagen y su retención, el arranque en frío (primer deploy sobre VM vacía) y el **rollback manual** (redeploy pineando un SHA previo).
-2. THE SYSTEM SHALL documentar el secret de CI para SSH y el token read-only de GHCR usado por la VM, y su procedimiento de rotación.
+2. THE SYSTEM SHALL documentar la **GitHub App** (permisos, alta de su clave privada en el Vault y rotación) y cómo el runner/deploy mintean tokens efímeros de registro y de pull GHCR a partir de ella.
 
 ## Out of scope
 
@@ -94,5 +104,6 @@ Acceptance criteria:
 
 ## Affected specs
 
-- `sdd/specs/app-deploy-dev.md` *(no existe aún — se creará al archivar)* — nueva capability: CD de la app al entorno dev (build → GHCR → SSH deploy).
-- `sdd/specs/infra-dev-terraform.md` — **modificado**: la provisión del runner self-hosted como IaC (cloud-init) + instance principal (dynamic group + policy de mínimo privilegio para leer el PAT del Vault) añade requisitos de infra a este spec (D12/D13). También cierra el pendiente "despliegue de la aplicación … change futuro `app-deploy-dev`".
+- `sdd/specs/app-deploy-dev.md` *(no existe aún — se creará al archivar)* — nueva capability: CD de la app al entorno dev (build → GHCR → deploy local vía runner self-hosted).
+- `sdd/specs/infra-dev-terraform.md` — **modificado**: provisión del runner self-hosted como IaC (cloud-init) + instance principal + secrets de runtime generados por Terraform → Vault (D12/D13/D14). Cierra el pendiente "despliegue de la aplicación … change futuro `app-deploy-dev`".
+- `sdd/steering/security.md` — **modificado**: se relaja la regla §8 "ningún secreto en el tfstate" para dev (Terraform genera los secrets y viven en el state bucket privado+versionado); staging/prod a revisar (D14).

@@ -36,11 +36,11 @@ Rejected: tag `dev` móvil como referencia del deploy — no reproducible, impos
 
 Rejected: imagen de migraciones aparte — innecesario, la prod ya trae alembic. · `uv run alembic` — `uv` no está en el stage prod.
 
-### D6 — Autenticación de la VM contra GHCR (pull) con token read-only efímero
+### D6 — Autenticación de la VM contra GHCR (pull) vía token minteado por GitHub App
 
-**Chosen:** imágenes **privadas**; en el paso de deploy la VM hace `docker login ghcr.io` con un token de solo lectura (`read:packages`) pasado desde el secret `GHCR_PULL_TOKEN`, y `docker logout` al terminar (no persistir credenciales de larga vida en la VM). 
+**Chosen (revisado — "endurecer hacia IaC"):** imágenes **privadas**; en el paso de deploy la VM **mintea un installation-token de la GitHub App** (misma App que registra el runner, D13; permiso `packages: read`) leyendo su clave privada del Vault por instance principal, hace `docker login ghcr.io -u x-access-token --password-stdin` con ese token efímero y `docker logout` al terminar. **No hay `GHCR_PULL_TOKEN` puesto a mano** — cero PAT de GitHub como secret.
 
-Rejected: hacer los paquetes públicos — el repo es privado, exponer imágenes es peor postura. · PAT de larga vida guardado en la VM — credencial persistente innecesaria.
+Rejected: PAT `read:packages` como GitHub Secret puesto a mano (`GHCR_PULL_TOKEN`) — viola el principio "nada a mano"; era el diseño previo. · Paquetes públicos — el repo es privado.
 
 ### D7 — `NEXT_PUBLIC_*` como build-args, no runtime
 
@@ -48,11 +48,11 @@ Rejected: hacer los paquetes públicos — el repo es privado, exponer imágenes
 
 Rejected: intentar inyectar `NEXT_PUBLIC_*` en runtime — Next standalone ya las tiene fijadas; sería un bug silencioso.
 
-### D8 — Render del `.env` desde Secrets con validación previa
+### D8 — Render del `.env` desde el OCI Vault (secrets generados por Terraform) con validación previa
 
-**Chosen:** el paso de deploy compone el `.env` desde GitHub Secrets, comprueba que **todas** las claves requeridas están presentes **antes** de tocar contenedores (falla temprano con el nombre de la que falte, R4.3), y lo coloca en la VM con `chmod 600` propiedad de `ubuntu`. El repo solo versiona la lista de claves esperadas (`.env.deploy.example`), nunca valores (steering `security.md` §8).
+**Chosen (revisado — "endurecer hacia IaC"):** el paso de deploy compone el `.env` leyendo los secrets de runtime del **OCI Vault** por instance principal (no de GitHub Secrets). Los valores los **genera Terraform** (D14) y los guarda en el Vault, así que **no se ponen a mano**. El deploy comprueba que cada secret requerido se leyó bien **antes** de tocar contenedores (falla temprano nombrando el que falte, R4.3), y coloca el `.env` con `chmod 600`. El repo solo versiona la lista de claves esperadas (`.env.deploy.example`), nunca valores.
 
-Rejected: subir un `.env` pre-hecho — mete secretos en un artefacto. · Validar después del `up` — dejaría el stack a medio arrancar.
+Rejected: `.env` desde GitHub Secrets puestos a mano (diseño previo) — viola "nada a mano". · Subir un `.env` pre-hecho — mete secretos en un artefacto. · Validar después del `up` — dejaría el stack a medio arrancar.
 
 ### D9 — Verificación de salud con `up --wait`
 
@@ -74,14 +74,22 @@ Rejected: Tailscale — más piezas de las necesarias cuando el runner vive en l
 
 ### D13 — Provisión del runner como IaC (cloud-init) + instance principal para el token
 
-**Chosen:** la instalación/registro del runner es **IaC**, no una receta manual. Concretamente:
+**Chosen (revisado — registro vía GitHub App, no PAT):** la instalación/registro del runner es **IaC**. Concretamente:
 
-- El **cloud-init** de la instancia (`infra/environments/dev/main.tf`, la plantilla de `user_data`) incorpora el aprovisionamiento del runner: descargar el binario, `config.sh --url <repo> --labels dev --unattended`, instalarlo como servicio (`svc.sh install && svc.sh start`), y meter al usuario del runner en el grupo `docker`. Esto es la **fuente de verdad**: una VM reconstruida desde Terraform arranca con el runner ya operativo.
-- El **registration token** se obtiene en arranque llamando a la API de GitHub con un **PAT guardado como secret del OCI Vault** (subido out-of-band, nunca inline en `.tf` → no entra al `tfstate`, igual que la clave SSH). El cloud-init lee ese secret vía **instance principal**: se añaden como IaC un `oci_identity_dynamic_group` (que matchea la instancia) y un `oci_identity_policy` de **mínimo privilegio** que autoriza a ese grupo a leer *solo* ese secret del Vault (`read secret-bundles in compartment … where target.secret.id = …`).
+- El **cloud-init** (`cloud-init.yaml.tftpl` + `runner-bootstrap.sh`) instala el runner: descarga el binario, `config.sh --url <repo> --labels dev --unattended`, servicio (`svc.sh install && svc.sh start`), usuario en grupo `docker`. Fuente de verdad: una VM reconstruida arranca con el runner operativo.
+- El **registration-token** se obtiene minteando un **installation-token de una GitHub App** (permisos `administration: write` para runners + `packages: read` para GHCR). La **clave privada de la App** es el **único secret-zero**: se sube al OCI Vault out-of-band, y el bootstrap la lee por **instance principal**, firma el JWT de App, pide el installation-token y de ahí el registration-token. Los identificadores no sensibles (`app_id`, `installation_id`) van como variables Terraform (tfvars). Se mantienen los recursos IaC `oci_identity_dynamic_group` (matchea la instancia) y `oci_identity_policy` de mínimo privilegio, ahora ampliada para leer el secret de la clave de la App **y** los secrets de runtime (D14).
 
-**Aplicación a la VM viva (a mano, solo esta vez):** el `metadata` de la instancia es **ForceNew** con `lifecycle { ignore_changes = [metadata] }` — cambiar el cloud-init por Terraform recrearía la VM (inaceptable: ruleta de capacidad A1). Así que el bloque de runner se ejecuta **una vez a mano** sobre la VM actual (mismos comandos que el cloud-init, documentados en el RUNBOOK) — exactamente el patrón que el hardening ya usa para las claves SSH. El `plan` no mostrará drift del `metadata` (está en `ignore_changes`); la IAM del instance principal (dynamic group + policy) **sí** la aplica el pipeline (son recursos normales, no metadata).
+**Aplicación a la VM viva (a mano, solo esta vez):** el `metadata` es **ForceNew** con `ignore_changes` — cambiar el cloud-init por Terraform recrearía la VM (ruleta de capacidad A1). El bloque de runner se ejecuta **una vez a mano** sobre la VM actual (mismos comandos, RUNBOOK) — patrón heredado del hardening (clave SSH). Un entorno **nuevo** (staging/prod) o un rebuild se aprovisiona 100% del cloud-init, sin este paso. El `plan` no muestra el `metadata` (ignore_changes); la IAM sí la aplica el pipeline.
 
-Rejected: PAT renderizado en `user_data` desde una var TF — filtra el credencial al `tfstate` (contra `security.md` §8). · Provisioner `remote-exec` de Terraform — imperativo, frágil, y el SSH saliente del pipeline choca con el security list. · Dejar el runner como paso puramente manual en el RUNBOOK — el usuario pide explícitamente que lo aprovisionable sea IaC.
+Rejected: **PAT de GitHub** (diseño previo) — expira/rota a mano y es un secret-zero más amplio; la App mintea tokens efímeros por código y no caduca. · PAT/clave renderizada en `user_data` — filtra credencial al `tfstate`. · Provisioner `remote-exec` — imperativo y choca con el security list.
+
+### D14 — Secrets de runtime generados por Terraform → Vault (regla tfstate relajada)
+
+**Chosen:** los secrets de runtime de la app (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) los **genera Terraform** (`random_password` / `random_bytes`; la `ENCRYPTION_KEY` como clave Fernet válida vía base64url del `random_bytes` de 32 B) y los guarda como `oci_vault_secret` en el Vault dev. El deploy los lee del Vault por instance principal (D8). `POSTGRES_DB`/`POSTGRES_USER` son no sensibles (variables con default). **Cero secrets de app puestos a mano ni en GitHub.**
+
+**Trade-off aceptado por el usuario (2026-07-24):** esto mete los valores en el `tfstate`, relajando la regla "ningún secreto en el tfstate" del hardening. Mitigación: el bucket de state es **privado + versionado + IAM mínima** (`svc-terraform-dev`); se documenta el cambio en `steering/security.md`. **Solo dev**: para staging/prod se revisará (posible generación fuera de banda o un gestor de secretos dedicado).
+
+Rejected: generar los secrets a mano con `gh secret set` (lo que se hizo en el primer intento) — es justo el "a mano" que el principio quiere evitar. · Secrets en GitHub Actions inyectados a mano — ídem; además el deploy corre en la VM y puede leer del Vault directamente.
 
 ### D11 — Alcance del deploy: solo app; postgres/redis intactos
 
@@ -94,16 +102,19 @@ Rejected: PAT renderizado en `user_data` desde una var TF — filtra el credenci
 | CI/CD | `.github/workflows/deploy-dev.yml` **(nuevo)** | build→GHCR (2 jobs) + deploy por acceso remoto (1 job), push a `main` path-filtered |
 | Orquestación | `docker-compose.deploy.yml` **(nuevo)**, `.env.deploy.example` **(nuevo)** | compose sin `build` (imágenes GHCR por SHA), migrate one-shot con imagen prod, healthchecks; plantilla de claves |
 | Frontend | `frontend/devops/Dockerfile` (posible `ARG`/`ENV` para `NEXT_PUBLIC_*`) | aceptar build-args si hoy no los declara |
-| Runner (IaC) | `infra/environments/dev/main.tf` (cloud-init + `oci_identity_dynamic_group` + `oci_identity_policy`), `variables.tf` | provisión del runner en cloud-init (fuente de verdad); instance principal de mínimo privilegio para leer el secret del PAT en el Vault (D13). Security list sin cambios |
-| Runner (VM viva) | — (a mano, 1 vez) | ejecutar el mismo bloque del cloud-init sobre la instancia actual (metadata ForceNew + ignore_changes), documentado en RUNBOOK |
-| Docs | `infra/environments/dev/RUNBOOK.md`, `README` | flujo de deploy, provisión/recuperación del runner (y alta del secret PAT en Vault), tags/retención, arranque en frío, rollback por SHA, secrets y rotación (R6) |
+| Runner + secrets (IaC) | `infra/environments/dev/main.tf` (cloud-init + `oci_identity_dynamic_group` + `oci_identity_policy` + `random_*` + `oci_vault_secret` de runtime), `variables.tf`, `dev.tfvars.example` | provisión del runner en cloud-init; secrets de runtime generados por TF → Vault (D14); instance principal de mínimo privilegio para leer la clave de la App y los secrets de runtime. Security list sin cambios |
+| Build args | `frontend/devops/Dockerfile`, `deploy-dev.yml` | `NEXT_PUBLIC_APP_ENV` como `ARG`/build-arg (build-time) — GitHub **variable** (no secret, no sensible) |
+| Runner (VM viva) | — (a mano, 1 vez) | ejecutar el bloque del cloud-init sobre la instancia actual (metadata ForceNew + ignore_changes), RUNBOOK |
+| Docs | `infra/environments/dev/RUNBOOK.md`, `README` | flujo de deploy, provisión/recuperación del runner, alta de la clave de la GitHub App en Vault y rotación, arranque en frío, rollback (R6) |
+| Steering | `sdd/steering/security.md` | relajar la regla "ningún secreto en el tfstate" para dev (D14) |
 
 ## Data & interfaces
 
 - **Sin cambios de esquema ni de API.** Las migraciones Alembic existentes se aplican en cada deploy (D5); este change no añade ninguna.
-- **Nuevos GitHub Secrets/Vars (CI):** `GHCR_PULL_TOKEN` (read-only), las claves de runtime del `.env` (`POSTGRES_*`, `JWT_*`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, …) y build-args `NEXT_PUBLIC_*`. **No** hacen falta `DEPLOY_HOST`/`DEPLOY_SSH_KEY`: el runner corre en la VM y el deploy es local (D12).
-- **Nuevos recursos OCI (Terraform, aplicados por el pipeline):** `oci_identity_dynamic_group` (matchea la instancia) + `oci_identity_policy` de mínimo privilegio (leer *solo* el secret del PAT en el Vault). El secret del PAT en sí se sube **out-of-band** (no Terraform).
-- **Nuevo secret en OCI Vault (out-of-band):** PAT de GitHub (scope mínimo para obtener registration-token del repo) que el cloud-init lee vía instance principal (D13).
+- **Único secret-zero (out-of-band → OCI Vault):** la **clave privada de la GitHub App**. El bootstrap y el deploy la leen por instance principal para mintear installation-tokens (registro del runner + login GHCR). No hay PATs ni `GHCR_PULL_TOKEN`.
+- **Secrets de runtime (generados por Terraform → Vault, D14):** `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY` como `oci_vault_secret`. `POSTGRES_DB`/`POSTGRES_USER` son variables no sensibles (default). El deploy los lee del Vault por instance principal — **ningún GitHub Secret de app**.
+- **GitHub variables (no secretos):** `NEXT_PUBLIC_APP_ENV` (build-arg, público). Identificadores de la App (`app_id`, `installation_id`) → variables Terraform en tfvars.
+- **Nuevos recursos OCI (Terraform, aplicados por el pipeline):** `oci_identity_dynamic_group` + `oci_identity_policy` (leer la clave de la App y los secrets de runtime), `random_password`/`random_bytes` + `oci_vault_secret` (×3). La clave de la App se sube out-of-band.
 - **Nuevos paquetes GHCR:** `autohostai-backend`, `autohostai-frontend` (privados).
 
 ## Risks & mitigations
