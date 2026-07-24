@@ -134,7 +134,8 @@ resource "oci_core_instance" "dev" {
   metadata = {
     ssh_authorized_keys = join("\n", var.ssh_authorized_keys) # claves de todos los operadores; par(es) dedicado(s) a esta VM, distinto de la API key de OCI
     # cloud-init en cloud-init.yaml.tftpl: Docker (repo APT oficial, arm64) + runner self-hosted
-    # (label `dev`) para el CD. El runner lee su PAT del Vault por instance principal (D13/R7).
+    # (label ${var.env}) para el CD. El runner lee la clave de la GitHub App del Vault por
+    # instance principal y mintea tokens efímeros (D13/R7).
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
       env                        = var.env
       github_repo                = var.github_repo

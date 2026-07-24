@@ -5,7 +5,9 @@
 #
 # Registro vía GitHub App: lee la clave privada de la App del OCI Vault por INSTANCE PRINCIPAL,
 # mintea un installation-token (helper gh-app-install-token.py) y con él pide el registration-token.
-# Nada de credenciales persistentes ni en argv. Idempotente (--replace).
+# El installation-token va por --config/stdin (fuera de argv). El registration-token, en cambio,
+# se pasa a `config.sh --token` por argv — inevitable (el runner oficial no acepta el token por
+# stdin/env); mitigado: es efímero, de un solo uso y se consume con --replace. Idempotente.
 set -euo pipefail
 
 # shellcheck disable=SC1091
@@ -15,11 +17,14 @@ RUNNER_HOME=/opt/actions-runner
 RUNNER_USER=ubuntu
 
 # 1) Installation-token de la GitHub App (clave del Vault → helper), sin credenciales en disco.
+# GITHUB_APP_ID/INSTALLATION_ID se pasan explícitos al helper: `source` sin `export` no los
+# propaga al subproceso python (mismo patrón que el paso de deploy).
 INSTALL_TOKEN="$(oci --auth instance_principal secrets secret-bundle get \
   --secret-id "$APP_KEY_SECRET_OCID" \
   --query 'data."secret-bundle-content".content' --raw-output \
   | base64 -d \
-  | python3 /opt/gh-app-install-token.py)"
+  | GITHUB_APP_ID="$GITHUB_APP_ID" GITHUB_APP_INSTALLATION_ID="$GITHUB_APP_INSTALLATION_ID" \
+    python3 /opt/gh-app-install-token.py)"
 
 # 2) Registration-token del repo. El token va por --config desde STDIN (no en argv → no aparece
 #    en /proc/<pid>/cmdline).

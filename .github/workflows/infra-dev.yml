@@ -98,13 +98,12 @@ jobs:
           TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
           TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           # budget_alert_recipients usa su default (Jose + Marta).
-        run: terraform plan -input=false -out=tfplan
-      - name: Subir el plan
-        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
-        with:
-          name: tfplan
-          path: infra/environments/dev/tfplan
-          retention-days: 1
+        # NO se usa `-out=tfplan` ni se sube el plan como artifact: desde app-deploy-dev el plan
+        # contiene secrets (clave de la App + secrets de runtime generados por TF), y un artifact
+        # es descargable por cualquiera con read del repo — superficie mayor que la IAM del bucket
+        # de state (hallazgo del panel de seguridad). El plan es para revisión por logs (Terraform
+        # redacta los valores sensibles en consola). El apply re-planifica en el mismo job.
+        run: terraform plan -input=false
 
   # apply: solo desde main y solo si action=apply. En repo privado + plan Free NO hay Environment
   # con required reviewers, así que el gate de aprobación es (opción A): el código llega a main
@@ -149,12 +148,9 @@ jobs:
           EOF
       - name: terraform init
         run: terraform init -input=false -backend-config=backend.hcl
-      - name: Descargar el plan
-        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
-        with:
-          name: tfplan
-          path: infra/environments/dev
-      # La config del provider se re-evalúa en apply (no viaja en el tfplan) → necesita las vars de identidad.
+      # Sin plan pre-guardado (ver job `plan`): el apply re-planifica y aplica en el mismo job,
+      # así ningún fichero con secrets sale del runner. Necesita TODAS las vars (no solo las de
+      # identidad del provider), porque re-evalúa el plan completo.
       - name: terraform apply
         env:
           TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
@@ -162,4 +158,11 @@ jobs:
           TF_VAR_fingerprint: ${{ secrets.OCI_FINGERPRINT }}
           TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
-        run: terraform apply -input=false -auto-approve tfplan
+          TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
+          TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
+          TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
+          TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+        run: terraform apply -input=false -auto-approve

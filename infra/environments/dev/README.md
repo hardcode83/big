@@ -14,7 +14,7 @@
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.
 
-El despliegue de la aplicación en sí (`docker compose pull && up -d` dentro de la VM) lo hace el change `app-deploy-dev` vía `.github/workflows/deploy-dev.yml` — build a GHCR + deploy local en un runner self-hosted que corre en la VM (ver RUNBOOK §6). Este Terraform sí aprovisiona **el runner** (en el `cloud-init`) y su **instance principal** (dynamic group + policy de mínimo privilegio para leer el PAT del Vault).
+El despliegue de la aplicación en sí (`docker compose pull && up -d` dentro de la VM) lo hace el change `app-deploy-dev` vía `.github/workflows/deploy-dev.yml` — build a GHCR + deploy local en un runner self-hosted que corre en la VM (ver RUNBOOK §6). Este Terraform sí aprovisiona **el runner** (en el `cloud-init`), sus **secrets de runtime** (generados por TF → Vault) y su **instance principal** (dynamic group + policy de mínimo privilegio para leer del Vault la clave de la GitHub App y los secrets de runtime).
 
 ## Acceso SSH a la instancia
 
@@ -83,7 +83,7 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 
 ## Despliegue de la app (CD — `app-deploy-dev`)
 
-Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, rotación del PAT y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
+Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, GitHub App (permisos, `GH_APP_PRIVATE_KEY`, rotación) y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
 
 Variables/secret del repo que consume el CD (además de los de `infra-dev`). **No hay secrets de app de runtime en GitHub** — los genera Terraform y viven en el Vault; el deploy los lee de ahí por instance principal:
 
@@ -97,5 +97,5 @@ Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`)
 
 ## Pendiente (no automatizable por este change)
 
-- **`terraform apply` inicial** e infra: ya verificado y aplicado en changes previos; el `apply` con la IAM del runner (dynamic group + policy) se dispara por el pipeline con confirmación explícita.
-- Ops del CD (a tu cargo, ver RUNBOOK §6): subir el PAT al Vault, aplicar la IAM del runner, provisionar el runner en la VM viva, y el primer deploy.
+- **`terraform apply` inicial** e infra: ya verificado y aplicado en changes previos; el `apply` con la IAM del runner (dynamic group + policy) y los secrets del Vault se dispara por el pipeline con confirmación explícita.
+- Ops del CD (a tu cargo, ver RUNBOOK §6): crear la GitHub App (variables `GH_APP_*` + secret `GH_APP_PRIVATE_KEY`), aplicar por el pipeline (crea IAM + secrets del Vault), provisionar el runner en la VM viva, y el primer deploy.

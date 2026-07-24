@@ -115,7 +115,7 @@ Rejected: generar/poner los secrets con `gh secret set` a mano (primer intento) 
 - **Único secret-zero (GitHub Secret `GH_APP_PRIVATE_KEY`):** la **clave privada de la GitHub App**. El pipeline la inyecta (`TF_VAR_github_app_private_key`) y Terraform la escribe al Vault de cada entorno; el bootstrap y el deploy la leen del Vault por instance principal para mintear installation-tokens (registro del runner + login GHCR). No hay PATs ni `GHCR_PULL_TOKEN`. `GH_APP_ID`/`GH_APP_INSTALLATION_ID` son **variables** (no sensibles).
 - **Secrets de runtime (generados por Terraform → Vault, D14):** `POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY` como `oci_vault_secret`. `POSTGRES_DB`/`POSTGRES_USER` son variables no sensibles (default). El deploy los lee del Vault por instance principal — **ningún GitHub Secret de app**.
 - **GitHub variables (no secretos):** `NEXT_PUBLIC_APP_ENV` (build-arg, público). Identificadores de la App (`app_id`, `installation_id`) → variables Terraform en tfvars.
-- **Nuevos recursos OCI (Terraform, aplicados por el pipeline):** `oci_identity_dynamic_group` + `oci_identity_policy` (leer la clave de la App y los secrets de runtime), `random_password`/`random_bytes` + `oci_vault_secret` (×3). La clave de la App se sube out-of-band.
+- **Nuevos recursos OCI (Terraform, aplicados por el pipeline):** `oci_identity_dynamic_group` + `oci_identity_policy` (leer la clave de la App y los secrets de runtime), `random_password`/`random_bytes` + `oci_vault_secret` (×4: 3 runtime + clave de la App). La clave de la App la escribe Terraform al Vault desde `var.github_app_private_key` (pipeline).
 - **Nuevos paquetes GHCR:** `autohostai-backend`, `autohostai-frontend` (privados).
 
 ## Risks & mitigations
@@ -124,10 +124,10 @@ Rejected: generar/poner los secrets con `gh secret set` a mano (primer intento) 
 - **Disponibilidad del runner:** si el runner (o la VM) está caído, los deploys quedan en cola. Mitigación: instalarlo como servicio con auto-arranque; documentar el alta/recuperación en el RUNBOOK.
 - **Bootstrap del runner (antes del primer deploy):** el runner debe estar registrado y activo en la VM **antes** de que un push a `main` dispare el job `self-hosted`; en la VM viva se aplica a mano una vez (D13). Sin él el job queda pendiente indefinidamente.
 - **Cloud-init IaC vs VM viva (drift invisible):** al ir el runner en el `metadata` (ForceNew + `ignore_changes`), el `plan` **no** mostrará el cambio ni detectará si la VM viva difiere del código. Mitigación: aplicar a mano el mismo bloque y documentar que la fuente de verdad es el cloud-init (un rebuild reproduce el runner). Igual que el patrón de claves SSH del hardening.
-- **PAT en el Vault (credencial de GitHub en OCI):** el PAT permite obtener registration-tokens del repo. Mitigación: scope mínimo, instance principal que solo puede *leer ese* secret, rotación documentada; nunca en `tfstate`.
+- **Clave de la GitHub App en el `tfstate` y en el Vault (credencial de GitHub en OCI):** la clave mintea installation-tokens con `administration: write` + `packages: read`. Mitigación: es un solo secret-zero (`GH_APP_PRIVATE_KEY`), la policy del instance principal solo permite leer *ese* secret, `tfstate` en bucket privado+versionado+IAM mínima (D14, relajación aceptada), rotación documentada (RUNBOOK §6.1). El plan **no** se sube como artifact (contendría la clave) — el `apply` re-planifica en el mismo job.
 - **Primer deploy sobre VM vacía (arranque en frío):** no hay `.env` ni imágenes previas; el orden build→login→pull→migrate→up debe ser idempotente y quedar documentado (R6.1).
 - **Migraciones destructivas / fallo a mitad:** `migrate` corre antes de arrancar la app; si falla, el deploy aborta con la versión anterior aún en marcha (postgres intacto). Backups del state de datos quedan fuera de este change.
-- **Deriva del `.env`:** al renderizarse desde Secrets en cada deploy, la fuente de verdad son los Secrets; documentar para evitar ediciones manuales en la VM que un deploy sobrescribe.
+- **Deriva del `.env`:** al renderizarse desde el Vault en cada deploy, la fuente de verdad es el Vault (secrets generados por TF); documentar para evitar ediciones manuales en la VM que un deploy sobrescribe.
 
 ## Open questions
 
@@ -135,6 +135,6 @@ Rejected: generar/poner los secrets con `gh secret set` a mano (primer intento) 
 
 - **OQ1 — Conectividad CI→VM** → **runner self-hosted en la VM, deploy local** (D12). Sin SSH ni puertos; el security list del hardening queda intacto.
 - **OQ2 — Clave SSH de deploy** → **moot** con el runner en la VM (deploy local). No se implementa.
-- **OQ3 — Provisión del runner** → **IaC en cloud-init** + **instance principal** para leer el PAT del Vault (D13). El usuario pidió expresamente que lo aprovisionable sea IaC; el "a mano" se limita a ejecutar el bloque una vez sobre la VM viva (metadata ForceNew). La IAM (dynamic group + policy) sí la aplica el pipeline.
+- **OQ3 — Provisión del runner** → **IaC en cloud-init** + **instance principal** para leer del Vault la clave de la GitHub App (D13). El usuario pidió expresamente que lo aprovisionable sea IaC; el "a mano" se limita a ejecutar el bloque una vez sobre la VM viva (metadata ForceNew). La IAM (dynamic group + policy) y los secrets del Vault los aplica el pipeline.
 
 *Confirmado por el usuario (2026-07-24):* runner en la propia VM (deploy local, sin SSH); provisión como IaC (cloud-init), credencial vía OCI Vault + instance principal, nada en el `tfstate`.
