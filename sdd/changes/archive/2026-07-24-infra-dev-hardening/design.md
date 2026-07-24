@@ -86,7 +86,7 @@ Variables Terraform (breaking renames — actualizar `dev.tfvars` local y secret
 - `budget_alert_email` (string) → `budget_alert_recipients` (list(string))
 - `budget_amount` default 10 → 1
 
-CI: el workflow pasa estas vars como `TF_VAR_*` desde secrets; los secrets multi-valor (claves, CIDRs, emails) pasan a formato lista (p. ej. JSON o multilínea → `jsonencode`/`split`). GitHub **Environment `dev-apply`** con required reviewers configurado en Settings (fuera del YAML). Nuevo secreto para la clave SSH de deploy vive en `app-deploy-dev`, no aquí.
+CI: el workflow pasa estas vars como `TF_VAR_*` desde secrets; los secrets de un valor (CIDR, clave SSH) se envuelven en lista JSON en el YAML. **Gate de aprobación = opción A** (repo privado + plan Free, sin Environments con required reviewers): review de PR + `apply` manual solo desde `main` (ver D1). Nuevo secreto para la clave SSH de deploy vive en `app-deploy-dev`, no aquí.
 
 ## Risks & mitigations
 
@@ -94,11 +94,11 @@ CI: el workflow pasa estas vars como `TF_VAR_*` desde secrets; los secrets multi
 - **IAM demasiado restrictiva rompe el `apply` actual** → derivar los permisos de los recursos reales del `main.tf` y probar un `plan` con el usuario acotado antes de retirar permisos amplios.
 - **`dynamic` de ingress podría reordenar reglas** y marcar diff cosmético → verificar que el `plan` post-cambio no destruye/recrea el security list (idealmente update in-place).
 - **cloud-init solo afecta VMs futuras** → la remediación de la VM viva es un paso operativo explícito (D3), sin él `docker compose` sigue ausente en la máquina actual.
-- **El Environment con reviewers es config de repo, no de código** → si no se configura en Settings, el gate de aprobación no existe aunque el YAML lo referencie.
+- **El gate de aprobación (opción A) no es enforceable en Free+privado** → branch protection/rulesets devuelven `403 "Upgrade to GitHub Pro or make this repository public"` (igual que los Environments). El "PR revisado antes de merge" queda como **convención (modelo de confianza de 2 personas)**, no forzado; lo único forzado es `apply` solo contra `main` (`if`). Para enforcement real: Pro/Team o repo público. Documentado en RUNBOOK §0.
 
 ## Open questions
 
-Resueltas en el gate: **(1)** Environment `dev-apply`, reviewers **Jose + Marta**. · **(2)** Alerta ACTUAL → **ABSOLUTE €1**. · **(4)** Remediación de la VM viva → **ejecutada por SSH ahora** + cloud-init corregido para máquinas nuevas. · **(6)** Puertos 8000/3000 → **acotados por CIDR** como el 22.
+Resueltas en el gate: **(1)** Gate de aprobación → **opción A** (repo privado+Free, sin Environment): review de PR + `apply` manual desde `main` (depende de branch protection en `main`, ver Risks). · **(2)** Alerta ACTUAL → **ABSOLUTE €1**. · **(4)** Remediación de la VM viva → **ejecutada por SSH ahora** + cloud-init corregido para máquinas nuevas. · **(6)** Puertos 8000/3000 → **acotados por CIDR** como el 22.
 
 Pendientes (implementación):
 3. **Policy IAM** (decidido: aplicar de verdad — D4): pendiente solo el detalle de implementación — la aplica un admin de la tenancy, derivando los verbos de los recursos reales del `main.tf` y probando `plan`/`apply` con el usuario acotado antes de retirar permisos amplios.

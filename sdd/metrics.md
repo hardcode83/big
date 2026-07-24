@@ -8,3 +8,4 @@
 | frontend-foundation | run, archive | 19001 | 401889 | 61077281 | 58.4514 | 2026-07-18 | 2026-07-21 |
 | frontend-docker-deps-autosync | new, design, tasks, run, review, archive | 16240 | 71311 | 6854270 | 5.6616 | 2026-07-21 | 2026-07-21 |
 | infra-dev-payg | new, tasks, run, archive | 26 | 32958 | 3947533 | 3.2768 | 2026-07-22 | 2026-07-22 |
+| infra-dev-hardening | new, tasks, archive (design/run/review sin registrar) | 14 | 12237 | 3739887 | 13.1693 | 2026-07-22 | 2026-07-24 |
