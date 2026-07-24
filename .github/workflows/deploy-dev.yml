@@ -77,6 +77,8 @@ jobs:
     needs: [build-backend, build-frontend]
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
+    permissions:
+      contents: read # solo checkout; el deploy es local en la VM, no toca la API de GitHub
     timeout-minutes: 15
     concurrency:
       group: deploy-dev

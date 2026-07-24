@@ -56,7 +56,7 @@ Rejected: subir un `.env` pre-hecho — mete secretos en un artefacto. · Valida
 
 ### D9 — Verificación de salud con `up --wait`
 
-**Chosen:** `docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 120`; healthchecks definidos en el compose de deploy para backend (`/health`, ya existe) y frontend (GET a `:3000`). Si algún servicio no queda `healthy` en el timeout, el comando sale ≠0 → el job falla y se vuelca `docker compose logs` al output (R5.1/R5.2). Los volúmenes de postgres/redis no se recrean (R5.3).
+**Chosen:** `docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 180` (180s, no 120: el primer `pull` de imágenes arm64 sobre la VM puede ser lento); healthchecks definidos en el compose de deploy para backend (`/health`, ya existe), frontend (GET a `:3000`) y **worker** (`celery inspect ping` — sin él `--wait` no gatearía sobre el worker). Si algún servicio no queda `healthy` en el timeout, el comando sale ≠0 → el job falla y se vuelca `docker compose logs` al output (R5.1/R5.2). Los volúmenes de postgres/redis no se recrean (R5.3).
 
 Rejected: polling casero con `curl` — reinventa lo que `--wait` ya hace de forma nativa.
 

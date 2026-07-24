@@ -36,8 +36,8 @@
 
 ## 6. Documentación
 
-- [ ] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md`: flujo de deploy (push a `main` → build → deploy local), provisión/recuperación del runner, alta y **rotación del PAT** en Vault, arranque en frío (primer deploy sobre VM sin app), y **rollback manual** (redeploy pineando un `IMAGE_TAG` previo). — **Files:** `infra/environments/dev/RUNBOOK.md` — [R6]
-- [ ] 6.2 Actualizar el `README` (raíz y/o `infra/environments/dev/README.md`): sección de deploy dev (trigger, esquema de tags/retención de imágenes, `.env.deploy.example`, secrets esperados). — **Files:** `README.md`, `infra/environments/dev/README.md` — [R6]
+- [x] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md`: flujo de deploy (push a `main` → build → deploy local), provisión/recuperación del runner, alta y **rotación del PAT** en Vault, arranque en frío (primer deploy sobre VM sin app), y **rollback manual** (redeploy pineando un `IMAGE_TAG` previo). — **Files:** `infra/environments/dev/RUNBOOK.md` §6 — [R6]
+- [x] 6.2 Actualizar el `README` (raíz y/o `infra/environments/dev/README.md`): sección de deploy dev (trigger, esquema de tags/retención de imágenes, `.env.deploy.example`, secrets esperados). — **Files:** `README.md`, `infra/environments/dev/README.md` — [R6]
 
 ## 7. Verificación end-to-end
 

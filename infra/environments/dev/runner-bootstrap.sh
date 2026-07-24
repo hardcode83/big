@@ -21,11 +21,13 @@ PAT="$(oci --auth instance_principal secrets secret-bundle get \
   --query 'data."secret-bundle-content".content' --raw-output | base64 -d)"
 
 # 2) Registration-token efímero (~1h) del repo.
-REG_TOKEN="$(curl -fsSL -X POST \
-  -H "Authorization: Bearer $PAT" \
-  -H "Accept: application/vnd.github+json" \
-  -H "X-GitHub-Api-Version: 2022-11-28" \
-  "https://api.github.com/repos/$GITHUB_REPO/actions/runners/registration-token" \
+# El PAT se pasa a curl por --config desde STDIN (no en argv), para que no aparezca en la tabla
+# de procesos (/proc/<pid>/cmdline) durante la petición.
+REG_TOKEN="$(printf 'header = "Authorization: Bearer %s"\n' "$PAT" \
+  | curl -fsSL -X POST --config - \
+      -H "Accept: application/vnd.github+json" \
+      -H "X-GitHub-Api-Version: 2022-11-28" \
+      "https://api.github.com/repos/$GITHUB_REPO/actions/runners/registration-token" \
   | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')"
 unset PAT # el PAT ya no se necesita
 

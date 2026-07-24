@@ -92,3 +92,56 @@ sudo cloud-init clean --logs && sudo cloud-init init
 ```
 
 Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos por defecto de Ubuntu 22.04; el cloud-init añade el **repo APT oficial de Docker**. Verificar tras arrancar: `docker compose version`.
+
+## 6. Despliegue de la app (CD — change `app-deploy-dev`)
+
+La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes nuevos. El `.env` de runtime se renderiza desde GitHub Secrets en cada deploy.
+
+### 6.1 Provisión del runner (IaC + alta a mano en la VM viva)
+
+La provisión del runner es **IaC**: vive en el `cloud-init` (`cloud-init.yaml.tftpl` + `runner-bootstrap.sh`), así que una VM reconstruida arranca con el runner. Como el `metadata` es ForceNew + `ignore_changes` (cambiarlo por Terraform recrearía la VM), sobre la **VM viva** se ejecuta **una vez a mano** el mismo bootstrap:
+
+```bash
+# Prerrequisitos (ver 6.2): el PAT ya está en el Vault y la policy de instance principal aplicada.
+# En la VM (por SSH):
+sudo apt-get update && sudo apt-get install -y python3-pip
+sudo pip3 install oci-cli
+sudo install -m 0644 /dev/stdin /etc/autohostai-runner.env <<EOF
+GITHUB_REPO=mreyesojeda/AutoHostAI
+PAT_SECRET_OCID=<OCID del secret del PAT en el Vault>
+EOF
+# copiar runner-bootstrap.sh a la VM (scp) y ejecutarlo:
+sudo bash runner-bootstrap.sh
+```
+
+Verificar: **Settings → Actions → Runners** del repo muestra `autohostai-dev-vm` **Idle** con label `dev`. (`sudo ./svc.sh status` en `/opt/actions-runner` para el servicio.)
+
+**Recuperación:** si el runner se cae, `sudo ./svc.sh start`; si se desregistra, re-ejecutar `runner-bootstrap.sh` (usa `--replace`, idempotente).
+
+### 6.2 PAT de GitHub en el Vault (subida y rotación)
+
+El runner obtiene su registration-token llamando a la API de GitHub con un **PAT** (scope mínimo: `repo` clásico, o fine-grained con *Administration: read/write* sobre este repo). El PAT se guarda como secret del Vault **out-of-band** (nunca en el `tfstate`); el cloud-init lo lee por **instance principal**.
+
+```bash
+# Subir (una vez) — el OCID que devuelve va en dev.tfvars (runner_pat_secret_ocid):
+oci vault secret create-base64 \
+  --compartment-id <compartment_ocid> \
+  --vault-id "$(terraform output -raw vault_id)" \
+  --key-id "$(terraform output -raw secrets_key_id)" \
+  --secret-name autohostai-dev-gh-pat \
+  --secret-content-content "$(printf '%s' '<PAT>' | base64)"
+
+# Rotar: crear una nueva versión del secret y revocar el PAT viejo en GitHub.
+oci vault secret update-base64 --secret-id <secret_ocid> \
+  --secret-content-content "$(printf '%s' '<PAT nuevo>' | base64)"
+```
+
+### 6.3 Arranque en frío (primer deploy sobre VM sin app)
+
+1. Provisionar el runner (6.1) y confirmar que está online.
+2. Crear en GitHub los secrets de runtime (ver README dev) y `GHCR_PULL_TOKEN` (read-only).
+3. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job crea `.env`, hace `docker login`, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
+
+### 6.4 Rollback (manual, por SHA)
+
+El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).

@@ -23,6 +23,8 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    volumes:
+      - redis_data:/data # persistente entre deploys (broker/estado Celery) — R2.1/R5.3
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -76,6 +78,13 @@ services:
         condition: service_healthy
       migrate:
         condition: service_completed_successfully
+    # `up --wait` debe poder fallar el deploy si el worker no arranca (R2.4/R5) — Celery ping vía broker.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker inspect ping -t 5 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
 
   frontend:
     image: ghcr.io/${GHCR_NS}/autohostai-frontend:${IMAGE_TAG}
@@ -96,3 +105,4 @@ services:
 
 volumes:
   postgres_data:
+  redis_data:

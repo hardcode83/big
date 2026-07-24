@@ -14,7 +14,7 @@
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.
 
-Lo que este Terraform **no** hace: desplegar la aplicación en sí (`docker compose pull && up -d` dentro de la VM). Eso es un workflow/step futuro, fuera de alcance de este change, que usa la IP pública de salida (`output "instance_public_ip"`) como input.
+El despliegue de la aplicación en sí (`docker compose pull && up -d` dentro de la VM) lo hace el change `app-deploy-dev` vía `.github/workflows/deploy-dev.yml` — build a GHCR + deploy local en un runner self-hosted que corre en la VM (ver RUNBOOK §6). Este Terraform sí aprovisiona **el runner** (en el `cloud-init`) y su **instance principal** (dynamic group + policy de mínimo privilegio para leer el PAT del Vault).
 
 ## Acceso SSH a la instancia
 
@@ -81,7 +81,23 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 - **Para `plan`/`apply` reales**: pestaña Actions → workflow `infra-dev` → **Run workflow** → elegir `plan` o `apply`. `apply` solo se ejecuta si el `plan` previo del mismo run fue exitoso.
 - **Ya verificado en vivo**: un `workflow_dispatch` con `action: plan` corrió contra la cuenta real — `init`/`validate`/`plan` en verde, 9 recursos a crear, 0 errores ([run 29728765058](https://github.com/mreyesojeda/AutoHostAI/actions/runs/29728765058)).
 
+## Despliegue de la app (CD — `app-deploy-dev`)
+
+Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, rotación del PAT y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
+
+Secrets/vars adicionales del repo que consume `deploy-dev` (además de los de `infra-dev` de arriba):
+
+| Secret/Var | Para qué |
+|---|---|
+| `GHCR_PULL_TOKEN` | Token GHCR **read-only** (`read:packages`) con el que la VM hace `docker login` para tirar de las imágenes privadas; se hace `logout` al terminar. |
+| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Credenciales de la DB de runtime (Postgres solo en la red interna del compose, sin puerto publicado). |
+| `JWT_SECRET_KEY`, `ENCRYPTION_KEY` | Secretos de app (backend). El deploy falla nombrando la clave si falta alguna. |
+| `BACKEND_INTERNAL_URL` | Opcional; default `http://backend:8000`. |
+| `NEXT_PUBLIC_APP_ENV` (build-arg) | Var pública del frontend — se **hornea en build** (Next standalone), se pasa como `build-arg`, NO en el `.env` de runtime. |
+
+El PAT de GitHub que el runner usa para registrarse **no** es un secret de GitHub: vive en el **OCI Vault** (subido out-of-band) y su OCID va en `dev.tfvars` (`runner_pat_secret_ocid`). Ver RUNBOOK §6.2.
+
 ## Pendiente (no automatizable por este change)
 
-- **`terraform apply` inicial**: los secrets ya están cargados y el `plan` ya se ha verificado en vivo — solo falta la confirmación explícita del usuario para disparar `action: apply`. No se dispara solo.
-- Una vez aplicado: desplegar la app en la VM (`docker compose pull && up -d` vía SSH) — workflow futuro, fuera de alcance.
+- **`terraform apply` inicial** e infra: ya verificado y aplicado en changes previos; el `apply` con la IAM del runner (dynamic group + policy) se dispara por el pipeline con confirmación explícita.
+- Ops del CD (a tu cargo, ver RUNBOOK §6): subir el PAT al Vault, aplicar la IAM del runner, provisionar el runner en la VM viva, y el primer deploy.

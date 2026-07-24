@@ -18,7 +18,7 @@ Acceptance criteria:
 
 1. WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**` o sus lockfiles/Dockerfiles, THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del repo.
 2. THE SYSTEM SHALL etiquetar cada imagen con el **SHA de commit** (inmutable) y con un tag móvil `dev`; el deploy referencia el SHA, nunca `latest`.
-3. WHERE el build de una de las dos imágenes falle, THE SYSTEM SHALL abortar sin publicar ninguna imagen ni continuar al deploy.
+3. WHERE el build de una de las dos imágenes falle, THE SYSTEM SHALL abortar el deploy (el job `deploy` tiene `needs` de ambos builds) — nunca se despliega un commit a medias. Cualquier imagen por SHA que hubiera alcanzado a publicarse queda huérfana e inofensiva (nada la referencia; se sobrescribe al reintentar el commit); el deploy solo consume el par pineado al SHA del commit.
 4. THE SYSTEM SHALL publicar autenticándose con el `GITHUB_TOKEN` del workflow (sin credenciales de registry adicionales en el repo).
 
 ### R2 — Compose remoto de dev (imágenes de registry, no build)
@@ -60,7 +60,7 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. WHEN se ejecuta un deploy, THE SYSTEM SHALL renderizar el `.env` que consume el compose remoto (creds Postgres, `JWT`/secretos de app, `NEXT_PUBLIC_APP_ENV`, URLs internas) a partir de GitHub Secrets, colocándolo en la VM con permisos restringidos.
+1. WHEN se ejecuta un deploy, THE SYSTEM SHALL renderizar el `.env` que consume el compose de deploy (creds Postgres, `JWT_SECRET_KEY`/`ENCRYPTION_KEY`, URLs internas como `BACKEND_INTERNAL_URL`, más `IMAGE_TAG`/`GHCR_NS`) a partir de GitHub Secrets, colocándolo en la VM con permisos restringidos. Las `NEXT_PUBLIC_*` **no** van en este `.env`: se hornean en build como build-args (ver R1), porque Next standalone las fija en tiempo de build.
 2. THE SYSTEM SHALL NOT versionar ningún valor de secreto en el repo ni hornearlo en las imágenes; el repo solo contiene la plantilla/lista de claves esperadas.
 3. IF falta un secret requerido para el runtime, THEN THE SYSTEM SHALL fallar el deploy con un mensaje que identifique la clave ausente, antes de tocar los contenedores en marcha.
 
