@@ -14,7 +14,7 @@
 - [x] 2.2 Añadir servicio `migrate` one-shot en el compose de deploy: **imagen prod del backend**, `restart: "no"`, `command: alembic upgrade head` (binario de `.venv/bin`, no `uv run`), `depends_on: postgres (healthy)`; backend/worker con `depends_on: migrate (service_completed_successfully)`. — **Files:** `docker-compose.deploy.yml` — [R2]
 - [x] 2.3 Crear `.env.deploy.example` con la lista de claves de runtime esperadas (`POSTGRES_*`, `JWT_*`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, `IMAGE_TAG`, `GHCR_NS`, …) **sin valores**; documentar que las `NEXT_PUBLIC_*` van como build-args (§1.2), no aquí. — **Files:** `.env.deploy.example` — [R4]
 
-## 3. Provisión del runner + secrets como IaC (Terraform)
+## 3. Provisión del runner + secrets como IaC (Terraform) <!-- panel: PASS 2026-07-24 (rediseño) -->
 
 <!-- Reabierto 2026-07-24: rediseño "endurecer hacia IaC" — registro vía GitHub App (no PAT) y
      secrets de runtime generados por Terraform → Vault (D13/D14). El cloud-init (§3.1 estructura)
@@ -25,7 +25,7 @@
 - [x] 3.3 IAM del instance principal: `oci_identity_policy` de mínimo privilegio que lee **la clave de la App + los 3 secrets de runtime** (`where any {target.secret.id = ...}`); variables `env`/`github_app_id`/`github_app_installation_id`/`github_app_private_key`(sensible)/`postgres_db`/`postgres_user` en `variables.tf` y `dev.tfvars.example`. — **Files:** `infra/environments/dev/{main.tf,variables.tf,dev.tfvars.example}` — [R7]
 - [x] 3.4 `terraform fmt`/`validate` **OK** (provider `random` añadido); cloud-init renderiza YAML válido (2 bloques `indent(6)`); `py_compile` del helper y `bash -n` del bootstrap OK. El **`plan`** real (add de policy + `random_*` + 4 `oci_vault_secret`, **0 recreación** de la instancia) → pipeline, §5.3. — **Files:** ninguno (verificación) — [R7, R8]
 
-## 4. Job de deploy (runner self-hosted, local)
+## 4. Job de deploy (runner self-hosted, local) <!-- panel: PASS 2026-07-24 (rediseño) -->
 
 - [x] 4.1 Añadir job `deploy` a `deploy-dev.yml`: `runs-on: [self-hosted, dev]`, `needs: [build-backend, build-frontend]`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: deploy-dev, cancel-in-progress: false }`, `timeout-minutes`. — **Files:** `.github/workflows/deploy-dev.yml` — [R3] (sin cambios en el rediseño)
 - [x] 4.2 Paso de render del `.env` leyendo los secrets del **OCI Vault** (instance principal, `oci secrets secret-bundle get`) con **validación previa** (`read_secret` falla nombrando la clave que no se pudo leer, antes de tocar contenedores), `chmod 600`; añade `IMAGE_TAG=sha-<sha>` y `GHCR_NS`. — **Files:** `.github/workflows/deploy-dev.yml` (config en `/etc/autohostai-deploy.env`, cloud-init) — [R4]
@@ -40,7 +40,7 @@
 - [ ] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (copiar `runner-bootstrap.sh`+`gh-app-install-token.py` y `/etc/autohostai-deploy.env`, `pip install oci-cli`, ejecutar bootstrap); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
 - [ ] 5.5 (op.) **Borrar** los 6 GitHub Secrets del primer intento (`POSTGRES_DB/USER/PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, y `NEXT_PUBLIC_APP_ENV` si quedó como secret) — ya no se usan (el deploy lee del Vault; `NEXT_PUBLIC_APP_ENV` pasa a variable). — **Files:** ninguno (op. GitHub) — [R8]
 
-## 6. Documentación
+## 6. Documentación <!-- panel: PASS 2026-07-24 (rediseño) -->
 
 - [x] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md` §6: flujo de deploy, GitHub App (permisos, variables/secret, rotación), provisión/recuperación del runner, secrets de runtime generados por TF → Vault, arranque en frío, rollback. — **Files:** `infra/environments/dev/RUNBOOK.md` — [R6]
 - [x] 6.2 Actualizar los READMEs (raíz + dev) y `.env.deploy.example`: deploy dev con GitHub App (variables + 1 secret) y secrets leídos del Vault (sin GitHub Secrets de app). — **Files:** `README.md`, `infra/environments/dev/README.md`, `.env.deploy.example` — [R6]
