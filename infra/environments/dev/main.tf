@@ -259,8 +259,9 @@ resource "oci_kms_key" "dev_secrets" {
 
 # --- Secrets de runtime generados por Terraform → Vault (D14 / R8) ---
 # "Todo como código": los valores los genera TF y viven en el Vault (y en el tfstate, bucket
-# privado+versionado — regla relajada en steering/security.md §8, solo dev). El deploy los lee
-# del Vault por instance principal. La clave de la GitHub App NO se genera aquí (out-of-band).
+# privado+versionado — regla relajada en steering/security.md §8, dev/test). El deploy los lee
+# del Vault por instance principal. La clave de la GitHub App NO se genera (no es aleatoria):
+# también la escribe TF al Vault, desde var.github_app_private_key (recurso github_app_key, abajo).
 resource "random_password" "postgres" {
   length  = 32
   special = false # evita caracteres que compliquen la URL de conexión
