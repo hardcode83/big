@@ -92,9 +92,11 @@ jobs:
           TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
           TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
-          # OCID del secret del Vault con el PAT de GitHub (runner self-hosted, change app-deploy-dev).
-          # Es un identificador, no el secreto; github_repo usa su default.
-          TF_VAR_runner_pat_secret_ocid: ${{ secrets.RUNNER_PAT_SECRET_OCID }}
+          # GitHub App del runner self-hosted (change app-deploy-dev). ids no sensibles → vars;
+          # la clave privada (sensible) → secret, y Terraform la escribe al Vault de cada entorno.
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
           # budget_alert_recipients usa su default (Jose + Marta).
         run: terraform plan -input=false -out=tfplan
       - name: Subir el plan

@@ -5,6 +5,10 @@ terraform {
     oci = {
       source = "oracle/oci"
     }
+    random = {
+      source  = "hashicorp/random"
+      version = ">= 3.5"
+    }
   }
 }
 
@@ -132,9 +136,18 @@ resource "oci_core_instance" "dev" {
     # cloud-init en cloud-init.yaml.tftpl: Docker (repo APT oficial, arm64) + runner self-hosted
     # (label `dev`) para el CD. El runner lee su PAT del Vault por instance principal (D13/R7).
     user_data = base64encode(templatefile("${path.module}/cloud-init.yaml.tftpl", {
-      github_repo      = var.github_repo
-      pat_secret_ocid  = var.runner_pat_secret_ocid
-      runner_bootstrap = file("${path.module}/runner-bootstrap.sh")
+      env                        = var.env
+      github_repo                = var.github_repo
+      github_app_id              = var.github_app_id
+      github_app_installation_id = var.github_app_installation_id
+      app_key_secret_ocid        = oci_vault_secret.github_app_key.id
+      pg_password_secret_ocid    = oci_vault_secret.postgres_password.id
+      jwt_secret_ocid            = oci_vault_secret.jwt_secret_key.id
+      encryption_key_secret_ocid = oci_vault_secret.encryption_key.id
+      postgres_db                = var.postgres_db
+      postgres_user              = var.postgres_user
+      runner_bootstrap           = file("${path.module}/runner-bootstrap.sh")
+      gh_app_token_helper        = file("${path.module}/gh-app-install-token.py")
     }))
   }
 
@@ -153,22 +166,23 @@ data "oci_identity_availability_domain" "dev" {
 }
 
 # --- Instance principal para el runner self-hosted (R7) ---
-# El cloud-init lee el PAT de GitHub del Vault SIN credenciales en disco: la instancia se
-# autentica como instance principal. Dynamic group (a nivel tenancy) que matchea SOLO esta
-# instancia + policy de mínimo privilegio que la autoriza a leer ÚNICAMENTE el secret del PAT.
+# La instancia se autentica como instance principal para leer del Vault SIN credenciales en disco:
+# la clave privada de la GitHub App (única secret-zero, out-of-band) y los secrets de runtime
+# (generados por TF, arriba). Dynamic group que matchea SOLO esta instancia + policy de mínimo
+# privilegio acotada a esos secrets concretos.
 resource "oci_identity_dynamic_group" "dev_runner" {
   compartment_id = var.tenancy_ocid
-  name           = "autohostai-dev-runner"
-  description    = "Instancia dev que ejecuta el runner self-hosted; lee el PAT de GitHub del Vault por instance principal."
+  name           = "autohostai-${var.env}-runner"
+  description    = "Instancia ${var.env} que ejecuta el runner self-hosted; lee del Vault por instance principal (clave de la GitHub App + secrets de runtime)."
   matching_rule  = "ALL {instance.id = '${oci_core_instance.dev.id}'}"
 }
 
-resource "oci_identity_policy" "dev_runner_read_pat" {
+resource "oci_identity_policy" "dev_runner_read_secrets" {
   compartment_id = var.compartment_ocid
-  name           = "autohostai-dev-runner-read-pat"
-  description    = "Permite al runner dev leer SOLO el secret del PAT de GitHub en el Vault (mínimo privilegio)."
+  name           = "autohostai-${var.env}-runner-read-secrets"
+  description    = "Permite al runner ${var.env} leer SOLO la clave de la GitHub App y los secrets de runtime en el Vault (mínimo privilegio)."
   statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where target.secret.id = '${var.runner_pat_secret_ocid}'"
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}'}"
   ]
 }
 
@@ -238,5 +252,75 @@ resource "oci_kms_key" "dev_secrets" {
   key_shape {
     algorithm = "AES"
     length    = 32
+  }
+}
+
+# --- Secrets de runtime generados por Terraform → Vault (D14 / R8) ---
+# "Todo como código": los valores los genera TF y viven en el Vault (y en el tfstate, bucket
+# privado+versionado — regla relajada en steering/security.md §8, solo dev). El deploy los lee
+# del Vault por instance principal. La clave de la GitHub App NO se genera aquí (out-of-band).
+resource "random_password" "postgres" {
+  length  = 32
+  special = false # evita caracteres que compliquen la URL de conexión
+}
+
+resource "random_password" "jwt" {
+  length  = 48
+  special = false
+}
+
+resource "random_bytes" "encryption_key" {
+  length = 32 # Fernet exige 32 bytes
+}
+
+locals {
+  # cryptography.Fernet exige base64 URL-safe (alfabeto -_ en vez de +/). random_bytes.base64
+  # es base64 estándar; el replace da exactamente la clave Fernet válida (44 chars, un '=').
+  encryption_key_fernet = replace(replace(random_bytes.encryption_key.base64, "+", "-"), "/", "_")
+}
+
+resource "oci_vault_secret" "postgres_password" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-postgres-password"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(random_password.postgres.result)
+  }
+}
+
+resource "oci_vault_secret" "jwt_secret_key" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-jwt-secret-key"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(random_password.jwt.result)
+  }
+}
+
+resource "oci_vault_secret" "encryption_key" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-encryption-key"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(local.encryption_key_fernet)
+  }
+}
+
+# Clave privada de la GitHub App: la escribe Terraform al Vault desde UN secret del pipeline
+# (var.github_app_private_key). Así un entorno nuevo no requiere subirla a mano en OCI (D14/D13).
+resource "oci_vault_secret" "github_app_key" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-gh-app-key"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.github_app_private_key)
   }
 }

@@ -67,7 +67,7 @@ jobs:
           push: true
           # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
           build-args: |
-            NEXT_PUBLIC_APP_ENV=${{ secrets.NEXT_PUBLIC_APP_ENV }}
+            NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:dev
@@ -86,41 +86,43 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
-      - name: Render .env desde Secrets (validación previa) [R4]
-        env:
-          POSTGRES_DB: ${{ secrets.POSTGRES_DB }}
-          POSTGRES_USER: ${{ secrets.POSTGRES_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.POSTGRES_PASSWORD }}
-          JWT_SECRET_KEY: ${{ secrets.JWT_SECRET_KEY }}
-          ENCRYPTION_KEY: ${{ secrets.ENCRYPTION_KEY }}
-          BACKEND_INTERNAL_URL: ${{ secrets.BACKEND_INTERNAL_URL }}
+      - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
         run: |
           set -euo pipefail
-          missing=()
-          for k in POSTGRES_DB POSTGRES_USER POSTGRES_PASSWORD JWT_SECRET_KEY ENCRYPTION_KEY; do
-            [ -n "${!k:-}" ] || missing+=("$k")
-          done
-          if [ ${#missing[@]} -gt 0 ]; then
-            echo "::error::faltan secrets requeridos para el runtime: ${missing[*]}"
-            exit 1
-          fi
+          source /etc/autohostai-deploy.env   # OCIDs de los secrets + POSTGRES_DB/USER (sin secretos)
+          read_secret() { # $1 = OCID; imprime el valor o falla nombrando la clave ($2)
+            local val
+            val="$(oci --auth instance_principal secrets secret-bundle get \
+              --secret-id "$1" --query 'data."secret-bundle-content".content' --raw-output 2>/dev/null | base64 -d)" || true
+            if [ -z "$val" ]; then echo "::error::no se pudo leer del Vault el secret requerido: $2" >&2; exit 1; fi
+            printf '%s' "$val"
+          }
+          PG_PASSWORD="$(read_secret "$PG_PASSWORD_SECRET_OCID" POSTGRES_PASSWORD)"
+          JWT_KEY="$(read_secret "$JWT_SECRET_OCID" JWT_SECRET_KEY)"
+          ENC_KEY="$(read_secret "$ENCRYPTION_KEY_SECRET_OCID" ENCRYPTION_KEY)"
           umask 077
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
             echo "GHCR_NS=${GITHUB_REPOSITORY_OWNER}"
             echo "POSTGRES_DB=${POSTGRES_DB}"
             echo "POSTGRES_USER=${POSTGRES_USER}"
-            echo "POSTGRES_PASSWORD=${POSTGRES_PASSWORD}"
-            echo "JWT_SECRET_KEY=${JWT_SECRET_KEY}"
-            echo "ENCRYPTION_KEY=${ENCRYPTION_KEY}"
-            [ -n "${BACKEND_INTERNAL_URL:-}" ] && echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL}" || true
+            echo "POSTGRES_PASSWORD=${PG_PASSWORD}"
+            echo "JWT_SECRET_KEY=${JWT_KEY}"
+            echo "ENCRYPTION_KEY=${ENC_KEY}"
           } > .env
           chmod 600 .env
 
-      - name: Login GHCR (read-only) [R3]
-        env:
-          GHCR_PULL_TOKEN: ${{ secrets.GHCR_PULL_TOKEN }}
-        run: echo "$GHCR_PULL_TOKEN" | docker login ghcr.io -u "${GITHUB_REPOSITORY_OWNER}" --password-stdin
+      - name: Login GHCR (token minteado por la GitHub App, read-only) [R3]
+        run: |
+          set -euo pipefail
+          source /etc/autohostai-deploy.env
+          INSTALL_TOKEN="$(oci --auth instance_principal secrets secret-bundle get \
+            --secret-id "$APP_KEY_SECRET_OCID" --query 'data."secret-bundle-content".content' --raw-output \
+            | base64 -d \
+            | GITHUB_APP_ID="$GITHUB_APP_ID" GITHUB_APP_INSTALLATION_ID="$GITHUB_APP_INSTALLATION_ID" \
+              python3 /opt/gh-app-install-token.py)"
+          printf '%s' "$INSTALL_TOKEN" | docker login ghcr.io -u x-access-token --password-stdin
+          unset INSTALL_TOKEN
 
       - name: Deploy — pull + up --wait [R3, R5]
         run: |

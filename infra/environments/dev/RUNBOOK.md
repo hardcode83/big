@@ -95,52 +95,48 @@ Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos p
 
 ## 6. Despliegue de la app (CD — change `app-deploy-dev`)
 
-La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes nuevos. El `.env` de runtime se renderiza desde GitHub Secrets en cada deploy.
+La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa un **token minteado por la GitHub App** (misma clave del Vault). **Cero secrets de app a mano.**
 
-### 6.1 Provisión del runner (IaC + alta a mano en la VM viva)
+### 6.1 GitHub App (único secret-zero) + variables
 
-La provisión del runner es **IaC**: vive en el `cloud-init` (`cloud-init.yaml.tftpl` + `runner-bootstrap.sh`), así que una VM reconstruida arranca con el runner. Como el `metadata` es ForceNew + `ignore_changes` (cambiarlo por Terraform recrearía la VM), sobre la **VM viva** se ejecuta **una vez a mano** el mismo bootstrap:
+Una **sola GitHub App** (reutilizable por todos los entornos) con permisos de repo `Administration: read/write` (registrar runners) y `Packages: read` (pull GHCR). Tras crearla e instalarla en el repo:
+
+- **Variables** de repo (no sensibles): `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `NEXT_PUBLIC_APP_ENV` (p. ej. `dev`).
+- **Secret** de repo: `GH_APP_PRIVATE_KEY` = contenido del `.pem` de la App. Es el **único secret-zero**; Terraform lo lee (`TF_VAR_github_app_private_key`) y lo escribe al Vault de cada entorno (`oci_vault_secret.github_app_key`). **Rotar** = regenerar el `.pem` en la App, actualizar el secret y re-aplicar.
+
+Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) **no se crean a mano**: los genera Terraform (`random_*`) → Vault.
+
+### 6.2 Provisión del runner (IaC + alta a mano en la VM viva)
+
+La provisión es **IaC**: `cloud-init.yaml.tftpl` + `runner-bootstrap.sh` + `gh-app-install-token.py`, así que una VM nueva arranca con el runner. Como el `metadata` es ForceNew + `ignore_changes`, sobre la **VM viva** se ejecuta **una vez a mano** (tras aplicar Terraform, §5.3, que ya puso la clave de la App y los OCIDs en el Vault):
 
 ```bash
-# Prerrequisitos (ver 6.2): el PAT ya está en el Vault y la policy de instance principal aplicada.
-# En la VM (por SSH):
-sudo apt-get update && sudo apt-get install -y python3-pip
-sudo pip3 install oci-cli
-sudo install -m 0644 /dev/stdin /etc/autohostai-runner.env <<EOF
+# En la VM (por SSH). /etc/autohostai-deploy.env lo escribe el cloud-init en una VM nueva;
+# para la VM viva, replicarlo con los OCIDs reales (los da el apply / la consola del Vault):
+sudo apt-get update && sudo apt-get install -y python3-pip && sudo pip3 install oci-cli
+sudo tee /etc/autohostai-deploy.env >/dev/null <<'EOF'
+ENV=dev
 GITHUB_REPO=mreyesojeda/AutoHostAI
-PAT_SECRET_OCID=<OCID del secret del PAT en el Vault>
+GITHUB_APP_ID=<app id>
+GITHUB_APP_INSTALLATION_ID=<installation id>
+APP_KEY_SECRET_OCID=<ocid del secret gh-app-key>
+PG_PASSWORD_SECRET_OCID=<...>
+JWT_SECRET_OCID=<...>
+ENCRYPTION_KEY_SECRET_OCID=<...>
+POSTGRES_DB=autohostai
+POSTGRES_USER=autohostai
 EOF
-# copiar runner-bootstrap.sh a la VM (scp) y ejecutarlo:
-sudo bash runner-bootstrap.sh
+sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
+sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
+sudo bash /opt/bootstrap-runner.sh
 ```
 
-Verificar: **Settings → Actions → Runners** del repo muestra `autohostai-dev-vm` **Idle** con label `dev`. (`sudo ./svc.sh status` en `/opt/actions-runner` para el servicio.)
-
-**Recuperación:** si el runner se cae, `sudo ./svc.sh start`; si se desregistra, re-ejecutar `runner-bootstrap.sh` (usa `--replace`, idempotente).
-
-### 6.2 PAT de GitHub en el Vault (subida y rotación)
-
-El runner obtiene su registration-token llamando a la API de GitHub con un **PAT** (scope mínimo: `repo` clásico, o fine-grained con *Administration: read/write* sobre este repo). El PAT se guarda como secret del Vault **out-of-band** (nunca en el `tfstate`); el cloud-init lo lee por **instance principal**.
-
-```bash
-# Subir (una vez) — el OCID que devuelve va en dev.tfvars (runner_pat_secret_ocid):
-oci vault secret create-base64 \
-  --compartment-id <compartment_ocid> \
-  --vault-id "$(terraform output -raw vault_id)" \
-  --key-id "$(terraform output -raw secrets_key_id)" \
-  --secret-name autohostai-dev-gh-pat \
-  --secret-content-content "$(printf '%s' '<PAT>' | base64)"
-
-# Rotar: crear una nueva versión del secret y revocar el PAT viejo en GitHub.
-oci vault secret update-base64 --secret-id <secret_ocid> \
-  --secret-content-content "$(printf '%s' '<PAT nuevo>' | base64)"
-```
+Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Idle** con label `dev`. Recuperación: `sudo /opt/actions-runner/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
 
 ### 6.3 Arranque en frío (primer deploy sobre VM sin app)
 
-1. Provisionar el runner (6.1) y confirmar que está online.
-2. Crear en GitHub los secrets de runtime (ver README dev) y `GHCR_PULL_TOKEN` (read-only).
-3. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job crea `.env`, hace `docker login`, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
+1. GitHub App + variables/secret creados (6.1); Terraform aplicado (§5.3, crea la IAM + los secrets del Vault); runner provisionado (6.2) y online.
+2. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job lee los secrets del Vault → `.env`, mintea el token de la App → `docker login`, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
 
 ### 6.4 Rollback (manual, por SHA)
 

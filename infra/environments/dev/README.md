@@ -85,17 +85,15 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 
 Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, rotación del PAT y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
 
-Secrets/vars adicionales del repo que consume `deploy-dev` (además de los de `infra-dev` de arriba):
+Variables/secret del repo que consume el CD (además de los de `infra-dev`). **No hay secrets de app de runtime en GitHub** — los genera Terraform y viven en el Vault; el deploy los lee de ahí por instance principal:
 
-| Secret/Var | Para qué |
-|---|---|
-| `GHCR_PULL_TOKEN` | Token GHCR **read-only** (`read:packages`) con el que la VM hace `docker login` para tirar de las imágenes privadas; se hace `logout` al terminar. |
-| `POSTGRES_DB`, `POSTGRES_USER`, `POSTGRES_PASSWORD` | Credenciales de la DB de runtime (Postgres solo en la red interna del compose, sin puerto publicado). |
-| `JWT_SECRET_KEY`, `ENCRYPTION_KEY` | Secretos de app (backend). El deploy falla nombrando la clave si falta alguna. |
-| `BACKEND_INTERNAL_URL` | Opcional; default `http://backend:8000`. |
-| `NEXT_PUBLIC_APP_ENV` (build-arg) | Var pública del frontend — se **hornea en build** (Next standalone), se pasa como `build-arg`, NO en el `.env` de runtime. |
+| Nombre | Tipo | Para qué |
+|---|---|---|
+| `GH_APP_ID`, `GH_APP_INSTALLATION_ID` | **variable** | Identifican la GitHub App que mintea tokens (registro del runner + pull GHCR). No sensibles. |
+| `GH_APP_PRIVATE_KEY` | **secret** | Clave privada (`.pem`) de la App. Único secret-zero; Terraform la escribe al Vault de cada entorno (`TF_VAR_github_app_private_key`). |
+| `NEXT_PUBLIC_APP_ENV` | **variable** | Var pública del frontend — se **hornea en build** (Next standalone) como `build-arg`, no en el `.env` de runtime. |
 
-El PAT de GitHub que el runner usa para registrarse **no** es un secret de GitHub: vive en el **OCI Vault** (subido out-of-band) y su OCID va en `dev.tfvars` (`runner_pat_secret_ocid`). Ver RUNBOOK §6.2.
+Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) los **genera Terraform** (`random_*`) → `oci_vault_secret`. `POSTGRES_DB`/`POSTGRES_USER` son variables Terraform con default. `github_app_id`/`github_app_installation_id` van también en `dev.tfvars`. Ver RUNBOOK §6.
 
 ## Pendiente (no automatizable por este change)
 
