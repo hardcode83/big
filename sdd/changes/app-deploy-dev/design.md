@@ -68,11 +68,20 @@ Rejected: polling casero con `curl` — reinventa lo que `--wait` ya hace de for
 
 **Chosen:** un **runner self-hosted de GitHub Actions corriendo en la propia VM dev**. El job `deploy` usa `runs-on: [self-hosted, dev]`; los builds (`build-backend`/`build-frontend`) siguen en `ubuntu-latest` (GitHub-hosted, tienen salida a GHCR). El deploy se ejecuta **localmente en la VM** (`docker compose -f docker-compose.deploy.yml …`) → **sin SSH ni puerto entrante nuevo**: el security list endurecido se mantiene intacto (22/8000/3000 solo a CIDRs de operador). La salida a GHCR (pull) y a github.com (runner) es tráfico saliente, no bloqueado.
 
-Consecuencia sobre OQ2 (clave SSH): con el runner **en** la VM, el deploy no usa SSH → la clave de deploy es **moot**. Solo si en el futuro el runner se moviera a otra máquina del entorno se reutilizaría `autohostai_dev_vm` (su pública ya está en la VM) para SSH sobre la red privada. Se registra como fallback, no se implementa ahora.
+Consecuencia sobre OQ2 (clave SSH): con el runner **en** la VM, el deploy no usa SSH → la clave de deploy es **moot** (no se usa).
 
-Rejected: Tailscale — más piezas (tailnet + authkey) de las necesarias cuando el runner puede vivir en la VM. · SSH desde runner GitHub-hosted — bloqueado por el security list. · Abrir 22 a rangos de Actions — contradice el hardening.
+Rejected: Tailscale — más piezas de las necesarias cuando el runner vive en la VM. · SSH desde runner GitHub-hosted — bloqueado por el security list. · Abrir 22 a rangos de Actions — contradice el hardening.
 
-**Bootstrap (out-of-band, antes del primer deploy):** instalar el runner como servicio (`svc`) en la VM con auto-arranque, con label `dev`, token de registro del repo; usuario del runner en el grupo `docker` (o acceso al socket) para operar Compose. Documentado en el RUNBOOK.
+### D13 — Provisión del runner como IaC (cloud-init) + instance principal para el token
+
+**Chosen:** la instalación/registro del runner es **IaC**, no una receta manual. Concretamente:
+
+- El **cloud-init** de la instancia (`infra/environments/dev/main.tf`, la plantilla de `user_data`) incorpora el aprovisionamiento del runner: descargar el binario, `config.sh --url <repo> --labels dev --unattended`, instalarlo como servicio (`svc.sh install && svc.sh start`), y meter al usuario del runner en el grupo `docker`. Esto es la **fuente de verdad**: una VM reconstruida desde Terraform arranca con el runner ya operativo.
+- El **registration token** se obtiene en arranque llamando a la API de GitHub con un **PAT guardado como secret del OCI Vault** (subido out-of-band, nunca inline en `.tf` → no entra al `tfstate`, igual que la clave SSH). El cloud-init lee ese secret vía **instance principal**: se añaden como IaC un `oci_identity_dynamic_group` (que matchea la instancia) y un `oci_identity_policy` de **mínimo privilegio** que autoriza a ese grupo a leer *solo* ese secret del Vault (`read secret-bundles in compartment … where target.secret.id = …`).
+
+**Aplicación a la VM viva (a mano, solo esta vez):** el `metadata` de la instancia es **ForceNew** con `lifecycle { ignore_changes = [metadata] }` — cambiar el cloud-init por Terraform recrearía la VM (inaceptable: ruleta de capacidad A1). Así que el bloque de runner se ejecuta **una vez a mano** sobre la VM actual (mismos comandos que el cloud-init, documentados en el RUNBOOK) — exactamente el patrón que el hardening ya usa para las claves SSH. El `plan` no mostrará drift del `metadata` (está en `ignore_changes`); la IAM del instance principal (dynamic group + policy) **sí** la aplica el pipeline (son recursos normales, no metadata).
+
+Rejected: PAT renderizado en `user_data` desde una var TF — filtra el credencial al `tfstate` (contra `security.md` §8). · Provisioner `remote-exec` de Terraform — imperativo, frágil, y el SSH saliente del pipeline choca con el security list. · Dejar el runner como paso puramente manual en el RUNBOOK — el usuario pide explícitamente que lo aprovisionable sea IaC.
 
 ### D11 — Alcance del deploy: solo app; postgres/redis intactos
 
@@ -85,29 +94,35 @@ Rejected: Tailscale — más piezas (tailnet + authkey) de las necesarias cuando
 | CI/CD | `.github/workflows/deploy-dev.yml` **(nuevo)** | build→GHCR (2 jobs) + deploy por acceso remoto (1 job), push a `main` path-filtered |
 | Orquestación | `docker-compose.deploy.yml` **(nuevo)**, `.env.deploy.example` **(nuevo)** | compose sin `build` (imágenes GHCR por SHA), migrate one-shot con imagen prod, healthchecks; plantilla de claves |
 | Frontend | `frontend/devops/Dockerfile` (posible `ARG`/`ENV` para `NEXT_PUBLIC_*`) | aceptar build-args si hoy no los declara |
-| Runner | VM dev (bootstrap out-of-band) | instalar runner self-hosted como servicio, label `dev`, acceso a docker; sin cambios en `.tf` ni en el security list (D12) |
-| Docs | `infra/environments/dev/RUNBOOK.md`, `README` | flujo de deploy, alta/recuperación del runner, tags/retención, arranque en frío, rollback por SHA, secrets y rotación (R6) |
+| Runner (IaC) | `infra/environments/dev/main.tf` (cloud-init + `oci_identity_dynamic_group` + `oci_identity_policy`), `variables.tf` | provisión del runner en cloud-init (fuente de verdad); instance principal de mínimo privilegio para leer el secret del PAT en el Vault (D13). Security list sin cambios |
+| Runner (VM viva) | — (a mano, 1 vez) | ejecutar el mismo bloque del cloud-init sobre la instancia actual (metadata ForceNew + ignore_changes), documentado en RUNBOOK |
+| Docs | `infra/environments/dev/RUNBOOK.md`, `README` | flujo de deploy, provisión/recuperación del runner (y alta del secret PAT en Vault), tags/retención, arranque en frío, rollback por SHA, secrets y rotación (R6) |
 
 ## Data & interfaces
 
 - **Sin cambios de esquema ni de API.** Las migraciones Alembic existentes se aplican en cada deploy (D5); este change no añade ninguna.
 - **Nuevos GitHub Secrets/Vars (CI):** `GHCR_PULL_TOKEN` (read-only), las claves de runtime del `.env` (`POSTGRES_*`, `JWT_*`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, …) y build-args `NEXT_PUBLIC_*`. **No** hacen falta `DEPLOY_HOST`/`DEPLOY_SSH_KEY`: el runner corre en la VM y el deploy es local (D12).
+- **Nuevos recursos OCI (Terraform, aplicados por el pipeline):** `oci_identity_dynamic_group` (matchea la instancia) + `oci_identity_policy` de mínimo privilegio (leer *solo* el secret del PAT en el Vault). El secret del PAT en sí se sube **out-of-band** (no Terraform).
+- **Nuevo secret en OCI Vault (out-of-band):** PAT de GitHub (scope mínimo para obtener registration-token del repo) que el cloud-init lee vía instance principal (D13).
 - **Nuevos paquetes GHCR:** `autohostai-backend`, `autohostai-frontend` (privados).
 
 ## Risks & mitigations
 
 - **Runner en máquina cuasi-productiva (D12):** el runner comparte la VM con la app → contención de recursos (mitigado: 4 OCPU/24 GB, dev, poca frecuencia de deploy) y superficie de seguridad (un runner comprometido = VM comprometida). Mitigación: runner con usuario propio y mínimo privilegio (solo grupo `docker`), repo privado, sin exponer el runner. Aceptable para dev; reevaluar en staging/prod.
 - **Disponibilidad del runner:** si el runner (o la VM) está caído, los deploys quedan en cola. Mitigación: instalarlo como servicio con auto-arranque; documentar el alta/recuperación en el RUNBOOK.
-- **Bootstrap del runner (antes del primer deploy):** el runner debe estar registrado y activo en la VM **antes** de que un push a `main` dispare el job `self-hosted` → paso out-of-band documentado; sin él el job queda pendiente indefinidamente.
+- **Bootstrap del runner (antes del primer deploy):** el runner debe estar registrado y activo en la VM **antes** de que un push a `main` dispare el job `self-hosted`; en la VM viva se aplica a mano una vez (D13). Sin él el job queda pendiente indefinidamente.
+- **Cloud-init IaC vs VM viva (drift invisible):** al ir el runner en el `metadata` (ForceNew + `ignore_changes`), el `plan` **no** mostrará el cambio ni detectará si la VM viva difiere del código. Mitigación: aplicar a mano el mismo bloque y documentar que la fuente de verdad es el cloud-init (un rebuild reproduce el runner). Igual que el patrón de claves SSH del hardening.
+- **PAT en el Vault (credencial de GitHub en OCI):** el PAT permite obtener registration-tokens del repo. Mitigación: scope mínimo, instance principal que solo puede *leer ese* secret, rotación documentada; nunca en `tfstate`.
 - **Primer deploy sobre VM vacía (arranque en frío):** no hay `.env` ni imágenes previas; el orden build→login→pull→migrate→up debe ser idempotente y quedar documentado (R6.1).
 - **Migraciones destructivas / fallo a mitad:** `migrate` corre antes de arrancar la app; si falla, el deploy aborta con la versión anterior aún en marcha (postgres intacto). Backups del state de datos quedan fuera de este change.
 - **Deriva del `.env`:** al renderizarse desde Secrets en cada deploy, la fuente de verdad son los Secrets; documentar para evitar ediciones manuales en la VM que un deploy sobrescribe.
 
 ## Open questions
 
-**Ambas resueltas en el gate de design (2026-07-24):**
+**Todas resueltas en el gate de design (2026-07-24):**
 
-- **OQ1 — Conectividad CI→VM** → **runner self-hosted en la VM, deploy local** (ver D12). El deploy no usa SSH ni abre puertos; el security list del hardening queda intacto. Trae una tarea de **bootstrap del runner** (out-of-band) a este change, pero **no** un cambio de `.tf`.
-- **OQ2 — Clave SSH de deploy** → **moot** con el runner en la VM (deploy local). Fallback documentado si el runner se moviera a otra máquina: reutilizar `autohostai_dev_vm` sobre la red privada. No se implementa ahora.
+- **OQ1 — Conectividad CI→VM** → **runner self-hosted en la VM, deploy local** (D12). Sin SSH ni puertos; el security list del hardening queda intacto.
+- **OQ2 — Clave SSH de deploy** → **moot** con el runner en la VM (deploy local). No se implementa.
+- **OQ3 — Provisión del runner** → **IaC en cloud-init** + **instance principal** para leer el PAT del Vault (D13). El usuario pidió expresamente que lo aprovisionable sea IaC; el "a mano" se limita a ejecutar el bloque una vez sobre la VM viva (metadata ForceNew). La IAM (dynamic group + policy) sí la aplica el pipeline.
 
-*Confirmado por el usuario (2026-07-24):* el runner corre **en la propia VM** → deploy local, sin SSH ni `known_hosts`. La clave de deploy no se usa.
+*Confirmado por el usuario (2026-07-24):* runner en la propia VM (deploy local, sin SSH); provisión como IaC (cloud-init), credencial vía OCI Vault + instance principal, nada en el `tfstate`.
