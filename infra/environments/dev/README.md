@@ -24,7 +24,7 @@ Lo que este Terraform **no** hace: desplegar la aplicación en sí (`docker comp
 ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm -C "autohostai-dev-vm"
 ```
 
-El contenido del `.pub` va en la variable `ssh_public_key` (Terraform lo inyecta vía `cloud-init`, campo `ssh_authorized_keys`, al usuario por defecto de la imagen Ubuntu). La privada se queda en tu máquina, nunca en el repo ni en ningún secret — solo hace falta en el momento de conectarte.
+Las claves públicas van en la variable **`ssh_authorized_keys`** (una `list(string)`; Terraform las inyecta vía `cloud-init` al usuario por defecto de la imagen Ubuntu). La privada se queda en tu máquina (con copia recuperable en el Vault, ver [`RUNBOOK.md`](./RUNBOOK.md) §2). **Ojo:** el `metadata` de la instancia es ForceNew en el provider `oci`, así que sobre la **VM viva** las altas/rotaciones de clave se hacen **out-of-band por SSH** (RUNBOOK §1), no cambiando la variable (recrearía la VM); la lista define el arranque de una VM nueva.
 
 Una vez aplicado y con la IP pública (`terraform output instance_public_ip`):
 
@@ -62,7 +62,7 @@ terraform plan -var-file=dev.tfvars
 
 ## Secrets de GitHub Actions esperados
 
-El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions). **Estado: 11 secrets esperados** — verificar con `gh secret list` cuáles faltan (`SSH_PUBLIC_KEY` se añadió después de los primeros 10, al detectar que faltaba una estrategia de acceso SSH a la instancia):
+El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`) necesita estos secrets del repo (Settings → Secrets and variables → Actions). Verifícalos con `gh secret list`. Las credenciales de OCI corresponden al usuario de servicio **`svc-terraform-dev`** (IAM mínima), no a un usuario amplio:
 
 | Secret | Para qué |
 |---|---|
@@ -70,9 +70,10 @@ El workflow `plan-apply` (`.github/workflows/infra-dev.yml`, disparo manual `wor
 | `OCI_PRIVATE_KEY` | Contenido del `.pem` privado. El workflow lo escribe a un fichero en `$RUNNER_TEMP` y pasa la **ruta** (`private_key_path`) a Terraform — nunca el contenido inline en un string/heredoc HCL (más frágil, ver `design.md` D2). |
 | `OCI_COMPARTMENT_OCID` | Compartment donde se crean los recursos. |
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
-| `ALLOWED_SSH_CIDR` | CIDR IPv4 restringido (`>= /24`, nunca abierto) permitido para SSH — hoy apunta a la IP del usuario, que es dinámica: si cambia, hay que actualizar este secret y volver a aplicar. |
-| `SSH_PUBLIC_KEY` | Contenido de la clave **pública** SSH dedicada a la VM (no sensible, pero se guarda como secret por consistencia) — la privada nunca sale de la máquina del usuario. |
-| `BUDGET_ALERT_EMAIL` | Destinatario de la alerta de presupuesto. |
+| `ALLOWED_SSH_CIDR` | CIDR IPv4 de operador (`>= /24`, nunca abierto) permitido para SSH/app — el workflow lo envuelve en lista JSON para `TF_VAR_allowed_ssh_cidrs`. Si tu IP cambia, actualiza el secret y re-aplica. |
+| `SSH_PUBLIC_KEY` | Contenido de la clave **pública** SSH de la VM — el workflow lo envuelve en lista JSON para `TF_VAR_ssh_authorized_keys`. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
+
+> Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`). Para varios operadores, convierte `ALLOWED_SSH_CIDR`/`SSH_PUBLIC_KEY` en arrays JSON y pásalos tal cual.
 
 ## Ejecutar el pipeline
 

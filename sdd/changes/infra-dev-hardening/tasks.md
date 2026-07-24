@@ -17,7 +17,7 @@
 
 - [x] 3.1 `variables.tf`: `budget_amount` default → **1**; `budget_alert_email` (string) → `budget_alert_recipients` (`list(string)`, default `["josegascon@gmail.com","mreyesojeda@gmail.com"]`); actualizar plantilla — **Files:** `infra/environments/dev/variables.tf`, `infra/environments/dev/dev.tfvars.example` — [R6]
 - [x] 3.2 `main.tf`: budget importe 1; regla **ACTUAL** `threshold_type=ABSOLUTE threshold=1`; **añadir** regla **FORECAST** `threshold_type=ABSOLUTE threshold=1`; `recipients = join(",", var.budget_alert_recipients)` — **Files:** `infra/environments/dev/main.tf` — [R6]
-- [x] 3.3 Reconciliar el drift: eliminar en la consola OCI la alerta/budget creada a mano **antes** del apply, para que Terraform recree sin duplicar — **Files:** ninguno (op. OCI) — [R6] (pendiente: acción tuya en consola antes del apply)
+- [x] 3.3 Reconciliar el drift: eliminar en la consola OCI la alerta/budget creada a mano **antes** del apply, para que Terraform recree sin duplicar — **Files:** ninguno (op. OCI) — [R6] (hecho: borrado en consola por el usuario — commit d49e113; el apply de §8.3 recreó budget + 2 alertas sin duplicados)
 
 ## 4. OCI Vault — backup de la clave SSH (R7)
 
@@ -33,7 +33,7 @@
 
 ## 6. IAM mínimo + state backend (R4)
 
-- [x] 6.1 Definir el grupo `autohostai-dev-terraform` + policy IAM acotada al compartment de dev (verbos exactos derivados de los recursos del `main.tf`: instance-family, virtual-network-family, budgets, object-family solo del bucket del state, y vault/keys/secrets de R7) — **Files:** doc de policy (aplicada por admin de tenancy, fuera del root module) — [R4]
+- [x] 6.1 Definir el grupo `autohostai-dev-terraform` + policy IAM acotada al compartment de dev (verbos exactos derivados de los recursos del `main.tf`: instance-family, virtual-network-family, budgets, object-family solo del bucket del state, y vault/keys/secrets de R7) — **Files:** `infra/environments/dev/iam-policy.md` (statements versionados; la aplica un admin de tenancy, fuera del root module) — [R4]
 - [x] 6.2 Aplicar la policy (admin de tenancy), mover el usuario de Terraform al grupo y **verificar `plan`/`apply` con los permisos acotados** antes de retirar los amplios — **Files:** ninguno (op. OCI) — [R4] (verificado: plan del provider + init del backend con svc-terraform-dev, sin errores de autorización)
 - [x] 6.3 Activar **versioning** en el bucket `autohostai-tfstate-dev` (OCI CLI/consola) — **Files:** ninguno (op. OCI) — [R4]
 
