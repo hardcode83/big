@@ -168,9 +168,10 @@ data "oci_identity_availability_domain" "dev" {
 
 # --- Instance principal para el runner self-hosted (R7) ---
 # La instancia se autentica como instance principal para leer del Vault SIN credenciales en disco:
-# la clave privada de la GitHub App (única secret-zero, out-of-band) y los secrets de runtime
-# (generados por TF, arriba). Dynamic group que matchea SOLO esta instancia + policy de mínimo
-# privilegio acotada a esos secrets concretos.
+# la clave privada de la GitHub App (única secret-zero; la escribe Terraform al Vault desde
+# var.github_app_private_key, un GitHub Secret del pipeline) y los secrets de runtime (generados
+# por TF, arriba). Dynamic group que matchea SOLO esta instancia + policy de mínimo privilegio
+# acotada a esos secrets concretos.
 resource "oci_identity_dynamic_group" "dev_runner" {
   compartment_id = var.tenancy_ocid
   name           = "autohostai-${var.env}-runner"
