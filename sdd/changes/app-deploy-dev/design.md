@@ -110,4 +110,4 @@ Rejected: Tailscale — más piezas (tailnet + authkey) de las necesarias cuando
 - **OQ1 — Conectividad CI→VM** → **runner self-hosted en la VM, deploy local** (ver D12). El deploy no usa SSH ni abre puertos; el security list del hardening queda intacto. Trae una tarea de **bootstrap del runner** (out-of-band) a este change, pero **no** un cambio de `.tf`.
 - **OQ2 — Clave SSH de deploy** → **moot** con el runner en la VM (deploy local). Fallback documentado si el runner se moviera a otra máquina: reutilizar `autohostai_dev_vm` sobre la red privada. No se implementa ahora.
 
-*Salvedad a confirmar por el usuario:* el design asume el runner **en la propia VM** (variante más simple, sin SSH). Si la intención era un runner en una **máquina aparte**, reaparece la tarea SSH (clave reutilizada + `known_hosts`) — decir antes de `/sdd:tasks`.
+*Confirmado por el usuario (2026-07-24):* el runner corre **en la propia VM** → deploy local, sin SSH ni `known_hosts`. La clave de deploy no se usa.
