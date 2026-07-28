@@ -116,7 +116,7 @@ La provisión es **IaC**: `cloud-init.yaml.tftpl` + `runner-bootstrap.sh` + `gh-
 sudo apt-get update && sudo apt-get install -y python3-pip && sudo pip3 install oci-cli
 sudo tee /etc/autohostai-deploy.env >/dev/null <<'EOF'
 ENV=dev
-GITHUB_REPO=mreyesojeda/AutoHostAI
+GITHUB_REPO=autohostai-labs/AutoHostAI
 GITHUB_APP_ID=<app id>
 GITHUB_APP_INSTALLATION_ID=<installation id>
 APP_KEY_SECRET_OCID=<ocid del secret gh-app-key>

@@ -14,7 +14,7 @@ Rejected: dos workflows encadenados por `workflow_run` — más frágil, propaga
 
 ### D2 — Registry GHCR, tags por SHA + `dev`, solo arm64
 
-**Chosen:** GHCR bajo el namespace del repo: `ghcr.io/mreyesojeda/autohostai-backend` y `-frontend`. `docker/build-push-action` (pineado por SHA) con `target: prod`, `platforms: linux/arm64` (la VM es ARM), `push: true`, auth con `GITHUB_TOKEN` + `permissions: packages: write`. Tags: el **SHA de commit** (inmutable, lo consume el deploy) y `dev` (móvil, conveniencia). El check amd64+arm64 sigue en `multiarch-build-check.yml` (no se toca).
+**Chosen:** GHCR bajo el namespace del repo (org): `ghcr.io/autohostai-labs/autohostai-backend` y `-frontend`. `docker/build-push-action` (pineado por SHA) con `target: prod`, `platforms: linux/arm64` (la VM es ARM), `push: true`, auth con `GITHUB_TOKEN` + `permissions: packages: write`. Tags: el **SHA de commit** (inmutable, lo consume el deploy) y `dev` (móvil, conveniencia). El check amd64+arm64 sigue en `multiarch-build-check.yml` (no se toca).
 
 Rejected: OCIR — IAM/token OCI extra sin beneficio en dev. · Docker Hub — rate limits y credenciales propias. · Publicar amd64 — la VM no lo usa.
 
@@ -26,7 +26,7 @@ Rejected: `docker-compose.override.yml` — la semántica de merge de override e
 
 ### D4 — Pineado de SHA vía `.env` renderizado
 
-**Chosen:** el deploy escribe en la VM un `.env` que incluye `IMAGE_TAG=<sha-del-commit>` y `GHCR_NS=mreyesojeda`; el compose interpola `${IMAGE_TAG}`/`${GHCR_NS}`. `docker compose pull && up -d` arranca exactamente las imágenes de ese commit. El rollback manual es re-deploy con un `IMAGE_TAG` previo (R6.1).
+**Chosen:** el deploy escribe en la VM un `.env` que incluye `IMAGE_TAG=<sha-del-commit>` y `GHCR_NS=autohostai-labs`; el compose interpola `${IMAGE_TAG}`/`${GHCR_NS}`. `docker compose pull && up -d` arranca exactamente las imágenes de ese commit. El rollback manual es re-deploy con un `IMAGE_TAG` previo (R6.1).
 
 Rejected: tag `dev` móvil como referencia del deploy — no reproducible, imposible de revertir por SHA.
 

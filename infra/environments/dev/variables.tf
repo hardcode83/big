@@ -87,7 +87,7 @@ variable "budget_amount" {
 variable "github_repo" {
   description = "owner/repo del repositorio GitHub cuyo runner self-hosted corre en la VM dev (para la URL de registro del runner)."
   type        = string
-  default     = "mreyesojeda/AutoHostAI"
+  default     = "autohostai-labs/AutoHostAI"
 }
 
 variable "env" {

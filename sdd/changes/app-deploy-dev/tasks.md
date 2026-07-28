@@ -38,7 +38,7 @@
 - [ ] 5.2 (op.) Convertir `NEXT_PUBLIC_APP_ENV` en **variable** de repo (no secret) y crear las variables `GH_APP_ID`/`GH_APP_INSTALLATION_ID` (si no en §5.1). Sin más OCI a mano: la clave de la App la escribe Terraform al Vault desde `GH_APP_PRIVATE_KEY`. — **Files:** ninguno (op. GitHub) — [R7]
 - [ ] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy + `random_*` + 4 `oci_vault_secret` (3 runtime + clave App). Confirmar **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7, R8]
 - [ ] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (copiar `runner-bootstrap.sh`+`gh-app-install-token.py` y `/etc/autohostai-deploy.env`, `pip install oci-cli`, ejecutar bootstrap); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
-- [ ] 5.5 (op.) **Borrar** los 6 GitHub Secrets del primer intento (`POSTGRES_DB/USER/PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, y `NEXT_PUBLIC_APP_ENV` si quedó como secret) — ya no se usan (el deploy lee del Vault; `NEXT_PUBLIC_APP_ENV` pasa a variable). — **Files:** ninguno (op. GitHub) — [R8]
+- [x] 5.5 (op.) **Borrar** los 6 GitHub Secrets del primer intento (`POSTGRES_DB/USER/PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, y `NEXT_PUBLIC_APP_ENV` si quedó como secret) — ya no se usan (el deploy lee del Vault; `NEXT_PUBLIC_APP_ENV` pasa a variable). — **Files:** ninguno (op. GitHub) — [R8]
 
 ## 6. Documentación <!-- panel: PASS 2026-07-24 (rediseño) -->
 
