@@ -15,7 +15,7 @@
 - [x] domain-foundation-ops — entidades + enums + esquema DB/Alembic de CleaningTask, CleaningChecklistTemplate, CleaningChecklistCompletion, CleaningPhoto, Incident, Conversation, Message, AccessRecord — dominios operativos, sobre `domain-foundation-core` (PRD §26.2-3, §7.9-7.16) → changes/archive/2026-07-17-domain-foundation-ops/
 - [ ] domain-foundation-financial — entidades + enums + esquema DB/Alembic de PricingRule, PriceRecommendation, OwnerApproval, Review, ReviewResponseDraft, OwnerStatement, Expense, NotificationLog, AuditLog, WebhookEvent — pricing/financiero + logs de sistema, sobre `domain-foundation-core`/`domain-foundation-ops` (PRD §26.2-3, §7.17-7.26)
 - [ ] auth-tenancy — JWT + RBAC + middleware, tenant isolation con tests (PRD §26.4-5, §6, §22)
-- [ ] timeline-state-machine — TimelineService central + PropertyStateMachine con todas las transiciones (PRD §26.6-7, §8, §10)
+- [x] timeline-state-machine — TimelineService central + PropertyStateMachine con todas las transiciones (PRD §26.6-7, §8, §10)
 - [ ] celery-jobs — scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14)
 - [ ] reservations — CRUD + MockPMSAdapter + import CSV + webhook handling (PRD §26.9, §16, §7.7)
 - [ ] cleaning — CleaningTask + checklist + fotos + StorageAdapter + validación (PRD §26.10, §11)
