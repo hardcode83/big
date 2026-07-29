@@ -73,11 +73,13 @@ Acceptance criteria:
 
 1. THE SYSTEM SHALL exponer el hostname público como variable de Terraform, cuyo valor para `dev` es **`autohostai.digitalsec.net`**; por ser un nombre público y no un secreto, THE SYSTEM SHALL documentar ese valor en `dev.tfvars.example` y en el `README.md` raíz.
 2. THE SYSTEM SHALL declarar el **API token de Cloudflare** y el **zone ID** como variables `sensitive`, presentes en `dev.tfvars.example` solo como marcador sin valor.
-3. THE SYSTEM SHALL consumir el API token en CI desde un **GitHub Secret de repositorio** (`CLOUDFLARE_API_TOKEN` → `TF_VAR_cloudflare_api_token`), del mismo modo que `infra-dev.yml` ya consume `GH_APP_PRIVATE_KEY`, y THE SYSTEM SHALL mantener una copia recuperable en el OCI Vault — GitHub Secrets es el consumidor de CI, el Vault es la copia del equipo.
-4. THE SYSTEM SHALL NOT hacer llegar el API token de Cloudflare a la VM: el único secreto de Cloudflare presente en la máquina es el token del túnel, leído del Vault por instance principal.
-5. THE SYSTEM SHALL documentar en `.env.deploy.example` la clave del token del túnel sin valor, coherente con el resto del fichero.
-6. THE SYSTEM SHALL NOT incluir en ningún fichero versionado el API token de Cloudflare, el secreto o token del túnel, ni el zone ID.
-7. WHERE el secreto del túnel queda en el `tfstate`, THE SYSTEM SHALL ampararse en la excepción dev/test ya documentada en `steering/security.md`, sin relajarla ni extenderla a staging/prod.
+3. THE SYSTEM SHALL consumir el API token en CI desde un **GitHub Secret de repositorio** (`CLOUDFLARE_API_TOKEN` → `TF_VAR_cloudflare_api_token`), del mismo modo que `infra-dev.yml` ya consume `GH_APP_PRIVATE_KEY`.
+4. THE SYSTEM SHALL NOT copiar el API token de Cloudflare al OCI Vault ni a ningún otro almacén que lo lleve al `tfstate`. A diferencia de la clave SSH o la de la GitHub App, un API token es **re-emitible en segundos** desde el dashboard, así que una copia "recuperable" no aporta capacidad de recuperación y sí ampliaría la exposición de un secreto cuyo radio de daño es **toda la zona** `digitalsec.net` (DNS y TLS de todos sus servicios), radio que la excepción dev/test de `steering/security.md` §8 no cubre.
+5. THE SYSTEM SHALL NOT hacer llegar el API token de Cloudflare a la VM: el único secreto de Cloudflare presente en la máquina es el token del túnel, leído del Vault por instance principal.
+6. THE SYSTEM SHALL documentar en `.env.deploy.example` la clave del token del túnel sin valor, coherente con el resto del fichero.
+7. THE SYSTEM SHALL NOT incluir en ningún fichero versionado el API token de Cloudflare, el secreto o token del túnel, ni el zone ID.
+8. WHERE el secreto del túnel queda en el `tfstate`, THE SYSTEM SHALL ampararse en la excepción dev/test ya documentada en `steering/security.md`, sin relajarla ni extenderla a staging/prod — su radio sí es el de este entorno: solo permite servir tráfico de ese túnel.
+9. THE SYSTEM SHALL restringir por `validation` la etiqueta de `public_hostname` a un prefijo reservado al proyecto (`autohostai*`), porque la zona es un dominio compartido y el valor llega de una variable de Actions editable sin PR — sin ese límite, cambiarla podría redirigir un hostname ajeno (`www`, `mail`…) al túnel de este entorno en el siguiente `apply`.
 
 ### R6 — Operación y bootstrap documentados
 

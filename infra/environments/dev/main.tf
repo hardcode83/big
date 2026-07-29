@@ -9,6 +9,13 @@ terraform {
       source  = "hashicorp/random"
       version = ">= 3.5"
     }
+    # Ingress HTTPS del entorno (change ingress-https-dev). Comparte root module con oci a
+    # propósito (design D1): el oci_vault_secret del token del túnel depende de atributos de
+    # recursos Cloudflare, así que ambos tienen que estar en el mismo grafo.
+    cloudflare = {
+      source  = "cloudflare/cloudflare"
+      version = "~> 5.0"
+    }
   }
 }
 
@@ -18,6 +25,10 @@ provider "oci" {
   fingerprint      = var.fingerprint
   private_key_path = var.private_key_path
   region           = var.region
+}
+
+provider "cloudflare" {
+  api_token = var.cloudflare_api_token
 }
 
 locals {

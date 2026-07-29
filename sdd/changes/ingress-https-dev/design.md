@@ -79,6 +79,39 @@ Rejected: un solo `apply` con todo — si el túnel no levanta, se pierde el acc
 Rejected: no tocar los ajustes de zona y confiar en los valores actuales — dejaría R3.1/R3.2 sin evidencia verificable.
 Rejected: ajustes por hostname — Cloudflare no los ofrece con esa granularidad en el plan Free.
 
+### D9 — El apex de la zona es una variable (`cloudflare_zone_name`)
+
+**Chosen:** añadir una quinta variable, `cloudflare_zone_name` (p. ej. `digitalsec.net`), y usarla en la `validation` de `public_hostname`.
+
+**Origen: resolución de un `DESIGN-CONFLICT`** levantado por el panel de la sección 1 (2026-07-29). Este diseño exigía en R3.4 validar en el `plan` que el hostname cuelga del apex a un solo nivel, pero no dijo **de dónde sale el apex**. Las dos salidas eran hardcodear `digitalsec.net` en el `.tf` —que choca con el *why* de R5 ("que el mismo código sirva para otra zona o entorno sin editarlo") y con R5.1— o parametrizarlo. Se parametriza. Verificado con `terraform console`: la condición acepta `autohostai.digitalsec.net` y rechaza el apex desnudo, `*.digitalsec.net`, `dev.autohostai.digitalsec.net`, otra zona y mayúsculas.
+
+**Deuda conocida, señalada por el architect:** `cloudflare_zone_name` y `cloudflare_zone_id` describen la misma zona, así que son **dos fuentes de verdad** que pueden desincronizarse (un zone id de una zona y un nombre de otra pasarían la validación). Mitigaciones posibles, ninguna implementada aquí por disciplina de alcance:
+
+- Derivar el nombre con `data "cloudflare_zone"` a partir del `zone_id` y eliminar la variable — la opción más limpia, pendiente de confirmar que una `validation` puede referenciar un data source en la versión de Terraform en uso (las validaciones con referencias cruzadas llegaron en 1.9).
+- O mantener la variable y añadir un `check`/`precondition` que afirme `data.cloudflare_zone.this.name == var.cloudflare_zone_name`, convirtiendo la desincronización en un fallo de `plan`.
+
+**Resuelto: se implementa la opción 2** (tarea 2.4). El panel de seguridad no dejó la deuda en teoría — demostró la explotación: con `CLOUDFLARE_ZONE_NAME = "il.digitalsec.net"` y `PUBLIC_HOSTNAME = "autohostai.il.digitalsec.net"` la validación devuelve `true`, pero el hostname queda a **dos** niveles bajo la zona real, fuera del Universal SSL, y el navegador muestra aviso de certificado. Como degrada R3.4 y el arreglo son cuatro líneas, se cierra en este change en vez de dejarlo anotado.
+
+Rejected: hardcodear el apex en el `.tf` — rompe R5.1 y el propósito de R5.
+Rejected: validar solo "≥ 3 etiquetas" sin conocer el apex — no distingue `dev.autohostai.digitalsec.net` (4 etiquetas, fuera del Universal SSL gratuito) de un hostname válido en otra zona.
+
+### D10 — El API token no se copia al Vault, y su radio de daño se trata como de zona
+
+**Origen: hallazgos del panel de seguridad de la sección 1 (2026-07-29).** El diseño original replicaba para el API token de Cloudflare el patrón "GitHub Secret = consumidor de CI, Vault = copia recuperable" que la spec de `infra-dev-terraform` fijó para la clave SSH. El panel señaló que la analogía no se sostiene:
+
+1. **El radio no es dev.** Con `Zone | DNS | Edit` + `Zone | Zone Settings | Edit` sobre `digitalsec.net` —una zona compartida y real, ver D7— el token permite reescribir DNS y bajar el TLS de todos los servicios del dominio. La excepción dev/test de `security.md` §8 se justifica *porque* el ámbito es dev/test, así que no lo cubre.
+2. **La copia no aporta recuperación.** Un API token es re-emitible en segundos desde el dashboard; a diferencia de una clave SSH o de una contraseña generada por Terraform, no hay nada que "recuperar".
+
+**Chosen:** no copiar el API token al Vault. Terraform no persiste la configuración de provider, así que sin esa copia el token **nunca llega al `tfstate`** y el problema de gobierno desaparece sin necesidad de enmendar §8. R5.3 se dividió en R5.3 (consumo en CI) y R5.4 (prohibición explícita de la copia).
+
+Rejected: enmendar `security.md` §8 para enumerar el token con su radio real — resuelve el papeleo pero deja la exposición en pie; la otra opción del propio panel era mejor.
+Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro, pero exige mover el hostname fuera de `digitalsec.net`, que es una decisión de producto, no de este change.
+
+**Otros dos hallazgos del mismo panel, ya corregidos en la sección 1:**
+
+- El job `plan` de `infra-dev.yml` aceptaba `workflow_dispatch` desde **cualquier rama** sin comprobar `github.ref`, y ahora recibe el token. `sensitive = true` no protege frente a código de rama no revisada (`nonsensitive()`, provider `http`, troceado). Se le añadió el mismo gating a `main` que tiene `apply`. **Consecuencia operativa:** ya no se puede planificar desde una rama de feature; el `plan` de un change se ejecuta tras mergear (ver `BLOCKED.md` #2).
+- La `validation` de `public_hostname` solo comprobaba profundidad, así que nada impedía apuntar `www.digitalsec.net` al túnel de dev cambiando una variable de Actions (editable sin PR). Se añadió la exigencia de prefijo `autohostai*` → R5.9.
+
 ### D8 — Sin cambios en la aplicación
 
 **Chosen:** ni backend ni frontend cambian. El túnel entrega a `frontend:3000` por la red interna y Next sigue sirviendo con `HOSTNAME=0.0.0.0`. `NEXT_PUBLIC_*` no se toca, porque nada del bundle del navegador depende del hostname público.
@@ -103,13 +136,13 @@ Rejected: ajustes por hostname — Cloudflare no los ofrece con esa granularidad
 
 ## Data & interfaces
 
-**Nuevas variables de Terraform** (`variables.tf`): `cloudflare_api_token` (string, sensitive), `cloudflare_zone_id` (string, sensitive), `cloudflare_account_id` (string), `public_hostname` (string, con `validation` que exija exactamente una etiqueta bajo el apex — hace cumplir R3.4 en el `plan`, no en revisión).
+**Nuevas variables de Terraform** (`variables.tf`): `cloudflare_api_token` (string, sensitive), `cloudflare_zone_id` (string, sensitive), `cloudflare_account_id` (string), `cloudflare_zone_name` (string, el apex — ver D9), y `public_hostname` (string, con `validation` contra el apex que exige exactamente una etiqueta — hace cumplir R3.4 en el `plan`, no en revisión). Ninguna lleva `default`, para que una credencial ausente rompa el `plan` nombrándola (R1.5).
 
 **Nuevo secreto del Vault**: `autohostai-dev-cloudflare-tunnel-token`, `content_type = "BASE64"`, contenido `base64encode(local.tunnel_token)` — nótese que el token ya es base64, así que el contenido queda doblemente codificado, igual que los demás secretos del fichero (el deploy hace `base64 -d` una vez y obtiene el token tal cual lo espera `cloudflared`).
 
 **Nueva variable de entorno de runtime**: `TUNNEL_TOKEN` en el `.env` que renderiza el CD, documentada sin valor en `.env.deploy.example`.
 
-**Nuevos secrets/vars de GitHub**: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`; variables `CLOUDFLARE_ACCOUNT_ID`, `PUBLIC_HOSTNAME`, `OCI_VAULT_ID`.
+**Nuevos secrets/vars de GitHub**: secrets `CLOUDFLARE_API_TOKEN`, `CLOUDFLARE_ZONE_ID`; variables `CLOUDFLARE_ACCOUNT_ID`, `CLOUDFLARE_ZONE_NAME`, `PUBLIC_HOSTNAME`, `OCI_VAULT_ID`.
 
 **Sin cambios** de esquema de base de datos, contratos de API ni entidades de dominio.
 

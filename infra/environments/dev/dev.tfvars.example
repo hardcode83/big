@@ -31,3 +31,21 @@ github_app_installation_id = "<Installation ID de la App en el repo/owner>"
 # La CLAVE PRIVADA de la App NO va aquí: es sensible y la inyecta el pipeline vía
 # TF_VAR_github_app_private_key desde el GitHub Secret GH_APP_PRIVATE_KEY (Terraform la escribe
 # al Vault). En local: export TF_VAR_github_app_private_key="$(cat app.private-key.pem)".
+
+# --- Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev) ---
+# El hostname y el apex NO son secretos (son nombres DNS públicos), así que llevan valor real:
+cloudflare_zone_name = "digitalsec.net"
+public_hostname      = "autohostai.digitalsec.net"
+# Debe ser UNA sola etiqueta bajo el apex: el Universal SSL gratuito solo cubre el apex y el
+# primer nivel. Algo como dev.autohostai.digitalsec.net exigiría Total TLS / ACM (de pago).
+
+cloudflare_account_id = "<Account ID de Cloudflare (no sensible)>"
+
+# Los dos sensibles se listan como MARCADOR para que se sepa que existen, pero comentados a
+# propósito: si se copiaran con el placeholder puesto, Terraform lo aceptaría como string válido y
+# el fallo llegaría tarde y confuso (error de auth del provider) en vez de temprano y claro
+# ("No value for required variable", el comportamiento verificado en la tarea 1.5).
+# Los inyecta el pipeline vía TF_VAR_* desde los GitHub Secrets CLOUDFLARE_ZONE_ID y
+# CLOUDFLARE_API_TOKEN; en local, export TF_VAR_cloudflare_api_token="..." (permisos mínimos en el RUNBOOK).
+# cloudflare_zone_id   = "<Zone ID de la zona en Cloudflare>"
+# cloudflare_api_token = "<API token: Account|Cloudflare Tunnel|Edit + Zone|DNS|Edit + Zone|Zone Settings|Edit>"
