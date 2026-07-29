@@ -50,7 +50,7 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. THE SYSTEM SHALL definir la instalación/registro del runner (binario, `config.sh --labels dev --unattended`, servicio con auto-arranque, usuario en grupo `docker`) en el **cloud-init** de la instancia (`infra/environments/dev/main.tf`), como fuente de verdad para una VM nueva.
-2. THE SYSTEM SHALL obtener el registration-token en arranque minteando un **installation-token de una GitHub App** — leyendo la **clave privada de la App** desde un secret del **OCI Vault** vía **instance principal**, nunca renderizando credencial alguno en `user_data`/`tfstate`. Los identificadores no sensibles (`app_id`, `installation_id`) van como variables Terraform.
+2. THE SYSTEM SHALL obtener el registration-token en arranque minteando un **installation-token de una GitHub App** — leyendo la **clave privada de la App** desde un secret del **OCI Vault** vía **instance principal**, nunca en claro en `user_data`. (El **valor** de la clave lo escribe Terraform al Vault desde una var sensible del pipeline, por lo que reside en el `tfstate` — relajación aceptada, ver D14 / `steering/security.md` §8.) Los identificadores no sensibles (`app_id`, `installation_id`) van como variables Terraform.
 3. THE SYSTEM SHALL declarar como Terraform un `oci_identity_dynamic_group` (la instancia) y un `oci_identity_policy` de **mínimo privilegio** que autorice a leer *solo* los secrets necesarios del Vault (clave de la App + secrets de runtime).
 4. WHERE la VM viva no puede recibir el cloud-init por Terraform (metadata ForceNew + `ignore_changes`), THE SYSTEM SHALL documentar la ejecución **a mano, una sola vez**, del mismo bloque sobre la instancia actual (RUNBOOK); un entorno nuevo se aprovisiona 100% del cloud-init.
 
@@ -91,7 +91,7 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. THE SYSTEM SHALL documentar en README/RUNBOOK: el trigger (push a `main`), el esquema de tags de imagen y su retención, el arranque en frío (primer deploy sobre VM vacía) y el **rollback manual** (redeploy pineando un SHA previo).
-2. THE SYSTEM SHALL documentar la **GitHub App** (permisos, alta de su clave privada en el Vault y rotación) y cómo el runner/deploy mintean tokens efímeros de registro y de pull GHCR a partir de ella.
+2. THE SYSTEM SHALL documentar la **GitHub App** (permiso `administration: write`, alta de su clave privada en el Vault y rotación) y cómo el bootstrap mintea el token efímero de **registro del runner** a partir de ella; y que el **pull de GHCR** lo hace el deploy con el `GITHUB_TOKEN` del job (no la App).
 
 ## Out of scope
 

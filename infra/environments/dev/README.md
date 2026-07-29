@@ -89,7 +89,7 @@ Variables/secret del repo que consume el CD (además de los de `infra-dev`). **N
 
 | Nombre | Tipo | Para qué |
 |---|---|---|
-| `GH_APP_ID`, `GH_APP_INSTALLATION_ID` | **variable** | Identifican la GitHub App que mintea tokens (registro del runner + pull GHCR). No sensibles. |
+| `GH_APP_ID`, `GH_APP_INSTALLATION_ID` | **variable** | Identifican la GitHub App que mintea el token de **registro del runner** (el pull de GHCR lo hace el `GITHUB_TOKEN` del job, no la App). No sensibles. |
 | `GH_APP_PRIVATE_KEY` | **secret** | Clave privada (`.pem`) de la App. Único secret-zero; Terraform la escribe al Vault de cada entorno (`TF_VAR_github_app_private_key`). |
 | `NEXT_PUBLIC_APP_ENV` | **variable** | Var pública del frontend — se **hornea en build** (Next standalone) como `build-arg`, no en el `.env` de runtime. |
 

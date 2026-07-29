@@ -26,7 +26,7 @@ budget_alert_recipients = ["<email 1>", "<email 2>"]
 # Runner self-hosted vía GitHub App (R7). Identificadores no sensibles:
 github_app_id              = "<App ID de la GitHub App>"
 github_app_installation_id = "<Installation ID de la App en el repo/owner>"
-# github_repo tiene default (mreyesojeda/AutoHostAI); postgres_db/postgres_user default (autohostai).
+# github_repo tiene default (autohostai-labs/AutoHostAI); postgres_db/postgres_user default (autohostai).
 #
 # La CLAVE PRIVADA de la App NO va aquí: es sensible y la inyecta el pipeline vía
 # TF_VAR_github_app_private_key desde el GitHub Secret GH_APP_PRIVATE_KEY (Terraform la escribe
