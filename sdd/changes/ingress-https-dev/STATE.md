@@ -1,16 +1,16 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: MERGED
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: main
+implementation_sha: 54e959d6ed4b16e07d6801b3de9f4a35f229ba8e
 pr_number: 
 pr_url: 
 pr_state: 
-merge_evidence: 
-merge_sha: 
+merge_evidence: ancestor
+merge_sha: 54e959d6ed4b16e07d6801b3de9f4a35f229ba8e
 ---
 
 # Change lifecycle
