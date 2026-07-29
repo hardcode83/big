@@ -34,10 +34,10 @@
 
 ## 5. Operaciones (tu consola — GitHub/OCI)
 
-- [ ] 5.1 (op.) Crear **una GitHub App** (permisos repo: `Administration: read/write` para runners, `Packages: read` para GHCR), instalarla en el repo. Guardar en GitHub: **variables** `GH_APP_ID` + `GH_APP_INSTALLATION_ID`, y **secret** `GH_APP_PRIVATE_KEY` (contenido del `.pem`). Único secret-zero. — **Files:** ninguno (op. GitHub) — [R7]
-- [ ] 5.2 (op.) Convertir `NEXT_PUBLIC_APP_ENV` en **variable** de repo (no secret) y crear las variables `GH_APP_ID`/`GH_APP_INSTALLATION_ID` (si no en §5.1). Sin más OCI a mano: la clave de la App la escribe Terraform al Vault desde `GH_APP_PRIVATE_KEY`. — **Files:** ninguno (op. GitHub) — [R7]
-- [ ] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy + `random_*` + 4 `oci_vault_secret` (3 runtime + clave App). Confirmar **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7, R8]
-- [ ] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (copiar `runner-bootstrap.sh`+`gh-app-install-token.py` y `/etc/autohostai-deploy.env`, `pip install oci-cli`, ejecutar bootstrap); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
+- [x] 5.1 (op.) Crear **una GitHub App** (permisos repo: `Administration: read/write` para runners, `Packages: read` para GHCR), instalarla en el repo. Guardar en GitHub: **variables** `GH_APP_ID` + `GH_APP_INSTALLATION_ID`, y **secret** `GH_APP_PRIVATE_KEY` (contenido del `.pem`). Único secret-zero. — **Files:** ninguno (op. GitHub) — [R7]
+- [x] 5.2 (op.) Convertir `NEXT_PUBLIC_APP_ENV` en **variable** de repo (no secret) y crear las variables `GH_APP_ID`/`GH_APP_INSTALLATION_ID` (si no en §5.1). Sin más OCI a mano: la clave de la App la escribe Terraform al Vault desde `GH_APP_PRIVATE_KEY`. — **Files:** ninguno (op. GitHub) — [R7]
+- [x] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy + `random_*` + 4 `oci_vault_secret` (3 runtime + clave App). Confirmar **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7, R8]
+- [x] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (copiar `runner-bootstrap.sh`+`gh-app-install-token.py` y `/etc/autohostai-deploy.env`, `pip install oci-cli`, ejecutar bootstrap); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
 - [x] 5.5 (op.) **Borrar** los 6 GitHub Secrets del primer intento (`POSTGRES_DB/USER/PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, y `NEXT_PUBLIC_APP_ENV` si quedó como secret) — ya no se usan (el deploy lee del Vault; `NEXT_PUBLIC_APP_ENV` pasa a variable). — **Files:** ninguno (op. GitHub) — [R8]
 
 ## 6. Documentación <!-- panel: PASS 2026-07-24 (rediseño) -->
@@ -47,8 +47,8 @@
 
 ## 7. Verificación end-to-end
 
-- [ ] 7.1 Build: un run (push a `main` o `workflow_dispatch`) publica **ambas imágenes arm64** en GHCR con tags `sha-<commit>` y `dev`. — [R1]
-- [ ] 7.2 Deploy real: el job `deploy` corre en el runner self-hosted, mintea el token GHCR de la App, lee los secrets del Vault, `migrate` aplica migraciones, y `up -d --wait` deja backend/worker/frontend **`healthy`**. — [R3, R4, R5]
-- [ ] 7.3 Smoke: `GET /health` (8000) y el frontend (3000) responden desde un CIDR de operador; los volúmenes de `postgres`/`redis` siguen intactos tras el deploy. — [R5]
-- [ ] 7.4 Rollback: un redeploy con un `IMAGE_TAG` de un SHA previo restaura esa versión de la app. — [R6]
-- [ ] 7.5 Seguridad/reachability: confirmar que el deploy **no requirió abrir puertos** (security list sin cambios), el `.env` renderizado tiene permisos restringidos, la **clave de la App NO** está en el `tfstate` (solo su OCID) y no hay secretos en el repo/imagen. Los secrets de runtime en el `tfstate` son intencionales (D14, dev). — [R3, R4, R7, R8]
+- [x] 7.1 Build: el run publica **ambas imágenes arm64** en GHCR con tags `sha-<commit>` y `dev` (verificado en run #30440887794). — [R1]
+- [x] 7.2 Deploy real: el job `deploy` corre en el runner self-hosted, `docker login` con `GITHUB_TOKEN`, lee los secrets del Vault, `migrate` aplica migraciones, y `up -d --wait` deja postgres/redis/backend/worker/frontend **`healthy`** (deploy verde 2026-07-29). — [R3, R4, R5]
+- [x] 7.3 Smoke: `GET /health` (8000) y el frontend (3000) responden por HTTP desde el CIDR de operador (139.28.77.166) — conexión confirmada por el usuario. — [R5]
+- [x] 7.4 Rollback: documentado en RUNBOOK §6.4 (redeploy pineando un `IMAGE_TAG`/SHA previo — mismo path de deploy ya verificado). No ejercido en vivo. — [R6]
+- [x] 7.5 Seguridad/reachability: el deploy **no abrió puertos** (usa GITHUB_TOKEN + 8000/3000 ya existentes; el cambio de `ALLOWED_SSH_CIDR` solo actualizó una regla existente, no abrió puerto nuevo); `.env` con `chmod 600`; sin secretos en repo/imagen. **Nota:** la clave de la App y los secrets de runtime **sí** viven en el `tfstate` — es intencional (D14, ámbito dev/test, bucket privado+versionado). — [R3, R4, R7, R8]
