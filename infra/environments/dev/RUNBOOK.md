@@ -211,31 +211,127 @@ terraform taint random_bytes.tunnel_secret      # o: terraform apply -replace='r
 
 El `apply` recrea el túnel, actualiza el secreto del Vault y **reconcilia el CNAME** (depende del id del túnel). Después hace falta **un deploy** para que `cloudflared` recoja el token nuevo del Vault; hasta entonces el contenedor sigue con el antiguo y quedará `unhealthy` cuando el túnel viejo desaparezca.
 
-### 7.4 Acceso de emergencia
+### 7.4 Depuración y acceso a la máquina
 
-Si la app no responde por HTTPS y hay que diagnosticar desde dentro:
+Cómo mirar la app y diagnosticar cuando algo va mal, sabiendo que **no hay ningún puerto HTTP abierto al público**. Léete el modelo mental una vez y el resto se explica solo.
 
-### El modelo mental en tres frases
+#### El modelo mental en tres frases
 
 1. **Desde internet** solo hay un camino a la app: `https://autohostai.digitalsec.work` → edge de Cloudflare → túnel → contenedor. No hay ningún puerto HTTP abierto en la VM.
 2. **Desde la VM**, `backend` y `frontend` sí escuchan en `127.0.0.1` (puertos 8000 y 3000). No son alcanzables desde fuera —`127.0.0.1` no es enrutable— pero sí desde la propia máquina.
 3. **Tú entras por SSH** (puerto 22, acotado a los CIDRs de operador) y, si quieres, te traes esos puertos a tu portátil por el propio SSH. Eso te da la app en tu navegador **sin pasar por Cloudflare**, que es como se distingue un fallo de la app de un fallo del edge.
 
-### 7.4.1 Ver la app en tu navegador (lo que querrás el 90 % de las veces)
+### 7.4.1 Ver la app en tu navegador por túnel SSH (lo que querrás el 90 % de las veces)
+
+**Ojo con el nombre:** este túnel **no** es el de Cloudflare. Son dos cosas opuestas que conviven:
+
+| | Cloudflare Tunnel | Túnel SSH (esta sección) |
+|---|---|---|
+| Quién lo abre | `cloudflared`, desde la VM hacia el edge | **tú**, desde tu portátil hacia la VM |
+| Dirección | **saliente** de la VM | **entrante** a la VM, por el puerto 22 |
+| Para quién | el público, en `https://autohostai.digitalsec.work` | solo para ti, mientras la sesión esté abierta |
+| Qué expone | publica la app en internet | **nada**; solo te acerca un puerto que ya existe |
+
+#### Requisitos previos
+
+1. Tener la clave privada de la VM en `~/.ssh/autohostai_dev_vm` (recuperable del Vault, §2).
+2. Que **tu IP pública esté en `allowed_ssh_cidrs`**. Si cambió de casa/oficina, actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev` (§0). Compruébala con `curl -s ifconfig.me`.
+3. Saber la IP pública de la VM. Es **reservada**, así que no cambia:
+
+   ```bash
+   cd infra/environments/dev && terraform output -raw instance_public_ip
+   ```
+
+#### El comando
 
 ```bash
-ssh -L 3000:localhost:3000 -L 8000:localhost:8000 ubuntu@<IP pública>
+ssh -i ~/.ssh/autohostai_dev_vm \
+    -L 3000:localhost:3000 \
+    -L 8000:localhost:8000 \
+    ubuntu@"$(cd infra/environments/dev && terraform output -raw instance_public_ip)"
 ```
 
-Deja esa terminal abierta y abre en tu navegador:
+O con la IP a pelo, si no tienes el repo a mano:
 
-- **http://localhost:3000** → el frontend, con devtools, network tab y todo.
-- **http://localhost:8000/docs** → el Swagger del backend.
-- **http://localhost:8000/health** → healthcheck del backend.
+```bash
+ssh -i ~/.ssh/autohostai_dev_vm -L 3000:localhost:3000 -L 8000:localhost:8000 ubuntu@79.76.101.10
+```
 
-El tráfico va cifrado dentro de la conexión SSH. Al cerrar la terminal, la puerta se cierra: **no queda nada abierto**.
+**Cómo leer `-L 3000:localhost:3000`** — es `-L <puerto_en_tu_portátil>:<destino>:<puerto_del_destino>`:
 
-Si `ssh -L` falla con *"Address already in use"*, es que ya tienes algo en el 3000 local (probablemente tu propio `make up`). Usa otros puertos locales: `ssh -L 3001:localhost:3000 ...` y abre `http://localhost:3001`.
+- El **primer** `3000` es el puerto que `ssh` abre **en tu portátil**.
+- `localhost:3000` es el destino **visto desde la VM** — ahí es donde el contenedor `frontend` publica (en `127.0.0.1`, ver el compose). Esa resolución ocurre en el extremo remoto, no en el tuyo: es el detalle que más confunde.
+
+Es decir, el recorrido completo es:
+
+```
+navegador → localhost:3000 (tu portátil) → canal SSH cifrado (puerto 22)
+          → la VM → 127.0.0.1:3000 de la VM → contenedor frontend
+```
+
+Y **por eso** `backend`/`frontend` publican en loopback: si no publicaran nada, `ssh -L` no tendría a qué conectarse en la VM y daría `connection refused`.
+
+#### Qué abrir una vez conectado
+
+Deja esa terminal abierta y ve al navegador:
+
+| URL | Qué es |
+|---|---|
+| **http://localhost:3000** | el frontend, con devtools y pestaña Network, **sin pasar por Cloudflare** |
+| **http://localhost:8000/docs** | Swagger del backend (OpenAPI autogenerado) |
+| **http://localhost:8000/health** | healthcheck del backend |
+
+Comprueba que el túnel está vivo sin salir de tu máquina:
+
+```bash
+curl -sSI http://localhost:3000 | head -1     # debería responder algo, no "connection refused"
+curl -sS  http://localhost:8000/health
+```
+
+#### Cerrarlo
+
+Sal de la sesión (`exit` o `Ctrl-D`). El listener de tu portátil desaparece y **no queda nada abierto** en ningún sitio: no has tocado el security list ni la configuración de la VM.
+
+#### Variante cómoda: alias en `~/.ssh/config`
+
+Para no recordar el comando, añade esto a tu `~/.ssh/config`:
+
+```
+Host autohostai-dev
+    HostName 79.76.101.10
+    User ubuntu
+    IdentityFile ~/.ssh/autohostai_dev_vm
+    LocalForward 3000 localhost:3000
+    LocalForward 8000 localhost:8000
+    ServerAliveInterval 30
+```
+
+A partir de entonces basta con:
+
+```bash
+ssh autohostai-dev
+```
+
+y los dos puertos se reenvían solos. `ServerAliveInterval 30` evita que la sesión muera sola cuando llevas rato sin teclear.
+
+#### Variante en segundo plano
+
+Si solo quieres los puertos, sin shell:
+
+```bash
+ssh -fN autohostai-dev          # -f = a segundo plano, -N = no ejecutar comando remoto
+# ...trabaja en el navegador...
+pkill -f 'ssh -fN autohostai-dev'   # para cerrarlo
+```
+
+#### Errores frecuentes
+
+| Mensaje | Causa y arreglo |
+|---|---|
+| `bind: Address already in use` | ya tienes algo en tu 3000 local (tu propio `make up`). Cambia **solo el puerto local**: `-L 3001:localhost:3000` y abre `http://localhost:3001` |
+| `channel 1: open failed: connect failed: Connection refused` | la sesión SSH funciona, pero en la VM no hay nada escuchando en ese puerto → el contenedor está caído o no publica en loopback. Mira `$C ps` (§7.4.2) |
+| `Connection timed out` al conectar | tu IP no está en `allowed_ssh_cidrs` (requisito 2) |
+| `Permission denied (publickey)` | clave incorrecta o no autorizada en la VM; ver §1 para añadir/rotar claves |
 
 ### 7.4.2 Estado y logs
 
