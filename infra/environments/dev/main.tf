@@ -424,22 +424,24 @@ resource "oci_vault_secret" "cloudflare_tunnel_token" {
 }
 
 # --- HTTPS forzado en el edge (R3.1, R3.2) ---
-# ALCANCE: estos ajustes son de ZONA, no de hostname — Cloudflare no los ofrece por hostname en el
-# plan Free, así que aplican a TODO el apex, incluidos otros servicios que cuelguen de él.
-# Consecuencia aceptada explícitamente en el gate del diseño (design D7).
-# Un recurso por ajuste: el provider modela cada setting con su propio setting_id.
-
+# ALCANCE: este ajuste es de ZONA, no de hostname — Cloudflare no lo ofrece por hostname en el plan
+# Free, así que aplica a TODO el apex. Se aceptó a sabiendas (design D7) tras inventariar la zona:
+# de los 7 hosts publicados en digitalsec.work solo 3 son `proxied` (argocd, carto-api, ha) y por
+# tanto solo esos tres se ven afectados; los que están en modo "DNS only" no pasan por el edge.
+# Riesgo asumido: un cliente programático que llame por http:// y NO siga redirecciones recibiría
+# un 301 en vez de la respuesta.
 resource "cloudflare_zone_setting" "always_use_https" {
   zone_id    = var.cloudflare_zone_id
   setting_id = "always_use_https"
   value      = "on"
 }
 
-resource "cloudflare_zone_setting" "min_tls_version" {
-  zone_id    = var.cloudflare_zone_id
-  setting_id = "min_tls_version"
-  value      = "1.2"
-}
+# NO se declara `min_tls_version`. La zona está hoy en 1.0 y subirla a 1.2 concentraba casi todo el
+# riesgo del change sobre servicios ajenos a él (rompería cualquier integración que solo hable TLS
+# 1.0/1.1), sin aportar nada al ingress: el túnel no expone TLS del origen y el edge ya negocia
+# TLS moderno con los navegadores. Decisión del 2026-07-29, ver design D7 y R3.2.
+# Si algún día se sube, es un cambio de una línea aquí — y de alcance de zona, así que merece su
+# propia decisión y su propia ventana de verificación.
 
 # Clave privada de la GitHub App: la escribe Terraform al Vault desde UN secret del pipeline
 # (var.github_app_private_key). Así un entorno nuevo no requiere subirla a mano en OCI (D14/D13).

@@ -70,14 +70,24 @@ Motivo: cerrar antes de verificar deja la app inalcanzable por ambas vías a la 
 
 Rejected: un solo `apply` con todo — si el túnel no levanta, se pierde el acceso HTTP directo al mismo tiempo y el diagnóstico se complica.
 
-### D7 — Ajustes de HTTPS de zona: alcance mínimo
+### D7 — Solo se fuerza HTTPS; el TLS mínimo de la zona no se toca
 
-**Chosen:** declarar únicamente el forzado de HTTPS y el TLS mínimo (R3.1, R3.2) como recursos de ajuste de zona del provider. Son ajustes **de zona**, no de hostname: afectan a todo `digitalsec.work`, no solo a `autohostai`.
+**Chosen:** declarar como código **únicamente** `always_use_https` (R3.1). **No** declarar `min_tls_version`. Ambos son ajustes **de zona**, no de hostname —Cloudflare no los ofrece con esa granularidad en el plan Free—, así que aplican a todo `digitalsec.work`.
 
-**Consecuencia aceptada explícitamente (2026-07-29):** `digitalsec.work` es un dominio personal de Jose que puede alojar otros servicios además de este entorno. Forzar HTTPS y TLS mínimo 1.2 **les aplicaría también**. Se acepta a sabiendas: es la postura deseable para todos ellos. Si algún servicio de esa zona necesitara HTTP en claro en el futuro, este ajuste es lo primero que hay que revisar.
+**Revisado con el inventario real de la zona (2026-07-29), antes del primer `apply`.** El diseño original asumía una zona prácticamente vacía. No lo está: 30 registros y **dos instancias de `external-dns`** gestionándola (`owner=default` del homelab y `owner=gke-carto…` de un clúster GKE), más `_acme-challenge` de cert-manager. Servicios publicados: `argocd`, `carto-api` (+ `dev.`/`staging.`), `ha`, `ckan`, `nginx`.
 
-Rejected: no tocar los ajustes de zona y confiar en los valores actuales — dejaría R3.1/R3.2 sin evidencia verificable.
-Rejected: ajustes por hostname — Cloudflare no los ofrece con esa granularidad en el plan Free.
+Dato que acota el impacto: **los ajustes de zona solo afectan al tráfico que pasa por el proxy**. De los 7 hosts, solo **3 son `proxied`** (`argocd`, `carto-api`, `ha`); el resto está en *DNS only* y no pasa por el edge. Valores previos verificados por API: `always_use_https = off`, `min_tls_version = 1.0`, `ssl = full`, `automatic_https_rewrites = on`.
+
+Por eso se separan las dos mitades:
+
+- **`always_use_https` → `on`.** Riesgo bajo y beneficio real para esos tres servicios. El único escenario de rotura es un cliente programático que llame por `http://` y **no siga redirecciones** (un `curl` sin `-L`, un webhook, un `POST` cuyo cuerpo se descarte al recibir el 301). Para AutoHostAI el riesgo es nulo: `autohostai.digitalsec.work` no existía, así que no hay cliente que pueda romperse.
+- **`min_tls_version` se queda en 1.0.** Subirlo a 1.2 concentraba **casi todo el riesgo del change sobre servicios ajenos a él** —rompería cualquier integración que solo hable TLS 1.0/1.1— y **no aporta nada al ingress**: el túnel no expone TLS del origen y el edge ya negocia TLS moderno con los navegadores. R3.2 se relajó en consecuencia.
+
+Rejected: declarar también `min_tls_version = "1.2"` — riesgo sobre terceros sin beneficio para este change; si algún día se sube, merece su propia decisión y su propia ventana de verificación.
+Rejected: no tocar ningún ajuste de zona — dejaría R3.1 sin evidencia verificable, y el forzado de HTTPS es justo lo que garantiza que no queda una vía en claro hacia la app.
+Rejected: *Redirect Rule* por hostname en vez del ajuste de zona — lograría R3.1 sin tocar a los otros tres servicios y es viable en plan Free; se descarta porque el ajuste de zona es deseable para ellos de todos modos y es una pieza menos que mantener. Queda como salida si alguno diera problemas.
+
+**Riesgo detectado a vigilar (no bloqueante):** con dos `external-dns` en `policy = "sync"` sobre esta zona, hay dos sistemas escribiendo DNS. En teoría el CNAME de Terraform está a salvo —`external-dns` solo borra registros con su TXT de propiedad, y el nuestro no lo tiene—, pero si esa suposición fallara el síntoma sería un CNAME que desaparece y que Terraform recrea en el siguiente `apply`. Verificar tras el primer `apply` que el registro sobrevive unas horas.
 
 ### D9 — El apex de la zona es una variable (`cloudflare_zone_name`)
 

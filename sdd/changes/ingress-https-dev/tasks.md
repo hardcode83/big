@@ -32,7 +32,7 @@ Tras esta sección el túnel y su DNS existen en Cloudflare, y **el token del t�
 
 ## 3. HTTPS forzado en la zona
 
-- [x] 3.1 Declarar como código los ajustes de zona de `digitalsec.work`: forzado de HTTPS y versión mínima de TLS 1.2. Alcance de **zona completa**, consecuencia aceptada en D7 — afecta también a los demás servicios del dominio. Ficheros: `infra/environments/dev/main.tf`. [R3.1, R3.2]
+- [x] 3.1 Declarar como código el forzado de HTTPS de la zona `digitalsec.work` (`cloudflare_zone_setting.always_use_https`). Alcance de **zona completa** —Cloudflare no lo ofrece por hostname en Free—, consecuencia aceptada en D7 tras inventariar la zona: solo afecta a los 3 hosts `proxied` (`argocd`, `carto-api`, `ha`). **`min_tls_version` NO se toca** (se queda en 1.0): ahí estaba casi todo el riesgo y no aporta al ingress. Ficheros: `infra/environments/dev/main.tf`. [R3.1, R3.2]
 - [ ] 3.2 Aplicar y comprobar que `curl -sSI http://autohostai.digitalsec.work` devuelve una redirección permanente a HTTPS. [R3.1]
 
 ## 4. `cloudflared` en el deploy (cierre de la fase A)

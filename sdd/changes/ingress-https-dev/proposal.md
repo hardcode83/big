@@ -50,7 +50,7 @@ Acceptance criteria:
 Acceptance criteria:
 
 1. WHEN un cliente solicita el hostname público por HTTP, THE SYSTEM SHALL responder con una redirección permanente a HTTPS.
-2. THE SYSTEM SHALL declarar como código (recursos de ajustes de zona del provider `cloudflare`) el forzado de HTTPS y una versión mínima de TLS de 1.2 o superior.
+2. THE SYSTEM SHALL declarar como código (recurso de ajuste de zona del provider `cloudflare`) el forzado de HTTPS. THE SYSTEM SHALL NOT modificar la versión mínima de TLS de la zona: `digitalsec.work` aloja servicios ajenos a este change y subirla de 1.0 a 1.2 concentraría casi todo el riesgo sobre ellos sin aportar nada al ingress (revisado 2026-07-29 con el inventario real de la zona, ver D7).
 3. WHEN se solicita el hostname público por HTTPS, THE SYSTEM SHALL servir la aplicación con un certificado válido y confiado por navegadores, sin intervención de un certificado gestionado en el origen.
 4. THE SYSTEM SHALL usar un hostname de **primer nivel** bajo el apex de la zona (`<etiqueta>.digitalsec.work`), que es el alcance que cubre el certificado Universal SSL gratuito; IF se necesitara un hostname de mayor profundidad (p. ej. `dev.autohostai.digitalsec.work`), THEN THE SYSTEM SHALL tratarlo como decisión de coste, porque exige Total TLS o Advanced Certificate Manager (de pago).
 
