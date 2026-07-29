@@ -122,6 +122,22 @@ Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro,
 - El job `plan` de `infra-dev.yml` aceptaba `workflow_dispatch` desde **cualquier rama** sin comprobar `github.ref`, y ahora recibe el token. `sensitive = true` no protege frente a código de rama no revisada (`nonsensitive()`, provider `http`, troceado). Se le añadió el mismo gating a `main` que tiene `apply`. **Consecuencia operativa:** ya no se puede planificar desde una rama de feature; el `plan` de un change se ejecuta tras mergear (ver `BLOCKED.md` #2).
 - La `validation` de `public_hostname` solo comprobaba profundidad, así que nada impedía apuntar `www.digitalsec.work` al túnel de dev cambiando una variable de Actions (editable sin PR). Se añadió la exigencia de prefijo `autohostai*` → R5.9.
 
+### D11 — Puerta de depuración: publicación acotada a loopback, no supresión total
+
+**Chosen:** en la fase B, `backend` y `frontend` publican en **`127.0.0.1:8000`** y **`127.0.0.1:3000`** en lugar de no publicar nada. Un operador con SSH se los trae a su máquina con `ssh -L` y abre la app en su navegador **sin pasar por Cloudflare**.
+
+**Planteado antes de mergear la fase B (2026-07-29), a petición del usuario.** El valor de una puerta de depuración no es "otra entrada desde internet" —eso es justo lo que este change cierra— sino "una forma de que quien ya tiene SSH mire la app con herramientas de verdad". Sin ella, diagnosticar un problema de render obliga a `docker compose exec ... node -e`, sin navegador ni devtools; y sobre todo **no se puede distinguir un fallo de la app de un fallo del edge o del túnel**, que es la pregunta más frecuente en una incidencia (árbol de decisión en `RUNBOOK.md` §7.4.4).
+
+Propiedades que se conservan: `127.0.0.1` no es enrutable, así que **no hay superficie nueva desde internet ni desde la VCN**; `local.ingress_ports` sigue en `[22]`; y el túnel sigue siendo el único camino público. El binding a loopback es además *explícito* sobre su intención, a diferencia de un `"3000:3000"` que publica en `0.0.0.0` sin decirlo.
+
+Coste honesto: cualquier cosa capaz de ejecutar código en la VM alcanza la app por loopback. Riesgo marginal ≈ 0 dentro del modelo de confianza vigente, porque el usuario del runner ya pertenece al grupo `docker` y por tanto ya es root efectivo en esa máquina.
+
+R4.3 se enmendó en consecuencia: pasa de "dejar de publicar los puertos" a "no publicarlos en ninguna interfaz externa; si se publican para depuración, acotados a `127.0.0.1`". El propósito del requisito —ninguna vía pública alternativa al túnel— queda intacto y más explícito.
+
+Rejected: no publicar nada y depender solo de `docker compose exec` — cumple R4.3 al pie de la letra pero deja la depuración sin navegador y sin forma de aislar la capa que falla.
+Rejected: publicar en `0.0.0.0` confiando en que el security list de OCI lo bloquee — un único control, externo a la VM, y el puerto quedaría alcanzable desde cualquier otro recurso de la VCN.
+Rejected: un segundo hostname del túnel hacia el backend — daría acceso desde cualquier sitio, pero expone el backend a internet y para protegerlo haría falta Cloudflare Access, añadiendo dependencia y alcance.
+
 ### D8 — Sin cambios en la aplicación
 
 **Chosen:** ni backend ni frontend cambian. El túnel entrega a `frontend:3000` por la red interna y Next sigue sirviendo con `HOSTNAME=0.0.0.0`. `NEXT_PUBLIC_*` no se toca, porque nada del bundle del navegador depende del hostname público.

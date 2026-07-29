@@ -50,9 +50,11 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
-    # Sin `ports`: desde ingress-https-dev el backend solo es alcanzable desde la red interna del
-    # compose. El frontend le habla por BACKEND_INTERNAL_URL (server-side) y el navegador nunca le
-    # llama directamente, así que no necesita exposición ninguna (R4.3).
+    # Publicado SOLO en loopback de la VM (R4.3): no es alcanzable desde internet ni desde la VCN,
+    # pero un operador con SSH puede llegar con `ssh -L 8000:localhost:8000` (ver RUNBOOK §7.4).
+    # Sin el prefijo 127.0.0.1 Docker publicaría en 0.0.0.0 y crearía una vía alternativa al túnel.
+    ports:
+      - "127.0.0.1:8000:8000"
     depends_on:
       postgres:
         condition: service_healthy
@@ -97,9 +99,13 @@ services:
       # todas las interfaces (healthcheck local + puerto publicado 3000).
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
-    # Sin `ports`: el único que llega al frontend es `cloudflared`, y lo hace por la red interna
-    # como `http://frontend:3000`. Publicar el puerto en el host sería una vía de entrada
-    # alternativa al túnel, justo lo que este change cierra (R4.3).
+    # Publicado SOLO en loopback de la VM (R4.3). Desde internet el único camino sigue siendo el
+    # túnel, que llega por la red interna como `http://frontend:3000`; el binding a loopback existe
+    # para depuración por túnel SSH (`ssh -L 3000:localhost:3000`, ver RUNBOOK §7.4) y permite abrir
+    # la app en el navegador sin pasar por Cloudflare, que es como se distingue un fallo de la app
+    # de un fallo del edge o del túnel.
+    ports:
+      - "127.0.0.1:3000:3000"
     depends_on:
       backend:
         condition: service_healthy

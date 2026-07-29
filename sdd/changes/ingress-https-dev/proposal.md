@@ -62,7 +62,7 @@ Acceptance criteria:
 
 1. WHEN el túnel ha sido verificado sirviendo la aplicación por HTTPS en el hostname público, THE SYSTEM SHALL reducir `local.ingress_ports` a `[22]`, eliminando las reglas de 8000 y 3000.
 2. THE SYSTEM SHALL mantener el 22 acotado a `var.allowed_ssh_cidrs` con la validación de prefijo `>= /24` intacta, y THE SYSTEM SHALL NOT introducir ninguna regla de ingress con origen `0.0.0.0/0`.
-3. THE SYSTEM SHALL dejar de publicar los puertos 8000 y 3000 en `docker-compose.deploy.yml`, de modo que backend y frontend solo sean alcanzables desde la red interna de compose.
+3. THE SYSTEM SHALL NOT publicar los puertos de `backend` y `frontend` en ninguna interfaz externa de la VM. WHERE se publiquen para depuración, THE SYSTEM SHALL acotarlos a `127.0.0.1`, de modo que no sean alcanzables ni desde internet ni desde la VCN y solo lleguen a ellos quien ya tenga acceso SSH a la máquina (procedimiento en `RUNBOOK.md` §7.4).
 4. IF la verificación del túnel no se ha registrado como evidencia, THEN THE SYSTEM SHALL NOT aplicar el cierre de puertos — el orden es verificar y después cerrar, nunca al revés.
 
 ### R5 — Configuración inyectada: hostname como variable, secretos fuera del repo

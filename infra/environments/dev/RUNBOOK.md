@@ -215,24 +215,70 @@ El `apply` recrea el túnel, actualiza el secreto del Vault y **reconcilia el CN
 
 Si la app no responde por HTTPS y hay que diagnosticar desde dentro:
 
-```bash
-ssh ubuntu@<IP pública>          # §1; el 22 sigue acotado a los CIDRs de operador
-cd /opt/autohostai               # donde el runner deja el checkout con el compose
+### El modelo mental en tres frases
 
-# OJO: tras este change backend y frontend YA NO publican puertos, así que `curl localhost:8000`
-# NO funciona ni desde la propia VM. Solo son alcanzables dentro de la red del compose:
-docker compose -f docker-compose.deploy.yml ps    # estado healthy/unhealthy de cada servicio
-docker compose -f docker-compose.deploy.yml exec backend \
-  python3 -c "import urllib.request;print(urllib.request.urlopen('http://localhost:8000/health').status)"
-docker compose -f docker-compose.deploy.yml exec frontend \
-  node -e "require('http').get('http://127.0.0.1:3000',r=>console.log(r.statusCode))"
-```
+1. **Desde internet** solo hay un camino a la app: `https://autohostai.digitalsec.work` → edge de Cloudflare → túnel → contenedor. No hay ningún puerto HTTP abierto en la VM.
+2. **Desde la VM**, `backend` y `frontend` sí escuchan en `127.0.0.1` (puertos 8000 y 3000). No son alcanzables desde fuera —`127.0.0.1` no es enrutable— pero sí desde la propia máquina.
+3. **Tú entras por SSH** (puerto 22, acotado a los CIDRs de operador) y, si quieres, te traes esos puertos a tu portátil por el propio SSH. Eso te da la app en tu navegador **sin pasar por Cloudflare**, que es como se distingue un fallo de la app de un fallo del edge.
 
-Si hiciera falta acceso HTTP directo temporal para depurar, la vía correcta es un **túnel SSH local** (no reabrir puertos en el security list):
+### 7.4.1 Ver la app en tu navegador (lo que querrás el 90 % de las veces)
 
 ```bash
 ssh -L 3000:localhost:3000 -L 8000:localhost:8000 ubuntu@<IP pública>
 ```
 
-…lo cual requiere que el servicio publique el puerto en la VM; si no lo hace, usar `docker compose exec` como arriba o publicar el puerto temporalmente en local con `docker compose ... run --publish`.
+Deja esa terminal abierta y abre en tu navegador:
+
+- **http://localhost:3000** → el frontend, con devtools, network tab y todo.
+- **http://localhost:8000/docs** → el Swagger del backend.
+- **http://localhost:8000/health** → healthcheck del backend.
+
+El tráfico va cifrado dentro de la conexión SSH. Al cerrar la terminal, la puerta se cierra: **no queda nada abierto**.
+
+Si `ssh -L` falla con *"Address already in use"*, es que ya tienes algo en el 3000 local (probablemente tu propio `make up`). Usa otros puertos locales: `ssh -L 3001:localhost:3000 ...` y abre `http://localhost:3001`.
+
+### 7.4.2 Estado y logs
+
+```bash
+ssh ubuntu@<IP pública>
+cd /opt/autohostai        # checkout que deja el runner, con el docker-compose.deploy.yml
+C="docker compose -f docker-compose.deploy.yml"
+
+$C ps                     # estado y healthy/unhealthy de los 7 servicios
+$C logs --tail=100 backend
+$C logs --tail=100 frontend
+$C logs --tail=100 cloudflared     # el túnel: conexiones al edge, errores de origen
+$C logs -f worker                  # Celery, en vivo
+```
+
+### 7.4.3 Entrar a un contenedor o a la base de datos
+
+```bash
+$C exec backend bash                                  # shell en el backend
+$C exec backend python3 -c "print('hola')"            # one-liner
+$C exec postgres psql -U autohostai -d autohostai     # consola SQL
+$C exec redis redis-cli info clients
+```
+
+La base de datos **no** publica puerto ni en loopback, a propósito: no hay motivo para llegar a ella desde fuera del compose. Si necesitas un cliente gráfico, añade `-L 5432:localhost:5432` **y** publica temporalmente el puerto en el compose; recuerda revertirlo.
+
+### 7.4.4 ¿El problema es la app, el túnel o el edge?
+
+Este es el árbol de decisión. Compara lo que ves **por HTTPS público** con lo que ves **por el túnel SSH**:
+
+| Por HTTPS público | Por `localhost:3000` (SSH) | Diagnóstico |
+|---|---|---|
+| falla | **falla igual** | **es la app.** Mira los logs de `frontend`/`backend`; Cloudflare no tiene nada que ver |
+| falla | **funciona** | **es el túnel o el edge.** Sigue con 7.2 (`cloudflared tunnel ready`, logs de `cloudflared`) |
+| `530` / error 1033 | funciona | el túnel **no tiene conector**: `cloudflared` está caído o sin token válido → `$C ps`, `$C logs cloudflared` |
+| `502` | funciona | el túnel está arriba pero el origen no responde: revisa `$C ps` del `frontend` |
+| `404` en vez de la app | funciona | el hostname no casa la regla de ingress y cae en la catch-all → revisa `PUBLIC_HOSTNAME` vs. el `_config` del túnel en Terraform |
+| funciona | falla | raro: cachéo del edge sirviendo una versión anterior, o el frontend responde a `cloudflared` pero no a loopback |
+
+### 7.4.5 Si nada responde y hay que entrar a la fuerza
+
+SSH es la red de seguridad y **nunca se cierra**. Si tampoco entra por SSH:
+
+1. Tu IP pública ha cambiado y ya no está en `allowed_ssh_cidrs` → actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev`.
+2. Si eso no fuera posible, queda la **consola serie de OCI** (Compute → Instance → Console connection), que no depende de la red de la VM.
 

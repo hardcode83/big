@@ -55,7 +55,7 @@ R4.4 prohíbe cerrar puertos sin esta evidencia registrada. Nada de la sección 
 ## 6. Cierre del acceso HTTP directo (fase B)
 
 - [x] 6.1 Reducir `local.ingress_ports` a `[22]` en `infra/environments/dev/main.tf`, manteniendo el 22 acotado a `var.allowed_ssh_cidrs` con su validación de prefijo `>= /24` intacta y sin introducir ninguna regla con origen `0.0.0.0/0`. Aplicar y confirmar en el log que solo desaparecen reglas de 8000/3000. [R4.1, R4.2] **Aplicado en código 2026-07-29**; el `apply` real cierra la tarea.
-- [x] 6.2 Quitar las secciones `ports` de `backend` y `frontend` en `docker-compose.deploy.yml`, de modo que solo sean alcanzables por la red interna del compose. [R4.3] **Aplicado en código 2026-07-29**; el deploy real cierra la tarea.
+- [x] 6.2 Acotar los `ports` de `backend` y `frontend` a **`127.0.0.1`** en `docker-compose.deploy.yml` (no suprimirlos): dejan de ser alcanzables desde internet y desde la VCN, pero un operador con SSH puede depurar con `ssh -L` (design D11, R4.3 enmendado). [R4.3] **Aplicado en código 2026-07-29**; el deploy real cierra la tarea.
 - [ ] 6.3 Confirmar tras el deploy que `https://autohostai.digitalsec.work` sigue sirviendo la app y que `curl` directo a la IP pública en 3000 y 8000 **ya no conecta**. [R4.1, R4.3]
 - [ ] 6.4 Confirmar que el acceso SSH a la VM sigue funcionando desde un CIDR autorizado (la red de seguridad no debe haberse roto). [R4.2]
 
@@ -72,7 +72,7 @@ R4.4 prohíbe cerrar puertos sin esta evidencia registrada. Nada de la sección 
 
 - [x] 8.1 `cd infra/environments/dev && terraform fmt -check -diff` sin diferencias. [R1]
 - [x] 8.2 `cd infra/environments/dev && terraform init -backend=false -input=false && terraform validate` sin errores — son los comandos exactos del job `check` de `infra-dev.yml`. [R1]
-- [x] 8.3 `docker compose -f docker-compose.deploy.yml config` valida sin errores y muestra `cloudflared` sin `ports` publicados, ni `backend`/`frontend` con ellos. [R2.3, R4.3] **Verificado 2026-07-29**: `docker compose config` valida y ningún servicio publica puertos (`cloudflared`, `backend` y `frontend` incluidos).
+- [x] 8.3 `docker compose -f docker-compose.deploy.yml config` valida sin errores, `cloudflared` sin `ports`, y `backend`/`frontend` publicando **solo en `127.0.0.1`**. [R2.3, R4.3] **Verificado 2026-07-29**: `host_ip = 127.0.0.1` en ambos; ningún puerto en interfaz externa.
 - [ ] 8.4 `terraform plan` final limpio (sin cambios pendientes) tras el último `apply`, y `oci_core_instance.dev` sin aparecer en ningún plan del change. [R1]
 - [x] 8.5 Confirmar con `git ls-files` y revisión del diff que no hay versionado ningún API token, secreto o token de túnel, ni el zone ID; y que `.terraform.lock.hcl` **sí** quedó versionado con el provider `cloudflare`. [R1.4, R5.6]
 - [ ] 8.6 Repasar los 6 requisitos del proposal uno por uno contra la implementación y dejar constancia de la evidencia de cada criterio, incluido R1.6 (ningún valor generado por Terraform copiado a mano del dashboard). [R1, R2, R3, R4, R5, R6]
