@@ -1,5 +1,6 @@
 import uuid
 from datetime import date, datetime, time, timezone
+from zoneinfo import ZoneInfo
 
 import pytest
 
@@ -92,7 +93,7 @@ def test_next_reservation_context(start, expected):
     assert ContextualStateResolver.after_incident_resolution(p, PropertyTransitionContext(reservations=(r,)), NOW) is expected
 
 
-def test_cleaning_completion_has_only_reservation_destinations():
+def test_cleaning_completion_has_only_approved_destinations():
     p = prop()
     assert ContextualStateResolver.after_cleaning_completion(p, PropertyTransitionContext(), NOW) is PropertyOperationalState.VACANT_READY
     r = reservation(p, date(2026, 1, 1), date(2026, 1, 2))
@@ -100,23 +101,32 @@ def test_cleaning_completion_has_only_reservation_destinations():
 
 
 @pytest.mark.parametrize(
-    "reservations,instant,expected",
+    "start,instant,expected",
     [
-        ((reservation(prop(), date(2026, 1, 1), date(2026, 1, 2)),), datetime(2026, 1, 1, 16, tzinfo=timezone.utc), PropertyOperationalState.OCCUPIED_ESTIMATED),
-        ((reservation(prop(), date(2026, 1, 2), date(2026, 1, 3)),), NOW, PropertyOperationalState.READY_FOR_NEXT_GUEST),
-        ((), NOW, PropertyOperationalState.VACANT_READY),
+        (date(2026, 1, 1), NOW, PropertyOperationalState.AWAITING_CHECKIN),
+        (date(2026, 1, 2), NOW, PropertyOperationalState.READY_FOR_NEXT_GUEST),
+        (None, NOW, PropertyOperationalState.VACANT_READY),
     ],
 )
-def test_cleaning_completion_contextual_destinations(reservations, instant, expected):
-    if reservations:
-        # Rebind the generated reservation to one shared property for scope validity.
-        p = prop()
-        source = reservation(p, reservations[0].check_in_date, reservations[0].check_out_date)
-        context = PropertyTransitionContext(reservations=(source,))
-    else:
-        p = prop()
-        context = PropertyTransitionContext()
+def test_cleaning_completion_contextual_destinations(start, instant, expected):
+    p = prop()
+    context = (
+        PropertyTransitionContext(reservations=(reservation(p, start, start.replace(day=start.day + 1)),))
+        if start is not None
+        else PropertyTransitionContext()
+    )
     assert ContextualStateResolver.after_cleaning_completion(p, context, instant) is expected
+
+
+def test_cleaning_completion_rejects_an_active_reservation():
+    p = prop()
+    active = reservation(p, date(2026, 1, 1), date(2026, 1, 2))
+    with pytest.raises(IncompatibleTransitionContextError, match="active reservation"):
+        ContextualStateResolver.after_cleaning_completion(
+            p,
+            PropertyTransitionContext(reservations=(active,)),
+            datetime(2026, 1, 1, 16, tzinfo=timezone.utc),
+        )
 
 
 def test_reservation_overrides_and_property_defaults_are_used():
@@ -126,12 +136,73 @@ def test_reservation_overrides_and_property_defaults_are_used():
     assert ContextualStateResolver.after_incident_resolution(p, PropertyTransitionContext(reservations=(r,)), datetime(2026, 1, 1, 16, tzinfo=timezone.utc)) is PropertyOperationalState.OCCUPIED_ESTIMATED
 
 
-def test_timezone_conversion_and_dst_edge_are_deterministic():
-    p = prop(tz="Europe/Madrid")
+def test_dst_spring_gap_is_rejected():
+    p = prop(tz="Europe/Madrid", check_in=time(2, 30))
     r = reservation(p, date(2026, 3, 29), date(2026, 3, 30))
+    with pytest.raises(IncompatibleTransitionContextError, match="does not exist"):
+        ContextualStateResolver.after_incident_resolution(
+            p,
+            PropertyTransitionContext(reservations=(r,)),
+            datetime(2026, 3, 29, 1, 30, tzinfo=timezone.utc),
+        )
+
+
+def test_dst_ambiguous_time_requires_explicit_property_zone():
+    p = prop(tz="Europe/Madrid", check_in=time(2, 30))
+    r = reservation(p, date(2026, 10, 25), date(2026, 10, 26))
+    with pytest.raises(IncompatibleTransitionContextError, match="ambiguous"):
+        ContextualStateResolver.after_incident_resolution(
+            p,
+            PropertyTransitionContext(reservations=(r,)),
+            datetime(2026, 10, 25, 1, 0, tzinfo=timezone.utc),
+        )
+
+
+@pytest.mark.parametrize(
+    "fold,expected_utc",
+    [
+        (0, datetime(2026, 10, 25, 0, 30, tzinfo=timezone.utc)),
+        (1, datetime(2026, 10, 25, 1, 30, tzinfo=timezone.utc)),
+    ],
+)
+def test_dst_ambiguous_fold_selects_each_occurrence(fold, expected_utc):
+    zone = ZoneInfo("Europe/Madrid")
+    p = prop(tz=zone.key, check_in=time(2, 30, tzinfo=zone, fold=fold))
+    r = reservation(p, date(2026, 10, 25), date(2026, 10, 26))
+    start, _ = ContextualStateResolver._effective_bounds(p, r)
+    assert start.fold == fold
+    assert start.astimezone(timezone.utc) == expected_utc
+
+
+@pytest.mark.parametrize(
+    "fold,instant,expected",
+    [
+        (0, datetime(2026, 10, 25, 0, 45, tzinfo=timezone.utc), PropertyOperationalState.OCCUPIED_ESTIMATED),
+        (1, datetime(2026, 10, 25, 0, 45, tzinfo=timezone.utc), PropertyOperationalState.AWAITING_CHECKIN),
+        (1, datetime(2026, 10, 25, 1, 45, tzinfo=timezone.utc), PropertyOperationalState.OCCUPIED_ESTIMATED),
+    ],
+)
+def test_dst_fold_controls_the_effective_reservation_interval(fold, instant, expected):
+    zone = ZoneInfo("Europe/Madrid")
+    p = prop(tz=zone.key, check_in=time(2, 30, tzinfo=zone, fold=fold))
+    r = reservation(p, date(2026, 10, 25), date(2026, 10, 26))
+    assert (
+        ContextualStateResolver.after_incident_resolution(
+            p,
+            PropertyTransitionContext(reservations=(r,)),
+            instant,
+        )
+        is expected
+    )
+
+
+def test_normal_local_time_and_repeated_resolution_are_deterministic():
+    p = prop(tz="Europe/Madrid", check_in=time(15))
+    r = reservation(p, date(2026, 3, 29), date(2026, 3, 30))
+    context = PropertyTransitionContext(reservations=(r,))
     instant = datetime(2026, 3, 29, 13, 0, tzinfo=timezone.utc)
-    first = ContextualStateResolver.after_incident_resolution(p, PropertyTransitionContext(reservations=(r,)), instant)
-    second = ContextualStateResolver.after_incident_resolution(p, PropertyTransitionContext(reservations=(r,)), instant)
+    first = ContextualStateResolver.after_incident_resolution(p, context, instant)
+    second = ContextualStateResolver.after_incident_resolution(p, context, instant)
     assert first is second is PropertyOperationalState.OCCUPIED_ESTIMATED
 
 
@@ -161,12 +232,27 @@ def test_cross_tenant_and_cross_property_entities_are_rejected():
         ContextualStateResolver.after_incident_resolution(p, PropertyTransitionContext(reservations=(other_property,)), NOW)
 
 
-@pytest.mark.parametrize("target,valid", [(PropertyOperationalState.VACANT_READY, True), (PropertyOperationalState.AWAITING_CHECKIN, False), (PropertyOperationalState.OCCUPIED_ESTIMATED, False)])
-def test_explicit_target_is_validated_against_context(target, valid):
+@pytest.mark.parametrize(
+    "target,context_factory,instant",
+    [
+        (PropertyOperationalState.CRITICAL_INCIDENT, lambda p: PropertyTransitionContext(incidents=(incident(p, IncidentSeverity.CRITICAL),)), NOW),
+        (PropertyOperationalState.MAINTENANCE_REQUIRED, lambda p: PropertyTransitionContext(incidents=(incident(p, IncidentSeverity.HIGH),)), NOW),
+        (PropertyOperationalState.CLEANING_IN_PROGRESS, lambda p: PropertyTransitionContext(cleaning_tasks=(cleaning(p, CleaningTaskStatus.IN_PROGRESS),)), NOW),
+        (PropertyOperationalState.AWAITING_CLEANING, lambda p: PropertyTransitionContext(cleaning_tasks=(cleaning(p, CleaningTaskStatus.CREATED),)), NOW),
+        (PropertyOperationalState.OCCUPIED_ESTIMATED, lambda p: PropertyTransitionContext(reservations=(reservation(p),)), datetime(2026, 1, 1, 16, tzinfo=timezone.utc)),
+        (PropertyOperationalState.AWAITING_CHECKIN, lambda p: PropertyTransitionContext(reservations=(reservation(p),)), NOW),
+        (PropertyOperationalState.READY_FOR_NEXT_GUEST, lambda p: PropertyTransitionContext(reservations=(reservation(p, date(2026, 1, 2), date(2026, 1, 3)),)), NOW),
+        (PropertyOperationalState.VACANT_READY, lambda p: PropertyTransitionContext(), NOW),
+    ],
+)
+def test_every_contextual_explicit_target_accepts_only_the_derived_state(target, context_factory, instant):
     p = prop()
-    context = PropertyTransitionContext()
-    if valid:
-        ContextualStateResolver.validate_explicit_target(target, p, context, NOW)
-    else:
-        with pytest.raises(IncompatibleTransitionContextError):
-            ContextualStateResolver.validate_explicit_target(target, p, context, NOW)
+    context = context_factory(p)
+    ContextualStateResolver.validate_explicit_target(target, p, context, instant)
+    other_target = next(
+        candidate
+        for candidate in ContextualStateResolver.CONTEXTUAL_STATES
+        if candidate is not target
+    )
+    with pytest.raises(IncompatibleTransitionContextError):
+        ContextualStateResolver.validate_explicit_target(other_target, p, context, instant)

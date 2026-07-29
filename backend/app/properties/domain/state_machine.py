@@ -1,3 +1,5 @@
+from datetime import timezone
+
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.properties.domain.entities import PropertyStateTransition
@@ -48,11 +50,15 @@ class PropertyStateMachine:
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.OWNER_BLOCKED): {PropertyOperationalState.BLOCKED_BY_OWNER},
-        (PropertyOperationalState.MAINTENANCE_REQUIRED, PropertyStateTrigger.INCIDENT_RESOLVED): {s for s in PropertyOperationalState},
+        (PropertyOperationalState.MAINTENANCE_REQUIRED, PropertyStateTrigger.INCIDENT_RESOLVED): (
+            set(ContextualStateResolver.CONTEXTUAL_STATES) - {PropertyOperationalState.MAINTENANCE_REQUIRED}
+        ),
         (PropertyOperationalState.MAINTENANCE_REQUIRED, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
         (PropertyOperationalState.MAINTENANCE_REQUIRED, PropertyStateTrigger.OWNER_BLOCKED): {PropertyOperationalState.BLOCKED_BY_OWNER},
         (PropertyOperationalState.CRITICAL_INCIDENT, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
-        (PropertyOperationalState.CRITICAL_INCIDENT, PropertyStateTrigger.INCIDENT_RESOLVED): {s for s in PropertyOperationalState},
+        (PropertyOperationalState.CRITICAL_INCIDENT, PropertyStateTrigger.INCIDENT_RESOLVED): (
+            set(ContextualStateResolver.CONTEXTUAL_STATES) - {PropertyOperationalState.CRITICAL_INCIDENT}
+        ),
         (PropertyOperationalState.CRITICAL_INCIDENT, PropertyStateTrigger.OWNER_BLOCKED): {PropertyOperationalState.BLOCKED_BY_OWNER},
         (PropertyOperationalState.BLOCKED_BY_OWNER, PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED): {
             state for state in PropertyOperationalState if state is not PropertyOperationalState.BLOCKED_BY_OWNER
@@ -165,6 +171,15 @@ class PropertyStateMachine:
             return ContextualStateResolver.after_cleaning_completion(request.property, request.context, request.reference_instant)
         if trigger is PropertyStateTrigger.INCIDENT_RESOLVED:
             return ContextualStateResolver.after_incident_resolution(request.property, request.context, request.reference_instant)
+        if (
+            trigger is PropertyStateTrigger.INCIDENT_HIGH
+            and request.property.current_operational_state is PropertyOperationalState.CRITICAL_INCIDENT
+        ):
+            return ContextualStateResolver.after_incident_resolution(
+                request.property,
+                request.context,
+                request.reference_instant,
+            )
         if trigger is PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED:
             if request.requested_state is None:
                 return ContextualStateResolver.after_incident_resolution(request.property, request.context, request.reference_instant)
@@ -188,13 +203,16 @@ class PropertyStateMachine:
             reservation = cls._source_reservation(request)
             start, end = ContextualStateResolver._effective_bounds(request.property, reservation)
             instant = request.reference_instant.astimezone(ContextualStateResolver._zone(request.property))
+            utc_instant = request.reference_instant.astimezone(timezone.utc)
+            utc_start = start.astimezone(timezone.utc)
+            utc_end = end.astimezone(timezone.utc)
             if trigger is PropertyStateTrigger.CHECKIN_WINDOW_OPENED and (reservation.status is not ReservationStatus.CONFIRMED or start.date() != instant.date()):
                 raise IncompatibleTransitionContextError("Check-in window requires a CONFIRMED reservation entering today")
-            if trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED and (reservation.status not in (ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN_ESTIMATED) or instant < start or instant >= end):
+            if trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED and (reservation.status not in (ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN_ESTIMATED) or utc_instant < utc_start or utc_instant >= utc_end):
                 raise IncompatibleTransitionContextError("Check-in time requires an active reservation at or after effective check-in")
-            if trigger is PropertyStateTrigger.CHECKOUT_TIME_REACHED and (reservation.status not in (ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN_ESTIMATED) or instant < end):
+            if trigger is PropertyStateTrigger.CHECKOUT_TIME_REACHED and (reservation.status not in (ReservationStatus.CONFIRMED, ReservationStatus.CHECKED_IN_ESTIMATED) or utc_instant < utc_end):
                 raise IncompatibleTransitionContextError("Checkout time requires an eligible reservation at or after effective checkout")
-            if trigger is PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN and (reservation.status is not ReservationStatus.CANCELLED or instant >= start):
+            if trigger is PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN and (reservation.status is not ReservationStatus.CANCELLED or utc_instant >= utc_start):
                 raise IncompatibleTransitionContextError("Cancellation must precede effective check-in")
         if trigger in (PropertyStateTrigger.CLEANER_ASSIGNED, PropertyStateTrigger.CLEANER_REJECTED, PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED, PropertyStateTrigger.CLEANING_STARTED, PropertyStateTrigger.CLEANING_COMPLETED):
             task = cls._source_cleaning(request)

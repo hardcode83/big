@@ -354,7 +354,8 @@ Section dependency: sections 1–6.
   `backend/alembic/` — command:
   `git diff --exit-code -- backend/app/properties/domain/entities.py backend/app/properties/domain/enums.py backend/app/timeline/domain/entities.py backend/app/timeline/domain/enums.py backend/app/reservations/domain/entities.py backend/app/reservations/domain/enums.py backend/app/cleaning/domain/entities.py backend/app/cleaning/domain/enums.py backend/app/maintenance/domain/entities.py backend/app/maintenance/domain/enums.py backend/app/properties/infrastructure backend/app/timeline/infrastructure backend/app/reservations/infrastructure backend/app/cleaning/infrastructure backend/app/maintenance/infrastructure backend/alembic`
   [R1, R7]
-- [x] 7.6 Review the implementation diff and confirm it contains only the eight
+- [x] 7.6 Review the original implementation diff, before section 8 remediation,
+  and confirm it contains only the eight
   approved new domain modules and four approved unit-test files, with no
   application, API, repository, persistence, job, RBAC, AuditLog, seed, frontend,
   infrastructure, documentation, live-spec, Proposal, or Design changes — files
@@ -370,3 +371,38 @@ Section dependency: sections 1–6.
   complete — files verified: all files changed by this implementation — command:
   `git diff --check`
   [R1, R2, R3, R4, R5, R6, R7]
+
+## 8. Blocking review remediation
+
+Section dependency: section 7 and the technical audit of PR #18.
+
+- [x] 8.1 Validate every contextual unblock destination against the single
+  precedence resolver, with positive and negative regression cases — files:
+  `backend/app/properties/domain/state_resolution.py`,
+  `backend/tests/properties/test_state_resolution.py`,
+  `backend/tests/properties/test_state_machine.py` — [R2, R4, R5, R7]
+- [x] 8.2 Resolve `CRITICAL_INCIDENT + INCIDENT_HIGH` from the complete active
+  incident context and verify remaining-CRITICAL, only-HIGH and no-op cases — files:
+  `backend/app/properties/domain/state_machine.py`,
+  `backend/tests/properties/test_state_machine.py` — [R3, R4, R7]
+- [x] 8.3 Reject cleaning completion with an already active reservation and prove
+  all three PRD §8.1 destinations remain executable — files:
+  `backend/app/properties/domain/state_resolution.py`,
+  `backend/tests/properties/test_state_resolution.py`,
+  `backend/tests/properties/test_state_machine.py` — [R2, R3, R7]
+- [x] 8.4 Enforce runtime timeline input types and stable domain errors for generic
+  and specialized factory paths, including every actor mapping — files:
+  `backend/app/timeline/domain/services.py`,
+  `backend/tests/timeline/test_event_factory.py` — [R6, R7]
+- [x] 8.5 Implement and verify the documented `zoneinfo` gap/fold policy with real
+  `Europe/Madrid` transitions — files:
+  `backend/app/properties/domain/state_resolution.py`,
+  `backend/tests/properties/test_state_resolution.py`,
+  `sdd/changes/timeline-state-machine/design.md` — [R2, R4, R7]
+- [x] 8.6 Classify all 66 original policy candidates, execute every valid relation,
+  add independent determinism variations, and prove branch coverage ≥80 % with the
+  declared dev dependency — files:
+  `backend/pyproject.toml`, `backend/uv.lock`,
+  `backend/tests/properties/test_state_machine.py`,
+  `backend/tests/properties/test_transition_result.py`,
+  `sdd/changes/timeline-state-machine/design.md` — [R2, R6, R7]

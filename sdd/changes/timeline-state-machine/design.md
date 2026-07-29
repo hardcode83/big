@@ -97,6 +97,10 @@ horas efectivas se calculan de forma pura usando `Property.timezone`, los defaul
 la propiedad y los overrides de la reserva; no se consulta un reloj global. Los UUID
 de evidencia se reciben como entrada para evitar aleatoriedad interna y conservar el
 determinismo incluso cuando no existe identificador de correlación.
+Los value objects validan también sus tipos en runtime: UUIDs, `datetime`, actor,
+contexto, tuplas de entidades y strings opcionales inválidos producen
+`InvalidTransitionInputError` en el límite público, antes de que un acceso a
+atributos pueda filtrar `AttributeError` o de que el timeline reclasifique el fallo.
 
 Rejected: leer reservas o incidencias mediante repositorios — está fuera de alcance
 y acoplaría el dominio a puertos innecesarios. Rejected: generar UUID con `uuid4()` o
@@ -163,6 +167,14 @@ contextual devuelve el estado actual, no existe transición operacional: se devu
 workflow propietario podrá registrar su propio evento (por ejemplo,
 `INCIDENT_RESOLVED`) mediante las reglas comunes del timeline.
 
+La policy enumera únicamente destinos ejecutables. En particular, las entradas
+contextuales de `INCIDENT_RESOLVED` contienen los ocho estados que puede producir el
+resolver, excluyendo el estado origen porque sería un no-op. No incluyen
+`BLOCKED_BY_OWNER`, `OUT_OF_SERVICE` ni `CLEANING_SCHEDULED`, que no se derivan de la
+precedencia contextual. La matriz amplia anterior producía 66 candidatos, pero ocho
+eran esos no-ops o estados no contextuales; la matriz ejecutable contiene 58
+relaciones válidas y los ocho candidatos excluidos se prueban como no-transiciones.
+
 Rejected: un grafo genérico configurable — añade abstracción sin requisito y oculta
 condiciones de negocio. Rejected: un `if/elif` independiente en cada módulo consumidor
 — crearía autoridades alternativas.
@@ -197,13 +209,26 @@ intervalo semiabierto `[effective_check_in, effective_check_out)`: en
 estarlo. Para limpieza completada se reutiliza el tramo de reservas de la misma
 política, sin la precedencia de incidencias, porque el mapa de PRD §8.1 limita sus
 tres destinos a `READY_FOR_NEXT_GUEST`, `AWAITING_CHECKIN` y `VACANT_READY`.
+Una reserva ya activa al completarse la limpieza es contexto incompatible: aceptar
+`OCCUPIED_ESTIMATED` ampliaría la matriz contra PRD §8.1, mientras que seleccionar
+silenciosamente uno de los tres destinos aprobados ocultaría una combinación
+operacional imposible.
+
+Los horarios locales se materializan de forma conservadora con `zoneinfo`. Una hora
+inexistente durante el salto de primavera se rechaza. Una hora repetida durante el
+salto de otoño solo se acepta si el `time` aporta la `ZoneInfo` de la propiedad y el
+`fold` que selecciona la primera (`0`) o segunda (`1`) ocurrencia; no se normaliza ni
+se elige una ocurrencia silenciosamente. Las horas no ambiguas pueden seguir siendo
+naive porque la zona canónica procede de `Property.timezone`.
 
 El resolver rechaza contexto que no permita una única respuesta: entidades de otro
 tenant o propiedad, fechas sin zona cuando sean necesarias, reservas activas
 solapadas o datos temporales incompletos para decidir una condición aplicable. No
 selecciona silenciosamente por orden de lista. Para desbloqueo, valida el destino
 explícito contra estas mismas condiciones cuando el estado es contextual; los
-estados manuales se validan por su regla manual.
+estados manuales se validan por su regla manual. `CLEANING_SCHEDULED` no es un estado
+manual: al desbloquear solo es compatible si la precedencia no exige un estado de
+incidencia y existe exactamente una tarea `ASSIGNED` o `ACCEPTED`.
 
 Rejected: restaurar el estado anterior desde `PropertyStateTransition` — contradice
 la decisión aprobada para `BLOCKED_BY_OWNER` y puede restaurar información obsoleta.
@@ -278,6 +303,13 @@ deduplicación siguen fuera de este change.
 dominio. El factory valida campos comunes, copia metadata, exige instante con zona y
 construye un `TimelineEvent` completo. Expone una operación general para los módulos
 futuros y una operación `property_state_changed` usada por la state machine.
+
+La validación runtime exige UUID reales para identificadores obligatorios y
+opcionales, enums de dominio reales para actor, tipo y severidad, campos obligatorios
+con su tipo correcto y coherencia actor/user. El factory especializado valida además
+transición, trigger y mapping de actor antes de acceder a `.value` o a diccionarios;
+toda entrada inválida se expresa como `TimelineEventValidationError`, nunca como
+`KeyError`, `ValueError` o `AttributeError`.
 
 Esto satisface R6.6 sin implementar workflows ajenos: reservas, limpieza o
 mantenimiento podrán construir sus eventos con las mismas reglas de dominio, pero
@@ -370,6 +402,15 @@ La suite cubrirá:
 
 La cobertura objetivo para estos servicios de dominio será al menos 80 %, con
 cobertura explícita del 100 % de flechas válidas e inválidas exigida por PRD §28.19.
+El oracle esperado se declara independientemente de `_POLICY`; además de ejecutar
+cada relación válida, los tests invocan `evaluate()` para todo destino no permitido
+dentro de pares estado/disparador declarados y para los ocho candidatos retirados.
+Se mide de forma reproducible con `pytest-cov`, declarado en el grupo `dev`, sobre
+`app.properties.domain.state_machine`, `app.properties.domain.state_resolution`,
+`app.properties.domain.value_objects`, `app.timeline.domain.services` y
+`app.timeline.domain.value_objects`, usando
+`COVERAGE_FILE=/tmp/autohostai-timeline-state-machine.coverage` y
+`--cov-branch --cov-report=term-missing --cov-fail-under=80`.
 
 Rejected: tests de integración con PostgreSQL — este change no toca persistencia.
 Rejected: mockear la state machine o el resolver — son las unidades reales que se
