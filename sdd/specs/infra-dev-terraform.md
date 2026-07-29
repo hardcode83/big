@@ -9,7 +9,7 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 ### Red y cómputo (`infra/environments/dev/main.tf`)
 
 - THE SYSTEM SHALL aprovisionar una VCN (`10.0.0.0/16`) con una subred pública (`10.0.1.0/24`), internet gateway y route table.
-- THE SYSTEM SHALL acotar el security list de la subred a los puertos 22 (SSH), 8000 (backend) y 3000 (frontend) — los que publica `docker-compose.yml` — **todos restringidos a `var.allowed_ssh_cidrs`** (ningún `0.0.0.0/0` de entrada), generando una regla por (CIDR × puerto) con un bloque `dynamic`.
+- THE SYSTEM SHALL acotar el security list de la subred a **un único puerto de entrada, el 22 (SSH)**, restringido a `var.allowed_ssh_cidrs` (ningún `0.0.0.0/0` de entrada), generando una regla por (CIDR × puerto) con un bloque `dynamic`. Los puertos 8000 y 3000 se retiraron en `ingress-https-dev`: la aplicación se sirve por Cloudflare Tunnel mediante una conexión saliente, así que no necesita exposición entrante. Ver spec `ingress-https-dev`.
 - THE SYSTEM SHALL aprovisionar una única instancia `VM.Standard.A1.Flex` (4 OCPU/24 GB, boot volume 200 GB, dentro del grant Always Free que la tenancy PAYG conserva a $0), fijada en AD-3 vía `var.ad_number` (default 3), con imagen Ubuntu 22.04 ARM64 resuelta vía `data.oci_core_images` — nunca un OCID hardcodeado.
 - THE SYSTEM SHALL inyectar por `cloud-init` las claves de `var.ssh_authorized_keys` (`list(string)`) al usuario `ubuntu`, e instalar Docker + Compose vía el **repositorio APT oficial de Docker** (`docker-ce`, `docker-compose-plugin`, arm64) — nunca `docker-compose-plugin` de los repos por defecto de Ubuntu (no existe ahí).
 - THE SYSTEM SHALL declarar `lifecycle { ignore_changes = [metadata] }` en la instancia: el `metadata` (user_data/claves) es ForceNew en el provider `oci`, así que cambiarlo recrearía la VM; la lista de claves y el cloud-init definen el arranque de una VM nueva, y las altas/rotaciones de clave sobre la VM viva se hacen out-of-band por SSH (ver `RUNBOOK.md`).
@@ -39,8 +39,14 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 - WHEN se abre/actualiza un PR que toca `infra/environments/dev/**`, THE SYSTEM SHALL ejecutar el job `check` (`terraform fmt -check`, `init -backend=false`, `validate`) sin ningún secret.
 - THE SYSTEM SHALL exponer un único camino a recursos reales: `workflow_dispatch` con input `action` (`plan`|`apply`), en dos jobs — `plan` (init→validate→plan, para revisión por logs) y `apply` (re-planifica y aplica en el mismo job). El `plan` **no** usa `-out` ni sube el `tfplan` como artifact: desde `app-deploy-dev` el plan contiene secrets (clave de la App + secrets generados) y un artifact es descargable por cualquiera con read del repo.
-- THE SYSTEM SHALL ejecutar el job `apply` **solo desde `main`** (`if: github.ref == 'refs/heads/main'`), con `concurrency` (serializa applies sobre el mismo state) y `timeout-minutes`; todas las GitHub Actions fijadas por **SHA de commit**.
+- THE SYSTEM SHALL ejecutar los jobs `plan` **y** `apply` **solo desde `main`** (`if: github.ref == 'refs/heads/main'`), con `concurrency` (serializa applies sobre el mismo state) y `timeout-minutes`; todas las GitHub Actions fijadas por **SHA de commit**. El gating de `plan` se añadió en `ingress-https-dev`: desde ese change el job recibe un API token con control del DNS y del TLS de toda una zona, y `sensitive = true` no impide desredactarlo desde código de una rama no revisada. Consecuencia operativa: no se puede planificar desde una rama de feature, así que el `plan`/`apply` de un change de infra ocurre tras el merge.
 - El gate de aprobación es **convención** (review de PR + `apply` manual desde `main`): en repo privado + plan Free NO hay Environments con required reviewers ni branch protection/rulesets (la API devuelve 403). Lo forzado técnicamente es que el `apply` solo corre contra `main`; el "PR revisado antes de merge" es un modelo de confianza de operadores. Enforcement real requeriría GitHub Pro/Team o repo público.
+
+### Provider de Cloudflare (desde `ingress-https-dev`)
+
+- THE SYSTEM SHALL declarar el provider `cloudflare` en el **mismo root module** que `oci`, porque el `oci_vault_secret` del token del túnel depende de atributos de recursos Cloudflare y ambos deben resolverse en un solo `apply`.
+- El comportamiento de los recursos de Cloudflare (túnel, routing, CNAME, ajuste de zona) y sus variables se especifica en `ingress-https-dev`.
+- El **API token de Cloudflare** es bootstrap irreducible (se acuña en el dashboard) y **no** se copia al Vault, a diferencia de la clave de la GitHub App: su radio abarca toda la zona y es re-emitible en segundos.
 
 ### Build multi-arch (`.github/workflows/multiarch-build-check.yml`)
 
@@ -56,5 +62,6 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 ## Estado y pendientes
 
-- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), security list acotado por CIDR, Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault.
-- El **despliegue de la aplicación** ya está resuelto por el change **`app-deploy-dev`** (build → GHCR → deploy local en el runner self-hosted); ver su spec. El repo vive en la org **`autohostai-labs`**.
+- Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**.
+- El **despliegue de la aplicación** ya está resuelto por el change **`app-deploy-dev`** (build → GHCR → deploy local en el runner self-hosted) y su **acceso público** por **`ingress-https-dev`** (Cloudflare Tunnel); ver sus specs. El repo vive en la org **`autohostai-labs`**.
+- **Pendiente en `ingress-https-hardening`**: acotar el statement de lectura de metadatos de secretos de la policy del runner, que quedó sin condición.

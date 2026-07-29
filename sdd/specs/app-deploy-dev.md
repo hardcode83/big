@@ -17,8 +17,9 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 ### Compose de deploy (`docker-compose.deploy.yml`)
 
 - THE SYSTEM SHALL declarar `backend`/`worker`/`frontend` con `image:` de GHCR pineada por `${IMAGE_TAG}` (sin sección `build`, sin bind-mounts de código) y mantener `postgres:16`/`redis:7` con volúmenes nombrados persistentes.
+- THE SYSTEM SHALL declarar además el servicio `cloudflared` que da el ingress HTTPS público, con imagen pineada por dígest y sin puertos publicados — su comportamiento se especifica en `ingress-https-dev`.
 - THE SYSTEM SHALL aplicar migraciones Alembic como paso one-shot (`migrate`, imagen `prod` del backend, `alembic upgrade head`) antes de arrancar backend/worker.
-- THE SYSTEM SHALL publicar únicamente los puertos 8000 (backend) y 3000 (frontend) — los abiertos en el security list; postgres/redis no publican puerto.
+- THE SYSTEM SHALL NOT publicar ningún puerto en una interfaz externa de la VM. `backend` y `frontend` publican **solo en `127.0.0.1`** (8000 y 3000) como puerta de depuración alcanzable por reenvío SSH; `postgres`, `redis` y `cloudflared` no publican puerto alguno. El acceso público llega exclusivamente por el túnel (ver `ingress-https-dev`).
 - THE SYSTEM SHALL fijar `HOSTNAME=0.0.0.0` en el frontend (Next standalone usa `$HOSTNAME` como dirección de bind) para que escuche en todas las interfaces.
 - THE SYSTEM SHALL declarar healthchecks para backend (`/health`), frontend (`127.0.0.1:3000`) y worker (`celery inspect ping`).
 
@@ -26,7 +27,7 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 
 - WHEN las imágenes se han publicado con éxito para un commit de `main`, THE SYSTEM SHALL ejecutar el deploy en un runner self-hosted en la VM (`runs-on: [self-hosted, dev]`), solo desde `main`, con `concurrency` (un deploy a la vez) y `timeout-minutes`.
 - THE SYSTEM SHALL autenticar el pull de GHCR con el **`GITHUB_TOKEN`** del job (`packages: read`) — no con la GitHub App — y hacer `docker logout` al terminar.
-- THE SYSTEM SHALL renderizar el `.env` de runtime **leyendo los secrets del OCI Vault** (por instance principal, `secret-bundle get` por OCID) con `chmod 600`, y fallar el deploy nombrando la clave si alguna no se puede leer, antes de tocar contenedores.
+- THE SYSTEM SHALL renderizar el `.env` de runtime **leyendo los secrets del OCI Vault** por instance principal con `chmod 600`, y fallar el deploy nombrando la clave si alguna no se puede leer, antes de tocar contenedores. Los secrets aprovisionados con la VM se leen por OCID (`secret-bundle get`, con los OCID en `/etc/autohostai-deploy.env`); los añadidos después —hoy el token del túnel— **por nombre** (`get-secret-bundle-by-name`), porque `cloud-init` no puede reescribir ese fichero en la máquina viva.
 - WHEN termina `docker compose up -d --wait`, THE SYSTEM SHALL considerar el deploy exitoso solo si todos los servicios quedan `healthy` dentro del timeout; IF alguno no lo alcanza, THEN THE SYSTEM SHALL fallar el job y volcar `docker compose logs`.
 - THE SYSTEM SHALL preservar los volúmenes de `postgres`/`redis` entre deploys.
 
@@ -47,4 +48,8 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 
 ## Estado
 
-Desplegado y verificado end-to-end (deploy verde, todos los servicios `healthy`, 2026-07-29). El repo vive en la org `autohostai-labs`. Pendiente/futuro: TLS/HTTPS (hoy HTTP plano en 8000/3000), y adoptar el provider `github` de Terraform para gestionar la parte GitHub-side como código (ver `steering/infra.md`).
+Desplegado y verificado end-to-end (deploy verde, todos los servicios `healthy`, 2026-07-29). El repo vive en la org `autohostai-labs`.
+
+El **TLS/HTTPS ya está resuelto** por el change `ingress-https-dev`: la app se sirve en `https://autohostai.digitalsec.work` a través de un Cloudflare Tunnel y los puertos 8000/3000 dejaron de estar expuestos. Ver su spec.
+
+Pendiente/futuro: adoptar el provider `github` de Terraform para gestionar la parte GitHub-side como código (ver `steering/infra.md`).
