@@ -78,7 +78,8 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
     permissions:
-      contents: read # solo checkout; el deploy es local en la VM, no toca la API de GitHub
+      contents: read # checkout
+      packages: read # pull de las imágenes privadas de GHCR con el GITHUB_TOKEN del job
     timeout-minutes: 15
     concurrency:
       group: deploy-dev
@@ -113,17 +114,14 @@ jobs:
           } > .env
           chmod 600 .env
 
-      - name: Login GHCR (token minteado por la GitHub App, read-only) [R3]
-        run: |
-          set -euo pipefail
-          source /etc/autohostai-deploy.env
-          INSTALL_TOKEN="$(oci --auth instance_principal secrets secret-bundle get \
-            --secret-id "$APP_KEY_SECRET_OCID" --query 'data."secret-bundle-content".content' --raw-output \
-            | base64 -d \
-            | GITHUB_APP_ID="$GITHUB_APP_ID" GITHUB_APP_INSTALLATION_ID="$GITHUB_APP_INSTALLATION_ID" \
-              python3 /opt/gh-app-install-token.py)"
-          printf '%s' "$INSTALL_TOKEN" | docker login ghcr.io -u x-access-token --password-stdin
-          unset INSTALL_TOKEN
+      - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
+        # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
+        # el "Manage Actions access" del package (repo AutoHostAI). Un token de GitHub App NO lo está
+        # (no es "Actions del repo" ni miembro), por eso el pull daba 403. La App solo registra el
+        # runner (bootstrap), no hace pull de GHCR.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
 
       - name: Deploy — pull + up --wait [R3, R5]
         run: |

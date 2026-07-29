@@ -16,6 +16,12 @@ source /etc/autohostai-deploy.env # ENV, GITHUB_REPO, GITHUB_APP_ID, GITHUB_APP_
 RUNNER_HOME=/opt/actions-runner
 RUNNER_USER=ubuntu
 
+# El usuario del runner debe poder hablar con el socket de Docker (el deploy es `docker compose`
+# local). En una VM nueva el cloud-init ya hace este usermod antes de arrancar el runner; aquí lo
+# garantizamos también para el alta out-of-band / re-provisión (el servicio, al (re)arrancar más
+# abajo con svc.sh, hereda el grupo docker recién añadido).
+usermod -aG docker "$RUNNER_USER" || true
+
 # 1) Installation-token de la GitHub App (clave del Vault → helper), sin credenciales en disco.
 # GITHUB_APP_ID/INSTALLATION_ID se pasan explícitos al helper: `source` sin `export` no los
 # propaga al subproceso python (mismo patrón que el paso de deploy).
