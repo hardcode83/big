@@ -32,9 +32,12 @@ provider "cloudflare" {
 }
 
 locals {
-  # Puertos publicados por docker-compose.yml (8000 backend, 3000 frontend) + SSH (22),
-  # todos acotados a los CIDRs de operadores (ningún 0.0.0.0/0). Producto cartesiano CIDR × puerto.
-  ingress_ports = [22, 8000, 3000]
+  # SOLO SSH. Desde el change ingress-https-dev la app se sirve por Cloudflare Tunnel (conexión
+  # saliente de la VM al edge), así que 8000 y 3000 dejaron de necesitar exposición: se retiraron
+  # tras verificar que el túnel servía la app por HTTPS (R4.1, orden exigido por R4.4 — verificar y
+  # después cerrar, nunca al revés). El 22 se mantiene acotado a los CIDRs de operadores y es la
+  # única vía de entrada a la máquina; ningún 0.0.0.0/0. Producto cartesiano CIDR × puerto.
+  ingress_ports = [22]
   ingress_rules = flatten([
     for cidr in var.allowed_ssh_cidrs : [
       for port in local.ingress_ports : { cidr = cidr, port = port }

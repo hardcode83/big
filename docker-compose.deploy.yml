@@ -50,8 +50,9 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
-    ports:
-      - "8000:8000"
+    # Sin `ports`: desde ingress-https-dev el backend solo es alcanzable desde la red interna del
+    # compose. El frontend le habla por BACKEND_INTERNAL_URL (server-side) y el navegador nunca le
+    # llama directamente, así que no necesita exposición ninguna (R4.3).
     depends_on:
       postgres:
         condition: service_healthy
@@ -96,8 +97,9 @@ services:
       # todas las interfaces (healthcheck local + puerto publicado 3000).
       HOSTNAME: "0.0.0.0"
       PORT: "3000"
-    ports:
-      - "3000:3000"
+    # Sin `ports`: el único que llega al frontend es `cloudflared`, y lo hace por la red interna
+    # como `http://frontend:3000`. Publicar el puerto en el host sería una vía de entrada
+    # alternativa al túnel, justo lo que este change cierra (R4.3).
     depends_on:
       backend:
         condition: service_healthy
