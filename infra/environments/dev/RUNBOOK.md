@@ -159,17 +159,27 @@ Dos cosas no son codificables y se hacen en el dashboard de Cloudflare:
    |---|---|---|---|
    | Account | Cloudflare Tunnel | Edit | crear el túnel y su configuración de routing |
    | Zone | DNS | Edit | el CNAME al `<tunnel_id>.cfargotunnel.com` |
-   | Zone | Zone Settings | Edit | forzar HTTPS y TLS mínimo 1.2 |
+   | Zone | Zone Settings | Edit | forzar HTTPS (`always_use_https`) |
+
+   ⚠️ El **TLS mínimo de la zona sigue en 1.0** y este entorno **no** lo modifica: `digitalsec.work` aloja otros servicios y subirlo a 1.2 concentraría el riesgo sobre ellos sin aportar nada al ingress (decisión D7 del change `ingress-https-dev` / ADR 0003). No des por hecho un mínimo de TLS 1.2 en el hostname público.
 
    ⚠️ Busca **"Cloudflare Tunnel", no "Zero Trust"**: son grupos distintos en el selector, aunque el recurso de Terraform se llame `zero_trust_tunnel_cloudflared`. Acota **Zone Resources** a la zona concreta, no "All zones".
 
    Verificar antes de guardarlo, y subirlo (el valor se muestra una sola vez):
 
    ```bash
-   curl -s -H "Authorization: Bearer <TOKEN>" \
+   # Léelo SIN dejarlo en el historial del shell: -s no lo muestra al teclearlo, y al no ir
+   # como argumento no acaba en ~/.zsh_history. Es el secreto de mayor radio de este entorno
+   # (DNS y TLS de toda la zona), así que no lo pases nunca en la línea de comandos.
+   read -rs CF_TOKEN
+
+   curl -s -H "Authorization: Bearer $CF_TOKEN" \
      https://api.cloudflare.com/client/v4/user/tokens/verify | jq .success   # debe ser true
 
-   gh secret   set CLOUDFLARE_API_TOKEN   --repo autohostai-labs/AutoHostAI
+   gh secret set CLOUDFLARE_API_TOKEN --repo autohostai-labs/AutoHostAI <<<"$CF_TOKEN"
+   unset CF_TOKEN
+
+   # El zone ID también se pide por stdin (convención del equipo: se trata como sensible).
    gh secret   set CLOUDFLARE_ZONE_ID     --repo autohostai-labs/AutoHostAI
    gh variable set CLOUDFLARE_ACCOUNT_ID  --repo autohostai-labs/AutoHostAI
    gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.work'
@@ -251,11 +261,7 @@ ssh -i ~/.ssh/autohostai_dev_vm \
     ubuntu@"$(cd infra/environments/dev && terraform output -raw instance_public_ip)"
 ```
 
-O con la IP a pelo, si no tienes el repo a mano:
-
-```bash
-ssh -i ~/.ssh/autohostai_dev_vm -L 3000:localhost:3000 -L 8000:localhost:8000 ubuntu@79.76.101.10
-```
+Si no tienes el repo a mano, saca la IP de la consola de OCI (Compute → Instance → Public IP) o de un `ssh` previo. **No la anotamos aquí a propósito:** ocultar el enlace hostname→origen es una propiedad que este entorno gana con el túnel —`dig` del hostname solo devuelve IPs del edge de Cloudflare—, y committearla en el repo la revierte.
 
 **Cómo leer `-L 3000:localhost:3000`** — es `-L <puerto_en_tu_portátil>:<destino>:<puerto_del_destino>`:
 
@@ -298,7 +304,7 @@ Para no recordar el comando, añade esto a tu `~/.ssh/config`:
 
 ```
 Host autohostai-dev
-    HostName 79.76.101.10
+    HostName <IP pública de la VM — terraform output -raw instance_public_ip>
     User ubuntu
     IdentityFile ~/.ssh/autohostai_dev_vm
     LocalForward 3000 localhost:3000

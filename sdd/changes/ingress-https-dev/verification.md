@@ -8,9 +8,9 @@ Runs de referencia: `infra-dev` apply de fase A **30476015034**, deploy **304762
 
 | # | Evidencia | |
 |---|---|---|
-| 1 | `cloudflare_zero_trust_tunnel_cloudflared.dev` con `config_src = "cloudflare"` y `tunnel_secret = random_bytes.tunnel_secret.base64`. Creado en el apply: `id=5c587f7c-d343-4534-83dc-4113034e03b1` | ✅ |
-| 2 | `terraform state show` del `_config` muestra `ingress = [{hostname="autohostai.digitalsec.work", service="http://frontend:3000"}, {service="http_status:404"}]` — catch-all presente y última | ✅ |
-| 3 | `cloudflare_dns_record.app`: CNAME a `${…dev.id}.cfargotunnel.com`, `proxied = true`. `dig +short autohostai.digitalsec.work` → `104.21.90.5`, `172.67.167.124` (IPs del edge, confirma el proxy). Ningún id literal en el repo | ✅ |
+| 1 | `cloudflare_zero_trust_tunnel_cloudflared.dev` con `config_src = "cloudflare"` y `tunnel_secret = random_bytes.tunnel_secret.base64`. Creado en el apply (id verificado en el log del run; no se versiona aquí, R1.3) | ✅ |
+| 2 | `terraform state show` del `_config` muestra `ingress = [{hostname="autohostai.digitalsec.work", service="http://frontend:3000"}, {service="http_status:404"}]` — catch-all presente y última. **Solo evidencia estructural**: el 404 nunca se observó en ejecución (ver Salvedades) | ⚠️ parcial |
+| 3 | `cloudflare_dns_record.app`: CNAME a `${…dev.id}.cfargotunnel.com`, `proxied = true`. `dig +short autohostai.digitalsec.work` → `104.21.90.5`, `172.67.167.124` (IPs del edge, confirma el proxy). Ningún id de túnel literal en el repo — **corregido**: la primera versión de este registro afirmaba eso mientras escribía el id dos líneas antes; el panel lo detectó y se redactó | ✅ |
 | 4 | `version = "~> 5.0"` en `required_providers`; `.terraform.lock.hcl` versionado con `cloudflare/cloudflare 5.22.0` y hashes de `darwin_arm64` + `linux_amd64` | ✅ |
 | 5 | `terraform plan` sin las variables de Cloudflare falla con 5 bloques `No value for required variable`, nombrando cada una, y sin escribir estado | ✅ |
 | 6 | El token se **deriva** en `local.tunnel_token` de `account_tag` + `id` + secreto; el CNAME se deriva del `id` del recurso. Ningún valor copiado del dashboard | ✅ |
@@ -22,8 +22,8 @@ Runs de referencia: `infra-dev` apply de fase A **30476015034**, deploy **304762
 | 1 | `oci_vault_secret.cloudflare_tunnel_token` creado (`amaaaaaa2r32b6yatky4l5ipbavbdyzjczbdmydgjxb672zz34l2zpyisrsa`), contenido `base64encode(local.tunnel_token)`. Sin paso manual | ✅ |
 | 2 | Deploy **30476283146**: el paso "Render .env" pasó leyendo por nombre con instance principal. Antes, en **30475510352**, falló con el mensaje esperado (`no se pudo leer del Vault el secret requerido: TUNNEL_TOKEN`) **sin tocar contenedores** — los pasos de login y `up` quedaron sin ejecutar | ✅ |
 | 3 | `docker-compose.deploy.yml`: imagen `cloudflare/cloudflared@sha256:e39ee8da…` (índice multi-arch, `linux/arm64` verificado), `restart: unless-stopped`, sin `ports`, sin `/var/run/docker.sock` (0 apariciones en el fichero) | ✅ |
-| 4 | El deploy usa `up -d --wait`, que exige `healthy` en todos los servicios, y salió verde → `cloudflared` está `healthy`. El healthcheck es `["CMD","cloudflared","tunnel","ready"]` con `TUNNEL_METRICS` fijado | ✅ |
-| 5 | `depends_on: frontend: {condition: service_healthy}` | ✅ |
+| 4 | Evidencia directa en el log del deploy (aportada por el panel de QA, más fuerte que mi inferencia inicial desde `up --wait`): `Container autohostai-cloudflared-1 Healthy`. El healthcheck es `["CMD","cloudflared","tunnel","ready"]` con `TUNNEL_METRICS` fijado | ✅ |
+| 5 | `depends_on: frontend: {condition: service_healthy}`, y el log confirma el orden real: `frontend-1 Healthy` precede a `cloudflared-1 Starting` | ✅ |
 
 ## R3 — HTTPS forzado en el edge
 
@@ -38,7 +38,7 @@ Runs de referencia: `infra-dev` apply de fase A **30476015034**, deploy **304762
 
 | # | Evidencia | |
 |---|---|---|
-| 1 | `local.ingress_ports = [22]`. Apply de fase B: `Plan: 0 to add, 1 to change, 0 to destroy`, solo `oci_core_security_list.dev_public` in-place. `http://79.76.101.10:3000` y `:8000` → **timeout** | ✅ |
+| 1 | `local.ingress_ports = [22]`. Apply de fase B: `Plan: 0 to add, 1 to change, 0 to destroy`, solo `oci_core_security_list.dev_public` in-place. `http://<IP pública>:3000` y `:8000` → **timeout** | ✅ |
 | 2 | El 22 sigue acotado a `var.allowed_ssh_cidrs` con su `validation` de prefijo `>= /24` intacta. Cero reglas con `0.0.0.0/0`. SSH verificado con una sesión real | ✅ |
 | 3 | `backend` y `frontend` publican **solo** en `127.0.0.1` (`docker compose config` → `host_ip = 127.0.0.1` en ambos; ningún puerto en interfaz externa). Puerta de depuración verificada: por `ssh -L` el frontend devuelve `307` y el backend `{"status":"ok"}`; al cerrar la sesión no queda listener | ✅ |
 | 4 | El orden se respetó: la fase A se aplicó y verificó (`301`, app servida, y `530/1033` antes del deploy probando que la ruta es edge→túnel→frontend) **antes** de mergear el PR #24 de la fase B, cuya descripción recoge esa evidencia | ✅ |
@@ -72,6 +72,18 @@ Runs de referencia: `infra-dev` apply de fase A **30476015034**, deploy **304762
 - `terraform fmt -check -diff` sin diferencias; `terraform validate` OK; job `check` de CI en verde en el PR.
 - `terraform plan` posterior al último apply: **`No changes`** — sin deriva entre código y realidad (tarea 8.4).
 - `docker compose config` válido, `cloudflared` sin puertos, `backend`/`frontend` solo en loopback.
+
+## Resultado del panel de `/sdd:review` (2026-07-29)
+
+**7 reviewers: 3 PASS (`tenancy`, `i18n`, `cicd`), 4 FAIL. 13 hallazgos únicos, todos atribuibles a este change.** Matriz de QA: **30 de 31 criterios cumplidos, 1 parcialmente** (R1.2, la catch-all).
+
+**Los 3 bloqueantes se separaron en el change `ingress-https-hardening`**, porque exigen `apply`, deploy y verificación propios:
+
+1. **`cloudflared` comparte la red `default` del compose** con `postgres`, `redis` y `backend`. Como el routing del túnel es remoto (`config_src = "cloudflare"`), quien tenga el API token puede publicar esos servicios en internet sin abrir un puerto, sin tocar el security list y sin un `apply`. **Esto invalida el radio de daño que D10 documentó**; el ADR 0003 lleva ya la corrección.
+2. El statement `read secrets in compartment` que se añadió **quedó sin condición**, contradiciendo el mínimo privilegio que la propia policy y `iam-policy.md` declaran. Impacto limitado a metadatos.
+3. `RUNBOOK.md` §7.4.3 **enseñaba a publicar Postgres sin prefijo `127.0.0.1:`**, es decir en `0.0.0.0` por el default de Docker.
+
+**Los 10 restantes se corrigieron en este change** antes de archivarlo: TLS 1.2 afirmado y no aplicado (RUNBOOK y design), el paso `curl` prometido en el CD que nunca existió, el ADR que no cubría D11, `steering/infra.md` describiendo mal el roadmap, el id del túnel versionado, el API token pasado por línea de comandos en el RUNBOOK, la IP pública cableada, y la página `docs/ingress-https.md` que faltaba. La advertencia obsoleta de `iam-policy.md` se corrige en `ingress-https-hardening` (R2.4), porque ese change toca el mismo fichero.
 
 ## Salvedades honestas
 

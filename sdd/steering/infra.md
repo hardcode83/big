@@ -19,7 +19,7 @@ Convención de despliegue remoto. Herramientas ya confirmadas: **Terraform** (Ia
 
 ## Decisión estable: el `apply` de infra no se protege con GitHub Environment
 
-**Los jobs `plan` y `apply` del workflow de infra están acotados a `main` (`github.ref`), con `concurrency` y `timeout-minutes`, y NO se protegen además con un GitHub Environment con revisores requeridos.** Revisado y decidido el 2026-07-29: con dos owners y un `apply` que solo se dispara por `workflow_dispatch` manual desde `main`, se considera control suficiente. Nunca llegó a existir `environment:` en los workflows, pese a que la entrada de `infra-dev-hardening` en el roadmap lo afirmaba.
+**Los jobs `plan` y `apply` del workflow de infra están acotados a `main` (`github.ref`), con `concurrency` y `timeout-minutes`, y NO se protegen además con un GitHub Environment con revisores requeridos.** Revisado y decidido el 2026-07-29: con dos owners y un `apply` que solo se dispara por `workflow_dispatch` manual desde `main`, se considera control suficiente. `environment:` nunca llegó a existir en los workflows: la entrada de `infra-dev-hardening` en el roadmap afirmaba que sí, y se corrigió el 2026-07-29 para reflejar el descarte.
 
 No es un hallazgo pendiente: **su ausencia es deliberada**, y no debe reabrirse en cada revisión. Lo que sí es requisito es el gating por rama de **ambos** jobs — `plan` también, porque desde `ingress-https-dev` recibe un token con control del DNS de toda la zona y `sensitive = true` no protege frente a código de una rama no revisada.
 
