@@ -2,7 +2,7 @@ import uuid
 from copy import deepcopy
 
 from app.properties.domain.entities import PropertyStateTransition
-from app.properties.domain.enums import PropertyOperationalState, StateTransitionTriggeredBy
+from app.properties.domain.enums import StateTransitionTriggeredBy
 from app.timeline.domain.entities import TimelineEvent
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
 

@@ -1,6 +1,3 @@
-import uuid
-from dataclasses import replace
-
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.properties.domain.entities import PropertyStateTransition
@@ -16,6 +13,7 @@ from .exceptions import (
     TransitionEvidenceError,
     TransitionScopeMismatchError,
 )
+from app.timeline.domain.exceptions import TimelineDomainError
 from .state_resolution import ContextualStateResolver
 from .transition_enums import PropertyStateTrigger
 from .value_objects import PropertyStateChangeRequest, PropertyStateChangeResult
@@ -108,7 +106,7 @@ class PropertyStateMachine:
                 reservation_id=request.reservation_id,
                 correlation_id=request.correlation_id,
             )
-        except Exception as exc:
+        except TimelineDomainError as exc:
             raise TransitionEvidenceError() from exc
         return PropertyStateChangeResult(transition=transition, timeline_event=event)
 
@@ -159,9 +157,15 @@ class PropertyStateMachine:
     @classmethod
     def _destination(cls, request: PropertyStateChangeRequest, allowed: set[PropertyOperationalState]) -> PropertyOperationalState:
         trigger = request.trigger
+        contextual_triggers = {
+            PropertyStateTrigger.CLEANING_COMPLETED,
+            PropertyStateTrigger.INCIDENT_RESOLVED,
+        }
         if trigger is PropertyStateTrigger.CLEANING_COMPLETED:
             return ContextualStateResolver.after_cleaning_completion(request.property, request.context, request.reference_instant)
-        if trigger in (PropertyStateTrigger.INCIDENT_RESOLVED, PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED):
+        if trigger is PropertyStateTrigger.INCIDENT_RESOLVED:
+            return ContextualStateResolver.after_incident_resolution(request.property, request.context, request.reference_instant)
+        if trigger is PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED:
             if request.requested_state is None:
                 return ContextualStateResolver.after_incident_resolution(request.property, request.context, request.reference_instant)
             destination = request.requested_state
@@ -170,7 +174,12 @@ class PropertyStateMachine:
             if trigger is PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED:
                 ContextualStateResolver.validate_explicit_target(destination, request.property, request.context, request.reference_instant)
             return destination
-        return next(iter(allowed)) if len(allowed) == 1 else next(iter(allowed))
+        if trigger in contextual_triggers:
+            raise InvalidStateTransitionError("Contextual policy requires an explicit resolver", trigger=trigger.value)
+        if len(allowed) != 1:
+            raise InvalidStateTransitionError("Fixed policy must contain exactly one destination", trigger=trigger.value)
+        destination, = allowed
+        return destination
 
     @classmethod
     def _validate_trigger_preconditions(cls, request: PropertyStateChangeRequest) -> None:
