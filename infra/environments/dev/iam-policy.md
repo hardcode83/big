@@ -2,7 +2,7 @@
 
 Terraform y el pipeline se autentican como el usuario de servicio **`svc-terraform-dev`** (solo API key, sin login de consola), miembro del grupo **`autohostai-dev-terraform`**. Este documento versiona la policy mínima que ese grupo necesita, para auditarla y reproducirla.
 
-**Por qué no está en el root module:** el propio usuario de Terraform no puede auto-otorgarse IAM (y darle `manage` de IAM contradiría el mínimo privilegio). El grupo, el usuario y la policy los crea/aplica un **admin de la tenancy** en la consola OCI (Identity Domains) — fuera de `main.tf`.
+**Por qué ESTA policy no está en el root module:** el propio usuario de Terraform no puede auto-otorgarse su IAM. El grupo, el usuario y **esta** policy los crea/aplica un **admin de la tenancy** en la consola OCI (Identity Domains) — fuera de `main.tf`. (Distinto del instance-principal del runner —`oci_identity_dynamic_group`/`oci_identity_policy` en `main.tf`—: esos SÍ los aplica el pipeline, posible gracias a la ampliación de abajo.)
 
 ## Grupo y usuario
 - Grupo (normal, no dynamic): `autohostai-dev-terraform`.
@@ -22,9 +22,13 @@ Allow group autohostai-dev-terraform to manage vaults in tenancy
 Allow group autohostai-dev-terraform to manage keys in tenancy
 Allow group autohostai-dev-terraform to manage secret-family in tenancy
 Allow group autohostai-dev-terraform to read compartments in tenancy
+Allow group autohostai-dev-terraform to manage dynamic-groups in tenancy
+Allow group autohostai-dev-terraform to manage policies in tenancy
 ```
 
 > Si el grupo está en un domain distinto del Default, cualificar: `Allow group 'NombreDominio'/'autohostai-dev-terraform' to ...`.
+
+**Ampliación 2026-07-29 (change `app-deploy-dev`):** las dos últimas sentencias (`manage dynamic-groups` + `manage policies`) se añadieron para que el **pipeline** cree como IaC el instance-principal del runner self-hosted (el `oci_identity_dynamic_group` + `oci_identity_policy` de `main.tf`, que leen del Vault la clave de la GitHub App y los secrets de runtime). **Es una relajación consciente del mínimo privilegio**: `svc-terraform-dev` gana gestión de identidad a nivel tenancy (podría crear dynamic-groups que matcheen cualquier recurso → superficie de escalada). Decisión del usuario, priorizando "todo como código, cero pasos manuales por entorno" sobre acotar ese verbo. Alternativa rechazada: aplicar esos dos recursos a mano por un admin (mantendría el mínimo privilegio, a costa de un paso manual por entorno).
 
 ## Verificado
 - `terraform plan` (provider con `svc-terraform-dev`): lee/refresca compute, red, budget y vault sin errores de autorización.
