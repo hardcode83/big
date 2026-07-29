@@ -22,3 +22,13 @@ output "secrets_key_id" {
   description = "OCID de la master key software que cifra los secrets del Vault."
   value       = oci_kms_key.dev_secrets.id
 }
+
+output "public_url" {
+  description = "URL pública por la que se sirve la app del entorno, a través del Cloudflare Tunnel (change ingress-https-dev)."
+  value       = "https://${var.public_hostname}"
+}
+
+output "cloudflare_tunnel_token_secret_name" {
+  description = "Nombre del secreto del Vault que guarda el token del túnel. El job de deploy lo resuelve POR NOMBRE (get-secret-bundle-by-name), no por OCID, porque cloud-init no puede reescribir /etc/autohostai-deploy.env en la VM viva (design D3). Se expone como output para que el workflow y el RUNBOOK citen una única fuente de verdad."
+  value       = oci_vault_secret.cloudflare_tunnel_token.secret_name
+}

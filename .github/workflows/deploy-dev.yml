@@ -88,6 +88,12 @@ jobs:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
+        env:
+          # OCID del Vault: lo necesita la resolución POR NOMBRE del token del túnel. No puede salir
+          # de /etc/autohostai-deploy.env porque ese fichero lo escribe cloud-init y `metadata` es
+          # ForceNew con ignore_changes, así que Terraform no puede reescribirlo en la VM viva; una
+          # clave nueva ahí no llegaría nunca (change ingress-https-dev, design D3).
+          OCI_VAULT_ID: ${{ vars.OCI_VAULT_ID }}
         run: |
           set -euo pipefail
           source /etc/autohostai-deploy.env   # OCIDs de los secrets + POSTGRES_DB/USER (sin secretos)
@@ -98,9 +104,23 @@ jobs:
             if [ -z "$val" ]; then echo "::error::no se pudo leer del Vault el secret requerido: $2" >&2; exit 1; fi
             printf '%s' "$val"
           }
+          read_secret_by_name() { # $1 = nombre del secret en el Vault; $2 = clave para el mensaje
+            local val
+            if [ -z "${OCI_VAULT_ID:-}" ]; then
+              echo "::error::falta la variable de repo OCI_VAULT_ID, necesaria para resolver $2 por nombre" >&2; exit 1
+            fi
+            val="$(oci --auth instance_principal secrets secret-bundle get-secret-bundle-by-name \
+              --secret-name "$1" --vault-id "$OCI_VAULT_ID" \
+              --query 'data."secret-bundle-content".content' --raw-output 2>/dev/null | base64 -d)" || true
+            if [ -z "$val" ]; then echo "::error::no se pudo leer del Vault el secret requerido: $2 (nombre: $1)" >&2; exit 1; fi
+            printf '%s' "$val"
+          }
           PG_PASSWORD="$(read_secret "$PG_PASSWORD_SECRET_OCID" POSTGRES_PASSWORD)"
           JWT_KEY="$(read_secret "$JWT_SECRET_OCID" JWT_SECRET_KEY)"
           ENC_KEY="$(read_secret "$ENCRYPTION_KEY_SECRET_OCID" ENCRYPTION_KEY)"
+          # El nombre es determinista (lo fija Terraform como autohostai-<env>-...), así que se
+          # deriva de ENV en vez de necesitar otra variable de repo.
+          TUNNEL_TOKEN="$(read_secret_by_name "autohostai-${ENV}-cloudflare-tunnel-token" TUNNEL_TOKEN)"
           umask 077
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
@@ -111,6 +131,7 @@ jobs:
             echo "JWT_SECRET_KEY=${JWT_KEY}"
             echo "ENCRYPTION_KEY=${ENC_KEY}"
             echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
+            echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
           } > .env
           chmod 600 .env
 

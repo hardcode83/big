@@ -108,6 +108,36 @@ services:
       retries: 5
       start_period: 20s
 
+  # Ingress HTTPS (change ingress-https-dev). Abre una conexión SALIENTE al edge de Cloudflare, que
+  # termina TLS y entrega a frontend:3000 por esta misma red interna. Por eso NO publica puertos y
+  # el security list de la VM no necesita 80/443. El routing (qué hostname va a qué servicio) vive
+  # en Terraform, no aquí: config_src = "cloudflare".
+  cloudflared:
+    # Pineada por dígest del índice multi-arch (incluye linux/arm64, la arquitectura de la VM).
+    # Corresponde a la release 2026.7.3, resuelta del registry el 2026-07-29.
+    image: cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Falta TUNNEL_TOKEN}
+      # Habilita el endpoint de métricas en loopback, que es lo que consulta `tunnel ready`.
+      # Sin esto el healthcheck no tiene a quién preguntar.
+      TUNNEL_METRICS: 127.0.0.1:2000
+    depends_on:
+      # No anunciar al edge un origen que todavía no responde (R2.5): si cloudflared arrancara antes
+      # que el frontend, el edge devolvería 502 durante la ventana de arranque.
+      frontend:
+        condition: service_healthy
+    # La imagen es distroless: sin shell, sin curl y sin wget, así que un healthcheck HTTP al uso no
+    # es posible. cloudflared trae su propio subcomando, que consulta el endpoint de métricas de
+    # arriba y solo devuelve 0 si el túnel tiene conexión establecida con el edge (design D5).
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
 volumes:
   postgres_data:
   redis_data:
