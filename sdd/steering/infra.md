@@ -6,6 +6,19 @@ applies_to: ["infra/**"]
 
 Convención de despliegue remoto. Herramientas ya confirmadas: **Terraform** (IaC) + **GitHub Actions** (CI/CD). Proveedor cloud: **decidido para `dev`** (Oracle Cloud, VM única + docker-compose — ver `docs/adr/0001-dev-hosting-provider.md`); **staging/prod siguen sin elegir**, decisión propia y futura, no heredada de dev. Nada de esto sustituye al stack local (`docker-compose`/`Makefile`, ver spec `local-environment`).
 
+## Norma innegociable: infraestructura como código (IaC-first)
+
+**Toda la infraestructura y su configuración se define como código** — Terraform para el cloud (OCI), y para **GitHub** el provider `integrations/github` y/o ficheros versionados (workflows, scripts). **Prohibido configurar a mano** en las consolas de OCI o GitHub salvo el *bootstrap irreducible* de abajo. Cualquier paso que hoy no puedas codificar debe quedar como **script versionado** (p. ej. `runner-bootstrap.sh`) o documentado en el RUNBOOK — nunca configuración ad-hoc que solo viva en una consola.
+
+**Bootstrap irreducible** (se hace una vez, a mano, y se **documenta**; no hay forma de codificarlo porque emite credenciales o crea la raíz):
+- Crear la **organización** GitHub y la **cuenta**/tenancy cloud.
+- Crear la **GitHub App** y generar su **clave privada** (la API de GitHub no permite crearla headless).
+- La **API key raíz de OCI** del usuario de servicio y el **bucket del tfstate** (dependencia circular con su propio state).
+
+**Todo lo demás es código**, incluido lo GitHub-side: secrets y variables de Actions (`github_actions_secret`/`github_actions_variable`), instalación de la App, ajustes de repo, acceso a packages, policies. La clave privada de la App / secrets se **inyectan** por variable y se escriben al Vault/secret-store desde Terraform (ver `security.md` §8, excepción dev/test).
+
+**Lección de `app-deploy-dev` (2026-07-29):** se hicieron varios pasos a mano en GitHub (crear/instalar la App, poner variables/secrets con `gh`, transferir el repo, tocar acceso de packages) que en su mayoría **eran codificables** con el provider `github`. De aquí en adelante, gestionar la parte GitHub con Terraform (`github` provider) igual que la de OCI; dejar a mano solo el bootstrap irreducible. Adoptar el provider `github` es un change futuro pendiente (ver roadmap).
+
 ## Convención de layout
 
 `infra/environments/<entorno>/` — un root module de Terraform por entorno (`dev`, `staging`, `prod`), cada uno con su propio state. Esto es ortogonal al layout de código por dominio de `backend`/`frontend` (ver `architecture.md`): la infra no se organiza por dominio de negocio (`auth`, `cleaning`, `reservations`, ...), sino por entorno y tipo de recurso.

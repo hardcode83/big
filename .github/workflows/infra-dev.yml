@@ -41,7 +41,8 @@ jobs:
       - name: terraform validate
         run: terraform validate
 
-  # workflow_dispatch: plan (siempre) → sube el tfplan como artifact.
+  # workflow_dispatch: plan (siempre) para revisión por logs — NO usa -out ni sube artifact
+  # (el plan contendría secrets desde app-deploy-dev); el apply re-planifica en su propio job.
   plan:
     if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest

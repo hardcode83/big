@@ -9,3 +9,4 @@
 | frontend-docker-deps-autosync | new, design, tasks, run, review, archive | 16240 | 71311 | 6854270 | 5.6616 | 2026-07-21 | 2026-07-21 |
 | infra-dev-payg | new, tasks, run, archive | 26 | 32958 | 3947533 | 3.2768 | 2026-07-22 | 2026-07-22 |
 | infra-dev-hardening | new, tasks, archive (design/run/review sin registrar) | 14 | 12237 | 3739887 | 13.1693 | 2026-07-22 | 2026-07-24 |
+| app-deploy-dev | new, design, tasks, run, review, archive | 38176 | 196026 | 30323880 | 24.4177 | 2026-07-24 | 2026-07-29 |
