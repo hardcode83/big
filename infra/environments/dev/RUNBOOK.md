@@ -92,3 +92,52 @@ sudo cloud-init clean --logs && sudo cloud-init init
 ```
 
 Recordatorio del bug histórico: `docker-compose-plugin` no está en los repos por defecto de Ubuntu 22.04; el cloud-init añade el **repo APT oficial de Docker**. Verificar tras arrancar: `docker compose version`.
+
+## 6. Despliegue de la app (CD — change `app-deploy-dev`)
+
+La app se despliega con `.github/workflows/deploy-dev.yml`: un **push a `main`** que toque `backend/**`/`frontend/**` (o `workflow_dispatch`) construye las imágenes `prod` arm64, las publica en **GHCR** (tag `sha-<commit>` + `dev`), y un job `deploy` en un **runner self-hosted que corre EN la VM** hace el deploy **localmente** (`docker compose -f docker-compose.deploy.yml pull && up -d --wait`) — sin SSH ni puertos entrantes. El `.env` de runtime lo **lee del OCI Vault** por instance principal en cada deploy (secrets generados por Terraform); el `docker login ghcr.io` usa un **token minteado por la GitHub App** (misma clave del Vault). **Cero secrets de app a mano.**
+
+### 6.1 GitHub App (único secret-zero) + variables
+
+Una **sola GitHub App** (reutilizable por todos los entornos) con permisos de repo `Administration: read/write` (registrar runners) y `Packages: read` (pull GHCR). Tras crearla e instalarla en el repo:
+
+- **Variables** de repo (no sensibles): `GH_APP_ID`, `GH_APP_INSTALLATION_ID`, `NEXT_PUBLIC_APP_ENV` (p. ej. `dev`).
+- **Secret** de repo: `GH_APP_PRIVATE_KEY` = contenido del `.pem` de la App. Es el **único secret-zero**; Terraform lo lee (`TF_VAR_github_app_private_key`) y lo escribe al Vault de cada entorno (`oci_vault_secret.github_app_key`). **Rotar** = regenerar el `.pem` en la App, actualizar el secret y re-aplicar.
+
+Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) **no se crean a mano**: los genera Terraform (`random_*`) → Vault.
+
+### 6.2 Provisión del runner (IaC + alta a mano en la VM viva)
+
+La provisión es **IaC**: `cloud-init.yaml.tftpl` + `runner-bootstrap.sh` + `gh-app-install-token.py`, así que una VM nueva arranca con el runner. Como el `metadata` es ForceNew + `ignore_changes`, sobre la **VM viva** se ejecuta **una vez a mano** (tras aplicar Terraform, §5.3, que ya puso la clave de la App y los OCIDs en el Vault):
+
+```bash
+# En la VM (por SSH). /etc/autohostai-deploy.env lo escribe el cloud-init en una VM nueva;
+# para la VM viva, replicarlo con los OCIDs reales (los da el apply / la consola del Vault):
+sudo apt-get update && sudo apt-get install -y python3-pip && sudo pip3 install oci-cli
+sudo tee /etc/autohostai-deploy.env >/dev/null <<'EOF'
+ENV=dev
+GITHUB_REPO=autohostai-labs/AutoHostAI
+GITHUB_APP_ID=<app id>
+GITHUB_APP_INSTALLATION_ID=<installation id>
+APP_KEY_SECRET_OCID=<ocid del secret gh-app-key>
+PG_PASSWORD_SECRET_OCID=<...>
+JWT_SECRET_OCID=<...>
+ENCRYPTION_KEY_SECRET_OCID=<...>
+POSTGRES_DB=autohostai
+POSTGRES_USER=autohostai
+EOF
+sudo install -m0755 runner-bootstrap.sh /opt/bootstrap-runner.sh
+sudo install -m0755 gh-app-install-token.py /opt/gh-app-install-token.py
+sudo bash /opt/bootstrap-runner.sh
+```
+
+Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Idle** con label `dev`. Recuperación: `sudo /opt/actions-runner/svc.sh start`; si se desregistra, re-ejecutar el bootstrap (`--replace`, idempotente).
+
+### 6.3 Arranque en frío (primer deploy sobre VM sin app)
+
+1. GitHub App + variables/secret creados (6.1); Terraform aplicado (§5.3, crea la IAM + los secrets del Vault); runner provisionado (6.2) y online.
+2. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job lee los secrets del Vault → `.env`, mintea el token de la App → `docker login`, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
+
+### 6.4 Rollback (manual, por SHA)
+
+El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).

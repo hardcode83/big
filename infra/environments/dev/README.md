@@ -14,7 +14,7 @@
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.
 
-Lo que este Terraform **no** hace: desplegar la aplicación en sí (`docker compose pull && up -d` dentro de la VM). Eso es un workflow/step futuro, fuera de alcance de este change, que usa la IP pública de salida (`output "instance_public_ip"`) como input.
+El despliegue de la aplicación en sí (`docker compose pull && up -d` dentro de la VM) lo hace el change `app-deploy-dev` vía `.github/workflows/deploy-dev.yml` — build a GHCR + deploy local en un runner self-hosted que corre en la VM (ver RUNBOOK §6). Este Terraform sí aprovisiona **el runner** (en el `cloud-init`), sus **secrets de runtime** (generados por TF → Vault) y su **instance principal** (dynamic group + policy de mínimo privilegio para leer del Vault la clave de la GitHub App y los secrets de runtime).
 
 ## Acceso SSH a la instancia
 
@@ -79,9 +79,23 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 
 - **En cualquier PR** que toque `infra/environments/dev/**`: el job `check` corre `fmt`/`validate` automáticamente, sin credenciales.
 - **Para `plan`/`apply` reales**: pestaña Actions → workflow `infra-dev` → **Run workflow** → elegir `plan` o `apply`. `apply` solo se ejecuta si el `plan` previo del mismo run fue exitoso.
-- **Ya verificado en vivo**: un `workflow_dispatch` con `action: plan` corrió contra la cuenta real — `init`/`validate`/`plan` en verde, 9 recursos a crear, 0 errores ([run 29728765058](https://github.com/mreyesojeda/AutoHostAI/actions/runs/29728765058)).
+- **Ya verificado en vivo**: un `workflow_dispatch` con `action: plan` corrió contra la cuenta real — `init`/`validate`/`plan` en verde, 9 recursos a crear, 0 errores ([run 29728765058](https://github.com/autohostai-labs/AutoHostAI/actions/runs/29728765058)).
+
+## Despliegue de la app (CD — `app-deploy-dev`)
+
+Workflow `deploy-dev` (`.github/workflows/deploy-dev.yml`): push a `main` sobre `backend/**`/`frontend/**` → build `prod` arm64 → GHCR → deploy **local** en el runner self-hosted de la VM (sin SSH). Flujo, provisión/recuperación del runner, GitHub App (permisos, `GH_APP_PRIVATE_KEY`, rotación) y rollback en [`RUNBOOK.md`](./RUNBOOK.md) §6.
+
+Variables/secret del repo que consume el CD (además de los de `infra-dev`). **No hay secrets de app de runtime en GitHub** — los genera Terraform y viven en el Vault; el deploy los lee de ahí por instance principal:
+
+| Nombre | Tipo | Para qué |
+|---|---|---|
+| `GH_APP_ID`, `GH_APP_INSTALLATION_ID` | **variable** | Identifican la GitHub App que mintea tokens (registro del runner + pull GHCR). No sensibles. |
+| `GH_APP_PRIVATE_KEY` | **secret** | Clave privada (`.pem`) de la App. Único secret-zero; Terraform la escribe al Vault de cada entorno (`TF_VAR_github_app_private_key`). |
+| `NEXT_PUBLIC_APP_ENV` | **variable** | Var pública del frontend — se **hornea en build** (Next standalone) como `build-arg`, no en el `.env` de runtime. |
+
+Los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`) los **genera Terraform** (`random_*`) → `oci_vault_secret`. `POSTGRES_DB`/`POSTGRES_USER` son variables Terraform con default. `github_app_id`/`github_app_installation_id` van también en `dev.tfvars`. Ver RUNBOOK §6.
 
 ## Pendiente (no automatizable por este change)
 
-- **`terraform apply` inicial**: los secrets ya están cargados y el `plan` ya se ha verificado en vivo — solo falta la confirmación explícita del usuario para disparar `action: apply`. No se dispara solo.
-- Una vez aplicado: desplegar la app en la VM (`docker compose pull && up -d` vía SSH) — workflow futuro, fuera de alcance.
+- **`terraform apply` inicial** e infra: ya verificado y aplicado en changes previos; el `apply` con la IAM del runner (dynamic group + policy) y los secrets del Vault se dispara por el pipeline con confirmación explícita.
+- Ops del CD (a tu cargo, ver RUNBOOK §6): crear la GitHub App (variables `GH_APP_*` + secret `GH_APP_PRIVATE_KEY`), aplicar por el pipeline (crea IAM + secrets del Vault), provisionar el runner en la VM viva, y el primer deploy.

@@ -56,8 +56,13 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 
 - `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` (`domain/`, `infrastructure/`, ver `sdd/steering/backend-architecture.md`); migraciones en `backend/alembic/`.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
-- `docker-compose.yml` / `Makefile` — orquestación del stack local, en la raíz.
+- `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
+- `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
+
+## Despliegue a dev (CD)
+
+Push a `main` que toque `backend/**`/`frontend/**` → `.github/workflows/deploy-dev.yml` construye las imágenes `prod` arm64, las publica en GHCR y las despliega en la VM dev (Oracle Cloud) mediante un runner self-hosted que corre en la propia VM (deploy local, sin SSH). Detalle de operación en [`infra/environments/dev/RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §6.
 - `docs/` — documentación extendida por capability y diagramas (`docs/diagrams/`: C4, hexagonal, ER, state machine, secuencias).
 - `infra/` — IaC por entorno (Terraform), no por dominio de negocio; ver `infra/environments/<entorno>/README.md`.
 - `.github/workflows/` — pipelines de CI/CD (GitHub Actions).

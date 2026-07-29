@@ -81,3 +81,45 @@ variable "budget_amount" {
   type        = number
   default     = 1
 }
+
+# Runner self-hosted (R7 — change app-deploy-dev)
+
+variable "github_repo" {
+  description = "owner/repo del repositorio GitHub cuyo runner self-hosted corre en la VM dev (para la URL de registro del runner)."
+  type        = string
+  default     = "autohostai-labs/AutoHostAI"
+}
+
+variable "env" {
+  description = "Nombre del entorno (dev/test/staging/prod). Se interpola en los nombres de los recursos de CD para que el código sea reutilizable por entorno sin tocar nada a mano. Default dev → los nombres coinciden con los existentes (cero drift)."
+  type        = string
+  default     = "dev"
+}
+
+variable "github_app_id" {
+  description = "ID de la GitHub App que mintea installation-tokens para registrar el runner y hacer pull de GHCR. Identificador no sensible. Una sola App vale para todos los entornos."
+  type        = string
+}
+
+variable "github_app_installation_id" {
+  description = "ID de la instalación de la GitHub App en el repo/owner. Identificador no sensible."
+  type        = string
+}
+
+variable "github_app_private_key" {
+  description = "Clave privada (.pem) de la GitHub App. Único secret-zero: vive como UN secret de GitHub Actions (org/repo), se inyecta por TF_VAR y Terraform la escribe al Vault de CADA entorno → un entorno nuevo no requiere pasos manuales en OCI. Su valor queda en el tfstate (bucket privado+versionado — relajación de security.md §8, solo dev/test)."
+  type        = string
+  sensitive   = true
+}
+
+variable "postgres_db" {
+  description = "Nombre de la base de datos de la app en dev (no sensible)."
+  type        = string
+  default     = "autohostai"
+}
+
+variable "postgres_user" {
+  description = "Usuario de Postgres de la app en dev (no sensible; la contraseña la genera Terraform → Vault)."
+  type        = string
+  default     = "autohostai"
+}
