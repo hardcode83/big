@@ -91,13 +91,18 @@ services:
     restart: unless-stopped
     environment:
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
+      # Next standalone (server.js) usa $HOSTNAME como dirección de bind; Docker lo pone al
+      # container-id → escucharía en una IP no-localhost. Forzar 0.0.0.0 para que escuche en
+      # todas las interfaces (healthcheck local + puerto publicado 3000).
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
     ports:
       - "3000:3000"
     depends_on:
       backend:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "node", "-e", "require('http').get('http://localhost:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
       interval: 10s
       timeout: 5s
       retries: 5
