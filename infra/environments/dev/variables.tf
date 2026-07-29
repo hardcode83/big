@@ -123,3 +123,52 @@ variable "postgres_user" {
   type        = string
   default     = "autohostai"
 }
+
+# Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev)
+
+variable "cloudflare_api_token" {
+  description = "API token de Cloudflare para el provider. Permisos mínimos: Account | Cloudflare Tunnel | Edit, Zone | DNS | Edit, Zone | Zone Settings | Edit, acotado a la zona gestionada. Bootstrap irreducible (se acuña en el dashboard, ver steering/infra.md): vive como GitHub Secret CLOUDFLARE_API_TOKEN e inyectado por TF_VAR. ATENCIÓN a su radio de daño: NO es un secreto de ámbito dev — con esos permisos sobre digitalsec.work puede reescribir el DNS y bajar el TLS de TODOS los servicios de la zona, no solo de este entorno. Por eso, a diferencia de la clave de la GitHub App, este token NO se copia al Vault: es re-emitible en segundos desde el dashboard, así que una copia 'recuperable' no aporta nada y en cambio lo metería en el tfstate, cuyo radio la excepción dev/test de security.md §8 no cubre. Terraform no persiste la configuración de provider, así que mientras no exista esa copia el token no llega al estado."
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_account_id" {
+  description = "Account ID de Cloudflare — necesario para los recursos de túnel, que son de ámbito de cuenta y no de zona. Identificador no sensible."
+  type        = string
+}
+
+variable "cloudflare_zone_id" {
+  description = "Zone ID de la zona gestionada en Cloudflare. Tratado como sensible por convención del equipo, igual que en el resto de proyectos."
+  type        = string
+  sensitive   = true
+}
+
+variable "cloudflare_zone_name" {
+  description = "Apex de la zona en Cloudflare (p. ej. digitalsec.work). No sensible. Se usa para validar que public_hostname cuelga de esta zona a un solo nivel de profundidad."
+  type        = string
+
+  validation {
+    condition     = can(regex("^([a-z0-9-]+\\.)+[a-z]{2,}$", var.cloudflare_zone_name))
+    error_message = "cloudflare_zone_name debe ser un nombre de dominio válido en minúsculas, sin protocolo ni barra final (p. ej. digitalsec.work)."
+  }
+}
+
+variable "public_hostname" {
+  description = "Hostname público por el que se sirve la app del entorno. No es un secreto: es un nombre DNS público y su valor de dev se documenta en dev.tfvars.example y en el README. Debe colgar de cloudflare_zone_name a UN solo nivel, porque el certificado Universal SSL gratuito solo cubre el apex y los subdominios de primer nivel; más profundidad exigiría Total TLS o Advanced Certificate Manager, ambos de pago."
+  type        = string
+
+  validation {
+    # Dos reglas, no una:
+    # 1) UNA sola etiqueta bajo el apex (<etiqueta>.<zona>) — rechaza el apex desnudo, wildcards y
+    #    cualquier profundidad extra que dejaría el hostname fuera del Universal SSL gratuito.
+    # 2) La etiqueta debe empezar por "autohostai" — la zona es un dominio compartido con otros
+    #    servicios y este valor llega de una variable de Actions editable sin PR; sin este prefijo,
+    #    un cambio de esa variable podría redirigir un hostname ajeno (www, mail...) al túnel de
+    #    este entorno en el siguiente apply. Permite autohostai, autohostai-staging, etc.
+    condition = (
+      endswith(var.public_hostname, ".${var.cloudflare_zone_name}") &&
+      can(regex("^autohostai[a-z0-9-]*[a-z0-9]$|^autohostai$", trimsuffix(var.public_hostname, ".${var.cloudflare_zone_name}")))
+    )
+    error_message = "public_hostname debe ser UNA sola etiqueta bajo cloudflare_zone_name y empezar por 'autohostai' (p. ej. autohostai.digitalsec.work, autohostai-staging.digitalsec.work). El apex desnudo, los wildcards y los subdominios más profundos quedan fuera del Universal SSL gratuito; el prefijo evita apropiarse de un hostname ajeno de una zona compartida."
+  }
+}

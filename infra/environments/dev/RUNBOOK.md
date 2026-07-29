@@ -141,3 +141,98 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 ### 6.4 Rollback (manual, por SHA)
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
+
+## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
+
+La app se sirve en **https://autohostai.digitalsec.work** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).
+
+Consecuencia operativa clave: **si el túnel cae, la app no es alcanzable por HTTPS y no hay vía alternativa por HTTP.** El acceso de emergencia es SSH (§1).
+
+### 7.1 Bootstrap irreducible (una vez, a mano)
+
+Dos cosas no son codificables y se hacen en el dashboard de Cloudflare:
+
+1. **El dominio y su zona** — registrar y delegar nameservers establece propiedad.
+2. **El API token del provider.** **My Profile → API Tokens → Create Custom Token** (ninguna plantilla sirve). Tres permisos, que mezclan ámbito de cuenta y de zona:
+
+   | Ámbito | Grupo | Nivel | Para qué |
+   |---|---|---|---|
+   | Account | Cloudflare Tunnel | Edit | crear el túnel y su configuración de routing |
+   | Zone | DNS | Edit | el CNAME al `<tunnel_id>.cfargotunnel.com` |
+   | Zone | Zone Settings | Edit | forzar HTTPS y TLS mínimo 1.2 |
+
+   ⚠️ Busca **"Cloudflare Tunnel", no "Zero Trust"**: son grupos distintos en el selector, aunque el recurso de Terraform se llame `zero_trust_tunnel_cloudflared`. Acota **Zone Resources** a la zona concreta, no "All zones".
+
+   Verificar antes de guardarlo, y subirlo (el valor se muestra una sola vez):
+
+   ```bash
+   curl -s -H "Authorization: Bearer <TOKEN>" \
+     https://api.cloudflare.com/client/v4/user/tokens/verify | jq .success   # debe ser true
+
+   gh secret   set CLOUDFLARE_API_TOKEN   --repo autohostai-labs/AutoHostAI
+   gh secret   set CLOUDFLARE_ZONE_ID     --repo autohostai-labs/AutoHostAI
+   gh variable set CLOUDFLARE_ACCOUNT_ID  --repo autohostai-labs/AutoHostAI
+   gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.work'
+   gh variable set PUBLIC_HOSTNAME        --repo autohostai-labs/AutoHostAI --body 'autohostai.digitalsec.work'
+   gh variable set OCI_VAULT_ID           --repo autohostai-labs/AutoHostAI   # terraform output vault_id
+   ```
+
+   **El API token NO se copia al Vault** (a diferencia de la clave de la GitHub App): su radio de daño es toda la zona y es re-emitible en segundos, así que una copia solo ampliaría la exposición. Si se pierde, se re-emite y se actualiza el GitHub Secret.
+
+### 7.2 Diagnóstico
+
+```bash
+# ¿El túnel está conectado al edge? (healthcheck del compose usa esto mismo)
+docker compose -f docker-compose.deploy.yml exec cloudflared cloudflared tunnel ready
+
+# Logs del túnel (registro de conexiones al edge, errores de origen)
+docker compose -f docker-compose.deploy.yml logs --tail=100 cloudflared
+
+# Estado visto desde Cloudflare: Zero Trust → Networks → Tunnels (healthy / degraded / down)
+```
+
+Interpretación rápida:
+
+| Síntoma | Causa probable |
+|---|---|
+| `cloudflared` **unhealthy** al desplegar | el token no llegó al `.env` (mira el paso "Render .env" del job) o el edge no es alcanzable |
+| Túnel **healthy** pero HTTPS da **502** | el origen no responde: revisar `frontend` (`docker compose ps`) |
+| HTTPS da **404** en vez de la app | el hostname no casa con la regla de ingress y cae en la catch-all; revisar `PUBLIC_HOSTNAME` vs. el `hostname` del `_config` |
+| **Aviso de certificado** en el navegador | el hostname tiene más de una etiqueta bajo el apex → fuera del Universal SSL gratuito (la `precondition` de Terraform debería haberlo impedido) |
+
+### 7.3 Rotar el secreto del túnel
+
+Lo genera Terraform (`random_bytes.tunnel_secret`), así que rotarlo es forzar un valor nuevo y volver a aplicar:
+
+```bash
+# Desde main, con el workflow infra-dev (plan → apply):
+terraform taint random_bytes.tunnel_secret      # o: terraform apply -replace='random_bytes.tunnel_secret'
+```
+
+El `apply` recrea el túnel, actualiza el secreto del Vault y **reconcilia el CNAME** (depende del id del túnel). Después hace falta **un deploy** para que `cloudflared` recoja el token nuevo del Vault; hasta entonces el contenedor sigue con el antiguo y quedará `unhealthy` cuando el túnel viejo desaparezca.
+
+### 7.4 Acceso de emergencia
+
+Si la app no responde por HTTPS y hay que diagnosticar desde dentro:
+
+```bash
+ssh ubuntu@<IP pública>          # §1; el 22 sigue acotado a los CIDRs de operador
+cd /opt/autohostai               # donde el runner deja el checkout con el compose
+
+# OJO: tras este change backend y frontend YA NO publican puertos, así que `curl localhost:8000`
+# NO funciona ni desde la propia VM. Solo son alcanzables dentro de la red del compose:
+docker compose -f docker-compose.deploy.yml ps    # estado healthy/unhealthy de cada servicio
+docker compose -f docker-compose.deploy.yml exec backend \
+  python3 -c "import urllib.request;print(urllib.request.urlopen('http://localhost:8000/health').status)"
+docker compose -f docker-compose.deploy.yml exec frontend \
+  node -e "require('http').get('http://127.0.0.1:3000',r=>console.log(r.statusCode))"
+```
+
+Si hiciera falta acceso HTTP directo temporal para depurar, la vía correcta es un **túnel SSH local** (no reabrir puertos en el security list):
+
+```bash
+ssh -L 3000:localhost:3000 -L 8000:localhost:8000 ubuntu@<IP pública>
+```
+
+…lo cual requiere que el servicio publique el puerto en la VM; si no lo hace, usar `docker compose exec` como arriba o publicar el puerto temporalmente en local con `docker compose ... run --publish`.
+

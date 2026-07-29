@@ -22,6 +22,14 @@ packages:
   - python3-pip
 write_files:
   # Config del CD (identificadores no sensibles + OCIDs de los secrets del Vault). Sin secretos.
+  #
+  # CONVENCIÓN (change ingress-https-dev, design D3): NO añadir aquí claves para secretos nuevos.
+  # Este fichero solo se escribe al crear la VM: `metadata` es ForceNew en el provider oci y la
+  # instancia declara `ignore_changes = [metadata]`, así que una clave añadida ahora NUNCA llegaría
+  # a la VM viva y quedaría como configuración muerta que aparenta funcionar. Los secretos que se
+  # sumen después del aprovisionamiento se resuelven POR NOMBRE desde el workflow de deploy
+  # (`get-secret-bundle-by-name` + la variable de repo OCI_VAULT_ID), que es determinista y no
+  # requiere tocar la máquina. Las claves de abajo se conservan porque una VM nueva sí las recibe.
   - path: /etc/autohostai-deploy.env
     permissions: '0644'
     content: |

@@ -30,6 +30,29 @@ Allow group autohostai-dev-terraform to manage policies in tenancy
 
 **Ampliación 2026-07-29 (change `app-deploy-dev`):** las dos últimas sentencias (`manage dynamic-groups` + `manage policies`) se añadieron para que el **pipeline** cree como IaC el instance-principal del runner self-hosted (el `oci_identity_dynamic_group` + `oci_identity_policy` de `main.tf`, que leen del Vault la clave de la GitHub App y los secrets de runtime). **Es una relajación consciente del mínimo privilegio**: `svc-terraform-dev` gana gestión de identidad a nivel tenancy (podría crear dynamic-groups que matcheen cualquier recurso → superficie de escalada). Decisión del usuario, priorizando "todo como código, cero pasos manuales por entorno" sobre acotar ese verbo. Alternativa rechazada: aplicar esos dos recursos a mano por un admin (mantendría el mínimo privilegio, a costa de un paso manual por entorno).
 
+**Sin cambios por el change `ingress-https-dev` (2026-07-29):** el ingress HTTPS añade recursos de **Cloudflare** (otro provider, otra API) más un `oci_vault_secret` y una ampliación de la policy del runner. Ambas cosas caen en verbos que `svc-terraform-dev` ya tiene (`manage secret-family`, `manage policies`), así que **no hace falta ampliar esta policy**.
+
+## Policy del runner (creada por Terraform, no por un admin)
+
+Distinta de la de arriba: la aplica el propio pipeline como IaC (`oci_identity_dynamic_group.dev_runner` + `oci_identity_policy.dev_runner_read_secrets` en `main.tf`). Permite a **la instancia dev** —y solo a ella, por `matching_rule` sobre su OCID— leer del Vault por instance principal, sin credenciales en disco.
+
+```
+Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment id <compartment>
+  where any {target.secret.id = '<gh-app-key>',
+             target.secret.id = '<postgres-password>',
+             target.secret.id = '<jwt-secret-key>',
+             target.secret.id = '<encryption-key>',
+             target.secret.id = '<cloudflare-tunnel-token>'}
+Allow dynamic-group autohostai-dev-runner to read secrets in compartment id <compartment>
+```
+
+Dos cosas a tener presentes al añadir secretos en el futuro:
+
+1. **La primera sentencia es una enumeración explícita de OCID.** Un secreto nuevo es **invisible** para el runner hasta que se añade a esa lista — es la causa de fallo más probable al sumar secretos, y se manifiesta como un deploy que falla en el paso "Render .env" nombrando la clave. Se mantiene así a propósito: un `read secret-bundles` sin condición daría acceso a todo secreto presente y futuro del compartment.
+2. **La segunda sentencia (`read secrets`) es nueva** del change `ingress-https-dev`. El deploy resuelve el token del túnel **por nombre** (`get-secret-bundle-by-name`) porque `cloud-init` no puede reescribir `/etc/autohostai-deploy.env` en la VM viva (`metadata` es ForceNew + `ignore_changes`), y resolver por nombre necesita además leer los metadatos del secreto, no solo su bundle. Da lectura de **metadatos** de los secretos del compartment (nombres, OCIDs, fechas), nunca de su contenido — el contenido sigue acotado por la enumeración de la primera sentencia.
+
+> **Pendiente de verificar en el primer deploy real:** que la condición `where any {target.secret.id = ...}` se evalúe correctamente en un acceso **por nombre** (es plausible que OCI resuelva nombre→OCID antes de autorizar, pero no está comprobado). Si no lo hiciera, el plan B es exponer el OCID del secreto como `output` y leerlo con `--secret-id` como los demás, a costa de una variable de repo que alguien debe fijar tras cada `apply`.
+
 ## Verificado
 - `terraform plan` (provider con `svc-terraform-dev`): lee/refresca compute, red, budget y vault sin errores de autorización.
 - `terraform init` (backend con `svc-terraform-dev`): lee el bucket del state (`object-family`).

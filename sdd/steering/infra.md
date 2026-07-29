@@ -14,6 +14,14 @@ Convención de despliegue remoto. Herramientas ya confirmadas: **Terraform** (Ia
 - Crear la **organización** GitHub y la **cuenta**/tenancy cloud.
 - Crear la **GitHub App** y generar su **clave privada** (la API de GitHub no permite crearla headless).
 - La **API key raíz de OCI** del usuario de servicio y el **bucket del tfstate** (dependencia circular con su propio state).
+- El **dominio y su zona DNS** (hoy `digitalsec.work` en Cloudflare): registrar y delegar nameservers establece propiedad, no es codificable.
+- El **API token de Cloudflare** del provider, con permisos mínimos `Account | Cloudflare Tunnel | Edit` + `Zone | DNS | Edit` + `Zone | Zone Settings | Edit`, acotado a esa zona (ver `RUNBOOK.md` §7.1). **No se copia al Vault**: su radio de daño es la zona entera y es re-emitible en segundos, así que una copia solo ampliaría la exposición sin aportar recuperación (change `ingress-https-dev`, ADR 0003).
+
+## Decisión estable: el `apply` de infra no se protege con GitHub Environment
+
+**Los jobs `plan` y `apply` del workflow de infra están acotados a `main` (`github.ref`), con `concurrency` y `timeout-minutes`, y NO se protegen además con un GitHub Environment con revisores requeridos.** Revisado y decidido el 2026-07-29: con dos owners y un `apply` que solo se dispara por `workflow_dispatch` manual desde `main`, se considera control suficiente. Nunca llegó a existir `environment:` en los workflows, pese a que la entrada de `infra-dev-hardening` en el roadmap lo afirmaba.
+
+No es un hallazgo pendiente: **su ausencia es deliberada**, y no debe reabrirse en cada revisión. Lo que sí es requisito es el gating por rama de **ambos** jobs — `plan` también, porque desde `ingress-https-dev` recibe un token con control del DNS de toda la zona y `sensitive = true` no protege frente a código de una rama no revisada.
 
 **Todo lo demás es código**, incluido lo GitHub-side: secrets y variables de Actions (`github_actions_secret`/`github_actions_variable`), instalación de la App, ajustes de repo, acceso a packages, policies. La clave privada de la App / secrets se **inyectan** por variable y se escriben al Vault/secret-store desde Terraform (ver `security.md` §8, excepción dev/test).
 
