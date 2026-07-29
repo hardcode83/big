@@ -19,7 +19,27 @@ Las 13 tareas pendientes son exactamente las tres entradas de abajo. **Secuencia
 
 ---
 
-## 1. Faltan los secrets y variables de Cloudflare en el repositorio
+## 0. Estado del PR (nota, no bloqueo)
+
+**PR abierto: https://github.com/autohostai-labs/AutoHostAI/pull/23** (rama `sdd/ingress-https-dev`, 6 commits). El job `check` de CI pasó; `plan` y `apply` aparecen como *skipped*, que es lo correcto: solo corren por `workflow_dispatch` desde `main`.
+
+`STATE.md` sigue en **`ACTIVE`** y **sin** campos de PR a propósito: `sdd_lifecycle.py record-pr` lo rechaza mientras haya tareas incompletas ("Change has 13 incomplete task(s)"), y esa negativa es correcta — estamos mergeando antes de verificar por la restricción de la entrada 2, no porque el change esté listo. No forzar ese registro: el PR se anota aquí y el estado se pondrá al día cuando las tareas pendientes se cierren de verdad.
+
+---
+
+## 1. ~~Faltan los secrets y variables de Cloudflare~~ — RESUELTA 2026-07-29
+
+Los seis valores están puestos y verificados (`gh secret list` / `gh variable list`). Chequeo previo de permisos del token: los cinco checks pasan (token válido, leer zona, DNS, Zone Settings, Tunnels de cuenta); zona `digitalsec.work` en estado `active`, plan Free; `autohostai.digitalsec.work` libre.
+
+**El token se rotó** tras haberse pegado en texto plano en una conversación: el valor expuesto devuelve ya `Invalid API Token`, y el GitHub Secret se actualizó.
+
+Hallazgo del inventario de la zona, que cambió una decisión: `digitalsec.work` **no** está vacía — 30 registros, dos instancias de `external-dns` (`owner=default` del homelab y `owner=gke-carto…`), cert-manager con DNS-01, y 7 hosts publicados de los que solo 3 son `proxied`. Por eso `min_tls_version` se dejó en 1.0 (ver D7 y R3.2).
+
+**Queda por vigilar tras el `apply`:** que el CNAME creado por Terraform sobreviva unas horas conviviendo con dos `external-dns` en `policy = "sync"`. En teoría sí (solo borran registros con su TXT de propiedad), pero son dos sistemas escribiendo el mismo DNS.
+
+---
+
+## 1-bis. (histórico) Faltaban los secrets y variables de Cloudflare en el repositorio
 
 - **Fase**: run (sección 1 cerrada; bloquea 2.8 en adelante)
 - **Tipo**: `decision` — requiere a un humano. El API token se acuña en el dashboard de Cloudflare, que es *bootstrap irreducible* (`steering/infra.md`, tarea 7.3), y subir credenciales es una acción que no puede hacer el agente.
