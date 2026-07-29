@@ -36,11 +36,11 @@ Rejected: tag `dev` móvil como referencia del deploy — no reproducible, impos
 
 Rejected: imagen de migraciones aparte — innecesario, la prod ya trae alembic. · `uv run alembic` — `uv` no está en el stage prod.
 
-### D6 — Autenticación de la VM contra GHCR (pull) vía token minteado por GitHub App
+### D6 — Autenticación contra GHCR (pull) con el `GITHUB_TOKEN` del job de deploy
 
-**Chosen (revisado — "endurecer hacia IaC"):** imágenes **privadas**; en el paso de deploy la VM **mintea un installation-token de la GitHub App** (misma App que registra el runner, D13; permiso `packages: read`) leyendo su clave privada del Vault por instance principal, hace `docker login ghcr.io -u x-access-token --password-stdin` con ese token efímero y `docker logout` al terminar. **No hay `GHCR_PULL_TOKEN` puesto a mano** — cero PAT de GitHub como secret.
+**Chosen (revisado 2026-07-29):** imágenes **privadas**; el job `deploy` corre dentro de un workflow del repo, así que usa su **`GITHUB_TOKEN`** (con `permissions: packages: read`) para `docker login ghcr.io` y `docker logout` al terminar. Funciona porque el package tiene "Manage Actions access" = repo AutoHostAI, que cubre al `GITHUB_TOKEN` de sus workflows. No hay `GHCR_PULL_TOKEN` a mano ni PAT.
 
-Rejected: PAT `read:packages` como GitHub Secret puesto a mano (`GHCR_PULL_TOKEN`) — viola el principio "nada a mano"; era el diseño previo. · Paquetes públicos — el repo es privado.
+Rejected: **token de GitHub App para el pull** (intento previo) — un installation-token de App **no** está cubierto por el acceso del package (no es "Actions del repo" ni miembro con acceso heredado) → daba **403 Forbidden** en el pull. La App queda solo para **registrar el runner** (D13), no para GHCR. · PAT `read:packages` a mano — viola "nada a mano". · Paquetes públicos — el repo es privado.
 
 ### D7 — `NEXT_PUBLIC_*` como build-args, no runtime
 
