@@ -61,18 +61,18 @@ R4.4 prohíbe cerrar puertos sin esta evidencia registrada. Nada de la sección 
 
 ## 7. Documentación
 
-- [ ] 7.1 `infra/environments/dev/RUNBOOK.md`: sección de operación del túnel — comprobar estado, leer logs de `cloudflared`, **rotar el secreto** del túnel, y acceso de emergencia por SSH cuando la app no responda por HTTPS. Incluir los permisos exactos del API token de Cloudflare (`Account | Cloudflare Tunnel | Edit`, `Zone | DNS | Edit`, `Zone | Zone Settings | Edit`) y el aviso de que "Cloudflare Tunnel" no está bajo "Zero Trust" en el selector. [R6.1]
-- [ ] 7.2 `README.md` raíz: URL pública de dev y nota de que los puertos directos 8000/3000 ya no están expuestos. [R6.4, R5.1]
-- [ ] 7.3 `sdd/steering/infra.md`: añadir al *bootstrap irreducible* (a) el dominio y su zona en Cloudflare y (b) el API token del provider con sus permisos mínimos; y registrar como decisión estable que el `apply` de infra **no** se protege con GitHub Environment. [R6.2, R6.5]
-- [ ] 7.4 `infra/environments/dev/iam-policy.md`: reflejar la policy ampliada del runner (secreto del túnel + `read secrets` para resolución por nombre). [R6.1, D4]
-- [ ] 7.5 `docs/adr/0003-https-ingress-dev.md`: decisión y alternativas descartadas (nginx + Origin Certificate, Caddy + LE DNS-01, Traefik) con tabla de criterios al estilo de ADR 0001, dejando constancia de que las cuatro cuestan €0 y de que decide el coste de mantenimiento, la superficie expuesta y el encaje con IaC-first. Incluir la restricción de Universal SSL (solo apex + primer nivel) como dato para la futura estrategia multi-entorno. [R6.3]
-- [ ] 7.6 Registrar en el ADR o en el RUNBOOK que el `tfstate` gana **exactamente un** secreto más en claro —el del túnel, cuyo radio es este entorno—, amparado por la excepción dev/test de `steering/security.md` sin extenderla a staging/prod; y que el API token de Cloudflare queda **deliberadamente fuera** del Vault y del state (R5.4 / D10). [R5.8, R5.4]
+- [x] 7.1 `infra/environments/dev/RUNBOOK.md`: sección de operación del túnel — comprobar estado, leer logs de `cloudflared`, **rotar el secreto** del túnel, y acceso de emergencia por SSH cuando la app no responda por HTTPS. Incluir los permisos exactos del API token de Cloudflare (`Account | Cloudflare Tunnel | Edit`, `Zone | DNS | Edit`, `Zone | Zone Settings | Edit`) y el aviso de que "Cloudflare Tunnel" no está bajo "Zero Trust" en el selector. [R6.1]
+- [x] 7.2 `README.md` raíz: URL pública de dev y nota de que los puertos directos 8000/3000 ya no están expuestos. [R6.4, R5.1]
+- [x] 7.3 `sdd/steering/infra.md`: añadir al *bootstrap irreducible* (a) el dominio y su zona en Cloudflare y (b) el API token del provider con sus permisos mínimos; y registrar como decisión estable que el `apply` de infra **no** se protege con GitHub Environment. [R6.2, R6.5]
+- [x] 7.4 `infra/environments/dev/iam-policy.md`: reflejar la policy ampliada del runner (secreto del túnel + `read secrets` para resolución por nombre). [R6.1, D4]
+- [x] 7.5 `docs/adr/0003-https-ingress-dev.md`: decisión y alternativas descartadas (nginx + Origin Certificate, Caddy + LE DNS-01, Traefik) con tabla de criterios al estilo de ADR 0001, dejando constancia de que las cuatro cuestan €0 y de que decide el coste de mantenimiento, la superficie expuesta y el encaje con IaC-first. Incluir la restricción de Universal SSL (solo apex + primer nivel) como dato para la futura estrategia multi-entorno. [R6.3]
+- [x] 7.6 Registrar en el ADR o en el RUNBOOK que el `tfstate` gana **exactamente un** secreto más en claro —el del túnel, cuyo radio es este entorno—, amparado por la excepción dev/test de `steering/security.md` sin extenderla a staging/prod; y que el API token de Cloudflare queda **deliberadamente fuera** del Vault y del state (R5.4 / D10). [R5.8, R5.4]
 
 ## 8. Verification
 
-- [ ] 8.1 `cd infra/environments/dev && terraform fmt -check -diff` sin diferencias. [R1]
-- [ ] 8.2 `cd infra/environments/dev && terraform init -backend=false -input=false && terraform validate` sin errores — son los comandos exactos del job `check` de `infra-dev.yml`. [R1]
+- [x] 8.1 `cd infra/environments/dev && terraform fmt -check -diff` sin diferencias. [R1]
+- [x] 8.2 `cd infra/environments/dev && terraform init -backend=false -input=false && terraform validate` sin errores — son los comandos exactos del job `check` de `infra-dev.yml`. [R1]
 - [ ] 8.3 `docker compose -f docker-compose.deploy.yml config` valida sin errores y muestra `cloudflared` sin `ports` publicados, ni `backend`/`frontend` con ellos. [R2.3, R4.3]
 - [ ] 8.4 `terraform plan` final limpio (sin cambios pendientes) tras el último `apply`, y `oci_core_instance.dev` sin aparecer en ningún plan del change. [R1]
-- [ ] 8.5 Confirmar con `git ls-files` y revisión del diff que no hay versionado ningún API token, secreto o token de túnel, ni el zone ID; y que `.terraform.lock.hcl` **sí** quedó versionado con el provider `cloudflare`. [R1.4, R5.6]
+- [x] 8.5 Confirmar con `git ls-files` y revisión del diff que no hay versionado ningún API token, secreto o token de túnel, ni el zone ID; y que `.terraform.lock.hcl` **sí** quedó versionado con el provider `cloudflare`. [R1.4, R5.6]
 - [ ] 8.6 Repasar los 6 requisitos del proposal uno por uno contra la implementación y dejar constancia de la evidencia de cada criterio, incluido R1.6 (ningún valor generado por Terraform copiado a mano del dashboard). [R1, R2, R3, R4, R5, R6]
