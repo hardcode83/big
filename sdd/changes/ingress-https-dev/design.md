@@ -63,7 +63,7 @@ Rejected: sin healthcheck, verificando solo por `curl` externo desde el runner �
 **Chosen:** R4 se implementa en **dos fases separadas**, no en un único `apply`:
 
 1. Fase A: túnel + DNS + `cloudflared` en el compose + secreto y policy. `local.ingress_ports` sigue en `[22, 8000, 3000]` y el compose sigue publicando puertos.
-2. Verificación: `curl -sSf https://autohostai.digitalsec.net` devuelve 200 desde fuera de los CIDRs de operador, y `cloudflared` está `healthy`.
+2. Verificación: `curl -sSf https://autohostai.digitalsec.work` devuelve 200 desde fuera de los CIDRs de operador, y `cloudflared` está `healthy`.
 3. Fase B: `local.ingress_ports = [22]` y se quitan los `ports` de backend/frontend en el compose.
 
 Motivo: cerrar antes de verificar deja la app inalcanzable por ambas vías a la vez. El 22 nunca se toca, así que SSH sigue siendo la red de seguridad.
@@ -72,45 +72,45 @@ Rejected: un solo `apply` con todo — si el túnel no levanta, se pierde el acc
 
 ### D7 — Ajustes de HTTPS de zona: alcance mínimo
 
-**Chosen:** declarar únicamente el forzado de HTTPS y el TLS mínimo (R3.1, R3.2) como recursos de ajuste de zona del provider. Son ajustes **de zona**, no de hostname: afectan a todo `digitalsec.net`, no solo a `autohostai`.
+**Chosen:** declarar únicamente el forzado de HTTPS y el TLS mínimo (R3.1, R3.2) como recursos de ajuste de zona del provider. Son ajustes **de zona**, no de hostname: afectan a todo `digitalsec.work`, no solo a `autohostai`.
 
-**Consecuencia aceptada explícitamente (2026-07-29):** `digitalsec.net` es el dominio personal de Jose y aloja otros servicios (el homelab publica ahí con external-dns + cert-manager). Forzar HTTPS y TLS mínimo 1.2 **también les aplica**. Se acepta a sabiendas: es la postura deseable para todos ellos. Si algún servicio de esa zona necesitara HTTP en claro en el futuro, este ajuste es lo primero que hay que revisar.
+**Consecuencia aceptada explícitamente (2026-07-29):** `digitalsec.work` es un dominio personal de Jose que puede alojar otros servicios además de este entorno. Forzar HTTPS y TLS mínimo 1.2 **les aplicaría también**. Se acepta a sabiendas: es la postura deseable para todos ellos. Si algún servicio de esa zona necesitara HTTP en claro en el futuro, este ajuste es lo primero que hay que revisar.
 
 Rejected: no tocar los ajustes de zona y confiar en los valores actuales — dejaría R3.1/R3.2 sin evidencia verificable.
 Rejected: ajustes por hostname — Cloudflare no los ofrece con esa granularidad en el plan Free.
 
 ### D9 — El apex de la zona es una variable (`cloudflare_zone_name`)
 
-**Chosen:** añadir una quinta variable, `cloudflare_zone_name` (p. ej. `digitalsec.net`), y usarla en la `validation` de `public_hostname`.
+**Chosen:** añadir una quinta variable, `cloudflare_zone_name` (p. ej. `digitalsec.work`), y usarla en la `validation` de `public_hostname`.
 
-**Origen: resolución de un `DESIGN-CONFLICT`** levantado por el panel de la sección 1 (2026-07-29). Este diseño exigía en R3.4 validar en el `plan` que el hostname cuelga del apex a un solo nivel, pero no dijo **de dónde sale el apex**. Las dos salidas eran hardcodear `digitalsec.net` en el `.tf` —que choca con el *why* de R5 ("que el mismo código sirva para otra zona o entorno sin editarlo") y con R5.1— o parametrizarlo. Se parametriza. Verificado con `terraform console`: la condición acepta `autohostai.digitalsec.net` y rechaza el apex desnudo, `*.digitalsec.net`, `dev.autohostai.digitalsec.net`, otra zona y mayúsculas.
+**Origen: resolución de un `DESIGN-CONFLICT`** levantado por el panel de la sección 1 (2026-07-29). Este diseño exigía en R3.4 validar en el `plan` que el hostname cuelga del apex a un solo nivel, pero no dijo **de dónde sale el apex**. Las dos salidas eran hardcodear `digitalsec.work` en el `.tf` —que choca con el *why* de R5 ("que el mismo código sirva para otra zona o entorno sin editarlo") y con R5.1— o parametrizarlo. Se parametriza. Verificado con `terraform console`: la condición acepta `autohostai.digitalsec.work` y rechaza el apex desnudo, `*.digitalsec.work`, `dev.autohostai.digitalsec.work`, otra zona y mayúsculas.
 
 **Deuda conocida, señalada por el architect:** `cloudflare_zone_name` y `cloudflare_zone_id` describen la misma zona, así que son **dos fuentes de verdad** que pueden desincronizarse (un zone id de una zona y un nombre de otra pasarían la validación). Mitigaciones posibles, ninguna implementada aquí por disciplina de alcance:
 
 - Derivar el nombre con `data "cloudflare_zone"` a partir del `zone_id` y eliminar la variable — la opción más limpia, pendiente de confirmar que una `validation` puede referenciar un data source en la versión de Terraform en uso (las validaciones con referencias cruzadas llegaron en 1.9).
 - O mantener la variable y añadir un `check`/`precondition` que afirme `data.cloudflare_zone.this.name == var.cloudflare_zone_name`, convirtiendo la desincronización en un fallo de `plan`.
 
-**Resuelto: se implementa la opción 2** (tarea 2.4). El panel de seguridad no dejó la deuda en teoría — demostró la explotación: con `CLOUDFLARE_ZONE_NAME = "il.digitalsec.net"` y `PUBLIC_HOSTNAME = "autohostai.il.digitalsec.net"` la validación devuelve `true`, pero el hostname queda a **dos** niveles bajo la zona real, fuera del Universal SSL, y el navegador muestra aviso de certificado. Como degrada R3.4 y el arreglo son cuatro líneas, se cierra en este change en vez de dejarlo anotado.
+**Resuelto: se implementa la opción 2** (tarea 2.4). El panel de seguridad no dejó la deuda en teoría — demostró la explotación: con `CLOUDFLARE_ZONE_NAME = "il.digitalsec.work"` y `PUBLIC_HOSTNAME = "autohostai.il.digitalsec.work"` la validación devuelve `true`, pero el hostname queda a **dos** niveles bajo la zona real, fuera del Universal SSL, y el navegador muestra aviso de certificado. Como degrada R3.4 y el arreglo son cuatro líneas, se cierra en este change en vez de dejarlo anotado.
 
 Rejected: hardcodear el apex en el `.tf` — rompe R5.1 y el propósito de R5.
-Rejected: validar solo "≥ 3 etiquetas" sin conocer el apex — no distingue `dev.autohostai.digitalsec.net` (4 etiquetas, fuera del Universal SSL gratuito) de un hostname válido en otra zona.
+Rejected: validar solo "≥ 3 etiquetas" sin conocer el apex — no distingue `dev.autohostai.digitalsec.work` (4 etiquetas, fuera del Universal SSL gratuito) de un hostname válido en otra zona.
 
 ### D10 — El API token no se copia al Vault, y su radio de daño se trata como de zona
 
 **Origen: hallazgos del panel de seguridad de la sección 1 (2026-07-29).** El diseño original replicaba para el API token de Cloudflare el patrón "GitHub Secret = consumidor de CI, Vault = copia recuperable" que la spec de `infra-dev-terraform` fijó para la clave SSH. El panel señaló que la analogía no se sostiene:
 
-1. **El radio no es dev.** Con `Zone | DNS | Edit` + `Zone | Zone Settings | Edit` sobre `digitalsec.net` —una zona compartida y real, ver D7— el token permite reescribir DNS y bajar el TLS de todos los servicios del dominio. La excepción dev/test de `security.md` §8 se justifica *porque* el ámbito es dev/test, así que no lo cubre.
+1. **El radio no es dev.** Con `Zone | DNS | Edit` + `Zone | Zone Settings | Edit` sobre `digitalsec.work` —una zona compartida y real, ver D7— el token permite reescribir DNS y bajar el TLS de todos los servicios del dominio. La excepción dev/test de `security.md` §8 se justifica *porque* el ámbito es dev/test, así que no lo cubre.
 2. **La copia no aporta recuperación.** Un API token es re-emitible en segundos desde el dashboard; a diferencia de una clave SSH o de una contraseña generada por Terraform, no hay nada que "recuperar".
 
 **Chosen:** no copiar el API token al Vault. Terraform no persiste la configuración de provider, así que sin esa copia el token **nunca llega al `tfstate`** y el problema de gobierno desaparece sin necesidad de enmendar §8. R5.3 se dividió en R5.3 (consumo en CI) y R5.4 (prohibición explícita de la copia).
 
 Rejected: enmendar `security.md` §8 para enumerar el token con su radio real — resuelve el papeleo pero deja la exposición en pie; la otra opción del propio panel era mejor.
-Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro, pero exige mover el hostname fuera de `digitalsec.net`, que es una decisión de producto, no de este change.
+Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro, pero exige mover el hostname fuera de `digitalsec.work`, que es una decisión de producto, no de este change.
 
 **Otros dos hallazgos del mismo panel, ya corregidos en la sección 1:**
 
 - El job `plan` de `infra-dev.yml` aceptaba `workflow_dispatch` desde **cualquier rama** sin comprobar `github.ref`, y ahora recibe el token. `sensitive = true` no protege frente a código de rama no revisada (`nonsensitive()`, provider `http`, troceado). Se le añadió el mismo gating a `main` que tiene `apply`. **Consecuencia operativa:** ya no se puede planificar desde una rama de feature; el `plan` de un change se ejecuta tras mergear (ver `BLOCKED.md` #2).
-- La `validation` de `public_hostname` solo comprobaba profundidad, así que nada impedía apuntar `www.digitalsec.net` al túnel de dev cambiando una variable de Actions (editable sin PR). Se añadió la exigencia de prefijo `autohostai*` → R5.9.
+- La `validation` de `public_hostname` solo comprobaba profundidad, así que nada impedía apuntar `www.digitalsec.work` al túnel de dev cambiando una variable de Actions (editable sin PR). Se añadió la exigencia de prefijo `autohostai*` → R5.9.
 
 ### D8 — Sin cambios en la aplicación
 
@@ -126,7 +126,7 @@ Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro,
 | Terraform — túnel | `infra/environments/dev/main.tf` | `random_bytes.tunnel_secret`, `cloudflare_zero_trust_tunnel_cloudflared.dev` (`config_src = "cloudflare"`), `cloudflare_zero_trust_tunnel_cloudflared_config.dev` (ingress → `http://frontend:3000` + catch-all `http_status:404`), `local.tunnel_token` |
 | Terraform — DNS y zona | `infra/environments/dev/main.tf` | `cloudflare_dns_record.app` (CNAME → `<tunnel_id>.cfargotunnel.com`, `proxied = true`), recursos de ajuste de zona (HTTPS forzado, TLS mín. 1.2) |
 | Terraform — secretos e IAM | `infra/environments/dev/main.tf` | `oci_vault_secret.cloudflare_tunnel_token`; `oci_identity_policy.dev_runner_read_secrets` amplía la lista de OCID y añade statement de `read secrets` |
-| Terraform — interfaz | `infra/environments/dev/variables.tf`, `outputs.tf`, `dev.tfvars.example` | vars `cloudflare_api_token` (sensitive), `cloudflare_zone_id` (sensitive), `cloudflare_account_id`, `public_hostname`; output `public_url`; `.example` con `autohostai.digitalsec.net` y marcadores sin valor |
+| Terraform — interfaz | `infra/environments/dev/variables.tf`, `outputs.tf`, `dev.tfvars.example` | vars `cloudflare_api_token` (sensitive), `cloudflare_zone_id` (sensitive), `cloudflare_account_id`, `public_hostname`; output `public_url`; `.example` con `autohostai.digitalsec.work` y marcadores sin valor |
 | Terraform — cierre (fase B) | `infra/environments/dev/main.tf` | `local.ingress_ports` → `[22]` |
 | CI — infra | `.github/workflows/infra-dev.yml` | `TF_VAR_cloudflare_api_token`, `TF_VAR_cloudflare_zone_id` desde secrets; `TF_VAR_cloudflare_account_id`, `TF_VAR_public_hostname` desde vars — en los jobs `plan` y `apply` |
 | CD — deploy | `.github/workflows/deploy-dev.yml` | leer el token del túnel del Vault **por nombre** y volcarlo al `.env` como `TUNNEL_TOKEN`; tras `up --wait`, verificación externa `curl -sSf https://<hostname>` |
@@ -151,7 +151,7 @@ Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro,
 | Riesgo | Mitigación |
 |---|---|
 | **La policy IAM no cubre el secreto nuevo** → el deploy falla al leer el Vault (causa de fallo más probable) | D4 lo hace parte del mismo `apply`; el paso de verificación del deploy falla nombrando la clave antes de tocar contenedores (R2.2) |
-| **Los ajustes de zona afectan a todo `digitalsec.net`**, incluido lo que ya publiques ahí | Pregunta abierta Q1 antes de implementar; si hay conflicto, se limita el alcance |
+| **Los ajustes de zona afectan a todo `digitalsec.work`**, incluido lo que ya publiques ahí | Pregunta abierta Q1 antes de implementar; si hay conflicto, se limita el alcance |
 | Permisos del API token insuficientes (`Cloudflare Tunnel` es de **cuenta**, no de zona, y no está bajo "Zero Trust") | El `plan` falla temprano y de forma legible; el conjunto exacto queda en el RUNBOOK |
 | Cerrar puertos con el túnel roto deja la app inalcanzable | D6: dos fases con verificación externa entre medias; el 22 nunca se cierra |
 | `cloudflared` sano pero el frontend caído → el edge devuelve 502 | `depends_on: frontend: service_healthy` (R2.5) y verificación externa end-to-end |
@@ -162,6 +162,6 @@ Rejected: acotar el token a una zona dedicada del proyecto — válido a futuro,
 
 Ninguna abierta. Las tres que planteó este diseño se resolvieron en el gate del **2026-07-29**:
 
-1. **Alcance de los ajustes de HTTPS de zona** → aplicar a todo `digitalsec.net`, aceptando el efecto sobre los demás servicios de la zona. Registrado en D7.
+1. **Alcance de los ajustes de HTTPS de zona** → aplicar a todo `digitalsec.work`, aceptando el efecto sobre los demás servicios de la zona. Registrado en D7.
 2. **¿Fase B dentro del change?** → **sí**, tal como la describe D6: fase A, verificación externa, fase B. El change queda autoconclusivo y R4 se cumple aquí.
 3. **Paso del hostname a Terraform** → **variable de GitHub** `PUBLIC_HOSTNAME` cableada como `TF_VAR_public_hostname`. Sin `default` en `variables.tf`: ningún valor de entorno concreto entra en el código, conforme a R5.1. La `validation` de una sola etiqueta bajo el apex (R3.4) se mantiene.

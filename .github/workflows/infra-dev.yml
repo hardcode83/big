@@ -46,7 +46,7 @@ jobs:
   plan:
     # Acotado a `main` igual que `apply`. Desde el change ingress-https-dev este job recibe
     # CLOUDFLARE_API_TOKEN, que tiene control de DNS y de los ajustes de TLS de TODA la zona
-    # digitalsec.net (no solo de dev). Un workflow_dispatch sobre una rama arbitraria ejecuta la
+    # digitalsec.work (no solo de dev). Un workflow_dispatch sobre una rama arbitraria ejecuta la
     # definición del workflow de ESA rama con el secret en su env, y `sensitive = true` no impide
     # desredactarlo desde código no revisado (nonsensitive(), provider http, troceado del valor).
     # Consecuencia operativa aceptada: no se puede planificar desde una rama de feature; el plan de

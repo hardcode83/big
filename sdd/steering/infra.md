@@ -14,7 +14,7 @@ Convención de despliegue remoto. Herramientas ya confirmadas: **Terraform** (Ia
 - Crear la **organización** GitHub y la **cuenta**/tenancy cloud.
 - Crear la **GitHub App** y generar su **clave privada** (la API de GitHub no permite crearla headless).
 - La **API key raíz de OCI** del usuario de servicio y el **bucket del tfstate** (dependencia circular con su propio state).
-- El **dominio y su zona DNS** (hoy `digitalsec.net` en Cloudflare): registrar y delegar nameservers establece propiedad, no es codificable.
+- El **dominio y su zona DNS** (hoy `digitalsec.work` en Cloudflare): registrar y delegar nameservers establece propiedad, no es codificable.
 - El **API token de Cloudflare** del provider, con permisos mínimos `Account | Cloudflare Tunnel | Edit` + `Zone | DNS | Edit` + `Zone | Zone Settings | Edit`, acotado a esa zona (ver `RUNBOOK.md` §7.1). **No se copia al Vault**: su radio de daño es la zona entera y es re-emitible en segundos, así que una copia solo ampliaría la exposición sin aportar recuperación (change `ingress-https-dev`, ADR 0003).
 
 ## Decisión estable: el `apply` de infra no se protege con GitHub Environment

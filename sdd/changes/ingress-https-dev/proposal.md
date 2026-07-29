@@ -10,7 +10,7 @@ Este change añade un ingress HTTPS público con un hostname real, **sin abrir n
 
 Un servicio `cloudflared` se suma a `docker-compose.deploy.yml` y publica el frontend a través de un **Cloudflare Tunnel**: el contenedor abre una conexión *saliente* al edge de Cloudflare, que termina TLS con el certificado del dominio y enruta las peticiones a `frontend:3000` por la red interna de compose. El backend sigue sin exposición pública — el frontend ya le habla server-side por `BACKEND_INTERNAL_URL`, y `frontend/lib/config/public.ts` excluye deliberadamente esa URL del bundle del navegador, así que no hace falta ni un segundo hostname ni CORS.
 
-El hostname de `dev` es **`autohostai.digitalsec.net`**, sobre la zona `digitalsec.net` que el equipo ya tiene en Cloudflare. Se elige un subdominio de primer nivel a propósito: es el alcance que cubre el certificado Universal SSL gratuito, así que el HTTPS sale a €0 sin certificados de pago. La **estrategia de nombres para varios entornos queda deliberadamente aplazada** — se decidirá cuando exista un segundo entorno, con el dato de que profundizar (`dev.autohostai.digitalsec.net`) obligaría a un certificado de pago mientras que aplanar (`autohostai-staging.digitalsec.net`) o usar otra zona no.
+El hostname de `dev` es **`autohostai.digitalsec.work`**, sobre la zona `digitalsec.work` que el equipo ya tiene en Cloudflare. Se elige un subdominio de primer nivel a propósito: es el alcance que cubre el certificado Universal SSL gratuito, así que el HTTPS sale a €0 sin certificados de pago. La **estrategia de nombres para varios entornos queda deliberadamente aplazada** — se decidirá cuando exista un segundo entorno, con el dato de que profundizar (`dev.autohostai.digitalsec.work`) obligaría a un certificado de pago mientras que aplanar (`autohostai-staging.digitalsec.work`) o usar otra zona no.
 
 Todo el lado Cloudflare se declara con el provider `cloudflare` en `infra/environments/dev/`: el túnel, sus reglas de ingress, el registro DNS y los ajustes de HTTPS de la zona. El secreto del túnel lo genera Terraform y se guarda como `oci_vault_secret`, de modo que el CD lo lee por instance principal igual que ya hace con `JWT_SECRET_KEY` y `ENCRYPTION_KEY`. Una vez verificado el túnel, `ingress_ports` baja de `[22, 8000, 3000]` a `[22]`.
 
@@ -52,7 +52,7 @@ Acceptance criteria:
 1. WHEN un cliente solicita el hostname público por HTTP, THE SYSTEM SHALL responder con una redirección permanente a HTTPS.
 2. THE SYSTEM SHALL declarar como código (recursos de ajustes de zona del provider `cloudflare`) el forzado de HTTPS y una versión mínima de TLS de 1.2 o superior.
 3. WHEN se solicita el hostname público por HTTPS, THE SYSTEM SHALL servir la aplicación con un certificado válido y confiado por navegadores, sin intervención de un certificado gestionado en el origen.
-4. THE SYSTEM SHALL usar un hostname de **primer nivel** bajo el apex de la zona (`<etiqueta>.digitalsec.net`), que es el alcance que cubre el certificado Universal SSL gratuito; IF se necesitara un hostname de mayor profundidad (p. ej. `dev.autohostai.digitalsec.net`), THEN THE SYSTEM SHALL tratarlo como decisión de coste, porque exige Total TLS o Advanced Certificate Manager (de pago).
+4. THE SYSTEM SHALL usar un hostname de **primer nivel** bajo el apex de la zona (`<etiqueta>.digitalsec.work`), que es el alcance que cubre el certificado Universal SSL gratuito; IF se necesitara un hostname de mayor profundidad (p. ej. `dev.autohostai.digitalsec.work`), THEN THE SYSTEM SHALL tratarlo como decisión de coste, porque exige Total TLS o Advanced Certificate Manager (de pago).
 
 ### R4 — Cierre del acceso HTTP directo, secuenciado tras la verificación
 
@@ -71,10 +71,10 @@ Acceptance criteria:
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL exponer el hostname público como variable de Terraform, cuyo valor para `dev` es **`autohostai.digitalsec.net`**; por ser un nombre público y no un secreto, THE SYSTEM SHALL documentar ese valor en `dev.tfvars.example` y en el `README.md` raíz.
+1. THE SYSTEM SHALL exponer el hostname público como variable de Terraform, cuyo valor para `dev` es **`autohostai.digitalsec.work`**; por ser un nombre público y no un secreto, THE SYSTEM SHALL documentar ese valor en `dev.tfvars.example` y en el `README.md` raíz.
 2. THE SYSTEM SHALL declarar el **API token de Cloudflare** y el **zone ID** como variables `sensitive`, presentes en `dev.tfvars.example` solo como marcador sin valor.
 3. THE SYSTEM SHALL consumir el API token en CI desde un **GitHub Secret de repositorio** (`CLOUDFLARE_API_TOKEN` → `TF_VAR_cloudflare_api_token`), del mismo modo que `infra-dev.yml` ya consume `GH_APP_PRIVATE_KEY`.
-4. THE SYSTEM SHALL NOT copiar el API token de Cloudflare al OCI Vault ni a ningún otro almacén que lo lleve al `tfstate`. A diferencia de la clave SSH o la de la GitHub App, un API token es **re-emitible en segundos** desde el dashboard, así que una copia "recuperable" no aporta capacidad de recuperación y sí ampliaría la exposición de un secreto cuyo radio de daño es **toda la zona** `digitalsec.net` (DNS y TLS de todos sus servicios), radio que la excepción dev/test de `steering/security.md` §8 no cubre.
+4. THE SYSTEM SHALL NOT copiar el API token de Cloudflare al OCI Vault ni a ningún otro almacén que lo lleve al `tfstate`. A diferencia de la clave SSH o la de la GitHub App, un API token es **re-emitible en segundos** desde el dashboard, así que una copia "recuperable" no aporta capacidad de recuperación y sí ampliaría la exposición de un secreto cuyo radio de daño es **toda la zona** `digitalsec.work` (DNS y TLS de todos sus servicios), radio que la excepción dev/test de `steering/security.md` §8 no cubre.
 5. THE SYSTEM SHALL NOT hacer llegar el API token de Cloudflare a la VM: el único secreto de Cloudflare presente en la máquina es el token del túnel, leído del Vault por instance principal.
 6. THE SYSTEM SHALL documentar en `.env.deploy.example` la clave del token del túnel sin valor, coherente con el resto del fichero.
 7. THE SYSTEM SHALL NOT incluir en ningún fichero versionado el API token de Cloudflare, el secreto o token del túnel, ni el zone ID.

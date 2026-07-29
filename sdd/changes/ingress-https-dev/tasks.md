@@ -10,7 +10,7 @@ Tras esta sección `plan` sigue verde y **no cambia ningún recurso real**: solo
 
 - [x] 1.1 Declarar las variables nuevas en `infra/environments/dev/variables.tf`: `cloudflare_api_token` y `cloudflare_zone_id` (`sensitive = true`), `cloudflare_account_id`, `cloudflare_zone_name` (el apex, ver D9) y `public_hostname` **con `validation` de dos reglas**: (a) exactamente una etiqueta bajo el apex — R3.4 se hace cumplir en el `plan`, no en revisión; (b) esa etiqueta debe empezar por `autohostai`, porque la zona es compartida y el valor llega de una variable de Actions editable sin PR (R5.9, hallazgo del panel). Sin `default` en ninguna. [R3.4, R5.1, R5.2, R5.9]
 - [x] 1.2 Añadir `cloudflare/cloudflare` a `required_providers` en `infra/environments/dev/main.tf` con constraint de versión mayor explícito, declarar `provider "cloudflare" { api_token = var.cloudflare_api_token }`, y regenerar `.terraform.lock.hcl` de modo que quede **versionado** con los hashes del provider. [R1.4]
-- [x] 1.3 Rellenar `infra/environments/dev/dev.tfvars.example`: `public_hostname = "autohostai.digitalsec.net"` con valor real (es público), y `cloudflare_api_token` / `cloudflare_zone_id` / `cloudflare_account_id` solo como marcadores sin valor. [R5.1, R5.2]
+- [x] 1.3 Rellenar `infra/environments/dev/dev.tfvars.example`: `public_hostname = "autohostai.digitalsec.work"` con valor real (es público), y `cloudflare_api_token` / `cloudflare_zone_id` / `cloudflare_account_id` solo como marcadores sin valor. [R5.1, R5.2]
 - [x] 1.4 Cablear las variables en los jobs `plan` y `apply` de `.github/workflows/infra-dev.yml`: `TF_VAR_cloudflare_api_token` y `TF_VAR_cloudflare_zone_id` desde `secrets`, `TF_VAR_cloudflare_account_id` y `TF_VAR_public_hostname` desde `vars`. El job `check` no recibe ninguna (sigue sin secretos, `init -backend=false`). [R5.3]
 - [x] 1.5 Verificar que un `plan` sin las credenciales de Cloudflare **falla nombrando la variable ausente** y no deja recursos a medias; evidencia: log del `plan` o `terraform validate` local mostrando el error de variable requerida. [R1.5]
 
@@ -32,8 +32,8 @@ Tras esta sección el túnel y su DNS existen en Cloudflare, y **el token del t�
 
 ## 3. HTTPS forzado en la zona
 
-- [x] 3.1 Declarar como código los ajustes de zona de `digitalsec.net`: forzado de HTTPS y versión mínima de TLS 1.2. Alcance de **zona completa**, consecuencia aceptada en D7 — afecta también a los demás servicios del dominio. Ficheros: `infra/environments/dev/main.tf`. [R3.1, R3.2]
-- [ ] 3.2 Aplicar y comprobar que `curl -sSI http://autohostai.digitalsec.net` devuelve una redirección permanente a HTTPS. [R3.1]
+- [x] 3.1 Declarar como código los ajustes de zona de `digitalsec.work`: forzado de HTTPS y versión mínima de TLS 1.2. Alcance de **zona completa**, consecuencia aceptada en D7 — afecta también a los demás servicios del dominio. Ficheros: `infra/environments/dev/main.tf`. [R3.1, R3.2]
+- [ ] 3.2 Aplicar y comprobar que `curl -sSI http://autohostai.digitalsec.work` devuelve una redirección permanente a HTTPS. [R3.1]
 
 ## 4. `cloudflared` en el deploy (cierre de la fase A)
 
@@ -49,14 +49,14 @@ Tras esta sección la app se sirve por HTTPS **y** sigue accesible por 8000/3000
 
 R4.4 prohíbe cerrar puertos sin esta evidencia registrada. Nada de la sección 6 empieza hasta que estas dos tareas estén cerradas.
 
-- [ ] 5.1 Comprobar desde una red **fuera** de los CIDRs de `var.allowed_ssh_cidrs` (p. ej. datos móviles) que `https://autohostai.digitalsec.net` sirve la aplicación con certificado válido y sin aviso del navegador. Registrar el resultado como evidencia. [R3.3, R4.4]
+- [ ] 5.1 Comprobar desde una red **fuera** de los CIDRs de `var.allowed_ssh_cidrs` (p. ej. datos móviles) que `https://autohostai.digitalsec.work` sirve la aplicación con certificado válido y sin aviso del navegador. Registrar el resultado como evidencia. [R3.3, R4.4]
 - [ ] 5.2 Comprobar que un hostname no previsto de la zona que resuelva al túnel devuelve **404** por la regla catch-all, y no la aplicación. [R1.2]
 
 ## 6. Cierre del acceso HTTP directo (fase B)
 
 - [ ] 6.1 Reducir `local.ingress_ports` a `[22]` en `infra/environments/dev/main.tf`, manteniendo el 22 acotado a `var.allowed_ssh_cidrs` con su validación de prefijo `>= /24` intacta y sin introducir ninguna regla con origen `0.0.0.0/0`. Aplicar y confirmar en el log que solo desaparecen reglas de 8000/3000. [R4.1, R4.2]
 - [ ] 6.2 Quitar las secciones `ports` de `backend` y `frontend` en `docker-compose.deploy.yml`, de modo que solo sean alcanzables por la red interna del compose. [R4.3]
-- [ ] 6.3 Confirmar tras el deploy que `https://autohostai.digitalsec.net` sigue sirviendo la app y que `curl` directo a la IP pública en 3000 y 8000 **ya no conecta**. [R4.1, R4.3]
+- [ ] 6.3 Confirmar tras el deploy que `https://autohostai.digitalsec.work` sigue sirviendo la app y que `curl` directo a la IP pública en 3000 y 8000 **ya no conecta**. [R4.1, R4.3]
 - [ ] 6.4 Confirmar que el acceso SSH a la VM sigue funcionando desde un CIDR autorizado (la red de seguridad no debe haberse roto). [R4.2]
 
 ## 7. Documentación

@@ -127,7 +127,7 @@ variable "postgres_user" {
 # Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev)
 
 variable "cloudflare_api_token" {
-  description = "API token de Cloudflare para el provider. Permisos mínimos: Account | Cloudflare Tunnel | Edit, Zone | DNS | Edit, Zone | Zone Settings | Edit, acotado a la zona gestionada. Bootstrap irreducible (se acuña en el dashboard, ver steering/infra.md): vive como GitHub Secret CLOUDFLARE_API_TOKEN e inyectado por TF_VAR. ATENCIÓN a su radio de daño: NO es un secreto de ámbito dev — con esos permisos sobre digitalsec.net puede reescribir el DNS y bajar el TLS de TODOS los servicios de la zona, no solo de este entorno. Por eso, a diferencia de la clave de la GitHub App, este token NO se copia al Vault: es re-emitible en segundos desde el dashboard, así que una copia 'recuperable' no aporta nada y en cambio lo metería en el tfstate, cuyo radio la excepción dev/test de security.md §8 no cubre. Terraform no persiste la configuración de provider, así que mientras no exista esa copia el token no llega al estado."
+  description = "API token de Cloudflare para el provider. Permisos mínimos: Account | Cloudflare Tunnel | Edit, Zone | DNS | Edit, Zone | Zone Settings | Edit, acotado a la zona gestionada. Bootstrap irreducible (se acuña en el dashboard, ver steering/infra.md): vive como GitHub Secret CLOUDFLARE_API_TOKEN e inyectado por TF_VAR. ATENCIÓN a su radio de daño: NO es un secreto de ámbito dev — con esos permisos sobre digitalsec.work puede reescribir el DNS y bajar el TLS de TODOS los servicios de la zona, no solo de este entorno. Por eso, a diferencia de la clave de la GitHub App, este token NO se copia al Vault: es re-emitible en segundos desde el dashboard, así que una copia 'recuperable' no aporta nada y en cambio lo metería en el tfstate, cuyo radio la excepción dev/test de security.md §8 no cubre. Terraform no persiste la configuración de provider, así que mientras no exista esa copia el token no llega al estado."
   type        = string
   sensitive   = true
 }
@@ -144,12 +144,12 @@ variable "cloudflare_zone_id" {
 }
 
 variable "cloudflare_zone_name" {
-  description = "Apex de la zona en Cloudflare (p. ej. digitalsec.net). No sensible. Se usa para validar que public_hostname cuelga de esta zona a un solo nivel de profundidad."
+  description = "Apex de la zona en Cloudflare (p. ej. digitalsec.work). No sensible. Se usa para validar que public_hostname cuelga de esta zona a un solo nivel de profundidad."
   type        = string
 
   validation {
     condition     = can(regex("^([a-z0-9-]+\\.)+[a-z]{2,}$", var.cloudflare_zone_name))
-    error_message = "cloudflare_zone_name debe ser un nombre de dominio válido en minúsculas, sin protocolo ni barra final (p. ej. digitalsec.net)."
+    error_message = "cloudflare_zone_name debe ser un nombre de dominio válido en minúsculas, sin protocolo ni barra final (p. ej. digitalsec.work)."
   }
 }
 
@@ -169,6 +169,6 @@ variable "public_hostname" {
       endswith(var.public_hostname, ".${var.cloudflare_zone_name}") &&
       can(regex("^autohostai[a-z0-9-]*[a-z0-9]$|^autohostai$", trimsuffix(var.public_hostname, ".${var.cloudflare_zone_name}")))
     )
-    error_message = "public_hostname debe ser UNA sola etiqueta bajo cloudflare_zone_name y empezar por 'autohostai' (p. ej. autohostai.digitalsec.net, autohostai-staging.digitalsec.net). El apex desnudo, los wildcards y los subdominios más profundos quedan fuera del Universal SSL gratuito; el prefijo evita apropiarse de un hostname ajeno de una zona compartida."
+    error_message = "public_hostname debe ser UNA sola etiqueta bajo cloudflare_zone_name y empezar por 'autohostai' (p. ej. autohostai.digitalsec.work, autohostai-staging.digitalsec.work). El apex desnudo, los wildcards y los subdominios más profundos quedan fuera del Universal SSL gratuito; el prefijo evita apropiarse de un hostname ajeno de una zona compartida."
   }
 }

@@ -34,10 +34,10 @@ github_app_installation_id = "<Installation ID de la App en el repo/owner>"
 
 # --- Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev) ---
 # El hostname y el apex NO son secretos (son nombres DNS públicos), así que llevan valor real:
-cloudflare_zone_name = "digitalsec.net"
-public_hostname      = "autohostai.digitalsec.net"
+cloudflare_zone_name = "digitalsec.work"
+public_hostname      = "autohostai.digitalsec.work"
 # Debe ser UNA sola etiqueta bajo el apex: el Universal SSL gratuito solo cubre el apex y el
-# primer nivel. Algo como dev.autohostai.digitalsec.net exigiría Total TLS / ACM (de pago).
+# primer nivel. Algo como dev.autohostai.digitalsec.work exigiría Total TLS / ACM (de pago).
 
 cloudflare_account_id = "<Account ID de Cloudflare (no sensible)>"
 

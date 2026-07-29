@@ -29,12 +29,12 @@ Las 13 tareas pendientes son exactamente las tres entradas de abajo. **Secuencia
   gh secret   set CLOUDFLARE_API_TOKEN   --repo autohostai-labs/AutoHostAI
   gh secret   set CLOUDFLARE_ZONE_ID     --repo autohostai-labs/AutoHostAI
   gh variable set CLOUDFLARE_ACCOUNT_ID  --repo autohostai-labs/AutoHostAI
-  gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.net'
-  gh variable set PUBLIC_HOSTNAME        --repo autohostai-labs/AutoHostAI --body 'autohostai.digitalsec.net'
+  gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.work'
+  gh variable set PUBLIC_HOSTNAME        --repo autohostai-labs/AutoHostAI --body 'autohostai.digitalsec.work'
   gh variable set OCI_VAULT_ID           --repo autohostai-labs/AutoHostAI
   ```
 
-  Permisos mínimos del token (los tres, y ojo que "Cloudflare Tunnel" **no** está bajo "Zero Trust" en el selector): `Account | Cloudflare Tunnel | Edit`, `Zone | DNS | Edit`, `Zone | Zone Settings | Edit`. Acotar a la zona `digitalsec.net`, no "All zones". El valor de `OCI_VAULT_ID` sale de `terraform output vault_id`.
+  Permisos mínimos del token (los tres, y ojo que "Cloudflare Tunnel" **no** está bajo "Zero Trust" en el selector): `Account | Cloudflare Tunnel | Edit`, `Zone | DNS | Edit`, `Zone | Zone Settings | Edit`. Acotar a la zona `digitalsec.work`, no "All zones". El valor de `OCI_VAULT_ID` sale de `terraform output vault_id`.
 
   Verificar el token antes de subirlo:
   ```bash

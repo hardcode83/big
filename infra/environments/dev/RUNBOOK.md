@@ -144,7 +144,7 @@ El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, 
 
 ## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
 
-La app se sirve en **https://autohostai.digitalsec.net** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).
+La app se sirve en **https://autohostai.digitalsec.work** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).
 
 Consecuencia operativa clave: **si el túnel cae, la app no es alcanzable por HTTPS y no hay vía alternativa por HTTP.** El acceso de emergencia es SSH (§1).
 
@@ -172,8 +172,8 @@ Dos cosas no son codificables y se hacen en el dashboard de Cloudflare:
    gh secret   set CLOUDFLARE_API_TOKEN   --repo autohostai-labs/AutoHostAI
    gh secret   set CLOUDFLARE_ZONE_ID     --repo autohostai-labs/AutoHostAI
    gh variable set CLOUDFLARE_ACCOUNT_ID  --repo autohostai-labs/AutoHostAI
-   gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.net'
-   gh variable set PUBLIC_HOSTNAME        --repo autohostai-labs/AutoHostAI --body 'autohostai.digitalsec.net'
+   gh variable set CLOUDFLARE_ZONE_NAME   --repo autohostai-labs/AutoHostAI --body 'digitalsec.work'
+   gh variable set PUBLIC_HOSTNAME        --repo autohostai-labs/AutoHostAI --body 'autohostai.digitalsec.work'
    gh variable set OCI_VAULT_ID           --repo autohostai-labs/AutoHostAI   # terraform output vault_id
    ```
 
