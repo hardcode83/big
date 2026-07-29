@@ -2,6 +2,21 @@
 
 Cola de bloqueos de este change. `/sdd:status` la muestra primero y `/sdd:archive` se niega a cerrar con entradas sin resolver. Resolver una entrada = borrarla; cuando quede vacío, borrar el fichero.
 
+## Estado al cerrar la sesión del 2026-07-29
+
+**26 de 39 tareas hechas.** Todo lo que no requiere credenciales, `apply` real o una red externa está implementado, verificado en local y commiteado en `sdd/ingress-https-dev` (4 commits, desde `46fe101` hasta `7b9fe18`).
+
+Hecho: secciones 1 (interfaz + CI, panel PASS), 2 (túnel/DNS/secreto, código), 3 (HTTPS de zona, código), 4 (`cloudflared` + CD, código), 7 (documentación completa) y las verificaciones 8.1, 8.2 y 8.5.
+
+Las 13 tareas pendientes son exactamente las tres entradas de abajo. **Secuencia obligada para desbloquear:**
+
+1. Crear el API token y subir los seis secrets/vars → **entrada 1**.
+2. PR y merge de `sdd/ingress-https-dev` a `main` (obligatorio antes de aplicar: `plan` y `apply` están acotados a `main`) → **entrada 2**.
+3. `workflow_dispatch` de `infra-dev` con `action=plan`, revisar, y luego `action=apply` → cierra **2.8, 2.9, 3.2**.
+4. Deploy de la app (push a `main` o `workflow_dispatch` de `deploy-dev`) → cierra **4.3**. Es aquí donde se comprueba el riesgo anotado en `iam-policy.md`: si la policy con `where any {target.secret.id = ...}` no autoriza el acceso **por nombre**, el paso "Render .env" fallará nombrando `TUNNEL_TOKEN`, y el plan B es leer por OCID.
+5. Verificación HTTPS desde datos móviles → cierra **5.1, 5.2** → **entrada 3**.
+6. Solo entonces la fase B (**6.1–6.4**), y por último **8.3, 8.4, 8.6**.
+
 ---
 
 ## 1. Faltan los secrets y variables de Cloudflare en el repositorio
