@@ -1,6 +1,10 @@
 # env / secrets
-.env
-.env.*.local
+# Broad on purpose: `make up` rewrites .env through a temporary file, and any
+# stray copy (.env.tmp, .env.bak, .env.save from an editor) would hold the JWT
+# signing key and the bootstrap passwords in cleartext.
+.env*
+!.env.example
+!.env.deploy.example
 
 # python
 __pycache__/
@@ -8,6 +12,8 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+.coverage
+htmlcov/
 .ruff_cache/
 
 # node / next.js

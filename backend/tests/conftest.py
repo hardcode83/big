@@ -4,20 +4,12 @@ from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
 
-# Import every domain module's infrastructure/models.py so Base.metadata is
-# fully populated regardless of which test file runs — cross-module FKs
-# (e.g. PropertyStateTransitionModel.triggered_by_user_id -> users.id) need
-# their target table registered before create_all, not just a correct type.
-import app.tenants.infrastructure.models  # noqa: F401
-import app.auth.infrastructure.models  # noqa: F401
-import app.properties.infrastructure.models  # noqa: F401
-import app.guests.infrastructure.models  # noqa: F401
-import app.reservations.infrastructure.models  # noqa: F401
-import app.timeline.infrastructure.models  # noqa: F401
-import app.cleaning.infrastructure.models  # noqa: F401
-import app.maintenance.infrastructure.models  # noqa: F401
-import app.messaging.infrastructure.models  # noqa: F401
-import app.access.infrastructure.models  # noqa: F401
+# Every domain module's infrastructure/models.py must be imported so Base.metadata
+# is fully populated regardless of which test file runs — cross-module FKs
+# (e.g. PropertyStateTransitionModel.triggered_by_user_id -> users.id) need their
+# target table registered before create_all, not just a correct type. The list lives
+# in one place now (app/core/models_registry.py), which the application imports too.
+import app.core.models_registry  # noqa: F401
 
 from app.core.config import settings
 from app.core.db import Base
@@ -47,23 +39,30 @@ async def _ensure_test_database_exists() -> None:
 
 
 @pytest_asyncio.fixture
-async def db_session():
+async def test_engine():
+    """Engine on the test database, schema created and dropped around the test.
+
+    A dedicated engine per test (NullPool: no connection kept across checkouts)
+    avoids reusing a pooled asyncpg connection across pytest-asyncio's per-test
+    event loops, which raises "attached to a different loop" / "another operation
+    is in progress" once more than one DB-touching test runs in the same session.
+    """
     await _ensure_test_database_exists()
 
-    # A dedicated engine per test (NullPool: no connection kept across
-    # checkouts) avoids reusing a pooled asyncpg connection across
-    # pytest-asyncio's per-test event loops, which raises "attached to a
-    # different loop" / "another operation is in progress" once more than
-    # one DB-touching test runs in the same session.
-    test_engine = create_async_engine(_TEST_DB_URL, poolclass=NullPool)
+    engine = create_async_engine(_TEST_DB_URL, poolclass=NullPool)
 
-    async with test_engine.begin() as conn:
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
 
-    async with AsyncSession(test_engine, expire_on_commit=False) as session:
-        yield session
+    yield engine
 
-    async with test_engine.begin() as conn:
+    async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.drop_all)
 
-    await test_engine.dispose()
+    await engine.dispose()
+
+
+@pytest_asyncio.fixture
+async def db_session(test_engine):
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+        yield session
