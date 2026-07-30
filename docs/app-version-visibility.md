@@ -24,20 +24,44 @@ el workspace, en las apps de campo y **también en `/login`, sin sesión** — q
 cuando más falta hace, porque si la app está rota puede que no puedas entrar. **No** aparece
 en el portal de huésped: la versión no le dice nada a un huésped.
 
-**2. El panel de procedencia**, botón "Detalles" en el pie, solo en el workspace. Es donde
-se hace el pareo:
+**2. El panel de procedencia**, botón "Detalles" en el pie, solo en el workspace:
 
 | Campo | Para qué sirve |
 |---|---|
 | Frontend / Backend | Las dos cadenas de versión. Si difieren, hay aviso de deriva |
-| Pull Request | **Enlace directo al PR** que produjo lo que está corriendo |
-| Commit | Enlace al commit (se muestra corto, se enlaza completo) |
+| Commit | El SHA corto de lo que está corriendo |
 | Construido | Fecha y hora UTC del build |
-| Run de Actions | Enlace al run del deploy — distingue "código viejo" de "deploy que falló" |
-| Rama | El ref del que salió el build |
 
-Los enlaces no están en `/login` a propósito: nombran el repositorio privado y el número de
-PR, y parear con un PR es acción de operador.
+### Por qué el panel no enlaza (todavía) al PR
+
+Los enlaces al PR, al commit y al run de Actions **están implementados pero retenidos**, y
+conviene saber por qué antes de "arreglarlo".
+
+El panel es un componente de cliente, así que **todo lo que recibe se serializa en el HTML
+de la página, esté el panel abierto o no**. Y `/dashboard` hoy es tan anónimo como `/login`:
+el frontend no tiene autenticación y el túnel enruta el hostname completo a `frontend:3000`.
+Publicar ahí los enlaces significaría que cualquiera con
+
+```bash
+curl https://autohostai.digitalsec.work/dashboard
+```
+
+obtiene el nombre del repositorio privado, el número de PR y el SHA completo de lo
+desplegado. Se decidió no hacerlo.
+
+La retención es **una sola constante**, `OPERATOR_SURFACE_IS_AUTHENTICATED` en
+`frontend/features/shell/components/provenance.ts`. Cuando el frontend gane autenticación
+(entrada `dashboard-web` del roadmap), se invierte y los enlaces aparecen sin tocar nada más.
+
+**Mientras tanto, el pareo con el PR es de dos pasos**, no de uno:
+
+```bash
+# 1. Leer el SHA corto del badge, p. ej. a2f3c1d
+# 2. Buscarlo:
+gh pr list --search a2f3c1d --state all      # el PR que lo contiene
+gh api /repos/autohostai-labs/AutoHostAI/commits/a2f3c1d/pulls --jq '.[0].number'
+git log --oneline -1 a2f3c1d                 # o simplemente el subject del commit
+```
 
 **3. Por línea de comandos**, sin abrir el navegador:
 

@@ -150,8 +150,11 @@ curl -s https://autohostai.digitalsec.work/deployment/version
 # → {"frontend":"0.1.0+2026-07-30.a2f3c1d","backend":"0.1.0+2026-07-30.a2f3c1d"}
 
 # 2. Abrir la app: el badge del pie muestra `<base>+<sha-corto>`. En el workspace,
-#    "Detalles" abre el panel con el PR, el commit y el run de Actions ENLAZADOS —
-#    de ahí se llega al PR que produjo lo que está corriendo.
+#    "Detalles" abre el panel con las dos versiones, el SHA corto y la fecha de build.
+#    Los ENLACES al PR/commit/run están retenidos mientras el frontend no tenga
+#    autenticación (serían públicos); para llegar al PR desde el SHA corto:
+#      gh pr list --search <sha-corto> --state all
+#    El motivo, en docs/app-version-visibility.md.
 
 # 3. Desde la VM, la identidad que lleva la imagen dentro (no lo que compose cree):
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \

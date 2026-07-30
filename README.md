@@ -103,9 +103,10 @@ plan sin protección de rama, así que se ejecuta y reporta pero nada impide fus
 en rojo (ver `sdd/specs/backend-ci.md` §Estado).
 
 Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), y en el
-workspace el botón "Detalles" enlaza al Pull Request, al commit y al run de Actions que la
-produjeron — así no hace falta entrar en la VM para saber qué está corriendo ni para
-confirmar un rollback. Cómo se opera, y las tres cosas que confunden si no se saben:
+workspace el botón "Detalles" compara la versión del frontend con la del backend y avisa si
+no coinciden — así no hace falta entrar en la VM para saber qué está corriendo ni para
+confirmar un rollback. Los enlaces al PR y al commit están retenidos mientras el frontend no
+tenga autenticación, porque el HTML de esas páginas es público. Cómo se opera, y las tres cosas que confunden si no se saben:
 [`docs/app-version-visibility.md`](docs/app-version-visibility.md).
 
 `make ci-checks` agrupa las comprobaciones que no pertenecen a la suite de ningún
