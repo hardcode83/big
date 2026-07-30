@@ -160,7 +160,7 @@ El segundo caso queda sin cubrir y no se intenta cubrir aquí: forzarlo exigirí
 | El pareo con el PR se rompe en silencio si el repo pasa a rebase | Documentado en R6.5 con el plan B (`gh api …/pulls`); el modo de fallo visible es "push directo" en la UI |
 | Colisión del Route Handler con el `rewrite` de `api-ingress-routing` | D9: el path no va bajo `/api/` |
 | El handler del frontend queda público por el túnel | D9: devuelve solo cadenas de versión, nunca PR ni URL de repo |
-| Cachéo del edge sirviendo un bundle viejo con versión vieja | Es la funcionalidad, no el riesgo: exactamente lo que hace visible |
+| Cachéo del edge sirviendo una **página** antigua | Es la funcionalidad, no el riesgo: el badge del HTML delata la versión anterior. El caso de **chunks JS** antiguos con HTML fresco queda fuera — ver la corrección de alcance arriba |
 | La versión en pantalla parece atrasada respecto a `main` | R6.4: el filtro de paths del CD hace que sea el último commit que **disparó build**; se documenta |
 | Divulgación sin sesión por `/version` | Decidido y aceptado (repo privado, entorno dev). El alcance exacto, corregido tras el hallazgo del panel de seguridad: un llamante anónimo obtiene cadena de versión, **SHA completo de 40 caracteres**, número de PR, fecha de build, `run_id` de Actions y `ref` — no el SHA corto, como decía antes esta fila. Lo que **no** sale es la URL del repositorio ni el título del PR (R2.5), y tampoco entran en el snapshot público del frontend (D6). Hoy `/version` solo es alcanzable por túnel SSH o desde la red del compose: el túnel enruta únicamente `http://frontend:3000` con catch-all 404 |
 

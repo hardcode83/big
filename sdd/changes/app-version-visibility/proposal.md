@@ -114,7 +114,7 @@ Acceptance criteria:
 
 1. THE SYSTEM SHALL designar **una** fuente de verdad para la base de versión y derivar o validar la otra a partir de ella; hoy `backend/pyproject.toml` y `frontend/package.json` declaran `0.1.0` de forma independiente y ninguna se usa.
 2. IF las dos declaraciones divergen, THEN THE SYSTEM SHALL fallar en CI, no en silencio.
-3. THE SYSTEM SHALL documentar en `RUNBOOK.md` §6.4 cómo confirmar un rollback usando el badge y `/version`, y en la tabla de diagnóstico de §7 cómo la versión del bundle descarta el cachéo del edge.
+3. THE SYSTEM SHALL documentar en `RUNBOOK.md` §6.4 cómo confirmar un rollback usando el badge y `/version`, y en la tabla de diagnóstico de §7 cómo el badge de la página descarta (o confirma) el cachéo del edge, con la limitación de que no cubre chunks JS antiguos servidos con HTML fresco.
 4. THE SYSTEM SHALL documentar que, por el filtro de paths del CD (`backend/**`, `frontend/**`, `docker-compose.deploy.yml`, el propio workflow), la versión en pantalla corresponde al **último commit que disparó build**, no al último commit de `main` — apuntar a un PR de varios merges atrás es correcto y no es deriva.
 5. THE SYSTEM SHALL documentar que el pareo depende de la estrategia de merge: funciona con merge commits y con squash (`título (#42)`), y se rompería **en silencio** con rebase, cuyo plan B es `gh api /repos/{repo}/commits/{sha}/pulls` con `pull-requests: read`.
 6. THE SYSTEM SHALL cumplir `steering/documentation.md`: `docs/<capability>.md` para esta capacidad, README raíz, y `.env.example`/`.env.deploy.example` si el change introdujera alguna variable (no se espera: la identidad va horneada, R1.3).
