@@ -4,6 +4,8 @@
 
 Aceptado — 2026-07-30. Decidido en la revisión del PR #25 (`auth-tenancy`), a petición de Marta. Se aparta deliberadamente del PRD §7.3.
 
+**Sobre no editar el PRD** (decisión cerrada por Jose el 2026-07-30, antes del merge): el PRD §7.3 sigue diciendo `UNIQUE(tenant_id, email)` y se deja así a propósito. Es el documento funcional de origen y su autoría es de Marta; la verdad de lo construido son las specs (`sdd/README.md`). La desviación queda registrada en este ADR, en el design D16/D19, en `docs/auth-tenancy.md` y en la spec viva que produce el archivado, así que es localizable desde cualquiera de los sitios donde alguien la buscaría. Si Marta prefiere reflejarla también en el PRD, es una edición de una línea sobre su documento y le corresponde a ella.
+
 ## Contexto
 
 El PRD §7.3 define la unicidad del email de un usuario como `UNIQUE(tenant_id, email)` (línea 402): la misma dirección puede existir una vez en cada tenant. Es lo razonable si el login lleva un discriminador de tenant —subdominio, campo en el formulario, invitación— porque entonces `{tenant, email, password}` identifica una cuenta.

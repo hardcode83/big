@@ -98,7 +98,9 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 | `LOGIN_LOCKOUT_MINUTES` | 15 | Duración del bloqueo |
 | `TRUSTED_CLIENT_IP_HEADER` | vacía | Ver el aviso de abajo |
 
-**Sobre el nombre `JWT_SECRET_KEY`.** El PRD §25 la llama `SECRET_KEY`. Se usa el nombre
+**Sobre el nombre `JWT_SECRET_KEY`** *(decisión cerrada por Jose el 2026-07-30, antes del
+merge del PR #25: se mantiene este nombre y no se renombra al del PRD)*. El PRD §25 la
+llama `SECRET_KEY`. Se usa el nombre
 más específico a propósito, y de forma consistente en todo el repositorio (`settings`,
 `.env.example`, los dos composes, `Makefile`, Terraform, el workflow de deploy y esta
 documentación): en la misma sección del PRD ya convive `ENCRYPTION_KEY`, así que
