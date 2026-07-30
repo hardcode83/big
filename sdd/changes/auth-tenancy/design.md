@@ -86,18 +86,14 @@ no, el primer login con email inexistente de cada worker pagaría `gensalt` + `h
 equivocada — un bit de "esta dirección no existe" por vida de proceso, exactamente la
 fuga que `burn` cierra. Lo levantó el panel de `/sdd:review` sobre la primera versión.
 
-**Intercambio aceptado y no resuelto aquí: `burn` gasta el factor de trabajo completo
-dentro del event loop.** Igualar el trabajo subió la amplificación del atacante en el
-camino del email inexistente de ~1 a ~100: esa petición pasó de ~2 ms a ~0,25 s de CPU
-síncrona. Con el límite de 10/min por IP hacen falta ~25 direcciones distintas para
-saturar un worker, así que hoy no es alcanzable —todas las peticiones llegan con la IP
-del contenedor del frontend, un único contador—, pero **se vuelve alcanzable justo cuando
-`api-ingress-routing` traiga las IP de cliente reales**. La solución es ejecutar
-`verify`/`hash`/`burn` en un hilo (`anyio.to_thread.run_sync`), lo que obliga a volver
-async el puerto `PasswordHasher` y sus cinco llamantes. Se deja fuera de este change a
-propósito: es un refactor mecánico pero amplio, y hacerlo al cierre de un review tiene
-más riesgo que valor cuando la exposición todavía no existe. Queda como requisito de
-`api-ingress-routing`, que es el change que la crea.
+**El coste de igualar el trabajo se paga fuera del event loop: ver D21.** Igualar el
+trabajo subió la amplificación del atacante en el camino del email inexistente de ~1 a
+~100: esa petición pasó de ~2 ms a ~0,25 s de CPU. La primera versión de este design la
+gastaba **dentro** del event loop y dejaba el arreglo como requisito de
+`api-ingress-routing`, con el argumento de que hasta entonces no era alcanzable. La
+revisión del PR #25 lo rechazó, y con mejor argumento que el mío: el momento de mover la
+frontera es ahora, cuando el puerto acaba de nacer y tiene cinco llamantes, no cuando lo
+hayan heredado los módulos siguientes. Está resuelto en D21.
 
 Rejected: `passlib[bcrypt]` — 1.7.4 es la última release, sin mantenimiento, y rompe con
 bcrypt 4.x por el `__about__` que ya no existe; añade una capa que hay que parchear.
@@ -301,33 +297,47 @@ parametrizar por entorno y no se re-ejecuta con seguridad. Rejected: una CLI con
 una dependencia nueva para un comando. Rejected: contraseñas por defecto en
 `.env.example` para que `make up` deje todo listo — es exactamente lo que R7.4 prohíbe.
 
-### D15 — Alcance honesto de los tests de aislamiento en este change
+### D15 — El alcance de este change es la infraestructura; el 404 cross-tenant y la matriz por rol son de `user-management`
 
-**Chosen:** R4.4 pide demostrar por cada uno de los cinco roles que un usuario del tenant A
-no llega a datos del tenant B, pero en este change **los únicos endpoints que existen son
-los de auth**, así que no hay recurso de negocio que cruzar. La prueba se hace en tres
-niveles y se documenta como tal: (a) sobre el puerto `UserRepository` con dos tenants
-poblados, parametrizado por los cinco roles; (b) sobre `GET /api/v1/auth/me` con un token
-cuyo `tenant_id` es el de otro tenant para un `user_id` real, que debe dar 401 por D7; y
-(c) sobre el caso de R4.5, token con tenant inexistente o no `ACTIVE`.
+**Chosen** (revisión del PR #25): el alcance de `auth-tenancy` es la **infraestructura** de
+autenticación, autorización, `RequestContext` y tenant scoping. Los dos criterios que solo
+pueden ejercitarse sobre una superficie de negocio con identificadores de recurso salen de
+este change y entran como **criterios de aceptación bloqueantes** de `user-management`, que
+es la siguiente entrada del roadmap con endpoints de ese tipo (`/api/v1/users/{id}`,
+`GET`/`PATCH /api/v1/tenants/{id}`).
 
-La matriz completa por endpoint de negocio llega con el primer módulo que los tenga
-(`reservations`). Se deja escrito para que el panel de `/sdd:review` no lo lea como
-requisito a medias, y para que ese módulo herede la obligación.
+Los dos criterios son:
 
-**R4.3 está en la misma situación y hay que declararlo igual** (lo levantó el panel de
-`/sdd:review`: R4.4 tenía esta decisión y R4.3 no, así que la tabla de cobertura de
-`tasks.md` afirmaba que la única parcial era R4.4 y eso era falso). R4.3 pide responder
-`404` y no `403` al referenciar un recurso de otro tenant. Ningún endpoint de este change
-recibe un identificador de recurso: `login`, `refresh`, `logout` y `me` son todos
-autorreferenciales. Así que `NotFoundError` existe como maquinaria del sobre de error pero
-**no tiene ni un call site en producción**, y no puede tenerlo hasta que haya un endpoint
-con `{id}` en la ruta. R4.3 queda **unmet y declarado**, y la obligación la hereda
-`reservations` junto con la matriz de R4.4.
+- **404 y no 403 al referenciar un recurso de otro tenant.** Ningún endpoint de este change
+  recibe un identificador de recurso: `login`, `refresh`, `logout` y `me` son todos
+  autorreferenciales. `NotFoundError` existe como maquinaria del sobre de error pero **no
+  tiene ni un call site en producción**, y no puede tenerlo hasta que haya un endpoint con
+  `{id}` en la ruta.
+- **La matriz completa por endpoint y por rol**, demostrando para cada uno de los cinco
+  roles que un usuario del tenant A no obtiene ni modifica datos del tenant B.
+
+Lo que **sí** queda cubierto y verificado aquí, porque no necesita superficie de negocio:
+el `tenant_id` efectivo se deriva solo del token y se ignora venga donde venga en la
+request (R4.1); toda lectura y escritura va scopada, con el filtro global como red
+(R4.2); un token que nombra un tenant inexistente o no `ACTIVE` se rechaza con 401 (R4.5);
+y el aislamiento por los cinco roles sobre el puerto `UserRepository` con dos tenants
+poblados, más `GET /api/v1/auth/me` con un token que nombra otro tenant para un `user_id`
+real, que da 401 por D7.
+
+Por qué así y no como estaba: la versión anterior de esta decisión dejaba R4.3 declarada
+**unmet** y R4.4 **parcial** dentro de un change marcado `local_review: APPROVED` y listo
+para PR. Eso es contradictorio — la revisión lo rechazó con razón — y no se arregla con un
+override al archivar, sino moviendo el requisito al change donde puede cumplirse de verdad.
+El roadmap es lo que lo hace vinculante: la entrada `user-management` lleva los dos
+criterios escritos como bloqueantes, no como recordatorio.
 
 Rejected: inventar un endpoint de negocio de prueba solo para ejercitar el cruce de
-tenants o el 404 — código muerto en producción para satisfacer un test. Rejected:
-declarar R4.4 o R4.3 cumplidos sin matizar — dejaría un falso verde en la spec viva.
+tenants o el 404 — código muerto en producción para satisfacer un test; la revisión lo
+descartó explícitamente. Rejected: declarar R4.3/R4.4 cumplidos sin matizar — dejaría un
+falso verde en la spec viva. Rejected: dejarlos dentro del change como incumplidos
+declarados — es la contradicción de arriba. Rejected: asignarlos a `reservations`, como
+decía la versión anterior — `user-management` va antes en el orden del roadmap y ya recibe
+identificadores de recurso, así que el hueco se cierra antes.
 
 ### D16 — Filtro global por tenant en `do_orm_execute`, y el login como única excepción explícita
 
@@ -350,7 +360,7 @@ levantó el de tenancy):
    sentencias Core construidas a mano.
 2. Solo se activa en sesiones con marca de tenant. Corren **sin marca**: las tareas de
    Celery, el bootstrap, la query anónima del login —que lo **necesita**, porque
-   `find_by_email_across_tenants` todavía no tiene tenant— y **`POST /auth/refresh`**,
+   `find_by_email_globally` todavía no tiene tenant— y **`POST /auth/refresh`**,
    que es anónimo y por tanto no pasa por `get_authenticated_request`, el único sitio que
    marca la sesión. Ese cuarto camino lo levantó el panel de seguridad y faltaba en
    esta lista: `RefreshTokenUseCase` emite cinco sentencias con la red desactivada,
@@ -385,25 +395,38 @@ mecanismo autorizado y esto solo la red.
 **La excepción del login.** `POST /auth/login` es anónimo: no hay tenant todavía, así que su
 sesión no lleva marca y el filtro global no aplica. Es la única consulta legítimamente
 cross-tenant del sistema, y para que sea imposible confundirla con un descuido el método del
-puerto se llama `find_by_email_across_tenants(email)` — un nombre que salta en cualquier
+puerto se llama `find_by_email_globally(email)` — un nombre que salta en cualquier
 `grep` y en cualquier revisión.
 
-Eso destapa un problema real del esquema existente: `UserModel` tiene
-`UniqueConstraint("tenant_id", "email")`, es decir, **el email es único por tenant, no
-globalmente**, así que `{email, password}` no identifica a un usuario de forma inequívoca en
-cuanto haya dos tenants. Resolución para el MVP, marcada como `ASSUMPTION`: la búsqueda
-devuelve todos los usuarios con ese email y el login **solo procede si hay exactamente uno**;
-con dos o más responde el mismo `401 INVALID_CREDENTIALS` genérico de R1.4, sin revelar la
-colisión. Con un único tenant en el MVP el caso no se da, y cuando llegue el multi-tenant real
-hará falta un discriminador en el login (subdominio, o `tenant` en el cuerpo) — queda anotado
-como dependencia de `saas-cross-tenant`, no resuelto aquí.
+Para que esa consulta identifique a un usuario, **el email normalizado es único en toda la
+instalación**, no por tenant: índice único funcional `uq_users_lower_email` sobre
+`lower(email)`, y se retira `UNIQUE(tenant_id, email)`. Es una desviación deliberada del
+PRD §7.3, decidida en la revisión del PR #25 y registrada en
+[ADR 0005](../../../docs/adr/0005-global-email-uniqueness.md). `find_by_email_globally`
+devuelve por tanto `User | None`, y el caso de uso no tiene rama de ambigüedad.
 
-Rejected: hacer el email globalmente único cambiando la constraint — rompería el modelo
-multi-tenant de PRD §7 (dos clientes distintos pueden tener un empleado con el mismo email) y
-toca una migración de `domain-foundation-core` que no es de este change. Rejected: exigir ya
-un discriminador de tenant en el login — superficie y fricción para un problema que con un
-tenant no existe, y cuya forma correcta (subdominio vs campo) depende de decisiones de la fase
-SaaS que no están tomadas.
+El motivo, en una frase: el login recibe `{email, password}` y nada más, así que si una
+dirección puede existir dos veces no identifica la cuenta. La versión anterior de este
+design resolvía eso en el código —proceder solo si había exactamente una coincidencia, y si
+no, no autenticar a nadie— lo que falla cerrado pero convierte una colisión en una
+**denegación de acceso permanente**: quien pudiera crear usuarios en el tenant B metía la
+dirección del propietario del tenant A y lo dejaba fuera, sin endpoint de desbloqueo. La
+revisión rechazó dejar eso como deuda de `user-management`: una invariante que decide quién
+entra en el producto no puede depender de que ningún escritor futuro se olvide, ni sobrevivir
+a carreras, scripts de datos o adaptadores nuevos. Por eso la garantía está en la base de
+datos y no en Python.
+
+`scalar_one_or_none` en esa consulta pasa a ser correcto en lugar de optimista: dos filas ya
+no son un caso esperado sino una invariante rota, y que reviente es preferible a autenticar
+la primera que ordene el planificador.
+
+Rejected: mantener `UNIQUE(tenant_id, email)` y comprobar en Python en cada escritor — es
+exactamente lo que la revisión rechazó. Rejected: exigir un discriminador de tenant en el
+login (subdominio o campo) — resolvería la identidad sin tocar el esquema, pero es un cambio
+de producto que afecta a la URL del frontend, al flujo de invitación y a la pantalla de login
+de PRD §24. Rejected: editar el PRD para que deje de decir `UNIQUE(tenant_id, email)` — es el
+documento funcional de origen y su autoría no es de este change; la desviación se registra en
+el ADR, aquí y en la spec viva.
 
 ### D18 — El access token lleva también `fam`, para que el logout pueda cumplir R2.3
 
@@ -426,18 +449,19 @@ R2.3.
 **Chosen** (hallazgo del panel de seguridad, secciones 3-4): `normalize_email` en
 `auth/domain/value_objects.py` es la única definición de "el mismo email", se aplica **en
 la escritura y en la lectura**, y la comparación SQL es una igualdad simple — nunca
-`lower()` dentro de la query. Se añade además un índice único funcional sobre
-`(tenant_id, lower(email))` como red para cualquier escritor futuro que olvide normalizar.
+`lower()` dentro de la query. El índice único que la respalda es el global sobre
+`lower(email)` de D16, y es lo que convierte la normalización de convención en invariante
+para cualquier escritor futuro que la olvide.
 
-El motivo es concreto: la constraint existente `uq_users_tenant_id_email` es sensible a
+El motivo es concreto: la constraint que había, `uq_users_tenant_id_email`, era sensible a
 mayúsculas, así que buscar con `lower()` y guardar en crudo permitía que `Jose@x.com` y
-`jose@x.com` **convivieran en el mismo tenant**; la búsqueda las considera la misma
-dirección, devuelve dos filas, y por la regla de "exactamente una" de D16 **las dos
-cuentas quedan con 401 para siempre**. Cualquiera que pueda crear usuarios podía así
-denegar el acceso a un email conocido de forma permanente — una versión sin límite del
-bloqueo de 15 minutos que D13 sí acota. Y hay un segundo motivo para no mezclar motores:
-Postgres y Python no coinciden al plegar mayúsculas (`lower('İ')` da un carácter en
-Postgres y dos en Python).
+`jose@x.com` **convivieran**; la búsqueda las considera la misma dirección y el login
+acabaría resolviendo a la fila que devolviera el planificador. Cualquiera que pueda crear
+usuarios podía así denegar el acceso a un email conocido de forma permanente — una versión
+sin límite del bloqueo de 15 minutos que D13 sí acota. Que el índice sea sobre
+`lower(email)` y no sobre `email` es lo que cierra esa variante. Y hay un segundo motivo
+para no mezclar motores: Postgres y Python no coinciden al plegar mayúsculas (`lower('İ')`
+da un carácter en Postgres y dos en Python).
 
 Rejected: volver a la comparación exacta sensible a mayúsculas — elimina el desajuste
 pero devuelve la trampa de usabilidad de que `Jose@x.com` no pueda entrar. Rejected:
@@ -459,6 +483,65 @@ despliegue: un `EXPIRE` perdido tumba el login hasta que alguien borre la clave 
 Rejected: un script Lua — atómico de verdad, pero introduce un artefacto que hay que
 mantener y versionar para un contador de dos líneas. Rejected: dejarlo como estaba
 asumiendo que el fallo es improbable — el radio de daño es el login completo.
+
+### D21 — bcrypt corre en hilos de trabajo, con una cota compartida y explícita
+
+**Chosen** (revisión del PR #25): el puerto `PasswordHasher` es **async** —`hash`, `verify`
+y `burn`— y el adaptador ejecuta cada llamada con `anyio.to_thread.run_sync` bajo un
+`CapacityLimiter` propio, cuyo tamaño sale de `BCRYPT_MAX_CONCURRENCY` y por defecto es el
+número de CPUs visibles.
+
+**Medido antes de decidirlo, no supuesto.** El refactor solo tiene sentido si bcrypt libera
+el GIL; si no lo liberara, el hilo movería el trabajo sin desbloquear nada. En este
+contenedor, con bcrypt 5.0.0 y coste 12:
+
+| | trabajo | parón máximo del event loop |
+|---|---|---|
+| 1 `verify` en el loop | 245 ms | **250 ms** |
+| 1 `verify` en hilo | 248 ms | 7 ms |
+| 8 `verify` en el loop | 1871 ms | **1875 ms** |
+| 8 `verify` en hilos | 271 ms | 7 ms |
+
+Los 7 ms son la granularidad del propio medidor. Que 8 en paralelo tarden 271 ms y no
+~1900 prueba que hay paralelismo real, es decir que el GIL se libera.
+
+**Por qué el puerto es async y no solo el adaptador.** Es la frontera lo que hace que el
+siguiente que escriba un caso de uso no pueda llamar a bcrypt en línea sin darse cuenta: un
+puerto síncrono deja la versión bloqueante como la fácil de escribir, que es exactamente
+cómo llegó a estar así.
+
+**Por qué una cota, y por qué compartida.** Sin cota propia se usa el pool por defecto de
+anyio, 40 hilos: una ráfaga de logins fallidos pone 40 cálculos de bcrypt en una VM de 4
+OCPU y **todas** las peticiones, también las ajenas al login, se vuelven ~10 veces más
+lentas — la amplificación que este cambio existe para acotar, con otra forma. Y la cota
+tiene que vivir a nivel de módulo, no de instancia: `get_password_hasher()` construye un
+`BcryptPasswordHasher` nuevo **en cada request**, así que un limitador por instancia
+acotaría cada petición contra sí misma, o sea nada. Está indexada por event loop
+(`WeakKeyDictionary`) porque las primitivas de anyio se enganchan al loop que las creó y la
+suite usa un loop por test — la misma trampa que ya sortea `tests/conftest.py` con el engine
+de asyncpg.
+
+**Lo que esto no arregla.** Mover el trabajo de sitio no lo abarata: el coste de CPU por
+intento sigue siendo ~0,25 s y la amplificación de ~100 en el camino del email inexistente
+sigue ahí. Lo que cambia es que ya no hay bloqueo de cabeza de línea —una ráfaga degrada el
+login en vez de tumbar el proceso entero— y que el consumo de CPU tiene un techo declarado.
+El límite por IP de R5.1 sigue siendo la defensa que acota el número de intentos, y
+`api-ingress-routing` sigue siendo requisito previo para exponer la API, porque sin IP de
+cliente real ese límite cuenta todo el despliegue en un solo contador (D12).
+
+Verificado por test y no solo por revisión (`tests/auth/test_password_hasher.py`): la
+identidad del hilo de las tres operaciones —no la latencia, que sería flaky— y la cota, con
+un bcrypt falso que se queda bloqueado para que "cuántas entraron" sea observable en vez de
+una carrera. Ambos comprobados en mutación: ejecutar en línea pone en rojo los tres tests de
+hilo, y quitar solo el `limiter=` pone en rojo exactamente el de la cota.
+
+Rejected: dejarlo como requisito de `api-ingress-routing`, que era la decisión anterior —
+consolidaría una interfaz síncrona que heredarían los módulos siguientes, y el refactor
+cuesta menos ahora, con cinco llamantes, que después. Rejected: el pool por defecto de anyio
+sin cota — ver arriba. Rejected: un `ProcessPoolExecutor` — daría aislamiento de CPU real,
+pero bcrypt ya libera el GIL, así que solo añadiría serialización de argumentos y procesos
+que gestionar. Rejected: bajar `BCRYPT_ROUNDS` para que el problema encoja — debilita el
+hash de todos para un problema de capacidad.
 
 ### D17 — El patrón de capas se registra como ADR 0004
 
@@ -566,7 +649,7 @@ requisito queda sin decisión asociada.
   diff en cada change.
 - **El login cross-tenant de D16 es la excepción que podría copiarse por error**: un método
   que consulta sin `tenant_id` es exactamente lo que la regla 1 de `steering/security.md`
-  prohíbe. Mitigación: el nombre `find_by_email_across_tenants` lo hace visible en cualquier
+  prohíbe. Mitigación: el nombre `find_by_email_globally` lo hace visible en cualquier
   `grep` y en la revisión, y es el único método del puerto sin `tenant_id` en la firma.
 
 ## Open questions

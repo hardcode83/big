@@ -48,10 +48,11 @@ si cambias la caja del email. Si falta alguna variable, aborta **antes** de abri
 transacción y lista todas las que faltan de golpe.
 
 **Una excepción a la idempotencia, a propósito**: si cambias `BOOTSTRAP_TENANT_NAME` y
-vuelves a lanzarlo, aborta con `BootstrapConflictError` en lugar de crear un segundo
-tenant con los mismos emails. Eso último dejaría **las dos cuentas sin poder entrar para
-siempre**, por la regla de "exactamente una coincidencia" del login (ver más abajo). Si
-te sale ese error, ya existen usuarios con esas direcciones: revisa el nombre del tenant.
+vuelves a lanzarlo, aborta con `BootstrapConflictError` en lugar de intentar crear un
+segundo tenant con los mismos emails. El índice único global rechazaría esa escritura de
+todas formas (ver más abajo); lo que aporta el aborto explícito es un error que nombra la
+variable a revisar en vez de un `IntegrityError` sobre un índice. Si te sale, ya existen
+usuarios con esas direcciones: revisa el nombre del tenant.
 
 No está enganchado a `make up`, que sigue arrancando sin pasos manuales.
 
@@ -91,10 +92,20 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 | `JWT_ACCESS_TOKEN_MINUTES` | 15 | Vida del access token |
 | `JWT_REFRESH_TOKEN_DAYS` | 7 | Vida del refresh token |
 | `BCRYPT_ROUNDS` | 12 | Coste del hash. **No lo cambies sobre una base con usuarios** sin rehashear: ver abajo |
+| `BCRYPT_MAX_CONCURRENCY` | nº de CPUs | Cuántos hashes pueden calcularse a la vez. Es el presupuesto de CPU del login: ver abajo |
 | `LOGIN_RATE_LIMIT_PER_MINUTE` | 10 | Intentos por IP y minuto |
 | `LOGIN_MAX_FAILED_ATTEMPTS` | 10 | Fallos consecutivos antes de bloquear la cuenta |
 | `LOGIN_LOCKOUT_MINUTES` | 15 | Duración del bloqueo |
 | `TRUSTED_CLIENT_IP_HEADER` | vacía | Ver el aviso de abajo |
+
+**Sobre el nombre `JWT_SECRET_KEY`.** El PRD §25 la llama `SECRET_KEY`. Se usa el nombre
+más específico a propósito, y de forma consistente en todo el repositorio (`settings`,
+`.env.example`, los dos composes, `Makefile`, Terraform, el workflow de deploy y esta
+documentación): en la misma sección del PRD ya convive `ENCRYPTION_KEY`, así que
+`SECRET_KEY` a secas no dice de qué es la clave y el día que haya una tercera obliga a
+adivinar. Es una desviación deliberada del PRD, no un despiste, y no se renombra al
+revés porque la variable ya vive en OCI Vault y en el `.env` de la VM: cambiarla es un
+paso operativo sobre el entorno desplegado, no una edición de código.
 
 ## ⚠️ Aviso: hoy la IP de cliente no es fiable
 
@@ -136,22 +147,37 @@ donde hay un solo salto.
 
 ## Cosas que sorprenden y conviene saber
 
-**Un email es único por tenant, no globalmente.** La constraint es
-`(tenant_id, email)`, así que `{email, password}` no identifica a un usuario en cuanto
-haya dos tenants. El login **solo procede si hay exactamente una coincidencia**; con dos
-o más responde el mismo 401 genérico. Los emails se normalizan a minúsculas en escritura
-y en lectura, y un índice único funcional sobre `(tenant_id, lower(email))` lo respalda.
-Sin eso, dos variantes de mayúsculas conviven en un tenant y **las dos cuentas quedan sin
-poder entrar para siempre**.
+**Un email es único en toda la instalación, no por tenant.** Se aparta del PRD §7.3,
+que define `UNIQUE(tenant_id, email)`, y el motivo está en [ADR
+0005](adr/0005-global-email-uniqueness.md): el login recibe `{email, password}` y nada
+más, así que si una dirección puede existir dos veces **no identifica la cuenta**. La
+garantía es un índice único funcional sobre `lower(email)` — en la base de datos, no en
+código de aplicación — y los emails se normalizan a minúsculas también en escritura y en
+lectura (design D19). La constraint `UNIQUE(tenant_id, email)` se retiró: la unicidad
+global ya la implica.
 
-⚠️ **Esa regla tiene un filo que hay que conocer antes de dar de alta usuarios.** La misma
-dirección en **dos tenants distintos** produce el mismo efecto: ambas cuentas dejan de
-poder entrar, y no hay endpoint de desbloqueo. El bootstrap ya se niega a provocarlo
-(`BootstrapConflictError`), pero cualquier alta futura de usuarios tiene que hacer la
-misma comprobación cross-tenant — está anotado como obligación en la entrada
-`user-management` del roadmap. Mientras el login no tenga un discriminador de tenant
-(subdominio o campo explícito), **no se puede permitir la misma dirección en dos
-tenants**.
+Lo que esto cierra: con unicidad por tenant, quien pudiera crear usuarios en el tenant B
+introducía la dirección del propietario del tenant A y **lo dejaba fuera del producto de
+forma indefinida**, porque no hay endpoint de desbloqueo. Ahora la base de datos rechaza
+esa escritura, con o sin comprobación en Python — que es lo que hace que la invariante no
+dependa de que ningún escritor futuro se olvide.
+
+El precio, asumido: **una persona no puede tener la misma dirección en dos tenants**. El
+día que haga falta, se modela con una identidad global más memberships (entrada
+`saas-cross-tenant` del roadmap), nunca repitiendo el email.
+
+**bcrypt no corre en el event loop.** Un `verify` cuesta ~250 ms de CPU con el coste 12
+configurado. Medido en este contenedor: ejecutado en línea, congela el proceso entero esos
+250 ms, y ocho intentos simultáneos se serializan en 1,87 s durante los que no se sirve
+nada más. Por eso `hash`, `verify` y el señuelo `burn` corren en hilos de trabajo con una
+cota compartida (`BCRYPT_MAX_CONCURRENCY`, design D21) — los mismos ocho tardan 271 ms y
+el loop no se detiene. bcrypt libera el GIL, así que los hilos dan paralelismo real.
+
+La cota importa tanto como el hilo: sin ella el pool por defecto son 40 hilos, y una
+ráfaga de logins fallidos pone 40 cálculos de bcrypt en una VM de 4 OCPU, con lo que
+**todas** las peticiones —incluidas las que no son de login— se vuelven ~10 veces más
+lentas. Por defecto vale el número de CPUs visibles. Subirla por encima no sirve de nada:
+el trabajo es de CPU, no de espera.
 
 **Cambiar `BCRYPT_ROUNDS` sobre una base con usuarios reabre un agujero.** Todo fallo de
 login gasta a propósito el mismo trabajo de bcrypt, incluso cuando el email no existe:

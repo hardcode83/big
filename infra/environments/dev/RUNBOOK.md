@@ -142,17 +142,18 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
 
-**Si el `migrate` falla por el índice único de emails.** La migración `e1eed2e039ee` crea un índice **único** sobre `(tenant_id, lower(email))` en `users`. Si la base ya tuviera dos filas del mismo tenant cuyos emails difieren solo en mayúsculas, el `migrate` aborta (correctamente: `restart: "no"`, y `backend`/`worker` no arrancan porque dependen de `service_completed_successfully`). El rollback por SHA de arriba **no sirve**, porque el problema son los datos, no el código: el siguiente deploy hacia delante volvería a fallar igual. Hay que limpiar primero:
+**Si el `migrate` falla por el índice único de emails.** La migración `e1eed2e039ee` crea un índice **único** sobre `lower(email)` en `users` — global, no por tenant (ADR 0005) — y retira la constraint `UNIQUE(tenant_id, email)`. Si la base ya tuviera la misma dirección en dos tenants, o dos variantes de mayúsculas en cualquier sitio, el `migrate` aborta (correctamente: `restart: "no"`, y `backend`/`worker` no arrancan porque dependen de `service_completed_successfully`). El rollback por SHA de arriba **no sirve**, porque el problema son los datos, no el código: el siguiente deploy hacia delante volvería a fallar igual. Hay que limpiar primero:
 
 ```bash
-# desde la VM, ver las colisiones
+# desde la VM, ver las colisiones (ojo: agrupado SOLO por la dirección, sin tenant_id —
+# dos tenants con el mismo email ya son una colisión)
 docker compose -f docker-compose.deploy.yml exec postgres \
   psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
-  "SELECT tenant_id, lower(email) AS addr, count(*), array_agg(id) FROM users
-   GROUP BY tenant_id, lower(email) HAVING count(*) > 1;"
+  "SELECT lower(email) AS addr, count(*), array_agg(id), array_agg(tenant_id) FROM users
+   GROUP BY lower(email) HAVING count(*) > 1;"
 ```
 
-Decidir cuál fila se queda, borrar o corregir el resto, y re-lanzar el deploy. Por qué existe ese índice: sin él dos variantes de mayúsculas conviven en un tenant y, por la regla de "exactamente una coincidencia" del login, **las dos cuentas quedan sin poder entrar** (change `auth-tenancy`, design D19).
+Decidir cuál fila se queda, borrar o corregir el resto, y re-lanzar el deploy. Por qué existe ese índice: el login recibe solo `{email, password}`, así que si una dirección puede existir dos veces **no identifica la cuenta**, y quien pueda crear usuarios en otro tenant deja fuera del producto a una cuenta existente sin que haya endpoint de desbloqueo (ADR 0005, design D16/D19).
 
 ### 6.5 Crear los usuarios iniciales en el entorno desplegado (change `auth-tenancy`)
 
@@ -183,7 +184,7 @@ shred -u /tmp/bootstrap.env 2>/dev/null || rm -f /tmp/bootstrap.env
 Notas que importan:
 
 - **`python -m`, no `uv run`**: la imagen `prod` no lleva `uv` (solo la etapa `dev` lo copia), pero sí tiene el venv en el `PATH`. El mismo comando vale en local (`make bootstrap`) y aquí.
-- Es **idempotente**: repetirlo no duplica nada. Pero si cambias `BOOTSTRAP_TENANT_NAME` y vuelves a lanzarlo, aborta con `BootstrapConflictError` en vez de crear un segundo tenant con los mismos emails — eso dejaría las dos cuentas sin poder entrar. Si aborta, es que ya hay usuarios con esas direcciones: revisa el nombre del tenant.
+- Es **idempotente**: repetirlo no duplica nada. Pero si cambias `BOOTSTRAP_TENANT_NAME` y vuelves a lanzarlo, aborta con `BootstrapConflictError` en vez de crear un segundo tenant con los mismos emails. El índice único global rechazaría esa escritura de todas formas (ADR 0005); lo que aporta el aborto explícito es un mensaje que nombra la variable a revisar en lugar de un `IntegrityError` sobre un índice. Si aborta, es que ya hay usuarios con esas direcciones: revisa el nombre del tenant.
 - Si falta alguna variable, aborta **antes** de escribir nada y las lista todas.
 - `run --rm --no-deps` en vez de `exec`: el contenedor vive solo para este comando y se lleva las variables con él, en vez de inyectarlas en el proceso del `backend` que está sirviendo.
 - Comprueba que funciona con un login: ver `docs/auth-tenancy.md`.

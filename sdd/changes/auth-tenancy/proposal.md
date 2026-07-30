@@ -69,6 +69,14 @@ Acceptance criteria:
    en 7 días, ambas configurables por entorno.
 7. IF la clave de firma JWT no está configurada al arrancar, THEN THE SYSTEM SHALL
    fallar el arranque en vez de servir con una clave por defecto.
+8. THE SYSTEM SHALL calcular y verificar los hashes de contraseña **fuera del hilo del
+   event loop** y con un número máximo de cálculos simultáneos configurable, de forma que
+   un intento de login no detenga la atención de las demás peticiones. *(Añadido en la
+   revisión del PR #25.)*
+9. THE SYSTEM SHALL tratar el email normalizado como identificador único de usuario en
+   toda la instalación, garantizado por la base de datos y comparado sin distinguir
+   mayúsculas. `ASSUMPTION`: se aparta de PRD §7.3, que define `UNIQUE(tenant_id, email)`;
+   el motivo y las alternativas están en ADR 0005. Decidido en la revisión del PR #25.
 
 ### R2 — Renovación con rotación y cierre de sesión
 
@@ -138,13 +146,20 @@ Acceptance criteria:
 2. THE SYSTEM SHALL scopar toda lectura y toda escritura al `tenant_id` efectivo, sin
    ninguna ruta de código que consulte una entidad con `tenant_id` sin filtrarlo,
    incluido el rol `SUPER_ADMIN`.
-3. IF un usuario referencia un recurso que existe pero pertenece a otro tenant, THEN
-   THE SYSTEM SHALL responder `404` y no `403`, para no revelar la existencia del
-   recurso. `ASSUMPTION`: el PRD no especifica el código; se elige `404` por
-   consistencia con no filtrar información entre tenants.
+3. ~~IF un usuario referencia un recurso que existe pero pertenece a otro tenant, THEN
+   THE SYSTEM SHALL responder `404` y no `403`.~~ **TRASLADADO** a `user-management` como
+   criterio de aceptación bloqueante (revisión del PR #25, design D15). Ningún endpoint de
+   este change recibe un identificador de recurso —`login`, `refresh`, `logout` y `me` son
+   autorreferenciales—, así que aquí no es verificable sin inventar un endpoint de negocio.
+   El número se conserva para no romper las referencias existentes; **este change no lo
+   cumple ni afirma cumplirlo**.
 4. THE SYSTEM SHALL incluir tests automáticos que, para cada uno de los cinco roles,
    demuestren que un usuario del tenant A no obtiene datos del tenant B ni puede
-   modificarlos.
+   modificarlos **a través de la superficie que este change construye**: el puerto
+   `UserRepository` con dos tenants poblados, y `GET /api/v1/auth/me` con un token que
+   nombra otro tenant para un `user_id` real. La matriz completa **por endpoint de negocio
+   y por rol** queda **TRASLADADA** a `user-management` como criterio bloqueante (design
+   D15).
 5. IF un token válido nombra un tenant que no existe o que no está `ACTIVE`, THEN THE
    SYSTEM SHALL rechazar la request con `401`.
 
@@ -226,6 +241,14 @@ Acceptance criteria:
   `AuditLog` de cambios de rol (regla 9 de `steering/security.md`), junto con los
   endpoints de `tenants`: van al change **`user-management`**, ya registrado en
   `sdd/roadmap.md` justo detrás de este. Aquí los usuarios entran por el bootstrap de R7.
+- **El 404 cross-tenant (R4.3) y la matriz de autorización por endpoint y por rol
+  (R4.4)**: van también a **`user-management`**, y están escritos como **criterios de
+  aceptación bloqueantes** en su entrada del roadmap, no como recordatorio. Es la primera
+  entrada con endpoints que reciben identificadores de recurso tenant-scoped
+  (`/api/v1/users/{id}`, `GET`/`PATCH /api/v1/tenants/{id}`), y va antes que
+  `reservations` en el orden de ejecución. Motivo en design D15: aquí no son verificables
+  porque los cuatro endpoints de auth son autorreferenciales, y la alternativa —inventar
+  un endpoint de negocio para ejercitarlos— sería código muerto en producción.
 - **Acceso del huésped**: PRD §6 le da token seguro de un solo uso y ningún panel, y
   `UserRole` no incluye `GUEST` — no es un `User`. Va al change **`guest-portal`**, ya
   registrado en `sdd/roadmap.md` detrás de `access-notifications`.
