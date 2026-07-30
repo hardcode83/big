@@ -57,6 +57,10 @@ export function ProvenancePanel({
   provenance: ResolvedProvenance;
   frontendVersion: string | null;
 }) {
+  // Withheld, not unknown: the panel received no repository details because it must not
+  // publish them on an anonymous surface.
+  const withheld = provenance.prHref === null && provenance.runId === null;
+
   const [open, setOpen] = useState(false);
   const [backendVersion, setBackendVersion] = useState<string | null>(null);
   const [checked, setChecked] = useState(false);
@@ -65,7 +69,13 @@ export function ProvenancePanel({
     setOpen(next);
     // Fetched on OPEN, never during render: this is what keeps the shell renderable
     // without a backend and `BACKEND_INTERNAL_URL` unread at shell render (design D9).
-    if (!next || checked) return;
+    //
+    // A successful answer is kept (a version only changes on deploy, and a deploy reloads
+    // the page). An UNSUCCESSFUL one is retried on the next open: the panel used to latch
+    // "unknown" for the lifetime of the mount, so reopening it mid-incident — exactly when
+    // an operator would — told them nothing new (found by the QA panel).
+    if (!next) return;
+    if (checked && backendVersion !== null) return;
     try {
       const response = await fetch("/deployment/version", {
         cache: "no-store",
@@ -112,60 +122,70 @@ export function ProvenancePanel({
               {!checked ? labels.checking : (backendVersion ?? labels.unknown)}
             </span>
           </Row>
-          <Row label={labels.pullRequest}>
-            {provenance.prHref && provenance.pr ? (
-              <a
-                className="underline underline-offset-2"
-                href={provenance.prHref}
-                data-testid="pr-link"
-              >
-                {labels.prPrefix}
-                {provenance.pr}
-              </a>
-            ) : (
-              <span data-testid="no-pr">{labels.noPullRequest}</span>
-            )}
-          </Row>
-          <Row label={labels.commit}>
-            {provenance.commitHref && provenance.commitShort ? (
-              <a
-                className="font-mono underline underline-offset-2"
-                href={provenance.commitHref}
-                data-testid="commit-link"
-              >
-                {provenance.commitShort}
-              </a>
-            ) : (
-              <span className="font-mono">
-                {provenance.commitShort ?? labels.unknown}
-              </span>
-            )}
-          </Row>
-          <Row label={labels.builtAt}>
-            <span className="font-mono">
-              {provenance.builtAt ?? labels.unknown}
-            </span>
-          </Row>
-          <Row label={labels.runId}>
-            {provenance.runHref && provenance.runId ? (
-              <a
-                className="font-mono underline underline-offset-2"
-                href={provenance.runHref}
-                data-testid="run-link"
-              >
-                {provenance.runId}
-              </a>
-            ) : (
-              <span className="font-mono">
-                {provenance.runId ?? labels.unknown}
-              </span>
-            )}
-          </Row>
-          <Row label={labels.ref}>
-            <span className="font-mono">
-              {provenance.ref ?? labels.unknown}
-            </span>
-          </Row>
+          {/*
+            When the repository details were withheld (the operator surface is not behind
+            authentication yet — see OPERATOR_SURFACE_IS_AUTHENTICATED), these rows are NOT
+            rendered at all. Showing them as "unknown" would be a lie: the values exist,
+            they are simply not ours to publish on an anonymous page.
+          */}
+          {withheld ? null : (
+            <>
+              <Row label={labels.pullRequest}>
+                {provenance.prHref && provenance.pr ? (
+                  <a
+                    className="underline underline-offset-2"
+                    href={provenance.prHref}
+                    data-testid="pr-link"
+                  >
+                    {labels.prPrefix}
+                    {provenance.pr}
+                  </a>
+                ) : (
+                  <span data-testid="no-pr">{labels.noPullRequest}</span>
+                )}
+              </Row>
+              <Row label={labels.commit}>
+                {provenance.commitHref && provenance.commitShort ? (
+                  <a
+                    className="font-mono underline underline-offset-2"
+                    href={provenance.commitHref}
+                    data-testid="commit-link"
+                  >
+                    {provenance.commitShort}
+                  </a>
+                ) : (
+                  <span className="font-mono">
+                    {provenance.commitShort ?? labels.unknown}
+                  </span>
+                )}
+              </Row>
+              <Row label={labels.builtAt}>
+                <span className="font-mono">
+                  {provenance.builtAt ?? labels.unknown}
+                </span>
+              </Row>
+              <Row label={labels.runId}>
+                {provenance.runHref && provenance.runId ? (
+                  <a
+                    className="font-mono underline underline-offset-2"
+                    href={provenance.runHref}
+                    data-testid="run-link"
+                  >
+                    {provenance.runId}
+                  </a>
+                ) : (
+                  <span className="font-mono">
+                    {provenance.runId ?? labels.unknown}
+                  </span>
+                )}
+              </Row>
+              <Row label={labels.ref}>
+                <span className="font-mono">
+                  {provenance.ref ?? labels.unknown}
+                </span>
+              </Row>
+            </>
+          )}
         </dl>
 
         {drifted ? (

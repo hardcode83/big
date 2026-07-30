@@ -80,8 +80,7 @@ describe("GET /deployment/version (R5.1-R5.6)", () => {
   });
 
   it("reports the backend as unknown when the request is aborted by the timeout", async () => {
-    // R5.5: a hung backend must not hang the panel. The handler passes an
-    // AbortSignal.timeout, so the rejection it has to survive is an AbortError.
+    // R5.5: a hung backend must not hang the panel.
     vi.stubGlobal(
       "fetch",
       vi.fn(async () => {
@@ -90,6 +89,60 @@ describe("GET /deployment/version (R5.1-R5.6)", () => {
     );
 
     expect((await body()).backend).toBeNull();
+  });
+
+  it("actually passes an abort signal that fires, not just a caught rejection", async () => {
+    // The QA panel proved the test above was VACUOUS for the wiring: deleting
+    // `signal: AbortSignal.timeout(...)` from the fetch left all nine tests green, because
+    // the rejection came from the mock and never from a real signal. So assert the signal
+    // itself — it exists, it is an AbortSignal, and it aborts once the bound elapses. A
+    // regression that drops the timeout leaves a hung backend blocking the panel forever.
+    let captured: AbortSignal | undefined;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async (_url: string | URL, init?: { signal?: AbortSignal }) => {
+        captured = init?.signal;
+        return Response.json({ version: "x" });
+      }),
+    );
+
+    await GET();
+
+    expect(captured).toBeInstanceOf(AbortSignal);
+    expect(captured!.aborted).toBe(false);
+    // AbortSignal.timeout uses real timers, so wait past the bound rather than faking it.
+    await new Promise((resolve) => setTimeout(resolve, 2100));
+    expect(captured!.aborted).toBe(true);
+  }, 10_000);
+
+  it("serves the memoized answer instead of hitting the backend on every request", async () => {
+    // Anonymous and publicly routed: without the cache each internet request would force
+    // one internal request on a single VM (security panel, finding 2).
+    let calls = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        calls += 1;
+        return Response.json({ version: "0.1.0+cached" });
+      }),
+    );
+
+    await GET();
+    await GET();
+    await GET();
+
+    expect(calls).toBe(1);
+  });
+
+  it("offers the answer to the edge with a bounded max-age", async () => {
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => Response.json({ version: "x" })),
+    );
+
+    const response = await GET();
+
+    expect(response.headers.get("Cache-Control")).toBe("public, max-age=30");
   });
 
   it("survives a malformed body without failing the request", async () => {

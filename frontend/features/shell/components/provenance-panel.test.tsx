@@ -22,14 +22,20 @@ const LABELS = {
   checking: "consultando…",
 };
 
-const PROVENANCE = resolveProvenance({
+const BAKED = {
   commit: "a2f3c1d3f9b2000000000000000000000000000f",
   pr: "42",
   builtAt: "2026-07-30T09:14:02Z",
   runId: "1234567890",
   ref: "main",
   repoUrl: "https://github.com/autohostai-labs/AutoHostAI",
-});
+};
+
+/** With the links resolved — the shape the panel gets ONCE the surface has auth. */
+const PROVENANCE = resolveProvenance(BAKED, true);
+
+/** What it gets TODAY: repository details withheld, because /dashboard is anonymous. */
+const WITHHELD = resolveProvenance(BAKED, false);
 
 const FRONTEND_VERSION = "0.1.0+2026-07-30.a2f3c1d";
 
@@ -99,14 +105,7 @@ describe("ProvenancePanel (R4.1-R4.4, R5.3-R5.4)", () => {
   it("says 'direct push' instead of a broken link when there is no PR (R4.4)", async () => {
     stubBackend(FRONTEND_VERSION);
     renderPanel({
-      provenance: resolveProvenance({
-        commit: "a2f3c1d3f9b2000000000000000000000000000f",
-        pr: undefined,
-        builtAt: "2026-07-30T09:14:02Z",
-        runId: "1234567890",
-        ref: "main",
-        repoUrl: "https://github.com/autohostai-labs/AutoHostAI",
-      }),
+      provenance: resolveProvenance({ ...BAKED, pr: undefined }, true),
     });
     await open();
 
@@ -211,5 +210,87 @@ describe("ProvenancePanel (R4.1-R4.4, R5.3-R5.4)", () => {
     await open();
 
     expect(fetchMock).toHaveBeenCalledOnce();
+  });
+});
+
+describe("withheld mode — what an anonymous /dashboard actually gets", () => {
+  it("renders the version rows but NOT the repository rows", async () => {
+    // Security panel, finding 1: the props are serialized into the RSC payload of a public
+    // page, so the repository details must not be there at all. Omitting the rows — rather
+    // than showing them as "unknown" — is the honest rendering: the values exist, they are
+    // simply not ours to publish anonymously.
+    stubBackend(FRONTEND_VERSION);
+    renderPanel({ provenance: WITHHELD });
+    await open();
+
+    expect(screen.queryByTestId("pr-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("no-pr")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("commit-link")).not.toBeInTheDocument();
+    expect(screen.queryByTestId("run-link")).not.toBeInTheDocument();
+    expect(screen.queryByText("Pull Request")).not.toBeInTheDocument();
+    expect(screen.queryByText("Run de Actions")).not.toBeInTheDocument();
+    expect(screen.queryByText("Rama")).not.toBeInTheDocument();
+
+    // The comparison, which is the other half of the panel, still works: both rows show
+    // the same version, which is what "no drift" looks like.
+    await waitFor(() =>
+      expect(screen.getByTestId("backend-version")).toHaveTextContent(
+        FRONTEND_VERSION,
+      ),
+    );
+    expect(screen.getAllByText(FRONTEND_VERSION)).toHaveLength(2);
+    expect(screen.queryByTestId("drift-warning")).not.toBeInTheDocument();
+  });
+
+  it("leaks no repository identity into the rendered markup", async () => {
+    stubBackend(FRONTEND_VERSION);
+    const { container } = renderPanel({ provenance: WITHHELD });
+    await open();
+
+    const html = document.body.innerHTML + container.innerHTML;
+    expect(html).not.toContain("github.com");
+    expect(html).not.toContain("autohostai-labs");
+    expect(html).not.toContain("a2f3c1d3f9b2000000000000000000000000000f");
+    expect(html).not.toContain("1234567890");
+  });
+});
+
+describe("retrying after an unreachable backend (QA panel, finding 2)", () => {
+  it("queries again on reopen when the previous attempt found nothing", async () => {
+    // The panel used to latch "unknown" for the life of the mount, so reopening it
+    // mid-incident — exactly when an operator would — told them nothing new.
+    let call = 0;
+    vi.stubGlobal(
+      "fetch",
+      vi.fn(async () => {
+        call += 1;
+        if (call === 1) throw new TypeError("fetch failed");
+        return Response.json({
+          frontend: FRONTEND_VERSION,
+          backend: FRONTEND_VERSION,
+        });
+      }),
+    );
+    renderPanel();
+
+    await open();
+    await waitFor(() =>
+      expect(screen.getByTestId("backend-version")).toHaveTextContent(
+        "desconocido",
+      ),
+    );
+
+    fireEvent.keyDown(document.body, { key: "Escape" });
+    await waitFor(() =>
+      expect(screen.queryByRole("dialog")).not.toBeInTheDocument(),
+    );
+    await open();
+
+    await waitFor(() =>
+      expect(screen.getByTestId("backend-version")).toHaveTextContent(
+        FRONTEND_VERSION,
+      ),
+    );
+    expect(call).toBe(2);
   });
 });

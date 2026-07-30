@@ -56,6 +56,16 @@ Rejected: meter todo en `PublicRuntimeConfig` — el snapshot lo recibe *toda* l
 
 Rejected: el slot `end` del `Topbar` — habría que reescribirlo en cada shell (su default es `<LocaleSwitcher />`) y compite por un `h-14` que en móvil ya va justo. Rejected: renderizarlo en cada página — 21 sitios donde olvidarlo.
 
+### D11 — Los enlaces de procedencia se retienen hasta que la superficie esté autenticada
+
+**Chosen:** una única constante de servidor, `OPERATOR_SURFACE_IS_AUTHENTICATED` en `features/shell/components/provenance.ts`, hoy `false`. Mientras lo sea, `resolveProvenance()` **no resuelve** el PR, el SHA completo, el `run_id`, el `ref` ni la URL del repositorio, así que no llegan al navegador; el panel omite esas filas en vez de rendirlas como "desconocido", porque decir "desconocido" de un valor que existe pero se retiene sería mentir. El default del parámetro es la constante, de modo que un llamante que lo olvide obtiene el comportamiento seguro.
+
+Motivo, hallado por el panel de seguridad y verificado en vivo: el resultado de `resolveProvenance()` se pasa como props a un island `"use client"`, así que se serializa en el payload RSC de la página **esté el panel abierto o no**. Y `/dashboard` es tan anónimo como `/login` (`auth-tenancy` no tocó el frontend, y el túnel enruta todo el hostname a `frontend:3000`), así que un `curl` devolvía la URL del repositorio privado, el PR y el SHA completo. **Cerrar el snapshot público de D6 no bastaba: los mismos datos salían un camino más allá.**
+
+Coste aceptado por el usuario: el pareo con el PR deja de ser de un clic y vuelve a ser de dos pasos —copiar el SHA corto del badge y buscarlo—. Se recupera solo al invertir la constante.
+
+Rejected: aceptar la divulgación y documentarla — sostenible, pero el usuario no la había aceptado a sabiendas: se le presentó el panel como "superficie autenticada de operación", que resultó falso. Rejected: Cloudflare Access sobre la app de dev — resuelve el problema de raíz y además cierra el resto de la app, que hoy también es pública, pero es un change de infra propio (Terraform, túnel, política de acceso) y no cabe aquí.
+
 ### D8 — El panel de procedencia es un client island que recibe props ya resueltas
 
 **Chosen:** un Server Component del shell de workspace construye el objeto (cadena, commit corto y completo, PR, fecha, `run_id`) con los enlaces ya formados y lo pasa como props a un island `"use client"` que usa el `Sheet`/`Dialog` de Radix ya presente en `components/ui/`. Mismo patrón que `SkipLink` (recibe `label`) y `Sidebar` (recibe `profile`): la interactividad es de cliente, la resolución de datos es de servidor.
