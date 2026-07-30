@@ -22,11 +22,25 @@ import { getServerConfig } from "@/lib/config/server";
 /** Bounded on purpose: a hung backend must not make the panel hang with it (R5.5). */
 const BACKEND_TIMEOUT_MS = 2000;
 
+/**
+ * The answer is memoized for this long, and the same value is offered to the edge.
+ *
+ * This path is anonymous and publicly routed, so without a cache every internet request
+ * would force one internal request to the backend on a single dev VM — the first public
+ * path in the product that costs internal work per call (found by the security panel).
+ * A version can only change on deploy, and a deploy restarts this process, so caching
+ * costs nothing in freshness. It also blunts the liveness oracle: probing in a loop no
+ * longer tracks the backend's state in real time.
+ */
+const CACHE_TTL_MS = 30_000;
+
 export const dynamic = "force-dynamic";
 
 interface BackendVersion {
   version?: unknown;
 }
+
+let cached: { backend: string | null; expiresAt: number } | null = null;
 
 export async function GET(): Promise<Response> {
   const { backendInternalUrl } = getServerConfig();
@@ -34,10 +48,27 @@ export async function GET(): Promise<Response> {
   // application code to read configuration only through `lib/config`.
   const frontend = buildPublicRuntimeConfig().appVersion || null;
 
-  return Response.json({
-    frontend,
-    backend: await readBackendVersion(backendInternalUrl),
-  });
+  const now = Date.now();
+  if (!cached || cached.expiresAt <= now) {
+    cached = {
+      backend: await readBackendVersion(backendInternalUrl),
+      expiresAt: now + CACHE_TTL_MS,
+    };
+  }
+
+  return Response.json(
+    { frontend, backend: cached.backend },
+    {
+      headers: {
+        "Cache-Control": `public, max-age=${Math.floor(CACHE_TTL_MS / 1000)}`,
+      },
+    },
+  );
+}
+
+/** Test seam: the module-level cache would otherwise leak between test cases. */
+export function __resetVersionCache(): void {
+  cached = null;
 }
 
 async function readBackendVersion(

@@ -61,6 +61,7 @@ export async function WorkspaceShell({ children }: { children: ReactNode }) {
                 closeLabel: t("common:provenance.closeLabel"),
                 commit: t("common:provenance.commit"),
                 pullRequest: t("common:provenance.pullRequest"),
+                prPrefix: t("common:provenance.prPrefix"),
                 noPullRequest: t("common:provenance.noPullRequest"),
                 builtAt: t("common:provenance.builtAt"),
                 runId: t("common:provenance.runId"),

@@ -35,6 +35,8 @@ export interface ProvenancePanelLabels {
   closeLabel: string;
   commit: string;
   pullRequest: string;
+  /** Notación del número de PR (`#`). En el catálogo por R4.5: es texto visible. */
+  prPrefix: string;
   noPullRequest: string;
   builtAt: string;
   runId: string;
@@ -117,7 +119,8 @@ export function ProvenancePanel({
                 href={provenance.prHref}
                 data-testid="pr-link"
               >
-                #{provenance.pr}
+                {labels.prPrefix}
+                {provenance.pr}
               </a>
             ) : (
               <span data-testid="no-pr">{labels.noPullRequest}</span>

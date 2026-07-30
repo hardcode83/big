@@ -11,6 +11,7 @@
     "closeLabel": "Close details",
     "commit": "Commit",
     "pullRequest": "Pull Request",
+    "prPrefix": "#",
     "noPullRequest": "direct push, no PR",
     "builtAt": "Built",
     "runId": "Actions run",

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 vi.mock("next/headers", () => ({ cookies: vi.fn() }));
 
-import { GET } from "./route";
+import { GET, __resetVersionCache } from "./route";
 
 const original = { ...process.env };
 
@@ -10,6 +10,7 @@ beforeEach(() => {
   process.env.BACKEND_INTERNAL_URL = "http://backend:8000";
   process.env.NEXT_PUBLIC_APP_VERSION = "0.1.0+2026-07-30.a2f3c1d";
   vi.restoreAllMocks();
+  __resetVersionCache();
 });
 
 afterEach(() => {

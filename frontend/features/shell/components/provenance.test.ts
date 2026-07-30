@@ -29,7 +29,6 @@ describe("resolveProvenance (R4.1, R4.2, R4.4)", () => {
   it("shortens the commit for display but links the full sha", () => {
     const r = resolveProvenance(FULL);
     expect(r.commitShort).toBe("a2f3c1d");
-    expect(r.commitFull).toBe(FULL.commit);
     expect(r.commitHref).toContain(FULL.commit);
   });
 
@@ -72,7 +71,6 @@ describe("resolveProvenance (R4.1, R4.2, R4.4)", () => {
       }),
     ).toEqual({
       commitShort: null,
-      commitFull: null,
       commitHref: null,
       pr: null,
       prHref: null,

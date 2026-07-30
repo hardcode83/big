@@ -10,6 +10,7 @@ const LABELS = {
   closeLabel: "Cerrar detalles",
   commit: "Commit",
   pullRequest: "Pull Request",
+  prPrefix: "#",
   noPullRequest: "push directo, sin PR",
   builtAt: "Construido",
   runId: "Run de Actions",

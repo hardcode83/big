@@ -7,10 +7,13 @@ import type { BuildProvenance } from "@/lib/config/server";
  * configuration (design D6). What crosses to the client island is a handful of ready-made
  * `href` strings on the operator surface, not the identity of the private repository in
  * the public snapshot.
+ *
+ * `commitFull` was removed after the security panel pointed out it crossed to the client
+ * without ever being rendered: serializing a value nobody displays is pure exposure. The
+ * full SHA still reaches the browser inside `commitHref`, where it has a purpose.
  */
 export interface ResolvedProvenance {
   commitShort: string | null;
-  commitFull: string | null;
   commitHref: string | null;
   pr: string | null;
   prHref: string | null;
@@ -33,7 +36,6 @@ export function resolveProvenance(
 
   return {
     commitShort: commit ? commit.slice(0, 7) : null,
-    commitFull: commit ?? null,
     commitHref: base && commit ? `${base}/commit/${commit}` : null,
     pr: pr ?? null,
     prHref: base && pr ? `${base}/pull/${pr}` : null,
