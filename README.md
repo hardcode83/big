@@ -10,16 +10,17 @@ Requisitos: Docker + Docker Compose v2, `make`.
 make up   # levanta todo el stack: postgres, redis, backend, worker, frontend
 ```
 
-Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (valores locales por defecto, sin secretos reales) si no existe todavía. Las migraciones de base de datos (Alembic) también se aplican solas — un servicio `migrate` corre `alembic upgrade head` antes de que `backend`/`worker` arranquen.
+Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (valores locales por defecto, sin secretos reales) si no existe todavía, y **genera en él la clave de firma JWT** con `openssl rand -hex 32` si falta — el valor se queda en tu máquina y nunca vive en el repositorio. Las migraciones de base de datos (Alembic) también se aplican solas — un servicio `migrate` corre `alembic upgrade head` antes de que `backend`/`worker` arranquen.
 
 Al cabo de unos segundos:
 
-- Backend (FastAPI): http://localhost:8000/health
+- Backend (FastAPI): http://localhost:8000/health — API en http://localhost:8000/api/v1, documentación navegable en http://localhost:8000/docs
 - Frontend (Next.js): http://localhost:3000 — Application Shell; `/` redirige a `/dashboard` y las rutas de módulos muestran un placeholder "en preparación" (todavía sin funcionalidad). No requiere backend para renderizar.
 - Postgres: localhost:5432 — ya con el esquema de dominio creado (`tenants`, `users`, `properties`, `guests`, `reservations`, `timeline_events`, ...)
 - Redis: localhost:6379
 
 ```bash
+make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -34,6 +35,23 @@ make up SERVICE=backend    # backend + postgres + redis (sin frontend)
 make up SERVICE=frontend   # frontend + backend + sus dependencias
 make sh SERVICE=backend    # shell dentro del contenedor de backend
 ```
+
+## Entrar en la aplicación
+
+El producto no tiene registro público, así que los usuarios iniciales se crean con un
+comando. Rellena los `BOOTSTRAP_*` de tu `.env` (van sin valor a propósito: son
+contraseñas de personas) y ejecuta:
+
+```bash
+make bootstrap   # crea el tenant, su config y dos usuarios: TENANT_OWNER y PROPERTY_MANAGER
+```
+
+Es idempotente y falla antes de escribir nada si falta alguna variable. No está
+enganchado a `make up` para que el arranque siga sin pasos manuales.
+
+Endpoints de auth: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`,
+`POST /api/v1/auth/logout`, `GET /api/v1/auth/me`. Operación, configuración del límite de
+intentos y las cosas que sorprenden: [`docs/auth-tenancy.md`](docs/auth-tenancy.md).
 
 ## Migraciones (Alembic)
 
@@ -54,7 +72,7 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 
 ## Estructura
 
-- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` (`domain/`, `infrastructure/`, ver `sdd/steering/backend-architecture.md`); migraciones en `backend/alembic/`.
+- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`); comandos operativos en `backend/app/cli/`; migraciones en `backend/alembic/`.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
@@ -75,6 +93,16 @@ La app desplegada se sirve en **https://autohostai.digitalsec.work**, a través 
 cd backend && uv run pytest
 cd frontend && npm test
 ```
+
+El backend tiene **gate de CI obligatorio** en cada PR
+(`.github/workflows/backend-tests.yml`): migraciones Alembic sobre un PostgreSQL limpio,
+`alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como services.
+No lleva filtro de rutas a propósito — un required check con filtro deja bloqueados los PR
+que no tocan esas rutas.
+
+Cada ejecución de la suite crea su propia base de datos (`<db>_test_<pid>`) y la borra al
+terminar, así que dos `pytest` simultáneos no se pisan. `make db-clean-test` barre las que
+deje atrás una ejecución interrumpida.
 
 ### Verificación del frontend
 

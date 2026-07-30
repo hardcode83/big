@@ -38,6 +38,11 @@ services:
     command: alembic upgrade head
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # alembic/env.py imports the ORM models, which reach app.core.config and build
+      # Settings at import time; jwt_secret_key is required (R1.7), so without this
+      # the migration container exits on a ValidationError and the deploy stalls on
+      # `depends_on: service_completed_successfully`.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -76,6 +81,9 @@ services:
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # app.worker imports app.core.config, and jwt_secret_key is required (R1.7):
+      # without this the worker crash-loops on a ValidationError.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
     depends_on:
       redis:
         condition: service_healthy
