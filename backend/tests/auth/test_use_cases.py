@@ -5,6 +5,7 @@ import uuid
 from datetime import timedelta
 
 import pytest
+from sqlalchemy import select, update
 
 from app.auth.application.use_cases import (
     GetCurrentUserUseCase,
@@ -20,6 +21,7 @@ from app.auth.domain.exceptions import (
     SessionReuseDetectedError,
     TooManyAttemptsError,
 )
+from app.auth.infrastructure.models import UserModel, UserSessionModel
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import (
     SqlAlchemySessionRepository,
@@ -547,6 +549,203 @@ async def test_losing_the_rotation_race_is_treated_as_reuse(
         await _refresh(db_session, codec).execute(
             refresh_token=first.refresh_token, now=utc_now()
         )
+
+
+@pytest.mark.asyncio
+async def test_the_loser_of_the_race_also_revokes_the_winners_child(
+    db_session, tenant_a, codec, hasher
+) -> None:
+    """Losing the race must take down the LINEAGE, not just the token presented (R2.2).
+
+    Asked for explicitly in the PR #25 review, and it is not the same property as
+    "the loser is refused": if the loser raised but left the winner's freshly minted
+    child alive, a stolen token that lost one race would still hold a usable 7-day
+    session — the theft would be detected and then tolerated.
+
+    The winner rotates through the real use case here (the earlier race test consumes
+    the row directly, so no child ever exists and this could not be observed).
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher)
+    first = await _login(db_session, codec, hasher).execute(
+        email="owner@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
+    )
+    stolen = first.refresh_token
+
+    # The legitimate holder rotates: its child is now the live session of the family.
+    winner = await _refresh(db_session, codec).execute(refresh_token=stolen, now=utc_now())
+    child_id = codec.decode_refresh(winner.refresh_token).token_id
+    repo = SqlAlchemySessionRepository(db_session)
+    assert (await repo.get(tenant_a.id, child_id)) is not None
+
+    # The thief presents the same token afterwards.
+    with pytest.raises(SessionReuseDetectedError):
+        await _refresh(db_session, codec).execute(refresh_token=stolen, now=utc_now())
+
+    child = await repo.get(tenant_a.id, child_id)
+    assert child is not None
+    assert child.revoked_at is not None, "the winner's child survived the reuse detection"
+    assert child.revoked_reason is SessionRevokedReason.REUSE_DETECTED
+    # And it is genuinely unusable, not merely flagged.
+    assert child.is_usable(utc_now()) is False
+
+
+@pytest.mark.asyncio
+async def test_a_logout_racing_a_refresh_leaves_no_unrevoked_child(
+    test_engine, db_session, tenant_a, codec, hasher
+) -> None:
+    """The revocation race that 11.9 closed, as an end-to-end interleaving (R2.2, R2.3).
+
+    Asked for explicitly in the PR #25 review. The scenario: a refresh is in flight and
+    has already read its session as usable; a logout revokes the family in between; the
+    refresh then tries to consume and insert its child. If `consume()` only guarded
+    `used_at IS NULL`, the logout would lose the tie and the request would insert a
+    child with a fresh 7-day life that OUTLIVES the revocation — a logged-out session
+    that keeps renewing itself.
+
+    `test_a_revoked_session_cannot_be_consumed` covers the guard in isolation. This one
+    has to reach it through the use case, and the ORDER is the whole point: an earlier
+    version of this test committed the logout BEFORE the refresh started, so the entity's
+    own `is_usable` refused it and `consume()` never ran — it passed with the guard
+    removed, which makes it a test of nothing. Proven by mutation.
+
+    The logout is therefore injected exactly between the use case's read and its write,
+    by a repository wrapper. That is the only moment at which the two can race.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher)
+    pair = await _login(db_session, codec, hasher).execute(
+        email="owner@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
+    )
+    claims = codec.decode_refresh(pair.refresh_token)
+
+    class LogsOutBetweenReadAndWrite(SqlAlchemySessionRepository):
+        """Commits a logout on another connection right after the use case's read."""
+
+        def __init__(self, session) -> None:
+            super().__init__(session)
+            self.logged_out = False
+
+        async def get(self, tenant_id, session_id):
+            found = await super().get(tenant_id, session_id)
+            # The use case has just seen this session as usable. NOW the logout lands.
+            if not self.logged_out:
+                self.logged_out = True
+                async with AsyncSession(test_engine, expire_on_commit=False) as other:
+                    await LogoutUseCase(
+                        sessions=SqlAlchemySessionRepository(other),
+                        uow=FlushingUnitOfWork(other),
+                    ).execute(
+                        tenant_id=claims.tenant_id, family_id=claims.family_id, now=utc_now()
+                    )
+            return found
+
+    sessions = LogsOutBetweenReadAndWrite(db_session)
+    use_case = RefreshTokenUseCase(
+        users=SqlAlchemyUserRepository(db_session),
+        sessions=sessions,
+        tokens=codec,
+        uow=FlushingUnitOfWork(db_session),
+    )
+
+    with pytest.raises((SessionReuseDetectedError, InvalidTokenError)):
+        await use_case.execute(refresh_token=pair.refresh_token, now=utc_now())
+
+    assert sessions.logged_out, "the logout never fired — the interleaving did not happen"
+    await db_session.commit()
+
+    # The real assertion is about the STATE, not the exception: not one usable session
+    # may remain in the family.
+    rows = (
+        await db_session.execute(
+            select(UserSessionModel).where(UserSessionModel.family_id == claims.family_id)
+        )
+    ).scalars().all()
+    assert rows, "the family vanished — the test would pass vacuously"
+    usable = [row.id for row in rows if row.revoked_at is None and row.used_at is None]
+    assert not usable, f"sessions still usable after logout: {usable}"
+
+
+@pytest.mark.asyncio
+async def test_a_failed_login_does_not_touch_last_login_at(
+    db_session, tenant_a, codec, hasher
+) -> None:
+    """`last_login_at` is evidence of a successful authentication (R1.2).
+
+    The positive case was covered; the review asked for the negative, which is the one
+    that matters: a `last_login_at` that moves on a WRONG password makes the column
+    useless as an audit trail and tells an attacker their guess reached a real account.
+    """
+    user = await insert_user(db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher)
+    assert user.last_login_at is None
+
+    for email, password in [
+        ("owner@example.com", "wrong password"),
+        ("nobody@example.com", PASSWORD),
+    ]:
+        with pytest.raises(InvalidCredentialsError):
+            await _login(db_session, codec, hasher).execute(
+                email=email, password=password, client_ip=IP, now=utc_now()
+            )
+
+    reloaded = await SqlAlchemyUserRepository(db_session).get_active_by_id(tenant_a.id, user.id)
+    assert reloaded is not None
+    assert reloaded.last_login_at is None
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_suspension_is_not_reverted_by_a_login(
+    test_engine, db_session, tenant_a, codec, hasher
+) -> None:
+    """Why `save(user)` had to go, pinned as a property (R1.2, design D7).
+
+    The old repository wrote the WHOLE row back from the entity it had read at the start
+    of the request. So an administrator suspending an account — or a password change, or
+    a demotion — committed while a login was in flight got silently overwritten by the
+    stale values: a login that un-suspends the account somebody just disabled. Replaced
+    by a `touch_last_login` that updates one column.
+
+    Asked for explicitly in the PR #25 review ("una actualización concurrente de rol,
+    estado o contraseña no se pierde"), and it is a real regression guard: reintroducing
+    a full-row save turns this test red.
+    """
+    from sqlalchemy.ext.asyncio import AsyncSession
+
+    user = await insert_user(db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher)
+    # Committed so the other connection can see the user at all — `insert_user` only
+    # flushes, and an earlier version of this test rolled that insert away.
+    await db_session.commit()
+    login = _login(db_session, codec, hasher)
+
+    # The login reads the user here...
+    authenticated = await login._authenticate("owner@example.com", PASSWORD, IP)
+    assert authenticated.status is UserStatus.ACTIVE
+
+    # ...and an admin suspends the account and demotes it on another connection.
+    async with AsyncSession(test_engine, expire_on_commit=False) as other:
+        await other.execute(
+            update(UserModel)
+            .where(UserModel.id == user.id)
+            .values(status=UserStatus.SUSPENDED, role=UserRole.CLEANER, password_hash="rotated")
+        )
+        await other.commit()
+
+    # ...and only then does the login finish writing.
+    await SqlAlchemyUserRepository(db_session).touch_last_login(
+        tenant_a.id, user.id, utc_now()
+    )
+    await db_session.commit()
+
+    # Read on a fresh connection: this session's snapshot predates the suspension, so
+    # reusing it could show the old row and make the assertion meaningless.
+    async with AsyncSession(test_engine, expire_on_commit=False) as reader:
+        fresh = (
+            await reader.execute(select(UserModel).where(UserModel.id == user.id))
+        ).scalar_one()
+    assert fresh.status is UserStatus.SUSPENDED, "the login resurrected a suspended account"
+    assert fresh.role is UserRole.CLEANER, "the login reverted a role change"
+    assert fresh.password_hash == "rotated", "the login reverted a password change"
+    assert fresh.last_login_at is not None, "the login failed to record itself at all"
 
 
 @pytest.mark.asyncio

@@ -352,3 +352,28 @@ async def test_role_is_mapped_back_as_an_enum(db_session, tenant_a) -> None:
 
     assert found is not None
     assert found.role is UserRole.CLEANER
+
+
+def test_no_unconditional_write_primitive_came_back() -> None:
+    """Regression guard for the two methods 11.9 removed (design D5, R2.1).
+
+    `SessionRepository.save` and `UserRepository.save` were deleted for two different
+    reasons: the session one wrote `used_at`/`revoked_at` without checking them, which is
+    the read-then-write race of R2.1 sitting next to the safe `consume()`; and the user
+    one copied the whole row back, so it could revert a suspension committed mid-request.
+
+    The PR #25 review asked to confirm no consumer of them remains. Absence of callers
+    cannot be proven by a test — that is what the grep and the review are for — but their
+    ABSENCE FROM THE SURFACE can, and that is the part that decays: the next person
+    needing to mark a session used would find a `save` and use it. If either name comes
+    back, this fails and the reason is one paragraph up.
+    """
+    forbidden = "save"
+    assert not hasattr(SqlAlchemySessionRepository, forbidden), (
+        "SqlAlchemySessionRepository.save is back — every mutation must stay conditional "
+        "(consume) or set-based (revoke_family)"
+    )
+    assert not hasattr(SqlAlchemyUserRepository, forbidden), (
+        "SqlAlchemyUserRepository.save is back — writing the whole row can revert a "
+        "concurrent status, role or password change; use touch_last_login"
+    )
