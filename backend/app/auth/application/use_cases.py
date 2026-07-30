@@ -59,25 +59,18 @@ class LoginUseCase:
         return pair
 
     async def _authenticate(self, email: str, password: str, client_ip: str) -> User:
-        candidates = await self.users.find_by_email_across_tenants(email)
-        if len(candidates) != 1:
-            # Unknown address, or an ambiguity that must not authenticate anybody
-            # (design D16). Both answer exactly like a wrong password (R1.4).
+        user = await self.users.find_by_email_globally(email)
+        if user is None:
+            # An unknown address answers exactly like a wrong password (R1.4).
             #
             # `burn` is not decoration: bcrypt is the only expensive step on this path,
             # so returning without it answers in ~2 ms where a real address takes as
             # long as the configured cost. That gap is a user-enumeration oracle by
             # latency, which is precisely what R1.4's ASSUMPTION exists to prevent —
             # identical bodies are not enough.
-            self.hasher.burn(password)
-            logger.warning(
-                "Login failed: %s match for the address, ip=%s",
-                "no" if not candidates else f"{len(candidates)} candidates",
-                client_ip,
-            )
+            await self.hasher.burn(password)
+            logger.warning("Login failed: no match for the address, ip=%s", client_ip)
             raise InvalidCredentialsError("Invalid email or password")
-
-        user = candidates[0]
 
         if await self.throttle.is_account_locked(user.id):
             # Deliberately NOT recording a failure here: counting an attempt that was
@@ -87,11 +80,11 @@ class LoginUseCase:
             # Same reason for burning: without it the responses of a locked account go
             # fast again, which tells an attacker exactly when the lock engaged and
             # when it lapsed.
-            self.hasher.burn(password)
+            await self.hasher.burn(password)
             logger.warning("Login refused: account locked user_id=%s ip=%s", user.id, client_ip)
             raise InvalidCredentialsError("Invalid email or password")
 
-        if not self.hasher.verify(password, user.password_hash):
+        if not await self.hasher.verify(password, user.password_hash):
             await self._record_failure(user.id, "wrong password", client_ip)
             raise InvalidCredentialsError("Invalid email or password")
 

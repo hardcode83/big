@@ -4,6 +4,10 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
+    # Declarado explícitamente aunque ya venga por fastapi/starlette: el adaptador de
+    # bcrypt lo importa directo (`anyio.to_thread`, design D21), y depender de una
+    # transitiva es romperse el día que la dependencia de arriba la cambie.
+    "anyio>=4.0",
     "asyncpg>=0.31.0",
     "bcrypt>=4.2",
     "celery>=5.6.3",

@@ -1,14 +1,13 @@
 """SQLAlchemy adapters for the auth ports (R4.2, R6.5, design D6/D10).
 
 Every method takes `tenant_id` and filters on it — except
-`find_by_email_across_tenants`, the one deliberate exception (design D16), which is
+`find_by_email_globally`, the one deliberate exception (design D16), which is
 therefore the only unscoped query in the system: every other cross-tenant need goes
 through it rather than hand-rolling a second one.
 No method commits: the transactional boundary is the use case (design D10).
 """
 
 import uuid
-from collections.abc import Sequence
 from datetime import datetime
 
 from sqlalchemy import select, update
@@ -45,23 +44,24 @@ class SqlAlchemyUserRepository:
         model = result.scalar_one_or_none()
         return _to_user(model) if model is not None else None
 
-    async def find_by_email_across_tenants(self, email: str) -> Sequence[User]:
+    async def find_by_email_globally(self, email: str) -> User | None:
         """THE ONLY unscoped query in the system (design D16).
 
         Its callers are the anonymous login and the bootstrap conflict check; both go
         through here rather than writing their own, so a grep for this method name
         enumerates every cross-tenant read that exists.
 
-        Login is anonymous, so there is no tenant yet. Matching is
-        case-insensitive because an email is not case-sensitive to the person
-        typing it; if that makes two users in the same tenant match, the caller
-        refuses to authenticate (R1.4) — it fails closed.
+        Login is anonymous, so there is no tenant yet — the address alone has to
+        identify the user, and it does: `uq_users_lower_email` makes a normalised
+        email unique across the whole installation, not per tenant (design D16,
+        ADR 0005). Matching is case-insensitive because an email is not
+        case-sensitive to the person typing it, and the index is built on
+        `lower(email)` so the guarantee is expressed in the same terms as the lookup.
 
-        ASSUMPTION: `UniqueConstraint(tenant_id, email)` makes an email unique per
-        tenant, not globally, so {email, password} does not identify one user once
-        there is more than one tenant. This may therefore return several users, and
-        login proceeds only when exactly one matches (design D16). Real multi-tenant
-        login will need a discriminator (subdomain, or a tenant field).
+        `scalar_one_or_none` therefore raises rather than picking a winner if two rows
+        ever match. That is deliberate: it can only happen if the unique index is
+        gone, and in that state authenticating whichever row sorted first is worse
+        than a 500 — it would be a silent cross-tenant account takeover. Fails closed.
 
         The comparison is a plain equality against the Python-normalised address —
         never `lower()` inside the query — see `normalize_email` and design D19.
@@ -69,7 +69,8 @@ class SqlAlchemyUserRepository:
         result = await self._session.execute(
             select(UserModel).where(UserModel.email == normalize_email(email))
         )
-        return [_to_user(model) for model in result.scalars().all()]
+        model = result.scalar_one_or_none()
+        return _to_user(model) if model is not None else None
 
     async def touch_last_login(
         self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime

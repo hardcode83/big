@@ -29,6 +29,12 @@ class Settings(BaseSettings):
     jwt_refresh_token_days: int = 7
 
     bcrypt_rounds: int = 12
+    # How many password hashes may run at once (design D21). bcrypt is CPU-bound and
+    # runs in a worker thread, so this is the login endpoint's CPU budget: too low
+    # queues legitimate logins, too high lets one burst of failed attempts starve
+    # every other request on the box. `None` derives it from the visible CPU count,
+    # which is the only value that adapts to the 4-OCPU dev VM and to a laptop alike.
+    bcrypt_max_concurrency: int | None = None
 
     login_rate_limit_per_minute: int = 10
     login_max_failed_attempts: int = 10

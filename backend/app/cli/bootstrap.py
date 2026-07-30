@@ -124,39 +124,29 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         created["tenant_configs"] = 1
 
     for seed in plan.users:
-        # Checked ACROSS tenants before writing, and this is not belt-and-braces.
+        # One global lookup answers both questions, because a normalised email is
+        # unique across the whole installation now (design D16, ADR 0005): if the
+        # address exists at all, either it is ours — a re-run, skip it — or it belongs
+        # to another tenant, which must not proceed.
+        #
+        # `uq_users_lower_email` would refuse the INSERT anyway, so this check is about
+        # the MESSAGE, not the invariant: what a re-run after a typo in
+        # BOOTSTRAP_TENANT_NAME gets is an explanation naming the variable to look at,
+        # instead of an IntegrityError mentioning an index nobody has heard of.
         # Idempotency keys on the tenant NAME, and `tenants` has no uniqueness on it,
-        # so a re-run after any edit to BOOTSTRAP_TENANT_NAME — a rename, a typo —
-        # would create a second tenant and insert these same addresses again. The
-        # functional unique index is per tenant, so nothing stops it. Then
-        # `find_by_email_across_tenants` returns two rows and D16's "exactly one" rule
-        # refuses to authenticate BOTH accounts, permanently, in a product with no
-        # public sign-up and no unlock endpoint. Recoverable only by hand-editing the
-        # database, so it has to fail here instead.
+        # so that typo creates a second tenant and then tries these same addresses.
         #
         # Deliberately through the PORT rather than a raw cross-tenant select: that
-        # keeps `find_by_email_across_tenants` the only unscoped query in the system, so
+        # keeps `find_by_email_globally` the only unscoped query in the system, so
         # D16's grep-based audit stays exhaustive. A second hand-rolled one here would
         # have made that claim false and the audit incomplete.
-        elsewhere = [
-            found.tenant_id
-            for found in await users.find_by_email_across_tenants(seed.email)
-            if found.tenant_id != tenant.id
-        ]
-        if elsewhere:
+        existing = await users.find_by_email_globally(seed.email)
+        if existing is not None and existing.tenant_id != tenant.id:
             raise BootstrapConflictError(
-                f"The address of {seed.role.value} already exists under another tenant "
-                f"({len(elsewhere)} found). Bootstrapping it again would leave every "
-                "account with that address unable to log in. Check BOOTSTRAP_TENANT_NAME."
+                f"The address of {seed.role.value} already exists under another tenant. "
+                "Emails are unique across the whole installation, so this address cannot "
+                "be bootstrapped again here. Check BOOTSTRAP_TENANT_NAME."
             )
-
-        existing = (
-            await session.execute(
-                select(UserModel).where(
-                    UserModel.tenant_id == tenant.id, UserModel.email == seed.email
-                )
-            )
-        ).scalar_one_or_none()
         if existing is not None:
             continue
         session.add(
@@ -165,7 +155,7 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
                 tenant_id=tenant.id,
                 name=seed.name,
                 email=seed.email,
-                password_hash=hasher.hash(seed.password),
+                password_hash=await hasher.hash(seed.password),
                 role=seed.role,
             )
         )

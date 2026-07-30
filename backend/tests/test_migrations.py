@@ -15,11 +15,14 @@ import pytest_asyncio
 from sqlalchemy.engine import make_url
 
 from app.core.config import settings
+from tests.db_names import scoped_name
 
 BACKEND_ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 
 _DEV_URL = make_url(settings.database_url)
-_MIGRATIONS_DB = f"{_DEV_URL.database}_migrations"
+# Per-run name: this fixture opens with DROP DATABASE, so a fixed name means a second
+# concurrent run drops the database this one is mid-test in (see tests/db_names.py).
+_MIGRATIONS_DB = scoped_name(_DEV_URL.database or "postgres", "migrations")
 _MIGRATIONS_URL = _DEV_URL.set(database=_MIGRATIONS_DB).render_as_string(hide_password=False)
 
 
@@ -107,6 +110,30 @@ async def _index_exists(url: str, index_name: str) -> bool:
         await conn.close()
 
 
+async def _constraint_exists(url: str, constraint_name: str) -> bool:
+    """Checked in `pg_constraint`, not by index name.
+
+    A UNIQUE constraint is backed by an index of the same name, so looking it up with
+    `to_regclass` would also pass for a plain index — and the revision that drops
+    `uq_users_tenant_id_email` (ADR 0005) has to drop the CONSTRAINT, since an index
+    left behind under that name would make the downgrade fail on a name clash.
+    """
+    parsed = make_url(url)
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        return bool(
+            await conn.fetchval("SELECT 1 FROM pg_constraint WHERE conname = $1", constraint_name)
+        )
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
 async def test_the_chain_upgrades_to_head_and_unwinds_revision_by_revision(
     migrations_database,
@@ -123,12 +150,18 @@ async def test_the_chain_upgrades_to_head_and_unwinds_revision_by_revision(
     assert upgraded.returncode == 0, upgraded.stderr
     assert await _table_exists(url, "user_sessions") is True
     assert await _enum_exists(url, "session_revoked_reason") is True
-    assert await _index_exists(url, "uq_users_tenant_id_lower_email") is True
+    # Global email uniqueness replaces the per-tenant constraint (ADR 0005): the new
+    # index exists AND the old constraint is gone. Asserting only the first would let
+    # a revision that added the index without dropping the constraint pass, and the
+    # two together are what make the email one contract instead of two.
+    assert await _index_exists(url, "uq_users_lower_email") is True
+    assert await _constraint_exists(url, "uq_users_tenant_id_email") is False
 
-    # Undo the functional index only.
+    # Undo the email revision only.
     down_index = _alembic("downgrade", "8ff62a7cb50c", database_url=url)
     assert down_index.returncode == 0, down_index.stderr
-    assert await _index_exists(url, "uq_users_tenant_id_lower_email") is False
+    assert await _index_exists(url, "uq_users_lower_email") is False
+    assert await _constraint_exists(url, "uq_users_tenant_id_email") is True
     assert await _table_exists(url, "user_sessions") is True
 
     # Undo user_sessions.
@@ -153,7 +186,10 @@ async def test_the_revisions_can_be_reapplied_after_a_downgrade(migrations_datab
 
     assert reapplied.returncode == 0, reapplied.stderr
     assert await _table_exists(url, "user_sessions") is True
-    assert await _index_exists(url, "uq_users_tenant_id_lower_email") is True
+    assert await _index_exists(url, "uq_users_lower_email") is True
+    # The re-upgrade has to drop the constraint its own downgrade recreated; if it
+    # left it behind, the schema would carry both rules and drift from the models.
+    assert await _constraint_exists(url, "uq_users_tenant_id_email") is False
 
 
 @pytest.mark.asyncio

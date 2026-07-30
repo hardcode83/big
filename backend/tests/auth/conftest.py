@@ -56,7 +56,12 @@ async def insert_user(
     """Creates a user the way production does: with the email normalised (D19).
 
     `normalize=False` writes the address verbatim, to exercise what happens when a
-    writer forgets — which is what the functional unique index has to catch.
+    writer forgets — which is what `uq_users_lower_email` has to catch.
+
+    Addresses default to a random one per user because emails are unique across the
+    WHOLE installation now (design D16, ADR 0005): a fixed default would make any
+    test that seeds two users collide, in a different tenant just as much as in the
+    same one.
     """
     raw_email = email or f"user-{uuid.uuid4().hex[:8]}@example.com"
     user = UserModel(
@@ -64,7 +69,9 @@ async def insert_user(
         tenant_id=tenant.id,
         name="Test User",
         email=normalize_email(raw_email) if normalize else raw_email,
-        password_hash=(hasher or BcryptPasswordHasher(rounds=TEST_BCRYPT_ROUNDS)).hash(password),
+        password_hash=await (hasher or BcryptPasswordHasher(rounds=TEST_BCRYPT_ROUNDS)).hash(
+            password
+        ),
         role=role,
         status=status,
     )

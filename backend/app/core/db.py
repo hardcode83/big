@@ -77,7 +77,7 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
        hand-built Core statement bypasses it entirely.
     2. It does nothing on a session without a tenant marker. Unmarked: Celery tasks,
        the bootstrap command, the anonymous login query — which *needs* it, because
-       `find_by_email_across_tenants` has no tenant yet — and `POST /auth/refresh`,
+       `find_by_email_globally` has no tenant yet — and `POST /auth/refresh`,
        which is anonymous and so never reaches `get_authenticated_request`, the only
        place that marks. Any future anonymous endpoint touching data inherits this.
     3. INSERTs are not guarded. `session.add` emits no ORM statement this listener

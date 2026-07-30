@@ -167,7 +167,9 @@ async def test_the_stored_password_is_a_verifiable_bcrypt_hash(
 
     assert owner.password_hash != COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"]
     assert owner.password_hash.startswith("$2")
-    assert hasher.verify(COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"], owner.password_hash) is True
+    assert (
+        await hasher.verify(COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"], owner.password_hash) is True
+    )
 
 
 @pytest.mark.asyncio
@@ -186,24 +188,28 @@ async def test_the_bootstrapped_owner_can_actually_log_in(
     monkeypatch.setattr(settings, "bootstrap_owner_email", "OWNER@Example.COM")
     await apply_plan(db_session, build_plan(), hasher)
 
-    found = await SqlAlchemyUserRepository(db_session).find_by_email_across_tenants(
+    found = await SqlAlchemyUserRepository(db_session).find_by_email_globally(
         "  owner@example.com "
     )
 
-    assert len(found) == 1
-    assert hasher.verify(COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"], found[0].password_hash) is True
+    assert found is not None
+    assert (
+        await hasher.verify(COMPLETE_ENV["BOOTSTRAP_OWNER_PASSWORD"], found.password_hash) is True
+    )
 
 
 @pytest.mark.asyncio
 async def test_it_refuses_when_the_address_already_exists_under_another_tenant(
     db_session, monkeypatch: pytest.MonkeyPatch, complete_env, hasher
 ) -> None:
-    """A typo in BOOTSTRAP_TENANT_NAME must not lock everyone out (security panel F3).
+    """A typo in BOOTSTRAP_TENANT_NAME must fail with an explanation (security panel F3).
 
     Idempotency keys on the tenant name and `tenants` has no uniqueness on it, so a
-    re-run with a changed name would create a second tenant carrying the same
-    addresses. `find_by_email_across_tenants` would then return two rows and D16's
-    "exactly one" rule would refuse BOTH accounts, permanently.
+    re-run with a changed name creates a second tenant and then tries to insert the
+    same addresses under it. `uq_users_lower_email` refuses that write either way
+    (ADR 0005) — what this check adds is an error naming the variable to look at
+    instead of an IntegrityError about an index, so the assertion is on the type of
+    error, not merely on the write failing.
     """
     await apply_plan(db_session, build_plan(), hasher)
     monkeypatch.setattr(settings, "bootstrap_tenant_name", "AutoHostAI Madird")  # typo
@@ -214,10 +220,10 @@ async def test_it_refuses_when_the_address_already_exists_under_another_tenant(
     await db_session.rollback()
     from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 
-    still_unique = await SqlAlchemyUserRepository(db_session).find_by_email_across_tenants(
+    still_there = await SqlAlchemyUserRepository(db_session).find_by_email_globally(
         COMPLETE_ENV["BOOTSTRAP_OWNER_EMAIL"]
     )
-    assert len(still_unique) == 1, "the owner must still be able to log in"
+    assert still_there is not None, "the owner must still be able to log in"
 
 
 def test_the_required_variables_are_exactly_the_ones_documented(

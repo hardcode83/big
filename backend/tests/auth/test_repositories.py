@@ -58,20 +58,20 @@ async def test_get_active_by_id_ignores_a_user_of_a_disabled_tenant(db_session) 
 
 
 @pytest.mark.asyncio
-async def test_find_by_email_across_tenants_finds_every_match(
-    db_session, tenant_a, tenant_b
-) -> None:
-    shared = "shared@example.com"
-    await insert_user(db_session, tenant=tenant_a, email=shared)
-    await insert_user(db_session, tenant=tenant_b, email=shared)
+async def test_find_by_email_globally_reaches_any_tenant(db_session, tenant_a, tenant_b) -> None:
+    """Unscoped on purpose (design D16): login is anonymous, there is no tenant yet.
+
+    The user is seeded in tenant_b while tenant_a also exists, so a query that
+    accidentally scoped itself to "the first tenant around" would come back empty.
+    """
+    user = await insert_user(db_session, tenant=tenant_b, email="owner@example.com")
     repo = SqlAlchemyUserRepository(db_session)
 
-    found = await repo.find_by_email_across_tenants(shared)
+    found = await repo.find_by_email_globally("owner@example.com")
 
-    # UniqueConstraint(tenant_id, email) makes email unique per tenant, not
-    # globally — the ambiguity R1.4 has to refuse is real, so it must surface here.
-    assert len(found) == 2
-    assert {user.tenant_id for user in found} == {tenant_a.id, tenant_b.id}
+    assert found is not None
+    assert found.id == user.id
+    assert found.tenant_id == tenant_b.id
 
 
 @pytest.mark.asyncio
@@ -79,9 +79,10 @@ async def test_find_by_email_is_case_and_whitespace_insensitive(db_session, tena
     user = await insert_user(db_session, tenant=tenant_a, email="Jose@Example.com")
     repo = SqlAlchemyUserRepository(db_session)
 
-    found = await repo.find_by_email_across_tenants("  jose@example.COM ")
+    found = await repo.find_by_email_globally("  jose@example.COM ")
 
-    assert [match.id for match in found] == [user.id]
+    assert found is not None
+    assert found.id == user.id
 
 
 @pytest.mark.asyncio
@@ -97,15 +98,17 @@ async def test_saving_normalises_the_email(db_session, tenant_a) -> None:
     reloaded = await repo.get_active_by_id(tenant_a.id, model.id)
     assert reloaded is not None
     assert reloaded.email == "first@example.com"
-    assert await repo.find_by_email_across_tenants("FIRST@EXAMPLE.COM") != []
+    assert await repo.find_by_email_globally("FIRST@EXAMPLE.COM") is not None
 
 
 @pytest.mark.asyncio
-async def test_two_case_variants_cannot_coexist_in_one_tenant(db_session, tenant_a) -> None:
-    """The other half of D19: the functional unique index enforces it structurally.
+async def test_a_writer_that_forgets_to_normalise_is_still_refused(db_session, tenant_a) -> None:
+    """The other half of D19: `uq_users_lower_email` enforces it structurally.
 
-    Without it, `Jose@x.com` and `jose@x.com` coexist, the lookup returns two rows,
-    and D16's "exactly one match" rule locks BOTH accounts out permanently.
+    `normalize_email` lowercases on every write, but that is a convention, and this
+    index is what makes it an invariant — without it a writer that forgets leaves two
+    case variants of one address in the database, and the login lookup then resolves
+    to whichever the query planner happened to return.
     """
     from sqlalchemy.exc import IntegrityError
 
@@ -113,19 +116,19 @@ async def test_two_case_variants_cannot_coexist_in_one_tenant(db_session, tenant
 
     with pytest.raises(IntegrityError):
         # normalize=False bypasses normalize_email on purpose, simulating a writer
-        # that forgot — otherwise the plain UniqueConstraint would catch it and this
-        # would not prove the functional index does anything.
+        # that forgot: the stored strings differ, so only an index on `lower(email)`
+        # can catch this one.
         await insert_user(
             db_session, tenant=tenant_a, email="Clash@Example.com", normalize=False
         )
 
 
 @pytest.mark.asyncio
-async def test_find_by_email_returns_empty_for_an_unknown_address(db_session, tenant_a) -> None:
+async def test_find_by_email_returns_nothing_for_an_unknown_address(db_session, tenant_a) -> None:
     await insert_user(db_session, tenant=tenant_a)
     repo = SqlAlchemyUserRepository(db_session)
 
-    assert await repo.find_by_email_across_tenants("nobody@example.com") == []
+    assert await repo.find_by_email_globally("nobody@example.com") is None
 
 
 @pytest.mark.asyncio

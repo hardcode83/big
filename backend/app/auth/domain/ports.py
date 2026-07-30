@@ -2,12 +2,11 @@
 
 Every port speaks in domain entities, never ORM models, and every method that
 touches a tenant-scoped entity takes `tenant_id` explicitly — with one deliberate
-exception, `find_by_email_across_tenants`, named so it is impossible to mistake
-for an oversight (design D16).
+exception, `find_by_email_globally`, named so it is impossible to mistake for an
+oversight (design D16).
 """
 
 import uuid
-from collections.abc import Sequence
 from datetime import datetime, timedelta
 from typing import Protocol
 
@@ -21,12 +20,13 @@ class UserRepository(Protocol):
         """The user, only if both the user and its tenant are ACTIVE (R4.5, design D7)."""
         ...
 
-    async def find_by_email_across_tenants(self, email: str) -> Sequence[User]:
+    async def find_by_email_globally(self, email: str) -> User | None:
         """The only unscoped query behind this port (design D16).
 
-        Login is anonymous: there is no tenant yet. `UniqueConstraint(tenant_id,
-        email)` makes email unique per tenant, not globally, so this may return
-        more than one user — the caller must refuse to authenticate then (R1.4).
+        Login is anonymous: there is no tenant yet, so the address has to identify
+        the user on its own. It can, because a normalised email is unique across the
+        whole installation (design D16, ADR 0005) — hence at most one user, and no
+        "which of these did you mean" case for the caller to handle.
         """
         ...
 
@@ -85,18 +85,27 @@ class SessionRepository(Protocol):
 
 
 class PasswordHasher(Protocol):
-    def hash(self, password: str) -> str: ...
+    """Async on purpose, even though hashing is pure computation (design D21).
 
-    def verify(self, password: str, password_hash: str) -> bool: ...
+    bcrypt costs ~250 ms of CPU per call at the configured cost. Run on the event
+    loop that stalls EVERY concurrent request for that long, so the adapter runs it
+    in a worker thread — and a port whose methods are awaited is what forces every
+    caller through that boundary. Declaring them sync would make the blocking
+    version the easy one to write, which is how it got that way in the first place.
+    """
 
-    def burn(self, password: str) -> None:
+    async def hash(self, password: str) -> str: ...
+
+    async def verify(self, password: str, password_hash: str) -> bool: ...
+
+    async def burn(self, password: str) -> None:
         """Do the same work as `verify` against a dummy hash, and discard the result.
 
         Exists so every failed login costs the same (R1.4). Without it the paths that
-        never reach `verify` — unknown address, ambiguous address, locked account —
-        answer in milliseconds while a real one takes as long as bcrypt does, which
-        turns the endpoint into a user-enumeration oracle by latency even though the
-        response bodies are identical.
+        never reach `verify` — unknown address, locked account — answer in
+        milliseconds while a real one takes as long as bcrypt does, which turns the
+        endpoint into a user-enumeration oracle by latency even though the response
+        bodies are identical.
         """
         ...
 

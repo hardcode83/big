@@ -48,7 +48,7 @@ async def test_an_unfiltered_select_cannot_see_another_tenant(db_session: AsyncS
 
 @pytest.mark.asyncio
 async def test_an_unmarked_session_is_not_filtered(db_session: AsyncSession) -> None:
-    """Login depends on this: find_by_email_across_tenants has no tenant yet (D16)."""
+    """Login depends on this: find_by_email_globally has no tenant yet (D16)."""
     tenant_a = await insert_tenant(db_session, name="unmarked-a")
     tenant_b = await insert_tenant(db_session, name="unmarked-b")
     await insert_user(db_session, tenant=tenant_a)

@@ -58,13 +58,13 @@ class CountingPasswordHasher:
         self._inner = inner
         self.expensive_calls = 0
 
-    def hash(self, password: str) -> str:
-        return self._inner.hash(password)
+    async def hash(self, password: str) -> str:
+        return await self._inner.hash(password)
 
-    def verify(self, password: str, password_hash: str) -> bool:
+    async def verify(self, password: str, password_hash: str) -> bool:
         self.expensive_calls += 1
-        return self._inner.verify(password, password_hash)
+        return await self._inner.verify(password, password_hash)
 
-    def burn(self, password: str) -> None:
+    async def burn(self, password: str) -> None:
         self.expensive_calls += 1
-        self._inner.burn(password)
+        await self._inner.burn(password)

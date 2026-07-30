@@ -186,17 +186,24 @@ async def test_a_user_of_a_disabled_tenant_is_refused(db_session, codec, hasher)
 
 
 @pytest.mark.asyncio
-async def test_the_same_address_in_two_tenants_authenticates_nobody(
+async def test_the_address_alone_identifies_the_account_whatever_its_tenant(
     db_session, tenant_a, tenant_b, codec, hasher
 ) -> None:
-    """Design D16's ambiguity: it fails closed, it does not pick one."""
-    await insert_user(db_session, tenant=tenant_a, email="shared@example.com", hasher=hasher)
-    await insert_user(db_session, tenant=tenant_b, email="shared@example.com", hasher=hasher)
+    """Login carries no tenant discriminator, and needs none (design D16, ADR 0005).
 
-    with pytest.raises(InvalidCredentialsError):
-        await _login(db_session, codec, hasher).execute(
-            email="shared@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
-        )
+    The user lives in tenant_b while tenant_a also exists, so this fails if the
+    lookup ever becomes tenant-scoped — and the token it returns must name the
+    tenant the user actually belongs to, not whichever one was found first.
+    """
+    user = await insert_user(db_session, tenant=tenant_b, email="owner@example.com", hasher=hasher)
+
+    pair = await _login(db_session, codec, hasher).execute(
+        email="owner@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
+    )
+
+    claims = codec.decode_access(pair.access_token)
+    assert claims.user_id == user.id
+    assert claims.tenant_id == tenant_b.id
 
 
 @pytest.mark.asyncio
@@ -298,12 +305,11 @@ async def test_the_password_never_reaches_the_log(
         ("nobody@example.com", PASSWORD, "none"),
         ("owner@example.com", "wrong password", "none"),
         ("owner@example.com", PASSWORD, "locked"),
-        ("shared@example.com", PASSWORD, "ambiguous"),
     ],
-    ids=["unknown-address", "wrong-password", "locked-account", "ambiguous-address"],
+    ids=["unknown-address", "wrong-password", "locked-account"],
 )
 async def test_every_failed_login_spends_the_same_work(
-    db_session, tenant_a, tenant_b, codec, hasher, email, password, setup
+    db_session, tenant_a, codec, hasher, email, password, setup
 ) -> None:
     """R1.4 is about being indistinguishable, and latency is distinguishable.
 
@@ -314,15 +320,9 @@ async def test_every_failed_login_spends_the_same_work(
     """
     counting = CountingPasswordHasher(hasher)
     throttle = InMemoryLoginThrottle(max_failures=1)
-    if setup == "ambiguous":
-        await insert_user(db_session, tenant=tenant_a, email="shared@example.com", hasher=hasher)
-        await insert_user(db_session, tenant=tenant_b, email="shared@example.com", hasher=hasher)
-    else:
-        user = await insert_user(
-            db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher
-        )
-        if setup == "locked":
-            await throttle.record_failure(user.id)
+    user = await insert_user(db_session, tenant=tenant_a, email="owner@example.com", hasher=hasher)
+    if setup == "locked":
+        await throttle.record_failure(user.id)
     use_case = _login(db_session, codec, counting, throttle)
     counting.expensive_calls = 0
 

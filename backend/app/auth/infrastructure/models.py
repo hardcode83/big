@@ -7,7 +7,6 @@ from sqlalchemy import (
     ForeignKey,
     Index,
     String,
-    UniqueConstraint,
     Uuid,
     column,
     func,
@@ -21,17 +20,20 @@ from app.core.db import Base, TenantScopedMixin, TimestampMixin, UUIDPrimaryKeyM
 class UserModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     __tablename__ = "users"
     __table_args__ = (
-        UniqueConstraint("tenant_id", "email", name="uq_users_tenant_id_email"),
-        # Backstop for design D19: `normalize_email` lowercases on every write, but a
-        # future writer that forgets would let two case variants coexist in one tenant,
-        # and D16's "exactly one match" rule would then lock BOTH accounts out for good.
-        # This makes the invariant structural instead of a convention.
-        Index(
-            "uq_users_tenant_id_lower_email",
-            "tenant_id",
-            func.lower(column("email")),
-            unique=True,
-        ),
+        # A normalised email identifies ONE user in the whole installation, not one
+        # per tenant (design D16, ADR 0005). This deviates from PRD §7.3, which
+        # specifies UNIQUE(tenant_id, email): with login by email only and no tenant
+        # discriminator, per-tenant uniqueness means the address does not identify the
+        # account, and creating a user in tenant B with the address of tenant A's owner
+        # locks that owner out of a product with no unlock endpoint.
+        #
+        # `lower(email)` rather than `email` because the lookup is case-insensitive:
+        # a case-sensitive constraint would let `Jose@x.com` and `jose@x.com` coexist
+        # and both then resolve to the same login (design D19).
+        #
+        # No UNIQUE(tenant_id, email) alongside it — global uniqueness already implies
+        # it, and two constraints for one rule is how they drift apart.
+        Index("uq_users_lower_email", func.lower(column("email")), unique=True),
         Index("ix_users_tenant_id_role", "tenant_id", "role"),
         Index("ix_users_tenant_id_status", "tenant_id", "status"),
     )
