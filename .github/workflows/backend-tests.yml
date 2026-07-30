@@ -71,6 +71,16 @@ jobs:
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
+      # `make version-check` parsea el TOML y el JSON con `tomllib`/`json` (stdlib >=3.11),
+      # así que necesita un intérprete con versión garantizada. Pinear la versión aquí, en
+      # vez de confiar en el `python3` que traiga la imagen del runner, es lo que exige el
+      # criterio de reproducibilidad de `specs/backend-ci.md` — mismo motivo por el que las
+      # actions van por SHA. Sin esto, un cambio en la imagen base de `ubuntu-latest`
+      # rompería el gate en cada PR con `ModuleNotFoundError: tomllib` (panel de CI/CD).
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+
       # Barato y primero: si la versión base ha divergido, falla antes de montar nada.
       # Vive aquí porque es el único gate que corre en CADA PR sin filtro de `paths`
       # (change app-version-visibility, R6.2). Sin `working-directory`: necesita la raíz.

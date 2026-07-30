@@ -83,12 +83,20 @@ class Settings(BaseSettings):
         every unexpected shape has to degrade rather than kill: an empty string (a direct
         push to main with no PR, R1.7), a literal "unknown" — one of the two renderings
         R2.6 sanctions — or anything malformed like "#42" or "42a".
+
+        The guard is the parse ITSELF, not a predicate about it. `str.isdigit()` was the
+        first attempt and it is not equivalent: it returns True for Unicode `No`-category
+        characters such as "²" or "₁" that `int()` then rejects, so the validator raised
+        from inside and the image still failed to boot anyway. A predicate that does not
+        imply parseability cannot make a coercion total (found by the security panel).
         """
-        if isinstance(value, int):
-            return value
-        if isinstance(value, str) and value.strip().isdigit():
-            return int(value.strip())
-        return None
+        try:
+            parsed = int(str(value).strip())
+        except (TypeError, ValueError):
+            return None
+        # A Pull Request number is positive; 0 and negatives are not PRs, so they mean
+        # "no PR" rather than a number worth reporting.
+        return parsed if parsed > 0 else None
 
     @model_validator(mode="after")
     def _reject_whitespace_jwt_secret(self) -> "Settings":

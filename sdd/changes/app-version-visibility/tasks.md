@@ -4,12 +4,12 @@
      1-2 son aditivas y verificables solas; 3 hornea la identidad; 4-5 la muestran.
      Nada en 4-5 rompe si 3 no ha corrido: todo degrada a "desconocida" (D4/R2.6). -->
 
-## 1. Fuente de verdad de la versión base
+## 1. Fuente de verdad de la versión base <!-- panel: PASS 2026-07-30 (cubierto con la sección 2) -->
 
 - [x] 1.1 Crear `VERSION` en la raíz con la base en una línea (`0.1.0`, la que ya declaran los dos manifiestos) — files: `VERSION` [R6.1]
 - [x] 1.2 Comprobación de paridad que falla si `VERSION`, `backend/pyproject.toml` y `frontend/package.json` divergen: target `version-check` en el `Makefile` (corre en el host, donde los tres ficheros existen) invocado desde un step de `.github/workflows/backend-tests.yml`, que es el único gate que corre en **cada** PR sin filtro de paths. **No** es un test de pytest: el contenedor de backend monta solo `./backend:/app` y no ve `VERSION` ni `frontend/package.json` (verificado en `/sdd:run`, ver D1) — files: `Makefile`, `.github/workflows/backend-tests.yml` [R6.2]
 
-## 2. Backend: `/version` <!-- panel: pendiente -->
+## 2. Backend: `/version` <!-- panel: PASS 2026-07-30 — 7 reviewers, 10 hallazgos, 2 rondas de arreglo -->
 
 - [x] 2.1 Seis campos nuevos en `Settings`, **todos con default** (`app_version: str = ""`, `build_commit: str = ""`, `build_pr: int | None = None`, `built_at: str = ""`, `build_run_id: str = ""`, `build_ref: str = ""`). Test que construye `Settings` sin ninguno de ellos y no lanza — files: `backend/app/core/config.py`, `backend/tests/test_config.py` [R2.6, R2.10]
 - [x] 2.2 `@app.get("/version")` inline en `create_app()`, junto a `/health` y **fuera** de `API_V1_PREFIX`, devolviendo `version`/`commit`/`pr`/`built_at`/`run_id`/`ref` desde `settings` (**snake_case**, como el resto de la API — cf. `TokenPairResponse`), con `summary`/`description` y modelo `VersionResponse` con campos `str | None` para que un campo no horneado sea `null` y no `""`. Sin tocar DB ni Redis — files: `backend/app/main.py` [R2.1, R2.2, R2.3, R2.5, R2.11]

@@ -112,7 +112,10 @@ def test_build_identity_is_optional_so_an_unbaked_image_still_boots(
         "42a",
         "1.2",
         "-42",
+        "0",  # PR numbers start at 1, so 0 means "no PR", not PR zero
         "null",
+        "²",  # `str.isdigit()` is True here but `int()` raises — the gap the panel found
+        "₁",
     ],
 )
 def test_an_unusable_build_pr_becomes_none_instead_of_killing_the_image(
@@ -129,7 +132,19 @@ def test_an_unusable_build_pr_becomes_none_instead_of_killing_the_image(
     assert Settings(_env_file=None, **_REQUIRED).build_pr is None
 
 
-@pytest.mark.parametrize(("raw", "expected"), [("42", 42), (" 42 ", 42), ("7", 7)])
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        ("42", 42),
+        (" 42 ", 42),
+        ("7", 7),
+        ("007", 7),
+        # Nd-category digits DO parse with int(), unlike the No-category "²" above. Kept
+        # as a value rather than an error for the same reason as everything else here:
+        # nothing about this field is worth refusing to boot over.
+        ("٤٢", 42),
+    ],
+)
 def test_a_well_formed_build_pr_is_still_parsed(
     monkeypatch: pytest.MonkeyPatch, raw: str, expected: int
 ) -> None:
