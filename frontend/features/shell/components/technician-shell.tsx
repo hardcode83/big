@@ -4,6 +4,7 @@ import { getServerT } from "@/lib/i18n/server";
 import { Brand } from "./brand";
 import { PageTitle } from "./page-title";
 import { ShellFrame } from "./shell-frame";
+import { ShellFooter } from "./shell-footer";
 import { SkipLink } from "./skip-link";
 import { Topbar } from "./topbar";
 
@@ -25,6 +26,14 @@ export async function TechnicianShell({ children }: { children: ReactNode }) {
     <ShellFrame
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
       topbar={<Topbar start={start} />}
+      footer={
+        <ShellFooter
+          versionLabels={{
+            label: t("common:version.label"),
+            unknown: t("common:version.unknown"),
+          }}
+        />
+      }
     >
       {children}
     </ShellFrame>

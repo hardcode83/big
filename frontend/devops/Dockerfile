@@ -30,8 +30,12 @@ ARG NEXT_PUBLIC_APP_ENV
 ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
 
 # Las dos únicas de la identidad que PUEDEN llegar al navegador (design D6): son lo que
-# pinta el badge, y al viajar dentro del bundle son también lo único capaz de delatar que
-# el edge de Cloudflare está sirviendo JavaScript de un despliegue anterior.
+# pinta el badge, y entran en PublicRuntimeConfig, que cruza al cliente.
+#
+# Nota de alcance, verificada y no supuesta: el badge es un Server Component, así que la
+# cadena viaja en el HTML servido y NO queda inlineada en .next/static. Delata que el edge
+# sirve una página cacheada antigua, pero no que sirva chunks JS antiguos con HTML fresco.
+# Ver la tabla de "Data & interfaces" del design.
 ARG NEXT_PUBLIC_APP_VERSION=""
 ARG NEXT_PUBLIC_BUILD_COMMIT_SHORT=""
 ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION} \

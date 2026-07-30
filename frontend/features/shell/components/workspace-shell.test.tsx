@@ -67,9 +67,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
 
   it("shows workspace destinations and never Cleaner/Technician", async () => {
     await renderShell();
-    expect(screen.getAllByRole("link", { name: "Panel" }).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByRole("link", { name: "Panel" }).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("link", { name: "Propiedades" }).length,
     ).toBeGreaterThan(0);
@@ -85,7 +85,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
     await renderShell();
     const dashboardLinks = screen.getAllByRole("link", { name: "Panel" });
     expect(
-      dashboardLinks.some((link) => link.getAttribute("aria-current") === "page"),
+      dashboardLinks.some(
+        (link) => link.getAttribute("aria-current") === "page",
+      ),
     ).toBe(true);
   });
 
@@ -96,7 +98,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
     });
     expect(collapse).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(collapse);
-    const expand = screen.getByRole("button", { name: "Expandir barra lateral" });
+    const expand = screen.getByRole("button", {
+      name: "Expandir barra lateral",
+    });
     expect(expand).toHaveAttribute("aria-expanded", "false");
   });
 

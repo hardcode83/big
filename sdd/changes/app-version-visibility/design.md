@@ -133,10 +133,19 @@ En el **frontend hay dos clases**, y la distinción es la que hace cumplible D6 
 
 | Clase | Variables | Dónde acaba | Por qué |
 |---|---|---|---|
-| `NEXT_PUBLIC_*` (build-arg en `builder`) | `NEXT_PUBLIC_APP_VERSION`, `NEXT_PUBLIC_BUILD_COMMIT_SHORT` | **Inlineadas en el bundle** → llegan al navegador en todas las superficies | Es lo que pinta el badge, y solo un valor dentro del bundle detecta que el edge sirve JS viejo. Son las dos únicas que D6 admite en el snapshot público |
+| `NEXT_PUBLIC_*` (build-arg en `builder`) | `NEXT_PUBLIC_APP_VERSION`, `NEXT_PUBLIC_BUILD_COMMIT_SHORT` | Entran en `PublicRuntimeConfig`, que **cruza al navegador** en todas las superficies | Es lo que pinta el badge. Son las dos únicas que D6 admite en el snapshot público |
 | `ENV` planas (etapa `prod`) | `BUILD_COMMIT` (completo), `BUILD_PR`, `BUILT_AT`, `BUILD_RUN_ID`, `BUILD_REF`, `REPO_URL` | Horneadas en la imagen pero **solo legibles por el servidor de Next** (`lib/config/server.ts`) | Alimentan el panel de procedencia. Horneadas (R1.3 se cumple: no son config de compose) pero **fuera del bundle**, así que no llegan al login ni al portal de huésped (D6, R3.6, R4.3) |
 
-Marcar una de las de la segunda clase como `NEXT_PUBLIC_*` sería un fallo de divulgación silencioso: pasaría los tests y metería el número de PR y la URL del repo en el bundle público.
+Marcar una de las de la segunda clase como `NEXT_PUBLIC_*` sería un fallo de divulgación silencioso: pasaría los tests y metería el número de PR y la URL del repo en el snapshot que recibe el navegador.
+
+**Corrección de alcance sobre el cachéo del edge (verificada en la sección 4, no supuesta).** El proposal y las primeras versiones de este design afirmaban que "solo un valor dentro del bundle detecta que el edge sirve JS viejo". **Eso no se cumple con el diseño elegido**, y conviene dejarlo escrito para no razonar sobre una garantía que no existe: el badge es un Server Component (así lo exige el chrome del shell, `frontend-foundation` D9), de modo que la cadena viaja en el **HTML servido**, no inlineada en `.next/static`. Comprobado con un build real: `grep` en `.next/static` no encuentra la cadena, y `curl` a `/login` en la imagen `prod` sí. Por tanto:
+
+| Escenario del edge | ¿Lo delata el badge? |
+|---|---|
+| Sirve una **página** (HTML/RSC) cacheada de un despliegue anterior | **Sí** — el badge del HTML es el antiguo. Es el síntoma de la tabla del `RUNBOOK §7` |
+| Sirve **chunks JS** antiguos con HTML fresco | **No** — el badge vendría del HTML nuevo |
+
+El segundo caso queda sin cubrir y no se intenta cubrir aquí: forzarlo exigiría que el badge fuese un client component, lo que contradice la convención de Server Components del shell y añade JavaScript de cliente por una cadena estática. Lo que el change sí garantiza en todo caso es que la identidad **no puede mentir sobre qué imagen corre**, porque va horneada y no en una variable de compose — que es el argumento de fondo de D2 y sigue intacto.
 
 **Labels OCI** en ambas imágenes: `org.opencontainers.image.source`, `.revision`, `.version`, `.created`.
 

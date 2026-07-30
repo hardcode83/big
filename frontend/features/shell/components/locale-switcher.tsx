@@ -31,7 +31,11 @@ export function LocaleSwitcher() {
   }, [requested, i18n]);
 
   return (
-    <div role="group" aria-label={t("localeSwitcher.label")} className="flex gap-1">
+    <div
+      role="group"
+      aria-label={t("localeSwitcher.label")}
+      className="flex gap-1"
+    >
       {SUPPORTED_LOCALES.map((locale) => (
         <Button
           key={locale}

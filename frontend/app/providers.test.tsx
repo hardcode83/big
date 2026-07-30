@@ -23,7 +23,13 @@ describe("AppProviders (D10)", () => {
   it("composes config, i18n and query and renders children without a backend", () => {
     render(
       <AppProviders
-        config={{ appEnv: "test", defaultLocale: "es", featureFlags: {} }}
+        config={{
+          appEnv: "test",
+          defaultLocale: "es",
+          featureFlags: {},
+          appVersion: "",
+          buildCommitShort: "",
+        }}
         locale="es"
       >
         <Probe />

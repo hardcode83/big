@@ -3,6 +3,7 @@ import type { ReactNode } from "react";
 import { getServerT } from "@/lib/i18n/server";
 import { Brand } from "./brand";
 import { ShellFrame } from "./shell-frame";
+import { ShellFooter } from "./shell-footer";
 import { SkipLink } from "./skip-link";
 import { Topbar } from "./topbar";
 
@@ -18,6 +19,14 @@ export async function PublicShell({ children }: { children: ReactNode }) {
     <ShellFrame
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
       topbar={<Topbar start={<Brand label={t("common:appName")} />} />}
+      footer={
+        <ShellFooter
+          versionLabels={{
+            label: t("common:version.label"),
+            unknown: t("common:version.unknown"),
+          }}
+        />
+      }
     >
       {children}
     </ShellFrame>

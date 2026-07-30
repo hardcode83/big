@@ -18,7 +18,9 @@ export function PageHeader({
   return (
     <div className="flex items-center justify-between gap-3 border-b px-4 py-3">
       <div className="min-w-0">{title}</div>
-      {actions ? <div className="flex items-center gap-2">{actions}</div> : null}
+      {actions ? (
+        <div className="flex items-center gap-2">{actions}</div>
+      ) : null}
     </div>
   );
 }
