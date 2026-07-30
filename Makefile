@@ -1,6 +1,6 @@
 SERVICE ?=
 
-.PHONY: up down logs ps sh bootstrap
+.PHONY: up down logs ps sh bootstrap db-clean-test
 
 up:
 	@umask 077; if [ ! -f .env ]; then \
@@ -26,6 +26,19 @@ up:
 # therefore works against the deployed prod image — see RUNBOOK §6.5.
 bootstrap:
 	docker compose exec backend python -m app.cli.bootstrap
+
+# Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, ver
+# backend/tests/db_names.py) y la borra al terminar. Una suite matada a lo bruto deja
+# la suya atrás: esto barre las huérfanas sin tocar la base de desarrollo.
+db-clean-test:
+	@docker compose exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres -tAc \
+		"select datname from pg_database where datname ~ '_(test|migrations)_[0-9a-z]+$$'" \
+		| while read -r db; do \
+			[ -n "$$db" ] || continue; \
+			echo "→ borrando $$db"; \
+			docker compose exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres \
+				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null </dev/null; \
+		done; echo "listo"
 
 down:
 	docker compose down $(SERVICE)

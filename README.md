@@ -94,6 +94,16 @@ cd backend && uv run pytest
 cd frontend && npm test
 ```
 
+El backend tiene **gate de CI obligatorio** en cada PR
+(`.github/workflows/backend-tests.yml`): migraciones Alembic sobre un PostgreSQL limpio,
+`alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como services.
+No lleva filtro de rutas a propósito — un required check con filtro deja bloqueados los PR
+que no tocan esas rutas.
+
+Cada ejecución de la suite crea su propia base de datos (`<db>_test_<pid>`) y la borra al
+terminar, así que dos `pytest` simultáneos no se pisan. `make db-clean-test` barre las que
+deje atrás una ejecución interrumpida.
+
 ### Verificación del frontend
 
 ```bash
