@@ -42,7 +42,7 @@ Acceptance criteria:
 6. WHEN el commit que dispara el build es un merge commit de PR, THE SYSTEM SHALL extraer el número de PR del subject del commit (`git log -1 --format=%s`, patrón `#<n>`), sin llamadas a la API de GitHub ni permisos adicionales.
 7. IF el subject no contiene un número de PR (push directo a `main`, o `workflow_dispatch` sobre un commit sin PR), THEN THE SYSTEM SHALL registrar el campo como ausente y continuar el build — nunca fallarlo.
 8. THE SYSTEM SHALL mantener intacto el esquema de tags actual (`sha-<commit>` + `dev`) y el pineado por `${IMAGE_TAG}` del compose de deploy.
-9. WHERE la imagen se construye en local (target `dev`, donde el frontend corre `npm run dev` y nunca ejecuta `npm run build`), THE SYSTEM SHALL rendir la identidad como local/desconocida sin fallar el arranque. Nota de compatibilidad: `auth-tenancy` retira el `env_file: .env` del servicio `frontend` en `docker-compose.yml` y pasa a listar sus variables explícitamente, así que cualquier variable que el frontend necesite en dev local hay que declararla ahí una por una.
+9. WHERE la imagen se construye en local (target `dev`, donde el frontend corre `npm run dev` y nunca ejecuta `npm run build`), THE SYSTEM SHALL rendir la identidad como local/desconocida sin fallar el arranque. THE SYSTEM SHALL declarar cualquier variable que el frontend necesite en dev local **explícitamente** en el bloque `environment:` de su servicio en `docker-compose.yml`, siguiendo el patrón que ya usa `NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV:-local}`: ese servicio **no tiene `env_file: .env`** a propósito desde `auth-tenancy` (el `.env` lleva ahora `JWT_SECRET_KEY` y `BOOTSTRAP_*_PASSWORD`, que el frontend no debe ver).
 
 ### R2 — El backend expone su procedencia en `/version`
 
@@ -62,6 +62,8 @@ Acceptance criteria:
 10. THE SYSTEM SHALL leer los campos horneados a través de `Settings` en `backend/app/core/config.py`, declarándolos **con valor por defecto**. `Settings` se instancia en tiempo de import (`settings = Settings()`) y `extra="ignore"`, así que un campo sin default convertiría una imagen construida sin build-args en un `ValidationError` al arrancar — el patrón opuesto al de `jwt_secret_key`, que es requerido *a propósito*. La versión nunca debe poder impedir el arranque.
 11. THE SYSTEM SHALL registrar `/version` dentro de `create_app()`, junto a `/health`, siguiendo la decisión D2 de `auth-tenancy` (`/health` se queda en la raíz porque moverlo rompe el healthcheck; `/version` va ahí porque es operativo, no producto).
 12. THE SYSTEM SHALL añadir `backend/tests/test_version.py` con la misma forma que el `test_health.py` existente (`ASGITransport` sobre `app.main:app`).
+13. THE SYSTEM SHALL quedar verde en el gate `backend-tests` (`.github/workflows/backend-tests.yml`, capacidad `specs/backend-ci.md`), que corre **sin filtro de `paths`** en cada Pull Request y ejecuta `alembic upgrade head`, `alembic check`, la suite completa y `alembic downgrade base`.
+14. THE SYSTEM SHALL NOT introducir ninguna tabla, modelo ni migración: la identidad de build vive en la imagen, no en la base de datos, así que `alembic check` y el ciclo `upgrade`/`downgrade` del gate quedan intactos.
 
 ### R3 — Badge de versión visible al abrir la app
 
@@ -134,28 +136,30 @@ Acceptance criteria:
 - `sdd/specs/app-deploy-dev.md` — modificar: el build pasa a calcular procedencia, pasarla como build-args y emitir labels OCI; se documenta que la extracción del PR depende del merge commit.
 - `sdd/specs/frontend-foundation.md` — modificar: `PublicRuntimeConfig` gana campos, el shell gana una superficie nueva, y el seam servidor→backend de `lib/config/server.ts` pasa a tener su primer consumidor real.
 
-- `sdd/specs/auth-tenancy.md` — modificar *(no existe aún — lo creará `/sdd:archive` de `auth-tenancy`)*: la allowlist de rutas anónimas gana `/version`, que es una afirmación de seguridad y pertenece a la spec que la establece.
+- `sdd/specs/auth-tenancy.md` — modificar *(ya existe: `auth-tenancy` se archivó el 2026-07-30)*: la allowlist de rutas anónimas gana `/version`, que es una afirmación de seguridad y pertenece a la spec que la establece (§"deny by default", donde ya se razona el keyeo por `(método, path)`).
 
 Fuera de `sdd/specs/`, este change toca `.github/workflows/deploy-dev.yml`, `backend/devops/Dockerfile`, `frontend/devops/Dockerfile`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/tests/test_route_authorization.py`, `backend/tests/test_version.py` *(nuevo)*, `docker-compose.yml` (variable del frontend en dev), la capa `frontend/lib/config/`, el shell de `frontend/features/shell/`, `frontend/locales/{es,en}/`, `infra/environments/dev/RUNBOOK.md` §6.4 y §7, `docs/` y el README raíz.
 
 ## Dependencias y supuestos
 
-Este change se diseña **sobre `auth-tenancy` mergeado**, no sobre el `main` actual. Lo siguiente está verificado contra `origin/sdd/auth-tenancy` (PR #25, abierto, 78 ficheros), no supuesto:
+`auth-tenancy` (PR #25) y `timeline-state-machine` (PR #18) **ya están mergeados y archivados**. Lo siguiente está verificado contra el `main` resultante (`628f59d`), no contra una rama ni supuesto:
 
-**Compatible sin roces en el CD.** `auth-tenancy` **no toca** `.github/workflows/`, ni `backend/devops/Dockerfile`, ni `frontend/devops/Dockerfile`. R1 entero (build-args, labels OCI, extracción del PR) no colisiona con nada.
+**Los tres puntos de acople del backend siguen exactamente como se anticiparon** (releídos sobre el código mergeado, no sobre la rama):
 
-**Compatible en el backend, con tres puntos de acople obligatorios**, ya recogidos como criterios: la allowlist de `test_route_authorization.py` (R2.7-R2.8), los campos con default en `Settings` (R2.10) y el registro dentro de `create_app()` siguiendo D2 (R2.11). El primero es el que rompe la suite si se olvida.
+- `backend/app/main.py` mantiene `create_app()`, `API_V1_PREFIX = "/api/v1"` y `/health` registrado inline dentro de la factoría → R2.11 vigente.
+- `ANONYMOUS_ENDPOINTS` de `backend/tests/test_route_authorization.py` es idéntico al inspeccionado (7 entradas, keyeado por `(método, path)`) → R2.7/R2.8 vigentes y **necesarios**: sin la entrada, la suite se cae.
+- `backend/app/core/config.py` sigue instanciando `settings = Settings()` en tiempo de import, con `extra="ignore"`, `jwt_secret_key` requerido por `Field(min_length=32)` y todo lo demás con default (ganó un campo, `bcrypt_max_concurrency`) → R2.10 vigente.
 
-**Compatible en el frontend por ausencia**: `auth-tenancy` no toca ni un fichero bajo `frontend/`. Ninguna colisión — y también ninguna autenticación de la que colgar R4, de ahí R4.6 y R4.7.
+**El CD sigue limpio.** `main` no ha cambiado `.github/workflows/deploy-dev.yml` ni ninguno de los dos Dockerfiles respecto a lo que R1 asume.
 
-**Roce real en el compose de dev**: `auth-tenancy` retira el `env_file: .env` del servicio `frontend` de `docker-compose.yml` y lista sus variables una por una (recogido en R1.9).
+**Novedad no prevista: existe un gate de CI del backend.** `auth-tenancy` añadió `.github/workflows/backend-tests.yml` y la capacidad `sdd/specs/backend-ci.md`. Corre **sin filtro de `paths` a propósito** (un required check con filtro deja el PR esperando para siempre un check que nunca llega), así que **este change se verifica ahí quiera o no**: R2.13 y R2.14 lo recogen.
 
-**Conflicto de merge previsible en `sdd/roadmap.md`.** `auth-tenancy` inserta 6 entradas nuevas y una de ellas, `local-dev-network-hardening`, va **en el mismo hueco** donde este change insertó `app-version-visibility` (tras `ingress-https-hardening`, antes de `infra-github-iac`). El conflicto es textual y trivial —conservar ambas líneas—, pero conviene resolverlo en el sentido de `auth-tenancy`, que es el que se mergea primero.
+**`timeline-state-machine` no interactúa.** Añadió `app/timeline/` con solo `domain/` e `infrastructure/`: **ninguna superficie HTTP**. `main.py` sigue incluyendo un único router (`auth_router`), así que no hay rutas nuevas que la allowlist tenga que considerar ni colisión posible con `/version`.
 
-**Interacción a vigilar con `api-ingress-routing`** (entrada nueva que trae `auth-tenancy`): recogida en R5.6.
+**Compatible en el frontend por ausencia**: `auth-tenancy` no tocó ni un fichero bajo `frontend/`. Ninguna colisión — y también ninguna autenticación de la que colgar R4, de ahí R4.6 y R4.7.
 
-**Dependencia de orden con `timeline-state-machine`:** está mergeado (PR #18) pero sin archivar, así que su `STATE.md` sigue en `READY_FOR_PR`. No bloquea este change, pero conviene cerrarlo antes para no acumular changes activos falsos.
+**Roce real en el compose de dev**, confirmado sobre el fichero mergeado: el servicio `frontend` de `docker-compose.yml` no tiene `env_file: .env` y declara sus variables una a una (`NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV:-local}`) — recogido en R1.9.
 
-`ASSUMPTION`: el repo mantiene merge commits como estrategia (verificado sobre los últimos diez merges de `main`, no sobre los ajustes del repositorio, que no se consultaron).
+**Interacción a vigilar con `api-ingress-routing`** (entrada que dejó `auth-tenancy` en el roadmap): recogida en R5.6.
 
-`ASSUMPTION`: `auth-tenancy` mergea sin cambios sustantivos respecto a la rama inspeccionada hoy (2026-07-30). Si su revisión mueve `create_app()`, la allowlist o `Settings`, hay que releer estos cuatro puntos de acople antes de `/sdd:design`.
+`ASSUMPTION`: el repo mantiene merge commits como estrategia (verificado sobre los últimos merges de `main`, no sobre los ajustes del repositorio, que no se consultaron).

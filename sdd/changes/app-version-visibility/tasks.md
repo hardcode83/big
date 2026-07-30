@@ -1,0 +1,60 @@
+# Tasks: app-version-visibility
+
+<!-- Orden pensado para que el sistema siga funcionando al final de cada sección:
+     1-2 son aditivas y verificables solas; 3 hornea la identidad; 4-5 la muestran.
+     Nada en 4-5 rompe si 3 no ha corrido: todo degrada a "desconocida" (D4/R2.6). -->
+
+## 1. Fuente de verdad de la versión base
+
+- [ ] 1.1 Crear `VERSION` en la raíz con la base en una línea (`0.1.0`, la que ya declaran los dos manifiestos) — files: `VERSION` [R6.1]
+- [ ] 1.2 Test de paridad que falla si `VERSION`, `backend/pyproject.toml` y `frontend/package.json` divergen. Va en el backend (`backend/tests/test_version_source.py`) porque es donde hay gate de CI que corre en cada PR sin filtro de paths; lee los dos manifiestos como texto/TOML, sin importar el frontend — files: `backend/tests/test_version_source.py` [R6.2]
+
+## 2. Backend: `/version`
+
+- [ ] 2.1 Seis campos nuevos en `Settings`, **todos con default** (`app_version: str = ""`, `build_commit: str = ""`, `build_pr: int | None = None`, `built_at: str = ""`, `build_run_id: str = ""`, `build_ref: str = ""`). Test que construye `Settings` sin ninguno de ellos y no lanza — files: `backend/app/core/config.py`, `backend/tests/test_config.py` [R2.6, R2.10]
+- [ ] 2.2 `@app.get("/version")` inline en `create_app()`, junto a `/health` y **fuera** de `API_V1_PREFIX`, devolviendo `version`/`commit`/`pr`/`builtAt`/`runId`/`ref` desde `settings`, con `summary`/`description` y modelo de respuesta Pydantic para que salga bien en OpenAPI. Sin tocar DB ni Redis — files: `backend/app/main.py` [R2.1, R2.2, R2.3, R2.5, R2.11]
+- [ ] 2.3 Añadir `("GET", "/version")` a `ANONYMOUS_ENDPOINTS` — una línea, sin relajar el criterio (no allowlist por path sin verbo, no exención por prefijo) y sin añadir ningún `Permission` al enum — files: `backend/tests/test_route_authorization.py` [R2.5, R2.7, R2.8, R2.9]
+- [ ] 2.4 `test_version.py` con la forma de `test_health.py` (`ASGITransport` sobre `app.main:app`): contrato completo con campos presentes, caso de campos ausentes → `null`/`""` sin error, y una aserción de que `/health` sigue devolviendo exactamente `{"status":"ok"}` — files: `backend/tests/test_version.py` [R2.1, R2.4, R2.6, R2.12]
+- [ ] 2.5 Verificar que no se ha introducido modelo, tabla ni revisión de Alembic: `alembic check` limpio y `alembic downgrade base` reversible, que es lo que corre el gate — files: (ninguno, comprobación) [R2.14]
+
+## 3. CD: identidad horneada en las dos imágenes
+
+- [ ] 3.1 Step que compone el bloque de procedencia **una sola vez** y lo publica por `$GITHUB_OUTPUT`: cadena `<VERSION>+<fecha-build>.<sha-corto>`, `github.sha` completo, PR extraído del subject del merge commit (`git log -1 --format=%s`, patrón `#(\d+)`), `builtAt` ISO 8601 UTC, `github.run_id`, `github.ref_name`. Si no hay PR en el subject, el campo queda vacío y el build **continúa** — files: `.github/workflows/deploy-dev.yml` [R1.1, R1.5, R1.6, R1.7]
+- [ ] 3.2 `ARG` + `ENV` de los seis campos al final de la etapa `prod` del backend (nombres en mayúsculas que `pydantic-settings` mapea por case-insensitive) — files: `backend/devops/Dockerfile` [R1.2]
+- [ ] 3.3 `ARG` + `ENV` `NEXT_PUBLIC_*` en la etapa `builder` del frontend, junto al `NEXT_PUBLIC_APP_ENV` existente, para que queden inlineados en el bundle de Next standalone — files: `frontend/devops/Dockerfile` [R1.2]
+- [ ] 3.4 Los dos jobs de build pasan el bloque como `build-args` y emiten `labels` OCI `org.opencontainers.image.{source,revision,version,created}` con los mismos valores — files: `.github/workflows/deploy-dev.yml` [R1.2, R1.4, R1.5]
+- [ ] 3.5 Comprobar que no se añade ninguna variable de runtime al `.env` que renderiza el job `deploy` ni a `docker-compose.deploy.yml`, y que los tags `sha-<commit>` + `dev` y el pineado por `${IMAGE_TAG}` quedan intactos — files: `.github/workflows/deploy-dev.yml`, `docker-compose.deploy.yml` (revisión) [R1.3, R1.8]
+- [ ] 3.6 Declarar las `NEXT_PUBLIC_BUILD_*` **explícitamente** en el bloque `environment:` del servicio `frontend` de `docker-compose.yml` (no tiene `env_file` a propósito desde `auth-tenancy`), con default que rinda "local" y sin fallar el arranque — files: `docker-compose.yml` [R1.9]
+
+## 4. Frontend: badge de versión
+
+- [ ] 4.1 `appVersion` y `buildCommitShort` añadidos a la allowlist de `PublicRuntimeConfig`, leídos de `NEXT_PUBLIC_*` dentro de `buildPublicRuntimeConfig()`, con fallback a desconocido. La URL del repo, el PR, `builtAt` y el `run_id` **no** entran aquí. Test que verifica que el snapshot público no contiene la URL del repositorio — files: `frontend/lib/config/public.ts`, `frontend/lib/config/public.test.tsx` [R3.4, R3.6]
+- [ ] 4.2 Slot `footer` opcional en `ShellFrame`, moviendo el `pb-16 md:pb-0` del `main` al contenedor para que en móvil el footer quede por encima del `BottomNavigation` (`fixed bottom-0 z-40 md:hidden`). Test de que el footer se renderiza y no queda tapado en el layout móvil — files: `frontend/features/shell/components/shell-frame.tsx`, test colocado [R3.1]
+- [ ] 4.3 Componente `VersionBadge` (Server Component sobre el `Badge` de `components/ui/`) que pinta `<appVersion>` compuesto con el SHA corto y **cero** peticiones de red; sin URL de repo ni título de PR. Test de render — files: `frontend/features/shell/components/version-badge.tsx`, test colocado [R3.1, R3.3, R3.6]
+- [ ] 4.4 Pasar el slot `footer` con el badge desde `WorkspaceShell`, `PublicShell` (login → visible sin sesión), `CleanerShell` y `TechnicianShell`; **no** desde `GuestShell`. Test que comprueba que el shell de huésped no lo renderiza — files: los cuatro shells + `guest-shell.tsx` sin cambios, `field-public-guest-shell.test.tsx`, `workspace-shell.test.tsx` [R3.2, R3.7]
+- [ ] 4.5 Claves i18n del badge en `locales/es/common.json` y `locales/en/common.json`; el texto estático se resuelve en servidor con `getServerT`. La parity test existente debe seguir verde — files: `frontend/locales/{es,en}/common.json` [R3.5]
+
+## 5. Frontend: panel de procedencia y deriva
+
+- [ ] 5.1 Route Handler `app/deployment/version/route.ts` que lee `BACKEND_INTERNAL_URL` vía `getServerConfig()`, consulta `/version` del backend con **timeout corto y explícito** y devuelve `{frontend, backend}` — **solo cadenas de versión**, nunca PR, URL de repo ni `run_id`, porque el túnel lo hace alcanzable públicamente. Path deliberadamente **fuera de `/api/`** para no colisionar con el `rewrite` que plantea `api-ingress-routing`. Tests: respuesta normal, backend caído, backend lento (timeout) y aserción de que el cuerpo no contiene los campos sensibles — files: `frontend/app/deployment/version/route.ts`, test colocado [R5.1, R5.2, R5.5, R5.6]
+- [ ] 5.2 Los campos server-only (URL del repositorio, PR, `builtAt`, `run_id`) expuestos en `getServerConfig()`, y un Server Component que construye el objeto de procedencia con los `href` ya formados (`…/pull/<n>`, `…/commit/<sha>`, `…/actions/runs/<id>`), rindiendo "push directo, sin PR" cuando no hay PR — files: `frontend/lib/config/server.ts`, `frontend/features/shell/components/provenance-panel.tsx`, tests colocados [R4.1, R4.2, R4.4]
+- [ ] 5.3 El panel es un island `"use client"` con el `Sheet` de `components/ui/`, recibe las props ya resueltas (no lee `useRuntimeConfig()` ni `process.env`) y se monta **solo desde `WorkspaceShell`**. Comentario en el componente dejando constancia de que la ubicación es estructural y **no una frontera de seguridad** mientras el frontend no tenga autenticación, y de que por eso no puede contener nada que requiera protección. Test de que ningún otro shell lo monta — files: `provenance-panel.tsx`, `workspace-shell.tsx`, tests de shells [R4.3, R4.6, R4.7]
+- [ ] 5.4 Al abrir el panel, comparar la versión propia con la del backend y mostrar el aviso de deriva con ambas; si el backend no responde o expira, mostrar la del backend como desconocida **sin romper nada** (el badge y el shell no dependen de esta llamada). Tests de los tres casos: iguales, distintas, backend inalcanzable — files: `provenance-panel.tsx`, test colocado [R5.3, R5.4]
+- [ ] 5.5 Claves i18n del panel (etiquetas de campos, "push directo, sin PR", aviso de deriva, versión desconocida) en `locales/es/` y `locales/en/` — files: `frontend/locales/{es,en}/common.json` [R4.5]
+
+## 6. Documentación
+
+- [ ] 6.1 `RUNBOOK.md`: en §6.4 (rollback), cómo confirmar con el badge y con `curl /version` que el rollback surtió efecto; en la tabla de diagnóstico de §7, cómo la versión del bundle descarta el cachéo del edge — files: `infra/environments/dev/RUNBOOK.md` [R6.3]
+- [ ] 6.2 Documentar las dos trampas: (a) por el filtro de paths del CD, la versión en pantalla es el último commit que **disparó build**, no el último de `main`, así que apuntar a un PR de varios merges atrás es correcto; (b) el pareo depende de la estrategia de merge — funciona con merge commits y squash, se rompería **en silencio** con rebase, cuyo plan B es `gh api /repos/{repo}/commits/{sha}/pulls` con `pull-requests: read` — files: `docs/app-version-visibility.md` [R6.4, R6.5]
+- [ ] 6.3 `docs/app-version-visibility.md`: página de capacidad orientada a *cómo se usa/opera* (leer la versión, parear con un PR, confirmar un rollback, interpretar la deriva), enlazando a la spec en vez de duplicar sus EARS — files: `docs/app-version-visibility.md` [R6.6]
+- [ ] 6.4 README raíz al día y `.env.example`/`.env.deploy.example` revisados: la identidad va horneada, así que **no debería haber variable de runtime nueva** — si la revisión encuentra alguna, documentarla con nombre y comentario sin valor. Confirmar además que ninguna doc queda describiendo comportamiento eliminado — files: `README.md`, `.env.example`, `.env.deploy.example` (revisión) [R6.6]
+
+## 7. Verification
+
+- [ ] 7.1 Suite completa del backend en verde: `docker compose exec backend uv run pytest` (con el stack parado: `docker compose run --rm backend uv run pytest`) [R2.12, R2.13]
+- [ ] 7.2 Cadena de migraciones intacta, que es lo que corre el gate: `docker compose exec backend uv run alembic upgrade head`, `alembic check` y `alembic downgrade base` [R2.14]
+- [ ] 7.3 Frontend en verde: `cd frontend && npm test`, `npm run typecheck` y `npm run lint` [R3, R4, R5]
+- [ ] 7.4 Build de producción del frontend sin backend, que es el invariante que `frontend-foundation` exige: `cd frontend && npm run build` [R5.4]
+- [ ] 7.5 Comprobación manual del flujo en local (`make up`): el badge aparece en `/login` sin sesión y en el workspace; **no** aparece en `/guest/<token>`; abrir el panel muestra los enlaces a PR/commit/run y el aviso de deriva se comporta bien con el backend parado (`docker compose stop backend`) [R3.2, R3.7, R4.2, R5.4]
+- [ ] 7.6 Verificación de la identidad horneada tras un deploy real a dev: `docker inspect` de las dos imágenes muestra los labels OCI, `curl` a `/version` por túnel SSH devuelve el bloque, y la cadena coincide con la del badge en `https://autohostai.digitalsec.work` [R1.2, R1.4, R1.5, R2.1]
+- [ ] 7.7 El gate `backend-tests` en verde en el Pull Request (corre sin filtro de paths, así que se ejecuta sí o sí) [R2.13]

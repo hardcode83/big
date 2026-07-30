@@ -3,3 +3,5 @@
 | date | phase | models | tokens in | tokens out | tokens cache | cost USD (est) | notes |
 |---|---|---|---|---|---|---|---|
 | 2026-07-30 | new | claude-opus-5 | 15 | 13655 | 976416 | 1.1622 |  |
+| 2026-07-30 | design | claude-opus-5 | 13 | 15518 | 1403488 | 1.3311 |  |
+| 2026-07-30 | tasks | claude-opus-5 | 8 | 8195 | 948001 | 2.7660 |  |
