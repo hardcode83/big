@@ -142,6 +142,52 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
 
+**Si el `migrate` falla por el índice único de emails.** La migración `e1eed2e039ee` crea un índice **único** sobre `(tenant_id, lower(email))` en `users`. Si la base ya tuviera dos filas del mismo tenant cuyos emails difieren solo en mayúsculas, el `migrate` aborta (correctamente: `restart: "no"`, y `backend`/`worker` no arrancan porque dependen de `service_completed_successfully`). El rollback por SHA de arriba **no sirve**, porque el problema son los datos, no el código: el siguiente deploy hacia delante volvería a fallar igual. Hay que limpiar primero:
+
+```bash
+# desde la VM, ver las colisiones
+docker compose -f docker-compose.deploy.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT tenant_id, lower(email) AS addr, count(*), array_agg(id) FROM users
+   GROUP BY tenant_id, lower(email) HAVING count(*) > 1;"
+```
+
+Decidir cuál fila se queda, borrar o corregir el resto, y re-lanzar el deploy. Por qué existe ese índice: sin él dos variantes de mayúsculas conviven en un tenant y, por la regla de "exactamente una coincidencia" del login, **las dos cuentas quedan sin poder entrar** (change `auth-tenancy`, design D19).
+
+### 6.5 Crear los usuarios iniciales en el entorno desplegado (change `auth-tenancy`)
+
+El producto no tiene registro público, así que tras un arranque en frío **no hay ninguna cuenta con la que entrar** hasta que se ejecuta el bootstrap. No está en el pipeline a propósito: las contraseñas las elige una persona, así que no encajan en el patrón `random_*` + Vault que usa el resto de secretos (`steering/security.md` §8) y no deben quedar escritas en el `.env` que el workflow reescribe en cada deploy.
+
+Se hace **una vez**, a mano. **No con `-e` en la línea de comandos**: eso deja las dos contraseñas más privilegiadas del despliegue en el `~/.bash_history` del operador y, mientras corre, en un `/proc/<pid>/cmdline` legible por cualquiera de la máquina (CWE-214). Se pasan por un fichero temporal con permisos `600` que se borra al terminar:
+
+```bash
+# en la VM, en el directorio del proyecto compose
+umask 077 && cat > /tmp/bootstrap.env <<'EOF'
+BOOTSTRAP_TENANT_NAME=...
+BOOTSTRAP_TENANT_BILLING_EMAIL=...
+BOOTSTRAP_OWNER_NAME=...
+BOOTSTRAP_OWNER_EMAIL=...
+BOOTSTRAP_OWNER_PASSWORD=...
+BOOTSTRAP_MANAGER_NAME=...
+BOOTSTRAP_MANAGER_EMAIL=...
+BOOTSTRAP_MANAGER_PASSWORD=...
+EOF
+
+# el heredoc con 'EOF' entre comillas no expande nada, y el fichero nace en 600
+docker compose -f docker-compose.deploy.yml run --rm --no-deps \
+  --env-file /tmp/bootstrap.env backend python -m app.cli.bootstrap
+
+shred -u /tmp/bootstrap.env 2>/dev/null || rm -f /tmp/bootstrap.env
+```
+
+Notas que importan:
+
+- **`python -m`, no `uv run`**: la imagen `prod` no lleva `uv` (solo la etapa `dev` lo copia), pero sí tiene el venv en el `PATH`. El mismo comando vale en local (`make bootstrap`) y aquí.
+- Es **idempotente**: repetirlo no duplica nada. Pero si cambias `BOOTSTRAP_TENANT_NAME` y vuelves a lanzarlo, aborta con `BootstrapConflictError` en vez de crear un segundo tenant con los mismos emails — eso dejaría las dos cuentas sin poder entrar. Si aborta, es que ya hay usuarios con esas direcciones: revisa el nombre del tenant.
+- Si falta alguna variable, aborta **antes** de escribir nada y las lista todas.
+- `run --rm --no-deps` en vez de `exec`: el contenedor vive solo para este comando y se lleva las variables con él, en vez de inyectarlas en el proceso del `backend` que está sirviendo.
+- Comprueba que funciona con un login: ver `docs/auth-tenancy.md`.
+
 ## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
 
 La app se sirve en **https://autohostai.digitalsec.work** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).

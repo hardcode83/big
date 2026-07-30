@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,er-entidades-core,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-07-30_autohost-er-entidades-core.png` (el ER se regeneró en `auth-tenancy` al añadir `user_sessions`; el anterior se borró, no se acumula).
 
 ## Forma del sistema
 
