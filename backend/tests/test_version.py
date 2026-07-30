@@ -87,13 +87,48 @@ async def test_version_needs_no_authentication() -> None:
 
 
 @pytest.mark.asyncio
-async def test_version_leaks_neither_repository_url_nor_pr_title() -> None:
-    # R2.5: the endpoint is reachable without a session, so the fields that identify the
-    # private repository stay out of it. Only the PR *number* is exposed.
+async def test_version_exposes_no_field_beyond_the_declared_six() -> None:
+    # R2.5, schema half: `response_model=VersionResponse` is what stops a new field from
+    # reaching an anonymous caller. This does bite on the module-level app, because the
+    # KEY SET does not depend on whether anything was baked.
     _, body = await _get("/version")
 
     assert set(body) == {"version", "commit", "pr", "built_at", "run_id", "ref"}
+
+
+@pytest.mark.asyncio
+async def test_version_leaks_no_repository_url_even_when_one_is_baked_in(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # R2.5, value half. Asserting this against the module-level `app` would be VACUOUS:
+    # its settings are built at import from an environment where nothing is baked, so the
+    # body is all-None and no substring assertion on it can ever fail. The repo-shaped
+    # values have to be baked in for the assertion to mean anything — this is what would
+    # catch a later change that smuggled a repository URL inside a `ref` or a version
+    # string, which is a value-level leak the response_model cannot stop.
+    import app.main as main_module
+
+    monkeypatch.setattr(
+        main_module,
+        "settings",
+        Settings(
+            _env_file=None,
+            jwt_secret_key="0" * 64,
+            app_version="0.1.0+2026-07-30.a2f3c1d",
+            build_commit="a2f3c1d3f9b2000000000000000000000000000f",
+            build_pr=42,
+            built_at="2026-07-30T09:14:02Z",
+            build_run_id="1234567890",
+            build_ref="refs/heads/main",
+        ),
+    )
+
+    _, body = await _get("/version", create_app())
+
     assert "github.com" not in str(body)
+    assert "autohostai-labs" not in str(body)
+    # And the PR is the number, never a title.
+    assert body["pr"] == 42
 
 
 def test_version_response_serialises_absent_fields_as_null() -> None:

@@ -70,18 +70,25 @@ class Settings(BaseSettings):
 
     @field_validator("build_pr", mode="before")
     @classmethod
-    def _empty_build_pr_is_none(cls, value: object) -> object:
-        """An unset `BUILD_PR` arrives as "", which is not a valid `int | None`.
+    def _unparseable_build_pr_is_none(cls, value: object) -> object:
+        """Anything that is not a plain positive integer becomes None, never an error.
 
-        The Dockerfile declares `ENV BUILD_PR=${BUILD_PR}`, so the variable is always
-        present in the image — empty when the commit had no associated Pull Request
-        (a direct push to main, or a workflow_dispatch on a commit without one, R1.7).
-        Without this coercion that empty string is a ValidationError at import time,
-        and a commit pushed straight to main would produce an image that cannot boot.
+        The coercion is TOTAL on purpose. `settings = Settings()` runs at import time, so
+        a ValidationError on this field means the image does not boot at all — the exact
+        failure R2.10 forbids ("la versión nunca debe poder impedir el arranque"), and
+        losing the whole deployment is a far worse outcome than losing one metadata field.
+
+        The value is composed outside this module (the `#(\\d+)` extraction lives in
+        deploy-dev.yml, design D3) and the Dockerfile always defines `ENV BUILD_PR`, so
+        every unexpected shape has to degrade rather than kill: an empty string (a direct
+        push to main with no PR, R1.7), a literal "unknown" — one of the two renderings
+        R2.6 sanctions — or anything malformed like "#42" or "42a".
         """
-        if isinstance(value, str) and not value.strip():
-            return None
-        return value
+        if isinstance(value, int):
+            return value
+        if isinstance(value, str) and value.strip().isdigit():
+            return int(value.strip())
+        return None
 
     @model_validator(mode="after")
     def _reject_whitespace_jwt_secret(self) -> "Settings":

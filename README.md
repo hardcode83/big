@@ -94,11 +94,18 @@ cd backend && uv run pytest
 cd frontend && npm test
 ```
 
-El backend tiene **gate de CI obligatorio** en cada PR
-(`.github/workflows/backend-tests.yml`): migraciones Alembic sobre un PostgreSQL limpio,
+El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`): paridad
+de la versión base (`make version-check`), migraciones Alembic sobre un PostgreSQL limpio,
 `alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como services.
-No lleva filtro de rutas a propósito — un required check con filtro deja bloqueados los PR
-que no tocan esas rutas.
+No lleva filtro de rutas a propósito — un check con filtro deja bloqueados los PR que no
+tocan esas rutas. Hoy **no está marcado como obligatorio**: el repositorio es privado en un
+plan sin protección de rama, así que se ejecuta y reporta pero nada impide fusionar con él
+en rojo (ver `sdd/specs/backend-ci.md` §Estado).
+
+La versión base del producto vive en `VERSION` (raíz). `make version-check` comprueba que
+`backend/pyproject.toml` y `frontend/package.json` no han divergido de ella, y el gate lo
+invoca en cada PR. Corre en el host, no en un contenedor: el servicio `backend` monta solo
+`./backend`, así que desde dentro no ve `VERSION` ni `frontend/package.json`.
 
 Cada ejecución de la suite crea su propia base de datos (`<db>_test_<pid>`) y la borra al
 terminar, así que dos `pytest` simultáneos no se pisan. `make db-clean-test` barre las que

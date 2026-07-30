@@ -101,16 +101,42 @@ def test_build_identity_is_optional_so_an_unbaked_image_still_boots(
     assert settings.build_ref == ""
 
 
-@pytest.mark.parametrize("empty", ["", "   ", "\t"])
-def test_an_empty_build_pr_becomes_none_instead_of_failing(
-    monkeypatch: pytest.MonkeyPatch, empty: str
+@pytest.mark.parametrize(
+    "unusable",
+    [
+        "",  # direct push to main, no PR — the Dockerfile still defines the variable
+        "   ",
+        "\t",
+        "unknown",  # one of the two renderings R2.6 explicitly sanctions
+        "#42",  # the '#' not stripped by whoever composed the build-arg
+        "42a",
+        "1.2",
+        "-42",
+        "null",
+    ],
+)
+def test_an_unusable_build_pr_becomes_none_instead_of_killing_the_image(
+    monkeypatch: pytest.MonkeyPatch, unusable: str
 ) -> None:
-    # The Dockerfile always defines BUILD_PR (`ENV BUILD_PR=${BUILD_PR}`), so a commit
-    # with no associated PR — a direct push to main — delivers an empty string. Without
-    # the coercion that is a ValidationError and the image cannot boot (R1.7, R2.6).
-    monkeypatch.setenv("BUILD_PR", empty)
+    # The coercion has to be TOTAL, not just for blank strings: `settings = Settings()`
+    # runs at import time, so ANY value this field cannot parse means the image does not
+    # boot at all. R2.10 — "la versión nunca debe poder impedir el arranque" — makes
+    # losing the deployment over a metadata field the one outcome that is not acceptable.
+    # The extraction pattern lives in deploy-dev.yml, outside this module, so nothing
+    # here can assume only digits or blanks arrive.
+    monkeypatch.setenv("BUILD_PR", unusable)
 
     assert Settings(_env_file=None, **_REQUIRED).build_pr is None
+
+
+@pytest.mark.parametrize(("raw", "expected"), [("42", 42), (" 42 ", 42), ("7", 7)])
+def test_a_well_formed_build_pr_is_still_parsed(
+    monkeypatch: pytest.MonkeyPatch, raw: str, expected: int
+) -> None:
+    # The total coercion must not swallow the happy path into None.
+    monkeypatch.setenv("BUILD_PR", raw)
+
+    assert Settings(_env_file=None, **_REQUIRED).build_pr == expected
 
 
 def test_build_identity_is_read_from_the_environment(

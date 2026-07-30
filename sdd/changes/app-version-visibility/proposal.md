@@ -137,6 +137,7 @@ Acceptance criteria:
 - `sdd/specs/frontend-foundation.md` — modificar: `PublicRuntimeConfig` gana campos, el shell gana una superficie nueva, y el seam servidor→backend de `lib/config/server.ts` pasa a tener su primer consumidor real.
 
 - `sdd/specs/auth-tenancy.md` — modificar *(ya existe: `auth-tenancy` se archivó el 2026-07-30)*: la allowlist de rutas anónimas gana `/version`, que es una afirmación de seguridad y pertenece a la spec que la establece (§"deny by default", donde ya se razona el keyeo por `(método, path)`).
+- `sdd/specs/backend-ci.md` — modificar *(añadida tras el hallazgo del panel de CI/CD)*: el gate `backend-tests` gana un step de paridad de versión que abarca **también** el frontend, mientras su Purpose acota hoy la capacidad a "la suite completa del backend". Hay que documentar ahí esa responsabilidad cruzada y por qué se acepta (es el único workflow que corre en cada PR sin filtro de `paths`, y el frontend no tiene gate propio todavía — su propia §Estado lo constata).
 
 Fuera de `sdd/specs/`, este change toca `.github/workflows/deploy-dev.yml`, `backend/devops/Dockerfile`, `frontend/devops/Dockerfile`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/tests/test_route_authorization.py`, `backend/tests/test_version.py` *(nuevo)*, `docker-compose.yml` (variable del frontend en dev), la capa `frontend/lib/config/`, el shell de `frontend/features/shell/`, `frontend/locales/{es,en}/`, `infra/environments/dev/RUNBOOK.md` §6.4 y §7, `docs/` y el README raíz.
 

@@ -25,9 +25,14 @@ ANONYMOUS_ENDPOINTS = {
     ("GET", "/health"),
     # Build identity of the running image (change app-version-visibility, R2.5/R2.7).
     # Anonymous so an operator can diagnose which version is deployed without being able
-    # to log in — which is precisely the situation where knowing it matters most. It
-    # exposes the short commit and the PR number, never the repository URL or the PR
-    # title. Note the verb: a POST /version would still fail this module, as intended.
+    # to log in — which is precisely the situation where knowing it matters most.
+    #
+    # What an unauthenticated caller gets, in full, so this decision can be audited
+    # against what actually ships: version string, the COMPLETE 40-char commit SHA, the
+    # PR number, the build timestamp, the Actions run id and the git ref. NOT the
+    # repository URL and NOT the PR title — that is the line R2.5 draws.
+    #
+    # Note the verb: a POST /version would still fail this module, as intended.
     ("GET", "/version"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),

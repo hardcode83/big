@@ -16,7 +16,9 @@ En el frontend, `frontend/lib/config/` es la única frontera de configuración: 
 
 La comprobación de paridad es un **target de Makefile (`make version-check`) invocado desde el gate de CI**, no un test de pytest. Motivo empírico, verificado durante `/sdd:run`: el contenedor de backend monta solo `./backend:/app`, así que un test en `backend/tests/` **no puede ver** `VERSION` ni `frontend/package.json` cuando se ejecuta con el comando que `project.md` manda usar (`docker compose exec backend uv run pytest`) — `ls /VERSION` dentro del contenedor da `No such file or directory`. Un test así pasaría en CI (donde el runner tiene el repo completo) y sería inejecutable en el flujo de desarrollo documentado. El target de Makefile corre en el host, donde los tres ficheros existen, y el gate lo invoca; una sola implementación, verificable en los dos sitios.
 
-Rejected: test de pytest en `backend/tests/` — inejecutable en el contenedor, por lo de arriba. Rejected: un `skipif` cuando los ficheros no se ven — un test que se salta en el flujo normal no es un gate. Rejected: workflow propio `version-parity.yml` — más limpio conceptualmente, pero añade un required check para tres líneas de shell. Rejected: `pyproject.toml` como canónico — obliga al frontend a parsear TOML para un dato que no es del backend. Rejected: derivar los manifiestos del `VERSION` en build — dos generadores por un string; validar es más simple que generar.
+**Consecuencia asumida:** el step ensancha la responsabilidad del gate más allá del backend, y el Purpose de `specs/backend-ci.md` la acota hoy a *"la suite completa del backend"*. Se acepta por pragmatismo —`backend-tests` es el **único** workflow que corre en cada PR sin filtro de `paths`, y la §Estado de esa misma spec constata que "el frontend tiene sus propios comandos de verificación que ningún workflow ejecuta todavía"—, y por eso `specs/backend-ci.md` entra en "Affected specs" del proposal: al archivar hay que documentar ahí que el gate también valida la paridad de versión entre los dos componentes.
+
+Rejected: test de pytest en `backend/tests/` — inejecutable en el contenedor, por lo de arriba. Rejected: un `skipif` cuando los ficheros no se ven — un test que se salta en el flujo normal no es un gate. Rejected: workflow propio `version-parity.yml` — más limpio conceptualmente, pero duplica checkout y arranque de runner para tres líneas de shell. *(El motivo **no** es evitar un required check: la §Estado de `specs/backend-ci.md` documenta que hoy ningún check puede marcarse obligatorio en este repo — plan privado sin protección de rama, `403: Upgrade to GitHub Pro` —, así que ese coste no existe. Corregido tras el hallazgo del panel de CI/CD.)* Rejected: `pyproject.toml` como canónico — obliga al frontend a parsear TOML para un dato que no es del backend. Rejected: derivar los manifiestos del `VERSION` en build — dos generadores por un string; validar es más simple que generar.
 
 ### D2 — La procedencia se calcula una vez en el CD y viaja como build-args
 
@@ -89,7 +91,7 @@ Rejected: registrar cada despliegue en una tabla — es historial de despliegues
 | Backend tests | `backend/tests/test_route_authorization.py` | `("GET", "/version")` en `ANONYMOUS_ENDPOINTS` (D5) |
 | Backend tests | `backend/tests/test_version.py` *(nuevo)* | Contrato de `/version`, forma de `test_health.py`; caso de campos ausentes |
 | Backend tests | `backend/tests/test_config.py` | Los campos nuevos no rompen el arranque cuando faltan |
-| CI de versión | `backend/tests/test_version_source.py` *(nuevo)* o test de frontend | `VERSION` == `pyproject.toml` == `package.json` (D1, R6.2) |
+| CI de versión | `Makefile` (target `version-check`), `.github/workflows/backend-tests.yml` (step que lo invoca) | `VERSION` == `pyproject.toml` == `package.json`, comprobado en el host porque el contenedor de backend no ve esos ficheros (D1, R6.2) |
 | Config frontend | `frontend/lib/config/public.ts` | `appVersion` y `buildCommitShort` en la allowlist (D6) |
 | Config frontend | `frontend/lib/config/server.ts` | URL de repo, PR y `run_id` como valores server-only (D6) |
 | Shell | `frontend/features/shell/components/shell-frame.tsx` | Slot `footer` + reubicación del `pb-16` (D7) |
@@ -140,7 +142,7 @@ Rejected: registrar cada despliegue en una tabla — es historial de despliegues
 | El handler del frontend queda público por el túnel | D9: devuelve solo cadenas de versión, nunca PR ni URL de repo |
 | Cachéo del edge sirviendo un bundle viejo con versión vieja | Es la funcionalidad, no el riesgo: exactamente lo que hace visible |
 | La versión en pantalla parece atrasada respecto a `main` | R6.4: el filtro de paths del CD hace que sea el último commit que **disparó build**; se documenta |
-| Divulgación del SHA corto sin sesión | Decidido y aceptado (repo privado, entorno dev); la URL del repo y el PR no salen del snapshot público (D6) |
+| Divulgación sin sesión por `/version` | Decidido y aceptado (repo privado, entorno dev). El alcance exacto, corregido tras el hallazgo del panel de seguridad: un llamante anónimo obtiene cadena de versión, **SHA completo de 40 caracteres**, número de PR, fecha de build, `run_id` de Actions y `ref` — no el SHA corto, como decía antes esta fila. Lo que **no** sale es la URL del repositorio ni el título del PR (R2.5), y tampoco entran en el snapshot público del frontend (D6). Hoy `/version` solo es alcanzable por túnel SSH o desde la red del compose: el túnel enruta únicamente `http://frontend:3000` con catch-all 404 |
 
 ## Open questions
 

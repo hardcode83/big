@@ -40,6 +40,47 @@ db-clean-test:
 				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null </dev/null; \
 		done; echo "listo"
 
+# Parsers reales (tomllib + json, ambos de la stdlib desde 3.11) en vez de sed/grep.
+# Motivo, del panel de QA: un `sed` no es consciente de secciones TOML, así que una clave
+# `version` bajo otra tabla ANTES de [project] enmascaraba una divergencia real en
+# [project].version si su valor coincidía con VERSION — un falso negativo, justo lo que
+# R6.2 prohíbe ("fallar en CI, no en silencio"). Lo mismo vale para una clave "version"
+# anidada en package.json. Con parsers reales la clase entera de fragilidad desaparece.
+define VERSION_CHECK_PY
+import json, pathlib, sys, tomllib
+
+def fail(message):
+    print("✗ " + message)
+    sys.exit(1)
+
+try:
+    base = pathlib.Path("VERSION").read_text().strip()
+except OSError as exc:
+    fail("no se pudo leer VERSION: %s" % exc)
+if not base:
+    fail("VERSION esta vacio")
+
+try:
+    py = tomllib.loads(pathlib.Path("backend/pyproject.toml").read_text())["project"]["version"]
+except (OSError, KeyError, tomllib.TOMLDecodeError) as exc:
+    fail("no se pudo leer [project].version de backend/pyproject.toml: %r" % (exc,))
+
+try:
+    js = json.loads(pathlib.Path("frontend/package.json").read_text())["version"]
+except (OSError, KeyError, ValueError) as exc:
+    fail("no se pudo leer version de frontend/package.json: %r" % (exc,))
+
+if base != py or base != js:
+    fail(
+        "version divergente - VERSION=%s pyproject.toml=%s package.json=%s\n"
+        "  la fuente de verdad es VERSION; alinea los dos manifiestos con ella"
+        % (base, py, js)
+    )
+
+print("✓ version base coherente en los tres ficheros: " + base)
+endef
+export VERSION_CHECK_PY
+
 # La versión base del producto vive en VERSION (change app-version-visibility, D1).
 # Los dos manifiestos la declaran también porque sus ecosistemas lo esperan, así que
 # esto comprueba que no han divergido. Lo invoca el gate de CI (backend-tests.yml).
@@ -49,18 +90,7 @@ db-clean-test:
 # frontend/package.json. Un test de pytest aquí sería inejecutable con el comando que
 # sdd/project.md manda usar.
 version-check:
-	@base=$$(tr -d '[:space:]' < VERSION); \
-	py=$$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' backend/pyproject.toml | head -1); \
-	js=$$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' frontend/package.json | head -1); \
-	[ -n "$$base" ] || { echo "✗ VERSION está vacío o no existe"; exit 1; }; \
-	[ -n "$$py" ] || { echo "✗ no se pudo leer 'version' de backend/pyproject.toml"; exit 1; }; \
-	[ -n "$$js" ] || { echo "✗ no se pudo leer 'version' de frontend/package.json"; exit 1; }; \
-	if [ "$$base" != "$$py" ] || [ "$$base" != "$$js" ]; then \
-		echo "✗ versión divergente — VERSION=$$base pyproject.toml=$$py package.json=$$js"; \
-		echo "  la fuente de verdad es VERSION; alinea los dos manifiestos con ella"; \
-		exit 1; \
-	fi; \
-	echo "✓ versión base coherente en los tres ficheros: $$base"
+	@python3 -c "$$VERSION_CHECK_PY"
 
 down:
 	docker compose down $(SERVICE)
