@@ -18,17 +18,21 @@ merge_sha:
 Managed by the SDD lifecycle commands. Do not infer remote state without
 checking the associated Pull Request.
 
-## Condición de archivado impuesta en la revisión del PR (2026-07-30)
+## Condición de archivado impuesta en la revisión del PR — **CUMPLIDA** (2026-07-30)
 
-`auth-tenancy` **no se archiva** hasta que el estado de `timeline-state-machine` sea
-coherente. Lo repara y archiva Marta **fuera** de este PR, y esa reparación no se mezcla
-aquí. Es decir: aunque el PR #25 se mergee y `verify-merge` dé evidencia objetiva,
-`/sdd:archive auth-tenancy` espera a que `sdd/changes/timeline-state-machine/` esté
-archivado o con su estado corregido.
+La condición era: `auth-tenancy` no se archiva hasta que el estado de
+`timeline-state-machine` sea coherente, porque estaba mergeado en `main` con su change
+todavía en `sdd/changes/` sin archivar, y archivar este por delante habría dejado las
+specs vivas describiendo un orden de hechos que no ocurrió.
 
-Motivo: `timeline-state-machine` está mergeado en `main` pero su change sigue en
-`sdd/changes/` sin archivar, así que archivar este por delante dejaría las specs vivas
-describiendo un orden de hechos que no ocurrió.
+**Satisfecha por Marta, fuera de este PR, como ella misma pidió**: PR #26
+(`chore(sdd): archive timeline-state-machine`), mergeado en `main` como `bab0c9b` el
+2026-07-30 a las 17:03. Trae `sdd/specs/timeline-state-machine.md`, mueve el change a
+`sdd/changes/archive/2026-07-29-timeline-state-machine/` y marca su entrada del roadmap.
+Esa reparación entra en esta rama por el merge de `main`, no reproducida a mano.
+
+Queda por tanto un único requisito para archivar: la evidencia objetiva de merge de este
+PR.
 
 ## Revisión humana aplicada (2026-07-30)
 
