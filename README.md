@@ -102,6 +102,12 @@ tocan esas rutas. Hoy **no está marcado como obligatorio**: el repositorio es p
 plan sin protección de rama, así que se ejecuta y reporta pero nada impide fusionar con él
 en rojo (ver `sdd/specs/backend-ci.md` §Estado).
 
+Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), y en el
+workspace el botón "Detalles" enlaza al Pull Request, al commit y al run de Actions que la
+produjeron — así no hace falta entrar en la VM para saber qué está corriendo ni para
+confirmar un rollback. Cómo se opera, y las tres cosas que confunden si no se saben:
+[`docs/app-version-visibility.md`](docs/app-version-visibility.md).
+
 `make ci-checks` agrupa las comprobaciones que no pertenecen a la suite de ningún
 componente, y **corren en el host, no en un contenedor**: `backend` y `frontend` montan solo
 su propio directorio, así que desde dentro no ven la raíz del repo.
