@@ -107,6 +107,27 @@ describe("version badge placement (change app-version-visibility, R3.2/R3.7)", (
     expect(screen.getByTestId("version-badge")).toBeInTheDocument();
   });
 
+  it("does NOT mount the provenance panel on any shell but the workspace", async () => {
+    // R4.3: the panel's links name the private repository and the Pull Request, so it
+    // belongs to the operator surface only. Login and the field apps get the badge alone.
+    for (const [pathname, shell] of [
+      ["/login", () => PublicShell({ children: <div>login</div> })],
+      ["/cleaner", () => CleanerShell({ children: <div>tareas</div> })],
+      ["/tech", () => TechnicianShell({ children: <div>incidencias</div> })],
+      [
+        "/guest/secret-token-123",
+        () => GuestShell({ children: <div>portal</div> }),
+      ],
+    ] as const) {
+      nav.pathname = pathname;
+      const view = await renderShell(await shell());
+      expect(
+        view.container.querySelector('[data-testid="provenance-trigger"]'),
+      ).toBeNull();
+      view.unmount();
+    }
+  });
+
   it("does NOT show it on the guest portal", async () => {
     // R3.7: `/guest/[token]` is a surface for people outside the operation. The build
     // version tells them nothing and is not theirs to see — a scoped reading of

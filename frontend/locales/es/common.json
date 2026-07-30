@@ -4,5 +4,21 @@
   "version": {
     "label": "Versión desplegada",
     "unknown": "versión desconocida"
+  },
+  "provenance": {
+    "trigger": "Detalles",
+    "title": "Procedencia del despliegue",
+    "closeLabel": "Cerrar detalles",
+    "commit": "Commit",
+    "pullRequest": "Pull Request",
+    "noPullRequest": "push directo, sin PR",
+    "builtAt": "Construido",
+    "runId": "Run de Actions",
+    "ref": "Rama",
+    "unknown": "desconocido",
+    "frontendVersion": "Frontend",
+    "backendVersion": "Backend",
+    "driftWarning": "Frontend y backend no corren la misma versión.",
+    "checking": "consultando…"
   }
 }
