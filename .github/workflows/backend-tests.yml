@@ -81,11 +81,13 @@ jobs:
         with:
           python-version: "3.12"
 
-      # Barato y primero: si la versión base ha divergido, falla antes de montar nada.
-      # Vive aquí porque es el único gate que corre en CADA PR sin filtro de `paths`
-      # (change app-version-visibility, R6.2). Sin `working-directory`: necesita la raíz.
-      - name: La versión base no ha divergido (VERSION vs los dos manifiestos)
-        run: make version-check
+      # Baratas y primero: si algo de esto falla, no merece la pena montar Postgres.
+      # Viven aquí porque es el único gate que corre en CADA PR sin filtro de `paths`
+      # (change app-version-visibility, R6.2). Sin `working-directory`: necesitan la raíz.
+      #   version-check     → VERSION vs los dos manifiestos
+      #   pr-extract-check  → la extracción del PR del subject del commit no ha regresado
+      - name: Comprobaciones de repo (paridad de versión y extracción de PR)
+        run: make ci-checks
 
       - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
         with:

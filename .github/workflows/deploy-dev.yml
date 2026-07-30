@@ -40,10 +40,28 @@ jobs:
         id: compose
         run: |
           set -euo pipefail
+          # Comprobar la existencia ANTES de leer: con `set -e`, un `$(... < VERSION)` sobre
+          # un fichero ausente aborta el script en la propia redirección, así que el chequeo
+          # de "vacío" de abajo nunca se alcanzaba y el log mostraba el error crudo del shell
+          # en vez de este mensaje (hallazgo del panel de CI/CD).
+          if [ ! -f VERSION ]; then
+            echo "::error::no existe el fichero VERSION en la raíz del repo" >&2; exit 1
+          fi
           base="$(tr -d '[:space:]' < VERSION)"
-          if [ -z "$base" ]; then echo "::error::VERSION está vacío o no existe" >&2; exit 1; fi
+          if [ -z "$base" ]; then echo "::error::VERSION está vacío" >&2; exit 1; fi
+          # Validar el formato, no solo que no esté vacío: `tr -d '[:space:]'` fusionaría un
+          # VERSION de dos líneas en "0.1.00.2.0" sin quejarse, y esa cadena acabaría en las
+          # dos imágenes y en los labels OCI (hallazgo del panel de QA).
+          if ! printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION no tiene forma X.Y.Z (leído: '$base')" >&2; exit 1
+          fi
           short="${GITHUB_SHA:0:7}"
+          # UNA sola lectura del reloj, y la fecha de la cadena de versión se deriva de ella.
+          # Con dos invocaciones de `date`, un build que cruzase la medianoche UTC podía dejar
+          # la fecha de `version` (y del label .version) un día por delante de `built_at` (y
+          # del label .created) — incoherencia dentro del mismo bloque de procedencia.
           built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          build_date="${built_at%%T*}"
 
           # El PR sale del subject del merge commit (design D3): este repo mergea con merge
           # commits ("Merge pull request #24 from ..."), así que el dato ya viaja en el
@@ -52,20 +70,16 @@ jobs:
           # directo a `main` es un caso legítimo, no un error. Con `rebase` esto se rompería
           # en silencio — plan B documentado en docs/app-version-visibility.md.
           #
-          # Solo se aceptan las DOS formas canónicas, ancladas:
-          #   "Merge pull request #N from ..."  (merge commit, lo que usa este repo)
-          #   "título (#N)"                     (squash, si algún día se cambia la estrategia)
-          # Un `grep -oE '#[0-9]+'` a secas leería "fix: cierra #7" como PR #7 cuando #7 es
-          # un ISSUE, y el badge enlazaría al sitio equivocado — que es peor que no enlazar.
+          # La lógica vive en .github/scripts/extract-pr.sh, no aquí, para que tenga test de
+          # regresión (`--self-test`, que corre en el gate de backend-tests). Embebida en el
+          # YAML no había forma de protegerla: aflojar el ancla del `sed` reintroduciría en
+          # silencio el falso positivo de leer un ISSUE como PR (hallazgo del panel de QA).
           subject="$(git log -1 --format=%s)"
-          pr="$(printf '%s' "$subject" | sed -n 's/^Merge pull request #\([0-9]\{1,\}\) .*/\1/p')"
-          if [ -z "$pr" ]; then
-            pr="$(printf '%s' "$subject" | sed -n 's/.*(#\([0-9]\{1,\}\))$/\1/p')"
-          fi
+          pr="$(.github/scripts/extract-pr.sh "$subject")"
           if [ -n "$pr" ]; then echo "PR detectado: #$pr"; else echo "sin PR en el subject → push directo"; fi
 
           {
-            echo "version=${base}+$(date -u +%Y-%m-%d).${short}"
+            echo "version=${base}+${build_date}.${short}"
             echo "commit=${GITHUB_SHA}"
             echo "commit_short=${short}"
             echo "pr=${pr}"

@@ -1,6 +1,6 @@
 SERVICE ?=
 
-.PHONY: up down logs ps sh bootstrap db-clean-test version-check
+.PHONY: up down logs ps sh bootstrap db-clean-test version-check pr-extract-check ci-checks
 
 up:
 	@umask 077; if [ ! -f .env ]; then \
@@ -91,6 +91,18 @@ export VERSION_CHECK_PY
 # sdd/project.md manda usar.
 version-check:
 	@python3 -c "$$VERSION_CHECK_PY"
+
+# La extracción del PR del subject del commit es lo que sostiene el pareo pantalla↔PR, y
+# vive en un script justamente para poder testearla. Sin este target, un cambio en el `sed`
+# volvería a leer un número de ISSUE como número de PR sin que ningún gate lo detecte
+# (hallazgo del panel de QA, sección 3).
+pr-extract-check:
+	@.github/scripts/extract-pr.sh --self-test
+
+# Las comprobaciones de repo que no encajan en la suite de un componente: ninguna se puede
+# ejecutar dentro de un contenedor, porque backend y frontend montan solo su propio
+# directorio y no ven la raíz. Las invoca el gate de CI.
+ci-checks: version-check pr-extract-check
 
 down:
 	docker compose down $(SERVICE)
