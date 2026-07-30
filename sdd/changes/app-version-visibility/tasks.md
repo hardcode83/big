@@ -6,16 +6,16 @@
 
 ## 1. Fuente de verdad de la versión base
 
-- [ ] 1.1 Crear `VERSION` en la raíz con la base en una línea (`0.1.0`, la que ya declaran los dos manifiestos) — files: `VERSION` [R6.1]
-- [ ] 1.2 Test de paridad que falla si `VERSION`, `backend/pyproject.toml` y `frontend/package.json` divergen. Va en el backend (`backend/tests/test_version_source.py`) porque es donde hay gate de CI que corre en cada PR sin filtro de paths; lee los dos manifiestos como texto/TOML, sin importar el frontend — files: `backend/tests/test_version_source.py` [R6.2]
+- [x] 1.1 Crear `VERSION` en la raíz con la base en una línea (`0.1.0`, la que ya declaran los dos manifiestos) — files: `VERSION` [R6.1]
+- [x] 1.2 Comprobación de paridad que falla si `VERSION`, `backend/pyproject.toml` y `frontend/package.json` divergen: target `version-check` en el `Makefile` (corre en el host, donde los tres ficheros existen) invocado desde un step de `.github/workflows/backend-tests.yml`, que es el único gate que corre en **cada** PR sin filtro de paths. **No** es un test de pytest: el contenedor de backend monta solo `./backend:/app` y no ve `VERSION` ni `frontend/package.json` (verificado en `/sdd:run`, ver D1) — files: `Makefile`, `.github/workflows/backend-tests.yml` [R6.2]
 
-## 2. Backend: `/version`
+## 2. Backend: `/version` <!-- panel: pendiente -->
 
-- [ ] 2.1 Seis campos nuevos en `Settings`, **todos con default** (`app_version: str = ""`, `build_commit: str = ""`, `build_pr: int | None = None`, `built_at: str = ""`, `build_run_id: str = ""`, `build_ref: str = ""`). Test que construye `Settings` sin ninguno de ellos y no lanza — files: `backend/app/core/config.py`, `backend/tests/test_config.py` [R2.6, R2.10]
-- [ ] 2.2 `@app.get("/version")` inline en `create_app()`, junto a `/health` y **fuera** de `API_V1_PREFIX`, devolviendo `version`/`commit`/`pr`/`builtAt`/`runId`/`ref` desde `settings`, con `summary`/`description` y modelo de respuesta Pydantic para que salga bien en OpenAPI. Sin tocar DB ni Redis — files: `backend/app/main.py` [R2.1, R2.2, R2.3, R2.5, R2.11]
-- [ ] 2.3 Añadir `("GET", "/version")` a `ANONYMOUS_ENDPOINTS` — una línea, sin relajar el criterio (no allowlist por path sin verbo, no exención por prefijo) y sin añadir ningún `Permission` al enum — files: `backend/tests/test_route_authorization.py` [R2.5, R2.7, R2.8, R2.9]
-- [ ] 2.4 `test_version.py` con la forma de `test_health.py` (`ASGITransport` sobre `app.main:app`): contrato completo con campos presentes, caso de campos ausentes → `null`/`""` sin error, y una aserción de que `/health` sigue devolviendo exactamente `{"status":"ok"}` — files: `backend/tests/test_version.py` [R2.1, R2.4, R2.6, R2.12]
-- [ ] 2.5 Verificar que no se ha introducido modelo, tabla ni revisión de Alembic: `alembic check` limpio y `alembic downgrade base` reversible, que es lo que corre el gate — files: (ninguno, comprobación) [R2.14]
+- [x] 2.1 Seis campos nuevos en `Settings`, **todos con default** (`app_version: str = ""`, `build_commit: str = ""`, `build_pr: int | None = None`, `built_at: str = ""`, `build_run_id: str = ""`, `build_ref: str = ""`). Test que construye `Settings` sin ninguno de ellos y no lanza — files: `backend/app/core/config.py`, `backend/tests/test_config.py` [R2.6, R2.10]
+- [x] 2.2 `@app.get("/version")` inline en `create_app()`, junto a `/health` y **fuera** de `API_V1_PREFIX`, devolviendo `version`/`commit`/`pr`/`built_at`/`run_id`/`ref` desde `settings` (**snake_case**, como el resto de la API — cf. `TokenPairResponse`), con `summary`/`description` y modelo `VersionResponse` con campos `str | None` para que un campo no horneado sea `null` y no `""`. Sin tocar DB ni Redis — files: `backend/app/main.py` [R2.1, R2.2, R2.3, R2.5, R2.11]
+- [x] 2.3 Añadir `("GET", "/version")` a `ANONYMOUS_ENDPOINTS` — una línea, sin relajar el criterio (no allowlist por path sin verbo, no exención por prefijo) y sin añadir ningún `Permission` al enum — files: `backend/tests/test_route_authorization.py` [R2.5, R2.7, R2.8, R2.9]
+- [x] 2.4 `test_version.py` con la forma de `test_health.py` (`ASGITransport` sobre `app.main:app`): contrato completo con campos presentes, caso de campos ausentes → `null`/`""` sin error, y una aserción de que `/health` sigue devolviendo exactamente `{"status":"ok"}` — files: `backend/tests/test_version.py` [R2.1, R2.4, R2.6, R2.12]
+- [x] 2.5 Verificar que no se ha introducido modelo, tabla ni revisión de Alembic: `alembic check` → "No new upgrade operations detected" y cero ficheros nuevos en `backend/alembic/versions/` (siguen siendo 4). El `downgrade base` lo cubre el gate sobre una base desechable, no en local (ver 7.2) — files: (ninguno, comprobación) [R2.14]
 
 ## 3. CD: identidad horneada en las dos imágenes
 
@@ -52,7 +52,7 @@
 ## 7. Verification
 
 - [ ] 7.1 Suite completa del backend en verde: `docker compose exec backend uv run pytest` (con el stack parado: `docker compose run --rm backend uv run pytest`) [R2.12, R2.13]
-- [ ] 7.2 Cadena de migraciones intacta, que es lo que corre el gate: `docker compose exec backend uv run alembic upgrade head`, `alembic check` y `alembic downgrade base` [R2.14]
+- [ ] 7.2 Cadena de migraciones intacta: `docker compose exec backend uv run alembic check` (debe decir "No new upgrade operations detected") y cero ficheros nuevos en `backend/alembic/versions/`. **`alembic downgrade base` NO se ejecuta en local**: destruiría el esquema de la base de dev y con él el tenant y los usuarios del `make bootstrap`. Ese ciclo lo cubre el gate `backend-tests` sobre una base recién creada y desechable, más `test_migrations.py` [R2.14]
 - [ ] 7.3 Frontend en verde: `cd frontend && npm test`, `npm run typecheck` y `npm run lint` [R3, R4, R5]
 - [ ] 7.4 Build de producción del frontend sin backend, que es el invariante que `frontend-foundation` exige: `cd frontend && npm run build` [R5.4]
 - [ ] 7.5 Comprobación manual del flujo en local (`make up`): el badge aparece en `/login` sin sesión y en el workspace; **no** aparece en `/guest/<token>`; abrir el panel muestra los enlaces a PR/commit/run y el aviso de deriva se comporta bien con el backend parado (`docker compose stop backend`) [R3.2, R3.7, R4.2, R5.4]

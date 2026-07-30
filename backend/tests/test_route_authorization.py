@@ -23,6 +23,12 @@ from app.main import create_app
 # stay green. Same vacuity class as the route-type hole, one axis over.
 ANONYMOUS_ENDPOINTS = {
     ("GET", "/health"),
+    # Build identity of the running image (change app-version-visibility, R2.5/R2.7).
+    # Anonymous so an operator can diagnose which version is deployed without being able
+    # to log in — which is precisely the situation where knowing it matters most. It
+    # exposes the short commit and the PR number, never the repository URL or the PR
+    # title. Note the verb: a POST /version would still fail this module, as intended.
+    ("GET", "/version"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),
     ("GET", "/openapi.json"),

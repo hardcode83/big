@@ -12,9 +12,11 @@ En el frontend, `frontend/lib/config/` es la única frontera de configuración: 
 
 ### D1 — `VERSION` en la raíz como única fuente de verdad de la base
 
-**Chosen:** un fichero `VERSION` en la raíz del repo con la versión base en una línea (`0.1.0`). El CD lo lee (`$(cat VERSION)`) para componer la cadena, y un test de CI verifica que `backend/pyproject.toml` y `frontend/package.json` declaran ese mismo valor. La versión del *producto* es un hecho de producto, no de componente: ninguno de los dos manifiestos es naturalmente canónico, y hoy ambos declaran `0.1.0` de forma independiente sin que nadie los use.
+**Chosen:** un fichero `VERSION` en la raíz del repo con la versión base en una línea (`0.1.0`). El CD lo lee (`$(cat VERSION)`) para componer la cadena. La versión del *producto* es un hecho de producto, no de componente: ninguno de los dos manifiestos es naturalmente canónico, y hoy ambos declaran `0.1.0` de forma independiente sin que nadie los use.
 
-Rejected: `pyproject.toml` como canónico — obliga al workflow del frontend a parsear TOML para un dato que no es del backend. Rejected: dejar los dos manifiestos y no tener base — pierde el hueco para SemVer que el proposal quiere conservar. Rejected: derivar los manifiestos del `VERSION` en build — dos generadores por un string; validar es más simple que generar.
+La comprobación de paridad es un **target de Makefile (`make version-check`) invocado desde el gate de CI**, no un test de pytest. Motivo empírico, verificado durante `/sdd:run`: el contenedor de backend monta solo `./backend:/app`, así que un test en `backend/tests/` **no puede ver** `VERSION` ni `frontend/package.json` cuando se ejecuta con el comando que `project.md` manda usar (`docker compose exec backend uv run pytest`) — `ls /VERSION` dentro del contenedor da `No such file or directory`. Un test así pasaría en CI (donde el runner tiene el repo completo) y sería inejecutable en el flujo de desarrollo documentado. El target de Makefile corre en el host, donde los tres ficheros existen, y el gate lo invoca; una sola implementación, verificable en los dos sitios.
+
+Rejected: test de pytest en `backend/tests/` — inejecutable en el contenedor, por lo de arriba. Rejected: un `skipif` cuando los ficheros no se ven — un test que se salta en el flujo normal no es un gate. Rejected: workflow propio `version-parity.yml` — más limpio conceptualmente, pero añade un required check para tres líneas de shell. Rejected: `pyproject.toml` como canónico — obliga al frontend a parsear TOML para un dato que no es del backend. Rejected: derivar los manifiestos del `VERSION` en build — dos generadores por un string; validar es más simple que generar.
 
 ### D2 — La procedencia se calcula una vez en el CD y viaja como build-args
 
@@ -108,14 +110,16 @@ Rejected: registrar cada despliegue en una tabla — es historial de despliegues
 
 ```jsonc
 {
-  "version": "0.1.0+2026-07-30.a2f3c1d",
-  "commit": "a2f3c1d…",       // SHA completo, o null
-  "pr": 42,                    // o null → "push directo"
-  "builtAt": "2026-07-30T09:14:02Z",
-  "runId": "1234567890",
+  "version": "0.1.0+2026-07-30.a2f3c1d",  // cadena canónica, con fecha (OQ2)
+  "commit": "a2f3c1d…",        // SHA completo, o null si no se horneó
+  "pr": 42,                     // o null → "push directo"
+  "built_at": "2026-07-30T09:14:02Z",
+  "run_id": "1234567890",
   "ref": "main"
 }
 ```
+
+**snake_case**, no camelCase: es la convención de la API existente (`access_token`, `token_type`, `expires_in` en `TokenPairResponse`) y de PRD §23. Un campo no horneado se serializa como `null`, no como `""`, para que el consumidor distinga "no hay dato" de "el dato es cadena vacía".
 
 **`GET /deployment/version` (frontend, Route Handler)** — devuelve `{"frontend": "<cadena>", "backend": "<cadena>|null"}`. Nada más: sin PR, sin URL de repo, sin `run_id`.
 

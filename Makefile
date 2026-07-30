@@ -1,6 +1,6 @@
 SERVICE ?=
 
-.PHONY: up down logs ps sh bootstrap db-clean-test
+.PHONY: up down logs ps sh bootstrap db-clean-test version-check
 
 up:
 	@umask 077; if [ ! -f .env ]; then \
@@ -39,6 +39,28 @@ db-clean-test:
 			docker compose exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres \
 				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null </dev/null; \
 		done; echo "listo"
+
+# La versión base del producto vive en VERSION (change app-version-visibility, D1).
+# Los dos manifiestos la declaran también porque sus ecosistemas lo esperan, así que
+# esto comprueba que no han divergido. Lo invoca el gate de CI (backend-tests.yml).
+#
+# Corre en el HOST a propósito, no dentro de un contenedor: el servicio backend monta
+# solo ./backend en /app, así que desde dentro no se ven ni VERSION ni
+# frontend/package.json. Un test de pytest aquí sería inejecutable con el comando que
+# sdd/project.md manda usar.
+version-check:
+	@base=$$(tr -d '[:space:]' < VERSION); \
+	py=$$(sed -n 's/^version[[:space:]]*=[[:space:]]*"\(.*\)".*/\1/p' backend/pyproject.toml | head -1); \
+	js=$$(sed -n 's/^[[:space:]]*"version"[[:space:]]*:[[:space:]]*"\([^"]*\)".*/\1/p' frontend/package.json | head -1); \
+	[ -n "$$base" ] || { echo "✗ VERSION está vacío o no existe"; exit 1; }; \
+	[ -n "$$py" ] || { echo "✗ no se pudo leer 'version' de backend/pyproject.toml"; exit 1; }; \
+	[ -n "$$js" ] || { echo "✗ no se pudo leer 'version' de frontend/package.json"; exit 1; }; \
+	if [ "$$base" != "$$py" ] || [ "$$base" != "$$js" ]; then \
+		echo "✗ versión divergente — VERSION=$$base pyproject.toml=$$py package.json=$$js"; \
+		echo "  la fuente de verdad es VERSION; alinea los dos manifiestos con ella"; \
+		exit 1; \
+	fi; \
+	echo "✓ versión base coherente en los tres ficheros: $$base"
 
 down:
 	docker compose down $(SERVICE)

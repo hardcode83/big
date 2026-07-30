@@ -72,6 +72,69 @@ def test_bootstrap_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch)
     assert settings.bootstrap_manager_password == ""
 
 
+_BUILD_IDENTITY_ENV = (
+    "APP_VERSION",
+    "BUILD_COMMIT",
+    "BUILD_PR",
+    "BUILT_AT",
+    "BUILD_RUN_ID",
+    "BUILD_REF",
+)
+
+
+def test_build_identity_is_optional_so_an_unbaked_image_still_boots(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # The whole point of R2.10/design D4: `settings = Settings()` runs at import time,
+    # so a required build-identity field would stop an image built without build-args
+    # from serving anything at all. Knowing the version must never block booting.
+    for name in _BUILD_IDENTITY_ENV:
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.app_version == ""
+    assert settings.build_commit == ""
+    assert settings.build_pr is None
+    assert settings.built_at == ""
+    assert settings.build_run_id == ""
+    assert settings.build_ref == ""
+
+
+@pytest.mark.parametrize("empty", ["", "   ", "\t"])
+def test_an_empty_build_pr_becomes_none_instead_of_failing(
+    monkeypatch: pytest.MonkeyPatch, empty: str
+) -> None:
+    # The Dockerfile always defines BUILD_PR (`ENV BUILD_PR=${BUILD_PR}`), so a commit
+    # with no associated PR — a direct push to main — delivers an empty string. Without
+    # the coercion that is a ValidationError and the image cannot boot (R1.7, R2.6).
+    monkeypatch.setenv("BUILD_PR", empty)
+
+    assert Settings(_env_file=None, **_REQUIRED).build_pr is None
+
+
+def test_build_identity_is_read_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Asserting only the defaults would not catch a refactor that stopped reading the
+    # baked ENV, which is the single source the endpoint reports from.
+    monkeypatch.setenv("APP_VERSION", "0.1.0+2026-07-30.a2f3c1d")
+    monkeypatch.setenv("BUILD_COMMIT", "a2f3c1d3f9b2000000000000000000000000000f")
+    monkeypatch.setenv("BUILD_PR", "42")
+    monkeypatch.setenv("BUILT_AT", "2026-07-30T09:14:02Z")
+    monkeypatch.setenv("BUILD_RUN_ID", "1234567890")
+    monkeypatch.setenv("BUILD_REF", "main")
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.app_version == "0.1.0+2026-07-30.a2f3c1d"
+    assert settings.build_commit == "a2f3c1d3f9b2000000000000000000000000000f"
+    assert settings.build_pr == 42
+    assert settings.built_at == "2026-07-30T09:14:02Z"
+    assert settings.build_run_id == "1234567890"
+    assert settings.build_ref == "main"
+
+
 def test_jwt_algorithm_is_a_constant_not_a_setting() -> None:
     assert JWT_ALGORITHM == "HS256"
     assert "jwt_algorithm" not in Settings.model_fields

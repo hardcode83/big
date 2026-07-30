@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field, model_validator
+from pydantic import Field, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -45,6 +45,20 @@ class Settings(BaseSettings):
     # currently fronts the API, so an X-Forwarded-For would be caller-supplied.
     trusted_client_ip_header: str = ""
 
+    # Build identity, baked into the image by the CD as ENV (change
+    # app-version-visibility, design D4). Every field has a default ON PURPOSE — the
+    # opposite of jwt_secret_key, which is required so the app refuses to boot without
+    # it. `settings = Settings()` runs at import time, so a required field here would
+    # turn an image built without build-args (a local `docker compose build`, a
+    # hand-built one) into a ValidationError before the app can serve a single request.
+    # Knowing which version is deployed must never be able to prevent deploying.
+    app_version: str = ""
+    build_commit: str = ""
+    build_pr: int | None = None
+    built_at: str = ""
+    build_run_id: str = ""
+    build_ref: str = ""
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""
@@ -53,6 +67,21 @@ class Settings(BaseSettings):
     bootstrap_manager_name: str = ""
     bootstrap_manager_email: str = ""
     bootstrap_manager_password: str = ""
+
+    @field_validator("build_pr", mode="before")
+    @classmethod
+    def _empty_build_pr_is_none(cls, value: object) -> object:
+        """An unset `BUILD_PR` arrives as "", which is not a valid `int | None`.
+
+        The Dockerfile declares `ENV BUILD_PR=${BUILD_PR}`, so the variable is always
+        present in the image — empty when the commit had no associated Pull Request
+        (a direct push to main, or a workflow_dispatch on a commit without one, R1.7).
+        Without this coercion that empty string is a ValidationError at import time,
+        and a commit pushed straight to main would produce an image that cannot boot.
+        """
+        if isinstance(value, str) and not value.strip():
+            return None
+        return value
 
     @model_validator(mode="after")
     def _reject_whitespace_jwt_secret(self) -> "Settings":
