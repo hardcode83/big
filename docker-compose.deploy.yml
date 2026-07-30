@@ -1,0 +1,151 @@
+# docker-compose de DEPLOY del entorno dev — lo ejecuta el runner self-hosted EN la VM.
+# A diferencia del docker-compose.yml de desarrollo: imágenes de GHCR pineadas por SHA
+# (${IMAGE_TAG}), SIN `build`, SIN bind-mounts de código. postgres/redis persisten entre
+# deploys (volúmenes nombrados). Solo se publican 8000/3000 (los puertos del security list). [R2, R5]
+
+services:
+  postgres:
+    image: postgres:16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:?Falta POSTGRES_DB}
+      POSTGRES_USER: ${POSTGRES_USER:?Falta POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Falta POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    # sin `ports`: postgres solo es accesible en la red interna del compose (el security list no abre 5432)
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data # persistente entre deploys (broker/estado Celery) — R2.1/R5.3
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  # Migraciones one-shot con la imagen PROD del backend (alembic es dep de runtime; sin `uv` en prod).
+  migrate:
+    image: ghcr.io/${GHCR_NS:?Falta GHCR_NS}/autohostai-backend:${IMAGE_TAG:?Falta IMAGE_TAG}
+    restart: "no"
+    command: alembic upgrade head
+    environment:
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  backend:
+    image: ghcr.io/${GHCR_NS}/autohostai-backend:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+    # Publicado SOLO en loopback de la VM (R4.3): no es alcanzable desde internet ni desde la VCN,
+    # pero un operador con SSH puede llegar con `ssh -L 8000:localhost:8000` (ver RUNBOOK §7.4).
+    # Sin el prefijo 127.0.0.1 Docker publicaría en 0.0.0.0 y crearía una vía alternativa al túnel.
+    ports:
+      - "127.0.0.1:8000:8000"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  worker:
+    image: ghcr.io/${GHCR_NS}/autohostai-backend:${IMAGE_TAG}
+    restart: unless-stopped
+    command: celery -A app.worker worker -l info
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # `up --wait` debe poder fallar el deploy si el worker no arranca (R2.4/R5) — Celery ping vía broker.
+    healthcheck:
+      test: ["CMD-SHELL", "celery -A app.worker inspect ping -t 5 >/dev/null 2>&1 || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
+  frontend:
+    image: ghcr.io/${GHCR_NS}/autohostai-frontend:${IMAGE_TAG}
+    restart: unless-stopped
+    environment:
+      BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
+      # Next standalone (server.js) usa $HOSTNAME como dirección de bind; Docker lo pone al
+      # container-id → escucharía en una IP no-localhost. Forzar 0.0.0.0 para que escuche en
+      # todas las interfaces (healthcheck local + puerto publicado 3000).
+      HOSTNAME: "0.0.0.0"
+      PORT: "3000"
+    # Publicado SOLO en loopback de la VM (R4.3). Desde internet el único camino sigue siendo el
+    # túnel, que llega por la red interna como `http://frontend:3000`; el binding a loopback existe
+    # para depuración por túnel SSH (`ssh -L 3000:localhost:3000`, ver RUNBOOK §7.4) y permite abrir
+    # la app en el navegador sin pasar por Cloudflare, que es como se distingue un fallo de la app
+    # de un fallo del edge o del túnel.
+    ports:
+      - "127.0.0.1:3000:3000"
+    depends_on:
+      backend:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "node", "-e", "require('http').get('http://127.0.0.1:3000',r=>process.exit(r.statusCode<500?0:1)).on('error',()=>process.exit(1))"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+  # Ingress HTTPS (change ingress-https-dev). Abre una conexión SALIENTE al edge de Cloudflare, que
+  # termina TLS y entrega a frontend:3000 por esta misma red interna. Por eso NO publica puertos y
+  # el security list de la VM no necesita 80/443. El routing (qué hostname va a qué servicio) vive
+  # en Terraform, no aquí: config_src = "cloudflare".
+  cloudflared:
+    # Pineada por dígest del índice multi-arch (incluye linux/arm64, la arquitectura de la VM).
+    # Corresponde a la release 2026.7.3, resuelta del registry el 2026-07-29.
+    image: cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
+    restart: unless-stopped
+    command: tunnel --no-autoupdate run
+    environment:
+      TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Falta TUNNEL_TOKEN}
+      # Habilita el endpoint de métricas en loopback, que es lo que consulta `tunnel ready`.
+      # Sin esto el healthcheck no tiene a quién preguntar.
+      TUNNEL_METRICS: 127.0.0.1:2000
+    depends_on:
+      # No anunciar al edge un origen que todavía no responde (R2.5): si cloudflared arrancara antes
+      # que el frontend, el edge devolvería 502 durante la ventana de arranque.
+      frontend:
+        condition: service_healthy
+    # La imagen es distroless: sin shell, sin curl y sin wget, así que un healthcheck HTTP al uso no
+    # es posible. cloudflared trae su propio subcomando, que consulta el endpoint de métricas de
+    # arriba y solo devuelve 0 si el túnel tiene conexión establecida con el edge (design D5).
+    healthcheck:
+      test: ["CMD", "cloudflared", "tunnel", "ready"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 20s
+
+volumes:
+  postgres_data:
+  redis_data:

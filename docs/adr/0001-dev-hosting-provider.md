@@ -136,3 +136,24 @@ Reabrir esta decisión (no solo para dev, evaluar también si el patrón deberí
 3. El negocio entra en su fase SaaS multi-tenant con tracción real (criterio detallado en "Kubernetes gestionado" arriba) → posible reconsideración de modelo completo (VM → K8s), no solo de proveedor.
 4. Cambian materialmente los precios o condiciones de free tier de cualquier candidato de esta tabla de forma que altere el ranking (revisar esta tabla, no solo la decisión).
 5. La tenancy de Oracle se actualiza a Pay As You Go por cualquier motivo (p. ej. para desbloquear otro servicio) → revisar de inmediato si eso reintroduce riesgo de facturación por exceso de cuota (ver Consecuencias) y si sigue siendo preferible a los fallbacks documentados.
+
+## Addendum — 2026-07-21 — Activación del criterio de revisión #5 (paso a Pay-As-You-Go)
+
+**Disparador.** El criterio de revisión #1 se materializó: la instancia Ampere A1 Always Free devolvía `Out of host capacity` de forma **persistente incluso con la home region ya en Frankfurt** (`eu-frankfurt-1`). Es decir, dejó de ser un problema de región — la home region es inmutable sin recrear la cuenta y ya estaba en la recomendada — y pasó a ser la escasez estructural de la cola de capacidad del *free tier puro*. Recrear la cuenta para "elegir mejor región" quedó descartado: Frankfurt ya era la buena, y crear una segunda cuenta free bajo la misma identidad viola los ToS de Oracle (una cuenta por persona; deduplicación por tarjeta+teléfono).
+
+**Debate reabierto (precios verificados 2026-07-21).** Se re-evaluaron los candidatos con precios actuales, no los del cuerpo de este ADR (que habían quedado desfasados):
+
+- **Hetzner** subió precios dos veces en 2026 y renombró los shapes; el tier de 8 GB es ahora **CX33 ~€8,49 neto + €0,50 IPv4 ≈ €9/mes** (no €5,49, que era el shape de 4 GB), y ademas Hetzner **no tiene backend de state nativo** (habría que añadir Object Storage S3-compatible a ~€6,49/mes o HCP Terraform).
+- **AWS Lightsail** 8 GB **~$44/mes** (no $24), y el free tier de AWS es crédito con caducidad.
+- Alternativas nuevas: **Contabo** ~€4-5/mes por 8 GB (provider Terraform vendor, fiabilidad dev-grade), **Netcup** ~€6-10 (sin provider que aprovisione la VM).
+
+**Decisión: mantener Oracle, pasando la tenancy a Pay-As-You-Go.** Es la única opción a **$0/mes con cero reescritura** — reutiliza el Terraform `oci` ya escrito y su backend de state nativo — y ataca el bloqueo real (capacidad), porque PAYG da **prioridad de aprovisionamiento A1**. No se cambia de proveedor; Hetzner (primario) y Contabo/Lightsail siguen documentados como fallback si Oracle deja de ser viable.
+
+**Propiedades del modelo PAYG** (verificadas contra docs de Oracle, 2026-07-21):
+
+- Conserva **toda** la capa gratuita ("recursos free para cuentas free o de pago, durante la vida de la cuenta"). Dentro de límites Always Free la factura es **$0** (cómputo, block storage, IP pública, egress).
+- Da **prioridad de capacidad** A1 (fix documentado del `Out of host capacity`) y **evita la reclamación de instancias ociosas** (que en free puro se paran si CPU p95 < 20% en 7 días).
+- Es **unidireccional a nivel de tipo de cuenta**: no hay downgrade a Always Free-only (ni autoservicio ni por soporte); el único "deshacer" total es borrar la tenancy. Pero el **escape a coste $0 es limpio**: terminar los recursos de pago y permanecer dentro de límites free → factura $0 con la cuenta intacta. Requiere tarjeta en fichero y exceder límites **sí** factura (a diferencia del free puro, que solo suspende) → la alerta de presupuesto ya desplegada es la salvaguarda.
+- En esta cuenta concreta, el estimador confirma que **4 OCPU / 24 GB sigue a €0** (conserva el grant antiguo 4/24; la ambigüedad pública sobre si PAYG mantiene 4/24 o baja a 2/12 no afecta, porque 2/12 también es gratis).
+
+**Nueva configuración de `dev`** (implementada en el change `infra-dev-payg`): instancia A1 redimensionada **in-place** (`terraform plan`: `0 to destroy`) a **4 OCPU / 24 GB / boot volume 200 GB**, fijada en **AD-3** (donde se encontró capacidad al bootstrap); el default de `ad_number` del workflow se fija a 3 para que el pipeline no la mueva de AD (mover = destruir + recrear). GitHub Actions (`workflow_dispatch`) pasa a ser el único gestor de cambios de infra.

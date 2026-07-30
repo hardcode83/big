@@ -1,0 +1,159 @@
+name: deploy-dev
+
+# CD del entorno dev: construye las imágenes `prod` arm64 de backend/frontend, las publica
+# en GHCR (tag por SHA + `dev`), y las despliega en la VM vía un runner self-hosted que corre
+# EN la propia VM (deploy local, sin SSH ni puertos entrantes — el security list del hardening
+# queda intacto). Disparo: push a `main` (path-filtered) o manual. [R1, R3, R4, R5]
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "backend/**"
+      - "frontend/**"
+      - "docker-compose.deploy.yml"
+      - ".github/workflows/deploy-dev.yml"
+  workflow_dispatch: {}
+
+jobs:
+  # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
+  build-backend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push backend (prod, arm64)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: backend
+          file: backend/devops/Dockerfile
+          target: prod
+          platforms: linux/arm64
+          push: true
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/autohostai-backend:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/autohostai-backend:dev
+
+  build-frontend:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: docker/setup-qemu-action@c7c53464625b32c7a7e944ae62b3e17d2b600130 # v3
+      - uses: docker/setup-buildx-action@8d2750c68a42422c14e847fe6c8ac0403b4cbd6f # v3
+      - uses: docker/login-action@c94ce9fb468520275223c153574b00df6fe4bcc9 # v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - name: Build & push frontend (prod, arm64)
+        uses: docker/build-push-action@10e90e3645eae34f1e60eeb005ba3a3d33f178e8 # v6
+        with:
+          context: frontend
+          file: frontend/devops/Dockerfile
+          target: prod
+          platforms: linux/arm64
+          push: true
+          # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
+          build-args: |
+            NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}
+          tags: |
+            ghcr.io/${{ github.repository_owner }}/autohostai-frontend:sha-${{ github.sha }}
+            ghcr.io/${{ github.repository_owner }}/autohostai-frontend:dev
+
+  # --- Deploy LOCAL en la VM (runner self-hosted); sin SSH ni puertos entrantes [R3, R4, R5] ---
+  deploy:
+    needs: [build-backend, build-frontend]
+    if: github.ref == 'refs/heads/main'
+    runs-on: [self-hosted, dev]
+    permissions:
+      contents: read # checkout
+      packages: read # pull de las imágenes privadas de GHCR con el GITHUB_TOKEN del job
+    timeout-minutes: 15
+    concurrency:
+      group: deploy-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Render .env leyendo los secrets del OCI Vault (validación previa) [R4]
+        env:
+          # OCID del Vault: lo necesita la resolución POR NOMBRE del token del túnel. No puede salir
+          # de /etc/autohostai-deploy.env porque ese fichero lo escribe cloud-init y `metadata` es
+          # ForceNew con ignore_changes, así que Terraform no puede reescribirlo en la VM viva; una
+          # clave nueva ahí no llegaría nunca (change ingress-https-dev, design D3).
+          OCI_VAULT_ID: ${{ vars.OCI_VAULT_ID }}
+        run: |
+          set -euo pipefail
+          source /etc/autohostai-deploy.env   # OCIDs de los secrets + POSTGRES_DB/USER (sin secretos)
+          read_secret() { # $1 = OCID; imprime el valor o falla nombrando la clave ($2)
+            local val
+            val="$(oci --auth instance_principal secrets secret-bundle get \
+              --secret-id "$1" --query 'data."secret-bundle-content".content' --raw-output 2>/dev/null | base64 -d)" || true
+            if [ -z "$val" ]; then echo "::error::no se pudo leer del Vault el secret requerido: $2" >&2; exit 1; fi
+            printf '%s' "$val"
+          }
+          read_secret_by_name() { # $1 = nombre del secret en el Vault; $2 = clave para el mensaje
+            local val
+            if [ -z "${OCI_VAULT_ID:-}" ]; then
+              echo "::error::falta la variable de repo OCI_VAULT_ID, necesaria para resolver $2 por nombre" >&2; exit 1
+            fi
+            val="$(oci --auth instance_principal secrets secret-bundle get-secret-bundle-by-name \
+              --secret-name "$1" --vault-id "$OCI_VAULT_ID" \
+              --query 'data."secret-bundle-content".content' --raw-output 2>/dev/null | base64 -d)" || true
+            if [ -z "$val" ]; then echo "::error::no se pudo leer del Vault el secret requerido: $2 (nombre: $1)" >&2; exit 1; fi
+            printf '%s' "$val"
+          }
+          PG_PASSWORD="$(read_secret "$PG_PASSWORD_SECRET_OCID" POSTGRES_PASSWORD)"
+          JWT_KEY="$(read_secret "$JWT_SECRET_OCID" JWT_SECRET_KEY)"
+          ENC_KEY="$(read_secret "$ENCRYPTION_KEY_SECRET_OCID" ENCRYPTION_KEY)"
+          # El nombre es determinista (lo fija Terraform como autohostai-<env>-...), así que se
+          # deriva de ENV en vez de necesitar otra variable de repo.
+          TUNNEL_TOKEN="$(read_secret_by_name "autohostai-${ENV}-cloudflare-tunnel-token" TUNNEL_TOKEN)"
+          umask 077
+          {
+            echo "IMAGE_TAG=sha-${GITHUB_SHA}"
+            echo "GHCR_NS=${GITHUB_REPOSITORY_OWNER}"
+            echo "POSTGRES_DB=${POSTGRES_DB}"
+            echo "POSTGRES_USER=${POSTGRES_USER}"
+            echo "POSTGRES_PASSWORD=${PG_PASSWORD}"
+            echo "JWT_SECRET_KEY=${JWT_KEY}"
+            echo "ENCRYPTION_KEY=${ENC_KEY}"
+            echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
+            echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
+          } > .env
+          chmod 600 .env
+
+      - name: Login GHCR (GITHUB_TOKEN del job, read-only) [R3]
+        # El job corre en un workflow del repo → su GITHUB_TOKEN (packages: read) está cubierto por
+        # el "Manage Actions access" del package (repo AutoHostAI). Un token de GitHub App NO lo está
+        # (no es "Actions del repo" ni miembro), por eso el pull daba 403. La App solo registra el
+        # runner (bootstrap), no hace pull de GHCR.
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: echo "$GITHUB_TOKEN" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+
+      - name: Deploy — pull + up --wait [R3, R5]
+        run: |
+          set -euo pipefail
+          docker compose -f docker-compose.deploy.yml pull
+          if ! docker compose -f docker-compose.deploy.yml up -d --wait --wait-timeout 180; then
+            echo "::error::deploy falló — servicios no healthy dentro del timeout"
+            docker compose -f docker-compose.deploy.yml logs --tail=200
+            exit 1
+          fi
+
+      - name: Logout GHCR
+        if: always()
+        run: docker logout ghcr.io || true

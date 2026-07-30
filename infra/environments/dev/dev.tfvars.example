@@ -8,11 +8,44 @@ private_key_path = "<ruta a tu .pem privado, p.ej. ~/.oci/oci_api_key.pem>"
 region           = "<p.ej. eu-frankfurt-1>"
 compartment_ocid = "<compartment OCID (raíz de la tenancy, para empezar)>"
 
-allowed_ssh_cidr = "<tu IP pública>/32"
+# CIDRs de operadores permitidos para SSH (22) y los puertos de app (8000/3000). Uno por IP, prefijo >= /24.
+allowed_ssh_cidrs = ["<tu IP pública>/32"]
 
-# Par dedicado a esta VM (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca
-# reutilizar la API key de OCI. Solo el contenido de la .pub va aquí, la privada se queda en tu máquina.
-ssh_public_key = "<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohostai-dev-vm>"
+# Lista de claves públicas SSH autorizadas (una por operador). Par dedicado a esta VM
+# (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca reutilizar la API key de OCI.
+# Solo el contenido de la(s) .pub va aquí; la privada se queda en tu máquina (y copia recuperable en OCI Vault).
+ssh_authorized_keys = ["<contenido de tu .pub, p.ej. ssh-ed25519 AAAA... autohostai-dev-vm>"]
 
-budget_alert_email = "<tu email>"
-# budget_amount y budget_alert_threshold_percent tienen defaults razonables — sobreescribe si hace falta.
+# Correos de las alertas de presupuesto (ACTUAL y FORECAST). Tiene default (Jose+Marta); sobreescribe si hace falta.
+budget_alert_recipients = ["<email 1>", "<email 2>"]
+# budget_amount tiene default 1 — sobreescribe si hace falta.
+
+# Entorno (default dev): interpola los nombres de los recursos de CD (autohostai-<env>-*).
+# env = "dev"
+
+# Runner self-hosted vía GitHub App (R7). Identificadores no sensibles:
+github_app_id              = "<App ID de la GitHub App>"
+github_app_installation_id = "<Installation ID de la App en el repo/owner>"
+# github_repo tiene default (autohostai-labs/AutoHostAI); postgres_db/postgres_user default (autohostai).
+#
+# La CLAVE PRIVADA de la App NO va aquí: es sensible y la inyecta el pipeline vía
+# TF_VAR_github_app_private_key desde el GitHub Secret GH_APP_PRIVATE_KEY (Terraform la escribe
+# al Vault). En local: export TF_VAR_github_app_private_key="$(cat app.private-key.pem)".
+
+# --- Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev) ---
+# El hostname y el apex NO son secretos (son nombres DNS públicos), así que llevan valor real:
+cloudflare_zone_name = "digitalsec.work"
+public_hostname      = "autohostai.digitalsec.work"
+# Debe ser UNA sola etiqueta bajo el apex: el Universal SSL gratuito solo cubre el apex y el
+# primer nivel. Algo como dev.autohostai.digitalsec.work exigiría Total TLS / ACM (de pago).
+
+cloudflare_account_id = "<Account ID de Cloudflare (no sensible)>"
+
+# Los dos sensibles se listan como MARCADOR para que se sepa que existen, pero comentados a
+# propósito: si se copiaran con el placeholder puesto, Terraform lo aceptaría como string válido y
+# el fallo llegaría tarde y confuso (error de auth del provider) en vez de temprano y claro
+# ("No value for required variable", el comportamiento verificado en la tarea 1.5).
+# Los inyecta el pipeline vía TF_VAR_* desde los GitHub Secrets CLOUDFLARE_ZONE_ID y
+# CLOUDFLARE_API_TOKEN; en local, export TF_VAR_cloudflare_api_token="..." (permisos mínimos en el RUNBOOK).
+# cloudflare_zone_id   = "<Zone ID de la zona en Cloudflare>"
+# cloudflare_api_token = "<API token: Account|Cloudflare Tunnel|Edit + Zone|DNS|Edit + Zone|Zone Settings|Edit>"

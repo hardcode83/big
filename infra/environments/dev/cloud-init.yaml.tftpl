@@ -1,0 +1,58 @@
+#cloud-config
+# cloud-init de la instancia. Fuente de verdad del arranque de una VM NUEVA:
+#  - Docker + Compose vía el repo APT OFICIAL de Docker (arm64) — docker-compose-plugin NO
+#    está en los repos por defecto de Ubuntu 22.04. $RELEASE/$KEY_FILE los sustituye cloud-init
+#    (no son interpolaciones de Terraform).
+#  - Runner self-hosted de GitHub Actions (label = ${env}) para el CD (change app-deploy-dev, R7),
+#    registrado vía GitHub App (clave leída del Vault por instance principal).
+# Sobre la VM viva no se aplica por Terraform (metadata ForceNew + ignore_changes): mismos pasos
+# a mano una vez (ver RUNBOOK). Un entorno nuevo se aprovisiona 100% de aquí.
+package_update: true
+apt:
+  sources:
+    docker:
+      source: "deb [arch=arm64 signed-by=$KEY_FILE] https://download.docker.com/linux/ubuntu $RELEASE stable"
+      keyid: 9DC858229FC7DD38854AE2D88D81803C0EBFCD88
+packages:
+  - docker-ce
+  - docker-ce-cli
+  - containerd.io
+  - docker-buildx-plugin
+  - docker-compose-plugin
+  - python3-pip
+write_files:
+  # Config del CD (identificadores no sensibles + OCIDs de los secrets del Vault). Sin secretos.
+  #
+  # CONVENCIÓN (change ingress-https-dev, design D3): NO añadir aquí claves para secretos nuevos.
+  # Este fichero solo se escribe al crear la VM: `metadata` es ForceNew en el provider oci y la
+  # instancia declara `ignore_changes = [metadata]`, así que una clave añadida ahora NUNCA llegaría
+  # a la VM viva y quedaría como configuración muerta que aparenta funcionar. Los secretos que se
+  # sumen después del aprovisionamiento se resuelven POR NOMBRE desde el workflow de deploy
+  # (`get-secret-bundle-by-name` + la variable de repo OCI_VAULT_ID), que es determinista y no
+  # requiere tocar la máquina. Las claves de abajo se conservan porque una VM nueva sí las recibe.
+  - path: /etc/autohostai-deploy.env
+    permissions: '0644'
+    content: |
+      ENV=${env}
+      GITHUB_REPO=${github_repo}
+      GITHUB_APP_ID=${github_app_id}
+      GITHUB_APP_INSTALLATION_ID=${github_app_installation_id}
+      APP_KEY_SECRET_OCID=${app_key_secret_ocid}
+      PG_PASSWORD_SECRET_OCID=${pg_password_secret_ocid}
+      JWT_SECRET_OCID=${jwt_secret_ocid}
+      ENCRYPTION_KEY_SECRET_OCID=${encryption_key_secret_ocid}
+      POSTGRES_DB=${postgres_db}
+      POSTGRES_USER=${postgres_user}
+  - path: /opt/gh-app-install-token.py
+    permissions: '0755'
+    content: |
+      ${indent(6, gh_app_token_helper)}
+  - path: /opt/bootstrap-runner.sh
+    permissions: '0755'
+    content: |
+      ${indent(6, runner_bootstrap)}
+runcmd:
+  - systemctl enable --now docker
+  - usermod -aG docker ubuntu
+  - pip3 install --quiet oci-cli
+  - /opt/bootstrap-runner.sh

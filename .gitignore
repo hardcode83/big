@@ -30,6 +30,14 @@ npm-debug.log*
 **/*.tfstate
 **/*.tfstate.*
 **/*.tfvars
-**/backend.hcl
 !**/*.tfvars.example
-!**/backend.hcl.example
+# Credenciales de backend/state: ignora TODO .hcl (incluidos typos como backekn.hcl)
+# salvo el lock file (versionado a propósito). Los .example terminan en .example, no en .hcl.
+**/*.hcl
+!**/.terraform.lock.hcl
+# Claves privadas y logs — nunca al repo
+*.pem
+**/*.log
+# Helper de bootstrap manual de capacidad A1 — local-only: el pipeline es el camino canónico
+# para operar infra. Re-ejecutarlo sobre la máquina existente es destructivo (itera ad_number con -auto-approve).
+infra/environments/dev/apply_loop.sh

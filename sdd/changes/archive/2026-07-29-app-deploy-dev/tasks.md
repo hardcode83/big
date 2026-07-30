@@ -1,0 +1,54 @@
+# Tasks: app-deploy-dev
+
+> Change de infra/CI — **no toca código de dominio backend/frontend**, así que las reglas de unit/integration/tenant-isolation de `steering/testing.md` no aplican (no hay `domain/` que testear). La verificación es por **runs de CI, `terraform plan` y deploy real** (§7). Las tareas marcadas **(op.)** son operaciones en tu consola (GitHub/OCI/VM), al estilo de las ops del hardening.
+
+## 1. Build y publicación de imágenes en GHCR <!-- panel: PASS 2026-07-24 -->
+
+- [x] 1.1 Crear `.github/workflows/deploy-dev.yml` con `on: push: branches:[main]` + `paths` (`backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `docker-compose.deploy.yml`, el propio workflow) y `workflow_dispatch`; jobs `build-backend` y `build-frontend` en `ubuntu-latest` con `docker/build-push-action` (pineado por SHA), `target: prod`, `platforms: linux/arm64`, `push: true`, `permissions: packages: write`, auth con `GITHUB_TOKEN`; tags `sha-<commit>` (inmutable) + `dev`. — **Files:** `.github/workflows/deploy-dev.yml` — [R1]
+- [x] 1.2 Declarar `ARG`/`ENV` para las `NEXT_PUBLIC_*` en `frontend/devops/Dockerfile` (stage builder, antes de `npm run build`) y pasarlas como `build-args` en `build-frontend` — quedan horneadas en la imagen, no en runtime. — **Files:** `frontend/devops/Dockerfile`, `.github/workflows/deploy-dev.yml` — [R1]
+- [x] 1.3 Fijar todas las Actions del workflow por SHA de commit (convención del repo, igual que `infra-dev.yml`). — **Files:** `.github/workflows/deploy-dev.yml` — [R1, R3]
+
+## 2. Compose de deploy y plantilla de entorno <!-- panel: PASS 2026-07-24 -->
+
+- [x] 2.1 Crear `docker-compose.deploy.yml` en la raíz: `backend`/`worker`/`frontend` con `image: ghcr.io/${GHCR_NS}/autohostai-<svc>:${IMAGE_TAG}` (**sin `build`**, sin bind-mounts), `postgres:16`/`redis:7` con volúmenes nombrados persistentes, `restart: unless-stopped`, y healthchecks para backend (`/health`) y frontend (`:3000`). — **Files:** `docker-compose.deploy.yml` — [R2, R5]
+- [x] 2.2 Añadir servicio `migrate` one-shot en el compose de deploy: **imagen prod del backend**, `restart: "no"`, `command: alembic upgrade head` (binario de `.venv/bin`, no `uv run`), `depends_on: postgres (healthy)`; backend/worker con `depends_on: migrate (service_completed_successfully)`. — **Files:** `docker-compose.deploy.yml` — [R2]
+- [x] 2.3 Crear `.env.deploy.example` con la lista de claves de runtime esperadas (`POSTGRES_*`, `JWT_*`/`ENCRYPTION_KEY`, `BACKEND_INTERNAL_URL`, `IMAGE_TAG`, `GHCR_NS`, …) **sin valores**; documentar que las `NEXT_PUBLIC_*` van como build-args (§1.2), no aquí. — **Files:** `.env.deploy.example` — [R4]
+
+## 3. Provisión del runner + secrets como IaC (Terraform) <!-- panel: PASS 2026-07-24 (rediseño) -->
+
+<!-- Reabierto 2026-07-24: rediseño "endurecer hacia IaC" — registro vía GitHub App (no PAT) y
+     secrets de runtime generados por Terraform → Vault (D13/D14). El cloud-init (§3.1 estructura)
+     y el patrón templatefile se conservan; cambia la lógica del bootstrap y la IAM/variables. -->
+
+- [x] 3.1 Reescribir `runner-bootstrap.sh` para registrar el runner minteando un **installation-token de GitHub App**: leer la clave de la App del Vault (instance principal), firmar el JWT (helper `gh-app-install-token.py`, RS256 con `cryptography`), obtener installation-token → registration-token, `config.sh --labels ${env} --unattended`, `svc.sh install/start`. El cloud-init inyecta `env`/`app_id`/`installation_id`/OCIDs de los secrets. — **Files:** `infra/environments/dev/{runner-bootstrap.sh,gh-app-install-token.py,cloud-init.yaml.tftpl,main.tf}` — [R7]
+- [x] 3.2 Generar los secrets de runtime con Terraform y guardarlos en el Vault: `random_password` (POSTGRES_PASSWORD, JWT_SECRET_KEY) + `random_bytes` → clave Fernet (ENCRYPTION_KEY, base64url); un `oci_vault_secret` por cada uno + el de la clave de la App (`var.github_app_private_key`). `POSTGRES_DB`/`POSTGRES_USER` variables con default. Nombres con `${var.env}`. — **Files:** `infra/environments/dev/{main.tf,variables.tf}` — [R8]
+- [x] 3.3 IAM del instance principal: `oci_identity_policy` de mínimo privilegio que lee **la clave de la App + los 3 secrets de runtime** (`where any {target.secret.id = ...}`); variables `env`/`github_app_id`/`github_app_installation_id`/`github_app_private_key`(sensible)/`postgres_db`/`postgres_user` en `variables.tf` y `dev.tfvars.example`. — **Files:** `infra/environments/dev/{main.tf,variables.tf,dev.tfvars.example}` — [R7]
+- [x] 3.4 `terraform fmt`/`validate` **OK** (provider `random` añadido); cloud-init renderiza YAML válido (2 bloques `indent(6)`); `py_compile` del helper y `bash -n` del bootstrap OK. El **`plan`** real (add de policy + `random_*` + 4 `oci_vault_secret`, **0 recreación** de la instancia) → pipeline, §5.3. — **Files:** ninguno (verificación) — [R7, R8]
+
+## 4. Job de deploy (runner self-hosted, local) <!-- panel: PASS 2026-07-24 (rediseño) -->
+
+- [x] 4.1 Añadir job `deploy` a `deploy-dev.yml`: `runs-on: [self-hosted, dev]`, `needs: [build-backend, build-frontend]`, `if: github.ref == 'refs/heads/main'`, `concurrency: { group: deploy-dev, cancel-in-progress: false }`, `timeout-minutes`. — **Files:** `.github/workflows/deploy-dev.yml` — [R3] (sin cambios en el rediseño)
+- [x] 4.2 Paso de render del `.env` leyendo los secrets del **OCI Vault** (instance principal, `oci secrets secret-bundle get`) con **validación previa** (`read_secret` falla nombrando la clave que no se pudo leer, antes de tocar contenedores), `chmod 600`; añade `IMAGE_TAG=sha-<sha>` y `GHCR_NS`. — **Files:** `.github/workflows/deploy-dev.yml` (config en `/etc/autohostai-deploy.env`, cloud-init) — [R4]
+- [x] 4.3 Paso `docker login ghcr.io` con el **`GITHUB_TOKEN`** del job (`permissions: packages: read`) y `docker logout` (`if: always()`) al finalizar. (Se descartó el token de la App: un installation-token no está cubierto por el acceso del package → 403; ver D6.) — **Files:** `.github/workflows/deploy-dev.yml` — [R3]
+- [x] 4.4 Paso de deploy: `docker compose -f docker-compose.deploy.yml pull` + `up -d --wait --wait-timeout 180`; en fallo, volcar `docker compose logs` y salir ≠0. — **Files:** `.github/workflows/deploy-dev.yml` — [R3, R5] (sin cambios)
+
+## 5. Operaciones (tu consola — GitHub/OCI)
+
+- [x] 5.1 (op.) Crear **una GitHub App** (permiso repo: `Administration: read/write` para registrar runners; `Packages: read` es vestigial — el pull GHCR lo hace el `GITHUB_TOKEN` del job), instalarla en el repo. Guardar en GitHub: **variables** `GH_APP_ID` + `GH_APP_INSTALLATION_ID`, y **secret** `GH_APP_PRIVATE_KEY` (contenido del `.pem`). Único secret-zero. — **Files:** ninguno (op. GitHub) — [R7]
+- [x] 5.2 (op.) Convertir `NEXT_PUBLIC_APP_ENV` en **variable** de repo (no secret) y crear las variables `GH_APP_ID`/`GH_APP_INSTALLATION_ID` (si no en §5.1). Sin más OCI a mano: la clave de la App la escribe Terraform al Vault desde `GH_APP_PRIVATE_KEY`. — **Files:** ninguno (op. GitHub) — [R7]
+- [x] 5.3 (op.) Aplicar Terraform por el pipeline (`workflow_dispatch` `apply` de `infra-dev.yml` desde `main`): crea dynamic group + policy + `random_*` + 4 `oci_vault_secret` (3 runtime + clave App). Confirmar **`0 to destroy`** (instancia intacta). — **Files:** ninguno (op. pipeline) — [R7, R8]
+- [x] 5.4 (op.) Provisionar el runner en la **VM viva a mano, una sola vez** (copiar `runner-bootstrap.sh`+`gh-app-install-token.py` y `/etc/autohostai-deploy.env`, `pip install oci-cli`, ejecutar bootstrap); verificar **online con label `dev`** en Settings → Actions → Runners. — **Files:** ninguno (op. VM); RUNBOOK — [R3, R7]
+- [x] 5.5 (op.) **Borrar** los 6 GitHub Secrets del primer intento (`POSTGRES_DB/USER/PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY`, y `NEXT_PUBLIC_APP_ENV` si quedó como secret) — ya no se usan (el deploy lee del Vault; `NEXT_PUBLIC_APP_ENV` pasa a variable). — **Files:** ninguno (op. GitHub) — [R8]
+
+## 6. Documentación <!-- panel: PASS 2026-07-24 (rediseño) -->
+
+- [x] 6.1 Actualizar `infra/environments/dev/RUNBOOK.md` §6: flujo de deploy, GitHub App (permisos, variables/secret, rotación), provisión/recuperación del runner, secrets de runtime generados por TF → Vault, arranque en frío, rollback. — **Files:** `infra/environments/dev/RUNBOOK.md` — [R6]
+- [x] 6.2 Actualizar los READMEs (raíz + dev) y `.env.deploy.example`: deploy dev con GitHub App (variables + 1 secret) y secrets leídos del Vault (sin GitHub Secrets de app). — **Files:** `README.md`, `infra/environments/dev/README.md`, `.env.deploy.example` — [R6]
+
+## 7. Verificación end-to-end
+
+- [x] 7.1 Build: el run publica **ambas imágenes arm64** en GHCR con tags `sha-<commit>` y `dev` (verificado en run #30440887794). — [R1]
+- [x] 7.2 Deploy real: el job `deploy` corre en el runner self-hosted, `docker login` con `GITHUB_TOKEN`, lee los secrets del Vault, `migrate` aplica migraciones, y `up -d --wait` deja postgres/redis/backend/worker/frontend **`healthy`** (deploy verde 2026-07-29). — [R3, R4, R5]
+- [x] 7.3 Smoke: `GET /health` (8000) y el frontend (3000) responden por HTTP desde el CIDR de operador (139.28.77.166) — conexión confirmada por el usuario. — [R5]
+- [x] 7.4 Rollback: documentado en RUNBOOK §6.4 (redeploy pineando un `IMAGE_TAG`/SHA previo — mismo path de deploy ya verificado). No ejercido en vivo. — [R6]
+- [x] 7.5 Seguridad/reachability: el deploy **no abrió puertos** (usa GITHUB_TOKEN + 8000/3000 ya existentes; el cambio de `ALLOWED_SSH_CIDR` solo actualizó una regla existente, no abrió puerto nuevo); `.env` con `chmod 600`; sin secretos en repo/imagen. **Nota:** la clave de la App y los secrets de runtime **sí** viven en el `tfstate` — es intencional (D14, ámbito dev/test, bucket privado+versionado). — [R3, R4, R7, R8]

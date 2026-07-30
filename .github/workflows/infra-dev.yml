@@ -14,9 +14,9 @@ on:
           - plan
           - apply
       ad_number:
-        description: "Availability Domain (1-based) donde crear la instancia — cambiar y reintentar si Oracle devuelve 'Out of host capacity' en la actual"
+        description: "Availability Domain (1-based) de la instancia. La instancia dev vive en AD-3 (donde se encontró capacidad al bootstrap). NO lo cambies para operar la máquina existente: mover de AD = destruir + recrear (vuelta a la ruleta de capacidad). Solo súbelo para un bootstrap nuevo si AD-3 diera 'Out of host capacity'."
         required: false
-        default: "1"
+        default: "3"
         type: string
 
 defaults:
@@ -24,49 +24,45 @@ defaults:
     working-directory: infra/environments/dev
 
 jobs:
-  # Se ejecuta en cualquier PR que toque infra/environments/dev/**, sin credenciales de
-  # OCI — terraform init -backend=false salta por completo el backend remoto. [R3.3]
+  # PR que toca infra/environments/dev/**: sin credenciales de OCI (init -backend=false). [R3.3]
   check:
     if: github.event_name == 'pull_request'
     runs-on: ubuntu-latest
+    timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.15.8"
-
       - name: terraform fmt
         run: terraform fmt -check -diff
-
       - name: terraform init (sin backend)
         run: terraform init -backend=false -input=false
-
       - name: terraform validate
         run: terraform validate
 
-  # Único disparador que puede tocar recursos reales — nunca automático en push/merge. [R3.1, R3.2]
-  plan-apply:
-    if: github.event_name == 'workflow_dispatch'
+  # workflow_dispatch: plan (siempre) para revisión por logs — NO usa -out ni sube artifact
+  # (el plan contendría secrets desde app-deploy-dev); el apply re-planifica en su propio job.
+  plan:
+    # Acotado a `main` igual que `apply`. Desde el change ingress-https-dev este job recibe
+    # CLOUDFLARE_API_TOKEN, que tiene control de DNS y de los ajustes de TLS de TODA la zona
+    # digitalsec.work (no solo de dev). Un workflow_dispatch sobre una rama arbitraria ejecuta la
+    # definición del workflow de ESA rama con el secret en su env, y `sensitive = true` no impide
+    # desredactarlo desde código no revisado (nonsensitive(), provider http, troceado del valor).
+    # Consecuencia operativa aceptada: no se puede planificar desde una rama de feature; el plan de
+    # un change se ejecuta tras mergear a `main` (ver BLOCKED.md #2).
+    if: github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
-
-      - uses: hashicorp/setup-terraform@v3
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
         with:
           terraform_version: "1.15.8"
-
-      # La private key se escribe a su propio fichero (fuera del checkout, en RUNNER_TEMP) y se
-      # referencia por RUTA (private_key_path) — nunca inline en un string/heredoc HCL. Embeber un
-      # PEM multilínea como valor de string es fragil (depende de que el secret termine en salto de
-      # línea para que el heredoc cierre bien) y así se evita del todo. [fix de revisión de arquitectura]
       - name: Escribir la private key a fichero
         env:
           OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
         run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
-
-      # Config parcial del backend oci — sus propias credenciales, no puede leer var.*
-      # (los backends se configuran antes de que existan variables de Terraform).
       - name: Escribir configuración del backend
         env:
           TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
@@ -87,13 +83,10 @@ jobs:
           fingerprint      = "${OCI_FINGERPRINT}"
           private_key_path = "${PRIVATE_KEY_PATH}"
           EOF
-
       - name: terraform init
         run: terraform init -input=false -backend-config=backend.hcl
-
       - name: terraform validate
         run: terraform validate
-
       - name: terraform plan
         env:
           TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
@@ -102,14 +95,78 @@ jobs:
           TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
-          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          # Vars-lista: se envuelven en JSON desde secrets de un solo valor (un operador).
+          # Para varios operadores, convertir el secret en un array JSON y pasarlo tal cual.
+          TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
+          TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
-          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-        run: terraform plan -input=false -out=tfplan
+          # GitHub App del runner self-hosted (change app-deploy-dev). ids no sensibles → vars;
+          # la clave privada (sensible) → secret, y Terraform la escribe al Vault de cada entorno.
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          # Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev). El hostname y el apex
+          # son nombres DNS públicos → vars; el zone id y el API token → secrets.
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_cloudflare_zone_name: ${{ vars.CLOUDFLARE_ZONE_NAME }}
+          TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
+          # budget_alert_recipients usa su default (Jose + Marta).
+        # NO se usa `-out=tfplan` ni se sube el plan como artifact: desde app-deploy-dev el plan
+        # contiene secrets (clave de la App + secrets de runtime generados por TF), y un artifact
+        # es descargable por cualquiera con read del repo — superficie mayor que la IAM del bucket
+        # de state (hallazgo del panel de seguridad). El plan es para revisión por logs (Terraform
+        # redacta los valores sensibles en consola). El apply re-planifica en el mismo job.
+        run: terraform plan -input=false
 
+  # apply: solo desde main y solo si action=apply. En repo privado + plan Free NO hay Environment
+  # con required reviewers, así que el gate de aprobación es (opción A): el código llega a main
+  # revisado vía PR + el dispatch de apply es manual y solo desde main → solo se aplica lo revisado.
+  # concurrency serializa applies sobre el mismo state. [R1]
+  apply:
+    if: github.event_name == 'workflow_dispatch' && github.event.inputs.action == 'apply' && github.ref == 'refs/heads/main'
+    needs: plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    concurrency:
+      group: infra-dev-apply
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - uses: hashicorp/setup-terraform@b9cd54a3c349d3f38e8881555d616ced269862dd # v3
+        with:
+          terraform_version: "1.15.8"
+      - name: Escribir la private key a fichero
+        env:
+          OCI_PRIVATE_KEY: ${{ secrets.OCI_PRIVATE_KEY }}
+        run: printf '%s\n' "$OCI_PRIVATE_KEY" > "$RUNNER_TEMP/oci_private_key.pem"
+      - name: Escribir configuración del backend
+        env:
+          TFSTATE_BUCKET: ${{ secrets.TFSTATE_BUCKET }}
+          TFSTATE_NAMESPACE: ${{ secrets.TFSTATE_NAMESPACE }}
+          OCI_REGION: ${{ secrets.OCI_REGION }}
+          OCI_TENANCY_OCID: ${{ secrets.OCI_TENANCY_OCID }}
+          OCI_USER_OCID: ${{ secrets.OCI_USER_OCID }}
+          OCI_FINGERPRINT: ${{ secrets.OCI_FINGERPRINT }}
+          PRIVATE_KEY_PATH: ${{ runner.temp }}/oci_private_key.pem
+        run: |
+          cat > backend.hcl <<EOF
+          bucket           = "${TFSTATE_BUCKET}"
+          namespace        = "${TFSTATE_NAMESPACE}"
+          key              = "dev.tfstate"
+          region           = "${OCI_REGION}"
+          tenancy_ocid     = "${OCI_TENANCY_OCID}"
+          user_ocid        = "${OCI_USER_OCID}"
+          fingerprint      = "${OCI_FINGERPRINT}"
+          private_key_path = "${PRIVATE_KEY_PATH}"
+          EOF
+      - name: terraform init
+        run: terraform init -input=false -backend-config=backend.hcl
+      # Sin plan pre-guardado (ver job `plan`): el apply re-planifica y aplica en el mismo job,
+      # así ningún fichero con secrets sale del runner. Necesita TODAS las vars (no solo las de
+      # identidad del provider), porque re-evalúa el plan completo.
       - name: terraform apply
-        if: ${{ github.event.inputs.action == 'apply' }}
         env:
           TF_VAR_tenancy_ocid: ${{ secrets.OCI_TENANCY_OCID }}
           TF_VAR_user_ocid: ${{ secrets.OCI_USER_OCID }}
@@ -117,8 +174,17 @@ jobs:
           TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          TF_VAR_allowed_ssh_cidr: ${{ secrets.ALLOWED_SSH_CIDR }}
-          TF_VAR_budget_alert_email: ${{ secrets.BUDGET_ALERT_EMAIL }}
+          TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
+          TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
-          TF_VAR_ssh_public_key: ${{ secrets.SSH_PUBLIC_KEY }}
-        run: terraform apply -input=false -auto-approve tfplan
+          TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
+          TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
+          TF_VAR_github_app_private_key: ${{ secrets.GH_APP_PRIVATE_KEY }}
+          # Ingress HTTPS vía Cloudflare Tunnel (change ingress-https-dev). El hostname y el apex
+          # son nombres DNS públicos → vars; el zone id y el API token → secrets.
+          TF_VAR_cloudflare_api_token: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          TF_VAR_cloudflare_zone_id: ${{ secrets.CLOUDFLARE_ZONE_ID }}
+          TF_VAR_cloudflare_account_id: ${{ vars.CLOUDFLARE_ACCOUNT_ID }}
+          TF_VAR_cloudflare_zone_name: ${{ vars.CLOUDFLARE_ZONE_NAME }}
+          TF_VAR_public_hostname: ${{ vars.PUBLIC_HOSTNAME }}
+        run: terraform apply -input=false -auto-approve
