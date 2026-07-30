@@ -11,3 +11,4 @@
 | infra-dev-hardening | new, tasks, archive (design/run/review sin registrar) | 14 | 12237 | 3739887 | 13.1693 | 2026-07-22 | 2026-07-24 |
 | app-deploy-dev | new, design, tasks, run, review, archive | 38176 | 196026 | 30323880 | 24.4177 | 2026-07-24 | 2026-07-29 |
 | ingress-https-dev | new, archive (design/tasks/run/review sin registrar — tracking caído) | 26 | 21236 | 6714997 | 10.5150 | 2026-07-29 | 2026-07-29 |
+| auth-tenancy | new, design, tasks, archive (run/review sin registrar) | 83 | 74257 | 11714127 | 10.0592 | 2026-07-30 | 2026-07-30 |
