@@ -35,6 +35,17 @@ describe("formatBuildVersion (OQ2)", () => {
     expect(formatBuildVersion("   ", "a2f3c1d")).toBeNull();
   });
 
+  it.each(["+", "  +abc123", "++", " + "])(
+    "returns null for %j, whose base is empty even though the string is not",
+    (malformed) => {
+      // The gap the QA panel found: these are non-empty, so the early return misses
+      // them, and the old code returned "" — which `??` does not catch, so the badge
+      // rendered BLANK instead of saying "unknown". The base needs its own check.
+      expect(formatBuildVersion(malformed, "")).toBeNull();
+      expect(formatBuildVersion(malformed, "a2f3c1d")).toBeNull();
+    },
+  );
+
   it("ignores surrounding whitespace in either input", () => {
     expect(formatBuildVersion(" 0.1.0+x.y ", " a2f3c1d ")).toBe(
       "0.1.0+a2f3c1d",
@@ -107,6 +118,12 @@ describe("VersionBadge (R3.1-R3.3, R3.6)", () => {
       "a2f3c1d3f9b2000000000000000000000000000f",
     );
     expect(container.textContent).not.toContain("1234567890");
-    expect(container.innerHTML).not.toContain("42");
+    // `innerHTML`, not `textContent`: a leak into an attribute (an `aria-label` or a
+    // `title`) would not show up in the text. And the PR is asserted as `#42`/`pr=`
+    // rather than a bare "42", which would false-fail the day a real version reads
+    // `0.1.42+…` — precision by accident is not precision (QA panel, finding 3).
+    expect(container.innerHTML).not.toContain("#42");
+    expect(container.innerHTML).not.toContain("pr=");
+    expect(container.innerHTML).not.toContain("BUILD_PR");
   });
 });

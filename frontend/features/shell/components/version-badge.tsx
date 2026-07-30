@@ -29,7 +29,15 @@ export function formatBuildVersion(
 
   // Everything before the `+` is the base; the build metadata after it is replaced by
   // the short SHA. A value with no `+` (the `local` of dev) is already the base.
-  const base = canonical.split("+")[0];
+  const base = canonical.split("+")[0].trim();
+  // The base has to be checked on its own, not just the whole string: `"+"` and
+  // `"  +abc123"` are non-empty yet have an EMPTY base, and returning `""` for them put
+  // a blank badge on screen instead of the localized "unknown" — `??` in the caller only
+  // catches null. The CD guards `VERSION` to `X.Y.Z` before composing, so the real
+  // pipeline cannot produce this, but the function must not depend on its caller being
+  // careful (found by the QA panel).
+  if (!base) return null;
+
   const short = buildCommitShort.trim();
   return short ? `${base}+${short}` : base;
 }
