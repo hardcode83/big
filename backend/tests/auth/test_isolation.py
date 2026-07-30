@@ -10,17 +10,17 @@ business resource to cross. What is proven below is:
   (c) a token naming a tenant that does not exist or is not ACTIVE (R4.5);
   (d) a `tenant_id` supplied in the body, query string or a header being ignored.
 
-The per-endpoint matrix arrives with the first module that has business endpoints
-(`reservations`), which inherits the obligation. `steering/security.md` rule 1 —
-"tests automáticos ... obligatorios en cada módulo nuevo" — is satisfied for the
-surface this change actually introduces, not for one it does not.
+That is the whole of R4.4 that this change's surface can express. The per-endpoint,
+per-role matrix and R4.3's 404-vs-403 are NOT here, and not because they were
+forgotten: they need endpoints that take a resource identifier, and login, refresh,
+logout and me are all self-referential (`NotFoundError` has no production call site
+yet, for the same reason). Both moved to `user-management` in the PR #25 review, where
+they are blocking acceptance criteria — it is the first change with
+`/api/v1/users/{id}` and `tenants/{id}`, and it comes before `reservations`.
 
-R4.3 IS NOT COVERED HERE EITHER, and for the same structural reason: it requires a
-cross-tenant resource reference to answer 404 rather than 403, and no endpoint in this
-change takes a resource identifier — login, refresh, logout and me are all
-self-referential. `NotFoundError` therefore has no production call site yet. That is
-declared in design D15 and inherited by `reservations`; it is deliberately NOT counted
-as met.
+`steering/security.md` rule 1 — "tests automáticos ... obligatorios en cada módulo
+nuevo" — is satisfied for the surface this change actually introduces, not for one it
+does not.
 """
 
 import uuid

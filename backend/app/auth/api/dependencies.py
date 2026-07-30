@@ -173,8 +173,9 @@ async def get_authenticated_request(
         # ASSUMPTION (R4.3): the PRD does not say which status code a cross-tenant
         # reference should get; 404 was chosen over 403 so the answer never reveals that
         # a resource exists. Here that principle shows up as a flat 401: this endpoint
-        # takes no resource identifier, so R4.3's own 404-vs-403 case has no
-        # implementation in this change and is declared unmet in design D15.
+        # takes no resource identifier, so the 404-vs-403 case cannot arise. R4.3 belongs
+        # to `user-management`, the first change with endpoints that take one, where it
+        # is a blocking acceptance criterion (design D15).
         raise InvalidTokenError("Token is not valid")
 
     context = RequestContext(user_id=user.id, tenant_id=user.tenant_id, role=user.role)
