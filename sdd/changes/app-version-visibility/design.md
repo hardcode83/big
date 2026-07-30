@@ -125,7 +125,18 @@ Rejected: registrar cada despliegue en una tabla — es historial de despliegues
 
 **`GET /deployment/version` (frontend, Route Handler)** — devuelve `{"frontend": "<cadena>", "backend": "<cadena>|null"}`. Nada más: sin PR, sin URL de repo, sin `run_id`.
 
-**Variables de entorno** — ninguna nueva en runtime de producción (D10): la identidad se hornea. En build: `APP_VERSION`, `BUILD_COMMIT`, `BUILD_PR`, `BUILT_AT`, `BUILD_RUN_ID`, `BUILD_REF` (backend) y sus equivalentes `NEXT_PUBLIC_*` (frontend). En dev local se declaran explícitamente en `docker-compose.yml` y degradan a local/desconocido.
+**Variables de entorno** — ninguna nueva en runtime de producción (D10): la identidad se hornea. En dev local se declaran explícitamente en `docker-compose.yml` y degradan a local/desconocido.
+
+En el **backend**, un solo grupo, `ENV` en la etapa `prod`: `APP_VERSION`, `BUILD_COMMIT`, `BUILD_PR`, `BUILT_AT`, `BUILD_RUN_ID`, `BUILD_REF`.
+
+En el **frontend hay dos clases**, y la distinción es la que hace cumplible D6 sin romper R1.3 (precisión añadida al implementar la sección 3):
+
+| Clase | Variables | Dónde acaba | Por qué |
+|---|---|---|---|
+| `NEXT_PUBLIC_*` (build-arg en `builder`) | `NEXT_PUBLIC_APP_VERSION`, `NEXT_PUBLIC_BUILD_COMMIT_SHORT` | **Inlineadas en el bundle** → llegan al navegador en todas las superficies | Es lo que pinta el badge, y solo un valor dentro del bundle detecta que el edge sirve JS viejo. Son las dos únicas que D6 admite en el snapshot público |
+| `ENV` planas (etapa `prod`) | `BUILD_COMMIT` (completo), `BUILD_PR`, `BUILT_AT`, `BUILD_RUN_ID`, `BUILD_REF`, `REPO_URL` | Horneadas en la imagen pero **solo legibles por el servidor de Next** (`lib/config/server.ts`) | Alimentan el panel de procedencia. Horneadas (R1.3 se cumple: no son config de compose) pero **fuera del bundle**, así que no llegan al login ni al portal de huésped (D6, R3.6, R4.3) |
+
+Marcar una de las de la segunda clase como `NEXT_PUBLIC_*` sería un fallo de divulgación silencioso: pasaría los tests y metería el número de PR y la URL del repo en el bundle público.
 
 **Labels OCI** en ambas imágenes: `org.opencontainers.image.source`, `.revision`, `.version`, `.created`.
 

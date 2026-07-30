@@ -111,6 +111,22 @@ services:
     environment:
       BACKEND_INTERNAL_URL: http://backend:8000
       NEXT_PUBLIC_APP_ENV: ${NEXT_PUBLIC_APP_ENV:-local}
+      # Identidad de build en dev local (change app-version-visibility, R1.9). Declaradas
+      # una a una porque este servicio NO tiene `env_file` a propósito (el .env lleva
+      # JWT_SECRET_KEY y BOOTSTRAP_*_PASSWORD, que el frontend no debe ver).
+      #
+      # En dev el target es `dev`: corre `npm run dev` y nunca ejecuta `npm run build`, así
+      # que aquí no hay nada horneado y estos valores llegan por entorno. Los defaults dejan
+      # el badge diciendo "local" en vez de fingir una versión desplegada.
+      NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-local}
+      NEXT_PUBLIC_BUILD_COMMIT_SHORT: ${NEXT_PUBLIC_BUILD_COMMIT_SHORT:-}
+      # Server-only (D6): las lee lib/config/server.ts, nunca el bundle.
+      BUILD_COMMIT: ${BUILD_COMMIT:-}
+      BUILD_PR: ${BUILD_PR:-}
+      BUILT_AT: ${BUILT_AT:-}
+      BUILD_RUN_ID: ${BUILD_RUN_ID:-}
+      BUILD_REF: ${BUILD_REF:-}
+      REPO_URL: ${REPO_URL:-}
     volumes:
       - ./frontend:/app
       - frontend_node_modules:/app/node_modules

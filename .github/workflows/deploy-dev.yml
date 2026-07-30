@@ -16,8 +16,68 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.5] ---
+  # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
+  # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (design
+  # D2). Además el PR se extrae en un único sitio auditable.
+  provenance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.compose.outputs.version }}
+      commit: ${{ steps.compose.outputs.commit }}
+      commit_short: ${{ steps.compose.outputs.commit_short }}
+      pr: ${{ steps.compose.outputs.pr }}
+      built_at: ${{ steps.compose.outputs.built_at }}
+      run_id: ${{ steps.compose.outputs.run_id }}
+      ref: ${{ steps.compose.outputs.ref }}
+      repo_url: ${{ steps.compose.outputs.repo_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Componer la identidad de build
+        id: compose
+        run: |
+          set -euo pipefail
+          base="$(tr -d '[:space:]' < VERSION)"
+          if [ -z "$base" ]; then echo "::error::VERSION está vacío o no existe" >&2; exit 1; fi
+          short="${GITHUB_SHA:0:7}"
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+
+          # El PR sale del subject del merge commit (design D3): este repo mergea con merge
+          # commits ("Merge pull request #24 from ..."), así que el dato ya viaja en el
+          # propio commit y no hace falta ni la API de GitHub ni `pull-requests: read`.
+          # Si no hay coincidencia el campo queda VACÍO y el build CONTINÚA (R1.7): un push
+          # directo a `main` es un caso legítimo, no un error. Con `rebase` esto se rompería
+          # en silencio — plan B documentado en docs/app-version-visibility.md.
+          #
+          # Solo se aceptan las DOS formas canónicas, ancladas:
+          #   "Merge pull request #N from ..."  (merge commit, lo que usa este repo)
+          #   "título (#N)"                     (squash, si algún día se cambia la estrategia)
+          # Un `grep -oE '#[0-9]+'` a secas leería "fix: cierra #7" como PR #7 cuando #7 es
+          # un ISSUE, y el badge enlazaría al sitio equivocado — que es peor que no enlazar.
+          subject="$(git log -1 --format=%s)"
+          pr="$(printf '%s' "$subject" | sed -n 's/^Merge pull request #\([0-9]\{1,\}\) .*/\1/p')"
+          if [ -z "$pr" ]; then
+            pr="$(printf '%s' "$subject" | sed -n 's/.*(#\([0-9]\{1,\}\))$/\1/p')"
+          fi
+          if [ -n "$pr" ]; then echo "PR detectado: #$pr"; else echo "sin PR en el subject → push directo"; fi
+
+          {
+            echo "version=${base}+$(date -u +%Y-%m-%d).${short}"
+            echo "commit=${GITHUB_SHA}"
+            echo "commit_short=${short}"
+            echo "pr=${pr}"
+            echo "built_at=${built_at}"
+            echo "run_id=${GITHUB_RUN_ID}"
+            echo "ref=${GITHUB_REF_NAME}"
+            echo "repo_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          } >> "$GITHUB_OUTPUT"
+
   # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
   build-backend:
+    needs: provenance
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,11 +99,28 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
+          # Horneada dentro de la imagen, no inyectada por compose en runtime (R1.2/R1.3):
+          # una variable de compose reporta lo que compose cree, no lo que la imagen es.
+          build-args: |
+            APP_VERSION=${{ needs.provenance.outputs.version }}
+            BUILD_COMMIT=${{ needs.provenance.outputs.commit }}
+            BUILD_PR=${{ needs.provenance.outputs.pr }}
+            BUILT_AT=${{ needs.provenance.outputs.built_at }}
+            BUILD_RUN_ID=${{ needs.provenance.outputs.run_id }}
+            BUILD_REF=${{ needs.provenance.outputs.ref }}
+          # Los mismos valores como labels OCI (R1.4), para que `docker inspect` en la VM y
+          # la página del package en GHCR queden pareados igual que la UI.
+          labels: |
+            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
+            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit }}
+            org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
+            org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:dev
 
   build-frontend:
+    needs: provenance
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,8 +143,32 @@ jobs:
           platforms: linux/arm64
           push: true
           # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
+          #
+          # DOS CLASES a propósito (design D6 + "Data & interfaces"):
+          #   NEXT_PUBLIC_*  → quedan INLINEADAS EN EL BUNDLE, así que llegan al navegador en
+          #                    todas las superficies. Solo las dos que pinta el badge, y son
+          #                    también las únicas que detectan un bundle viejo servido por el
+          #                    edge, porque viajan dentro del propio JS.
+          #   sin prefijo    → horneadas como ENV en la imagen, legibles SOLO por el servidor
+          #                    de Next. Alimentan el panel de procedencia sin meter el número
+          #                    de PR ni la URL del repo en el bundle público (R3.6, R4.3).
+          # Renombrar una de las segundas a NEXT_PUBLIC_* sería una fuga silenciosa: pasaría
+          # los tests y publicaría repo y PR en el login.
           build-args: |
             NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}
+            NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}
+            NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}
+            BUILD_COMMIT=${{ needs.provenance.outputs.commit }}
+            BUILD_PR=${{ needs.provenance.outputs.pr }}
+            BUILT_AT=${{ needs.provenance.outputs.built_at }}
+            BUILD_RUN_ID=${{ needs.provenance.outputs.run_id }}
+            BUILD_REF=${{ needs.provenance.outputs.ref }}
+            REPO_URL=${{ needs.provenance.outputs.repo_url }}
+          labels: |
+            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
+            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit }}
+            org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
+            org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:dev

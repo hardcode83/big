@@ -29,6 +29,14 @@ FROM deps AS builder
 ARG NEXT_PUBLIC_APP_ENV
 ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
 
+# Las dos únicas de la identidad que PUEDEN llegar al navegador (design D6): son lo que
+# pinta el badge, y al viajar dentro del bundle son también lo único capaz de delatar que
+# el edge de Cloudflare está sirviendo JavaScript de un despliegue anterior.
+ARG NEXT_PUBLIC_APP_VERSION=""
+ARG NEXT_PUBLIC_BUILD_COMMIT_SHORT=""
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION} \
+    NEXT_PUBLIC_BUILD_COMMIT_SHORT=${NEXT_PUBLIC_BUILD_COMMIT_SHORT}
+
 COPY . .
 RUN npm run build
 
@@ -39,6 +47,27 @@ ENV NODE_ENV=production
 COPY --from=builder /app/public ./public
 COPY --from=builder /app/.next/standalone ./
 COPY --from=builder /app/.next/static ./.next/static
+
+# Procedencia SIN prefijo NEXT_PUBLIC_, deliberadamente (design D6): horneada en la imagen
+# —así que R1.3 se cumple, no es config de compose— pero legible SOLO por el servidor de
+# Next a través de lib/config/server.ts. Alimenta el panel de procedencia sin que el número
+# de PR ni la URL del repositorio entren en el bundle que recibe el navegador en /login o
+# en el portal de huésped. Renombrar cualquiera de estas a NEXT_PUBLIC_* sería una fuga que
+# ningún test detectaría.
+#
+# Al final de la etapa: cambian en cada commit y no deben invalidar las capas de arriba.
+ARG BUILD_COMMIT=""
+ARG BUILD_PR=""
+ARG BUILT_AT=""
+ARG BUILD_RUN_ID=""
+ARG BUILD_REF=""
+ARG REPO_URL=""
+ENV BUILD_COMMIT=${BUILD_COMMIT} \
+    BUILD_PR=${BUILD_PR} \
+    BUILT_AT=${BUILT_AT} \
+    BUILD_RUN_ID=${BUILD_RUN_ID} \
+    BUILD_REF=${BUILD_REF} \
+    REPO_URL=${REPO_URL}
 
 EXPOSE 3000
 CMD ["node", "server.js"]
