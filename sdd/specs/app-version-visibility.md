@@ -52,7 +52,8 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
 ### El badge en el shell
 
 - WHEN se abre la aplicación, THE SYSTEM SHALL mostrar la versión desplegada en un badge en el
-  pie del shell, en la forma corta `<base>+<sha-corto>`.
+  pie del shell, con la **cadena canónica completa** `<base>+<fecha-build>.<sha-corto>` —la
+  misma que llevan los labels OCI—, sin recortarla.
 - THE SYSTEM SHALL mostrarlo también **sin sesión** (`/login`) y en las apps de campo
   (`/cleaner`, `/tech`): es cuando más falta hace, porque si la aplicación está rota puede que
   no se pueda entrar.
@@ -60,14 +61,39 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
   superficie para personas ajenas a la operación.
 - THE SYSTEM SHALL renderizar el badge **exclusivamente** desde la configuración horneada, sin
   ninguna petición de red, de modo que no pueda fallar ni tardar ni depender del backend.
-- IF la imagen no lleva identidad horneada, THEN THE SYSTEM SHALL mostrar un texto localizado
-  de versión desconocida, y THE SYSTEM SHALL NOT mostrar un badge vacío ni una cadena con
-  forma de versión a medias — incluidos los casos en que la cadena existe pero su base queda
-  vacía (`"+"`, `"  +abc123"`).
+- IF la imagen no lleva identidad horneada **o la identidad no tiene la forma admitida**, THEN
+  THE SYSTEM SHALL mostrar un texto localizado de versión desconocida, y THE SYSTEM SHALL NOT
+  mostrar un badge vacío ni una cadena con forma de versión a medias — incluidos los casos en
+  que la cadena existe pero su base queda vacía (`"+"`, `"  +abc123"`) o su `+` no lleva nada
+  (`"0.1.0+"`). Las dos causas son **indistinguibles en pantalla** a propósito, y se separan
+  desde fuera comparando con `org.opencontainers.image.version` de la imagen.
 - THE SYSTEM SHALL exponer los dos campos añadiéndolos explícitamente a la allowlist de
   `PublicRuntimeConfig`, sin esparcir `process.env`, y THE SYSTEM SHALL NOT incluir en ese
   snapshot la URL del repositorio, el número de Pull Request, el SHA completo, el `run_id` ni
   el `ref`.
+
+### El límite valida la forma de la identidad, no solo el nombre de los campos
+
+- THE SYSTEM SHALL admitir en el snapshot público **únicamente** `<base>` con forma `X.Y.Z`
+  —opcionalmente seguida de `+<fecha-de-calendario-real>.<7 hex>`— o el literal `local`; y para
+  el commit corto **únicamente** 7 caracteres hexadecimales. IF el valor horneado no encaja,
+  THEN THE SYSTEM SHALL rendirlo como cadena vacía, que es el mismo caso que "sin identidad".
+- THE SYSTEM SHALL hacer esa comprobación en `buildPublicRuntimeConfig()` y **no** en el
+  componente que pinta el badge: React serializa el snapshot como prop en el payload RSC del
+  layout raíz, así que un valor no vetado viaja en el HTML de **todas** las superficies —el
+  portal de huésped incluido— por mucho que el badge decida no pintarlo. Validar en el
+  componente solo limpia los píxeles.
+- THE SYSTEM SHALL acotar cada componente por **valor** y no por cantidad de caracteres: el
+  commit a 7 hex exactos (los dígitos decimales son subconjunto del hex, así que un rango
+  `{7,12}` admite un `run_id` de Actions como si fuera un commit), el mes y el día a rangos de
+  calendario reales (`\d{4}-\d{2}-\d{2}` son ocho dígitos libres), y la base a `X.Y.Z` (una
+  clase de caracteres con tope de longitud dejaba pasar `0.1.0-<run_id>` y un prefijo hex de 32
+  caracteres que `git rev-parse` resuelve a un commit). Un tope de longitud limita cuánto de un
+  valor se filtra; no impide que se filtre.
+- WHERE el CD deje de emitir esas formas, THE SYSTEM SHALL degradar a "versión desconocida" en
+  vez de mostrar algo no vetado — falla cerrado. THE SYSTEM SHALL NOT depender de ninguna
+  comprobación automática de esa congruencia: **no existe**, y la entrada de roadmap
+  `build-identity-contract` la cubre.
 - THE SYSTEM SHALL declarar toda string visible del badge en `locales/es/` y `locales/en/`,
   resuelta en servidor y entregada como props — el badge es síncrono, porque un componente
   async anidado en el frame suspende el árbol entero del shell.
@@ -116,8 +142,12 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
   commit que **disparó build**, no al último de `main`: apuntar a un commit de varios merges
   atrás es correcto y no es deriva.
 - THE SYSTEM SHALL documentar que el despliegue pinea por el tag **mutable** `sha-<commit>` y
-  no por dígest, de modo que la forma corta del badge es idéntica para dos builds distintos del
-  mismo commit; solo `org.opencontainers.image.created` los distingue.
+  no por dígest, así que un mismo commit puede construirse más de una vez y dar imágenes
+  distintas con el mismo tag. La fecha del badge **separa builds de días distintos**; THE SYSTEM
+  SHALL NOT pretender que separe dos builds del mismo commit **el mismo día** —la fecha canónica
+  tiene granularidad de día (`%Y-%m-%d`)—, que es justo el caso de un `workflow_dispatch` para
+  recuperar un deploy fallido: solo `org.opencontainers.image.created`, que lleva la hora, los
+  distingue.
 
 ## Key files
 
@@ -126,8 +156,11 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
   build-args del frontend y labels OCI en ambos builds.
 - `frontend/devops/Dockerfile` — `ARG`/`ENV` `NEXT_PUBLIC_*` en la etapa `builder`.
 - `frontend/.dockerignore` — exclusión de `.env*` del contexto de build.
-- `frontend/lib/config/public.ts` — `appVersion` y `buildCommitShort` en la allowlist pública.
-- `frontend/features/shell/components/version-badge.tsx` — `formatBuildVersion` y el badge.
+- `frontend/lib/config/public.ts` — `appVersion` y `buildCommitShort` en la allowlist pública,
+  y los patrones `BAKED_VERSION`/`BAKED_COMMIT_SHORT` que vetan la forma antes de que el valor
+  entre en el snapshot. Es la frontera de divulgación; el badge no decide nada de esto.
+- `frontend/features/shell/components/version-badge.tsx` — `formatBuildVersion` y el badge:
+  solo composición y presentación.
 - `frontend/features/shell/components/shell-footer.tsx`, `shell-frame.tsx` — pie y slot `footer`.
 - `frontend/locales/{es,en}/common.json` — claves `version.*`.
 - `docker-compose.yml` — las dos `NEXT_PUBLIC_*` del servicio `frontend` en dev local.
@@ -135,16 +168,30 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
 
 ## Estado
 
-Desplegado y verificado en `dev` el 2026-07-31 (PR #27, merge `5872022`): el badge muestra
-`0.1.0+5872022` en `/login`, `/dashboard`, `/cleaner` y `/tech`, y está ausente en
-`/guest/<token>`.
+Desplegado en `dev` el 2026-07-31 en dos pasos: `app-version-visibility` (PR #27, merge
+`5872022`) puso el badge con la forma corta, y `app-version-badge-date` (PR #28, merge
+`d30ad7d`) lo pasó a la cadena canónica completa y movió el veto de forma al límite del
+snapshot público.
+
+Verificado que el badge aparece en `/login`, `/dashboard`, `/cleaner` y `/tech` y está ausente
+en `/guest/<token>`. La legibilidad en móvil está **medida**, no supuesta: 181×23 px en una
+línea, sin desbordamiento a 390, 360 ni 320 px de ancho, y 7 px de separación sobre el
+`BottomNavigation` fijo. Y el veto del límite está comprobado end-to-end: con un
+`NEXT_PUBLIC_APP_VERSION` envenenado (SHA de 40 caracteres más `run_id`), ni el HTML de `/login`
+ni el de `/guest/<token>` contienen esos valores, y el snapshot rinde `appVersion: ""`.
 
 **Pendiente de comprobar sobre la VM**: que los labels OCI de las dos imágenes lleven idénticos
 valores. Los valores son idénticos por construcción (un único job `provenance` alimenta ambos
 builds), pero que aterrizaran en las imágenes publicadas no se ha verificado — el token de `gh`
 disponible no tiene `read:packages` y el package es privado.
 
-**Mejora ya identificada**: el badge recorta la fecha de build, decisión que se tomó porque la
-fecha se mostraría en el panel de procedencia; ese panel se retiró al recortar el alcance del
-change, así que hoy la fecha solo es accesible por `docker inspect` o en el código fuente de la
-página. Lo corrige la entrada de roadmap `app-version-badge-date`.
+**Dos huecos conocidos, con entrada de roadmap cada uno.** Ninguno es un defecto de esta
+capacidad; los dos son cosas que hoy nadie comprueba:
+
+- `build-identity-contract` — nada ata los patrones de `frontend/lib/config/public.ts` a lo que
+  el job `provenance` emite de verdad. Ensanchar `${GITHUB_SHA:0:7}`, cambiar el formato de la
+  fecha o subir `VERSION` a algo que no sea `X.Y.Z` deja el badge en "versión desconocida" sin
+  que falle ningún test ni ningún check. Degrada cerrado, no filtra, y por eso no bloqueó.
+- `frontend-ci` — **ningún workflow ejecuta la suite del frontend**, así que los tests que
+  respaldan el badge y el límite solo se verifican en la máquina de quien los corre. En
+  `app-version-badge-date` esto ya costó 27 tests rotos en `main` que nada habría delatado.
