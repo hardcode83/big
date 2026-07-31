@@ -33,5 +33,13 @@
 - [x] 4.2 Backend: **1177 pasados / 35 saltados**, `alembic check` sin operaciones nuevas. No son 1203: los 26 que faltan son exactamente los que el recorte eliminó. `git diff main..HEAD -- backend/` está **vacío**, así que 1177 es la línea base del repo y no una regresión [R1]
 - [x] 4.3 Build de producción con el backend parado: compila, y `.next/server/app` no contiene ninguna ruta `deployment` [R2.3]
 - [x] 4.4 Comprobación manual: badge presente en `/login`, `/dashboard` y `/cleaner`, ausente en `/guest/<token>`, y mostrando `local` en dev — que es la degradación correcta, porque el target `dev` nunca ejecuta `npm run build` [R2.2, R2.6]
-- [ ] 4.5 **BLOQUEADA — requiere un deploy real.** Tras el merge: `docker inspect` de las dos imágenes muestra los cuatro labels con idénticos valores, y la cadena coincide con el badge en `https://autohostai.digitalsec.work` [R1.5]
-- [ ] 4.6 **BLOQUEADA — requiere el PR abierto.** El gate `backend-tests` en verde. El recorte revirtió ese workflow a `main`, así que el riesgo del pineado de `setup-python` desaparece [R1]
+### Verificación posterior al merge — NO son tareas de este change
+
+Las dos comprobaciones que exigen infraestructura viven en `BLOCKED.md` con sus comandos de
+reanudación, no aquí: `tasks.md` recoge lo que el change hace en local, y mantenerlas como
+casillas sin marcar bloquearía `READY_FOR_PR` de forma circular (una de ellas *requiere* el
+PR abierto, y `READY_FOR_PR` es el estado previo a abrirlo). `/sdd:archive` se niega a cerrar
+el change mientras `BLOCKED.md` tenga entradas, que es donde debe estar la exigencia.
+
+- Identidad sobre la VM: `docker inspect` de las dos imágenes tras un deploy real → `BLOCKED.md` §1
+- El gate `backend-tests` en verde en el PR → `BLOCKED.md` §2
