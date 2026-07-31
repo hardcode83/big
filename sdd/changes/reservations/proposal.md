@@ -92,13 +92,17 @@ Acceptance criteria:
    `RESERVATION_UPDATED` cuyo `metadata` registre los campos cambiados.
 3. WHEN una reserva se cancela, THE SYSTEM SHALL persistir un
    `RESERVATION_CANCELLED`.
-4. WHEN una reserva se crea por sincronización PMS o por importación CSV, THE
-   SYSTEM SHALL persistir un `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y
-   sin `actor_user_id`.
-5. WHILE se escribe una mutación de reserva, THE SYSTEM SHALL persistir la
+4. WHEN una reserva se crea por sincronización con el PMS, THE SYSTEM SHALL
+   persistir un `RESERVATION_IMPORTED` con `actor_type` `SYSTEM` y sin
+   `actor_user_id`.
+5. WHEN una reserva se crea por importación CSV, THE SYSTEM SHALL persistir un
+   `RESERVATION_IMPORTED` con `actor_type` `USER` y el `actor_user_id` de quien
+   subió el fichero — la importación manual la ejecuta una persona identificada,
+   no el sistema.
+6. WHILE se escribe una mutación de reserva, THE SYSTEM SHALL persistir la
    reserva y su evento de timeline en una única transacción, de modo que un fallo
    al escribir el evento deje la reserva sin cambiar.
-6. WHEN se construye cualquiera de esos eventos, THE SYSTEM SHALL hacerlo a
+7. WHEN se construye cualquiera de esos eventos, THE SYSTEM SHALL hacerlo a
    través de la fábrica de dominio ya existente, sin duplicar sus validaciones en
    la capa de aplicación.
 
