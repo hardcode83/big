@@ -13,10 +13,10 @@ export interface VersionBadgeLabels {
  * Composes what the badge shows from the canonical build version (OQ2).
  *
  * The canonical string carries the build date — `0.1.0+2026-07-30.a2f3c1d` — because
- * that is what `/version`, the OCI labels and `docker inspect` report. The badge shows
- * the shortened form `0.1.0+a2f3c1d`: with the date it is ~24 characters and competes
- * for room in a phone's chrome, and `steering/frontend.md` is mobile-first. Nothing is
- * lost — the provenance panel shows the build timestamp as its own field.
+ * that is what the OCI labels and `docker inspect` report. The badge shows the shortened
+ * form `0.1.0+a2f3c1d`: with the date it is ~24 characters and competes for room in a
+ * phone's chrome, and `steering/frontend.md` is mobile-first. The full string is still
+ * one `docker inspect` away when the exact build timestamp matters.
  *
  * Exported for testing: the composition rules are the part worth pinning down.
  */

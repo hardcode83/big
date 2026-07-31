@@ -55,7 +55,7 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
-describe("WorkspaceShell version badge (change app-version-visibility, R3.1)", () => {
+describe("WorkspaceShell version badge (change app-version-visibility, R2.1)", () => {
   it("renders the badge, and it is the shell that actually has a fixed bottom nav", async () => {
     // The QA panel found this untested: WorkspaceShell is the ONLY shell that renders
     // BottomNavigation, so it is the only surface where "footer hidden behind the fixed

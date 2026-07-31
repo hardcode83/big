@@ -4,22 +4,5 @@
   "version": {
     "label": "Deployed version",
     "unknown": "unknown version"
-  },
-  "provenance": {
-    "trigger": "Details",
-    "title": "Deployment provenance",
-    "closeLabel": "Close details",
-    "commit": "Commit",
-    "pullRequest": "Pull Request",
-    "prPrefix": "#",
-    "noPullRequest": "direct push, no PR",
-    "builtAt": "Built",
-    "runId": "Actions run",
-    "ref": "Branch",
-    "unknown": "unknown",
-    "frontendVersion": "Frontend",
-    "backendVersion": "Backend",
-    "driftWarning": "Frontend and backend are not running the same version.",
-    "checking": "checking…"
   }
 }

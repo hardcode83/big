@@ -95,34 +95,18 @@ cd frontend && npm test
 ```
 
 El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`):
-comprobaciones de repo (`make ci-checks`), migraciones Alembic sobre un PostgreSQL limpio,
-`alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como services.
-No lleva filtro de rutas a propósito — un check con filtro deja bloqueados los PR que no
-tocan esas rutas. Hoy **no está marcado como obligatorio**: el repositorio es privado en un
-plan sin protección de rama, así que se ejecuta y reporta pero nada impide fusionar con él
-en rojo (ver `sdd/specs/backend-ci.md` §Estado).
+migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
+`downgrade base`, con Postgres y Redis como services. No lleva filtro de rutas a propósito
+— un check con filtro deja bloqueados los PR que no tocan esas rutas. Hoy **no está marcado
+como obligatorio**: el repositorio es privado en un plan sin protección de rama, así que se
+ejecuta y reporta pero nada impide fusionar con él en rojo (ver `sdd/specs/backend-ci.md`
+§Estado).
 
-Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), y en el
-workspace el botón "Detalles" compara la versión del frontend con la del backend y avisa si
-no coinciden — así no hace falta entrar en la VM para saber qué está corriendo ni para
-confirmar un rollback. Los enlaces al PR y al commit están retenidos mientras el frontend no
-tenga autenticación, porque el HTML de esas páginas es público. Cómo se opera, y las tres cosas que confunden si no se saben:
+Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), en el workspace,
+las apps de campo y también en `/login` sin sesión — así no hace falta entrar en la VM para
+saber qué está corriendo. La versión base vive en `VERSION` (raíz) y el CD la compone con la
+fecha de build y el commit corto. Cómo se opera:
 [`docs/app-version-visibility.md`](docs/app-version-visibility.md).
-
-`make ci-checks` agrupa las comprobaciones que no pertenecen a la suite de ningún
-componente, y **corren en el host, no en un contenedor**: `backend` y `frontend` montan solo
-su propio directorio, así que desde dentro no ven la raíz del repo.
-
-- `make version-check` — la versión base del producto vive en `VERSION` (raíz); esto
-  comprueba que `backend/pyproject.toml` y `frontend/package.json` no han divergido de ella.
-- `make pr-extract-check` — la extracción del número de PR del subject del commit
-  (`.github/scripts/extract-pr.sh`, lo que sostiene el pareo versión↔PR del despliegue) no
-  ha regresado: solo debe reconocer `Merge pull request #N …` y `título (#N)`, nunca una
-  mención suelta a un issue.
-
-Cada ejecución de la suite crea su propia base de datos (`<db>_test_<pid>`) y la borra al
-terminar, así que dos `pytest` simultáneos no se pisan. `make db-clean-test` barre las que
-deje atrás una ejecución interrumpida.
 
 ### Verificación del frontend
 

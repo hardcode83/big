@@ -142,28 +142,18 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
 
-**Cómo confirmar que el rollback surtió efecto, sin entrar en la VM** (change `app-version-visibility`). Antes, la única forma era leer `IMAGE_TAG` del `.env` por túnel SSH. Ahora hay tres vías, de más barata a más profunda:
+**Cómo confirmar que el rollback surtió efecto, sin entrar en la VM** (change
+`app-version-visibility`). Antes, la única forma era leer `IMAGE_TAG` del `.env` por túnel
+SSH. Ahora basta con abrir la app: el badge del pie muestra `<base>+<sha-corto>` de lo que
+está corriendo. Desde la VM, la identidad que lleva la imagen dentro:
 
 ```bash
-# 1. Desde fuera, sin credenciales: la cadena de versión que sirve el backend.
-curl -s https://autohostai.digitalsec.work/deployment/version
-# → {"frontend":"0.1.0+2026-07-30.a2f3c1d","backend":"0.1.0+2026-07-30.a2f3c1d"}
-
-# 2. Abrir la app: el badge del pie muestra `<base>+<sha-corto>`. En el workspace,
-#    "Detalles" abre el panel con las dos versiones, el SHA corto y la fecha de build.
-#    Los ENLACES al PR/commit/run están retenidos mientras el frontend no tenga
-#    autenticación (serían públicos); para llegar al PR desde el SHA corto:
-#      gh pr list --search <sha-corto> --state all
-#    El motivo, en docs/app-version-visibility.md.
-
-# 3. Desde la VM, la identidad que lleva la imagen dentro (no lo que compose cree):
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
   --format '{{json .Config.Labels}}'
 ```
 
-Las dos versiones deben coincidir. **Si no coinciden**, el panel lo avisa: significa que backend y frontend corren imágenes distintas — típicamente un `restart` a mano o un `pull` del tag móvil `dev`. Se arregla re-lanzando el deploy del commit deseado, que vuelve a pinear los dos al mismo `sha-`.
-
-Y al revés: si el badge sigue mostrando la versión **anterior** después de un deploy verde, el problema no es el deploy — mira la tabla de §7.
+Si el badge sigue mostrando la versión **anterior** después de un deploy verde, el problema
+no es el deploy — mira la tabla de §7.
 
 **Si el `migrate` falla por el índice único de emails.** La migración `e1eed2e039ee` crea un índice **único** sobre `lower(email)` en `users` — global, no por tenant (ADR 0005) — y retira la constraint `UNIQUE(tenant_id, email)`. Si la base ya tuviera la misma dirección en dos tenants, o dos variantes de mayúsculas en cualquier sitio, el `migrate` aborta (correctamente: `restart: "no"`, y `backend`/`worker` no arrancan porque dependen de `service_completed_successfully`). El rollback por SHA de arriba **no sirve**, porque el problema son los datos, no el código: el siguiente deploy hacia delante volvería a fallar igual. Hay que limpiar primero:
 
@@ -279,10 +269,8 @@ Interpretación rápida:
 | Túnel **healthy** pero HTTPS da **502** | el origen no responde: revisar `frontend` (`docker compose ps`) |
 | HTTPS da **404** en vez de la app | el hostname no casa con la regla de ingress y cae en la catch-all; revisar `PUBLIC_HOSTNAME` vs. el `hostname` del `_config` |
 | **Aviso de certificado** en el navegador | el hostname tiene más de una etiqueta bajo el apex → fuera del Universal SSL gratuito (la `precondition` de Terraform debería haberlo impedido) |
-| El **badge del pie** muestra una versión anterior a la que acabas de desplegar | El edge está sirviendo una **página** cacheada. Compara con `curl -s https://autohostai.digitalsec.work/deployment/version`: si ahí sale la nueva y en el navegador la vieja, es caché del edge, no el deploy. Purga la caché de Cloudflare o prueba en incógnito. **Ojo al alcance**: el badge se renderiza en servidor, así que delata una página cacheada pero **no** chunks JS antiguos servidos con HTML fresco — para ese caso hay que mirar los nombres de fichero en la pestaña Network |
+| El **badge del pie** muestra una versión anterior a la que acabas de desplegar | El edge está sirviendo una **página** cacheada. Compara con los labels OCI de la imagen desplegada (`docker inspect`): si la imagen es la nueva y el navegador muestra la vieja, es caché del edge, no el deploy. Purga la caché de Cloudflare o prueba en incógnito. **Ojo al alcance**: el badge se renderiza en servidor, así que delata una página cacheada pero **no** chunks JS antiguos servidos con HTML fresco — para ese caso hay que mirar los nombres de fichero en la pestaña Network |
 | El badge muestra `versión desconocida` en el entorno desplegado | La imagen se construyó sin los build-args de identidad. En dev local es lo normal y correcto (el target `dev` no ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build — revisa sus `outputs` en el run de Actions |
-| El panel avisa de **deriva** entre frontend y backend | Corren imágenes distintas: casi siempre un `restart` a mano o un `pull` del tag móvil `dev`. Re-lanza el deploy del commit deseado (§6.4) para volver a pinear los dos al mismo `sha-` |
-| El panel dice **`push directo, sin PR`** | No es un error: ese commit llegó a `main` sin Pull Request. La extracción solo reconoce `Merge pull request #N …` y `título (#N)` a propósito, para no confundir un número de issue con uno de PR (ver `docs/app-version-visibility.md`) |
 
 ### 7.3 Rotar el secreto del túnel
 

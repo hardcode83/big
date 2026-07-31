@@ -16,22 +16,17 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.5] ---
-  # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
-  # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (design
-  # D2). Además el PR se extrae en un único sitio auditable.
+  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.4] ---
+  # Un job propio, no un step en cada build: R1.4 exige que las dos imágenes lleven
+  # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (D2).
   provenance:
     runs-on: ubuntu-latest
     permissions:
       contents: read
     outputs:
       version: ${{ steps.compose.outputs.version }}
-      commit: ${{ steps.compose.outputs.commit }}
       commit_short: ${{ steps.compose.outputs.commit_short }}
-      pr: ${{ steps.compose.outputs.pr }}
       built_at: ${{ steps.compose.outputs.built_at }}
-      run_id: ${{ steps.compose.outputs.run_id }}
-      ref: ${{ steps.compose.outputs.ref }}
       repo_url: ${{ steps.compose.outputs.repo_url }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
@@ -40,52 +35,22 @@ jobs:
         id: compose
         run: |
           set -euo pipefail
-          # Comprobar la existencia ANTES de leer: con `set -e`, un `$(... < VERSION)` sobre
-          # un fichero ausente aborta el script en la propia redirección, así que el chequeo
-          # de "vacío" de abajo nunca se alcanzaba y el log mostraba el error crudo del shell
-          # en vez de este mensaje (hallazgo del panel de CI/CD).
           if [ ! -f VERSION ]; then
             echo "::error::no existe el fichero VERSION en la raíz del repo" >&2; exit 1
           fi
           base="$(tr -d '[:space:]' < VERSION)"
           if [ -z "$base" ]; then echo "::error::VERSION está vacío" >&2; exit 1; fi
-          # Validar el formato, no solo que no esté vacío: `tr -d '[:space:]'` fusionaría un
-          # VERSION de dos líneas en "0.1.00.2.0" sin quejarse, y esa cadena acabaría en las
-          # dos imágenes y en los labels OCI (hallazgo del panel de QA).
           if ! printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
             echo "::error::VERSION no tiene forma X.Y.Z (leído: '$base')" >&2; exit 1
           fi
-          short="${GITHUB_SHA:0:7}"
-          # UNA sola lectura del reloj, y la fecha de la cadena de versión se deriva de ella.
-          # Con dos invocaciones de `date`, un build que cruzase la medianoche UTC podía dejar
-          # la fecha de `version` (y del label .version) un día por delante de `built_at` (y
-          # del label .created) — incoherencia dentro del mismo bloque de procedencia.
+          # UNA sola lectura del reloj: con dos invocaciones de `date`, un build que
+          # cruzase la medianoche UTC dejaría la fecha de la versión un día por delante
+          # del label `.created`.
           built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          build_date="${built_at%%T*}"
-
-          # El PR sale del subject del merge commit (design D3): este repo mergea con merge
-          # commits ("Merge pull request #24 from ..."), así que el dato ya viaja en el
-          # propio commit y no hace falta ni la API de GitHub ni `pull-requests: read`.
-          # Si no hay coincidencia el campo queda VACÍO y el build CONTINÚA (R1.7): un push
-          # directo a `main` es un caso legítimo, no un error. Con `rebase` esto se rompería
-          # en silencio — plan B documentado en docs/app-version-visibility.md.
-          #
-          # La lógica vive en .github/scripts/extract-pr.sh, no aquí, para que tenga test de
-          # regresión (`--self-test`, que corre en el gate de backend-tests). Embebida en el
-          # YAML no había forma de protegerla: aflojar el ancla del `sed` reintroduciría en
-          # silencio el falso positivo de leer un ISSUE como PR (hallazgo del panel de QA).
-          subject="$(git log -1 --format=%s)"
-          pr="$(.github/scripts/extract-pr.sh "$subject")"
-          if [ -n "$pr" ]; then echo "PR detectado: #$pr"; else echo "sin PR en el subject → push directo"; fi
-
           {
-            echo "version=${base}+${build_date}.${short}"
-            echo "commit=${GITHUB_SHA}"
-            echo "commit_short=${short}"
-            echo "pr=${pr}"
+            echo "version=${base}+${built_at%%T*}.${GITHUB_SHA:0:7}"
+            echo "commit_short=${GITHUB_SHA:0:7}"
             echo "built_at=${built_at}"
-            echo "run_id=${GITHUB_RUN_ID}"
-            echo "ref=${GITHUB_REF_NAME}"
             echo "repo_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
           } >> "$GITHUB_OUTPUT"
 
@@ -113,20 +78,11 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
-          # Horneada dentro de la imagen, no inyectada por compose en runtime (R1.2/R1.3):
-          # una variable de compose reporta lo que compose cree, no lo que la imagen es.
-          build-args: |
-            APP_VERSION=${{ needs.provenance.outputs.version }}
-            BUILD_COMMIT=${{ needs.provenance.outputs.commit }}
-            BUILD_PR=${{ needs.provenance.outputs.pr }}
-            BUILT_AT=${{ needs.provenance.outputs.built_at }}
-            BUILD_RUN_ID=${{ needs.provenance.outputs.run_id }}
-            BUILD_REF=${{ needs.provenance.outputs.ref }}
-          # Los mismos valores como labels OCI (R1.4), para que `docker inspect` en la VM y
-          # la página del package en GHCR queden pareados igual que la UI.
+          # Labels OCI (R1.4): la identidad de la imagen legible con `docker inspect` en la
+          # VM y en la página del package de GHCR, sin variables de runtime.
           labels: |
             org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
-            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
             org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
@@ -158,29 +114,15 @@ jobs:
           push: true
           # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
           #
-          # DOS CLASES a propósito (design D6 + "Data & interfaces"):
-          #   NEXT_PUBLIC_*  → quedan INLINEADAS EN EL BUNDLE, así que llegan al navegador en
-          #                    todas las superficies. Solo las dos que pinta el badge, y son
-          #                    también las únicas que detectan un bundle viejo servido por el
-          #                    edge, porque viajan dentro del propio JS.
-          #   sin prefijo    → horneadas como ENV en la imagen, legibles SOLO por el servidor
-          #                    de Next. Alimentan el panel de procedencia sin meter el número
-          #                    de PR ni la URL del repo en el bundle público (R3.6, R4.3).
-          # Renombrar una de las segundas a NEXT_PUBLIC_* sería una fuga silenciosa: pasaría
-          # los tests y publicaría repo y PR en el login.
+          # Solo las dos que pinta el badge. Son públicas por decisión: el snapshot de
+          # `PublicRuntimeConfig` cruza al navegador en todas las superficies.
           build-args: |
             NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}
             NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}
             NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}
-            BUILD_COMMIT=${{ needs.provenance.outputs.commit }}
-            BUILD_PR=${{ needs.provenance.outputs.pr }}
-            BUILT_AT=${{ needs.provenance.outputs.built_at }}
-            BUILD_RUN_ID=${{ needs.provenance.outputs.run_id }}
-            BUILD_REF=${{ needs.provenance.outputs.ref }}
-            REPO_URL=${{ needs.provenance.outputs.repo_url }}
           labels: |
             org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
-            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit }}
+            org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
             org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |

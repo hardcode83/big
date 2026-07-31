@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from pydantic import Field, field_validator, model_validator
+from pydantic import Field, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
@@ -45,20 +45,6 @@ class Settings(BaseSettings):
     # currently fronts the API, so an X-Forwarded-For would be caller-supplied.
     trusted_client_ip_header: str = ""
 
-    # Build identity, baked into the image by the CD as ENV (change
-    # app-version-visibility, design D4). Every field has a default ON PURPOSE — the
-    # opposite of jwt_secret_key, which is required so the app refuses to boot without
-    # it. `settings = Settings()` runs at import time, so a required field here would
-    # turn an image built without build-args (a local `docker compose build`, a
-    # hand-built one) into a ValidationError before the app can serve a single request.
-    # Knowing which version is deployed must never be able to prevent deploying.
-    app_version: str = ""
-    build_commit: str = ""
-    build_pr: int | None = None
-    built_at: str = ""
-    build_run_id: str = ""
-    build_ref: str = ""
-
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""
@@ -67,36 +53,6 @@ class Settings(BaseSettings):
     bootstrap_manager_name: str = ""
     bootstrap_manager_email: str = ""
     bootstrap_manager_password: str = ""
-
-    @field_validator("build_pr", mode="before")
-    @classmethod
-    def _unparseable_build_pr_is_none(cls, value: object) -> object:
-        """Anything that is not a plain positive integer becomes None, never an error.
-
-        The coercion is TOTAL on purpose. `settings = Settings()` runs at import time, so
-        a ValidationError on this field means the image does not boot at all — the exact
-        failure R2.10 forbids ("la versión nunca debe poder impedir el arranque"), and
-        losing the whole deployment is a far worse outcome than losing one metadata field.
-
-        The value is composed outside this module (the `#(\\d+)` extraction lives in
-        deploy-dev.yml, design D3) and the Dockerfile always defines `ENV BUILD_PR`, so
-        every unexpected shape has to degrade rather than kill: an empty string (a direct
-        push to main with no PR, R1.7), a literal "unknown" — one of the two renderings
-        R2.6 sanctions — or anything malformed like "#42" or "42a".
-
-        The guard is the parse ITSELF, not a predicate about it. `str.isdigit()` was the
-        first attempt and it is not equivalent: it returns True for Unicode `No`-category
-        characters such as "²" or "₁" that `int()` then rejects, so the validator raised
-        from inside and the image still failed to boot anyway. A predicate that does not
-        imply parseability cannot make a coercion total (found by the security panel).
-        """
-        try:
-            parsed = int(str(value).strip())
-        except (TypeError, ValueError):
-            return None
-        # A Pull Request number is positive; 0 and negatives are not PRs, so they mean
-        # "no PR" rather than a number worth reporting.
-        return parsed if parsed > 0 else None
 
     @model_validator(mode="after")
     def _reject_whitespace_jwt_secret(self) -> "Settings":
