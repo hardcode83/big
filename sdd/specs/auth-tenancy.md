@@ -131,8 +131,11 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
 ### Autorización por rol, denegando por defecto
 
 - THE SYSTEM SHALL materializar la política de PRD §6 como un enum `Permission` y un mapa
-  de rol a permisos en `app/auth/domain/policy.py`, con solo los permisos que esta
-  capacidad usa.
+  de rol a permisos en `app/auth/domain/policy.py`, sin permisos especulativos: cada
+  capacidad añade los que sus endpoints declaran. Además de los dos de autoservicio
+  (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`), que PRD §6 concede a todo rol que puede
+  autenticarse, el catálogo contiene hoy los que añadió `reservations`
+  (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), diferenciados por rol.
 - WHEN un usuario autenticado invoca un endpoint que exige un permiso que su rol no tiene,
   THE SYSTEM SHALL responder `403` con `{"error": {"code": "FORBIDDEN", ...}}`.
 - THE SYSTEM SHALL declarar el permiso exigido en cada ruta mediante la dependencia
@@ -180,9 +183,11 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
   la matriz completa de autorización por endpoint de negocio y por rol **no** pertenecen a
   esta capacidad. Ninguno de sus cuatro endpoints recibe un identificador de recurso —
   `login`, `refresh`, `logout` y `me` son autorreferenciales—, así que no son verificables
-  aquí sin inventar un endpoint de negocio. Son criterios de aceptación bloqueantes de
-  `user-management`, la primera capacidad con endpoints que reciben identificadores
-  tenant-scoped.
+  aquí sin inventar un endpoint de negocio. Cada capacidad con endpoints de negocio
+  demuestra esos dos criterios sobre **sus** endpoints; la primera en hacerlo fue
+  `reservations` (ver `specs/reservations.md`), no `user-management` como se anotó aquí
+  cuando se archivó esta capacidad: el orden real de ejecución los invirtió. Siguen siendo
+  criterios bloqueantes de `user-management` para los suyos.
 
 ### Protección de los endpoints de autenticación
 
