@@ -14,10 +14,12 @@ Antes, saber qué estaba desplegado exigía abrir un túnel SSH a la VM y leer `
 **Abriendo la app.** El pie de página muestra:
 
 ```
-0.1.0+a2f3c1d
+0.1.0+2026-07-31.5872022
 ```
 
-`0.1.0` es la base (el fichero `VERSION` de la raíz) y `a2f3c1d` el commit corto. Aparece en
+`0.1.0` es la base (el fichero `VERSION` de la raíz), `2026-07-31` la fecha de build y
+`5872022` el commit corto — la **misma** cadena que llevan los labels OCI de las imágenes, sin
+recortar. Aparece en
 el workspace, en las apps de campo y **también en `/login`, sin sesión** — que es justo
 cuando más falta hace, porque si la app está rota puede que no puedas entrar. **No** se
 pinta en el portal de huésped: la versión no le dice nada a un huésped.
@@ -34,19 +36,27 @@ pinta en el portal de huésped: la versión no le dice nada a un huésped.
 ```bash
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
   --format '{{json .Config.Labels}}'
-# org.opencontainers.image.version  → 0.1.0+2026-07-30.a2f3c1d  (con la fecha de build)
+# org.opencontainers.image.version  → 0.1.0+2026-07-30.a2f3c1d  (lo mismo que el badge)
 # org.opencontainers.image.revision → el SHA completo
-# org.opencontainers.image.created  → cuándo se construyó
+# org.opencontainers.image.created  → cuándo se construyó, con hora
 ```
+
+El label `.version` y el badge dicen ahora **exactamente lo mismo**, así que comparar la
+pantalla con la VM es comparar dos cadenas idénticas. Lo que solo está en la VM es el SHA
+completo y la **hora** del build.
 
 Las dos imágenes de un mismo despliegue llevan la **misma** cadena: la calcula un único job
 del CD y la consumen los dos builds, así que no pueden desincronizarse.
 
 > **Un matiz si usas el badge para afirmar "esta imagen concreta".** El despliegue pinea por
-> el tag `sha-<commit>`, que es mutable, no por dígest. Y la forma corta del badge
-> (`<base>+<sha>`) es **idéntica para dos builds distintos del mismo commit** — solo la
-> cadena completa de los labels OCI lleva la fecha de build que los distingue. Para
-> identificar una imagen sin ambigüedad, mira `org.opencontainers.image.created`.
+> el tag `sha-<commit>`, que es mutable, no por dígest, así que un mismo commit puede
+> construirse más de una vez y producir imágenes distintas con el mismo tag. El badge lleva
+> la fecha, así que **separa builds de días distintos**; lo que no separa son **dos builds
+> del mismo commit el mismo día** — y ese es justo el caso frecuente, porque un
+> `workflow_dispatch` para recuperar un deploy fallido se lanza el mismo día. La fecha
+> canónica tiene granularidad de día (`%Y-%m-%d`); la hora solo está en
+> `org.opencontainers.image.created`. Para identificar una imagen sin ambigüedad, sigue
+> siendo ese label el que hay que mirar.
 
 ## Para parear con un PR
 
@@ -76,6 +86,25 @@ El badge se renderiza en el servidor, así que su valor viaja en el HTML. Si el 
 una **página** antigua, el badge la delata. Si sirve **JavaScript** antiguo con HTML fresco,
 no: el badge vendría del HTML nuevo. Para ese caso hay que mirar los nombres de fichero en
 la pestaña Network del navegador.
+
+### Si el badge dice "versión desconocida"
+
+Puede significar dos cosas distintas, y conviene no confundirlas.
+
+La imagen **no lleva identidad horneada**: en dev local es lo normal (el target `dev` nunca
+ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build.
+
+O la lleva pero **el frontend la ha rechazado**. La configuración pública solo admite
+`X.Y.Z+YYYY-MM-DD.<7 hex>` —o el literal `local`— y el commit corto solo 7 caracteres hex;
+cualquier otra cosa cae a vacío. Es deliberado: esa cadena viaja en el HTML de **todas** las
+superficies, así que el límite prefiere no mostrar nada antes que mostrar algo sin vetar. Se
+dispara si alguien ensancha `${GITHUB_SHA:0:7}`, cambia el formato de la fecha, o `VERSION`
+deja de tener forma `X.Y.Z`.
+
+Para separarlas, mira el label de la imagen: si `org.opencontainers.image.version` está
+**vacío** es el primer caso; si lleva una cadena y el badge sigue diciendo "desconocida" es el
+segundo, y hay que alinear el patrón de `frontend/lib/config/public.ts` con lo que el CD
+compone —en el mismo commit, porque hoy **nada detecta esa deriva**—.
 
 ## Cómo se mantiene la versión base
 

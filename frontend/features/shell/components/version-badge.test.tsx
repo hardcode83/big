@@ -12,21 +12,41 @@ const LABELS = {
 } as const;
 
 describe("formatBuildVersion", () => {
-  it("shortens the canonical string to base + short sha", () => {
-    // The canonical form keeps the build date because the OCI labels report it; the
-    // badge drops it to stay readable on a phone.
+  it("shows the canonical string whole, build date included", () => {
+    // This is the production shape: the CD bakes the canonical string AND the short sha,
+    // so the assertion also pins that the sha is not appended a second time at the end.
     expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "a2f3c1d")).toBe(
-      "0.1.0+a2f3c1d",
+      "0.1.0+2026-07-30.a2f3c1d",
     );
   });
 
-  it("falls back to the base alone when no short sha was baked", () => {
-    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "")).toBe("0.1.0");
+  it("does not need the short sha when the canonical string carries metadata", () => {
+    // It used to compose `base + short sha` and therefore depended on the second argument;
+    // now the date-bearing string is shown as-is and the sha inside it is enough.
+    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "")).toBe(
+      "0.1.0+2026-07-30.a2f3c1d",
+    );
   });
 
   it("handles a value with no build metadata, like the `local` of dev", () => {
     expect(formatBuildVersion("local", "")).toBe("local");
   });
+
+  it("appends the short sha only when there is no metadata to show", () => {
+    // The remaining job of the second argument: `local` is not an identity, so a baked
+    // sha is the only thing that distinguishes one dev image from another.
+    expect(formatBuildVersion("local", "a2f3c1d")).toBe("local+a2f3c1d");
+  });
+
+  it.each(["0.1.0+", "0.1.0++", "0.1.0+   "])(
+    "treats %j as having no metadata, since its `+` carries nothing",
+    (empty) => {
+      // Mirror image of the empty-base guard: showing `0.1.0+` would be the half-formed
+      // version string the degradation rules forbid, so it degrades like `local` does.
+      expect(formatBuildVersion(empty, "")).toBe("0.1.0");
+      expect(formatBuildVersion(empty, "a2f3c1d")).toBe("0.1.0+a2f3c1d");
+    },
+  );
 
   it("returns null when nothing was baked, so the caller can localize it", () => {
     // Returning "" would put an empty badge on screen; null lets the component choose
@@ -47,8 +67,20 @@ describe("formatBuildVersion", () => {
   );
 
   it("ignores surrounding whitespace in either input", () => {
-    expect(formatBuildVersion(" 0.1.0+x.y ", " a2f3c1d ")).toBe(
-      "0.1.0+a2f3c1d",
+    // Two assertions because each input's trim shows up on a different branch: the first on
+    // the canonical path, the second on the fallback where the baked sha is what gets used.
+    expect(formatBuildVersion(" 0.1.0+2026-07-30.a2f3c1d ", "")).toBe(
+      "0.1.0+2026-07-30.a2f3c1d",
+    );
+    expect(formatBuildVersion(" local ", " a2f3c1d ")).toBe("local+a2f3c1d");
+  });
+
+  it("keeps metadata that itself contains a `+`, instead of dropping the tail", () => {
+    // `rest.join("+")`, not `rest[0]`. Whether such a string is admissible at all is the
+    // boundary's call (`lib/config/public.test.tsx` — it is not, and gets dropped to `""`);
+    // this only pins that the composition here loses nothing.
+    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d+dirty", "")).toBe(
+      "0.1.0+2026-07-30.a2f3c1d+dirty",
     );
   });
 });
@@ -69,14 +101,14 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
     return render(<VersionBadge labels={LABELS} />);
   }
 
-  it("renders the shortened version from the baked snapshot", () => {
+  it("renders the whole canonical version from the baked snapshot", () => {
     process.env.NEXT_PUBLIC_APP_VERSION = "0.1.0+2026-07-30.a2f3c1d";
     process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT = "a2f3c1d";
 
     renderBadge();
 
     expect(screen.getByTestId("version-badge")).toHaveTextContent(
-      "0.1.0+a2f3c1d",
+      "0.1.0+2026-07-30.a2f3c1d",
     );
   });
 
@@ -95,7 +127,7 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
     renderBadge();
 
     expect(
-      screen.getByLabelText("Versión desplegada: 0.1.0+a2f3c1d"),
+      screen.getByLabelText("Versión desplegada: 0.1.0+2026-07-30.a2f3c1d"),
     ).toBeInTheDocument();
   });
 
@@ -130,5 +162,29 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
     expect(container.innerHTML).not.toContain("#42");
     expect(container.innerHTML).not.toContain("pr=");
     expect(container.innerHTML).not.toContain("BUILD_PR");
+  });
+
+  it("shows the localized unknown text when the boundary rejected the baked values", () => {
+    // The gap the security panel found in the guard above: it plants sensitive values in env
+    // vars the component NEVER reads, so it asserts against a vector this change removed and
+    // is blind to the one it created — a widened `NEXT_PUBLIC_APP_VERSION`. The refusal now
+    // lives in `buildPublicRuntimeConfig()`, which is the layer the value actually has to
+    // pass through to reach the page source (see `lib/config/public.test.tsx`). What this
+    // asserts is the consequence the operator sees: a rejected identity is indistinguishable
+    // from no identity, and neither leaves a blank badge.
+    process.env.NEXT_PUBLIC_APP_VERSION =
+      "0.1.0+2026-07-30.a2f3c1d3f9b2000000000000000000000000000f.1234567890";
+    process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT =
+      "a2f3c1d3f9b2000000000000000000000000000f";
+
+    const { container } = renderBadge();
+
+    expect(container.innerHTML).not.toContain(
+      "a2f3c1d3f9b2000000000000000000000000000f",
+    );
+    expect(container.innerHTML).not.toContain("1234567890");
+    expect(screen.getByTestId("version-badge")).toHaveTextContent(
+      "versión desconocida",
+    );
   });
 });

@@ -102,10 +102,11 @@ como obligatorio**: el repositorio es privado en un plan sin protección de rama
 ejecuta y reporta pero nada impide fusionar con él en rojo (ver `sdd/specs/backend-ci.md`
 §Estado).
 
-Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), en el workspace,
-las apps de campo y también en `/login` sin sesión — así no hace falta entrar en la VM para
-saber qué está corriendo. La versión base vive en `VERSION` (raíz) y el CD la compone con la
-fecha de build y el commit corto. Cómo se opera:
+Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+2026-07-31.5872022`), en el
+workspace, las apps de campo y también en `/login` sin sesión — así no hace falta entrar en la
+VM para saber qué está corriendo. La versión base vive en `VERSION` (raíz) y el CD la compone
+con la fecha de build y el commit corto; el pie muestra esa cadena completa, la misma que
+llevan los labels OCI de las imágenes. Cómo se opera:
 [`docs/app-version-visibility.md`](docs/app-version-visibility.md).
 
 ### Verificación del frontend

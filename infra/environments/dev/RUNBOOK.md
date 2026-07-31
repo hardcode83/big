@@ -144,8 +144,13 @@ El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, 
 
 **Cómo confirmar que el rollback surtió efecto, sin entrar en la VM** (change
 `app-version-visibility`). Antes, la única forma era leer `IMAGE_TAG` del `.env` por túnel
-SSH. Ahora basta con abrir la app: el badge del pie muestra `<base>+<sha-corto>` de lo que
-está corriendo. Desde la VM, la identidad que lleva la imagen dentro:
+SSH. Ahora basta con abrir la app: el badge del pie muestra la cadena canónica completa
+`<base>+<fecha-build>.<sha-corto>` (p. ej. `0.1.0+2026-07-31.5872022`) de lo que está
+corriendo — la **misma** que el label `org.opencontainers.image.version` de la imagen, así que
+comparar pantalla y VM es comparar dos cadenas idénticas. Ojo: la fecha tiene granularidad de
+día, así que dos builds del mismo commit **el mismo día** se ven iguales en el badge; para
+distinguirlos hace falta `org.opencontainers.image.created`, que lleva la hora. Desde la VM,
+la identidad que lleva la imagen dentro:
 
 ```bash
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
@@ -270,7 +275,7 @@ Interpretación rápida:
 | HTTPS da **404** en vez de la app | el hostname no casa con la regla de ingress y cae en la catch-all; revisar `PUBLIC_HOSTNAME` vs. el `hostname` del `_config` |
 | **Aviso de certificado** en el navegador | el hostname tiene más de una etiqueta bajo el apex → fuera del Universal SSL gratuito (la `precondition` de Terraform debería haberlo impedido) |
 | El **badge del pie** muestra una versión anterior a la que acabas de desplegar | El edge está sirviendo una **página** cacheada. Compara con los labels OCI de la imagen desplegada (`docker inspect`): si la imagen es la nueva y el navegador muestra la vieja, es caché del edge, no el deploy. Purga la caché de Cloudflare o prueba en incógnito. **Ojo al alcance**: el badge se renderiza en servidor, así que delata una página cacheada pero **no** chunks JS antiguos servidos con HTML fresco — para ese caso hay que mirar los nombres de fichero en la pestaña Network |
-| El badge muestra `versión desconocida` en el entorno desplegado | La imagen se construyó sin los build-args de identidad. En dev local es lo normal y correcto (el target `dev` no ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build — revisa sus `outputs` en el run de Actions |
+| El badge muestra `versión desconocida` en el entorno desplegado | **Dos causas distintas, y se distinguen mirando la imagen.** (1) *No se horneó identidad*: en dev local es lo normal y correcto (el target `dev` no ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build — revisa sus `outputs` en el run de Actions. (2) *Se horneó pero el frontend la rechazó por no tener la forma esperada*: el snapshot público solo admite `X.Y.Z+YYYY-MM-DD.<7 hex>` (o `local`) y el commit corto solo 7 caracteres hex, y cae a vacío con cualquier otra cosa — a propósito, porque ese valor viaja en el HTML de todas las superficies. Ocurre si alguien ensancha `${GITHUB_SHA:0:7}`, cambia el formato de la fecha o `VERSION` deja de ser `X.Y.Z`. **Cómo separarlas**: `docker inspect ... --format '{{json .Config.Labels}}'` y mira `org.opencontainers.image.version`. Si el label está **vacío**, es la causa 1; si lleva una cadena pero el badge dice "desconocida", es la causa 2 — compara esa cadena con las formas de arriba y corrige el patrón de `frontend/lib/config/public.ts` y el CD en el mismo commit |
 
 ### 7.3 Rotar el secreto del túnel
 
