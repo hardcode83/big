@@ -20,11 +20,12 @@ from app.guests.domain.repositories import GuestRepository
 from app.guests.domain.value_objects import GuestSummary
 from app.properties.domain.repositories import PropertyRepository
 from app.reservations.domain.entities import Reservation
-from app.reservations.domain.enums import PaymentStatus, ReservationChannel
+from app.reservations.domain.enums import PaymentStatus, ReservationChannel, ReservationStatus
 from app.reservations.domain.exceptions import (
     GuestNotFoundError,
     PropertyNotFoundError,
     ReservationNotFoundError,
+    ReservationValidationError,
 )
 from app.reservations.domain.repositories import (
     Page,
@@ -36,6 +37,10 @@ from app.timeline.domain.enums import TimelineActorType, TimelineEventType, Time
 from app.timeline.domain.repositories import TimelineEventRepository
 from app.timeline.domain.services import TimelineEventFactory
 from app.timeline.domain.value_objects import TimelineEventData
+
+# A manual booking is created by a person, on a channel that is not an OTA feed. The OTA
+# channels arrive through the PMS sync or the CSV import, which set `external_pms_id`.
+MANUAL_CHANNELS = frozenset({ReservationChannel.MANUAL, ReservationChannel.DIRECT})
 
 
 @dataclass(frozen=True)
@@ -65,6 +70,24 @@ class CreateReservationCommand:
     special_requests: str | None = None
     internal_notes: str | None = None
     external_channel_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """A hand-made booking may only carry a manual channel (R1.2).
+
+        The rule lives on the command, not in the router where it started (the architecture
+        review caught it: `steering/backend.md` — "la lógica nunca vive en el router"), so it
+        holds for every caller of `CreateReservationUseCase`, HTTP or not.
+
+        Why the rule exists: an OTA channel means the booking came from the PMS feed and
+        carries an `external_pms_id`, which is the idempotency key of the ingest paths. One
+        typed by hand would have no such id, so the next sync would import the same stay again
+        as a second row.
+        """
+        if self.channel not in MANUAL_CHANNELS:
+            raise ReservationValidationError(
+                "channel must be MANUAL or DIRECT when creating a reservation by hand; "
+                f"{self.channel.value} arrives through the PMS sync or the CSV import"
+            )
 
 
 @dataclass(frozen=True)
@@ -112,7 +135,7 @@ class _TimelineWriter:
                 title=title,
                 created_at=now,
                 severity=TimelineSeverity.INFO,
-                metadata=metadata,
+                metadata=metadata or {},
             )
         )
         await self.timeline.add(tenant_id, event)
@@ -237,17 +260,33 @@ class UpdateReservationUseCase:
             if await self._guests.get(tenant_id, changes["guest_id"]) is None:
                 raise GuestNotFoundError("Guest does not exist")
 
+        was_cancelled = reservation.status is ReservationStatus.CANCELLED
         applied = reservation.update_details(changes, now=now)
         if not applied:
             return reservation
 
+        # A PATCH that sets `status: CANCELLED` cancels the booking as surely as a DELETE
+        # does, so it must leave the SAME evidence (R2.3). Recording only
+        # `RESERVATION_UPDATED` would mean a reservation could end up cancelled with no
+        # `RESERVATION_CANCELLED` anywhere in the timeline — and since `cancel()` is
+        # idempotent, a later DELETE would add nothing either, so the event would never
+        # appear. The timeline is the whole audit trail of a reservation until
+        # `AuditLog` arrives (design D14), so this is not a cosmetic distinction.
+        # Found by the security review of section 4.
+        cancelled_now = (
+            not was_cancelled and reservation.status is ReservationStatus.CANCELLED
+        )
         await self._reservations.save(tenant_id, reservation)
         await self._timeline.record(
             tenant_id=tenant_id,
             property_id=reservation.property_id,
             reservation_id=reservation.id,
-            event_type=TimelineEventType.RESERVATION_UPDATED,
-            title="Reservation updated",
+            event_type=(
+                TimelineEventType.RESERVATION_CANCELLED
+                if cancelled_now
+                else TimelineEventType.RESERVATION_UPDATED
+            ),
+            title="Reservation cancelled" if cancelled_now else "Reservation updated",
             now=now,
             actor_type=TimelineActorType.USER,
             actor_user_id=actor_user_id,

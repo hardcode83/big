@@ -276,4 +276,5 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/auth/me",
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
+        "/api/v1/integrations/pms/import-csv",
     }

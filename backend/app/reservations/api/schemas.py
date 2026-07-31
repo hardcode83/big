@@ -29,13 +29,12 @@ from app.reservations.domain.enums import (
 )
 from app.guests.domain.enums import GuestDocumentStatus, LegalRegistrationStatus
 
-# A manual booking is created by a person, on a channel that is not an OTA feed. The OTA
-# channels arrive through the PMS sync or the CSV import, which build the entity
-# themselves — accepting `AIRBNB` here would invite hand-typed bookings that the next PMS
-# sync then duplicates because they carry no `external_pms_id`.
-MANUAL_CHANNELS = frozenset({ReservationChannel.MANUAL, ReservationChannel.DIRECT})
-
 MAX_PER_PAGE = 100
+# `page` needs a ceiling too, not just `per_page`: the value becomes a SQL OFFSET, and a
+# 20-digit page number overflows int8 and comes back as an unhandled driver error instead of a
+# 422 in the PRD §23 envelope (found by the security review of section 4). At 100 rows per page
+# this still allows ten million rows, far past anything this system will hold.
+MAX_PAGE = 100_000
 MAX_TEXT = 5000
 
 
@@ -60,9 +59,6 @@ class CreateReservationRequest(BaseModel):
     special_requests: Annotated[str | None, Field(max_length=MAX_TEXT)] = None
     internal_notes: Annotated[str | None, Field(max_length=MAX_TEXT)] = None
     external_channel_id: Annotated[str | None, Field(max_length=200)] = None
-
-    def manual_channel(self) -> bool:
-        return self.channel in MANUAL_CHANNELS
 
 
 class UpdateReservationRequest(BaseModel):

@@ -12,6 +12,7 @@ from typing import Protocol
 
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import ReservationStatus
+from app.reservations.domain.exceptions import ReservationValidationError
 
 
 @dataclass(frozen=True)
@@ -28,6 +29,19 @@ class ReservationFilters:
     status: ReservationStatus | None = None
     date_from: date | None = None
     date_to: date | None = None
+
+    def __post_init__(self) -> None:
+        """An inverted range is a contradiction, not an empty result.
+
+        The rule lives here rather than in the router (where it started, and where the
+        architecture review caught it): `steering/backend.md` says "la lógica nunca vive en el
+        router", and this way any future caller of `ListReservationsUseCase` — a dashboard
+        aggregate, a scheduled report — gets the same answer instead of silently receiving
+        zero rows.
+        """
+        if self.date_from is not None and self.date_to is not None:
+            if self.date_to < self.date_from:
+                raise ReservationValidationError("date_to cannot be earlier than date_from")
 
 
 @dataclass(frozen=True)

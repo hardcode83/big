@@ -20,10 +20,12 @@ from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.properties.infrastructure.models import PropertyModel
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.reservations.application.use_cases import (
+    CancelReservationUseCase,
     CreateReservationCommand,
     CreateReservationUseCase,
+    UpdateReservationUseCase,
 )
-from app.reservations.domain.enums import ReservationChannel
+from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.tenants.infrastructure.models import TenantModel
@@ -135,6 +137,81 @@ async def test_the_successful_path_persists_both_rows_together(db_session) -> No
     # Both rows carry the same instant: the one the use case decided on.
     assert event.created_at == NOW
     assert stored.nights == 3
+
+
+@pytest.mark.asyncio
+async def test_a_failing_timeline_write_rolls_back_an_update_too(db_session) -> None:
+    """The other two mutating paths share the pattern, so they share the guarantee (R2.6).
+
+    Covered explicitly rather than by inspection: `save` already wrote to the session by the
+    time the event fails, so this is where a stray commit inside a repository would show.
+    """
+    tenant, prop, user = await _tenant_property_and_user(db_session)
+    reservation = await CreateReservationUseCase(
+        reservations=SqlAlchemyReservationRepository(db_session),
+        properties=SqlAlchemyPropertyRepository(db_session),
+        guests=SqlAlchemyGuestRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(
+        tenant_id=tenant.id, actor_user_id=user.id, command=_command(prop), now=NOW
+    )
+    await db_session.commit()
+
+    update = UpdateReservationUseCase(
+        reservations=SqlAlchemyReservationRepository(db_session),
+        guests=SqlAlchemyGuestRepository(db_session),
+        timeline=_ExplodingTimelineRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    with pytest.raises(RuntimeError):
+        await update.execute(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            reservation_id=reservation.id,
+            changes={"adults": 9},
+            now=NOW + timedelta(hours=1),
+        )
+    await db_session.rollback()
+
+    adults = await db_session.scalar(
+        select(ReservationModel.adults).where(ReservationModel.id == reservation.id)
+    )
+    assert adults == 2
+
+
+@pytest.mark.asyncio
+async def test_a_failing_timeline_write_rolls_back_a_cancellation_too(db_session) -> None:
+    tenant, prop, user = await _tenant_property_and_user(db_session)
+    reservation = await CreateReservationUseCase(
+        reservations=SqlAlchemyReservationRepository(db_session),
+        properties=SqlAlchemyPropertyRepository(db_session),
+        guests=SqlAlchemyGuestRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(
+        tenant_id=tenant.id, actor_user_id=user.id, command=_command(prop), now=NOW
+    )
+    await db_session.commit()
+
+    cancel = CancelReservationUseCase(
+        reservations=SqlAlchemyReservationRepository(db_session),
+        timeline=_ExplodingTimelineRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    with pytest.raises(RuntimeError):
+        await cancel.execute(
+            tenant_id=tenant.id,
+            actor_user_id=user.id,
+            reservation_id=reservation.id,
+            now=NOW + timedelta(days=1),
+        )
+    await db_session.rollback()
+
+    status = await db_session.scalar(
+        select(ReservationModel.status).where(ReservationModel.id == reservation.id)
+    )
+    assert status is not ReservationStatus.CANCELLED
 
 
 @pytest.mark.asyncio

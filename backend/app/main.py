@@ -7,6 +7,8 @@ import app.core.models_registry  # noqa: F401
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.core.errors import register_error_handlers
+from app.integrations.api.errors import register_integration_error_handlers
+from app.integrations.api.router import router as integrations_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
 
@@ -18,8 +20,10 @@ def create_app() -> FastAPI:
     register_error_handlers(app)
     register_auth_error_handlers(app)
     register_reservation_error_handlers(app)
+    register_integration_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     app.include_router(reservations_router, prefix=API_V1_PREFIX)
+    app.include_router(integrations_router, prefix=API_V1_PREFIX)
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck
     # in docker-compose.yml and docker-compose.deploy.yml probes /health, and the

@@ -21,6 +21,7 @@ from app.reservations.api.dependencies import (
     get_update_reservation_use_case,
 )
 from app.reservations.api.schemas import (
+    MAX_PAGE,
     MAX_PER_PAGE,
     CreateReservationRequest,
     ReservationDetailResponse,
@@ -37,7 +38,6 @@ from app.reservations.application.use_cases import (
     UpdateReservationUseCase,
 )
 from app.reservations.domain.enums import ReservationStatus
-from app.reservations.domain.exceptions import ReservationValidationError
 from app.reservations.domain.repositories import ReservationFilters
 
 router = APIRouter(prefix="/reservations", tags=["reservations"])
@@ -59,15 +59,15 @@ ManageDep = Annotated[AuthenticatedRequest, Depends(require(Permission.MANAGE_RE
 async def list_reservations(
     authenticated: ReadDep,
     use_case: Annotated[ListReservationsUseCase, Depends(get_list_reservations_use_case)],
-    page: Annotated[int, Query(ge=1)] = 1,
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
     per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
     property_id: uuid.UUID | None = None,
     status_filter: Annotated[ReservationStatus | None, Query(alias="status")] = None,
     date_from: date | None = None,
     date_to: date | None = None,
 ) -> ReservationPageResponse:
-    if date_from is not None and date_to is not None and date_to < date_from:
-        raise ReservationValidationError("date_to cannot be earlier than date_from")
+    # No validation here: `ReservationFilters` rejects an inverted range itself, and
+    # `CreateReservationCommand` the non-manual channel — the router only translates.
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         filters=ReservationFilters(
@@ -100,12 +100,6 @@ async def create_reservation(
     authenticated: ManageDep,
     use_case: Annotated[CreateReservationUseCase, Depends(get_create_reservation_use_case)],
 ) -> ReservationResponse:
-    if not body.manual_channel():
-        # OTA channels come in through the sync or the CSV, which carry an
-        # `external_pms_id`; one typed by hand would be duplicated by the next sync.
-        raise ReservationValidationError(
-            "channel must be MANUAL or DIRECT when creating a reservation by hand"
-        )
     reservation = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         actor_user_id=authenticated.context.user_id,

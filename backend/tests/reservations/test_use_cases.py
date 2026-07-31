@@ -237,6 +237,79 @@ class TestUpdate:
         assert world.timeline.events == []
 
     @pytest.mark.asyncio
+    async def test_a_patch_that_cancels_records_a_cancellation_not_an_update(
+        self, world
+    ) -> None:
+        """R2.3: a PATCH to `CANCELLED` cancels as surely as a DELETE, so it must leave the
+        same evidence. Without this, `cancel()` being idempotent means a later DELETE adds
+        nothing either and `RESERVATION_CANCELLED` never exists for that reservation."""
+        reservation = await world.create()
+        world.timeline.events.clear()
+
+        await world.update_use_case().execute(
+            tenant_id=world.tenant_a,
+            actor_user_id=world.user_a,
+            reservation_id=reservation.id,
+            changes={"status": ReservationStatus.CANCELLED},
+            now=NOW + timedelta(hours=1),
+        )
+
+        assert reservation.status is ReservationStatus.CANCELLED
+        assert [event.event_type for event in world.timeline.events] == [
+            TimelineEventType.RESERVATION_CANCELLED
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_patch_that_changes_status_to_something_else_is_still_an_update(
+        self, world
+    ) -> None:
+        reservation = await world.create()
+        world.timeline.events.clear()
+
+        await world.update_use_case().execute(
+            tenant_id=world.tenant_a,
+            actor_user_id=world.user_a,
+            reservation_id=reservation.id,
+            changes={"status": ReservationStatus.CONFIRMED},
+            now=NOW + timedelta(hours=1),
+        )
+
+        assert [event.event_type for event in world.timeline.events] == [
+            TimelineEventType.RESERVATION_UPDATED
+        ]
+
+    @pytest.mark.asyncio
+    async def test_a_cancelled_reservation_can_still_be_corrected(self, world) -> None:
+        """Pinning behaviour the requirements do not forbid, so nobody has to re-derive it.
+
+        A cancelled booking keeps accepting edits (a manager fixing the party size on a
+        cancelled stay for the record), and the event is an ordinary `RESERVATION_UPDATED` —
+        cancelling twice is what is idempotent, not the row itself.
+        """
+        reservation = await world.create()
+        await world.cancel_use_case().execute(
+            tenant_id=world.tenant_a,
+            actor_user_id=world.user_a,
+            reservation_id=reservation.id,
+            now=NOW + timedelta(days=1),
+        )
+        world.timeline.events.clear()
+
+        await world.update_use_case().execute(
+            tenant_id=world.tenant_a,
+            actor_user_id=world.user_a,
+            reservation_id=reservation.id,
+            changes={"adults": 5},
+            now=NOW + timedelta(days=2),
+        )
+
+        assert reservation.adults == 5
+        assert reservation.status is ReservationStatus.CANCELLED
+        assert [event.event_type for event in world.timeline.events] == [
+            TimelineEventType.RESERVATION_UPDATED
+        ]
+
+    @pytest.mark.asyncio
     async def test_another_tenants_reservation_is_not_found(self, world) -> None:
         reservation = await world.create()
 

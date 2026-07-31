@@ -1,0 +1,100 @@
+"""The `pms_sync` console command (R3, design D10).
+
+Argument handling is tested directly; the sync itself is covered in `test_sync.py`, so `run`
+is stubbed here rather than driving the real database through a command that opens its own
+session (the test session is a different one, by design).
+"""
+
+import uuid
+
+import pytest
+
+from app.integrations.application.ingest import IngestReport, RowError
+from app.integrations.cli import pms_sync
+
+
+def test_it_refuses_to_run_without_a_tenant(capsys) -> None:
+    assert pms_sync.main([]) == 2
+    assert "usage" in capsys.readouterr().err
+
+
+def test_it_refuses_a_tenant_that_is_not_a_uuid(capsys) -> None:
+    assert pms_sync.main(["not-a-uuid"]) == 2
+    assert "not a UUID" in capsys.readouterr().err
+
+
+def test_it_refuses_a_non_numeric_window(capsys) -> None:
+    assert pms_sync.main([str(uuid.uuid4()), "many"]) == 2
+    assert "window-days" in capsys.readouterr().err
+
+
+def test_it_prints_the_report_and_exits_zero(monkeypatch, capsys) -> None:
+    called = {}
+
+    async def _fake_run(tenant_id, *, window_days):
+        called["tenant_id"] = tenant_id
+        called["window_days"] = window_days
+        return IngestReport(created=2, updated=1, skipped=0)
+
+    monkeypatch.setattr(pms_sync, "run", _fake_run)
+    tenant_id = uuid.uuid4()
+
+    assert pms_sync.main([str(tenant_id), "7"]) == 0
+
+    assert called == {"tenant_id": tenant_id, "window_days": 7}
+    out = capsys.readouterr().out
+    assert "created 2" in out
+    assert "updated 1" in out
+
+
+def test_skipped_rows_are_reported_but_do_not_fail_the_command(monkeypatch, capsys) -> None:
+    """R3.4: rows the sync could not import are information, not a failed run."""
+
+    async def _fake_run(tenant_id, *, window_days):
+        return IngestReport(
+            created=1,
+            skipped=1,
+            errors=[RowError(reference="PMS-9", reason="Unknown property 'X' for this tenant")],
+        )
+
+    monkeypatch.setattr(pms_sync, "run", _fake_run)
+
+    assert pms_sync.main([str(uuid.uuid4())]) == 0
+
+    captured = capsys.readouterr()
+    assert "skipped PMS-9" in captured.err
+    assert "Unknown property" in captured.err
+
+
+def test_the_default_window_is_used_when_not_given(monkeypatch) -> None:
+    seen = {}
+
+    async def _fake_run(tenant_id, *, window_days):
+        seen["window_days"] = window_days
+        return IngestReport()
+
+    monkeypatch.setattr(pms_sync, "run", _fake_run)
+
+    pms_sync.main([str(uuid.uuid4())])
+
+    assert seen["window_days"] == pms_sync.DEFAULT_WINDOW_DAYS
+
+
+@pytest.mark.asyncio
+async def test_run_binds_the_session_to_the_tenant(monkeypatch, tenant_a, property_a) -> None:
+    """The command does not go through `get_authenticated_request`, so it must mark the
+    session itself — otherwise the listener of `app/core/db.py` scopes nothing (its limit 2)."""
+    from app.core import db as core_db
+
+    marked: list[uuid.UUID] = []
+    real_bind = core_db.bind_session_to_tenant
+
+    def _spy(session, tenant_id):
+        marked.append(tenant_id)
+        return real_bind(session, tenant_id)
+
+    monkeypatch.setattr(pms_sync, "bind_session_to_tenant", _spy)
+
+    await pms_sync.run(tenant_a.id, window_days=30)
+
+    assert marked == [tenant_a.id]
