@@ -94,15 +94,19 @@ cd backend && uv run pytest
 cd frontend && npm test
 ```
 
-El backend tiene **gate de CI obligatorio** en cada PR
-(`.github/workflows/backend-tests.yml`): migraciones Alembic sobre un PostgreSQL limpio,
-`alembic check`, la suite completa y `downgrade base`, con Postgres y Redis como services.
-No lleva filtro de rutas a propósito — un required check con filtro deja bloqueados los PR
-que no tocan esas rutas.
+El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`):
+migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
+`downgrade base`, con Postgres y Redis como services. No lleva filtro de rutas a propósito
+— un check con filtro deja bloqueados los PR que no tocan esas rutas. Hoy **no está marcado
+como obligatorio**: el repositorio es privado en un plan sin protección de rama, así que se
+ejecuta y reporta pero nada impide fusionar con él en rojo (ver `sdd/specs/backend-ci.md`
+§Estado).
 
-Cada ejecución de la suite crea su propia base de datos (`<db>_test_<pid>`) y la borra al
-terminar, así que dos `pytest` simultáneos no se pisan. `make db-clean-test` barre las que
-deje atrás una ejecución interrumpida.
+Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+a2f3c1d`), en el workspace,
+las apps de campo y también en `/login` sin sesión — así no hace falta entrar en la VM para
+saber qué está corriendo. La versión base vive en `VERSION` (raíz) y el CD la compone con la
+fecha de build y el commit corto. Cómo se opera:
+[`docs/app-version-visibility.md`](docs/app-version-visibility.md).
 
 ### Verificación del frontend
 

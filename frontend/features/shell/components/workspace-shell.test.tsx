@@ -55,6 +55,29 @@ afterEach(() => {
   window.localStorage.clear();
 });
 
+describe("WorkspaceShell version badge (change app-version-visibility, R2.1)", () => {
+  it("renders the badge, and it is the shell that actually has a fixed bottom nav", async () => {
+    // The QA panel found this untested: WorkspaceShell is the ONLY shell that renders
+    // BottomNavigation, so it is the only surface where "footer hidden behind the fixed
+    // bar" can happen — and it was the one shell no test checked for the badge at all.
+    const { container } = await renderShell();
+
+    const badge = screen.getByTestId("version-badge");
+    expect(badge).toBeInTheDocument();
+
+    const footer = container.querySelector("footer")!;
+    const fixedNav = container.querySelector('nav[class*="fixed"]')!;
+    expect(footer).not.toBeNull();
+    expect(fixedNav).not.toBeNull();
+    // Footer before the fixed nav, and inside the column that reserves its height.
+    expect(
+      footer.compareDocumentPosition(fixedNav) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy();
+    expect(footer.parentElement?.className).toContain("pb-16");
+  });
+});
+
 describe("WorkspaceShell (D3/D6/D9)", () => {
   it("renders shell landmarks and the skip link", async () => {
     await renderShell();
@@ -67,9 +90,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
 
   it("shows workspace destinations and never Cleaner/Technician", async () => {
     await renderShell();
-    expect(screen.getAllByRole("link", { name: "Panel" }).length).toBeGreaterThan(
-      0,
-    );
+    expect(
+      screen.getAllByRole("link", { name: "Panel" }).length,
+    ).toBeGreaterThan(0);
     expect(
       screen.getAllByRole("link", { name: "Propiedades" }).length,
     ).toBeGreaterThan(0);
@@ -85,7 +108,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
     await renderShell();
     const dashboardLinks = screen.getAllByRole("link", { name: "Panel" });
     expect(
-      dashboardLinks.some((link) => link.getAttribute("aria-current") === "page"),
+      dashboardLinks.some(
+        (link) => link.getAttribute("aria-current") === "page",
+      ),
     ).toBe(true);
   });
 
@@ -96,7 +121,9 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
     });
     expect(collapse).toHaveAttribute("aria-expanded", "true");
     fireEvent.click(collapse);
-    const expand = screen.getByRole("button", { name: "Expandir barra lateral" });
+    const expand = screen.getByRole("button", {
+      name: "Expandir barra lateral",
+    });
     expect(expand).toHaveAttribute("aria-expanded", "false");
   });
 

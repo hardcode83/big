@@ -29,6 +29,17 @@ FROM deps AS builder
 ARG NEXT_PUBLIC_APP_ENV
 ENV NEXT_PUBLIC_APP_ENV=${NEXT_PUBLIC_APP_ENV}
 
+# La identidad de build que pinta el badge. Entra en PublicRuntimeConfig, que cruza al
+# navegador en todas las superficies — es público por decisión.
+#
+# Nota de alcance, verificada: el badge es un Server Component, así que la cadena viaja en
+# el HTML servido y NO queda inlineada en .next/static. Delata que el edge sirve una página
+# cacheada antigua, pero no chunks JS antiguos con HTML fresco.
+ARG NEXT_PUBLIC_APP_VERSION=""
+ARG NEXT_PUBLIC_BUILD_COMMIT_SHORT=""
+ENV NEXT_PUBLIC_APP_VERSION=${NEXT_PUBLIC_APP_VERSION} \
+    NEXT_PUBLIC_BUILD_COMMIT_SHORT=${NEXT_PUBLIC_BUILD_COMMIT_SHORT}
+
 COPY . .
 RUN npm run build
 

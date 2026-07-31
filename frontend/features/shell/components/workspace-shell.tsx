@@ -6,6 +6,7 @@ import { Breadcrumbs } from "./breadcrumbs";
 import { PageTitle } from "./page-title";
 import { ShellFrame } from "./shell-frame";
 import { Sidebar } from "./sidebar";
+import { ShellFooter } from "./shell-footer";
 import { SkipLink } from "./skip-link";
 import { TabletNavTrigger } from "./tablet-nav-trigger";
 import { Topbar } from "./topbar";
@@ -39,6 +40,14 @@ export async function WorkspaceShell({ children }: { children: ReactNode }) {
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
       sidebar={<Sidebar profile={PROFILE} />}
       topbar={<Topbar start={start} />}
+      footer={
+        <ShellFooter
+          versionLabels={{
+            label: t("common:version.label"),
+            unknown: t("common:version.unknown"),
+          }}
+        />
+      }
       bottomNavigation={<BottomNavigation profile={PROFILE} />}
     >
       {children}
