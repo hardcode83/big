@@ -18,6 +18,7 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 
 - WHEN the frontend starts, THE SYSTEM SHALL render the complete Application Shell without requiring a functional backend, and redirect `/` to `/dashboard`.
 - THE SYSTEM SHALL provide five independent sibling shells selected by static route group: WorkspaceShell (`workspace`), CleanerShell (`cleaner`), TechnicianShell (`technician`), PublicShell (`public`), and GuestShell (`guest`). There is no MaintenanceShell.
+- THE SYSTEM SHALL offer an optional `footer` slot on `ShellFrame`, rendered outside the `main` landmark, and SHALL reserve the mobile `BottomNavigation` height (`pb-16 md:pb-0`) on the column that wraps topbar/main/footer — not on `main` — so the footer sits above the fixed bar rather than underneath it. The four operational shells pass it; `GuestShell` does not.
 - WHEN the Workspace shell is displayed, THE SYSTEM SHALL provide sidebar + topbar on desktop (≥1024px, sidebar collapsible to an icon rail), a collapsible drawer on tablet (768–1023px), and topbar + fixed bottom navigation on mobile (<768px) with at most five destinations (Dashboard, Timeline, Cleaning, Incidents, and a "More" sheet). Responsive surfaces are selected via CSS media queries, not JavaScript viewport detection.
 - THE SYSTEM SHALL make CleanerShell and TechnicianShell independent and mobile-first, rendering no artificial bottom navigation or sidebar when the profile has a single navigable destination; the public slug `/tech` is preserved while the internal profile is named `technician`.
 - WHEN a user opens any PRD §24 route whose module is not implemented, THE SYSTEM SHALL render a localized planned-module placeholder ("En preparación" / "In preparation") within the common visual structure, containing no business logic, API calls, invented contracts, or business mock data.
@@ -62,6 +63,7 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 
 - THE SYSTEM SHALL define a single configuration boundary (`lib/config`): `server.ts` (`server-only`) for private/runtime values, `public.ts` for an explicit allowlist of the serializable public snapshot, `runtime-config-provider.tsx` for client access, and `constants.ts` for non-sensitive defaults (locale `es`). Application code does not read `process.env` outside this boundary.
 - THE SYSTEM SHALL keep `BACKEND_INTERNAL_URL` server-only and unread at shell render, expose a build-time public `NEXT_PUBLIC_APP_ENV`, and keep the feature-flag registry empty and allowlisted; no secret or non-allowlisted value reaches the browser.
+- THE SYSTEM SHALL expose the deployed build identity through that same allowlist — `appVersion` and `buildCommitShort`, read from `NEXT_PUBLIC_*` — and nothing else about the build: the repository URL, the Pull Request number, the full commit SHA and the Actions run id never enter the snapshot, which the root layout serializes on **every** surface. See `app-version-visibility`.
 
 ### Authentication readiness (not implemented)
 
@@ -75,7 +77,7 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 ## Key files
 
 - `frontend/app/` — RootLayout (server, providers + locale + metadata), route groups `(workspace)`/`(public)`/`(field)`/`(guest)`, 21 placeholder pages, five shell layouts, `global-error.tsx`, per-segment `error.tsx`.
-- `frontend/features/shell/` — `navigation/` (route registry, selectors, active-route matching, breadcrumbs, route metadata), `state/use-shell-ui-store.ts`, `components/` (five shells + chrome: `ShellFrame`, `Topbar`, `Sidebar`, `BottomNavigation`, `MoreMenu`, `NavLink`, `Breadcrumbs`, `PageTitle`, `Brand`, `SkipLink`, `LocaleSwitcher`, `TabletNavTrigger`, `OverlayAutoCloser`, `RoutePlaceholder`, `PageHeader`).
+- `frontend/features/shell/` — `navigation/` (route registry, selectors, active-route matching, breadcrumbs, route metadata), `state/use-shell-ui-store.ts`, `components/` (five shells + chrome: `ShellFrame`, `Topbar`, `Sidebar`, `BottomNavigation`, `MoreMenu`, `NavLink`, `Breadcrumbs`, `PageTitle`, `Brand`, `SkipLink`, `LocaleSwitcher`, `TabletNavTrigger`, `OverlayAutoCloser`, `RoutePlaceholder`, `PageHeader`, `ShellFooter`, `VersionBadge`).
 - `frontend/components/` — `ui/` (shadcn primitives: Button, Sheet, Tooltip, Separator, Skeleton, Badge), `states/` (`StatePanel`, `LoadingState`, `ErrorState`, `EmptyState`, `ModulePlaceholder`).
 - `frontend/lib/` — `api/` (transport + PRD §23 errors), `config/` (server/public/runtime boundary), `i18n/` (server/client init, locale resolution, catalogs), `query/` (client + tenant-scoped keys), `metadata/` (localized metadata builder), `utils.ts`.
 - `frontend/locales/{es,en}/{common,navigation,states}.json` — translation catalogs.
