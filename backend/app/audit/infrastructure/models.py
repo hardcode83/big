@@ -10,31 +10,17 @@ from app.core.db import Base, TenantScopedMixin, UUIDPrimaryKeyMixin
 
 
 class AuditLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
-    """`changes` is a cleartext diff sink: rule-3 values go in redacted, never raw.
+    """A cleartext diff sink. Structured form, per rule 11 of steering/security.md.
 
-    steering/security.md rule 9 makes an audit entry mandatory for "acceso y
-    modificación de datos de documento de Guest", and §7.25 shapes `changes` as
-    `{field: {old: val, new: val}}`. A diff taken where the value is already
-    decrypted would land `document_number` here in the clear — and rule 4 forbids the
-    document number even in a listing, which
-    `ix_audit_logs_tenant_id_entity_type_entity_id` makes cheap.
+    Rule 9 makes an audit entry mandatory for "acceso y modificación de datos de
+    documento de Guest", and §7.25 shapes `changes` as `{field: {old: val, new: val}}`
+    — so the natural implementation takes the diff where the value is already
+    decrypted. Masking would not save it either:
+    `ix_audit_logs_tenant_id_entity_type_entity_id` makes listing every Guest diff
+    cheap, and rule 4 keeps the document number out of listings entirely.
 
-    **The contract, binding on `user-management` (role changes) and on whoever first
-    audits guest documents** — this is the STRUCTURED form of the rule: a field
-    covered by rules 3 or 4 (`document_number`, `wifi_password`, access codes) is
-    recorded as `{"changed": true}` and its value does not survive at all, not even
-    masked. Masking is not enough here: rule 4 keeps the document number out of
-    listings entirely, and `ix_audit_logs_tenant_id_entity_type_entity_id` makes
-    listing every Guest diff cheap.
-
-    `WebhookEventModel.payload`/`error` and `NotificationLogModel.last_error` carry
-    the same structured form. The single exception in the whole change is
-    `NotificationLogModel.subject`/`body`, and only for **access codes**: those render
-    a message a guest is meant to receive, so rule 4's `****XX` is allowed there.
-    Never for `document_number`, and never here.
-
-    This change creates the table and nothing writes to it yet, so the constraint is
-    stated rather than enforced.
+    Nothing writes here yet; `user-management` (role changes) and whoever first audits
+    guest documents inherit the contract. Do not restate rule 11 here.
     """
 
     __tablename__ = "audit_logs"

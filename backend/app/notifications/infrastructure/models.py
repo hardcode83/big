@@ -9,39 +9,21 @@ from app.notifications.domain.enums import NotificationChannel, NotificationStat
 
 
 class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
-    """`subject`, `body` and `last_error` are cleartext: never a rule-3 secret.
+    """Three cleartext sinks. The contract is rule 11 of steering/security.md.
 
-    steering/security.md rule 3 forbids storing access codes, WiFi passwords or
-    document numbers unencrypted, and rule 4 requires access codes to be masked
-    (`****XX`). This table is the delivery record for exactly those notifications
-    (PRD §17: the access code reaches the guest through one of these channels), so
-    `body` is the one column in the schema that could quietly reopen a door
-    `AccessRecordModel` deliberately closed — it stores `code_masked` only, with no
-    plaintext column at all.
+    `subject`/`body` are the ONE exception it grants: an access code may appear as
+    `****XX`. `last_error` is not covered by that exception — structured form, no
+    rule-3 value at all — because a delivery diagnostic never needs to show anyone the
+    code, and a provider SDK's exception routinely embeds the message it failed to
+    send.
 
-    **The contract, binding on `access-notifications`.** The default is that no
-    rule-3 value survives here in any form. **Only rule 4 grants an exception, and it
-    grants exactly one**: `****XX` for an access code. The question "does this column
-    need to show the value to a human?" explains *why* that exception exists — it does
-    not create others. A guest needs the WiFi password too, and it still may not be
-    stored: rule 4 grants it no masked form, so the body persists a template or a
-    reference, never the rendered credential. `document_number` likewise — rule 4
-    demands absence from listings, not a mask.
+    Why this table matters more than it looks: PRD §17 has the access code reach the
+    guest through one of these channels, so `body` is the one column that could
+    quietly reopen a door `AccessRecordModel` deliberately closed — it stores
+    `code_masked` only, with no plaintext column at all.
 
-    - `subject`/`body`: an **access code** may appear as `****XX`, never raw. Nothing
-      else.
-    - `last_error` is a delivery diagnostic. Nobody needs to be shown the code to
-      debug a failed send, so it takes the **structured form**: no rule-3 value at
-      all, masked or otherwise. This matches `WebhookEventModel.error`, which is the
-      same data class — a provider SDK's exception routinely embeds the message it
-      failed to send, so a raw error would put the code back in the clear one column
-      over from a masked `body`.
-
-    `AuditLogModel.changes` and `WebhookEventModel.payload`/`error` are all structured
-    form. Do not copy the `subject`/`body` permission into any of them.
-
-    This change creates the table and nothing writes to it yet, so the constraint is
-    stated here rather than enforced — the writer inherits it with its own test.
+    Nothing writes here yet; `access-notifications` inherits the contract with its own
+    test. Do not restate rule 11 here — it lives in one place on purpose.
     """
 
     __tablename__ = "notification_logs"

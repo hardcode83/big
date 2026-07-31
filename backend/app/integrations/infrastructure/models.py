@@ -24,27 +24,15 @@ class WebhookEventModel(Base, UUIDPrimaryKeyMixin):
     path already do (second limit in the docstring of `_scope_statement_to_tenant`).
     Pinned by `tests/test_tenant_filter.py::test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`.
 
-    **`payload` and `error` are cleartext sinks fed by an external party**, and more
-    exposed than the other two in this change: PRD §16 has the provider POST this body
-    and §7.26 has it persisted verbatim. A PMS check-in event can carry
-    `document_number`, which steering/security.md rule 3 forbids storing unencrypted
-    and rule 4 forbids surfacing in listings.
+    **`payload` and `error` are cleartext sinks fed by an external party.** Structured
+    form, per rule 11 of steering/security.md — and the most exposed of the six, since
+    PRD §16 has the provider POST this body and §7.26 has it persisted verbatim, so a
+    PMS check-in event carrying `document_number` lands here by default rather than by
+    mistake. `error` must never echo the raw body back: that would reintroduce through
+    the text column what `payload` just dropped.
 
-    **The contract, binding on `reservations-webhooks`** — the STRUCTURED form, the
-    same one `AuditLogModel.changes` carries: a field covered by rules 3 or 4 is
-    stripped before persisting and its value does not survive at all, not even masked.
-    `error` must never echo the raw body back, which would reintroduce through the
-    text column what `payload` just dropped.
-
-    `NotificationLogModel.last_error` carries this same form — it is the same data
-    class as `error` here, a provider diagnostic. The only column in the change with a
-    looser rule is `NotificationLogModel.subject`/`body`, and only for **access
-    codes**, because those render a message a guest is meant to receive. Nothing reads
-    a webhook payload or a delivery error to be shown it, so that permission does not
-    reach here.
-
-    This change creates the table and nothing writes to it, so the constraint is
-    stated rather than enforced — the writer inherits it with its own test.
+    Nothing writes here yet; `reservations-webhooks` inherits the contract with its own
+    test. Do not restate rule 11 here.
     """
 
     __tablename__ = "webhook_events"
