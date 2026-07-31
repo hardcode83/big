@@ -94,12 +94,35 @@ identidad sin cubrir, por escrito.
 
 **Chosen:** los repositorios devuelven `None` para una fila de otro tenant y el caso
 de uso lanza `NotFoundError` (`app/core/errors.py`, ya mapeado a 404 con el envelope
-de PRD §23). Esto materializa por primera vez el criterio que `auth-tenancy` dejó
-anotado en `dependencies.py` (su R4.3, declarado fuera de alcance allí porque sus
-cuatro endpoints son autorreferenciales) y que su design D15 asignó al primer módulo
-con identificadores de recurso — que es este, no `user-management`.
+de PRD §23).
+
+**Desviación explícita de una decisión aprobada.** El design D15 de `auth-tenancy`
+**rechazó por nombre** asignar sus R4.3/R4.4 a `reservations`: *"Rejected: asignarlos
+a `reservations` … `user-management` va antes en el orden del roadmap y ya recibe
+identificadores de recurso, así que el hueco se cierra antes"*. Esa premisa ya no se
+cumple: el orden real de ejecución ha puesto `reservations` primero, así que **este**
+es de hecho el primer módulo con endpoints que reciben identificadores de recurso
+tenant-scoped. No se reescribe la historia — D15 decidió lo contrario y su motivo era
+razonable cuando se escribió.
+
+Consecuencias documentales, que son parte del alcance de este change y no un efecto
+colateral:
+
+- `sdd/specs/auth-tenancy.md` §*Alcance declarado* afirma hoy que esos criterios "son
+  criterios de aceptación bloqueantes de `user-management`, la primera capacidad con
+  endpoints que reciben identificadores tenant-scoped". Al archivar hay que corregir
+  la parte factual (la primera capacidad es `reservations`), **sin** liberar a
+  `user-management`: cada módulo demuestra la matriz de **sus** endpoints, así que sus
+  criterios siguen siendo bloqueantes para los suyos.
+- El bullet de `user-management` en `sdd/roadmap.md` repite la misma afirmación y hay
+  que ajustarlo igual.
+
+Lo que este change cierra es **su propia** R5.1/R5.7 sobre sus seis endpoints, no los
+requisitos de otro change.
 
 Rejected: `403` — confirma la existencia del recurso a quien no debería saberlo.
+Rejected: presentar D6 como si D15 ya lo hubiera asignado aquí — es falso y dejaría
+tres documentos vigentes contradiciéndose.
 
 ### D7 — Dos permisos nuevos, matriz derivada de PRD §6
 
@@ -243,6 +266,32 @@ original marcaba las dos vías como `SYSTEM`.
 Rejected: `SYSTEM` para el CSV — perdería quién importó qué, que es justo lo que un
 timeline auditable tiene que responder.
 
+### D16 — La resolución de `Property` es un puerto nuevo del módulo `properties`
+
+**Chosen:** `PropertyRepository` (Protocol) en
+`backend/app/properties/domain/repositories.py` con
+`get(tenant_id, property_id)`, `find_by_internal_code(tenant_id, internal_code)` y
+`find_by_pms_external_id(tenant_id, pms_external_id)`, más
+`SqlAlchemyPropertyRepository` en
+`backend/app/properties/infrastructure/repositories.py`. Sin él, tres criterios no
+tienen mecanismo: R1.4 (`property_id` inexistente en el tenant → `404`), R3.4 (reserva
+del PMS que apunta a una propiedad desconocida → se omite y se informa) y R4 (el CSV
+referencia la propiedad por `internal_code`, D11). El módulo `properties` hoy solo
+tiene `domain/` e `infrastructure/models.py`, y `Property` ya lleva `internal_code` y
+`pms_external_id` — el dato está, faltaba quién lo lee.
+
+Las tres vías de resolución quedan así: por `id` en la API, por `internal_code` en el
+CSV y por `pms_external_id` en la sincronización con el PMS. Las tres son
+tenant-scoped y devuelven `None` fuera del tenant, que es lo que hace que R1.4 dé
+`404` por D6 y que R3.4 pueda contar la fila como error sin abortar.
+
+Rejected: leer `properties` desde el repositorio de reservas — un repositorio por
+agregado raíz es regla de `steering/backend-architecture.md`. Rejected: pasar el
+`property_id` sin comprobarlo y dejar que la FK falle — daría un `500`/`409` opaco
+donde R1.4 pide `404`, y en la ingesta abortaría el lote en vez de informar la fila.
+Rejected: resolver por `internal_code` también en la API — el identificador público de
+un recurso en PRD §23 es su UUID.
+
 ## Changes by area
 
 | Area | Files | Change |
@@ -252,7 +301,8 @@ timeline auditable tiene que responder.
 | Reservas — infraestructura | `backend/app/reservations/infrastructure/repositories.py` (nuevo) | `SqlAlchemyReservationRepository` (traduce modelo ↔ entidad, `tenant_id` explícito) |
 | Reservas — API | `backend/app/reservations/api/{router,schemas,dependencies}.py` (nuevos) | Los cinco endpoints de PRD §23 con `require(...)`, paginación y envelope |
 | Timeline | `backend/app/timeline/domain/repositories.py` (nuevo), `backend/app/timeline/infrastructure/repositories.py` (nuevo) | Puerto `TimelineEventRepository` + adaptador SQLAlchemy (primera persistencia de eventos) |
-| Huéspedes | `backend/app/guests/domain/repositories.py` (nuevo), `backend/app/guests/infrastructure/repositories.py` (nuevo) | Puerto `GuestRepository` con búsqueda por email normalizado + adaptador |
+| Huéspedes | `backend/app/guests/domain/repositories.py` (nuevo), `backend/app/guests/infrastructure/repositories.py` (nuevo) | Puerto `GuestRepository` (lectura por `id` para R1.8 y búsqueda por email normalizado para D8) + adaptador |
+| Propiedades | `backend/app/properties/domain/repositories.py` (nuevo), `backend/app/properties/infrastructure/repositories.py` (nuevo) | Puerto `PropertyRepository` y adaptador: resolución tenant-scoped por `id`, `internal_code` y `pms_external_id` (D16, R1.4/R3.4/R4) |
 | Integraciones | `backend/app/integrations/**` (módulo nuevo: `domain/ports.py`, `domain/dtos.py`, `application/use_cases.py`, `infrastructure/mock_pms.py`, `infrastructure/csv_parser.py`, `api/{router,schemas}.py`, `cli/pms_sync.py`) | Puerto `PMSAdapter`, `ReservationDTO`, `MockPMSAdapter` (`EXTERNAL_DEPENDENCY`), parser CSV, endpoint de importación y comando de sync |
 | Core | `backend/app/core/unit_of_work.py` (nuevo), `backend/app/core/config.py`, `backend/app/main.py` | `UnitOfWork` compartido; dos settings de límites del CSV; montaje de los dos routers nuevos |
 | Auth | `backend/app/auth/domain/policy.py` | Dos permisos nuevos y su matriz de roles |
@@ -291,8 +341,14 @@ class TimelineEventRepository(Protocol):
     async def add(self, event: TimelineEvent) -> None: ...
 
 class GuestRepository(Protocol):
-    async def find_by_email(self, tenant_id: UUID, email: str) -> Guest | None: ...
+    async def get(self, tenant_id: UUID, guest_id: UUID) -> Guest | None: ...       # R1.8
+    async def find_by_email(self, tenant_id: UUID, email: str) -> Guest | None: ... # D8
     async def add(self, guest: Guest) -> None: ...
+
+class PropertyRepository(Protocol):                                                 # D16
+    async def get(self, tenant_id: UUID, property_id: UUID) -> Property | None: ...
+    async def find_by_internal_code(self, tenant_id: UUID, internal_code: str) -> Property | None: ...
+    async def find_by_pms_external_id(self, tenant_id: UUID, pms_external_id: str) -> Property | None: ...
 
 class PMSAdapter(Protocol):
     async def list_reservations(self, since: datetime, property_external_id: str | None = None) -> list[ReservationDTO]: ...

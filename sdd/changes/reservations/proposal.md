@@ -206,8 +206,14 @@ Acceptance criteria:
 ## Affected specs
 
 - `sdd/specs/reservations.md` *(no existe aún — se creará al archivar)*
-- `sdd/specs/auth-tenancy.md` — el catálogo de `Permission` y la matriz de roles
-  crecen con los permisos de este módulo.
+- `sdd/specs/auth-tenancy.md` — dos cambios: (1) el catálogo de `Permission` y la
+  matriz de roles crecen con los permisos de este módulo; (2) su §*Alcance declarado*
+  afirma que `user-management` es "la primera capacidad con endpoints que reciben
+  identificadores tenant-scoped" — el orden real de ejecución lo ha convertido en
+  falso y hay que corregirlo sin liberar a `user-management` de demostrar la matriz de
+  **sus** endpoints (ver `design.md` D6).
+- `sdd/roadmap.md` — el bullet de `user-management` repite esa misma afirmación y
+  necesita el mismo ajuste factual.
 - `sdd/specs/timeline-state-machine.md` — sigue siendo dominio puro, pero deja de
   ser cierto que nadie persiste sus eventos: la spec debe apuntar dónde vive esa
   persistencia.
