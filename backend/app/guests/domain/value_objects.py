@@ -14,6 +14,35 @@ shared module is a candidate for the change that next touches `auth` (design D3 
 the same debt for the unit of work).
 """
 
+import uuid
+from dataclasses import dataclass
+
+from app.guests.domain.enums import GuestDocumentStatus, LegalRegistrationStatus
+
+
+@dataclass(frozen=True)
+class GuestSummary:
+    """What a reservation is allowed to know about its guest (R1.8, design D17).
+
+    Everything the operation needs to contact and identify the guest, and **nothing** from
+    the identity document: no `document_number_encrypted`, no `document_expiry_date`, no
+    `date_of_birth`, no `nationality`. `document_status` is included because rule 4 of
+    `steering/security.md` says exactly that — "número de documento jamás en listados
+    (solo `document_status`)".
+
+    A frozen projection rather than the `Guest` entity so the guarantee is structural: no
+    future serialiser can reach a field that is not here, and R1.8 does not depend on
+    every author of a response model remembering to exclude one.
+    """
+
+    id: uuid.UUID
+    full_name: str
+    email: str | None
+    phone: str | None
+    preferred_language: str
+    document_status: GuestDocumentStatus
+    legal_registration_status: LegalRegistrationStatus
+
 
 def normalize_email(value: str) -> str:
     """`strip` + `lower`, applied in Python on both write and read.

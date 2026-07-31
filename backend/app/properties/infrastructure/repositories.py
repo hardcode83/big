@@ -13,6 +13,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.properties.domain.entities import Property
+from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
 from app.properties.infrastructure.models import PropertyModel
 
 
@@ -45,23 +46,34 @@ class SqlAlchemyPropertyRepository:
     async def find_by_pms_external_id(
         self, tenant_id: uuid.UUID, pms_external_id: str
     ) -> Property | None:
-        """Fails closed when the external id is ambiguous.
+        """Fails closed when the external id is ambiguous, with a DOMAIN error.
 
-        `ix_properties_tenant_id_pms_external_id` is an index, NOT a unique
-        constraint, so two properties of the same tenant *can* carry the same external
-        id. `scalar_one_or_none` therefore raises instead of picking a winner: an
-        ambiguous mapping means the PMS sync cannot know which property a reservation
-        belongs to, and importing it into an arbitrary one would silently attach a
-        guest to the wrong flat. Loud is better than wrong here.
+        `ix_properties_tenant_id_pms_external_id` is an index, NOT a unique constraint,
+        so two properties of the same tenant *can* carry the same external id. Picking
+        one would silently attach a booking — and a guest — to the wrong flat, so this
+        refuses instead.
+
+        It refuses by raising `AmbiguousPropertyExternalIdError`, never by letting
+        SQLAlchemy's `MultipleResultsFound` escape: the port promises `Property | None`,
+        and its caller (the PMS sync, R3.4) has to report the offending row and continue
+        with the batch — which it could only do by catching an infrastructure exception,
+        forbidden inside `application/` by the dependency rule.
         """
-        result = await self._session.execute(
-            select(PropertyModel).where(
+        rows = await self._session.execute(
+            select(PropertyModel)
+            .where(
                 PropertyModel.tenant_id == tenant_id,
                 PropertyModel.pms_external_id == pms_external_id.strip(),
             )
+            .limit(2)
         )
-        model = result.scalar_one_or_none()
-        return _to_property(model) if model is not None else None
+        models = list(rows.scalars())
+        if len(models) > 1:
+            raise AmbiguousPropertyExternalIdError(
+                f"Two or more properties share pms_external_id {pms_external_id!r}",
+                pms_external_id=pms_external_id,
+            )
+        return _to_property(models[0]) if models else None
 
 
 def _to_property(model: PropertyModel) -> Property:

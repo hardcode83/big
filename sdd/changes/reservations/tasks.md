@@ -17,11 +17,11 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 
 ## 2. Agregado `Reservation`: invariantes y repositorio
 
-- [ ] 2.1 Métodos de mutación en `backend/app/reservations/domain/entities.py` (`update_details`, `cancel`) que recalculan `nights`/`total_guests` y revalidan las invariantes de fechas y ocupación, sin setters públicos; TDD — unit tests primero en `backend/tests/reservations/test_entities.py`, incluidos los casos de rechazo (`check_out <= check_in`, `adults < 1`, `children < 0`) [R1]
-- [ ] 2.2 `cancel()` idempotente: cancelar una reserva ya `CANCELLED` no cambia nada y expone que no hubo transición, para que el caso de uso no emita un segundo evento; unit test [R1, R2]
-- [ ] 2.3 Excepciones de dominio en `backend/app/reservations/domain/exceptions.py` y su mapeo a los errores de `app/core/errors.py` (`ValidationFailedError`, `NotFoundError`); unit tests [R1]
-- [ ] 2.4 `ReservationRepository` (Protocol) en `backend/app/reservations/domain/repositories.py` (`get`, `find_by_external_pms_id`, `list`, `add`, `save`) y el value object `ReservationFilters` [R1, R3]
-- [ ] 2.5 `SqlAlchemyReservationRepository` en `backend/app/reservations/infrastructure/repositories.py`: `tenant_id` explícito en cada query, `add` que rechaza `tenant_id` ajeno (los INSERT no los cubre el listener de `core/db.py`), orden estable `check_in_date DESC, id`, y el filtro de solape de estancia de D12; tests de integración en `backend/tests/reservations/test_repositories.py` incluidos los de aislamiento cross-tenant [R1, R5]
+- [x] 2.1 Métodos de mutación en `backend/app/reservations/domain/entities.py` (`update_details`, `cancel`) que recalculan `nights`/`total_guests` y revalidan las invariantes de fechas y ocupación, sin setters públicos; TDD — unit tests primero en `backend/tests/reservations/test_entities.py`, incluidos los casos de rechazo (`check_out <= check_in`, `adults < 1`, `children < 0`) [R1]
+- [x] 2.2 `cancel()` idempotente: cancelar una reserva ya `CANCELLED` no cambia nada y expone que no hubo transición, para que el caso de uso no emita un segundo evento; unit test [R1, R2]
+- [x] 2.3 Excepciones de dominio **puras** en `backend/app/reservations/domain/exceptions.py` (sin importar `app/core/errors.py`, que arrastra FastAPI: mismo patrón que `auth/domain/exceptions.py`); el mapeo a status/código va en `backend/app/reservations/api/errors.py` en la sección 4 [R1]
+- [x] 2.4 `ReservationRepository` (Protocol) en `backend/app/reservations/domain/repositories.py` (`get`, `find_by_external_pms_id`, `list`, `add`, `save`) y el value object `ReservationFilters` [R1, R3]
+- [x] 2.5 `SqlAlchemyReservationRepository` en `backend/app/reservations/infrastructure/repositories.py`: `tenant_id` explícito en cada query, `add` que rechaza `tenant_id` ajeno (los INSERT no los cubre el listener de `core/db.py`), orden estable `check_in_date DESC, id`, y el filtro de solape de estancia de D12; tests de integración en `backend/tests/reservations/test_repositories.py` incluidos los de aislamiento cross-tenant [R1, R5]
 
 ## 3. Casos de uso de reservas + timeline atómico
 

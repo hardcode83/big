@@ -2,6 +2,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import date, datetime, time
 from decimal import Decimal
+from typing import Any
 
 from app.guests.domain.enums import LegalRegistrationStatus
 from app.reservations.domain.enums import (
@@ -9,6 +10,34 @@ from app.reservations.domain.enums import (
     ReservationAccessStatus,
     ReservationChannel,
     ReservationStatus,
+)
+from app.reservations.domain.exceptions import ReservationValidationError
+
+# What `PATCH /reservations/{id}` is allowed to touch (R1.5). Everything else is either
+# derived (`nights`, `total_guests`), owned by another module (`access_status`,
+# `legal_registration_status`) or immutable identity (`id`, `tenant_id`, `property_id`,
+# `external_pms_id`). Keeping the list here rather than in the schema means the rule
+# holds for the CSV/PMS ingest paths too, not just for the HTTP one.
+UPDATABLE_FIELDS = frozenset(
+    {
+        "guest_id",
+        "channel",
+        "status",
+        "check_in_date",
+        "check_out_date",
+        "check_in_time",
+        "check_out_time",
+        "adults",
+        "children",
+        "gross_amount",
+        "ota_commission",
+        "net_amount",
+        "currency",
+        "payment_status",
+        "cleaning_required",
+        "special_requests",
+        "internal_notes",
+    }
 )
 
 
@@ -44,5 +73,132 @@ class Reservation:
     internal_notes: str | None = None
 
     def __post_init__(self) -> None:
+        """Only the stay-length invariant, on purpose.
+
+        This runs on every reconstruction from the database too, so validating more
+        here would make an already-stored row unreadable instead of correctable — the
+        occupancy rules belong to the paths that accept input (`create`,
+        `update_details`). The date rule predates this change and stays.
+        """
         if self.check_out_date <= self.check_in_date:
             raise ValueError("check_out_date must be after check_in_date")
+
+    @classmethod
+    def create(
+        cls,
+        *,
+        id: uuid.UUID,
+        tenant_id: uuid.UUID,
+        property_id: uuid.UUID,
+        channel: ReservationChannel,
+        check_in_date: date,
+        check_out_date: date,
+        now: datetime,
+        adults: int = 1,
+        children: int = 0,
+        **optional: Any,
+    ) -> "Reservation":
+        """The only way a reservation comes into existence (R1.2).
+
+        `nights` and `total_guests` are derived here and never accepted from a caller:
+        a client that could send them could contradict the dates it also sent, and then
+        every consumer of the timeline would have to decide which one to believe.
+        """
+        _validate_occupancy(adults=adults, children=children)
+        _validate_dates(check_in_date=check_in_date, check_out_date=check_out_date)
+        return cls(
+            id=id,
+            tenant_id=tenant_id,
+            property_id=property_id,
+            channel=channel,
+            check_in_date=check_in_date,
+            check_out_date=check_out_date,
+            nights=(check_out_date - check_in_date).days,
+            created_at=now,
+            updated_at=now,
+            adults=adults,
+            children=children,
+            total_guests=adults + children,
+            **optional,
+        )
+
+    def update_details(self, changes: dict[str, Any], *, now: datetime) -> dict[str, Any]:
+        """Apply the present fields and report what actually changed (R1.5, R2.2).
+
+        The return value is the `metadata` of the `RESERVATION_UPDATED` timeline event:
+        `{field: {"from": ..., "to": ...}}`, already JSON-serialisable. A field sent with
+        the value it already had is not a change and does not appear — which is what
+        makes an effectively-empty PATCH emit no event at all.
+
+        Validation runs on the RESULT, not on the incoming fields: moving only
+        `check_in_date` can invalidate a stay whose `check_out_date` was fine before,
+        and checking the fields in isolation would let that through.
+        """
+        unknown = set(changes) - UPDATABLE_FIELDS
+        if unknown:
+            raise ReservationValidationError(
+                f"Fields cannot be updated: {', '.join(sorted(unknown))}"
+            )
+
+        applied: dict[str, Any] = {}
+        for field_name, new_value in changes.items():
+            old_value = getattr(self, field_name)
+            if old_value == new_value:
+                continue
+            applied[field_name] = {"from": _jsonable(old_value), "to": _jsonable(new_value)}
+            setattr(self, field_name, new_value)
+
+        if not applied:
+            return {}
+
+        _validate_occupancy(adults=self.adults, children=self.children)
+        _validate_dates(check_in_date=self.check_in_date, check_out_date=self.check_out_date)
+        self.nights = (self.check_out_date - self.check_in_date).days
+        self.total_guests = self.adults + self.children
+        self.updated_at = now
+        return applied
+
+    def cancel(self, *, now: datetime) -> bool:
+        """Cancel the reservation; `True` only if this call is what cancelled it (R1.6, R1.7).
+
+        The boolean is the whole point: `DELETE` is idempotent, so the use case needs to
+        know whether a `RESERVATION_CANCELLED` event corresponds to something that
+        happened. Without it a client retrying a delete would append a cancellation to
+        the timeline every time.
+        """
+        if self.status is ReservationStatus.CANCELLED:
+            return False
+        self.status = ReservationStatus.CANCELLED
+        self.updated_at = now
+        return True
+
+
+def _validate_occupancy(*, adults: int, children: int) -> None:
+    if adults < 1:
+        raise ReservationValidationError("adults must be at least 1")
+    if children < 0:
+        raise ReservationValidationError("children cannot be negative")
+
+
+def _validate_dates(*, check_in_date: date, check_out_date: date) -> None:
+    if check_out_date <= check_in_date:
+        raise ReservationValidationError("check_out_date must be after check_in_date")
+
+
+def _jsonable(value: Any) -> Any:
+    """Values that survive a round trip through the `metadata` JSONB column.
+
+    `date`/`time`/`datetime` become ISO 8601 strings, `Decimal` a string (never a float:
+    that would round money), enums their `.value`, UUIDs their canonical form. Anything
+    else is returned as-is and, if it is not serialisable, fails loudly at insert time
+    rather than being silently coerced here.
+    """
+    if isinstance(value, (date, datetime, time)):
+        return value.isoformat()
+    if isinstance(value, Decimal):
+        return str(value)
+    if isinstance(value, uuid.UUID):
+        return str(value)
+    if hasattr(value, "value") and hasattr(type(value), "__members__"):
+        return value.value
+    return value

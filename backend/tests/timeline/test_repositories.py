@@ -16,10 +16,8 @@ from app.timeline.domain.enums import TimelineActorType, TimelineEventType, Time
 from app.timeline.domain.services import TimelineEventFactory
 from app.timeline.domain.value_objects import TimelineEventData
 from app.timeline.infrastructure.models import TimelineEventModel
-from app.timeline.infrastructure.repositories import (
-    CrossTenantWriteError,
-    SqlAlchemyTimelineEventRepository,
-)
+from app.core.tenancy import CrossTenantWriteError
+from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
 
 async def _tenant_and_property(db_session, name: str) -> tuple[TenantModel, PropertyModel]:
@@ -55,7 +53,7 @@ async def test_it_persists_the_event_with_its_instant_and_metadata(db_session) -
     decided_at = datetime(2026, 7, 31, 10, 30, tzinfo=UTC)
     event = _event(tenant.id, prop.id, created_at=decided_at)
 
-    await SqlAlchemyTimelineEventRepository(db_session, tenant_id=tenant.id).add(event)
+    await SqlAlchemyTimelineEventRepository(db_session).add(tenant.id, event)
 
     stored = (
         await db_session.execute(select(TimelineEventModel).where(TimelineEventModel.id == event.id))
@@ -77,7 +75,7 @@ async def test_an_event_without_metadata_stores_null_not_an_empty_object(db_sess
     event = _event(tenant.id, prop.id, created_at=datetime.now(UTC))
     event.metadata = {}
 
-    await SqlAlchemyTimelineEventRepository(db_session, tenant_id=tenant.id).add(event)
+    await SqlAlchemyTimelineEventRepository(db_session).add(tenant.id, event)
 
     stored = (
         await db_session.execute(select(TimelineEventModel).where(TimelineEventModel.id == event.id))
@@ -92,4 +90,4 @@ async def test_it_refuses_an_event_of_another_tenant(db_session) -> None:
     foreign = _event(tenant_b.id, prop_b.id, created_at=datetime.now(UTC))
 
     with pytest.raises(CrossTenantWriteError):
-        await SqlAlchemyTimelineEventRepository(db_session, tenant_id=tenant_a.id).add(foreign)
+        await SqlAlchemyTimelineEventRepository(db_session).add(tenant_a.id, foreign)

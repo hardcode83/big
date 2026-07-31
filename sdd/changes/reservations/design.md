@@ -292,6 +292,51 @@ donde R1.4 pide `404`, y en la ingesta abortaría el lote en vez de informar la 
 Rejected: resolver por `internal_code` también en la API — el identificador público de
 un recurso en PRD §23 es su UUID.
 
+### D17 — Las lecturas de `GuestRepository` devuelven una proyección sin documento
+
+**Chosen:** `get`/`find_by_email` devuelven `GuestSummary` (frozen dataclass en
+`backend/app/guests/domain/value_objects.py`) con `id`, `full_name`, `email`, `phone`,
+`preferred_language`, `document_status` y `legal_registration_status` — y **nada** de
+`document_number_encrypted`, `document_expiry_date`, `date_of_birth` ni `nationality`.
+`add` sigue tomando la entidad `Guest` completa, porque las vías de ingesta crean
+huéspedes sin datos de documento.
+
+Lo levantó el panel de seguridad de la sección 1: el puerto afirmaba que dejar los
+documentos fuera de su superficie los hacía inalcanzables, pero devolvía la entidad
+entera, así que un `model_validate(guest)` en cualquier serializador futuro habría
+filtrado el ciphertext. Con la proyección, R1.8 ("sin exponer ningún dato de documento") y
+la regla 4 de `steering/security.md` ("número de documento jamás en listados, solo
+`document_status`") pasan a ser estructurales en vez de depender de que cada autor de un
+response model se acuerde.
+
+Rejected: devolver la entidad y confiar en el schema de salida — deja la garantía en
+manos de cada serializador nuevo. Rejected: enmascarar el número en la entidad — sigue
+llevando el dato a una capa que no lo necesita.
+
+### D18 — El tenant de las **referencias** de un evento de timeline lo garantiza quien llama
+
+**Chosen:** `TimelineEventRepository.add(tenant_id, event)` comprueba el `tenant_id` del
+propio evento, y documenta como **precondición** que `property_id`, `reservation_id` y
+`actor_user_id` ya se hayan resuelto dentro de ese tenant. Las FKs de `timeline_events`
+son globales (no compuestas con `tenant_id`), así que la base de datos aceptaría un evento
+del tenant A anclado a una propiedad del tenant B, y el adaptador no puede detectarlo sin
+una query propia.
+
+En este change la precondición se cumple estructuralmente en todas las vías: la propiedad
+sale siempre de `PropertyRepository.get/find_by_internal_code/find_by_pms_external_id`
+(D16, todas tenant-scoped) y la reserva de `ReservationRepository`, y el CSV referencia la
+propiedad por `internal_code`, nunca por UUID (D11) — así que un identificador ajeno no
+tiene por dónde entrar.
+
+**Deuda registrada**: la FK compuesta `(tenant_id, property_id)` que convertiría esto en
+imposible en lugar de solo incorrecto exige migración y toca tablas de
+`domain-foundation-core`/`-ops`; pertenece a un change de esquema, no a este. Lo levantó
+el panel de seguridad de la sección 1 (severidad baja).
+
+Rejected: validar con una query por evento — un viaje extra a la base de datos en cada
+mutación para cubrir un caso que hoy ningún camino puede producir. Rejected: no
+documentarlo — sería exactamente el hueco silencioso que el panel señaló.
+
 ## Changes by area
 
 | Area | Files | Change |

@@ -7,7 +7,7 @@ instead of a leak, so each lookup has a neighbour it must fail to find.
 import uuid
 
 import pytest
-from sqlalchemy.exc import MultipleResultsFound
+from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
 
 from app.properties.infrastructure.models import PropertyModel
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
@@ -118,13 +118,15 @@ async def test_an_ambiguous_pms_external_id_fails_closed(db_session) -> None:
     """Two properties, one external id: refuse rather than attach a guest to a coin flip.
 
     `ix_properties_tenant_id_pms_external_id` is an index, not a unique constraint, so
-    this state is reachable — the repository must not silently pick one.
+    this state is reachable — the repository must not silently pick one. It refuses with a
+    DOMAIN error, so the PMS sync can report the row without catching a SQLAlchemy
+    exception inside `application/` (design D16).
     """
     tenant = await _tenant(db_session, "TenantA")
     await _property(db_session, tenant, internal_code="REDES11", pms_external_id="PMS-DUP")
     await _property(db_session, tenant, internal_code="PAJARITOS8", pms_external_id="PMS-DUP")
 
-    with pytest.raises(MultipleResultsFound):
+    with pytest.raises(AmbiguousPropertyExternalIdError):
         await SqlAlchemyPropertyRepository(db_session).find_by_pms_external_id(
             tenant.id, "PMS-DUP"
         )
