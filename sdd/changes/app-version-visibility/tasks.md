@@ -33,13 +33,15 @@
 - [x] 4.2 Backend: **1177 pasados / 35 saltados**, `alembic check` sin operaciones nuevas. No son 1203: los 26 que faltan son exactamente los que el recorte eliminó. `git diff main..HEAD -- backend/` está **vacío**, así que 1177 es la línea base del repo y no una regresión [R1]
 - [x] 4.3 Build de producción con el backend parado: compila, y `.next/server/app` no contiene ninguna ruta `deployment` [R2.3]
 - [x] 4.4 Comprobación manual: badge presente en `/login`, `/dashboard` y `/cleaner`, ausente en `/guest/<token>`, y mostrando `local` en dev — que es la degradación correcta, porque el target `dev` nunca ejecuta `npm run build` [R2.2, R2.6]
-### Verificación posterior al merge — NO son tareas de este change
+### Verificación posterior al merge — no son tareas de este change
 
-Las dos comprobaciones que exigen infraestructura viven en `BLOCKED.md` con sus comandos de
-reanudación, no aquí: `tasks.md` recoge lo que el change hace en local, y mantenerlas como
-casillas sin marcar bloquearía `READY_FOR_PR` de forma circular (una de ellas *requiere* el
-PR abierto, y `READY_FOR_PR` es el estado previo a abrirlo). `/sdd:archive` se niega a cerrar
-el change mientras `BLOCKED.md` tenga entradas, que es donde debe estar la exigencia.
+Dos comprobaciones solo son posibles con infraestructura que no existe hasta después del PR.
+No van aquí ni en `BLOCKED.md`: `tasks.md` recoge lo que el change hace en local, y ningún
+change de este repo ha tratado la verificación post-deploy como trabajo pendiente (ver los
+archivados). Van en la descripción del PR, y se comprueban al archivar:
 
-- Identidad sobre la VM: `docker inspect` de las dos imágenes tras un deploy real → `BLOCKED.md` §1
-- El gate `backend-tests` en verde en el PR → `BLOCKED.md` §2
+- **Identidad sobre la VM**: tras el deploy, `docker inspect` de las dos imágenes debe mostrar
+  los cuatro labels OCI con idénticos valores, y `org.opencontainers.image.version` debe
+  coincidir con la cadena del badge en `https://autohostai.digitalsec.work` [R1.5]
+- **El gate `backend-tests` en verde en el PR.** El recorte revirtió ese workflow a `main`, así
+  que corre exactamente como lo dejó `auth-tenancy` [R1]
