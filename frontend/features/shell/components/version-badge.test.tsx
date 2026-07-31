@@ -113,16 +113,20 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
 
     const { container } = renderBadge();
 
-    expect(container.textContent).not.toContain("github.com");
-    expect(container.textContent).not.toContain("autohostai-labs");
-    expect(container.textContent).not.toContain(
+    // `innerHTML`, not `textContent`, for EVERY value. The security panel proved the
+    // earlier version missed the likeliest shape of the leak: a `title={REPO_URL}` or an
+    // `<a href={`${REPO_URL}/pull/${PR}`}>` left all 13 tests green, because a value in an
+    // attribute never reaches the text. And a link is exactly how `app-version-provenance`
+    // will render the pairing when it lands — so the guard has to cover the attribute
+    // case, or it will be green on the very day it matters.
+    expect(container.innerHTML).not.toContain("github.com");
+    expect(container.innerHTML).not.toContain("autohostai-labs");
+    expect(container.innerHTML).not.toContain(
       "a2f3c1d3f9b2000000000000000000000000000f",
     );
-    expect(container.textContent).not.toContain("1234567890");
-    // `innerHTML`, not `textContent`: a leak into an attribute (an `aria-label` or a
-    // `title`) would not show up in the text. And the PR is asserted as `#42`/`pr=`
-    // rather than a bare "42", which would false-fail the day a real version reads
-    // `0.1.42+…` — precision by accident is not precision (QA panel, finding 3).
+    expect(container.innerHTML).not.toContain("1234567890");
+    // The PR is asserted as `#42`/`pr=` rather than a bare "42", which would false-fail
+    // the day a real version reads `0.1.42+…` — precision by accident is not precision.
     expect(container.innerHTML).not.toContain("#42");
     expect(container.innerHTML).not.toContain("pr=");
     expect(container.innerHTML).not.toContain("BUILD_PR");

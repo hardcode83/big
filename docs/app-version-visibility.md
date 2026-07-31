@@ -42,6 +42,12 @@ docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
 Las dos imágenes de un mismo despliegue llevan la **misma** cadena: la calcula un único job
 del CD y la consumen los dos builds, así que no pueden desincronizarse.
 
+> **Un matiz si usas el badge para afirmar "esta imagen concreta".** El despliegue pinea por
+> el tag `sha-<commit>`, que es mutable, no por dígest. Y la forma corta del badge
+> (`<base>+<sha>`) es **idéntica para dos builds distintos del mismo commit** — solo la
+> cadena completa de los labels OCI lleva la fecha de build que los distingue. Para
+> identificar una imagen sin ambigüedad, mira `org.opencontainers.image.created`.
+
 ## Para parear con un PR
 
 El badge da el SHA corto; de ahí al Pull Request:

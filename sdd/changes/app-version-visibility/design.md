@@ -105,6 +105,16 @@ Con esa topología, el badge del frontend no informa de "la versión del fronten
 comparación para cubrir un fallo que exige intervención manual es maquinaria cara, y en la
 primera implementación abrió además superficie de divulgación.
 
+**Y la topología además acota la DIRECCIÓN de una posible deriva** (lo verificó el panel de
+seguridad, y es un argumento más fuerte que el anterior): `docker-compose.deploy.yml` declara
+`frontend: depends_on: backend: condition: service_healthy`. En un deploy que falle a medias
+—`up -d --wait` agotando el timeout, o el `migrate` abortando, que el `RUNBOOK §6.4` documenta
+como modo de fallo real— el frontend **no se recrea** y su contenedor viejo sigue sirviendo el
+badge **antiguo**. Es decir, la deriva automática solo puede ir en la dirección conservadora
+(badge por detrás del backend), nunca en la peligrosa: el badge no puede afirmar un despliegue
+que el backend no tiene. Invertirla exigiría justamente la intervención manual que esta
+decisión nombra.
+
 **La red de seguridad para el caso patológico ya está puesta y no cuesta código**: los labels
 OCI van en las **dos** imágenes (R1.5), así que dos `docker inspect` comparan las cadenas
 desde la VM.
