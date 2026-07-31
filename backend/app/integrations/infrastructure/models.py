@@ -36,9 +36,12 @@ class WebhookEventModel(Base, UUIDPrimaryKeyMixin):
     `error` must never echo the raw body back, which would reintroduce through the
     text column what `payload` just dropped.
 
-    `NotificationLogModel.subject`/`body`/`last_error` carry a DIFFERENT form —
-    rendered text, where the rule-4 masked value is allowed because a person reads it.
-    Do not copy that one here: nothing reads a webhook payload as prose.
+    `NotificationLogModel.last_error` carries this same form — it is the same data
+    class as `error` here, a provider diagnostic. The only column in the change with a
+    looser rule is `NotificationLogModel.subject`/`body`, and only for **access
+    codes**, because those render a message a guest is meant to receive. Nothing reads
+    a webhook payload or a delivery error to be shown it, so that permission does not
+    reach here.
 
     This change creates the table and nothing writes to it, so the constraint is
     stated rather than enforced — the writer inherits it with its own test.

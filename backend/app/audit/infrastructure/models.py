@@ -27,10 +27,11 @@ class AuditLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
     listings entirely, and `ix_audit_logs_tenant_id_entity_type_entity_id` makes
     listing every Guest diff cheap.
 
-    `WebhookEventModel.payload` carries the same structured form.
-    `NotificationLogModel.subject`/`body`/`last_error` deliberately carry a DIFFERENT
-    one — rendered text, where the rule-4 masked form is allowed. Do not copy one
-    into the other.
+    `WebhookEventModel.payload`/`error` and `NotificationLogModel.last_error` carry
+    the same structured form. The single exception in the whole change is
+    `NotificationLogModel.subject`/`body`, and only for **access codes**: those render
+    a message a guest is meant to receive, so rule 4's `****XX` is allowed there.
+    Never for `document_number`, and never here.
 
     This change creates the table and nothing writes to it yet, so the constraint is
     stated rather than enforced.

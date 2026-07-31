@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-07-30_autohost-er-entidades-core.png` (el ER se regeneró en `auth-tenancy` al añadir `user_sessions`; el anterior se borró, no se acumula).
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-07-31_autohost-er-entidades.png` (el ER se regeneró en `domain-foundation-financial` al completar las 26 entidades de PRD §7; el anterior, `2026-07-30_..._-core`, se borró — el sufijo `-core` nunca describió su alcance real y le faltaban 6 tablas).
 
 ## Forma del sistema
 
