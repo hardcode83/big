@@ -13,11 +13,13 @@ export interface VersionBadgeLabels {
 /**
  * Composes what the badge shows from the canonical build version.
  *
- * The canonical string carries the build date — `0.1.0+2026-07-30.a2f3c1d` — because
- * that is what the OCI labels and `docker inspect` report. The badge shows the shortened
- * form `0.1.0+a2f3c1d`: with the date it is ~24 characters and competes for room in a
- * phone's chrome, and `steering/frontend.md` is mobile-first. The full string is still
- * one `docker inspect` away when the exact build timestamp matters.
+ * Shows the canonical string WHOLE — `0.1.0+2026-07-30.a2f3c1d`, date included — which is
+ * the same string the OCI labels and `docker inspect` report. It used to be shortened to
+ * `0.1.0+a2f3c1d`, on the premise that the date would be visible in the provenance panel;
+ * trimming the scope of `app-version-visibility` removed that panel, and with it the only
+ * place in the UI where the date could be read. The date is also the only thing that tells
+ * two different builds apart, because the deployment pins the MUTABLE tag `sha-<commit>`
+ * rather than a digest — see the `app-version-badge-date` change.
  *
  * Exported for testing: the composition rules are the part worth pinning down.
  */
@@ -28,9 +30,9 @@ export function formatBuildVersion(
   const canonical = appVersion.trim();
   if (!canonical) return null;
 
-  // Everything before the `+` is the base; the build metadata after it is replaced by
-  // the short SHA. A value with no `+` (the `local` of dev) is already the base.
-  const base = canonical.split("+")[0].trim();
+  // Everything before the first `+` is the base; whatever follows is the build metadata.
+  const [rawBase, ...rest] = canonical.split("+");
+  const base = rawBase.trim();
   // The base has to be checked on its own, not just the whole string: `"+"` and
   // `"  +abc123"` are non-empty yet have an EMPTY base, and returning `""` for them put
   // a blank badge on screen instead of the localized "unknown" — `??` in the caller only
@@ -39,6 +41,15 @@ export function formatBuildVersion(
   // careful (found by the QA panel).
   if (!base) return null;
 
+  // `rest.join("+")` instead of `rest[0]`: nothing is dropped if the metadata itself
+  // carries a `+`. Requiring an alphanumeric is the mirror image of the empty-base guard —
+  // `"0.1.0+"` and `"0.1.0++"` have a `+` that carries NOTHING, and rendering them would
+  // be exactly the "half-formed version string" the degradation rules forbid.
+  const metadata = rest.join("+").trim();
+  if (/[0-9a-z]/i.test(metadata)) return `${base}+${metadata}`;
+
+  // No usable metadata (the `local` of dev): the short SHA is the only identity available,
+  // so it is still worth appending when the image baked one.
   const short = buildCommitShort.trim();
   return short ? `${base}+${short}` : base;
 }

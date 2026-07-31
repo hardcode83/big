@@ -12,21 +12,41 @@ const LABELS = {
 } as const;
 
 describe("formatBuildVersion", () => {
-  it("shortens the canonical string to base + short sha", () => {
-    // The canonical form keeps the build date because the OCI labels report it; the
-    // badge drops it to stay readable on a phone.
+  it("shows the canonical string whole, build date included", () => {
+    // This is the production shape: the CD bakes the canonical string AND the short sha,
+    // so the assertion also pins that the sha is not appended a second time at the end.
     expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "a2f3c1d")).toBe(
-      "0.1.0+a2f3c1d",
+      "0.1.0+2026-07-30.a2f3c1d",
     );
   });
 
-  it("falls back to the base alone when no short sha was baked", () => {
-    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "")).toBe("0.1.0");
+  it("does not need the short sha when the canonical string carries metadata", () => {
+    // It used to compose `base + short sha` and therefore depended on the second argument;
+    // now the date-bearing string is shown as-is and the sha inside it is enough.
+    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "")).toBe(
+      "0.1.0+2026-07-30.a2f3c1d",
+    );
   });
 
   it("handles a value with no build metadata, like the `local` of dev", () => {
     expect(formatBuildVersion("local", "")).toBe("local");
   });
+
+  it("appends the short sha only when there is no metadata to show", () => {
+    // The remaining job of the second argument: `local` is not an identity, so a baked
+    // sha is the only thing that distinguishes one dev image from another.
+    expect(formatBuildVersion("local", "a2f3c1d")).toBe("local+a2f3c1d");
+  });
+
+  it.each(["0.1.0+", "0.1.0++", "0.1.0+   "])(
+    "treats %j as having no metadata, since its `+` carries nothing",
+    (empty) => {
+      // Mirror image of the empty-base guard: showing `0.1.0+` would be the half-formed
+      // version string the degradation rules forbid, so it degrades like `local` does.
+      expect(formatBuildVersion(empty, "")).toBe("0.1.0");
+      expect(formatBuildVersion(empty, "a2f3c1d")).toBe("0.1.0+a2f3c1d");
+    },
+  );
 
   it("returns null when nothing was baked, so the caller can localize it", () => {
     // Returning "" would put an empty badge on screen; null lets the component choose
@@ -47,8 +67,12 @@ describe("formatBuildVersion", () => {
   );
 
   it("ignores surrounding whitespace in either input", () => {
-    expect(formatBuildVersion(" 0.1.0+x.y ", " a2f3c1d ")).toBe(
-      "0.1.0+a2f3c1d",
+    expect(formatBuildVersion(" 0.1.0+x.y ", " a2f3c1d ")).toBe("0.1.0+x.y");
+  });
+
+  it("keeps metadata that itself contains a `+`, instead of dropping the tail", () => {
+    expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d+dirty", "")).toBe(
+      "0.1.0+2026-07-30.a2f3c1d+dirty",
     );
   });
 });
@@ -69,14 +93,14 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
     return render(<VersionBadge labels={LABELS} />);
   }
 
-  it("renders the shortened version from the baked snapshot", () => {
+  it("renders the whole canonical version from the baked snapshot", () => {
     process.env.NEXT_PUBLIC_APP_VERSION = "0.1.0+2026-07-30.a2f3c1d";
     process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT = "a2f3c1d";
 
     renderBadge();
 
     expect(screen.getByTestId("version-badge")).toHaveTextContent(
-      "0.1.0+a2f3c1d",
+      "0.1.0+2026-07-30.a2f3c1d",
     );
   });
 
@@ -95,7 +119,7 @@ describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
     renderBadge();
 
     expect(
-      screen.getByLabelText("Versión desplegada: 0.1.0+a2f3c1d"),
+      screen.getByLabelText("Versión desplegada: 0.1.0+2026-07-30.a2f3c1d"),
     ).toBeInTheDocument();
   });
 

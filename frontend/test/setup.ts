@@ -5,7 +5,20 @@ import { cleanup } from "@testing-library/react";
 // This jsdom build does not ship the Web Storage API; provide a minimal
 // in-memory localStorage so persistence-backed code (e.g. the shell UI store)
 // is testable.
-if (typeof window !== "undefined" && !window.localStorage) {
+//
+// Feature-detect the METHODS, not the object. Node 22+ exposes a global
+// `localStorage` of its own (Web Storage, backed by `--localstorage-file`), and the
+// jsdom window picks it up — so on Node 25 the old truthiness check saw something
+// there, skipped the polyfill, and left `window.localStorage.clear` undefined,
+// which took down 27 tests across four shell files. Truthiness was never the
+// question; whether the thing behaves like Storage is.
+const storageIsUsable =
+  typeof window !== "undefined" &&
+  typeof window.localStorage?.clear === "function" &&
+  typeof window.localStorage?.getItem === "function" &&
+  typeof window.localStorage?.setItem === "function";
+
+if (typeof window !== "undefined" && !storageIsUsable) {
   const store = new Map<string, string>();
   Object.defineProperty(window, "localStorage", {
     configurable: true,

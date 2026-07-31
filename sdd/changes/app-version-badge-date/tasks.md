@@ -6,7 +6,7 @@ dejan escritas ahí.
 
 ## 1. El badge deja de recortar
 
-- [ ] 1.1 `formatBuildVersion` devuelve la **cadena canónica completa** en vez de recomponer
+- [x] 1.1 `formatBuildVersion` devuelve la **cadena canónica completa** en vez de recomponer
   `base+sha`. Contrato nuevo: si la cadena lleva metadatos de build (tiene `+`), se devuelve
   tal cual (con la fecha); si no los lleva (el `local` de dev), se devuelve la base, y solo
   entonces se le añade el sha corto si viene horneado. Las degradaciones del change padre
@@ -20,7 +20,7 @@ dejan escritas ahí.
   (toca 4 ficheros y contradice la spec recién escrita).
   — files: `frontend/features/shell/components/version-badge.tsx` [R1.1, R1.2, R1.3]
 
-- [ ] 1.2 Ajustar `version-badge.test.tsx` a la nueva expectativa. Los tests que hoy afirman
+- [x] 1.2 Ajustar `version-badge.test.tsx` a la nueva expectativa. Los tests que hoy afirman
   el recorte y **tienen que cambiar de valor esperado**, no de intención: el de la línea 15
   (`shortens the canonical string…` → la cadena completa), el de whitespace de la línea 49
   (` 0.1.0+x.y ` → `0.1.0+x.y`, no `0.1.0+a2f3c1d`), el de render de la 72 y el del nombre
@@ -31,11 +31,22 @@ dejan escritas ahí.
   duplica al final. — files: `frontend/features/shell/components/version-badge.test.tsx`
   [R1.1, R1.2, R1.3]
 
-- [ ] 1.3 Reescribir el comentario de cabecera de `formatBuildVersion`, que hoy **argumenta
+- [x] 1.3 Reescribir el comentario de cabecera de `formatBuildVersion`, que hoy **argumenta
   el recorte** ("with the date it is ~24 characters and competes for room in a phone's
   chrome") y quedaría contradiciendo al código. Debe decir por qué se muestra completa: la
   fecha es lo único que separa builds distintos, y el panel donde iba a verse no existe.
   — files: `frontend/features/shell/components/version-badge.tsx` [R1.1, R3.1]
+
+- [x] 1.4 **No estaba en el checklist; sin R#.** Añadida al descubrir que la suite del
+  frontend estaba **roja en `main`**, no por este change: 27 tests en 4 ficheros de shell
+  caían con `window.localStorage.clear is not a function`. Causa: **Node 25 expone un
+  `localStorage` global propio** (Web Storage ya sin flag, respaldado por
+  `--localstorage-file`), el `window` de jsdom lo recoge, y el guard de `test/setup.ts`
+  —`if (!window.localStorage)`— lo veía *truthy* y por eso **no instalaba el polyfill**,
+  dejando un objeto sin `clear`. El guard pasa a detectar los **métodos** (`clear`,
+  `getItem`, `setItem`) en vez de la existencia del objeto. Sin esto la tarea 4.1 no se
+  puede cumplir ni afirmar honestamente. Solo toca infraestructura de test, ninguna línea
+  de producción. — files: `frontend/test/setup.ts`
 
 ## 2. La legibilidad en móvil, medida
 
