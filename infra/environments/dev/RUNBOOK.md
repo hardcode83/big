@@ -144,8 +144,13 @@ El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, 
 
 **Cómo confirmar que el rollback surtió efecto, sin entrar en la VM** (change
 `app-version-visibility`). Antes, la única forma era leer `IMAGE_TAG` del `.env` por túnel
-SSH. Ahora basta con abrir la app: el badge del pie muestra `<base>+<sha-corto>` de lo que
-está corriendo. Desde la VM, la identidad que lleva la imagen dentro:
+SSH. Ahora basta con abrir la app: el badge del pie muestra la cadena canónica completa
+`<base>+<fecha-build>.<sha-corto>` (p. ej. `0.1.0+2026-07-31.5872022`) de lo que está
+corriendo — la **misma** que el label `org.opencontainers.image.version` de la imagen, así que
+comparar pantalla y VM es comparar dos cadenas idénticas. Ojo: la fecha tiene granularidad de
+día, así que dos builds del mismo commit **el mismo día** se ven iguales en el badge; para
+distinguirlos hace falta `org.opencontainers.image.created`, que lleva la hora. Desde la VM,
+la identidad que lleva la imagen dentro:
 
 ```bash
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
