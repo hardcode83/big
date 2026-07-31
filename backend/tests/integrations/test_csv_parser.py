@@ -136,3 +136,95 @@ class TestFileLevelFailures:
         """Distinct from a malformed file: the answer is `413`, not `422`."""
         with pytest.raises(CsvTooLargeError):
             _parse(HEADER + GOOD_ROW * 5, max_rows=3)
+
+
+class TestRecordBudget:
+    """A record over budget costs that record, never the file (R4.2, D11).
+
+    Three shapes, because three successive fixes each closed one and left another open — the
+    history is in `_bounded_lines`' docstring. All three were measured by the review panel or while
+    verifying its findings.
+    """
+
+    HEADER_WITH_NOTES = (
+        "property_internal_code,channel,check_in_date,check_out_date,adults,special_requests\n"
+    )
+
+    def _row(self, note: str, day: int = 1) -> str:
+        return f"REDES11,AIRBNB,2026-08-0{day},2026-08-1{day},2,{note}\n"
+
+    def test_one_very_long_physical_line_only_costs_its_own_row(self) -> None:
+        body = (
+            self.HEADER_WITH_NOTES
+            + self._row("Ana", 1)
+            + f'REDES11,AIRBNB,2026-08-05,2026-08-08,2,{"X" * 20_001}\n'
+            + self._row("Bob", 2)
+            + self._row("Cara", 3)
+        )
+
+        result = _parse(body)
+
+        assert [row.reservation.special_requests for row in result.rows] == ["Ana", "Bob", "Cara"]
+        assert [failure.line for failure in result.failures] == [3]
+
+    def test_a_quoted_field_spread_over_short_lines_only_costs_its_own_row(self) -> None:
+        """The shape a physical-line bound missed: no single line is long, the record is.
+
+        And the shape that a record bound *without buffering* made worse — the reader had already
+        been handed the opening lines, so its unterminated quote swallowed the rows after it.
+        """
+        oversized = (
+            'REDES11,AIRBNB,2026-08-05,2026-08-08,2,"'
+            + ("A" * 9_000 + "\n") * 2
+            + "A" * 9_000
+            + '"\n'
+        )
+        body = (
+            self.HEADER_WITH_NOTES
+            + self._row("fine", 1)
+            + oversized
+            + self._row("also fine", 2)
+            + self._row("still fine", 3)
+        )
+
+        result = _parse(body)
+
+        assert [row.reservation.special_requests for row in result.rows] == [
+            "fine",
+            "also fine",
+            "still fine",
+        ]
+        assert [failure.line for failure in result.failures] == [3]
+
+    def test_a_legitimate_multi_line_quoted_field_still_works(self) -> None:
+        """The bound must not turn a normal two-line note into an error."""
+        body = (
+            self.HEADER_WITH_NOTES
+            + self._row("fine", 1)
+            + 'REDES11,AIRBNB,2026-09-01,2026-09-03,2,"two\nlines"\n'
+            + self._row("last", 3)
+        )
+
+        result = _parse(body)
+
+        assert result.failures == []
+        assert [row.reservation.special_requests for row in result.rows] == [
+            "fine",
+            "two\nlines",
+            "last",
+        ]
+        # The line number is the record's first line, which is what a person looks for.
+        assert [row.line for row in result.rows] == [2, 4, 5]
+
+    def test_a_file_ending_inside_a_quoted_value_reports_that_row_and_keeps_the_rest(self) -> None:
+        body = (
+            self.HEADER_WITH_NOTES
+            + self._row("fine", 1)
+            + 'REDES11,AIRBNB,2026-09-01,2026-09-03,2,"never closed\n'
+        )
+
+        result = _parse(body)
+
+        assert [row.reservation.special_requests for row in result.rows] == ["fine"]
+        assert [failure.line for failure in result.failures] == [3]
+        assert "unclosed" in result.failures[0].reason

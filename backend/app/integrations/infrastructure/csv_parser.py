@@ -24,10 +24,13 @@ from app.integrations.domain.dtos import ParsedRow, ParseResult, ReservationDTO,
 # `_csv.Error`, which is neither a `ValueError` nor a `CsvFileError`, so it escaped as a 500 and
 # took every valid row of the file with it — measured by the security review. Bounded here, and
 # per-column widths below, so a hostile or merely sloppy cell becomes a reported row.
-MAX_CELL_CHARS = 10_000
-# A whole physical line. Bounded separately from a cell because it is what can be checked BEFORE
-# the tokeniser runs, which is what lets an oversized row be skipped instead of killing the file.
-MAX_LINE_CHARS = 20_000
+# The budget of one CSV record — a whole row, including a quoted cell spread over several lines.
+# Checked BEFORE the tokeniser sees the text, which is what lets an oversized row be skipped
+# instead of killing the file. There is deliberately no separate per-cell constant: an earlier
+# version had `MAX_CELL_CHARS`, and once `field_size_limit` was driven from the record budget it
+# documented a bound nothing enforced — the security review flagged it as a trap for the next
+# reader.
+MAX_RECORD_CHARS = 20_000
 
 # Mirrors the column widths of PRD §7.6/§7.7 so a too-long value is a row error with a line
 # number instead of an `asyncpg.StringDataRightTruncationError` that poisons the transaction.
@@ -76,7 +79,7 @@ def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
     # `field_size_limit` is process-global interpreter state, so it is restored afterwards rather
     # than left lowered for every other CSV reader in the process (raised by the security review
     # as an informational point).
-    previous_field_limit = csv.field_size_limit(MAX_LINE_CHARS)
+    previous_field_limit = csv.field_size_limit(MAX_RECORD_CHARS)
     try:
         return _parse(_text_stream(raw), max_rows=max_rows)
     finally:
@@ -101,33 +104,74 @@ def _text_stream(raw: bytes) -> io.TextIOBase:
 def _bounded_lines(
     stream: io.TextIOBase, dropped: list[RowFailure], fed_lines: list[int]
 ) -> "Iterator[str]":
-    """Yield the file's lines, dropping any that is too long — as a ROW failure.
+    """Yield the file one RECORD at a time, dropping any record over budget as a row failure.
 
     This is the difference between "the file is unusable" and "one row is unusable", and R4.2 only
     accepts the second reading: *"omitir esa fila, continuar con el resto"*. D11 rejects the other
     one by name ("Rejected: abortar todo el fichero al primer error").
 
-    A previous version let the oversized cell reach `csv.reader`, which raises `csv.Error` and
-    cannot resume — so a single 20 000-character cell anywhere in the file made the whole upload
-    return `422` with **zero** rows imported, losing every good row around it. The QA review
-    measured exactly that. Bounding the physical line before the tokeniser ever sees it keeps the
-    reader alive for the rest of the file.
+    Three iterations of this function got it wrong, so the reasoning is worth writing down:
+
+    1. Letting the oversized cell reach `csv.reader` raises `csv.Error`, which cannot resume — the
+       whole upload returned `422` with zero rows. Measured by the QA review.
+    2. Bounding each *physical line* fixed that shape but not a quoted field spread over several
+       short lines, whose aggregate still tripped `field_size_limit`. Measured by the security
+       review.
+    3. Bounding the record but yielding its lines as they arrived was worse than either: by the
+       time the budget was exceeded the reader had already been handed the opening lines of the
+       record, so its unterminated quote swallowed the following rows and they vanished silently.
+       Measured here, before committing.
+
+    Hence buffering: a record's lines are held until it closes, and only then either yielded or
+    reported. Quote parity is what says whether a record is still open — in RFC 4180 a record
+    continues while the number of `"` seen in it is odd — and the buffer is bounded by
+    `MAX_RECORD_CHARS`, so holding it costs nothing measurable.
 
     `fed_lines` records the physical line number of each line actually handed to the reader, so a
     record's line number stays truthful even after lines have been dropped (`reader.line_num`
     counts what it saw, not what the file contains).
     """
-    for physical_line, line in enumerate(stream, start=1):
-        if len(line) > MAX_LINE_CHARS:
+    buffer: list[str] = []
+    buffered_lines: list[int] = []
+    record_chars = 0
+    record_start = 0
+    inside_quotes = False
+
+    def flush() -> "Iterator[str]":
+        if record_chars > MAX_RECORD_CHARS:
             dropped.append(
                 RowFailure(
-                    line=physical_line,
-                    reason=f"The row is longer than {MAX_LINE_CHARS} characters",
+                    line=record_start,
+                    reason=f"The row is longer than {MAX_RECORD_CHARS} characters",
                 )
             )
-            continue
-        fed_lines.append(physical_line)
-        yield line
+            return
+        for physical_line, line in zip(buffered_lines, buffer, strict=True):
+            fed_lines.append(physical_line)
+            yield line
+
+    for physical_line, line in enumerate(stream, start=1):
+        if not inside_quotes:
+            record_start = physical_line
+            record_chars = 0
+            buffer = []
+            buffered_lines = []
+        record_chars += len(line)
+        inside_quotes = (inside_quotes + line.count('"')) % 2 == 1
+        # Past the budget there is no point holding the text: the record is going to be reported,
+        # and only its length and starting line matter from here.
+        if record_chars <= MAX_RECORD_CHARS:
+            buffer.append(line)
+            buffered_lines.append(physical_line)
+        if not inside_quotes:
+            yield from flush()
+
+    if inside_quotes:
+        # The file ended inside a quoted field: the record never closed, so it is reported rather
+        # than handed over half-built.
+        dropped.append(
+            RowFailure(line=record_start, reason="The row ends inside an unclosed quoted value")
+        )
 
 
 def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
