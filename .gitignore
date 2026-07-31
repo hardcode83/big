@@ -47,3 +47,6 @@ npm-debug.log*
 # Helper de bootstrap manual de capacidad A1 — local-only: el pipeline es el camino canónico
 # para operar infra. Re-ejecutarlo sobre la máquina existente es destructivo (itera ad_number con -auto-approve).
 infra/environments/dev/apply_loop.sh
+
+# Artefactos de sesiones de Playwright (capturas, snapshots, logs de consola)
+.playwright-mcp/
