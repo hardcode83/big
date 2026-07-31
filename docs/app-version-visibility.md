@@ -87,6 +87,25 @@ una **página** antigua, el badge la delata. Si sirve **JavaScript** antiguo con
 no: el badge vendría del HTML nuevo. Para ese caso hay que mirar los nombres de fichero en
 la pestaña Network del navegador.
 
+### Si el badge dice "versión desconocida"
+
+Puede significar dos cosas distintas, y conviene no confundirlas.
+
+La imagen **no lleva identidad horneada**: en dev local es lo normal (el target `dev` nunca
+ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build.
+
+O la lleva pero **el frontend la ha rechazado**. La configuración pública solo admite
+`X.Y.Z+YYYY-MM-DD.<7 hex>` —o el literal `local`— y el commit corto solo 7 caracteres hex;
+cualquier otra cosa cae a vacío. Es deliberado: esa cadena viaja en el HTML de **todas** las
+superficies, así que el límite prefiere no mostrar nada antes que mostrar algo sin vetar. Se
+dispara si alguien ensancha `${GITHUB_SHA:0:7}`, cambia el formato de la fecha, o `VERSION`
+deja de tener forma `X.Y.Z`.
+
+Para separarlas, mira el label de la imagen: si `org.opencontainers.image.version` está
+**vacío** es el primer caso; si lleva una cadena y el badge sigue diciendo "desconocida" es el
+segundo, y hay que alinear el patrón de `frontend/lib/config/public.ts` con lo que el CD
+compone —en el mismo commit, porque hoy **nada detecta esa deriva**—.
+
 ## Cómo se mantiene la versión base
 
 `VERSION`, en la raíz, es la fuente de la parte fija. Subirla es editar ese fichero. El CD

@@ -197,7 +197,13 @@ dejan escritas ahí.
 ## 4. Verification
 
 - [x] 4.1 Suite completa del frontend en verde: `cd frontend && npm test` [R1, R2]
-  → **189/189 en 35 ficheros**. Partía de 178 (27 de ellos rojos antes de la tarea 1.4).
+  → **198/198 en 35 ficheros**, tras los arreglos del panel de `/sdd:review`. Partía de 178
+  (27 de ellos **rojos** antes de la tarea 1.4), pasó por 189 y por 194.
+  **Aviso que trae el revisor de cicd**: ningún workflow invoca vitest —solo existen
+  `backend-tests.yml`, `deploy-dev.yml`, `infra-dev.yml` y `multiarch-build-check.yml`, y los
+  dos últimos solo hacen `npm run build`—, así que este verde es la ejecución local de una
+  persona y no evidencia reproducible. Es exactamente lo que `backend-tests.yml` se creó para
+  arreglar en el backend, y la tarea 1.4 es su factura. Queda como entrada de roadmap.
 - [x] 4.2 Lint y typecheck: `cd frontend && npx eslint . && npm run typecheck` [R1]
   → ambos limpios. (El comando de `project.md` dice `npm run lint`; `npx eslint .` es
   literalmente lo que ese script ejecuta.)
@@ -232,8 +238,12 @@ Ninguno es tarea de este change; quedan escritos para que no se pierdan con la s
 - **Deriva entre el productor y el que valida.** Nada comprueba que la cadena que el CD
   compone de verdad satisfaga el patrón del límite. Si alguien ensancha `${GITHUB_SHA:0:7}` a
   8 caracteres, el badge cae a "versión desconocida" y **ningún test ni paso del pipeline
-  falla**. Lo señalaron seguridad y arquitectura por separado. Se cerraría con un check en el
-  workflow, o con un test que lea `deploy-dev.yml` y afirme la forma de la composición.
+  falla**. Lo señalaron seguridad y arquitectura por separado, y cicd lo repitió en el
+  `/sdd:review` discrepando de dejarlo solo anotado. **Ya es entrada de roadmap:
+  `build-identity-contract`**, con la discrepancia entre revisores registrada.
+- **La suite del frontend no corre en ningún pipeline.** Ninguno de los cuatro workflows
+  invoca vitest, así que el verde de la tarea 4.1 es local y no reproducible. Lo levantó cicd
+  en el `/sdd:review`. **Ya es entrada de roadmap: `frontend-ci`.**
 - **La cita "R2.4"** que arrastran `lib/config/public.ts:35` y varios tests: en el change
   padre R2.4 es "añadir los dos campos a la allowlist", no la prohibición del SHA/`run_id`,
   que es prosa de la sección "Alcance de la divulgación, aceptado". La cita preexiste a este

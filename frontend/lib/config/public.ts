@@ -67,6 +67,10 @@ export interface PublicRuntimeConfig {
  * - The commit is exactly 7 hex characters, which is what the CD composes
  *   (`${GITHUB_SHA:0:7}`). Deliberately NOT a range: decimal digits are a subset of hex, so a
  *   lenient `{7,12}` accepts an Actions `run_id` — 11 decimal digits — as if it were a commit.
+ * - The date's month and day are bounded to real calendar ranges, not just to two digits each.
+ *   A bare `\d{4}-\d{2}-\d{2}` is eight FREE decimal digits, and `0.1.0+3061-83-52.9680000`
+ *   sailed through it — the same mistake as the base, one slot further along. The pipeline
+ *   guarantees `date -u`, which means a real date, so that is what gets required.
  *
  * If either shape ever changes upstream, change it here in the same commit, on purpose. The
  * badge degrades to "unknown" rather than showing something unvetted, and nothing detects that
@@ -78,7 +82,7 @@ export interface PublicRuntimeConfig {
  * the third left the base unpinned.
  */
 const BAKED_VERSION =
-  /^(?:\d+\.\d+\.\d+(?:\+\d{4}-\d{2}-\d{2}\.[0-9a-f]{7})?|local)$/;
+  /^(?:\d+\.\d+\.\d+(?:\+\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\.[0-9a-f]{7})?|local)$/;
 const BAKED_COMMIT_SHORT = /^[0-9a-f]{7}$/;
 
 function allowlistedShape(raw: string | undefined, shape: RegExp): string {

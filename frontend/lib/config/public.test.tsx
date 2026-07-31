@@ -109,6 +109,13 @@ describe("public runtime config (D15)", () => {
     ["a bare 40-char SHA", "a2f3c1d3f9b2000000000000000000000000000f"],
     ["a 32-char hex prefix that still resolves to a commit", "8a34fec66181ee2aa1969864bc384ba4"],
     ["a branch name", "feature-my-branch"],
+    // The date slot was the last component still bounded by digit COUNT rather than by value:
+    // `\d{4}-\d{2}-\d{2}` is eight free decimal digits, enough room for numeric provenance.
+    // Found at feature-scale review, and it is the same mistake as the base one slot along.
+    ["numeric provenance in the date slot", "0.1.0+3061-83-52.9680000"],
+    ["a month that does not exist", "0.1.0+2026-13-01.5872022"],
+    ["a day that does not exist", "0.1.0+2026-07-32.5872022"],
+    ["a zero month", "0.1.0+2026-00-15.5872022"],
   ])("drops %s instead of letting it into the snapshot", (_why, widened) => {
     // This is the layer that matters, and the reason it is here and not in `VersionBadge`:
     // React serializes this object as a prop into the RSC payload of the root layout, so
