@@ -23,7 +23,7 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 - [x] 2.4 `ReservationRepository` (Protocol) en `backend/app/reservations/domain/repositories.py` (`get`, `find_by_external_pms_id`, `list`, `add`, `save`) y el value object `ReservationFilters` [R1, R3]
 - [x] 2.5 `SqlAlchemyReservationRepository` en `backend/app/reservations/infrastructure/repositories.py`: `tenant_id` explícito en cada query, `add` que rechaza `tenant_id` ajeno (los INSERT no los cubre el listener de `core/db.py`), orden estable `check_in_date DESC, id`, y el filtro de solape de estancia de D12; tests de integración en `backend/tests/reservations/test_repositories.py` incluidos los de aislamiento cross-tenant [R1, R5]
 
-## 3. Casos de uso de reservas + timeline atómico
+## 3. Casos de uso de reservas + timeline atómico <!-- panel: pendiente, se revisa junto a la 4 -->
 
 - [x] 3.1 `CreateReservationUseCase` en `backend/app/reservations/application/use_cases.py`: resuelve la propiedad por `PropertyRepository.get` (→ `NotFoundError` si no es del tenant), crea la reserva, emite `RESERVATION_CREATED_MANUAL` con `actor_type` USER y hace un único `commit`; unit tests con fakes en memoria de los cuatro puertos [R1, R2, R5]
 - [x] 3.2 `UpdateReservationUseCase`: aplica solo los campos presentes, revalida sobre el resultado y emite `RESERVATION_UPDATED` con los campos cambiados en `metadata`; unit tests, incluido que un PATCH vacío no emite evento [R1, R2]
@@ -33,13 +33,13 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 
 ## 4. API de reservas
 
-- [ ] 4.1 Dos permisos nuevos (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`) y su matriz de roles en `backend/app/auth/domain/policy.py` según D7; ampliar `backend/tests/auth/test_policy.py` con los cinco roles [R5]
-- [ ] 4.2 Esquemas Pydantic en `backend/app/reservations/api/schemas.py` (crear, patch, respuesta, respuesta paginada `{data,total,page,per_page,total_pages}`), con `per_page` acotado a 100 y fechas ISO 8601 UTC [R1]
-- [ ] 4.3 Dependencias de inyección en `backend/app/reservations/api/dependencies.py` (un builder por caso de uso, siguiendo `auth/api/dependencies.py`) [R1]
-- [ ] 4.4 Router `backend/app/reservations/api/router.py` con los cinco endpoints de PRD §23, cada uno declarando `require(...)`, con `summary`/`description` y modelos de respuesta para OpenAPI; montarlo en `backend/app/main.py` bajo `API_V1_PREFIX` [R1, R5]
-- [ ] 4.5 Tests de API en `backend/tests/reservations/test_api.py` (httpx AsyncClient): los cinco endpoints en camino feliz, `422` de validación, `404` de propiedad inexistente, `204` idempotente del DELETE y `409` por `external_pms_id` duplicado [R1]
-- [ ] 4.6 Tests de la matriz completa endpoint × rol en `backend/tests/reservations/test_authorization.py`: los cinco roles contra los cinco endpoints, reutilizando las fixtures `tenant_a`/`tenant_b`/`users_by_role_*` de `backend/tests/auth/conftest.py` [R5]
-- [ ] 4.7 Tests de aislamiento en `backend/tests/reservations/test_isolation.py`: un usuario del tenant A recibe `404` (no `403`) al pedir, editar y cancelar por `id` una reserva real del tenant B, y su listado nunca la incluye [R5]
+- [x] 4.1 Dos permisos nuevos (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`) y su matriz de roles en `backend/app/auth/domain/policy.py` según D7; ampliar `backend/tests/auth/test_policy.py` con los cinco roles [R5]
+- [x] 4.2 Esquemas Pydantic en `backend/app/reservations/api/schemas.py` (crear, patch, respuesta, respuesta paginada `{data,total,page,per_page,total_pages}`), con `per_page` acotado a 100 y fechas ISO 8601 UTC [R1]
+- [x] 4.3 Dependencias de inyección en `backend/app/reservations/api/dependencies.py` (un builder por caso de uso, siguiendo `auth/api/dependencies.py`) [R1]
+- [x] 4.4 Router `backend/app/reservations/api/router.py` con los cinco endpoints de PRD §23, cada uno declarando `require(...)`, con `summary`/`description` y modelos de respuesta para OpenAPI; montarlo en `backend/app/main.py` bajo `API_V1_PREFIX` [R1, R5]
+- [x] 4.5 Tests de API en `backend/tests/reservations/test_api.py` (httpx AsyncClient): los cinco endpoints en camino feliz, `422` de validación, `404` de propiedad de otro tenant, `204` idempotente del DELETE, y la comprobación de que el endpoint manual **no** acepta `external_pms_id` — el `409` del unique constraint solo es alcanzable desde la ingesta y se cubre en `test_repositories.py` (design D9 corregido) [R1]
+- [x] 4.6 Tests de la matriz completa endpoint × rol en `backend/tests/reservations/test_authorization.py`: los cinco roles contra los cinco endpoints, reutilizando las fixtures `tenant_a`/`tenant_b`/`users_by_role_*` de `backend/tests/auth/conftest.py` [R5]
+- [x] 4.7 Tests de aislamiento en `backend/tests/reservations/test_isolation.py`: un usuario del tenant A recibe `404` (no `403`) al pedir, editar y cancelar por `id` una reserva real del tenant B, y su listado nunca la incluye [R5]
 
 ## 5. Integraciones: puerto PMS, mock y sincronización
 

@@ -174,6 +174,12 @@ La `UniqueConstraint` que ya está en la tabla es la autoridad ante una carrera:
 su motivo en el informe de importación. Una reserva sin `external_pms_id` (creada a
 mano) nunca entra en esta ruta.
 
+El `409` **solo es alcanzable desde las vías de ingesta**, no desde `POST /reservations`:
+el endpoint manual no acepta `external_pms_id` (es la clave de idempotencia de la ingesta, y
+un valor escrito a mano haría que la siguiente sincronización creyera que ya importó esa
+reserva). Corregido aquí tras descubrirlo al escribir el test de API de la sección 4: la
+tabla de endpoints de este design listaba un `409` que el endpoint no puede producir.
+
 Rejected: `ON CONFLICT DO UPDATE` — hace invisible la distinción creada/actualizada
 que el informe de R4.1 tiene que reportar.
 
@@ -372,7 +378,7 @@ alcance.
 
 ```
 GET    /reservations?page&per_page&property_id&status&date_from&date_to  → 200 {data,total,page,per_page,total_pages}
-POST   /reservations                                                     → 201 | 422 | 404 (propiedad) | 409 (external_pms_id duplicado)
+POST   /reservations                                                     → 201 | 422 | 404 (propiedad)
 GET    /reservations/{id}                                                → 200 | 404
 PATCH  /reservations/{id}                                                → 200 | 422 | 404
 DELETE /reservations/{id}                                                → 204 (idempotente)
