@@ -15,3 +15,4 @@
 | app-version-visibility | new+design+tasks+run+archive | 168599 | 611287 | 148801977 | 92.3229 | 2026-07-30 | 2026-07-31 |
 | app-version-badge-date | new, tasks, run+review, archive (sin design: una función) | 135570 | 402614 | 64114944 | 47.5171 | 2026-07-31 | 2026-07-31 |
 | reservations | new, design, run, review, archive | 271778 | 807608 | 217200231 | 133.2077 | 2026-07-31 | 2026-07-31 |
+| domain-foundation-financial | new, design, tasks, run, review | 192804 | 450889 | 91234692 | 61.7428 | 2026-07-31 | — |

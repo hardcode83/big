@@ -51,10 +51,11 @@ def test_importing_app_main_registers_every_domain_model() -> None:
 def test_the_tenant_filter_sees_the_child_tables_that_have_no_tenant_id_of_their_own() -> None:
     """Pins design D16's fifth limit rather than leaving it implicit.
 
-    `messages`, `cleaning_checklist_completions` and `cleaning_photos` carry no
-    `tenant_id` — they hang off a tenant-scoped parent. The net matches on column
-    presence, so it does NOT cover them: any repository touching them must join the
-    scoped parent explicitly and carry its own isolation test.
+    `messages`, `cleaning_checklist_completions`, `cleaning_photos` and
+    `review_response_drafts` carry no `tenant_id` — they hang off a tenant-scoped
+    parent. The net matches on column presence, so it does NOT cover them: any
+    repository touching them must join the scoped parent explicitly and carry its own
+    isolation test.
     """
     from app.core.db import tenant_scoped_classes
 
@@ -63,3 +64,4 @@ def test_the_tenant_filter_sees_the_child_tables_that_have_no_tenant_id_of_their
     assert "messages" not in covered
     assert "cleaning_checklist_completions" not in covered
     assert "cleaning_photos" not in covered
+    assert "review_response_drafts" not in covered

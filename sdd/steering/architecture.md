@@ -10,6 +10,8 @@ Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominio
 
 **Monolito modular** con arquitectura hexagonal, separado por dominios de negocio (PRD §3.2): `auth`, `tenants`, `properties`, `reservations`, `guests`, `cleaning`, `maintenance`, `messaging`, `access`, `pricing`, `statements`, `notifications`, `timeline`, `integrations`. Sin microservicios en MVP; el código debe permitir extraer servicios en el futuro.
 
+Dos dominios más que **no** están en la lista de PRD §3.2, añadidos en `domain-foundation-financial`: `reviews` (PRD §7.20-7.21) y `audit` (§7.25). Se descartó plegar las reviews en `statements` —mezclaría reporting financiero con contenido de OTAs— y alojar `AuditLog` en `app/core/`, que es infraestructura compartida y no aloja entidades de negocio. La divergencia se justifica en que `audit` es transversal exactamente igual que `timeline`, que el propio §3.2 ya lista como dominio de pleno derecho.
+
 Monorepo: `/backend` (FastAPI + Celery, con `backend/devops/Dockerfile`), `/frontend` (Next.js, con `frontend/devops/Dockerfile`). Sin `/docker` a nivel de raíz — `docker-compose.yml` y `Makefile` orquestando todo el stack viven en la raíz del repo (change `local-environment`). Despliegue remoto (IaC/CI-CD): convención en `infra/` — ver `steering/infra.md`, ortogonal a este layout por dominio.
 
 ## Decisiones firmes

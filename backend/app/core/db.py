@@ -80,6 +80,22 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
        `find_by_email_globally` has no tenant yet — and `POST /auth/refresh`,
        which is anonymous and so never reaches `get_authenticated_request`, the only
        place that marks. Any future anonymous endpoint touching data inherits this.
+
+       This is how `webhook_events` rows whose `tenant_id` is NULL are reached through
+       the ORM. That column is nullable by design (§7.26: a payload that cannot be
+       attributed is recorded rather than lost), but the scan below matches on column
+       presence, so a marked session filters `tenant_id = X` and those rows come back
+       empty with no error.
+
+       **`reservations-webhooks` must use a session that was NEVER marked** — its own,
+       straight from `async_session_factory`, the way `app/cli/bootstrap.py` and
+       `app/integrations/cli/pms_sync.py` already do. It must NOT pop the marker off a
+       session that has one: `session.info` is per-session, not per-statement, so
+       un-marking mid-request disables this net for **every** scoped table for the rest
+       of that session — `guests.document_number` included. There is no supported way
+       to exempt one table for one query; if you find yourself wanting that, the read
+       belongs in a different session. Pinned by
+       `tests/test_tenant_filter.py::test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`.
     3. INSERTs are not guarded. `session.add` emits no ORM statement this listener
        can rewrite, so a cross-tenant insert is stopped only by the explicit check
        in the repository (`add()` refuses a foreign `tenant_id`).
@@ -89,9 +105,10 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
        on the anonymous login path must not be handed to a marked session.
 
     5. Child tables with no `tenant_id` of their own are out of reach (`messages`,
-       `cleaning_checklist_completions`, `cleaning_photos`): they hang off a scoped
-       parent, and this scan matches on column presence. Any repository touching them
-       must join the scoped parent explicitly and bring its own isolation test.
+       `cleaning_checklist_completions`, `cleaning_photos`, `review_response_drafts`):
+       they hang off a scoped parent, and this scan matches on column presence. Any
+       repository touching them must join the scoped parent explicitly and bring its
+       own isolation test.
 
     Rows 3, 4 and 5 are why the explicit `tenant_id` of design D6 remains the
     authoritative mechanism and this is only the net.
