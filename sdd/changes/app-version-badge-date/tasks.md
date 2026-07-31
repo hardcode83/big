@@ -20,23 +20,43 @@ dejan escritas ahí.
   (toca 4 ficheros y contradice la spec recién escrita).
   — files: `frontend/features/shell/components/version-badge.tsx` [R1.1, R1.2, R1.3]
 
-  **Segunda decisión, añadida por el panel de la sección 1 — la forma de los metadatos se
-  valida, no se confía.** El badge solo renderiza verbatim la forma canónica
-  `YYYY-MM-DD.<7-12 hex>`; cualquier otra cosa degrada a la forma corta. Referentes: **R1.2**
-  (ninguna cadena con forma de versión a medias) y **R2.4 de la capability padre**
-  (`sdd/specs/app-version-visibility.md:67-70`: el SHA completo, el `run_id`, el `ref` y el
-  número de PR **no** pueden estar en el snapshot público). El motivo lo encontró el panel de
-  seguridad y es estructural: **hasta este change los metadatos se descartaban** y se
-  sustituían por el sha corto, así que compusiera lo que compusiera el CD solo 7 caracteres
-  podían llegar a pantalla. Mostrarlos completos elimina ese límite, y el badge se pinta en
-  superficies **anónimas** — un futuro `.${GITHUB_RUN_ID}` o un `:0:7` caído en el paso
-  `provenance` publicaría el SHA completo o el run id en el pie de `/login`, y el guard que
-  existía **seguiría verde**, porque plantaba los valores sensibles en variables que el
-  componente no lee. Ahora el componente lo impide en vez de confiar en el pipeline.
-  Arquitectura pedía además que esto quedase escrito como decisión y no como heurística
-  silenciosa: esta nota es eso. Consecuencia asumida: si el esquema canónico cambia (una
-  hora, por ejemplo), hay que cambiar el patrón con él o el badge cae a la forma corta sin
-  avisar — el comentario del código lo dice.
+  **Segunda decisión, del panel de la sección 1 — la identidad horneada se valida en el
+  límite, no en el badge.** `buildPublicRuntimeConfig()` (`lib/config/public.ts`) solo admite
+  dos formas: `<base>` a secas (el `local` de dev) y `<base>+YYYY-MM-DD.<7 hex>`; el
+  `buildCommitShort` solo `[0-9a-f]{7}`. Cualquier otra cosa cae a `""`, que es el caso "sin
+  identidad" que el badge ya rinde como "versión desconocida".
+
+  Referentes: la sección **"Alcance de la divulgación, aceptado"** de
+  `sdd/specs/app-version-visibility.md` y su prohibición de líneas 67-70 (el SHA completo, el
+  número de PR, el `run_id` y el `ref` **no** pueden estar en el snapshot público), más
+  **R1.2** para la parte presentacional (ninguna cadena con forma de versión a medias).
+
+  El motivo es estructural y lo encontró el panel de seguridad: **hasta este change los
+  metadatos se descartaban** y se sustituían por el sha corto, así que compusiera lo que
+  compusiera el CD solo 7 caracteres podían llegar a pantalla. Mostrarlos completos elimina
+  ese límite, y el guard que existía **seguía verde** porque plantaba los valores sensibles en
+  variables que el componente no lee.
+
+  **Tres iteraciones, y las dos primeras estaban mal — conviene que quede escrito:**
+  1. Validar en `formatBuildVersion` con `[0-9a-f]{7,12}`. Seguridad demostró que los dígitos
+     decimales son un **subconjunto** del hex, así que un `run_id` de Actions (11 dígitos)
+     pasaba como si fuera un commit. La tolerancia *era* el agujero.
+  2. Seguía validando solo el `appVersion`, cuando `buildCommitShort` es **el destino de toda
+     degradación** y el CD lo compone en la línea de al lado (`commit_short=${GITHUB_SHA:0:7}`):
+     el mismo descuido que ensancha uno ensancha el otro, así que el camino "seguro" publicaba
+     el SHA de 40 caracteres.
+  3. Y sobre todo: **la capa era la equivocada.** Arquitectura lo reprodujo con un
+     `next build` real — React serializa el snapshot como prop en el payload RSC del layout
+     raíz, así que un valor envenenado viaja en el código fuente de **todas** las superficies,
+     incluida `/guest/<token>`, pase lo que pase con el badge. Validar en el componente solo
+     limpiaba los píxeles. Verificado ya sobre el servidor real: con el valor envenenado, ni
+     `/login` ni `/guest/<token>` contienen el SHA ni el run id, y el payload lleva
+     `appVersion: ""`.
+
+  Lo que queda en el componente es presentación: componer la cadena y no pintar nunca una
+  versión a medias. Consecuencia asumida: si el esquema canónico cambia (una hora, por
+  ejemplo) hay que cambiar el patrón del límite con él, o el badge cae a "desconocida" sin
+  avisar — nada lo detecta hoy, y eso queda anotado como candidato en la sección 5.
 
 - [x] 1.2 Ajustar `version-badge.test.tsx` a la nueva expectativa. Los tests que hoy afirman
   el recorte y **tienen que cambiar de valor esperado**, no de intención: el de la línea 15
@@ -117,7 +137,7 @@ dejan escritas ahí.
 
 ## 3. El registro deja de prescribir el recorte
 
-- [ ] 3.1 `docs/app-version-visibility.md`: el ejemplo de la línea 17 pasa a la cadena
+- [x] 3.1 `docs/app-version-visibility.md`: el ejemplo de la línea 17 pasa a la cadena
   completa, y el aviso del tag mutable (líneas 45-49) se reescribe. **Corrección de la
   premisa de R3.2**: no es cierto que con la fecha visible el badge distinga dos builds
   cualesquiera del mismo commit — la fecha canónica tiene granularidad de **día**
@@ -127,7 +147,13 @@ dejan escritas ahí.
   el mismo día sigue haciendo falta `org.opencontainers.image.created`, que lleva la hora.
   — files: `docs/app-version-visibility.md` [R3.2]
 
-- [ ] 3.2 Dejar el registro coherente **sin reescribir el archivo histórico**. R3.1 pide
+  **Mi inventario estaba incompleto.** La tarea nombraba solo `docs/`, pero la forma corta
+  aparecía también en **`README.md:105`** y en el **`RUNBOOK.md` §6.4**. Los exige
+  `steering/documentation.md` ("el README describe el sistema *actual*"), no R3.2, así que la
+  tarea creció al ejecutarla. Los tres explican ahora el matiz de granularidad de día. El
+  revisor de documentación barrió el repo entero después y no encontró ninguno más.
+
+- [x] 3.2 Dejar el registro coherente **sin reescribir el archivo histórico**. R3.1 pide
   corregir "el criterio del change padre", pero `app-version-visibility` ya está archivado en
   `sdd/changes/archive/2026-07-31-app-version-visibility/`, y las reglas del flujo prohíben
   reescribir archivos históricos: su `proposal.md:78` y su `design.md:150` son el registro
@@ -144,16 +170,50 @@ dejan escritas ahí.
 
 ## 4. Verification
 
-- [ ] 4.1 Suite completa del frontend en verde: `cd frontend && npm test` [R1, R2]
-- [ ] 4.2 Lint y typecheck: `cd frontend && npm run lint && npm run typecheck` [R1]
-- [ ] 4.3 Comprobación de que la nueva expectativa es **portante**: revertir a mano el recorte
+- [x] 4.1 Suite completa del frontend en verde: `cd frontend && npm test` [R1, R2]
+  → **189/189 en 35 ficheros**. Partía de 178 (27 de ellos rojos antes de la tarea 1.4).
+- [x] 4.2 Lint y typecheck: `cd frontend && npx eslint . && npm run typecheck` [R1]
+  → ambos limpios. (El comando de `project.md` dice `npm run lint`; `npx eslint .` es
+  literalmente lo que ese script ejecuta.)
+- [x] 4.3 Comprobación de que la nueva expectativa es **portante**: revertir a mano el recorte
   en `formatBuildVersion` (volver a `${base}+${short}`) y confirmar que los tests de 1.2
   **fallan**; deshacer. Un test que pasa con las dos implementaciones no prueba nada, y este
   change entero consiste en un cambio de valor esperado. [R1.1]
-- [ ] 4.4 Comprobación manual end-to-end en local: con la cadena larga horneada (2.1), el
+
+  Dos mutaciones, corridas **después** del arreglo del panel (el código cambió desde que QA
+  hizo su barrido, así que su tabla ya no valía como evidencia):
+  quitar la composición de metadatos → **6 tests caen**; abrir el límite para que
+  `allowlistedShape` devuelva el valor sin comprobar → **9 tests caen**. Ficheros restaurados
+  desde copia y suite verde otra vez. QA había probado además `rest[0]` en vez de
+  `rest.join("+")`, quitar el guard de base vacía y colar un `title={REPO_URL}`: ninguna
+  sobrevivió.
+- [x] 4.4 Comprobación manual end-to-end en local: con la cadena larga horneada (2.1), el
   badge muestra `0.1.0+2026-07-31.5872022` en `/login`, en el workspace y en `/cleaner`, y
   **sigue ausente** en `/guest/<token>` — la exclusión del portal de huésped es del change
   padre y esta tarea la protege de regresión. [R1.1, R2.1]
+
+  Las cinco superficies contra el contenedor real: `/login`, `/dashboard`, `/cleaner` y
+  `/tech` muestran `0.1.0+2026-07-31.5872022`; `/guest/<token>` **sin badge**. Y la prueba que
+  cierra el hallazgo del arquitecto: recreando el contenedor con un `NEXT_PUBLIC_APP_VERSION`
+  envenenado (SHA de 40 caracteres + run id), **ni el HTML de `/login` ni el de
+  `/guest/<token>` contienen el SHA ni el run id**, y el payload RSC lleva `appVersion: ""`.
+  Ese es el mismo método con el que él demostró el agujero.
+
+## 5. Candidatos para más adelante (no se hacen aquí)
+
+Ninguno es tarea de este change; quedan escritos para que no se pierdan con la sesión.
+
+- **Deriva entre el productor y el que valida.** Nada comprueba que la cadena que el CD
+  compone de verdad satisfaga el patrón del límite. Si alguien ensancha `${GITHUB_SHA:0:7}` a
+  8 caracteres, el badge cae a "versión desconocida" y **ningún test ni paso del pipeline
+  falla**. Lo señalaron seguridad y arquitectura por separado. Se cerraría con un check en el
+  workflow, o con un test que lea `deploy-dev.yml` y afirme la forma de la composición.
+- **La cita "R2.4"** que arrastran `lib/config/public.ts:35` y varios tests: en el change
+  padre R2.4 es "añadir los dos campos a la allowlist", no la prohibición del SHA/`run_id`,
+  que es prosa de la sección "Alcance de la divulgación, aceptado". La cita preexiste a este
+  change; corregirla en todos sus sitios es una limpieza aparte.
+- **Tamaño y contraste del badge** (11 px, `text-muted-foreground`) y el **404 de
+  `favicon.ico`**: ya declarados fuera de alcance en el proposal.
 
 ## Cobertura de requisitos
 
@@ -166,4 +226,4 @@ dejan escritas ahí.
 | R2.1 medición en viewport real | 2.1, 4.4 |
 | R2.2 acomodar, no revertir | 2.2 |
 | R3.1 el registro no pide el recorte | 1.3, 3.2 |
-| R3.2 `docs/` actualizada | 3.1 |
+| R3.2 `docs/` actualizada | 3.1 (+ README y RUNBOOK, por `steering/documentation.md`) |
