@@ -19,8 +19,15 @@ Antes, saber qué estaba desplegado exigía abrir un túnel SSH a la VM y leer `
 
 `0.1.0` es la base (el fichero `VERSION` de la raíz) y `a2f3c1d` el commit corto. Aparece en
 el workspace, en las apps de campo y **también en `/login`, sin sesión** — que es justo
-cuando más falta hace, porque si la app está rota puede que no puedas entrar. **No** aparece
-en el portal de huésped: la versión no le dice nada a un huésped.
+cuando más falta hace, porque si la app está rota puede que no puedas entrar. **No** se
+pinta en el portal de huésped: la versión no le dice nada a un huésped.
+
+> **Matiz que conviene saber si alguien pregunta.** El badge no se *muestra* ahí, pero la
+> cadena **sí viaja en el HTML** de esa página, igual que en todas: la configuración pública
+> es un único snapshot que el layout raíz serializa en cada superficie. No es una fuga
+> nueva —quien alcanza `/guest/<token>` alcanza `/login` en el mismo origen y obtiene la
+> misma cadena—, pero la respuesta honesta a "¿un huésped puede ver la versión?" es
+> *"no en pantalla; sí en el código fuente de la página"*.
 
 **Desde la VM**, la identidad que lleva la imagen dentro:
 

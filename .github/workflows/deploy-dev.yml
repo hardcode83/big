@@ -16,8 +16,8 @@ on:
   workflow_dispatch: {}
 
 jobs:
-  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.4] ---
-  # Un job propio, no un step en cada build: R1.4 exige que las dos imágenes lleven
+  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.5] ---
+  # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
   # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (D2).
   provenance:
     runs-on: ubuntu-latest
@@ -78,7 +78,7 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
-          # Labels OCI (R1.4): la identidad de la imagen legible con `docker inspect` en la
+          # Labels OCI (R1.5): la identidad de la imagen legible con `docker inspect` en la
           # VM y en la página del package de GHCR, sin variables de runtime.
           labels: |
             org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}

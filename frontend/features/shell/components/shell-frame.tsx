@@ -24,7 +24,7 @@ export function ShellFrame({
   /**
    * Persistent chrome below the content. Optional so each shell decides whether it
    * has one — the guest portal deliberately does not (change app-version-visibility,
-   * R3.7). Server-rendered like the rest of the frame.
+   * R2.6). Server-rendered like the rest of the frame.
    */
   footer?: ReactNode;
   children: ReactNode;

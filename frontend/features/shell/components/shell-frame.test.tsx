@@ -17,14 +17,14 @@ function renderFrame(props: Partial<Parameters<typeof ShellFrame>[0]> = {}) {
   );
 }
 
-describe("ShellFrame footer slot (change app-version-visibility, D7/R3.1)", () => {
+describe("ShellFrame footer slot (change app-version-visibility, D4/R2.1)", () => {
   it("renders the footer when one is passed", () => {
     renderFrame({ footer: <div data-testid="footer-probe">pie</div> });
     expect(screen.getByTestId("footer-probe")).toBeInTheDocument();
   });
 
   it("renders no footer element when the shell passes none", () => {
-    // The guest portal relies on this: it simply does not pass the slot (R3.7).
+    // The guest portal relies on this: it simply does not pass the slot (R2.6).
     const { container } = renderFrame();
     expect(container.querySelector("footer")).toBeNull();
   });
@@ -39,7 +39,7 @@ describe("ShellFrame footer slot (change app-version-visibility, D7/R3.1)", () =
   });
 
   it("reserves the mobile bottom-nav space on the column, not on main", () => {
-    // This is the whole point of design D7. `BottomNavigation` is
+    // This is the whole point of D4 of this change. `BottomNavigation` is
     // `fixed inset-x-0 bottom-0 z-40 md:hidden`, so something has to reserve its height
     // on mobile. With `pb-16` on `main` (where it used to be), a footer rendered after
     // `main` lands inside the overlaid strip and is unreadable on a phone; with the

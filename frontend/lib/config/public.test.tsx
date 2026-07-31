@@ -42,7 +42,7 @@ describe("public runtime config (D15)", () => {
 
   it("renders empty build identity when nothing was baked, without throwing", () => {
     // A local `npm run dev` and an image built without build-args both land here. The
-    // shell has to keep working; only the badge degrades (R2.6/R3.3).
+    // shell has to keep working; only the badge degrades (R2.7).
     const config = buildPublicRuntimeConfig();
     expect(config.appVersion).toBe("");
     expect(config.buildCommitShort).toBe("");
@@ -68,10 +68,11 @@ describe("public runtime config (D15)", () => {
   });
 
   it("keeps the repository identity out of the browser snapshot", () => {
-    // The one guarantee that makes the badge safe to show on /login (design D6, R3.6).
-    // These five are baked into the image as plain ENV, readable only by the Next
-    // server through `server.ts`; if one of them ever gets renamed to NEXT_PUBLIC_*
-    // it would silently ship the private repo name and the PR number to every visitor.
+    // A standing guard (R2.4), not a description of today's build: none of these names
+    // is read anywhere in the current code — the provenance scope moved out to
+    // `app-version-provenance`. It stays because it FAILS the moment anyone routes one
+    // of them into the public snapshot, which reaches every anonymous surface. That is
+    // exactly the leak this change was trimmed to remove, so the guard outlives it.
     process.env.REPO_URL = "https://github.com/autohostai-labs/AutoHostAI";
     process.env.BUILD_COMMIT = "a2f3c1d3f9b2000000000000000000000000000f";
     process.env.BUILD_PR = "42";

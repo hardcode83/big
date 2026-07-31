@@ -20,15 +20,19 @@ export interface PublicRuntimeConfig {
   /**
    * Canonical build version baked at image build time (`<base>+<date>.<sha>`), or
    * `""` when the image carries no identity (a local `npm run dev`, an image built
-   * without build-args). Change `app-version-visibility`, design D6.
+   * without build-args). Change `app-version-visibility`, D3.
    */
   appVersion: string;
   /**
-   * Short commit SHA baked at build time, or `""`. Only the SHORT one is here: the
-   * full SHA, the Pull Request number, the build timestamp, the Actions run id and
-   * the repository URL are deliberately server-only (`server.ts`), because this
-   * snapshot reaches the browser on EVERY surface — including `/login` and the guest
-   * portal — and D6 keeps the repository identity out of it.
+   * Short commit SHA baked at build time, or `""`.
+   *
+   * These two are the ONLY build identity this change carries. The full SHA, the Pull
+   * Request number, the Actions run id and the repository URL are **not baked anywhere**
+   * — they were removed with the provenance scope and live in the `app-version-provenance`
+   * roadmap entry, which is blocked until the frontend has authentication. Do not read
+   * this as "they exist server-side and are blessed": they do not exist. This snapshot
+   * reaches the browser on EVERY surface, including `/login` and the guest portal
+   * (app-version-visibility D3, R2.4).
    */
   buildCommitShort: string;
 }

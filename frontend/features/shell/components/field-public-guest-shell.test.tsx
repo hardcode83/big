@@ -81,9 +81,9 @@ describe("PublicShell (D3/D9, task 6.7)", () => {
   });
 });
 
-describe("version badge placement (change app-version-visibility, R3.2/R3.7)", () => {
+describe("version badge placement (change app-version-visibility, R2.2/R2.6)", () => {
   it("shows the badge on the login shell, where there is no session yet", async () => {
-    // R3.2: this is the surface that matters most for diagnosis — if the app is broken
+    // R2.2: this is the surface that matters most for diagnosis — if the app is broken
     // you may not be able to get past it, and you still need to know what is deployed.
     nav.pathname = "/login";
     await renderShell(await PublicShell({ children: <div>login</div> }));
@@ -108,7 +108,7 @@ describe("version badge placement (change app-version-visibility, R3.2/R3.7)", (
   });
 
   it("does NOT show it on the guest portal", async () => {
-    // R3.7: `/guest/[token]` is a surface for people outside the operation. The build
+    // R2.6: `/guest/[token]` is a surface for people outside the operation. The build
     // version tells them nothing and is not theirs to see — a scoped reading of
     // "visible across the shell" that the change records explicitly.
     nav.pathname = "/guest/secret-token-123";

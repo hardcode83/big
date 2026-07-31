@@ -11,10 +11,10 @@ const LABELS = {
   unknown: "versión desconocida",
 } as const;
 
-describe("formatBuildVersion (OQ2)", () => {
+describe("formatBuildVersion", () => {
   it("shortens the canonical string to base + short sha", () => {
-    // The canonical form keeps the build date because /version and the OCI labels
-    // report it; the badge drops it to stay readable on a phone.
+    // The canonical form keeps the build date because the OCI labels report it; the
+    // badge drops it to stay readable on a phone.
     expect(formatBuildVersion("0.1.0+2026-07-30.a2f3c1d", "a2f3c1d")).toBe(
       "0.1.0+a2f3c1d",
     );
@@ -30,7 +30,7 @@ describe("formatBuildVersion (OQ2)", () => {
 
   it("returns null when nothing was baked, so the caller can localize it", () => {
     // Returning "" would put an empty badge on screen; null lets the component choose
-    // the translated "unknown" instead (R3.3 — it must never look like a real version).
+    // the translated "unknown" instead (R2.7 — it must never look like a real version).
     expect(formatBuildVersion("", "")).toBeNull();
     expect(formatBuildVersion("   ", "a2f3c1d")).toBeNull();
   });
@@ -53,7 +53,7 @@ describe("formatBuildVersion (OQ2)", () => {
   });
 });
 
-describe("VersionBadge (R3.1-R3.3, R3.6)", () => {
+describe("VersionBadge (R2.1-R2.4, R2.7)", () => {
   const original = { ...process.env };
 
   beforeEach(() => {
@@ -100,9 +100,10 @@ describe("VersionBadge (R3.1-R3.3, R3.6)", () => {
   });
 
   it("never renders the repository URL, the full sha, the PR or the run id", () => {
-    // R3.6 / design D6: these are baked as plain ENV, server-only. Even with all of
-    // them present in the environment the badge must not surface any of them — it reads
-    // the public snapshot, which does not carry them.
+    // R2.4. A standing guard, not a description of today's build: these names are not
+    // read anywhere in the current code (the provenance scope moved to
+    // `app-version-provenance`). It stays because it FAILS if anyone ever routes one of
+    // them into the public snapshot — which is the leak this change was trimmed to avoid.
     process.env.NEXT_PUBLIC_APP_VERSION = "0.1.0+2026-07-30.a2f3c1d";
     process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT = "a2f3c1d";
     process.env.REPO_URL = "https://github.com/autohostai-labs/AutoHostAI";

@@ -120,7 +120,11 @@ Acceptance criteria:
   frontend tenga autenticación antes: los enlaces nombran el repositorio privado y hoy el
   HTML de todas las páginas es público.
 - **La detección de deriva frontend↔backend**, y con ella el endpoint `/version` del backend
-  y el Route Handler del frontend → misma entrada.
+  y el Route Handler del frontend: **descartada, no aplazada**. El monorepo construye ambas
+  imágenes del mismo commit y el compose pinea los cuatro servicios al mismo `${IMAGE_TAG}`,
+  así que divergir exige intervención manual en la VM; y los labels OCI de ambas imágenes ya
+  permiten comprobarlo con dos `docker inspect`. Razonamiento y condición de revisión en la
+  decisión D6 del design.
 - **El gate de paridad de versión** entre `VERSION` y los dos manifiestos → misma entrada.
 - **SemVer real con git tags, releases y CHANGELOG.** El esquema híbrido deja el hueco.
 - **Versionado de la API.** `/api/v1` ya existe (PRD §23); esto versiona el *build*.

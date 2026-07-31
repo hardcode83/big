@@ -86,6 +86,38 @@ donde olvidarlo.
 anidado** dentro del footer, y eso **suspende el árbol entero del shell** — reventó los 11
 tests de las cinco shells a la vez. El chrome no puede permitirse eso por un valor decorativo.
 
+### D6 — La versión del frontend ES la versión del despliegue
+
+**Chosen:** el change cubre la identidad **solo desde el frontend**. No hay endpoint de
+versión en el backend ni comparación entre los dos, y eso es una decisión, no un residuo del
+recorte.
+
+El motivo es estructural y está verificado en el repo: es un monorepo con un único CD que
+construye ambas imágenes **del mismo commit en el mismo run** (`deploy-dev.yml`, las dos con
+`sha-${{ github.sha }}`), el job `deploy` depende de los dos builds, escribe **una** variable
+(`IMAGE_TAG=sha-${GITHUB_SHA}`), y `docker-compose.deploy.yml` pinea los **cuatro** servicios
+a ese mismo `${IMAGE_TAG}`, con `:?` para fallar ruidosamente si falta. Frontend y backend no
+pueden divergir por accidente: haría falta que alguien editara el `.env` de la VM a mano o
+levantara compose con un tag distinto.
+
+Con esa topología, el badge del frontend no informa de "la versión del frontend" — informa de
+**la versión del despliegue**. Montar un endpoint en el backend, un relé público y lógica de
+comparación para cubrir un fallo que exige intervención manual es maquinaria cara, y en la
+primera implementación abrió además superficie de divulgación.
+
+**La red de seguridad para el caso patológico ya está puesta y no cuesta código**: los labels
+OCI van en las **dos** imágenes (R1.5), así que dos `docker inspect` comparan las cadenas
+desde la VM.
+
+**Condición de revisión — cuándo reabrir esto:** si backend y frontend dejan de desplegarse
+juntos (pipelines separados, escalado independiente, un hotfix de solo-backend, o un compose
+que deje de compartir `IMAGE_TAG`), la premisa se rompe y la detección de deriva vuelve a
+tener sentido.
+
+Rejected: endpoint `/version` en el backend + comparación en la UI — es lo que se implementó
+primero; se retiró al ver que el coste (ruta anónima nueva, relé público, oráculo de liveness)
+no se justifica contra un modo de fallo que la topología ya previene.
+
 ## Changes by area
 
 | Area | Files | Change |

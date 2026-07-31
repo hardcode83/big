@@ -1,7 +1,8 @@
 import { Badge } from "@/components/ui/badge";
 import { buildPublicRuntimeConfig } from "@/lib/config/public";
 
-/** Strings resolved by the shell on the server and handed down (design D9/D13). */
+/** Strings resolved by the shell on the server and handed down (`frontend-foundation`
+ * D9/D13, and D5 of this change). */
 export interface VersionBadgeLabels {
   /** Describes what the value is, for the accessible name. */
   label: string;
@@ -10,7 +11,7 @@ export interface VersionBadgeLabels {
 }
 
 /**
- * Composes what the badge shows from the canonical build version (OQ2).
+ * Composes what the badge shows from the canonical build version.
  *
  * The canonical string carries the build date — `0.1.0+2026-07-30.a2f3c1d` — because
  * that is what the OCI labels and `docker inspect` report. The badge shows the shortened
@@ -43,15 +44,16 @@ export function formatBuildVersion(
 }
 
 /**
- * Deployed build version, shown in the shell footer (R3.1-R3.3).
+ * Deployed build version, shown in the shell footer (R2.1-R2.3).
  *
  * Renders from the baked snapshot and makes NO network request whatsoever — so it cannot
- * fail, cannot be slow, and works with the backend down. It carries neither the
- * repository URL nor the Pull Request title (R3.6): both are server-only and never enter
- * `PublicRuntimeConfig` (design D6).
+ * fail, cannot be slow, and works with the backend down. It carries nothing beyond the two
+ * allowlisted fields (R2.4); the repository identity is not part of this change at all —
+ * see the `app-version-provenance` roadmap entry.
  *
  * Synchronous, and it receives its strings instead of calling `getServerT()` itself —
- * the same shape as `Brand` and `SkipLink` (design D9/D13). An async component nested
+ * the same shape as `Brand` and `SkipLink` (`frontend-foundation` D9/D13, and D5 of this
+ * change). An async component nested
  * inside the frame would suspend the whole shell tree, which is not something the chrome
  * can afford for a decorative value.
  */
