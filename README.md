@@ -72,7 +72,7 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 
 ## Estructura
 
-- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`); comandos operativos en `backend/app/cli/`; migraciones en `backend/alembic/`.
+- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`); comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/` (hoy el PMS, con su mock); migraciones en `backend/alembic/`.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
@@ -108,6 +108,17 @@ VM para saber qué está corriendo. La versión base vive en `VERSION` (raíz) y
 con la fecha de build y el commit corto; el pie muestra esa cadena completa, la misma que
 llevan los labels OCI de las imágenes. Cómo se opera:
 [`docs/app-version-visibility.md`](docs/app-version-visibility.md).
+
+La API de negocio ya tiene su primera capability: **reservas** (`/api/v1/reservations` más la
+importación por CSV `/api/v1/integrations/pms/import-csv`). Se opera por API — el frontend llega
+con `dashboard-web` — y la sincronización con el PMS se lanza como comando:
+
+```bash
+docker compose exec backend uv run python -m app.integrations.cli.pms_sync <tenant-uuid>
+```
+
+Roles, formato del CSV, idempotencia y qué queda en el timeline:
+[`docs/reservations.md`](docs/reservations.md).
 
 ### Verificación del frontend
 

@@ -45,6 +45,13 @@ class Settings(BaseSettings):
     # currently fronts the API, so an X-Forwarded-For would be caller-supplied.
     trusted_client_ip_header: str = ""
 
+    # Limits of the CSV reservation import (R4.3, design D11). Both are checked BEFORE
+    # parsing: a 200 MB upload must be refused, not streamed into memory first. The byte
+    # ceiling is rule 6 of `steering/security.md` ("tamaño máx. configurable, default 10 MB");
+    # the row ceiling is this change's, because a small file can still hold a million rows.
+    csv_import_max_bytes: int = 10 * 1024 * 1024
+    csv_import_max_rows: int = 1000
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""

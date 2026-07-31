@@ -14,3 +14,4 @@
 | auth-tenancy | new, design, tasks, archive (run/review sin registrar) | 83 | 74257 | 11714127 | 10.0592 | 2026-07-30 | 2026-07-30 |
 | app-version-visibility | new+design+tasks+run+archive | 168599 | 611287 | 148801977 | 92.3229 | 2026-07-30 | 2026-07-31 |
 | app-version-badge-date | new, tasks, run+review, archive (sin design: una función) | 135570 | 402614 | 64114944 | 47.5171 | 2026-07-31 | 2026-07-31 |
+| reservations | new, design, run, review | 271736 | 790955 | 200076826 | 123.9486 | 2026-07-31 | — |

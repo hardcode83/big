@@ -263,7 +263,18 @@ def test_the_allowlist_only_names_endpoints_that_exist() -> None:
 
 
 def test_the_protected_endpoints_are_the_ones_expected() -> None:
+    """A snapshot, on purpose: every new protected path has to show up in this diff.
+
+    Grown by `reservations` with its five endpoints (two paths, five methods) — the
+    per-method permissions are asserted in `tests/reservations/test_authorization.py`.
+    """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
 
-    assert protected == {"/api/v1/auth/logout", "/api/v1/auth/me"}
+    assert protected == {
+        "/api/v1/auth/logout",
+        "/api/v1/auth/me",
+        "/api/v1/reservations",
+        "/api/v1/reservations/{reservation_id}",
+        "/api/v1/integrations/pms/import-csv",
+    }
