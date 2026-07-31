@@ -29,9 +29,9 @@
 
 ## 4. Verification
 
-- [ ] 4.1 Frontend en verde: `docker compose exec -T frontend npx vitest run`, `npm run typecheck`, `npm run lint` — **PENDIENTE**: el daemon de Docker se cayó justo tras el recorte y no se han podido re-ejecutar [R2]
-- [ ] 4.2 Backend sin tocar: `docker compose exec -T backend uv run pytest -q` debe seguir en 1203/35 — **PENDIENTE**, mismo motivo. El recorte revirtió `main.py`, `config.py`, los dos tests y el Dockerfile del backend a `main`, así que no debería haber diferencia [R1]
-- [ ] 4.3 Build de producción del frontend sin backend: `npm run build` — **PENDIENTE**, mismo motivo [R2.3]
-- [ ] 4.4 Comprobación manual en local (`make up`): badge en `/login`, `/dashboard` y `/cleaner`; ausente en `/guest/<token>` — **PENDIENTE**, mismo motivo [R2.2, R2.6]
+- [x] 4.1 Frontend en verde: **35 ficheros / 173 tests**, typecheck y lint limpios. Nota: el primer typecheck falló por `.next/types/validator.ts`, un artefacto generado que vivía en el volumen y seguía referenciando la ruta borrada — no era el código; con `.next/types` regenerado, limpio [R2]
+- [x] 4.2 Backend: **1177 pasados / 35 saltados**, `alembic check` sin operaciones nuevas. No son 1203: los 26 que faltan son exactamente los que el recorte eliminó. `git diff main..HEAD -- backend/` está **vacío**, así que 1177 es la línea base del repo y no una regresión [R1]
+- [x] 4.3 Build de producción con el backend parado: compila, y `.next/server/app` no contiene ninguna ruta `deployment` [R2.3]
+- [x] 4.4 Comprobación manual: badge presente en `/login`, `/dashboard` y `/cleaner`, ausente en `/guest/<token>`, y mostrando `local` en dev — que es la degradación correcta, porque el target `dev` nunca ejecuta `npm run build` [R2.2, R2.6]
 - [ ] 4.5 **BLOQUEADA — requiere un deploy real.** Tras el merge: `docker inspect` de las dos imágenes muestra los cuatro labels con idénticos valores, y la cadena coincide con el badge en `https://autohostai.digitalsec.work` [R1.5]
 - [ ] 4.6 **BLOQUEADA — requiere el PR abierto.** El gate `backend-tests` en verde. El recorte revirtió ese workflow a `main`, así que el riesgo del pineado de `setup-python` desaparece [R1]

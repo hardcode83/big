@@ -6,37 +6,13 @@ producía ya no existe: el panel de procedencia, el endpoint `/version` del back
 Handler, la extracción del PR y el gate de paridad viven ahora en la entrada de roadmap
 `app-version-provenance`.
 
-Quedan tres entradas.
+Quedan dos entradas, ambas por infraestructura que no existe en local. La suite ya se
+re-ejecutó sobre el código recortado (backend 1177/35 e idéntico a `main`; frontend 173
+tests, typecheck, lint y build de producción limpios; flujo manual comprobado ruta por ruta).
 
 ---
 
-## 1. Re-verificar tras el recorte (no ejecutado)
-
-- **Fase**: run / review
-- **Tipo**: `deferred`
-- **Qué y por qué**: el daemon de Docker se cayó justo después del recorte, así que **la
-  suite no se ha vuelto a ejecutar** sobre el código reducido. Antes del recorte estaba en
-  1203/35 (backend) y 212/212 (frontend), pero eso ya no describe el árbol actual.
-
-  Lo que hay que correr:
-  ```bash
-  docker compose exec -T frontend npx vitest run
-  docker compose exec -T frontend npm run typecheck
-  docker compose exec -T frontend npm run lint
-  docker compose exec -T frontend npm run build
-  docker compose exec -T backend uv run pytest -q     # debe volver a 1203/35
-  ```
-  El backend se revirtió a `main` entero (`main.py`, `config.py`, sus dos tests y el
-  Dockerfile), así que no debería haber diferencia — pero **no está comprobado**.
-
-  Comprobado sí, estáticamente: no quedan referencias colgantes a nada eliminado
-  (`grep` de `provenance`, `extract-pr`, `ci-checks`, `deployment/version`,
-  `OPERATOR_SURFACE` sobre `frontend/`, `backend/`, `Makefile`, `.github/`).
-- **Comando de reanudación**: con Docker en pie, `/sdd:review app-version-visibility`
-
----
-
-## 2. Verificación de la identidad sobre la VM (tarea 4.5)
+## 1. Verificación de la identidad sobre la VM (tarea 4.5)
 
 - **Fase**: run (sección 4)
 - **Tipo**: `deferred`
@@ -51,7 +27,7 @@ Quedan tres entradas.
 
 ---
 
-## 3. El gate `backend-tests` en verde en el PR (tarea 4.6)
+## 2. El gate `backend-tests` en verde en el PR (tarea 4.6)
 
 - **Fase**: run (sección 4)
 - **Tipo**: `deferred`
