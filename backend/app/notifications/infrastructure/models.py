@@ -19,16 +19,17 @@ class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, Timesta
     `AccessRecordModel` deliberately closed — it stores `code_masked` only, with no
     plaintext column at all.
 
-    **The contract, binding on `access-notifications`.** The discriminator is not
-    "is it prose" but *does the column's purpose require showing the value to a human
-    recipient*:
+    **The contract, binding on `access-notifications`.** The default is that no
+    rule-3 value survives here in any form. **Only rule 4 grants an exception, and it
+    grants exactly one**: `****XX` for an access code. The question "does this column
+    need to show the value to a human?" explains *why* that exception exists — it does
+    not create others. A guest needs the WiFi password too, and it still may not be
+    stored: rule 4 grants it no masked form, so the body persists a template or a
+    reference, never the rendered credential. `document_number` likewise — rule 4
+    demands absence from listings, not a mask.
 
-    - `subject`/`body` render a message a guest or owner is meant to receive, so an
-      **access code** may appear in its rule-4 masked form (`****XX`) and never raw.
-      That permission is granted to access codes ONLY: rule 4 gives no masked form to
-      `document_number` — it demands absence from listings — and none to
-      `wifi_password`. Those two follow the structured form below in every column of
-      this table.
+    - `subject`/`body`: an **access code** may appear as `****XX`, never raw. Nothing
+      else.
     - `last_error` is a delivery diagnostic. Nobody needs to be shown the code to
       debug a failed send, so it takes the **structured form**: no rule-3 value at
       all, masked or otherwise. This matches `WebhookEventModel.error`, which is the

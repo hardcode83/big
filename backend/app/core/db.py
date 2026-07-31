@@ -130,6 +130,35 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
 
 
 def bind_session_to_tenant(session: AsyncSession, tenant_id: uuid.UUID) -> None:
+    """Mark a session with its tenant. One-way: there is no unbind, by design.
+
+    The two guards below amend `auth-tenancy`'s design D16, which shipped this as a
+    bare assignment. They exist because the setter turned out to be its own unbind:
+    `bind_session_to_tenant(session, None)` writes NULL, `_scope_statement_to_tenant`
+    returns early on NULL, and the net is off for every scoped table for the rest of
+    that session — `guests.document_number` included. Re-marking is worse than that:
+    it repoints the filter at a foreign tenant instead of just removing it.
+
+    The `uuid.UUID` annotation protected nothing: this backend runs no mypy and no
+    ruff (`pyproject.toml` declares only pytest), and CI runs neither.
+
+    Added by `domain-foundation-financial` because that change made the hole easier to
+    reach, not harder: `webhook_events` is the first table whose legitimate read path
+    needs the filter off, and `tests/test_session_marking.py` bans the `session.info`
+    route — which leaves this function as the obvious thing to reach for. Read
+    unmarked data from a session that was NEVER marked instead.
+    """
+    if tenant_id is None:
+        raise ValueError(
+            "a session cannot be bound to a null tenant: that silently disables the "
+            "global filter for every scoped table. Use a session that was never marked."
+        )
+    current = session.info.get(TENANT_ID_SESSION_KEY)
+    if current is not None and current != tenant_id:
+        raise ValueError(
+            f"session is already bound to tenant {current}; rebinding it to {tenant_id} "
+            "would repoint the global filter at another tenant mid-session"
+        )
     session.info[TENANT_ID_SESSION_KEY] = tenant_id
 
 

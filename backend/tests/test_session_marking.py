@@ -20,9 +20,12 @@ meta-test included.
 """
 
 import ast
+import uuid
 from pathlib import Path
 
 import pytest
+
+from app.core.db import TENANT_ID_SESSION_KEY, bind_session_to_tenant
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 
@@ -110,3 +113,40 @@ def test_the_checks_actually_catch_the_escapes_they_claim_to() -> None:
     # name in every index and foreign key in the schema.
     assert _session_state_accesses(ast.parse('session.info["tenant_id"] = None'))
     assert not _session_state_accesses(ast.parse('Index("ix_x_tenant_id", "tenant_id")'))
+
+
+@pytest.mark.asyncio
+async def test_binding_to_a_null_tenant_is_rejected(db_session) -> None:
+    """The setter was its own unbind (panel round 3, amends auth-tenancy D16).
+
+    `_scope_statement_to_tenant` returns early when the marker is None, so writing
+    None through the sanctioned setter switched the net off for every scoped table
+    without touching `session.info` — invisible to the scan above, which is the whole
+    reason this guard exists rather than a wider scan.
+    """
+    with pytest.raises(ValueError, match="null tenant"):
+        bind_session_to_tenant(db_session, None)
+
+    assert TENANT_ID_SESSION_KEY not in db_session.info
+
+
+@pytest.mark.asyncio
+async def test_rebinding_to_another_tenant_is_rejected(db_session) -> None:
+    """Worse than unbinding: it repoints the filter at a foreign tenant."""
+    first, second = uuid.uuid4(), uuid.uuid4()
+    bind_session_to_tenant(db_session, first)
+
+    with pytest.raises(ValueError, match="already bound"):
+        bind_session_to_tenant(db_session, second)
+
+    assert db_session.info[TENANT_ID_SESSION_KEY] == first
+
+
+@pytest.mark.asyncio
+async def test_binding_twice_to_the_same_tenant_is_allowed(db_session) -> None:
+    """Idempotent: the guard must not break a legitimate re-entrant call."""
+    tenant_id = uuid.uuid4()
+    bind_session_to_tenant(db_session, tenant_id)
+    bind_session_to_tenant(db_session, tenant_id)
+
+    assert db_session.info[TENANT_ID_SESSION_KEY] == tenant_id
