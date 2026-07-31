@@ -37,3 +37,18 @@ class PMSAdapter(Protocol):
     async def get_reservation(self, external_id: str) -> ReservationDTO | None:
         """One reservation by the provider's id; `None` when the provider has no such id."""
         ...
+
+
+class ReservationCsvParser(Protocol):
+    """Turns an uploaded CSV into rows, reporting per-row failures instead of raising (R4.2).
+
+    A port because the use case must not import `infrastructure/` (the feature-scale
+    architecture review caught the router doing exactly that): parsing a file format is an
+    adapter concern, and going through a port is what keeps `application/` free of it.
+
+    Raises only for failures of the FILE as a whole — not UTF-8, missing required columns, more
+    rows than allowed — because in those cases there is nothing to report per row.
+    """
+
+    def parse(self, raw: bytes, *, max_rows: int) -> "ParseResult":  # noqa: F821
+        ...

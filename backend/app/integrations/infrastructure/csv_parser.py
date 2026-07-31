@@ -20,6 +20,29 @@ from decimal import Decimal, InvalidOperation
 
 from app.integrations.domain.dtos import ReservationDTO
 
+# One cell can never be longer than this. The `csv` module's own default (131072) raises
+# `_csv.Error`, which is neither a `ValueError` nor a `CsvFileError`, so it escaped as a 500 and
+# took every valid row of the file with it — measured by the security review. Bounded here, and
+# per-column widths below, so a hostile or merely sloppy cell becomes a reported row.
+MAX_CELL_CHARS = 10_000
+
+# Mirrors the column widths of PRD §7.6/§7.7 so a too-long value is a row error with a line
+# number instead of an `asyncpg.StringDataRightTruncationError` that poisons the transaction.
+MAX_LENGTHS = {
+    "external_pms_id": 200,
+    "external_channel_id": 200,
+    "guest_name": 300,
+    "guest_email": 255,
+    "guest_phone": 30,
+    "property_internal_code": 50,
+    "channel": 50,
+    "status": 50,
+    "currency": 3,
+    "special_requests": 5_000,
+}
+MAX_PARTY = 50
+MAX_AMOUNT = Decimal("99999999.99")  # Numeric(10,2)
+
 REQUIRED_COLUMNS = ("property_internal_code", "channel", "check_in_date", "check_out_date", "adults")
 OPTIONAL_COLUMNS = (
     "external_pms_id",
@@ -66,6 +89,7 @@ class ParseResult:
 
 def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
     text = _decode(raw)
+    csv.field_size_limit(MAX_CELL_CHARS)
     reader = csv.DictReader(io.StringIO(text))
     if reader.fieldnames is None:
         raise CsvFileError("The file is empty")
@@ -77,7 +101,13 @@ def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
 
     rows: list[ParsedRow] = []
     failures: list[RowFailure] = []
-    for index, raw_row in enumerate(reader, start=2):  # header is line 1
+    # `csv.Error` (a cell over `MAX_CELL_CHARS`, a malformed quote) is raised by the reader as it
+    # advances, so the iteration itself has to be guarded — it is not a per-field failure.
+    try:
+        raw_rows = list(enumerate(reader, start=2))  # header is line 1
+    except csv.Error as error:
+        raise CsvFileError(f"The file could not be read as CSV: {error}") from error
+    for index, raw_row in raw_rows:
         if len(rows) + len(failures) >= max_rows:
             raise CsvTooLargeError(f"The file has more than {max_rows} data rows")
         if None in raw_row:
@@ -116,6 +146,8 @@ def _decode(raw: bytes) -> str:
 
 
 def _to_dto(row: dict[str, str]) -> ReservationDTO:
+    _reject_control_characters(row)
+    _reject_overlong_values(row)
     check_in = _date(row, "check_in_date")
     check_out = _date(row, "check_out_date")
     if check_out <= check_in:
@@ -151,6 +183,25 @@ def _to_dto(row: dict[str, str]) -> ReservationDTO:
     )
 
 
+def _reject_control_characters(row: dict[str, str]) -> None:
+    """A NUL byte never reaches the database.
+
+    Postgres refuses `\x00` in a text column with `CharacterNotInRepertoireError`, which aborted
+    the whole transaction instead of just the offending row (measured by the security review of
+    this change). Other control characters are harmless in these columns, so only NUL is refused.
+    """
+    for column, value in row.items():
+        if "\x00" in value:
+            raise ValueError(f"{column} contains a NUL byte")
+
+
+def _reject_overlong_values(row: dict[str, str]) -> None:
+    for column, limit in MAX_LENGTHS.items():
+        value = row.get(column, "")
+        if len(value) > limit:
+            raise ValueError(f"{column} is longer than {limit} characters")
+
+
 def _date(row: dict[str, str], column: str) -> date:
     value = row.get(column, "")
     if not value:
@@ -181,6 +232,8 @@ def _int(row: dict[str, str], column: str, *, default: int) -> int:
         raise ValueError(f"{column} must be a whole number, got {value!r}") from error
     if parsed < 0:
         raise ValueError(f"{column} cannot be negative")
+    if parsed > MAX_PARTY:
+        raise ValueError(f"{column} cannot be greater than {MAX_PARTY}")
     return parsed
 
 
@@ -190,8 +243,28 @@ def _decimal(row: dict[str, str], column: str) -> Decimal | None:
         return None
     try:
         parsed = Decimal(value.replace(",", "."))
+        # `Decimal("nan")` and `Decimal("1E+999")` CONSTRUCT fine; it is the comparison and the
+        # INSERT that blow up. Both checks therefore live inside the `try`, and `is_finite`
+        # rejects NaN/Infinity before any comparison is attempted with them (both found by the
+        # security review as escaping 500s).
+        if not parsed.is_finite():
+            raise ValueError(f"{column} must be a finite amount, got {value!r}")
+        if parsed < 0:
+            raise ValueError(f"{column} cannot be negative")
+        if parsed > MAX_AMOUNT:
+            raise ValueError(f"{column} cannot be greater than {MAX_AMOUNT}")
     except InvalidOperation as error:
         raise ValueError(f"{column} must be a decimal amount, got {value!r}") from error
-    if parsed < 0:
-        raise ValueError(f"{column} cannot be negative")
     return parsed
+
+
+class CsvReservationParser:
+    """Adapter for the `ReservationCsvParser` port (design D1).
+
+    A thin class around the function so the use case depends on a port instead of importing this
+    module — the dependency rule the architecture review flagged. The function stays public
+    because the parser tests exercise it directly.
+    """
+
+    def parse(self, raw: bytes, *, max_rows: int) -> ParseResult:
+        return parse_reservations_csv(raw, max_rows=max_rows)

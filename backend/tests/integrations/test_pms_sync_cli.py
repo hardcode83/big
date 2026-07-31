@@ -11,6 +11,7 @@ import pytest
 
 from app.integrations.application.ingest import IngestReport, RowError
 from app.integrations.cli import pms_sync
+from app.integrations.cli.pms_sync import UnknownTenantError
 
 
 def test_it_refuses_to_run_without_a_tenant(capsys) -> None:
@@ -81,9 +82,9 @@ def test_the_default_window_is_used_when_not_given(monkeypatch) -> None:
 
 
 @pytest.mark.asyncio
-async def test_run_binds_the_session_to_the_tenant(monkeypatch, tenant_a, property_a) -> None:
-    """The command does not go through `get_authenticated_request`, so it must mark the
-    session itself — otherwise the listener of `app/core/db.py` scopes nothing (its limit 2)."""
+async def test_it_binds_the_session_to_the_tenant(monkeypatch, db_session, tenant_a, property_a) -> None:
+    """The command does not go through `get_authenticated_request`, so it must mark the session
+    itself — otherwise the listener of `app/core/db.py` scopes nothing (its limit 2)."""
     from app.core import db as core_db
 
     marked: list[uuid.UUID] = []
@@ -95,6 +96,24 @@ async def test_run_binds_the_session_to_the_tenant(monkeypatch, tenant_a, proper
 
     monkeypatch.setattr(pms_sync, "bind_session_to_tenant", _spy)
 
-    await pms_sync.run(tenant_a.id, window_days=30)
+    report = await pms_sync.sync_with_session(db_session, tenant_a.id)
 
     assert marked == [tenant_a.id]
+    assert report.created == 2
+
+
+@pytest.mark.asyncio
+async def test_it_refuses_a_tenant_that_does_not_exist(db_session, tenant_a) -> None:
+    """A typo in the UUID must not look like "the PMS had nothing for us"."""
+    with pytest.raises(UnknownTenantError):
+        await pms_sync.sync_with_session(db_session, uuid.uuid4())
+
+
+def test_main_reports_an_unknown_tenant_as_a_failure(monkeypatch, capsys) -> None:
+    async def _fake_run(tenant_id, *, window_days):
+        raise UnknownTenantError(f"No tenant with id {tenant_id}")
+
+    monkeypatch.setattr(pms_sync, "run", _fake_run)
+
+    assert pms_sync.main([str(uuid.uuid4())]) == 2
+    assert "No tenant with id" in capsys.readouterr().err

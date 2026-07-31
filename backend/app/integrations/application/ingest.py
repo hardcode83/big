@@ -20,7 +20,11 @@ from app.guests.domain.repositories import GuestRepository
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.entities import Property
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
-from app.reservations.domain.entities import Reservation
+from app.reservations.domain.entities import (
+    INGEST_OWNED_FIELDS,
+    Reservation,
+    net_amount_from,
+)
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.domain.exceptions import (
     DuplicateExternalReservationError,
@@ -35,12 +39,27 @@ from app.timeline.domain.value_objects import TimelineEventData
 PropertyResolver = Callable[[ReservationDTO], Awaitable[Property | None]]
 
 
+@dataclass(frozen=True)
+class IngestRow:
+    """One row to ingest, with whatever identifies it for the person reading the report.
+
+    `line` is the CSV line number (the header is line 1) and is `None` for the PMS sync, which
+    has no lines — there its identity is the provider's `external_id`. Carrying both is what
+    lets R4.2 report "línea 7" instead of an empty reference for a row whose optional
+    `external_pms_id` was blank. The feature-scale architecture review found that gap.
+    """
+
+    dto: ReservationDTO
+    line: int | None = None
+
+
 @dataclass
 class RowError:
-    """Why one row was skipped, with enough to find it again."""
+    """Why one row was skipped, with enough for a person to find it again."""
 
-    reference: str
     reason: str
+    reference: str | None = None
+    line: int | None = None
 
 
 @dataclass
@@ -61,7 +80,10 @@ class IngestReport:
             "created": self.created,
             "updated": self.updated,
             "skipped": self.skipped,
-            "errors": [{"reference": error.reference, "reason": error.reason} for error in self.errors],
+            "errors": [
+                {"line": error.line, "reference": error.reference, "reason": error.reason}
+                for error in self.errors
+            ],
         }
 
 
@@ -81,7 +103,7 @@ class ReservationIngestor:
         self,
         *,
         tenant_id: uuid.UUID,
-        rows: list[ReservationDTO],
+        rows: list[IngestRow],
         resolve_property: PropertyResolver,
         now: datetime,
         actor_type: TimelineActorType,
@@ -96,11 +118,13 @@ class ReservationIngestor:
         programming error, which is not caught on purpose.
         """
         report = IngestReport()
-        for row in rows:
+        for item in rows:
+            row = item.dto
             try:
                 await self._ingest_row(
                     tenant_id=tenant_id,
                     row=row,
+                    line=item.line,
                     resolve_property=resolve_property,
                     now=now,
                     actor_type=actor_type,
@@ -115,7 +139,13 @@ class ReservationIngestor:
                 ValueError,
             ) as error:
                 report.skipped += 1
-                report.errors.append(RowError(reference=row.external_id, reason=str(error)))
+                report.errors.append(
+                    RowError(
+                        reason=str(error),
+                        reference=row.external_id or None,
+                        line=item.line,
+                    )
+                )
         return report
 
     async def _ingest_row(
@@ -123,6 +153,7 @@ class ReservationIngestor:
         *,
         tenant_id: uuid.UUID,
         row: ReservationDTO,
+        line: int | None,
         resolve_property: PropertyResolver,
         now: datetime,
         actor_type: TimelineActorType,
@@ -135,8 +166,9 @@ class ReservationIngestor:
             report.skipped += 1
             report.errors.append(
                 RowError(
-                    reference=row.external_id,
                     reason=f"Unknown property {row.property_external_id!r} for this tenant",
+                    reference=row.external_id or None,
+                    line=line,
                 )
             )
             return
@@ -164,7 +196,7 @@ class ReservationIngestor:
             id=uuid.uuid4(),
             tenant_id=tenant_id,
             property_id=prop.id,
-            channel=_channel(row.channel),
+            channel=ReservationChannel.parse(row.channel),
             check_in_date=row.check_in_date,
             check_out_date=row.check_out_date,
             now=now,
@@ -173,12 +205,12 @@ class ReservationIngestor:
             guest_id=guest_id,
             external_pms_id=row.external_id or None,
             external_channel_id=row.external_channel_id,
-            status=_status(row.status),
+            status=ReservationStatus.parse_ingested(row.status),
             check_in_time=row.check_in_time,
             check_out_time=row.check_out_time,
             gross_amount=row.gross_amount,
             ota_commission=row.ota_commission,
-            net_amount=_net_amount(row),
+            net_amount=net_amount_from(row.gross_amount, row.ota_commission),
             currency=row.currency,
             special_requests=row.special_requests,
         )
@@ -254,10 +286,12 @@ class ReservationIngestor:
 
 
 def _updatable_fields(row: ReservationDTO, *, guest_id: uuid.UUID | None) -> dict[str, object]:
-    """What an ingest run is allowed to change on a reservation it already knows.
+    """Translate a provider row into the fields an ingest run may write (R3.2).
 
-    Only fields the provider owns. `internal_notes` is ours and never overwritten from
-    outside, and `status` is included because a cancellation upstream must reach us.
+    Pure translation: WHICH fields an external system is allowed to own is a domain rule
+    (`INGEST_OWNED_FIELDS`), and the derivation of `net_amount` is another (`net_amount_from`).
+    This function only maps the DTO onto them — and asserts it stayed inside the allow-list, so
+    adding a field here without deciding it in the domain fails loudly.
     """
     changes: dict[str, object] = {
         "check_in_date": row.check_in_date,
@@ -268,43 +302,14 @@ def _updatable_fields(row: ReservationDTO, *, guest_id: uuid.UUID | None) -> dic
         "children": row.children,
         "gross_amount": row.gross_amount,
         "ota_commission": row.ota_commission,
-        "net_amount": _net_amount(row),
+        "net_amount": net_amount_from(row.gross_amount, row.ota_commission),
         "currency": row.currency,
         "special_requests": row.special_requests,
-        "channel": _channel(row.channel),
+        "channel": ReservationChannel.parse(row.channel),
     }
     if row.status:
-        changes["status"] = _status(row.status)
+        changes["status"] = ReservationStatus.parse_ingested(row.status)
     if guest_id is not None:
         changes["guest_id"] = guest_id
+    assert set(changes) <= INGEST_OWNED_FIELDS
     return changes
-
-
-def _channel(value: str) -> ReservationChannel:
-    try:
-        return ReservationChannel(value.strip().upper())
-    except ValueError as error:
-        raise ReservationValidationError(f"Unknown channel {value!r}") from error
-
-
-def _status(value: str | None) -> ReservationStatus:
-    if not value:
-        return ReservationStatus.CONFIRMED
-    try:
-        return ReservationStatus(value.strip().upper())
-    except ValueError as error:
-        raise ReservationValidationError(f"Unknown reservation status {value!r}") from error
-
-
-def _net_amount(row: ReservationDTO):
-    """Derived, not taken on trust: net is gross minus the OTA's cut.
-
-    PRD §16's DTO carries no `net_amount`, so computing it here is the only way the field
-    of PRD §7.7 gets filled from an import — and deriving it means the three amounts cannot
-    contradict each other.
-    """
-    if row.gross_amount is None:
-        return None
-    if row.ota_commission is None:
-        return row.gross_amount
-    return row.gross_amount - row.ota_commission

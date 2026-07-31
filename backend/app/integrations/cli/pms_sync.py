@@ -22,6 +22,9 @@ from datetime import UTC, datetime, timedelta
 # imports the registry for every test, which is why no unit test can catch its absence here.
 # This was found by running the command by hand.
 import app.core.models_registry  # noqa: F401
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
@@ -29,6 +32,7 @@ from app.integrations.application.ingest import IngestReport
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.infrastructure.mock_pms import MockPMSAdapter
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.tenants.infrastructure.models import TenantModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
@@ -36,26 +40,54 @@ DEFAULT_WINDOW_DAYS = 30
 USAGE = "usage: python -m app.integrations.cli.pms_sync <tenant-uuid> [window-days]"
 
 
+class UnknownTenantError(RuntimeError):
+    """The tenant argument names no tenant.
+
+    Exists so a typo in the UUID does not look like a successful run: without it, every row was
+    reported "Unknown property for this tenant" and the command exited 0 — indistinguishable from
+    "the PMS had nothing for us". Raised by `run`, reported as exit code 2 by `main`. Found by the
+    feature-scale QA review.
+    """
+
+
+async def sync_with_session(
+    session: AsyncSession,
+    tenant_id: uuid.UUID,
+    *,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    now: datetime | None = None,
+) -> IngestReport:
+    """The command's actual work, against a session somebody else owns.
+
+    Split out from `run` so the suite can exercise it on the test session: `run` opens its own
+    session from `async_session_factory`, and a test that awaited that would hit the
+    "attached to a different loop" problem `tests/conftest.py` documents at length.
+    """
+    at = now or datetime.now(UTC)
+    # Marks the session so the listener of `app/core/db.py` also scopes ORM reads: a command does
+    # not go through `get_authenticated_request`, which is what normally does this (limit 2 of the
+    # listener's docstring).
+    bind_session_to_tenant(session, tenant_id)
+    if await session.scalar(select(TenantModel.id).where(TenantModel.id == tenant_id)) is None:
+        raise UnknownTenantError(f"No tenant with id {tenant_id}")
+    use_case = SyncReservationsFromPmsUseCase(
+        pms=MockPMSAdapter(),
+        reservations=SqlAlchemyReservationRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(
+        tenant_id=tenant_id,
+        since=at - timedelta(days=window_days),
+        now=at,
+    )
+
+
 async def run(tenant_id: uuid.UUID, *, window_days: int = DEFAULT_WINDOW_DAYS) -> IngestReport:
-    now = datetime.now(UTC)
     async with async_session_factory() as session:
-        # Marks the session so the listener of `app/core/db.py` also scopes ORM reads: a
-        # command does not go through `get_authenticated_request`, which is what normally
-        # does this (limit 2 of the listener's docstring).
-        bind_session_to_tenant(session, tenant_id)
-        use_case = SyncReservationsFromPmsUseCase(
-            pms=MockPMSAdapter(),
-            reservations=SqlAlchemyReservationRepository(session),
-            properties=SqlAlchemyPropertyRepository(session),
-            guests=SqlAlchemyGuestRepository(session),
-            timeline=SqlAlchemyTimelineEventRepository(session),
-            uow=SqlAlchemyUnitOfWork(session),
-        )
-        return await use_case.execute(
-            tenant_id=tenant_id,
-            since=now - timedelta(days=window_days),
-            now=now,
-        )
+        return await sync_with_session(session, tenant_id, window_days=window_days)
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -76,7 +108,11 @@ def main(argv: list[str] | None = None) -> int:
             print(f"pms-sync: window-days must be an integer\n{USAGE}", file=sys.stderr)
             return 2
 
-    report = asyncio.run(run(tenant_id, window_days=window_days))
+    try:
+        report = asyncio.run(run(tenant_id, window_days=window_days))
+    except UnknownTenantError as error:
+        print(f"pms-sync: {error}", file=sys.stderr)
+        return 2
     print(
         f"pms-sync: created {report.created}, updated {report.updated}, "
         f"skipped {report.skipped}"

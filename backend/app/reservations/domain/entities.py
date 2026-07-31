@@ -50,6 +50,36 @@ UPDATABLE_FIELDS = frozenset(
 # be encrypted and masked everywhere else.
 OPAQUE_IN_TIMELINE = frozenset({"special_requests", "internal_notes"})
 
+# What an ingest run (PMS sync or CSV import) may overwrite on a reservation it already knows
+# (R3.2). A subset of `UPDATABLE_FIELDS`: only the fields the **provider** owns.
+#
+# `internal_notes` is ours — a manager's note must not be wiped by the next sync — and
+# `payment_status`/`cleaning_required` are operational decisions taken on this side. `status` IS
+# included, because a cancellation upstream has to reach us.
+#
+# Lives in the domain rather than in the ingest use case where it started (the architecture
+# review of the feature moved it): which fields an external system is allowed to own is a
+# business rule, not orchestration.
+INGEST_OWNED_FIELDS = frozenset(
+    {
+        "guest_id",
+        "channel",
+        "status",
+        "check_in_date",
+        "check_out_date",
+        "check_in_time",
+        "check_out_time",
+        "adults",
+        "children",
+        "gross_amount",
+        "ota_commission",
+        "net_amount",
+        "currency",
+        "special_requests",
+    }
+)
+assert INGEST_OWNED_FIELDS <= UPDATABLE_FIELDS  # an ingest can never exceed what a PATCH may do
+
 
 @dataclass
 class Reservation:
@@ -189,6 +219,21 @@ class Reservation:
         self.status = ReservationStatus.CANCELLED
         self.updated_at = now
         return True
+
+
+def net_amount_from(gross_amount: Decimal | None, ota_commission: Decimal | None) -> Decimal | None:
+    """What the host actually receives: gross minus the channel's cut.
+
+    A domain rule, not a mapping detail (the architecture review moved it out of the ingest
+    code): PRD §16's `ReservationDTO` carries no `net_amount`, so an import has to derive it,
+    and deriving it in one place is what stops the three amounts of PRD §7.7 from
+    contradicting each other. No commission means the host keeps the gross.
+    """
+    if gross_amount is None:
+        return None
+    if ota_commission is None:
+        return gross_amount
+    return gross_amount - ota_commission
 
 
 def _validate_occupancy(*, adults: int, children: int) -> None:

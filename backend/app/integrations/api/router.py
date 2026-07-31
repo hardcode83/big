@@ -13,18 +13,17 @@ from app.auth.api.dependencies import AuthenticatedRequest, now_utc, require
 from app.auth.domain.policy import Permission
 from app.core.config import settings
 from app.integrations.api.dependencies import get_import_csv_use_case
-from app.integrations.api.schemas import ImportReportResponse, RowErrorResponse
+from app.integrations.api.schemas import ImportReportResponse
 from app.integrations.application.use_cases import ImportReservationsFromCsvUseCase
-from app.integrations.infrastructure.csv_parser import (
-    CsvFileError,
-    CsvTooLargeError,
-    parse_reservations_csv,
-)
+from app.integrations.infrastructure.csv_parser import CsvFileError, CsvTooLargeError
 
 router = APIRouter(prefix="/integrations", tags=["integrations"])
 
+# The declared type is client-supplied, so it is a courtesy check, not the gate — the real gate
+# is the UTF-8 + required-columns parse. But it is not opt-out either: an absent or empty type is
+# refused rather than silently skipping the branch (the security review found that bypass).
 ACCEPTED_CONTENT_TYPES = frozenset(
-    {"text/csv", "application/csv", "text/plain", "application/vnd.ms-excel", ""}
+    {"text/csv", "application/csv", "text/plain", "application/vnd.ms-excel"}
 )
 
 
@@ -46,12 +45,14 @@ async def import_reservations_csv(
     use_case: Annotated[ImportReservationsFromCsvUseCase, Depends(get_import_csv_use_case)],
     file: Annotated[UploadFile, File(description="UTF-8 CSV with the documented columns")],
 ) -> ImportReportResponse:
-    if file.content_type is not None and file.content_type not in ACCEPTED_CONTENT_TYPES:
-        raise CsvFileError(f"Unsupported content type {file.content_type!r}; expected CSV")
+    if file.content_type not in ACCEPTED_CONTENT_TYPES:
+        raise CsvFileError(
+            f"Unsupported content type {file.content_type or '(none)'!r}; expected CSV"
+        )
 
-    # Read with a ceiling: `await file.read()` unbounded is how a 2 GB upload becomes an
-    # out-of-memory kill instead of a 413 (rule 6 of `steering/security.md`). One byte over the
-    # limit is enough to know the file is too big without holding all of it.
+    # The byte ceiling is enforced by `MaxBodySizeMiddleware` BEFORE the body is read — see
+    # `app/core/http_limits.py`. Reading here with a ceiling as well is defence in depth for a
+    # request whose body arrived in one chunk under a lying `Content-Length`.
     limit = settings.csv_import_max_bytes
     raw = await file.read(limit + 1)
     if len(raw) > limit:
@@ -59,17 +60,10 @@ async def import_reservations_csv(
     if not raw:
         raise CsvFileError("The file is empty")
 
-    parsed = parse_reservations_csv(raw, max_rows=settings.csv_import_max_rows)
     report = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         actor_user_id=authenticated.context.user_id,
-        rows=[row.reservation for row in parsed.rows],
+        raw=raw,
         now=now_utc(),
     )
-    return ImportReportResponse.from_report(
-        report,
-        parse_failures=[
-            RowErrorResponse(line=failure.line, reason=failure.reason)
-            for failure in parsed.failures
-        ],
-    )
+    return ImportReportResponse.from_report(report)

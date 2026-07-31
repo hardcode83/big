@@ -11,9 +11,14 @@ from datetime import datetime
 
 from app.core.unit_of_work import UnitOfWork
 from app.guests.domain.repositories import GuestRepository
-from app.integrations.application.ingest import IngestReport, ReservationIngestor
+from app.integrations.application.ingest import (
+    IngestReport,
+    IngestRow,
+    ReservationIngestor,
+    RowError,
+)
 from app.integrations.domain.dtos import ReservationDTO
-from app.integrations.domain.ports import PMSAdapter
+from app.integrations.domain.ports import PMSAdapter, ReservationCsvParser
 from app.properties.domain.entities import Property
 from app.properties.domain.repositories import PropertyRepository
 from app.reservations.domain.repositories import ReservationRepository
@@ -63,7 +68,7 @@ class SyncReservationsFromPmsUseCase:
 
         report = await self._ingestor.ingest(
             tenant_id=tenant_id,
-            rows=rows,
+            rows=[IngestRow(dto=row) for row in rows],
             resolve_property=resolve,
             now=now,
             actor_type=TimelineActorType.SYSTEM,
@@ -84,26 +89,34 @@ class ImportReservationsFromCsvUseCase:
     def __init__(
         self,
         *,
+        parser: ReservationCsvParser,
         reservations: ReservationRepository,
         properties: PropertyRepository,
         guests: GuestRepository,
         timeline: TimelineEventRepository,
         uow: UnitOfWork,
+        max_rows: int,
     ) -> None:
+        self._parser = parser
         self._properties = properties
         self._ingestor = ReservationIngestor(
             reservations=reservations, guests=guests, timeline=timeline
         )
         self._uow = uow
+        self._max_rows = max_rows
 
     async def execute(
         self,
         *,
         tenant_id: uuid.UUID,
         actor_user_id: uuid.UUID,
-        rows: list[ReservationDTO],
+        raw: bytes,
         now: datetime,
     ) -> IngestReport:
+        # Parsing lives behind the port, so the file format is an adapter detail and the
+        # router only has to hand over bytes (design D1's dependency rule).
+        parsed = self._parser.parse(raw, max_rows=self._max_rows)
+
         async def resolve(row: ReservationDTO) -> Property | None:
             # By `internal_code` (REDES11), because a person fills in this file and does not
             # know UUIDs (design D11). It is also why a CSV can never name a property of
@@ -114,12 +127,19 @@ class ImportReservationsFromCsvUseCase:
 
         report = await self._ingestor.ingest(
             tenant_id=tenant_id,
-            rows=rows,
+            rows=[IngestRow(dto=row.reservation, line=row.line) for row in parsed.rows],
             resolve_property=resolve,
             now=now,
             actor_type=TimelineActorType.USER,
             actor_user_id=actor_user_id,
             source=CSV_SOURCE,
         )
+        # The rows the file itself could not yield are part of the same report: to the person
+        # who uploaded the CSV, "line 7 is not a date" and "line 9 names no property" are the
+        # same kind of answer (R4.1, R4.2).
+        for failure in parsed.failures:
+            report.skipped += 1
+            report.errors.append(RowError(reason=failure.reason, line=failure.line))
+        report.errors.sort(key=lambda error: (error.line is None, error.line or 0))
         await self._uow.commit()
         return report

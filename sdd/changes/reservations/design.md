@@ -250,8 +250,13 @@ dice literalmente "Depende de `domain-foundation-financial` por la entidad
 `AuditLog`" — es la convención establecida del repo para este caso, no un juicio
 nuevo.
 
-**Lo que hay que hacer cuando `domain-foundation-financial` pase**: añadir la
-escritura de `AuditLog` en los cuatro casos de uso mutadores de este módulo. Queda
+**Lo que hay que hacer cuando `domain-foundation-financial` pase**: añadir la escritura de
+`AuditLog` en los **seis** casos de uso mutadores del change — los cuatro de `reservations`
+(create/update/cancel más el propio agregado) y los dos de `integrations`
+(`SyncReservationsFromPmsUseCase` e `ImportReservationsFromCsvUseCase`), que también crean
+`Reservation` y `Guest`. Los dos últimos los añadió el panel de seguridad a escala de feature:
+la nota original decía "cuatro" y habría dejado las reservas importadas como las únicas sin
+registro de auditoría. Queda
 anotado en la spec al archivar.
 
 Rejected: crear la tabla `audit_logs` aquí — le roba la entidad a la entrada que la
@@ -361,8 +366,8 @@ documentarlo — sería exactamente el hueco silencioso que el panel señaló.
 | Timeline | `backend/app/timeline/domain/repositories.py` (nuevo), `backend/app/timeline/infrastructure/repositories.py` (nuevo) | Puerto `TimelineEventRepository` + adaptador SQLAlchemy (primera persistencia de eventos) |
 | Huéspedes | `backend/app/guests/domain/repositories.py` (nuevo), `backend/app/guests/infrastructure/repositories.py` (nuevo) | Puerto `GuestRepository` (lectura por `id` para R1.8 y búsqueda por email normalizado para D8) + adaptador |
 | Propiedades | `backend/app/properties/domain/repositories.py` (nuevo), `backend/app/properties/infrastructure/repositories.py` (nuevo) | Puerto `PropertyRepository` y adaptador: resolución tenant-scoped por `id`, `internal_code` y `pms_external_id` (D16, R1.4/R3.4/R4) |
-| Integraciones | `backend/app/integrations/**` (módulo nuevo: `domain/ports.py`, `domain/dtos.py`, `application/use_cases.py`, `infrastructure/mock_pms.py`, `infrastructure/csv_parser.py`, `api/{router,schemas}.py`, `cli/pms_sync.py`) | Puerto `PMSAdapter`, `ReservationDTO`, `MockPMSAdapter` (`EXTERNAL_DEPENDENCY`), parser CSV, endpoint de importación y comando de sync |
-| Core | `backend/app/core/unit_of_work.py` (nuevo), `backend/app/core/config.py`, `backend/app/main.py` | `UnitOfWork` compartido; dos settings de límites del CSV; montaje de los dos routers nuevos |
+| Integraciones | `backend/app/integrations/**` (módulo nuevo: `domain/{ports,dtos}.py`, `application/{ingest,use_cases}.py`, `infrastructure/{mock_pms,csv_parser}.py`, `api/{router,schemas,dependencies,errors}.py`, `cli/pms_sync.py`) | Puertos `PMSAdapter` y `ReservationCsvParser`, `ReservationDTO`, `MockPMSAdapter` (`EXTERNAL_DEPENDENCY`), `ReservationIngestor` (la **única** ruta de upsert, compartida por el sync y el CSV), parser CSV, endpoint de importación y comando de sync |
+| Core | `backend/app/core/{unit_of_work,tenancy,http_limits}.py` (nuevos), `backend/app/core/config.py`, `backend/app/main.py` | `UnitOfWork` compartido; `CrossTenantWriteError` único; `MaxBodySizeMiddleware`; dos settings de límites del CSV; montaje de los dos routers nuevos y sus handlers de error |
 | Auth | `backend/app/auth/domain/policy.py` | Dos permisos nuevos y su matriz de roles |
 | Tests | `backend/tests/reservations/**`, `backend/tests/integrations/**`, `backend/tests/timeline/**` (nuevos) | Dominio puro, casos de uso con fakes, integración contra Postgres, matriz RBAC × rol y aislamiento cross-tenant |
 | Documentación | `.env.example`, `README.md`, `docs/reservations.md` (nuevo) | Las dos variables nuevas y la capability, según `steering/documentation.md` |
@@ -447,9 +452,14 @@ ya existen en `TimelineEventType`.
   sin probar (regla L de SOLID en el steering). Mitigación: el mock puede devolver
   filas con propiedad inexistente y fechas inválidas, y hay test de que la
   sincronización las reporta como error sin abortar (R3.4).
-- **Importación CSV como vector de carga.** Mitigación: límites de bytes y filas
-  antes de parsear, streaming por filas y `413`/`422` tempranos (regla 6 de
-  `steering/security.md`).
+- **Importación CSV como vector de carga.** La primera versión ponía la cota de bytes *dentro*
+  del endpoint, y el panel de seguridad **midió** que eso llega tarde: FastAPI parsea el
+  `multipart` antes de resolver dependencias, así que una petición **sin token** ya había dejado
+  60 MiB en el disco del contenedor antes del 401. Mitigación real: `MaxBodySizeMiddleware`
+  (`app/core/http_limits.py`), que rechaza por `Content-Length` antes de leer nada y además
+  cuenta el cuerpo mientras llega; la cota de filas y la de longitud por columna viven en el
+  parser, de modo que una celda hostil es una fila reportada y no un 500 que se lleva el
+  fichero entero (regla 6 de `steering/security.md`).
 - **Primera escritura de `timeline_events`.** Si el evento falla, la reserva no debe
   quedar escrita. Mitigación: D4 (una transacción, un commit) más test explícito que
   fuerza el fallo del repositorio de timeline y comprueba que la reserva no existe.

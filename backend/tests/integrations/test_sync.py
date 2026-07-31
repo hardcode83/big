@@ -159,6 +159,34 @@ async def test_an_existing_guest_of_the_tenant_is_linked_instead_of_duplicated(
 
 
 @pytest.mark.asyncio
+async def test_a_guest_of_another_tenant_with_the_same_email_is_not_linked(
+    db_session, tenant_a, tenant_b, property_a
+) -> None:
+    """The dedup lookup is tenant-scoped, so the neighbour's John Smith is invisible here.
+
+    Proven at the ingest level and not only at the repository level: this is the path where an
+    external payload supplies the email, so it is where the mistake would be made.
+    """
+    theirs = GuestModel(
+        tenant_id=tenant_b.id, full_name="Their John", email="john.smith@example.com"
+    )
+    db_session.add(theirs)
+    await db_session.flush()
+
+    await _use_case(db_session, include_broken_rows=False).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    linked = await db_session.scalar(
+        select(ReservationModel.guest_id).where(ReservationModel.external_pms_id == "MOCK-PMS-0001")
+    )
+    assert linked is not None
+    assert linked != theirs.id
+    mine = await db_session.scalar(select(GuestModel).where(GuestModel.id == linked))
+    assert mine.tenant_id == tenant_a.id
+
+
+@pytest.mark.asyncio
 async def test_the_sync_never_touches_another_tenants_property(
     db_session, tenant_a, tenant_b, property_b
 ) -> None:

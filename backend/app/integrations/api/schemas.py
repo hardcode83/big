@@ -26,17 +26,19 @@ class ImportReportResponse(BaseModel):
     errors: list[RowErrorResponse]
 
     @classmethod
-    def from_report(
-        cls, report: IngestReport, *, parse_failures: list[RowErrorResponse] | None = None
-    ) -> "ImportReportResponse":
-        failures = list(parse_failures or [])
+    def from_report(cls, report: IngestReport) -> "ImportReportResponse":
+        """Every error already carries its line when the source had one (R4.2).
+
+        The use case merges the rows the parser rejected with the rows the ingest rejected, so
+        this is a straight mapping — earlier it stitched the two lists together here, which is
+        how the ingest-level errors ended up without a line number.
+        """
         return cls(
             created=report.created,
             updated=report.updated,
-            skipped=report.skipped + len(failures),
-            errors=failures
-            + [
-                RowErrorResponse(reference=error.reference or None, reason=error.reason)
+            skipped=report.skipped,
+            errors=[
+                RowErrorResponse(line=error.line, reference=error.reference, reason=error.reason)
                 for error in report.errors
             ],
         )
