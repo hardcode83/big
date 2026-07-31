@@ -8,12 +8,12 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 
 ## 1. Puertos y adaptadores de lectura (base para todo lo demás)
 
-- [ ] 1.1 `PropertyRepository` (Protocol) en `backend/app/properties/domain/repositories.py` con `get`, `find_by_internal_code` y `find_by_pms_external_id`, los tres con `tenant_id` explícito; test de dominio que compruebe que el Protocol es puro (sin imports prohibidos, cubierto ya por `tests/test_layering.py`) [R1, R3, R4]
-- [ ] 1.2 `SqlAlchemyPropertyRepository` en `backend/app/properties/infrastructure/repositories.py` traduciendo `PropertyModel` → entidad `Property`; tests de integración en `backend/tests/properties/test_repositories.py`: encuentra por las tres vías dentro del tenant y devuelve `None` para una propiedad del tenant B [R1, R3, R4, R5]
-- [ ] 1.3 `GuestRepository` (Protocol) en `backend/app/guests/domain/repositories.py` con `get`, `find_by_email` y `add`; normalización de email (`strip` + `lower`) como función de dominio con su unit test [R1, R3]
-- [ ] 1.4 `SqlAlchemyGuestRepository` en `backend/app/guests/infrastructure/repositories.py`; tests de integración: desempate determinista por `created_at` y luego `id` cuando dos huéspedes del tenant comparten email (D8), `None` cross-tenant, y `add` que rechaza un `tenant_id` ajeno [R3, R5]
-- [ ] 1.5 `TimelineEventRepository` (Protocol) en `backend/app/timeline/domain/repositories.py` con `add`, y `SqlAlchemyTimelineEventRepository` en `backend/app/timeline/infrastructure/repositories.py`; tests de integración en `backend/tests/timeline/test_repositories.py`: persiste un evento construido con `TimelineEventFactory` y lo recupera con su `metadata` intacta [R2]
-- [ ] 1.6 `UnitOfWork` (Protocol) + `SqlAlchemyUnitOfWork` en `backend/app/core/unit_of_work.py` con su test de que `commit` delega en la sesión (D3) [R2]
+- [x] 1.1 `PropertyRepository` (Protocol) en `backend/app/properties/domain/repositories.py` con `get`, `find_by_internal_code` y `find_by_pms_external_id`, los tres con `tenant_id` explícito; test de dominio que compruebe que el Protocol es puro (sin imports prohibidos, cubierto ya por `tests/test_layering.py`) [R1, R3, R4]
+- [x] 1.2 `SqlAlchemyPropertyRepository` en `backend/app/properties/infrastructure/repositories.py` traduciendo `PropertyModel` → entidad `Property`; tests de integración en `backend/tests/properties/test_repositories.py`: encuentra por las tres vías dentro del tenant y devuelve `None` para una propiedad del tenant B [R1, R3, R4, R5]
+- [x] 1.3 `GuestRepository` (Protocol) en `backend/app/guests/domain/repositories.py` con `get`, `find_by_email` y `add`; normalización de email (`strip` + `lower`) como función de dominio con su unit test [R1, R3]
+- [x] 1.4 `SqlAlchemyGuestRepository` en `backend/app/guests/infrastructure/repositories.py`; tests de integración: desempate determinista por `created_at` y luego `id` cuando dos huéspedes del tenant comparten email (D8), `None` cross-tenant, y `add` que rechaza un `tenant_id` ajeno [R3, R5]
+- [x] 1.5 `TimelineEventRepository` (Protocol) en `backend/app/timeline/domain/repositories.py` con `add`, y `SqlAlchemyTimelineEventRepository` en `backend/app/timeline/infrastructure/repositories.py`; tests de integración en `backend/tests/timeline/test_repositories.py`: persiste un evento construido con `TimelineEventFactory` y lo recupera con su `metadata` intacta [R2]
+- [x] 1.6 `UnitOfWork` (Protocol) + `SqlAlchemyUnitOfWork` en `backend/app/core/unit_of_work.py` con su test de que `commit` delega en la sesión (D3) [R2]
 
 ## 2. Agregado `Reservation`: invariantes y repositorio
 
