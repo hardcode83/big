@@ -78,23 +78,45 @@ class MaxBodySizeMiddleware:
                     return {"type": "http.disconnect"}
             return message
 
-        sent_response = False
+        response_started = False
+        refused = False
 
         async def guarded_send(message: Message) -> None:
-            nonlocal sent_response
-            if exceeded and not sent_response:
-                sent_response = True
-                await _refuse(send, limit)
+            nonlocal response_started, refused
+            if message["type"] == "http.response.start":
+                if exceeded:
+                    # The app is answering after the body was cut short: replace its answer with
+                    # the 413, once.
+                    if not refused:
+                        refused = True
+                        response_started = True
+                        await _refuse(send, limit)
+                    return
+                response_started = True
+            elif exceeded and not response_started:
+                # Body without a start we forwarded: nothing to salvage, answer 413 instead.
+                if not refused:
+                    refused = True
+                    response_started = True
+                    await _refuse(send, limit)
                 return
-            if not exceeded:
-                await send(message)
+            elif refused:
+                # Already answered 413; drop whatever the app still wants to say.
+                return
+            await send(message)
 
         try:
             await self._app(scope, counting_receive, guarded_send)
         except Exception:
-            if not exceeded:
+            # An exception on a request that ALSO exceeded the limit is almost certainly the parser
+            # choking on the truncated body — that is this middleware's own doing, so it answers
+            # 413. Anything else propagates: swallowing it would report a genuine endpoint bug as a
+            # size problem. Once a response has started there is nothing to replace, so it
+            # propagates too and the server closes the connection (the security review's point:
+            # never emit a second `http.response.start`).
+            if not exceeded or response_started:
                 raise
-        if exceeded and not sent_response:
+        if exceeded and not response_started:
             await _refuse(send, limit)
 
 

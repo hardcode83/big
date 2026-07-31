@@ -14,11 +14,10 @@ for the human who has to fix the file.
 
 import csv
 import io
-from dataclasses import dataclass
 from datetime import date, time
 from decimal import Decimal, InvalidOperation
 
-from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.domain.dtos import ParsedRow, ParseResult, ReservationDTO, RowFailure
 
 # One cell can never be longer than this. The `csv` module's own default (131072) raises
 # `_csv.Error`, which is neither a `ValueError` nor a `CsvFileError`, so it escaped as a 500 and
@@ -69,45 +68,68 @@ class CsvTooLargeError(CsvFileError):
     """More rows than the configured limit (answered 413, not 422: it is about size)."""
 
 
-@dataclass
-class ParsedRow:
-    line: int
-    reservation: ReservationDTO
-
-
-@dataclass
-class RowFailure:
-    line: int
-    reason: str
-
-
-@dataclass
-class ParseResult:
-    rows: list[ParsedRow]
-    failures: list[RowFailure]
-
-
 def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
-    text = _decode(raw)
-    csv.field_size_limit(MAX_CELL_CHARS)
-    reader = csv.DictReader(io.StringIO(text))
-    if reader.fieldnames is None:
+    # `field_size_limit` is process-global interpreter state, so it is restored afterwards rather
+    # than left lowered for every other CSV reader in the process (raised by the security review
+    # as an informational point).
+    previous_field_limit = csv.field_size_limit(MAX_CELL_CHARS)
+    try:
+        return _parse(_text_stream(raw), max_rows=max_rows)
+    finally:
+        csv.field_size_limit(previous_field_limit)
+
+
+def _text_stream(raw: bytes) -> io.TextIOBase:
+    """Decode lazily, over the bytes we already hold.
+
+    Not `io.StringIO(raw.decode(...))`: that materialises the whole file a second time as a `str`
+    and then copies it again into the buffer. Reading through a `TextIOWrapper` decodes in chunks as
+    the reader advances, which is what keeps the transient cost of a file at the byte ceiling
+    proportional instead of a multiple — the security review measured the difference.
+    """
+    try:
+        # `utf-8-sig` strips Excel's BOM; see the note that used to live in `_decode`.
+        return io.TextIOWrapper(io.BytesIO(raw), encoding="utf-8-sig", newline="")
+    except UnicodeDecodeError as error:  # pragma: no cover - raised on read, not on construction
+        raise CsvFileError("The file must be UTF-8 encoded") from error
+
+
+def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
+    reader = csv.DictReader(stream)
+    try:
+        fieldnames = reader.fieldnames
+    except UnicodeDecodeError as error:
+        raise CsvFileError("The file must be UTF-8 encoded") from error
+    if fieldnames is None:
         raise CsvFileError("The file is empty")
 
-    headers = {name.strip().lower() for name in reader.fieldnames if name}
+    headers = {name.strip().lower() for name in fieldnames if name}
     missing = [column for column in REQUIRED_COLUMNS if column not in headers]
     if missing:
         raise CsvFileError(f"Missing required column(s): {', '.join(missing)}")
 
     rows: list[ParsedRow] = []
     failures: list[RowFailure] = []
-    # `csv.Error` (a cell over `MAX_CELL_CHARS`, a malformed quote) is raised by the reader as it
-    # advances, so the iteration itself has to be guarded — it is not a per-field failure.
-    try:
-        raw_rows = list(enumerate(reader, start=2))  # header is line 1
-    except csv.Error as error:
-        raise CsvFileError(f"The file could not be read as CSV: {error}") from error
-    for index, raw_row in raw_rows:
+    # Streamed, one row at a time. An earlier version hoisted this into `list(enumerate(reader))`
+    # to guard `csv.Error` in one place, and the security review measured what that cost: a 10 MiB
+    # file — inside the configured byte limit — built 283 000 rows and 200 MiB of heap before the
+    # `max_rows` ceiling was ever consulted. Guarding each step of the iteration instead keeps the
+    # ceiling meaningful: nothing past row `max_rows` is ever constructed.
+    index = 1  # the header is line 1
+    rows_iterator = iter(reader)
+    while True:
+        index += 1
+        try:
+            raw_row = next(rows_iterator)
+        except StopIteration:
+            break
+        except UnicodeDecodeError as error:
+            # The decode happens as the reader advances now, so a non-UTF-8 file surfaces here.
+            raise CsvFileError("The file must be UTF-8 encoded") from error
+        except csv.Error as error:
+            # A cell over `MAX_CELL_CHARS` or a malformed quote: the reader cannot advance, so
+            # this is a failure of the file, not of one field.
+            raise CsvFileError(f"The file could not be read as CSV: {error}") from error
         if len(rows) + len(failures) >= max_rows:
             raise CsvTooLargeError(f"The file has more than {max_rows} data rows")
         if None in raw_row:
@@ -130,19 +152,6 @@ def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
         except ValueError as error:
             failures.append(RowFailure(line=index, reason=str(error)))
     return ParseResult(rows=rows, failures=failures)
-
-
-def _decode(raw: bytes) -> str:
-    """UTF-8, BOM tolerated.
-
-    `utf-8-sig` rather than `utf-8`: Excel writes a BOM, and without this the first header
-    would come back as `\\ufeffproperty_internal_code` and the file would be rejected for a
-    missing column it actually has.
-    """
-    try:
-        return raw.decode("utf-8-sig")
-    except UnicodeDecodeError as error:
-        raise CsvFileError("The file must be UTF-8 encoded") from error
 
 
 def _to_dto(row: dict[str, str]) -> ReservationDTO:
@@ -176,11 +185,32 @@ def _to_dto(row: dict[str, str]) -> ReservationDTO:
         children=_int(row, "children", default=0),
         gross_amount=_decimal(row, "gross_amount"),
         ota_commission=_decimal(row, "ota_commission"),
-        currency=(row.get("currency") or "EUR").upper(),
+        currency=_currency(row),
         status=row.get("status") or None,
         special_requests=row.get("special_requests") or None,
         raw_payload=dict(row),
     )
+
+
+def _currency(row: dict[str, str]) -> str:
+    """Exactly three ASCII letters, checked AFTER normalising.
+
+    `_reject_overlong_values` bounds the raw cell, but `.upper()` can make a string LONGER —
+    `"ß".upper()` is `"SS"`, `"ﬄ".upper()` is `"FFL"` — so a 2-character cell could still produce
+    6 characters for a `varchar(3)` column and abort the whole transaction with a
+    `StringDataRightTruncationError`. Measured by the security review in its verification round:
+    the outgoing value is what has to satisfy the column, not the incoming one.
+
+    An explicit ISO-4217 shape (three ASCII letters) rather than a bare length check, because
+    that is what the column and the API schema (`^[A-Z]{3}$`) both mean by a currency.
+    """
+    raw = row.get("currency", "")
+    if not raw:
+        return "EUR"
+    normalised = raw.strip().upper()
+    if len(normalised) != 3 or not normalised.isascii() or not normalised.isalpha():
+        raise ValueError(f"currency must be a 3-letter code, got {raw!r}")
+    return normalised
 
 
 def _reject_control_characters(row: dict[str, str]) -> None:

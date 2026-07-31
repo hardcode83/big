@@ -170,15 +170,27 @@ siempre un `Guest` nuevo — duplica la misma persona en cada importación.
 **Chosen:** la ingesta (PMS y CSV) busca por `(tenant_id, external_pms_id)`; si
 existe actualiza y **no** emite `RESERVATION_IMPORTED`; si no, inserta y lo emite.
 La `UniqueConstraint` que ya está en la tabla es la autoridad ante una carrera: el
-`IntegrityError` se traduce a `409` en la creación por API y a una fila "omitida" con
-su motivo en el informe de importación. Una reserva sin `external_pms_id` (creada a
+`IntegrityError` se traduce a `DuplicateExternalReservationError`, que la ingesta convierte en
+una fila "omitida" con su motivo en el informe. Una reserva sin `external_pms_id` (creada a
 mano) nunca entra en esta ruta.
 
-El `409` **solo es alcanzable desde las vías de ingesta**, no desde `POST /reservations`:
-el endpoint manual no acepta `external_pms_id` (es la clave de idempotencia de la ingesta, y
-un valor escrito a mano haría que la siguiente sincronización creyera que ya importó esa
-reserva). Corregido aquí tras descubrirlo al escribir el test de API de la sección 4: la
-tabla de endpoints de este design listaba un `409` que el endpoint no puede producir.
+**Hoy ese duplicado no produce ningún `409` por HTTP**, y conviene decirlo con precisión porque
+este párrafo se ha corregido dos veces:
+
+- `POST /reservations` no puede producirlo, porque el endpoint manual **no acepta**
+  `external_pms_id` — es la clave de idempotencia de la ingesta, y un valor escrito a mano haría
+  que la siguiente sincronización creyera que ya importó esa reserva. (Descubierto al escribir el
+  test de API de la sección 4: la tabla de endpoints de este design listaba un `409` que el
+  endpoint no puede producir.)
+- Las vías de ingesta tampoco, porque `ReservationIngestor` **captura** la excepción y la reporta
+  como fila omitida: es justo lo que R3.4/R4.2 piden. (Señalado por el panel de arquitectura a
+  escala de feature.)
+
+El mapeo `DuplicateExternalReservationError → 409` se mantiene en
+`app/reservations/api/errors.py` a propósito: el error de dominio existe y un endpoint futuro que
+acepte `external_pms_id` —o la recepción de webhooks— lo necesitará, y sin mapeo saldría como
+`500`. Es un mapeo correcto de un error alcanzable en el dominio, no código muerto que finge una
+respuesta que hoy nadie da.
 
 Rejected: `ON CONFLICT DO UPDATE` — hace invisible la distinción creada/actualizada
 que el informe de R4.1 tiene que reportar.

@@ -20,7 +20,7 @@ tested against it behaves the same in production.
 from datetime import datetime
 from typing import Protocol
 
-from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.domain.dtos import ParseResult, ReservationDTO
 
 
 class PMSAdapter(Protocol):
@@ -50,5 +50,5 @@ class ReservationCsvParser(Protocol):
     rows than allowed — because in those cases there is nothing to report per row.
     """
 
-    def parse(self, raw: bytes, *, max_rows: int) -> "ParseResult":  # noqa: F821
+    def parse(self, raw: bytes, *, max_rows: int) -> ParseResult:
         ...

@@ -37,3 +37,33 @@ class ReservationDTO:
     status: str | None = None
     special_requests: str | None = None
     raw_payload: dict[str, Any] = field(default_factory=dict)
+
+
+@dataclass(frozen=True)
+class ParsedRow:
+    """One row a parser could turn into a `ReservationDTO`, with the line it came from."""
+
+    line: int
+    reservation: ReservationDTO
+
+
+@dataclass(frozen=True)
+class RowFailure:
+    """One row a parser could NOT use, with the line and the reason a person needs (R4.2)."""
+
+    line: int
+    reason: str
+
+
+@dataclass(frozen=True)
+class ParseResult:
+    """What a `ReservationCsvParser` returns: what it could read, and what it could not.
+
+    Lives in `domain/` rather than beside the CSV adapter so the port can describe its contract in
+    the vocabulary of the domain instead of the vocabulary of one file format — the architecture
+    review pointed out that a port whose return type only exists in `infrastructure/` still leaks
+    the layer it was meant to hide.
+    """
+
+    rows: list[ParsedRow]
+    failures: list[RowFailure]
