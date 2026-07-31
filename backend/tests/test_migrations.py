@@ -148,6 +148,11 @@ async def test_the_chain_upgrades_to_head_and_unwinds_revision_by_revision(
 
     upgraded = _alembic("upgrade", "head", database_url=url)
     assert upgraded.returncode == 0, upgraded.stderr
+    # domain-foundation-financial: one of its 10 tables and one of its 10 ENUM types.
+    # The type is the load-bearing half — Alembic never emits DROP TYPE on its own, and
+    # an orphan left behind breaks the NEXT upgrade with "type already exists".
+    assert await _table_exists(url, "audit_logs") is True
+    assert await _enum_exists(url, "expense_category") is True
     assert await _table_exists(url, "user_sessions") is True
     assert await _enum_exists(url, "session_revoked_reason") is True
     # Global email uniqueness replaces the per-tenant constraint (ADR 0005): the new
@@ -156,6 +161,14 @@ async def test_the_chain_upgrades_to_head_and_unwinds_revision_by_revision(
     # two together are what make the email one contract instead of two.
     assert await _index_exists(url, "uq_users_lower_email") is True
     assert await _constraint_exists(url, "uq_users_tenant_id_email") is False
+
+    # Undo domain-foundation-financial only; everything before it must survive.
+    down_financial = _alembic("downgrade", "e1eed2e039ee", database_url=url)
+    assert down_financial.returncode == 0, down_financial.stderr
+    assert await _table_exists(url, "audit_logs") is False
+    assert await _enum_exists(url, "expense_category") is False
+    assert await _index_exists(url, "uq_users_lower_email") is True
+    assert await _table_exists(url, "user_sessions") is True
 
     # Undo the email revision only.
     down_index = _alembic("downgrade", "8ff62a7cb50c", database_url=url)
@@ -185,6 +198,10 @@ async def test_the_revisions_can_be_reapplied_after_a_downgrade(migrations_datab
     reapplied = _alembic("upgrade", "head", database_url=url)
 
     assert reapplied.returncode == 0, reapplied.stderr
+    # Re-applying is where an orphaned ENUM type would surface: the CREATE TABLE that
+    # re-creates it fails with "type already exists" if the downgrade skipped DROP TYPE.
+    assert await _table_exists(url, "audit_logs") is True
+    assert await _enum_exists(url, "expense_category") is True
     assert await _table_exists(url, "user_sessions") is True
     assert await _index_exists(url, "uq_users_lower_email") is True
     # The re-upgrade has to drop the constraint its own downgrade recreated; if it

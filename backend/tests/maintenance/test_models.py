@@ -1,12 +1,14 @@
+import uuid
 from datetime import date, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.infrastructure.models import UserModel
-from app.maintenance.domain.enums import IncidentSource
-from app.maintenance.infrastructure.models import IncidentModel
+from app.maintenance.domain.enums import IncidentSource, OwnerApprovalRelatedType
+from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.enums import ReservationChannel
 from app.reservations.infrastructure.models import ReservationModel
@@ -177,3 +179,125 @@ async def test_incident_severity_is_distinct_postgres_enum_from_timeline_severit
 
     assert [r[0] for r in incident_severity_values] == ["LOW", "MEDIUM", "HIGH", "CRITICAL"]
     assert [r[0] for r in timeline_severity_values] == ["INFO", "WARNING", "ERROR", "CRITICAL"]
+
+
+async def _owner_approval(db_session, tenant, prop, responded_by=None) -> OwnerApprovalModel:
+    approval = OwnerApprovalModel(
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=uuid.uuid4(),
+        amount=Decimal("250.00"),
+        reason="Boiler replacement quoted by the technician.",
+        responded_by=responded_by,
+    )
+    db_session.add(approval)
+    return approval
+
+
+@pytest.mark.asyncio
+async def test_owner_approval_roundtrip_applies_the_prd_defaults(db_session) -> None:
+    tenant, prop = await _tenant_property(db_session)
+    approval = await _owner_approval(db_session, tenant, prop)
+    await db_session.commit()
+
+    fetched = (
+        await db_session.execute(
+            select(OwnerApprovalModel).where(OwnerApprovalModel.id == approval.id)
+        )
+    ).scalar_one()
+    assert fetched.status.value == "PENDING"
+    assert fetched.requested_at is not None
+    assert fetched.responded_at is None
+    assert fetched.amount == Decimal("250.00")
+
+
+@pytest.mark.asyncio
+async def test_owner_approvals_has_no_created_at_or_updated_at_column() -> None:
+    """§7.19 declares neither (design OQ1): the mixin must not have crept in."""
+    columns = set(OwnerApprovalModel.__table__.columns.keys())
+
+    assert "created_at" not in columns
+    assert "updated_at" not in columns
+    assert {"requested_at", "responded_at"} <= columns
+
+
+@pytest.mark.asyncio
+async def test_owner_approval_responder_set_null_on_user_delete(db_session) -> None:
+    tenant, prop = await _tenant_property(db_session)
+    owner = UserModel(
+        tenant_id=tenant.id,
+        name="Owner Olga",
+        email="olga@example.com",
+        password_hash="hash",
+        role="TENANT_OWNER",
+    )
+    db_session.add(owner)
+    await db_session.flush()
+
+    approval = await _owner_approval(db_session, tenant, prop, responded_by=owner.id)
+    await db_session.commit()
+
+    await db_session.delete(owner)
+    await db_session.commit()
+    await db_session.refresh(approval)
+
+    assert approval.responded_by is None
+    assert approval.reason.startswith("Boiler replacement")
+
+
+@pytest.mark.asyncio
+async def test_owner_approval_polymorphic_reference_has_no_foreign_key() -> None:
+    assert OwnerApprovalModel.__table__.c.related_id.foreign_keys == set()
+    assert OwnerApprovalModel.__table__.c.related_id.nullable is False
+
+
+@pytest.mark.asyncio
+async def test_owner_approval_requested_at_default_comes_from_the_ddl(db_session) -> None:
+    """`requested_at` is this row's creation timestamp, defaulted like every other.
+
+    Raw `text()`: SQLAlchemy Core would fill a Python-side default and prove nothing
+    (QA finding, section 1). §7.19 declares the column NOT NULL with no DEFAULT —
+    exactly as it declares `created_at` in the other 22 tables, all of which
+    `TimestampMixin` defaults (design D5, panel section 2).
+    """
+    tenant, prop = await _tenant_property(db_session)
+
+    await db_session.execute(
+        text(
+            "INSERT INTO owner_approvals "
+            "(id, tenant_id, property_id, related_type, related_id, amount, reason) "
+            "VALUES (:id, :tenant_id, :property_id, 'INCIDENT', :related_id, 250.00, 'raw insert')"
+        ),
+        {
+            "id": uuid.uuid4(),
+            "tenant_id": tenant.id,
+            "property_id": prop.id,
+            "related_id": uuid.uuid4(),
+        },
+    )
+    await db_session.commit()
+
+    fetched = (
+        await db_session.execute(
+            select(OwnerApprovalModel).where(OwnerApprovalModel.reason == "raw insert")
+        )
+    ).scalar_one()
+    assert fetched.requested_at is not None
+    assert fetched.status.value == "PENDING"
+
+
+@pytest.mark.asyncio
+async def test_owner_approval_property_restrict_on_delete(db_session) -> None:
+    """`owner_approvals.property_id` is this model's OWN mandatory FK (R3.7, D8).
+
+    Without it, flipping this column to CASCADE would leave the file green: every
+    other RESTRICT case here drives IncidentModel or ExpenseModel instead.
+    """
+    tenant, prop = await _tenant_property(db_session)
+    await _owner_approval(db_session, tenant, prop)
+    await db_session.commit()
+
+    await db_session.delete(prop)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
