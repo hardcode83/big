@@ -5,7 +5,7 @@ use case decided on, because those are the evidence the timeline exists for.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, date, datetime
 
 import pytest
 from sqlalchemy import select
@@ -13,6 +13,7 @@ from sqlalchemy import select
 from app.properties.infrastructure.models import PropertyModel
 from app.tenants.infrastructure.models import TenantModel
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType, TimelineSeverity
+from app.timeline.domain.exceptions import TimelineMetadataNotSerialisableError
 from app.timeline.domain.services import TimelineEventFactory
 from app.timeline.domain.value_objects import TimelineEventData
 from app.timeline.infrastructure.models import TimelineEventModel
@@ -81,6 +82,40 @@ async def test_an_event_without_metadata_stores_null_not_an_empty_object(db_sess
         await db_session.execute(select(TimelineEventModel).where(TimelineEventModel.id == event.id))
     ).scalar_one()
     assert stored.metadata_ is None
+
+
+@pytest.mark.asyncio
+async def test_it_refuses_metadata_the_jsonb_column_cannot_store(db_session) -> None:
+    """A `date` in `metadata` used to surface as an opaque 500 at INSERT time.
+
+    `date`/`Decimal`/`UUID` are the natural types of a reservation's own fields, so this is
+    the likely caller mistake — and the error must name the offending key instead of
+    arriving as "Object of type date is not JSON serializable" from the driver.
+    """
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    event = _event(tenant.id, prop.id, created_at=datetime.now(UTC))
+    event.metadata = {"check_in_date": date(2026, 8, 1), "nights": 3}
+
+    with pytest.raises(TimelineMetadataNotSerialisableError) as raised:
+        await SqlAlchemyTimelineEventRepository(db_session).add(tenant.id, event)
+
+    assert "check_in_date" in str(raised.value)
+    assert "nights" not in str(raised.value)
+
+
+@pytest.mark.asyncio
+async def test_nested_json_native_metadata_is_accepted(db_session) -> None:
+    """The change map of `RESERVATION_UPDATED` is nested dicts of strings (R2.2)."""
+    tenant, prop = await _tenant_and_property(db_session, "TenantA")
+    event = _event(tenant.id, prop.id, created_at=datetime.now(UTC))
+    event.metadata = {"changed": {"adults": {"from": 2, "to": 3}}}
+
+    await SqlAlchemyTimelineEventRepository(db_session).add(tenant.id, event)
+
+    stored = (
+        await db_session.execute(select(TimelineEventModel).where(TimelineEventModel.id == event.id))
+    ).scalar_one()
+    assert stored.metadata_ == {"changed": {"adults": {"from": 2, "to": 3}}}
 
 
 @pytest.mark.asyncio

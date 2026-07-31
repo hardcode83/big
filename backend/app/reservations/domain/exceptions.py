@@ -34,6 +34,15 @@ class PropertyNotFoundError(ReservationDomainError):
     """The referenced property does not exist within the acting tenant (R1.4) — 404."""
 
 
+class GuestNotFoundError(ReservationDomainError):
+    """The `guest_id` being linked does not exist within the acting tenant — 404.
+
+    Same reasoning as `ReservationNotFoundError`: a guest of another tenant must be
+    indistinguishable from one that does not exist, or the endpoint becomes a probe for
+    which guest ids a neighbour holds (R5.1).
+    """
+
+
 class DuplicateExternalReservationError(ReservationDomainError):
     """Another reservation of this tenant already carries that `external_pms_id` — 409.
 

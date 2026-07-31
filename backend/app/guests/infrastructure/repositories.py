@@ -37,6 +37,11 @@ class SqlAlchemyGuestRepository:
     async def find_by_email(self, tenant_id: uuid.UUID, email: str) -> GuestSummary | None:
         """Deterministic pick when a tenant holds several guests with one address.
 
+        A blank address never matches anything. Without that guard, `"   "` normalises to
+        `""` and matches every guest stored with a blank email, so two CSV rows with an
+        empty `guest_email` — ordinary in real exports — would be merged into one person,
+        the opposite of what design D8 says ("sin email… se crea siempre uno nuevo").
+
         Ordered by `created_at` then `id`: the oldest row wins, and `id` breaks the tie
         when two guests were inserted inside the same clock tick — without it the answer
         would depend on the query plan, so the same import could attach a reservation to a
@@ -45,11 +50,14 @@ class SqlAlchemyGuestRepository:
         The comparison is a plain equality against the Python-normalised address, never
         `lower()` in SQL (see `normalize_email`).
         """
+        normalised = normalize_email(email) if email else ""
+        if not normalised:
+            return None
         result = await self._session.execute(
             select(GuestModel)
             .where(
                 GuestModel.tenant_id == tenant_id,
-                GuestModel.email == normalize_email(email),
+                GuestModel.email == normalised,
             )
             .order_by(GuestModel.created_at, GuestModel.id)
             .limit(1)
@@ -69,7 +77,10 @@ class SqlAlchemyGuestRepository:
                 id=guest.id,
                 tenant_id=guest.tenant_id,
                 full_name=guest.full_name,
-                email=normalize_email(guest.email) if guest.email else None,
+                # The truth of the NORMALISED value decides, not of the raw one: `"   "`
+                # is truthy before `strip()` and would be stored as `""`, which then
+                # behaves like a shared address for every guest without one.
+                email=(normalize_email(guest.email) if guest.email else "") or None,
                 phone=guest.phone,
                 preferred_language=guest.preferred_language,
                 nationality=guest.nationality,

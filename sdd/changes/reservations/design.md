@@ -316,8 +316,8 @@ llevando el dato a una capa que no lo necesita.
 ### D18 — El tenant de las **referencias** de un evento de timeline lo garantiza quien llama
 
 **Chosen:** `TimelineEventRepository.add(tenant_id, event)` comprueba el `tenant_id` del
-propio evento, y documenta como **precondición** que `property_id`, `reservation_id` y
-`actor_user_id` ya se hayan resuelto dentro de ese tenant. Las FKs de `timeline_events`
+propio evento, y documenta como **precondición** que `property_id`, `reservation_id`,
+`actor_user_id` y `guest_id` ya se hayan resuelto dentro de ese tenant. Las FKs de `timeline_events`
 son globales (no compuestas con `tenant_id`), así que la base de datos aceptaría un evento
 del tenant A anclado a una propiedad del tenant B, y el adaptador no puede detectarlo sin
 una query propia.
@@ -325,8 +325,15 @@ una query propia.
 En este change la precondición se cumple estructuralmente en todas las vías: la propiedad
 sale siempre de `PropertyRepository.get/find_by_internal_code/find_by_pms_external_id`
 (D16, todas tenant-scoped) y la reserva de `ReservationRepository`, y el CSV referencia la
-propiedad por `internal_code`, nunca por UUID (D11) — así que un identificador ajeno no
-tiene por dónde entrar.
+propiedad por `internal_code`, nunca por UUID (D11).
+
+**`guest_id` es la excepción y necesita comprobación activa**, no argumento estructural: es
+un UUID que el cliente envía en el cuerpo de `POST` y de `PATCH`, y la FK
+`reservations.guest_id → guests.id` es global. Por eso los casos de uso de creación y
+actualización lo resuelven con `GuestRepository.get(tenant_id, guest_id)` y responden `404`
+(`GuestNotFoundError`) si no resuelve dentro del tenant — indistinguible de "no existe",
+igual que R5.1 exige para la reserva. Lo señaló el panel de seguridad de la sección 2 al
+ver que la lista original de esta precondición no lo incluía.
 
 **Deuda registrada**: la FK compuesta `(tenant_id, property_id)` que convertiría esto en
 imposible en lugar de solo incorrecto exige migración y toca tablas de
@@ -372,33 +379,49 @@ DELETE /reservations/{id}                                                → 204
 POST   /integrations/pms/import-csv   (multipart/form-data)              → 200 {created,updated,skipped,errors[]} | 413 | 422
 ```
 
-**Puertos nuevos** (todos `Protocol` en `domain/`):
+**Puertos nuevos** (todos `Protocol` en `domain/`). `tenant_id` es parámetro de **todos**
+los métodos, escrituras incluidas, siguiendo `app/auth/domain/ports.py`: así una instancia
+de repositorio no puede discrepar de su llamante sobre cuál es el tenant actuante — lo
+levantó el panel de seguridad de la sección 1, que encontró dos fuentes de verdad del
+tenant en la misma clase.
 
 ```python
 class ReservationRepository(Protocol):
     async def get(self, tenant_id: UUID, reservation_id: UUID) -> Reservation | None: ...
     async def find_by_external_pms_id(self, tenant_id: UUID, external_pms_id: str) -> Reservation | None: ...
-    async def list(self, tenant_id: UUID, filters: ReservationFilters, page: int, per_page: int) -> tuple[list[Reservation], int]: ...
-    async def add(self, reservation: Reservation) -> None: ...
-    async def save(self, reservation: Reservation) -> None: ...
+    async def list(self, tenant_id: UUID, filters: ReservationFilters, *, page: int, per_page: int) -> Page: ...
+    async def add(self, tenant_id: UUID, reservation: Reservation) -> None: ...  # DuplicateExternalReservationError
+    async def save(self, tenant_id: UUID, reservation: Reservation) -> None: ...
 
 class TimelineEventRepository(Protocol):
-    async def add(self, event: TimelineEvent) -> None: ...
+    async def add(self, tenant_id: UUID, event: TimelineEvent) -> None: ...      # precondición: D18
 
 class GuestRepository(Protocol):
-    async def get(self, tenant_id: UUID, guest_id: UUID) -> Guest | None: ...       # R1.8
-    async def find_by_email(self, tenant_id: UUID, email: str) -> Guest | None: ... # D8
-    async def add(self, guest: Guest) -> None: ...
+    async def get(self, tenant_id: UUID, guest_id: UUID) -> GuestSummary | None: ...       # R1.8, D17
+    async def find_by_email(self, tenant_id: UUID, email: str) -> GuestSummary | None: ... # D8, D17
+    async def add(self, tenant_id: UUID, guest: Guest) -> None: ...
 
 class PropertyRepository(Protocol):                                                 # D16
     async def get(self, tenant_id: UUID, property_id: UUID) -> Property | None: ...
     async def find_by_internal_code(self, tenant_id: UUID, internal_code: str) -> Property | None: ...
     async def find_by_pms_external_id(self, tenant_id: UUID, pms_external_id: str) -> Property | None: ...
+    # ↑ AmbiguousPropertyExternalIdError (error de dominio) si dos propiedades comparten el id externo
 
 class PMSAdapter(Protocol):
     async def list_reservations(self, since: datetime, property_external_id: str | None = None) -> list[ReservationDTO]: ...
     async def get_reservation(self, external_id: str) -> ReservationDTO | None: ...
 ```
+
+`Page` (`items`, `total`) y `ReservationFilters` son value objects del dominio de reservas;
+`GuestSummary` lo es del de huéspedes (D17). Los tres viven en `domain/`, de modo que
+`application/` los maneja sin tocar infraestructura.
+
+**`CrossTenantWriteError`** vive en `backend/app/core/tenancy.py`, por el mismo criterio
+que D3 aplica al `UnitOfWork`: no tiene un dominio dueño, y una clase por módulo —que es
+como empezó— hace que un `except` escrito contra la de `guests` no capture la de
+`reservations`. Es un `RuntimeError`, no un `AppError`: llegar ahí significa que un caso de
+uso confundió dos tenants, o sea un error de programación que debe salir como 500 y
+arreglarse, nunca manejarse.
 
 **Config nueva** (`.env.example` + `core/config.py`): `CSV_IMPORT_MAX_BYTES`
 (default `10485760`) y `CSV_IMPORT_MAX_ROWS` (default `1000`). Ninguna es un secreto.

@@ -6,7 +6,7 @@ los tests son `docker compose exec backend uv run pytest` (o
 ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corre
 `alembic upgrade head`, `alembic check`, `pytest -q -rs` y `alembic downgrade base`.
 
-## 1. Puertos y adaptadores de lectura (base para todo lo demás)
+## 1. Puertos y adaptadores de lectura (base para todo lo demás) <!-- panel: PASS 2026-07-31 (architect, security, qa, tenancy; 8 hallazgos corregidos en ronda 1) -->
 
 - [x] 1.1 `PropertyRepository` (Protocol) en `backend/app/properties/domain/repositories.py` con `get`, `find_by_internal_code` y `find_by_pms_external_id`, los tres con `tenant_id` explícito; test de dominio que compruebe que el Protocol es puro (sin imports prohibidos, cubierto ya por `tests/test_layering.py`) [R1, R3, R4]
 - [x] 1.2 `SqlAlchemyPropertyRepository` en `backend/app/properties/infrastructure/repositories.py` traduciendo `PropertyModel` → entidad `Property`; tests de integración en `backend/tests/properties/test_repositories.py`: encuentra por las tres vías dentro del tenant y devuelve `None` para una propiedad del tenant B [R1, R3, R4, R5]
@@ -15,7 +15,7 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 - [x] 1.5 `TimelineEventRepository` (Protocol) en `backend/app/timeline/domain/repositories.py` con `add`, y `SqlAlchemyTimelineEventRepository` en `backend/app/timeline/infrastructure/repositories.py`; tests de integración en `backend/tests/timeline/test_repositories.py`: persiste un evento construido con `TimelineEventFactory` y lo recupera con su `metadata` intacta [R2]
 - [x] 1.6 `UnitOfWork` (Protocol) + `SqlAlchemyUnitOfWork` en `backend/app/core/unit_of_work.py` con su test de que `commit` delega en la sesión (D3) [R2]
 
-## 2. Agregado `Reservation`: invariantes y repositorio
+## 2. Agregado `Reservation`: invariantes y repositorio <!-- panel: PASS 2026-07-31 (architect, security; 5 hallazgos corregidos en ronda 1) -->
 
 - [x] 2.1 Métodos de mutación en `backend/app/reservations/domain/entities.py` (`update_details`, `cancel`) que recalculan `nights`/`total_guests` y revalidan las invariantes de fechas y ocupación, sin setters públicos; TDD — unit tests primero en `backend/tests/reservations/test_entities.py`, incluidos los casos de rechazo (`check_out <= check_in`, `adults < 1`, `children < 0`) [R1]
 - [x] 2.2 `cancel()` idempotente: cancelar una reserva ya `CANCELLED` no cambia nada y expone que no hubo transición, para que el caso de uso no emita un segundo evento; unit test [R1, R2]
@@ -25,11 +25,11 @@ ni typecheck configurados en `backend/` — el workflow `backend-tests.yml` corr
 
 ## 3. Casos de uso de reservas + timeline atómico
 
-- [ ] 3.1 `CreateReservationUseCase` en `backend/app/reservations/application/use_cases.py`: resuelve la propiedad por `PropertyRepository.get` (→ `NotFoundError` si no es del tenant), crea la reserva, emite `RESERVATION_CREATED_MANUAL` con `actor_type` USER y hace un único `commit`; unit tests con fakes en memoria de los cuatro puertos [R1, R2, R5]
-- [ ] 3.2 `UpdateReservationUseCase`: aplica solo los campos presentes, revalida sobre el resultado y emite `RESERVATION_UPDATED` con los campos cambiados en `metadata`; unit tests, incluido que un PATCH vacío no emite evento [R1, R2]
-- [ ] 3.3 `CancelReservationUseCase`: emite `RESERVATION_CANCELLED` solo si hubo transición real (2.2); unit tests de la doble cancelación [R1, R2]
-- [ ] 3.4 `GetReservationUseCase` y `ListReservationsUseCase`: el detalle resuelve el `Guest` vinculado con `GuestRepository.get` y nunca expone campos de documento; la lista aplica filtros + paginación y devuelve `(items, total)`; unit tests con fakes [R1, R5]
-- [ ] 3.5 Test de atomicidad (R2.6): un `TimelineEventRepository` que lanza al persistir deja la reserva sin escribir — test de integración contra Postgres, no con fakes, porque lo que se prueba es la transacción [R2]
+- [x] 3.1 `CreateReservationUseCase` en `backend/app/reservations/application/use_cases.py`: resuelve la propiedad por `PropertyRepository.get` (→ `NotFoundError` si no es del tenant), crea la reserva, emite `RESERVATION_CREATED_MANUAL` con `actor_type` USER y hace un único `commit`; unit tests con fakes en memoria de los cuatro puertos [R1, R2, R5]
+- [x] 3.2 `UpdateReservationUseCase`: aplica solo los campos presentes, revalida sobre el resultado y emite `RESERVATION_UPDATED` con los campos cambiados en `metadata`; unit tests, incluido que un PATCH vacío no emite evento [R1, R2]
+- [x] 3.3 `CancelReservationUseCase`: emite `RESERVATION_CANCELLED` solo si hubo transición real (2.2); unit tests de la doble cancelación [R1, R2]
+- [x] 3.4 `GetReservationUseCase` y `ListReservationsUseCase`: el detalle resuelve el `Guest` vinculado con `GuestRepository.get` y nunca expone campos de documento; la lista aplica filtros + paginación y devuelve `(items, total)`; unit tests con fakes [R1, R5]
+- [x] 3.5 Test de atomicidad (R2.6): un `TimelineEventRepository` que lanza al persistir deja la reserva sin escribir — test de integración contra Postgres, no con fakes, porque lo que se prueba es la transacción [R2]
 
 ## 4. API de reservas
 

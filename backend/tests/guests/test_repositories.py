@@ -103,6 +103,67 @@ async def test_find_by_email_picks_the_oldest_deterministically(db_session) -> N
 
 
 @pytest.mark.asyncio
+async def test_the_id_breaks_the_tie_when_created_at_is_identical(db_session) -> None:
+    """The second half of design D8's rule: two rows inserted in the same clock tick."""
+    tenant = await _tenant(db_session, "TenantA")
+    same_instant = datetime(2026, 1, 1, tzinfo=UTC)
+    one = await _guest(
+        db_session, tenant, full_name="John A", email="john@example.com", created_at=same_instant
+    )
+    two = await _guest(
+        db_session, tenant, full_name="John B", email="john@example.com", created_at=same_instant
+    )
+
+    found = await _repository(db_session, tenant).find_by_email(tenant.id, "john@example.com")
+
+    assert found is not None
+    assert found.id == min(one.id, two.id, key=str)
+
+
+@pytest.mark.asyncio
+async def test_a_blank_email_is_stored_as_null(db_session) -> None:
+    """`"   "` is truthy before `strip()`; storing it as `""` would make it a shared key."""
+    tenant = await _tenant(db_session, "TenantA")
+    now = datetime.now(UTC)
+    guest = Guest(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        full_name="No Email",
+        created_at=now,
+        updated_at=now,
+        email="   ",
+    )
+
+    await _repository(db_session, tenant).add(tenant.id, guest)
+
+    stored = await _repository(db_session, tenant).get(tenant.id, guest.id)
+    assert stored is not None
+    assert stored.email is None
+
+
+@pytest.mark.asyncio
+async def test_a_blank_email_never_matches_another_guest(db_session) -> None:
+    """Two rows with no email are two people, not one (design D8)."""
+    tenant = await _tenant(db_session, "TenantA")
+    now = datetime.now(UTC)
+    for name in ("First Anonymous", "Second Anonymous"):
+        await _repository(db_session, tenant).add(
+            tenant.id,
+            Guest(
+                id=uuid.uuid4(),
+                tenant_id=tenant.id,
+                full_name=name,
+                created_at=now,
+                updated_at=now,
+                email="  ",
+            ),
+        )
+
+    assert await _repository(db_session, tenant).find_by_email(tenant.id, "\t") is None
+    assert await _repository(db_session, tenant).find_by_email(tenant.id, "") is None
+
+
+@pytest.mark.asyncio
 async def test_reads_cannot_carry_identity_document_data(db_session) -> None:
     """The structural half of R1.8 and rule 4 of `steering/security.md` (design D17).
 

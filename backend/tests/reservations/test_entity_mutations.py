@@ -146,6 +146,34 @@ class TestUpdateDetails:
             "check_in_time": {"from": None, "to": "16:30:00"},
         }
 
+    def test_free_text_fields_report_the_change_without_their_content(self) -> None:
+        """`timeline_events` is append-only, so prose written there can never be redacted.
+
+        A manager pasting a door code into `internal_notes` must not leave it in clear text
+        for ever in the one store designed never to be edited. R2.2 asks for the fields
+        that changed, not their values.
+        """
+        reservation = _create(internal_notes="old note")
+
+        changed = reservation.update_details(
+            {
+                "internal_notes": "door code 4815, wifi hunter2",
+                "special_requests": "late check-in",
+                "adults": 3,
+            },
+            now=NOW,
+        )
+
+        assert changed["internal_notes"] == {"changed": True}
+        assert changed["special_requests"] == {"changed": True}
+        # The values still reach the row itself — only the timeline stays opaque.
+        assert reservation.internal_notes == "door code 4815, wifi hunter2"
+        assert "4815" not in str(changed)
+        assert "hunter2" not in str(changed)
+        assert "late check-in" not in str(changed)
+        # Structured fields keep their before/after, which is what makes the event useful.
+        assert changed["adults"] == {"from": 1, "to": 3}
+
     def test_money_is_never_serialised_as_a_float(self) -> None:
         reservation = _create()
 

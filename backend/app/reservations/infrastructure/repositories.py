@@ -13,42 +13,29 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
-from app.reservations.domain.entities import Reservation
+from app.reservations.domain.entities import UPDATABLE_FIELDS, Reservation
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
 from app.reservations.domain.repositories import Page, ReservationFilters
 from app.reservations.infrastructure.models import ReservationModel
 
 EXTERNAL_PMS_ID_CONSTRAINT = "uq_reservations_tenant_id_external_pms_id"
 
-# Columns `save` writes back. Identity (`id`, `tenant_id`, `property_id`,
-# `external_pms_id`) is excluded on purpose: a repository that could move a row to
-# another tenant or re-point it at another property would defeat both the isolation rule
-# and the idempotency key.
-_MUTABLE_COLUMNS = (
-    "guest_id",
-    "external_channel_id",
-    "channel",
-    "status",
-    "check_in_date",
-    "check_out_date",
-    "check_in_time",
-    "check_out_time",
-    "nights",
-    "adults",
-    "children",
-    "total_guests",
-    "gross_amount",
-    "ota_commission",
-    "net_amount",
-    "currency",
-    "payment_status",
-    "access_status",
-    "legal_registration_status",
-    "cleaning_required",
-    "special_requests",
-    "internal_notes",
-    "updated_at",
-)
+# Columns `save` writes back: **derived** from the domain's own allow-list plus the fields
+# the aggregate recomputes. One allow-list, not two.
+#
+# It used to be a hand-written tuple that also contained `access_status` and
+# `legal_registration_status` — fields `UPDATABLE_FIELDS` deliberately excludes as "owned
+# by another module", and which the proposal puts out of scope ("el campo
+# `legal_registration_status` … se deja en su default"). Two allow-lists that disagree end
+# with the wider one winning: the ingest path of R3 builds an entity from an external
+# `ReservationDTO` and calls `save`, so a PMS payload could have overwritten the SES
+# .Hospedajes registration state. Deriving it makes that impossible instead of unlikely.
+#
+# Identity (`id`, `tenant_id`, `property_id`, `external_pms_id`) is absent from both lists:
+# a repository able to move a row to another tenant would defeat the isolation rule, and
+# one able to re-point `external_pms_id` would defeat the idempotency key of design D9.
+_DERIVED_COLUMNS = ("nights", "total_guests", "updated_at")
+_MUTABLE_COLUMNS = tuple(sorted(UPDATABLE_FIELDS)) + _DERIVED_COLUMNS
 
 
 class SqlAlchemyReservationRepository:

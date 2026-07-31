@@ -40,6 +40,16 @@ UPDATABLE_FIELDS = frozenset(
     }
 )
 
+# Free-text fields whose CONTENT never reaches the timeline (R2.2, panel de seguridad de
+# la sección 2). R2.2 asks the event to record "los campos cambiados" — the fields, not
+# their values — and `timeline_events` is append-only by rule ("nunca se editan eventos
+# pasados", `steering/architecture.md`), so anything written there cannot be redacted
+# later. A manager pasting a door code or a WiFi password into `internal_notes` would
+# otherwise leave it in clear text, permanently, in the one store designed never to be
+# edited — while rules 3 and 4 of `steering/security.md` require exactly those values to
+# be encrypted and masked everywhere else.
+OPAQUE_IN_TIMELINE = frozenset({"special_requests", "internal_notes"})
+
 
 @dataclass
 class Reservation:
@@ -130,6 +140,10 @@ class Reservation:
         the value it already had is not a change and does not appear — which is what
         makes an effectively-empty PATCH emit no event at all.
 
+        Free-text fields report `{"changed": True}` and never their content: see
+        `OPAQUE_IN_TIMELINE` for why the timeline must not become the one place where a
+        door code lives in clear text for ever.
+
         Validation runs on the RESULT, not on the incoming fields: moving only
         `check_in_date` can invalidate a stay whose `check_out_date` was fine before,
         and checking the fields in isolation would let that through.
@@ -145,7 +159,11 @@ class Reservation:
             old_value = getattr(self, field_name)
             if old_value == new_value:
                 continue
-            applied[field_name] = {"from": _jsonable(old_value), "to": _jsonable(new_value)}
+            applied[field_name] = (
+                {"changed": True}
+                if field_name in OPAQUE_IN_TIMELINE
+                else {"from": _jsonable(old_value), "to": _jsonable(new_value)}
+            )
             setattr(self, field_name, new_value)
 
         if not applied:

@@ -11,9 +11,14 @@ from decimal import Decimal
 import pytest
 
 from app.core.tenancy import CrossTenantWriteError
+from app.guests.domain.enums import LegalRegistrationStatus
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.entities import Reservation
-from app.reservations.domain.enums import ReservationChannel, ReservationStatus
+from app.reservations.domain.enums import (
+    ReservationAccessStatus,
+    ReservationChannel,
+    ReservationStatus,
+)
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
 from app.reservations.domain.repositories import ReservationFilters
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
@@ -184,6 +189,28 @@ class TestSave:
         reloaded = await repository.get(tenant.id, reservation.id)
         assert reloaded is not None
         assert reloaded.status is ReservationStatus.CANCELLED
+
+    @pytest.mark.asyncio
+    async def test_it_cannot_write_fields_owned_by_another_module(self, db_session) -> None:
+        """`access_status` and `legal_registration_status` are out of this change's scope.
+
+        The columns `save` writes are derived from the domain allow-list, so the ingest
+        path of R3 — which builds an entity from an external PMS payload — cannot
+        overwrite the SES.Hospedajes registration state through the back door.
+        """
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        reservation = _reservation(tenant, prop)
+        await repository.add(tenant.id, reservation)
+
+        reservation.legal_registration_status = LegalRegistrationStatus.SUBMITTED
+        reservation.access_status = ReservationAccessStatus.DELIVERED
+        await repository.save(tenant.id, reservation)
+
+        reloaded = await repository.get(tenant.id, reservation.id)
+        assert reloaded is not None
+        assert reloaded.legal_registration_status is LegalRegistrationStatus.NOT_REQUIRED
+        assert reloaded.access_status is ReservationAccessStatus.PENDING
 
     @pytest.mark.asyncio
     async def test_it_cannot_move_a_reservation_to_another_property(self, db_session) -> None:
