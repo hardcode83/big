@@ -20,6 +20,24 @@ dejan escritas ahí.
   (toca 4 ficheros y contradice la spec recién escrita).
   — files: `frontend/features/shell/components/version-badge.tsx` [R1.1, R1.2, R1.3]
 
+  **Segunda decisión, añadida por el panel de la sección 1 — la forma de los metadatos se
+  valida, no se confía.** El badge solo renderiza verbatim la forma canónica
+  `YYYY-MM-DD.<7-12 hex>`; cualquier otra cosa degrada a la forma corta. Referentes: **R1.2**
+  (ninguna cadena con forma de versión a medias) y **R2.4 de la capability padre**
+  (`sdd/specs/app-version-visibility.md:67-70`: el SHA completo, el `run_id`, el `ref` y el
+  número de PR **no** pueden estar en el snapshot público). El motivo lo encontró el panel de
+  seguridad y es estructural: **hasta este change los metadatos se descartaban** y se
+  sustituían por el sha corto, así que compusiera lo que compusiera el CD solo 7 caracteres
+  podían llegar a pantalla. Mostrarlos completos elimina ese límite, y el badge se pinta en
+  superficies **anónimas** — un futuro `.${GITHUB_RUN_ID}` o un `:0:7` caído en el paso
+  `provenance` publicaría el SHA completo o el run id en el pie de `/login`, y el guard que
+  existía **seguiría verde**, porque plantaba los valores sensibles en variables que el
+  componente no lee. Ahora el componente lo impide en vez de confiar en el pipeline.
+  Arquitectura pedía además que esto quedase escrito como decisión y no como heurística
+  silenciosa: esta nota es eso. Consecuencia asumida: si el esquema canónico cambia (una
+  hora, por ejemplo), hay que cambiar el patrón con él o el badge cae a la forma corta sin
+  avisar — el comentario del código lo dice.
+
 - [x] 1.2 Ajustar `version-badge.test.tsx` a la nueva expectativa. Los tests que hoy afirman
   el recorte y **tienen que cambiar de valor esperado**, no de intención: el de la línea 15
   (`shortens the canonical string…` → la cadena completa), el de whitespace de la línea 49
@@ -50,7 +68,7 @@ dejan escritas ahí.
 
 ## 2. La legibilidad en móvil, medida
 
-- [ ] 2.1 **Medir**, no suponer. Levantar el frontend local con la cadena larga horneada
+- [x] 2.1 **Medir**, no suponer. Levantar el frontend local con la cadena larga horneada
   (`NEXT_PUBLIC_APP_VERSION=0.1.0+2026-07-31.5872022 docker compose up -d frontend`; el
   servicio ya declara la variable con default `local` y **no tiene `env_file`**), y con
   Playwright a **390×844** (iPhone 12/13/14), **360** (Android común) y **320** (iPhone SE,
@@ -61,7 +79,26 @@ dejan escritas ahí.
   píxeles medidos en la tarea al cerrarla — el número es la evidencia, no el "se ve bien".
   — files: ninguno (verificación) [R2.1]
 
-- [ ] 2.2 Según lo medido en 2.1, **una de dos**, y se escribe cuál: si cabe con holgura, se
+  **Medido** con la cadena real `0.1.0+2026-07-31.5872022` (24 caracteres) servida por el
+  contenedor de dev, en Chromium vía Playwright. El badge mide **181×23 px** —una sola
+  línea— y es idéntico en los tres anchos, porque el texto no llega a competir por el
+  espacio:
+
+  | viewport | superficie | `scrollWidth`/`clientWidth` | holgura a la derecha | separación de la barra fija |
+  | --- | --- | --- | --- | --- |
+  | 390 | `/login` | 390 / 390 — sin desbordamiento | 193 px | (sin barra: `PublicShell`) |
+  | 390 | `/dashboard` | 390 / 390 — sin desbordamiento | 193 px | **+7 px** (pie 780, barra 787) |
+  | 360 | `/login` | 360 / 360 — sin desbordamiento | 163 px | (sin barra) |
+  | 320 | `/login` | 320 / 320 — sin desbordamiento | 123 px | (sin barra) |
+  | 320 | `/dashboard` | 320 / 320 — sin desbordamiento | 123 px | **+7 px** (pie 504, barra 511) |
+
+  Ni desbordamiento de la página ni del propio badge (`scrollWidth === clientWidth` también
+  dentro del elemento, así que no hay texto recortado). El workspace se pudo medir de verdad
+  porque `/dashboard` responde 200 **sin sesión** —el frontend todavía no tiene auth— y es el
+  único shell que pinta `BottomNavigation`; su columna sigue llevando
+  `flex min-w-0 flex-1 flex-col pb-16 md:pb-0`, que es lo que produce esos 7 px.
+
+- [x] 2.2 Según lo medido en 2.1, **una de dos**, y se escribe cuál: si cabe con holgura, se
   cierra la tarea anotando el ancho del badge frente al del viewport y no se toca el
   componente; si no cabe, se **acomoda** —truncado visual con la cadena completa accesible, o
   salto de línea— y **nunca** se revierte a la forma corta. Si la acomodación introduce
@@ -69,6 +106,14 @@ dejan escritas ahí.
   `locales/en/` en la misma tarea, por `steering/frontend.md`; el `aria-label` actual ya
   nombra el valor completo y no necesita clave nueva.
   — files: `version-badge.tsx` y `locales/{es,en}/common.json` **solo si hace falta** [R2.2]
+
+  **Cabe con holgura: no se toca el componente y no hay strings nuevas.** 181 px de badge
+  frente a 320 px del viewport más estrecho que se contempla — el 57 %, y con 123 px libres
+  a su derecha. La preocupación que motivó el recorte original ("con la fecha son ~24
+  caracteres que compiten por el espacio en un móvil") era razonable a priori y resulta ser
+  infundada: a 11 px en `font-mono` esos 24 caracteres ocupan menos de la mitad del ancho
+  incluso en un iPhone SE. Que la acomodación no haya hecho falta es un resultado de la
+  medición, no una decisión de saltársela.
 
 ## 3. El registro deja de prescribir el recorte
 

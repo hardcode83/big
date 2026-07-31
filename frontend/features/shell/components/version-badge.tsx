@@ -11,6 +11,28 @@ export interface VersionBadgeLabels {
 }
 
 /**
+ * The one metadata shape the badge renders verbatim: a build date and a short commit, as in
+ * `2026-07-31.5872022`.
+ *
+ * The component distrusts its producer on purpose, for the same reason the empty-base guard
+ * below exists — it must not depend on its caller being careful. Until this change the
+ * metadata was DISCARDED and replaced by the short SHA, so whatever the CD composed, only
+ * seven characters could ever reach the screen. Showing it whole removes that structural
+ * limit, and the badge is painted on ANONYMOUS surfaces: a later edit to the provenance step
+ * — dropping `:0:7` from `${GITHUB_SHA:0:7}`, or appending `.${GITHUB_RUN_ID}` — would
+ * publish the full SHA or the Actions run id in the footer of `/login`. Those are precisely
+ * the values the capability forbids in the frontend snapshot (R2.4 in
+ * `sdd/specs/app-version-visibility.md`), so the badge enforces it here rather than trusting
+ * the pipeline to keep being careful. Off-shape metadata degrades to the short form: the
+ * badge shows LESS than expected, never more. Found by the security panel of this change.
+ *
+ * The 7-12 bound on the commit is what rejects a 40-character full SHA while still tolerating
+ * a pipeline that widens the abbreviation. If the canonical schema ever changes — a time
+ * component, say — this pattern changes with it, or the badge silently falls back.
+ */
+const CANONICAL_METADATA = /^\d{4}-\d{2}-\d{2}\.[0-9a-f]{7,12}$/;
+
+/**
  * Composes what the badge shows from the canonical build version.
  *
  * Shows the canonical string WHOLE — `0.1.0+2026-07-30.a2f3c1d`, date included — which is
@@ -41,15 +63,17 @@ export function formatBuildVersion(
   // careful (found by the QA panel).
   if (!base) return null;
 
-  // `rest.join("+")` instead of `rest[0]`: nothing is dropped if the metadata itself
-  // carries a `+`. Requiring an alphanumeric is the mirror image of the empty-base guard —
-  // `"0.1.0+"` and `"0.1.0++"` have a `+` that carries NOTHING, and rendering them would
-  // be exactly the "half-formed version string" the degradation rules forbid.
+  // `rest.join("+")` instead of `rest[0]`, so the shape check sees the WHOLE metadata.
+  // Taking only the first segment would let a smuggled suffix — `2026-07-31.5872022+dirty` —
+  // be truncated into something that matches the canonical shape, and the badge would then
+  // pass a modified build off as a clean one.
   const metadata = rest.join("+").trim();
-  if (/[0-9a-z]/i.test(metadata)) return `${base}+${metadata}`;
+  if (CANONICAL_METADATA.test(metadata)) return `${base}+${metadata}`;
 
-  // No usable metadata (the `local` of dev): the short SHA is the only identity available,
-  // so it is still worth appending when the image baked one.
+  // No usable metadata: either the string never had any (the `local` of dev), or it had a
+  // `+` carrying nothing (`"0.1.0+"`, `"0.1.0++"` — the mirror image of the empty-base guard
+  // above), or it carried something off-shape. Either way the short SHA is the only identity
+  // left, so it is still worth appending when the image baked one.
   const short = buildCommitShort.trim();
   return short ? `${base}+${short}` : base;
 }
