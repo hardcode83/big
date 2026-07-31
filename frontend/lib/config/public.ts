@@ -54,16 +54,31 @@ export interface PublicRuntimeConfig {
  * the snapshot is covered at once. `""` is already the "no identity baked" case the badge
  * renders as a localized "unknown", so dropping degrades safely.
  *
- * The commit is pinned to exactly 7 hex characters because that is what the CD composes
- * (`${GITHUB_SHA:0:7}` in the `provenance` job). It is deliberately NOT a range: decimal
- * digits are a subset of hex, so a lenient `{7,12}` would happily accept an Actions
- * `run_id` — an 11-digit decimal number — as if it were a commit. If the abbreviation ever
- * widens, widen this pattern in the same commit, on purpose.
+ * Everything is pinned to what the pipeline actually guarantees, never to a character class
+ * plus a length cap — a cap only limits how much of a secret leaks, it does not stop one:
  *
- * Both patterns and the reasoning came out of the security and architecture panels of the
- * `app-version-badge-date` change; the first two attempts got the layer and the bound wrong.
+ * - The base is `X.Y.Z`, which the CD validates before composing anything
+ *   (`grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'` on `VERSION`), or the literal `local` that
+ *   `docker-compose.yml` defaults to for a dev image. An earlier version of this pattern
+ *   allowed any 32 alphanumerics/dots/hyphens, and the security panel showed that
+ *   `0.1.0-30618352968+2026-07-31.5872022` — a run id in the base, a common CI versioning
+ *   pattern — sailed through into the HTML of `/guest/<token>`, as did a 32-character hex
+ *   prefix that `git rev-parse` resolves to a commit.
+ * - The commit is exactly 7 hex characters, which is what the CD composes
+ *   (`${GITHUB_SHA:0:7}`). Deliberately NOT a range: decimal digits are a subset of hex, so a
+ *   lenient `{7,12}` accepts an Actions `run_id` — 11 decimal digits — as if it were a commit.
+ *
+ * If either shape ever changes upstream, change it here in the same commit, on purpose. The
+ * badge degrades to "unknown" rather than showing something unvetted, and nothing detects that
+ * drift today — see section 5 of `sdd/changes/app-version-badge-date/tasks.md`.
+ *
+ * All of this came out of the security and architecture panels of the `app-version-badge-date`
+ * change, across three iterations: the first put the check in the badge (wrong layer — the
+ * value reaches the page source regardless), the second bounded the commit too loosely, and
+ * the third left the base unpinned.
  */
-const BAKED_VERSION = /^[0-9A-Za-z][0-9A-Za-z.-]{0,31}(\+\d{4}-\d{2}-\d{2}\.[0-9a-f]{7})?$/;
+const BAKED_VERSION =
+  /^(?:\d+\.\d+\.\d+(?:\+\d{4}-\d{2}-\d{2}\.[0-9a-f]{7})?|local)$/;
 const BAKED_COMMIT_SHORT = /^[0-9a-f]{7}$/;
 
 function allowlistedShape(raw: string | undefined, shape: RegExp): string {

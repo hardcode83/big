@@ -100,6 +100,15 @@ describe("public runtime config (D15)", () => {
     ["a branch ref as metadata", "0.1.0+refs/heads/main"],
     ["a `+`-smuggled suffix", "0.1.0+2026-07-30.a2f3c1d+dirty"],
     ["a base that is not a version at all", "https://github.com/autohostai-labs/AutoHostAI"],
+    // The base half of the same finding, filed after the metadata half was already tight.
+    // A cap on length only limits how much of a secret leaks; it does not stop one — the
+    // security panel proved the old `{0,31}` cap was incidental by widening it to `{0,63}`
+    // and watching the whole suite stay green with a bare 40-char SHA admitted.
+    ["a run id in the base", "0.1.0-30618352968+2026-07-31.5872022"],
+    ["a PR number in the base", "0.1.0-pr1234+2026-07-31.5872022"],
+    ["a bare 40-char SHA", "a2f3c1d3f9b2000000000000000000000000000f"],
+    ["a 32-char hex prefix that still resolves to a commit", "8a34fec66181ee2aa1969864bc384ba4"],
+    ["a branch name", "feature-my-branch"],
   ])("drops %s instead of letting it into the snapshot", (_why, widened) => {
     // This is the layer that matters, and the reason it is here and not in `VersionBadge`:
     // React serializes this object as a prop into the RSC payload of the root layout, so

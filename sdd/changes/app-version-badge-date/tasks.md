@@ -53,10 +53,35 @@ dejan escritas ahí.
      `/login` ni `/guest/<token>` contienen el SHA ni el run id, y el payload lleva
      `appVersion: ""`.
 
+  4. Y una cuarta, del mismo tipo por la otra mitad: **la base seguía sin pinear.** Era
+     `[0-9A-Za-z][0-9A-Za-z.-]{0,31}`, y seguridad demostró que
+     `0.1.0-30618352968+2026-07-31.5872022` —un run id en la base, patrón habitual de
+     versionado en CI— entraba en el HTML de `/guest/<token>`, igual que un prefijo hex de 32
+     caracteres que `git rev-parse` resuelve a un commit. Y que era estructural: ensanchando
+     el tope a `{0,63}` se admite un SHA de 40 caracteres **con la suite en verde**, porque
+     ningún test distinguía el tope de no tener tope. Un tope de longitud limita cuánto de un
+     secreto se filtra; no impide que se filtre. Ahora la base es `X.Y.Z` —lo que el CD ya
+     valida con `grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'` antes de componer— o el literal `local`
+     con el que `docker-compose.yml` arranca en dev. Verificado que los dos caminos legítimos
+     siguen pasando: el contenedor rinde `0.1.0+2026-07-31.5872022` con las variables puestas
+     y `local` sin ellas.
+
   Lo que queda en el componente es presentación: componer la cadena y no pintar nunca una
-  versión a medias. Consecuencia asumida: si el esquema canónico cambia (una hora, por
-  ejemplo) hay que cambiar el patrón del límite con él, o el badge cae a "desconocida" sin
-  avisar — nada lo detecta hoy, y eso queda anotado como candidato en la sección 5.
+  versión a medias. Consecuencia asumida: si el esquema canónico cambia (una hora, o un
+  `VERSION` que pase a `1.0.0-rc1`) hay que cambiar el patrón del límite con él, o el badge
+  cae a "desconocida" sin avisar — nada lo detecta hoy, y eso queda anotado como candidato en
+  la sección 5.
+
+  **Estado de la revisión de esta sección, sin adornos.** Arquitectura dio **PASS** en la
+  segunda ronda. Seguridad dio **FAIL (1, MEDIUM)** en esa misma ronda, y ese hallazgo es el
+  punto 4 de arriba: está arreglado y verificado por mí (mutación del patrón → 4 tests caen;
+  suite 194/194; los dos caminos legítimos comprobados contra el contenedor), pero **ningún
+  revisor ha visto ese último arreglo** — el flujo permite dos rondas de arreglo por sección y
+  estaban agotadas. Por eso esta sección **no lleva anotación `panel: PASS`**. Lo cierra
+  `/sdd:review`, que revisa a escala de feature. Seguridad calificó el hallazgo de no
+  explotable hoy: el repositorio es privado (un run id filtrado da una URL que da 404 sin
+  autenticar) y el CD ya valida la base, así que era defensa en profundidad, no exposición
+  viva.
 
 - [x] 1.2 Ajustar `version-badge.test.tsx` a la nueva expectativa. Los tests que hoy afirman
   el recorte y **tienen que cambiar de valor esperado**, no de intención: el de la línea 15
@@ -86,7 +111,8 @@ dejan escritas ahí.
   puede cumplir ni afirmar honestamente. Solo toca infraestructura de test, ninguna línea
   de producción. — files: `frontend/test/setup.ts`
 
-## 2. La legibilidad en móvil, medida
+## 2. La legibilidad en móvil, medida <!-- panel: N/A — verificación, sin código de producción -->
+
 
 - [x] 2.1 **Medir**, no suponer. Levantar el frontend local con la cadena larga horneada
   (`NEXT_PUBLIC_APP_VERSION=0.1.0+2026-07-31.5872022 docker compose up -d frontend`; el
@@ -135,7 +161,7 @@ dejan escritas ahí.
   incluso en un iPhone SE. Que la acomodación no haya hecho falta es un resultado de la
   medición, no una decisión de saltársela.
 
-## 3. El registro deja de prescribir el recorte
+## 3. El registro deja de prescribir el recorte <!-- panel: PASS 2026-07-31 (sdd-review-documentation, 0 hallazgos) -->
 
 - [x] 3.1 `docs/app-version-visibility.md`: el ejemplo de la línea 17 pasa a la cadena
   completa, y el aviso del tag mutable (líneas 45-49) se reescribe. **Corrección de la
