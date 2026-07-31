@@ -85,48 +85,83 @@ class TestEveryRejectedRowCarriesItsLine:
 
 
 class TestHostileCellsBecomeRowErrorsNot500s:
+    """One bad row costs that row, and nothing else (R4.2, D11).
+
+    The first version of this class accepted `200 or 422` for the oversized-cell case, with only
+    one good row before the bad one — so a `422` that silently dropped every good row looked
+    harmless. The QA review measured what that hid: a 20 000-character cell anywhere in the file
+    returned `422` with **zero** reservations created. These tests now surround the bad row with
+    good ones and demand `200`.
+    """
+
+    # (name, the bad row, a fragment the report must contain). Named so a failure says which
+    # hostile value regressed instead of pointing at a tuple index.
+    HOSTILE_ROWS = [
+        (
+            "cell of 200 kB",
+            "REDES11,AIRBNB,2026-08-01,2026-08-04,2," + "A" * 200_000 + ",,,,\n",
+            "longer than",
+        ),
+        ("nan amount", "REDES11,AIRBNB,2026-08-01,2026-08-04,2,Bad,,,nan,\n", "finite"),
+        ("huge amount", "REDES11,AIRBNB,2026-08-01,2026-08-04,2,Bad,,,1E+999,\n", "greater than"),
+        (
+            "phone of 31 chars",
+            "REDES11,AIRBNB,2026-08-01,2026-08-04,2,Bad,," + "9" * 31 + ",,\n",
+            "guest_phone",
+        ),
+        ("adults out of int32", "REDES11,AIRBNB,2026-08-01,2026-08-04,4000000000,Bad,,,,\n", "adults"),
+        ("NUL byte", "REDES11,AIRBNB,2026-08-01,2026-08-04,2,Ba\x00d,,,,\n", "NUL"),
+    ]
+
     @pytest.mark.parametrize(
-        "row,expected_in_reason",
-        [
-            # 200 kB in one cell: `_csv.Error`, which is neither ValueError nor CsvFileError.
-            ("REDES11,AIRBNB,2026-08-01,2026-08-04,2," + "A" * 200_000 + ",,,,\n", "guest_name"),
-            ("REDES11,AIRBNB,2026-08-01,2026-08-04,2,,,,nan,\n", "finite"),
-            ("REDES11,AIRBNB,2026-08-01,2026-08-04,2,,,,1E+999,\n", "greater than"),
-            ("REDES11,AIRBNB,2026-08-01,2026-08-04,2,,," + "9" * 31 + ",,\n", "guest_phone"),
-            ("REDES11,AIRBNB,2026-08-01,2026-08-04,4000000000,,,,,\n", "adults"),
-        ],
+        "bad_row,expected_in_reason",
+        [(row, reason) for _, row, reason in HOSTILE_ROWS],
+        ids=[name for name, _, _ in HOSTILE_ROWS],
     )
     @pytest.mark.asyncio
-    async def test_the_good_rows_of_the_file_still_import(
-        self, api, manager, property_a, db_session, row: str, expected_in_reason: str
+    async def test_the_other_rows_of_the_file_still_import(
+        self, api, manager, property_a, db_session, bad_row: str, expected_in_reason: str
     ) -> None:
+        good_after = GOOD.replace("OK-1", "OK-2").replace("John", "Ada")
+
         response = await api.post(
-            ENDPOINT, files=_upload(HEADER + GOOD + row), headers=auth_header(api, manager)
+            ENDPOINT,
+            files=_upload(HEADER + GOOD + bad_row + good_after),
+            headers=auth_header(api, manager),
         )
 
-        assert response.status_code in (200, 422)
-        if response.status_code == 200:
-            body = response.json()
-            assert body["created"] == 1
-            assert any(expected_in_reason in error["reason"] for error in body["errors"])
-            assert await db_session.scalar(select(func.count()).select_from(ReservationModel)) == 1
-        else:
-            # A file-level refusal is acceptable for the oversized-cell case, as long as it is a
-            # 422 in the envelope and not a 500.
-            assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+        assert response.status_code == 200, response.text
+        body = response.json()
+        # Both good rows survive — that is the whole point of R4.2 and of D11's rejected
+        # alternative ("abortar todo el fichero al primer error").
+        assert body["created"] == 2, body
+        assert body["skipped"] == 1, body
+        assert any(expected_in_reason in error["reason"] for error in body["errors"]), body
+        assert body["errors"][0]["line"] == 3, body
+        assert await db_session.scalar(select(func.count()).select_from(ReservationModel)) == 2
 
     @pytest.mark.asyncio
-    async def test_a_nul_byte_is_a_row_error(self, api, manager, property_a) -> None:
-        row = "REDES11,AIRBNB,2026-08-01,2026-08-04,2,Jo\x00hn,,,,\n"
+    async def test_a_currency_that_grows_when_uppercased_is_a_row_error(
+        self, api, manager, property_a, db_session
+    ) -> None:
+        """`"ß".upper()` is `"SS"`: a 2-character cell became 4+ for a varchar(3) column.
+
+        The length check ran on the incoming value, so this reached the INSERT and aborted the
+        transaction — losing the good rows. Found by the security review's verification round.
+        """
+        header = HEADER.rstrip("\n") + ",currency\n"
+        good = GOOD.rstrip("\n") + ",EUR\n"
+        bad = GOOD.rstrip("\n").replace("OK-1", "OK-9") + ",ßß\n"
 
         response = await api.post(
-            ENDPOINT, files=_upload(HEADER + GOOD + row), headers=auth_header(api, manager)
+            ENDPOINT, files=_upload(header + good + bad), headers=auth_header(api, manager)
         )
 
-        assert response.status_code == 200
+        assert response.status_code == 200, response.text
         body = response.json()
         assert body["created"] == 1
-        assert "NUL" in body["errors"][0]["reason"]
+        assert "currency" in body["errors"][0]["reason"]
+        assert await db_session.scalar(select(func.count()).select_from(ReservationModel)) == 1
 
 
 class TestTheBodyCeilingAppliesBeforeAnythingReadsTheBody:

@@ -14,6 +14,7 @@ for the human who has to fix the file.
 
 import csv
 import io
+from collections.abc import Iterator
 from datetime import date, time
 from decimal import Decimal, InvalidOperation
 
@@ -24,6 +25,9 @@ from app.integrations.domain.dtos import ParsedRow, ParseResult, ReservationDTO,
 # took every valid row of the file with it — measured by the security review. Bounded here, and
 # per-column widths below, so a hostile or merely sloppy cell becomes a reported row.
 MAX_CELL_CHARS = 10_000
+# A whole physical line. Bounded separately from a cell because it is what can be checked BEFORE
+# the tokeniser runs, which is what lets an oversized row be skipped instead of killing the file.
+MAX_LINE_CHARS = 20_000
 
 # Mirrors the column widths of PRD §7.6/§7.7 so a too-long value is a row error with a line
 # number instead of an `asyncpg.StringDataRightTruncationError` that poisons the transaction.
@@ -72,7 +76,7 @@ def parse_reservations_csv(raw: bytes, *, max_rows: int) -> ParseResult:
     # `field_size_limit` is process-global interpreter state, so it is restored afterwards rather
     # than left lowered for every other CSV reader in the process (raised by the security review
     # as an informational point).
-    previous_field_limit = csv.field_size_limit(MAX_CELL_CHARS)
+    previous_field_limit = csv.field_size_limit(MAX_LINE_CHARS)
     try:
         return _parse(_text_stream(raw), max_rows=max_rows)
     finally:
@@ -94,8 +98,42 @@ def _text_stream(raw: bytes) -> io.TextIOBase:
         raise CsvFileError("The file must be UTF-8 encoded") from error
 
 
+def _bounded_lines(
+    stream: io.TextIOBase, dropped: list[RowFailure], fed_lines: list[int]
+) -> "Iterator[str]":
+    """Yield the file's lines, dropping any that is too long — as a ROW failure.
+
+    This is the difference between "the file is unusable" and "one row is unusable", and R4.2 only
+    accepts the second reading: *"omitir esa fila, continuar con el resto"*. D11 rejects the other
+    one by name ("Rejected: abortar todo el fichero al primer error").
+
+    A previous version let the oversized cell reach `csv.reader`, which raises `csv.Error` and
+    cannot resume — so a single 20 000-character cell anywhere in the file made the whole upload
+    return `422` with **zero** rows imported, losing every good row around it. The QA review
+    measured exactly that. Bounding the physical line before the tokeniser ever sees it keeps the
+    reader alive for the rest of the file.
+
+    `fed_lines` records the physical line number of each line actually handed to the reader, so a
+    record's line number stays truthful even after lines have been dropped (`reader.line_num`
+    counts what it saw, not what the file contains).
+    """
+    for physical_line, line in enumerate(stream, start=1):
+        if len(line) > MAX_LINE_CHARS:
+            dropped.append(
+                RowFailure(
+                    line=physical_line,
+                    reason=f"The row is longer than {MAX_LINE_CHARS} characters",
+                )
+            )
+            continue
+        fed_lines.append(physical_line)
+        yield line
+
+
 def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
-    reader = csv.DictReader(stream)
+    dropped: list[RowFailure] = []
+    fed_lines: list[int] = []
+    reader = csv.DictReader(_bounded_lines(stream, dropped, fed_lines))
     try:
         fieldnames = reader.fieldnames
     except UnicodeDecodeError as error:
@@ -115,10 +153,8 @@ def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
     # file — inside the configured byte limit — built 283 000 rows and 200 MiB of heap before the
     # `max_rows` ceiling was ever consulted. Guarding each step of the iteration instead keeps the
     # ceiling meaningful: nothing past row `max_rows` is ever constructed.
-    index = 1  # the header is line 1
     rows_iterator = iter(reader)
     while True:
-        index += 1
         try:
             raw_row = next(rows_iterator)
         except StopIteration:
@@ -127,9 +163,12 @@ def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
             # The decode happens as the reader advances now, so a non-UTF-8 file surfaces here.
             raise CsvFileError("The file must be UTF-8 encoded") from error
         except csv.Error as error:
-            # A cell over `MAX_CELL_CHARS` or a malformed quote: the reader cannot advance, so
-            # this is a failure of the file, not of one field.
+            # Lines are bounded before the tokeniser sees them, so this is no longer the
+            # oversized-cell path: what remains is a structurally unparseable file (an unbalanced
+            # quote swallowing the rest of it), where there is genuinely no next row to move on to.
             raise CsvFileError(f"The file could not be read as CSV: {error}") from error
+        # The physical line this record ended on, which is what a person looks for in the file.
+        index = fed_lines[min(reader.line_num, len(fed_lines)) - 1] if fed_lines else 1
         if len(rows) + len(failures) >= max_rows:
             raise CsvTooLargeError(f"The file has more than {max_rows} data rows")
         if None in raw_row:
@@ -151,6 +190,11 @@ def _parse(stream: io.TextIOBase, *, max_rows: int) -> ParseResult:
             rows.append(ParsedRow(line=index, reservation=_to_dto(normalised)))
         except ValueError as error:
             failures.append(RowFailure(line=index, reason=str(error)))
+    # `dropped` is filled BY the generator as the loop consumes it, so it can only be merged once
+    # the loop is over — reading it before iterating gave an empty list and silently swallowed
+    # every over-long row. Sorted so the report reads in file order.
+    failures.extend(dropped)
+    failures.sort(key=lambda failure: failure.line)
     return ParseResult(rows=rows, failures=failures)
 
 
