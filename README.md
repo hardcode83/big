@@ -15,7 +15,7 @@ Sin pasos previos: `make up` crea `.env` automáticamente desde `.env.example` (
 Al cabo de unos segundos:
 
 - Backend (FastAPI): http://localhost:8000/health — API en http://localhost:8000/api/v1, documentación navegable en http://localhost:8000/docs
-- Frontend (Next.js): http://localhost:3000 — Application Shell; `/` redirige a `/dashboard` y las rutas de módulos muestran un placeholder "en preparación" (todavía sin funcionalidad). No requiere backend para renderizar.
+- Frontend (Next.js): http://localhost:3000 — Application Shell; `/` redirige a `/dashboard`. El **dashboard** (`/dashboard`) y el **detalle de propiedad** (`/properties/[id]`) son funcionales en modo solo lectura sobre datos mock (ver [`docs/dashboard.md`](docs/dashboard.md)); el resto de rutas de módulos muestran un placeholder "en preparación". No requiere backend para renderizar.
 - Postgres: localhost:5432 — ya con el esquema de dominio creado (`tenants`, `users`, `properties`, `guests`, `reservations`, `timeline_events`, ...)
 - Redis: localhost:6379
 
