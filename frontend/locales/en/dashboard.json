@@ -1,0 +1,104 @@
+{
+  "state": {
+    "VACANT_READY": "Vacant, ready",
+    "READY_FOR_NEXT_GUEST": "Ready for next guest",
+    "AWAITING_CHECKIN": "Awaiting check-in",
+    "OCCUPIED_ESTIMATED": "Occupied (estimated)",
+    "CLEANING_IN_PROGRESS": "Cleaning in progress",
+    "AWAITING_CLEANING": "Awaiting cleaning",
+    "CLEANING_SCHEDULED": "Cleaning scheduled",
+    "MAINTENANCE_REQUIRED": "Maintenance required",
+    "CRITICAL_INCIDENT": "Critical incident",
+    "BLOCKED_BY_OWNER": "Blocked by owner",
+    "OUT_OF_SERVICE": "Out of service"
+  },
+  "card": {
+    "reservation": "Reservation",
+    "noReservation": "No reservation",
+    "guest": "Guest",
+    "noGuest": "No guest",
+    "checkIn": "Check-in",
+    "checkOut": "Check-out",
+    "cleaning": "Cleaning",
+    "noCleaning": "No cleaning pending",
+    "openIncidents": "Open incidents",
+    "nextAction": "Next action",
+    "responsible": "Responsible",
+    "lastEvent": "Last event",
+    "openDetail": "View detail"
+  },
+  "cards": {
+    "empty": {
+      "title": "No properties",
+      "description": "There are no properties to show yet."
+    },
+    "error": {
+      "title": "Couldn't load the dashboard",
+      "description": "Please try again in a few seconds."
+    }
+  },
+  "detail": {
+    "reservation": "Reservation",
+    "guest": "Guest",
+    "access": "Access",
+    "cleaning": "Cleaning",
+    "incidents": "Incidents",
+    "financial": "Financial",
+    "notes": "Notes",
+    "approvals": "Pending approvals",
+    "photos": "Last cleaning photos",
+    "noAccess": "No access information",
+    "noCleaning": "No cleaning pending",
+    "noNotes": "No notes",
+    "noIncidents": "No open incidents",
+    "noApprovals": "No pending approvals",
+    "noPhotos": "No photos from the last cleaning",
+    "photoAlt": "Last cleaning photo",
+    "notFound": {
+      "title": "Property not found",
+      "description": "There is no property with that identifier."
+    }
+  },
+  "financial": {
+    "reservationTotal": "Reservation total",
+    "pendingExpenses": "Pending expenses"
+  },
+  "incident": {
+    "severity": {
+      "LOW": "Low",
+      "MEDIUM": "Medium",
+      "HIGH": "High",
+      "CRITICAL": "Critical"
+    }
+  },
+  "timeline": {
+    "title": "Timeline",
+    "empty": "No events for the selected filters.",
+    "filters": {
+      "type": "Type",
+      "actor": "Actor",
+      "severity": "Severity"
+    },
+    "eventType": {
+      "CHECKOUT_WINDOW_REACHED": "Checkout window reached",
+      "CLEANING_TASK_CREATED": "Cleaning task created",
+      "PROPERTY_STATE_CHANGED": "State changed",
+      "ACCESS_CODE_DELIVERED": "Access code delivered",
+      "GUEST_MESSAGE_RECEIVED": "Guest message received"
+    },
+    "actor": {
+      "SYSTEM": "System",
+      "USER": "User",
+      "GUEST": "Guest",
+      "SCHEDULER": "Scheduler",
+      "WEBHOOK": "Webhook",
+      "AI": "AI"
+    },
+    "severity": {
+      "INFO": "Info",
+      "WARNING": "Warning",
+      "ERROR": "Error",
+      "CRITICAL": "Critical"
+    }
+  }
+}
