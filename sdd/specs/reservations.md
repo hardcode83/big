@@ -194,14 +194,24 @@ y su job de `celery-jobs`), ni transiciones de estado operacional dependientes d
   `process_webhook_events` de `celery-jobs`. Entrada de roadmap propia:
   `reservations-webhooks`.
 - **Sin `AuditLog`** (regla 9 de `steering/security.md`): la entidad pertenece a
-  `domain-foundation-financial`. Cuando exista hay que añadir su escritura a los **seis**
-  casos de uso mutadores — los cuatro de `reservations` y los dos de `integrations`. El
-  rastro mientras tanto es el `TimelineEvent`.
+  `domain-foundation-financial` y su **escritor ya existe** desde `user-management`
+  (`app/audit/domain/`: `ChangeSet`, `AuditLogFactory`, puerto y adaptador). Queda pendiente
+  añadir la escritura a los **seis** casos de uso mutadores de aquí — los cuatro de
+  `reservations` y los dos de `integrations`—, que ahora es trabajo mecánico en vez de un
+  bloqueo. Ojo a dos cosas del contrato de `user-management` al hacerlo: el `ChangeSet` va
+  ligado a un `entity_type` y solo admite los campos declarados de esa entidad, así que
+  `reservations` tendrá que registrar los suyos; y los campos de texto libre
+  (`internal_notes`, `special_requests`) se registran solo como que cambiaron, igual que ya
+  hacen en el timeline. El rastro mientras tanto es el `TimelineEvent`.
 - **La clave ajena `(tenant_id, property_id)` de `timeline_events` no es compuesta**, así
   que la precondición de arriba la garantiza quien llama y no el esquema. Convertirlo en
   imposible exige migración y pertenece a un change de esquema.
-- **`app/auth/infrastructure/unit_of_work.py` y `app/core/unit_of_work.py` son duplicados**
-  de ocho líneas; la consolidación es del próximo change que toque `auth`.
+- ~~`app/auth/infrastructure/unit_of_work.py` y `app/core/unit_of_work.py` duplicados~~ —
+  **cerrado en `user-management`**, que fue el siguiente change en tocar `auth`: la copia de
+  `auth` se borró y `app/core/unit_of_work.py` es la única. El **Protocol** sigue declarado dos
+  veces a propósito: `app/auth/domain/ports.py` tiene el suyo para que `auth/application/`
+  importe sus puertos de su propio `domain/`, y unificarlo obligaría a esa capa a importar un
+  módulo que trae `sqlalchemy` consigo.
 - **La API no tiene salida a internet**: el túnel enruta solo al frontend, así que estos
   endpoints se verifican con tests y, en dev, por túnel SSH (`RUNBOOK.md` §7.4). Lo cambia
   `api-ingress-routing`.

@@ -8,8 +8,11 @@ tenant sean inalcanzables desde la cuenta de otro. Es también el primer *vertic
 del backend: establece el patrón de capas (`api/` → `application/` → `domain/` ←
 `infrastructure/`, ADR 0004) que heredan los módulos posteriores.
 
-No incluye alta ni administración de usuarios —los usuarios entran por el comando de
-bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
+No incluye alta ni administración de usuarios —eso es `user-management`
+(`specs/user-management.md`), que también añadió al enum de revocación las dos razones
+administrativas y los cuatro permisos de administración al catálogo de esta capacidad— ni
+recuperación de contraseña por el propio usuario ni acceso de huéspedes. El comando de
+bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
 
 ## Requirements
 
@@ -106,8 +109,13 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
 - WHEN se llama a `GET /api/v1/auth/me` con un token de acceso válido, THE SYSTEM SHALL
   devolver el usuario autenticado sin su `password_hash`.
 - Una rotación **no** es una revocación: la sesión consumida queda con `used_at` puesto y
-  `revoked_at` nulo. El enum `SessionRevokedReason` solo tiene `LOGOUT` y
-  `REUSE_DETECTED`.
+  `revoked_at` nulo.
+- El enum `SessionRevokedReason` tiene cuatro valores. `LOGOUT` y `REUSE_DETECTED` son los de
+  esta capacidad, en los que el dueño de la sesión **es** el actor. `USER_DEACTIVATED` y
+  `PASSWORD_RESET` los añadió `user-management` para lo contrario: un administrador que actúa
+  sobre la cuenta de otra persona. Hacen falta porque `POST /api/v1/auth/refresh` no atraviesa
+  `get_authenticated_request` y por tanto no revalida el estado de la cuenta — sin revocar, una
+  cuenta desactivada seguiría emitiendo pares nuevos toda la vida del refresh.
 
 ### Tokens
 
@@ -135,7 +143,9 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
   capacidad añade los que sus endpoints declaran. Además de los dos de autoservicio
   (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`), que PRD §6 concede a todo rol que puede
   autenticarse, el catálogo contiene hoy los que añadió `reservations`
-  (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), diferenciados por rol.
+  (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`) y los cuatro de `user-management`
+  (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), todos
+  diferenciados por rol.
 - WHEN un usuario autenticado invoca un endpoint que exige un permiso que su rol no tiene,
   THE SYSTEM SHALL responder `403` con `{"error": {"code": "FORBIDDEN", ...}}`.
 - THE SYSTEM SHALL declarar el permiso exigido en cada ruta mediante la dependencia
@@ -184,10 +194,10 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
   esta capacidad. Ninguno de sus cuatro endpoints recibe un identificador de recurso —
   `login`, `refresh`, `logout` y `me` son autorreferenciales—, así que no son verificables
   aquí sin inventar un endpoint de negocio. Cada capacidad con endpoints de negocio
-  demuestra esos dos criterios sobre **sus** endpoints; la primera en hacerlo fue
-  `reservations` (ver `specs/reservations.md`), no `user-management` como se anotó aquí
-  cuando se archivó esta capacidad: el orden real de ejecución los invirtió. Siguen siendo
-  criterios bloqueantes de `user-management` para los suyos.
+  demuestra esos dos criterios sobre **sus** endpoints: los demostraron `reservations`
+  (`specs/reservations.md`) y `user-management` (`specs/user-management.md`), en ese orden —
+  no solo `user-management` como se anotó aquí al archivar esta capacidad, porque el orden
+  real de ejecución los invirtió. **Ya no queda ninguno pendiente.**
 
 ### Protección de los endpoints de autenticación
 
@@ -296,7 +306,10 @@ bootstrap— ni recuperación de contraseña ni acceso de huéspedes.
 - Aplicación: `backend/app/auth/application/use_cases.py` — login, refresh, logout, me.
 - Infraestructura: `backend/app/auth/infrastructure/` — `password_hasher.py` (bcrypt en
   hilos con cota), `token_codec.py` (PyJWT HS256), `repositories.py`, `throttle.py`
-  (Redis), `models.py` (`UserModel`, `UserSessionModel`), `unit_of_work.py`.
+  (Redis), `models.py` (`UserModel`, `UserSessionModel`). El `SqlAlchemyUnitOfWork` de este
+  módulo se borró en `user-management`: la única copia vive en `app/core/unit_of_work.py`. El
+  Protocol `UnitOfWork` sigue declarado en `app/auth/domain/ports.py` a propósito, para que
+  `auth/application/` importe sus puertos de su propio `domain/`.
 - API: `backend/app/auth/api/` — `router.py`, `schemas.py`, `dependencies.py`
   (`get_authenticated_request`, `require(permission)`, `get_client_ip`).
 - Núcleo compartido: `backend/app/core/` — `config.py`, `db.py` (filtro global por tenant),
