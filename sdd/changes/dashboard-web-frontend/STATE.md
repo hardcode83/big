@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/dashboard-web-frontend
+implementation_sha: 62608c39eb4509256cd20a63f2391e9f906439a7
 pr_number: 
 pr_url: 
 pr_state: 
