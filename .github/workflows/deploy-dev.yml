@@ -16,8 +16,47 @@ on:
   workflow_dispatch: {}
 
 jobs:
+  # --- Identidad de build, calculada UNA vez para las dos imágenes [R1.1, R1.5] ---
+  # Un job propio, no un step en cada build: R1.5 exige que las dos imágenes lleven
+  # idéntica cadena, y calcularlo dos veces es exactamente cómo se desincronizan (D2).
+  provenance:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    outputs:
+      version: ${{ steps.compose.outputs.version }}
+      commit_short: ${{ steps.compose.outputs.commit_short }}
+      built_at: ${{ steps.compose.outputs.built_at }}
+      repo_url: ${{ steps.compose.outputs.repo_url }}
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - name: Componer la identidad de build
+        id: compose
+        run: |
+          set -euo pipefail
+          if [ ! -f VERSION ]; then
+            echo "::error::no existe el fichero VERSION en la raíz del repo" >&2; exit 1
+          fi
+          base="$(tr -d '[:space:]' < VERSION)"
+          if [ -z "$base" ]; then echo "::error::VERSION está vacío" >&2; exit 1; fi
+          if ! printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "::error::VERSION no tiene forma X.Y.Z (leído: '$base')" >&2; exit 1
+          fi
+          # UNA sola lectura del reloj: con dos invocaciones de `date`, un build que
+          # cruzase la medianoche UTC dejaría la fecha de la versión un día por delante
+          # del label `.created`.
+          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          {
+            echo "version=${base}+${built_at%%T*}.${GITHUB_SHA:0:7}"
+            echo "commit_short=${GITHUB_SHA:0:7}"
+            echo "built_at=${built_at}"
+            echo "repo_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          } >> "$GITHUB_OUTPUT"
+
   # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
   build-backend:
+    needs: provenance
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -39,11 +78,19 @@ jobs:
           target: prod
           platforms: linux/arm64
           push: true
+          # Labels OCI (R1.5): la identidad de la imagen legible con `docker inspect` en la
+          # VM y en la página del package de GHCR, sin variables de runtime.
+          labels: |
+            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
+            org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-backend:dev
 
   build-frontend:
+    needs: provenance
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -66,8 +113,18 @@ jobs:
           platforms: linux/arm64
           push: true
           # NEXT_PUBLIC_* se hornean en build (Next standalone) → build-args, no runtime. [R1]
+          #
+          # Solo las dos que pinta el badge. Son públicas por decisión: el snapshot de
+          # `PublicRuntimeConfig` cruza al navegador en todas las superficies.
           build-args: |
             NEXT_PUBLIC_APP_ENV=${{ vars.NEXT_PUBLIC_APP_ENV }}
+            NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}
+            NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}
+          labels: |
+            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
+            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
+            org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:sha-${{ github.sha }}
             ghcr.io/${{ github.repository_owner }}/autohostai-frontend:dev

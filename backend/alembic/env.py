@@ -7,19 +7,11 @@ from sqlalchemy.ext.asyncio import async_engine_from_config
 
 from alembic import context
 
-# Import every domain module's infrastructure/models.py so Base.metadata is
-# fully populated for autogenerate. Add new domains here, in dependency
-# order, as later changes introduce them.
-import app.tenants.infrastructure.models  # noqa: E402,F401
-import app.auth.infrastructure.models  # noqa: E402,F401
-import app.properties.infrastructure.models  # noqa: E402,F401
-import app.guests.infrastructure.models  # noqa: E402,F401
-import app.reservations.infrastructure.models  # noqa: E402,F401
-import app.timeline.infrastructure.models  # noqa: E402,F401
-import app.cleaning.infrastructure.models  # noqa: E402,F401
-import app.maintenance.infrastructure.models  # noqa: E402,F401
-import app.messaging.infrastructure.models  # noqa: E402,F401
-import app.access.infrastructure.models  # noqa: E402,F401
+# Every domain module's infrastructure/models.py must be imported so Base.metadata
+# is fully populated for autogenerate. The list lives in one place now
+# (app/core/models_registry.py), shared with the application and the test suite —
+# add a new domain there, not here.
+import app.core.models_registry  # noqa: E402,F401
 from app.core.config import settings
 from app.core.db import Base
 

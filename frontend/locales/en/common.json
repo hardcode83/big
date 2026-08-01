@@ -1,4 +1,8 @@
 {
   "appName": "AutoHostAI",
-  "appDescription": "AutoHostAI operational application"
+  "appDescription": "AutoHostAI operational application",
+  "version": {
+    "label": "Deployed version",
+    "unknown": "unknown version"
+  }
 }

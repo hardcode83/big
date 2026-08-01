@@ -1,6 +1,10 @@
 # env / secrets
-.env
-.env.*.local
+# Broad on purpose: `make up` rewrites .env through a temporary file, and any
+# stray copy (.env.tmp, .env.bak, .env.save from an editor) would hold the JWT
+# signing key and the bootstrap passwords in cleartext.
+.env*
+!.env.example
+!.env.deploy.example
 
 # python
 __pycache__/
@@ -8,6 +12,8 @@ __pycache__/
 .venv/
 *.egg-info/
 .pytest_cache/
+.coverage
+htmlcov/
 .ruff_cache/
 
 # node / next.js
@@ -41,3 +47,6 @@ npm-debug.log*
 # Helper de bootstrap manual de capacidad A1 — local-only: el pipeline es el camino canónico
 # para operar infra. Re-ejecutarlo sobre la máquina existente es destructivo (itera ad_number con -auto-approve).
 infra/environments/dev/apply_loop.sh
+
+# Artefactos de sesiones de Playwright (capturas, snapshots, logs de consola)
+.playwright-mcp/

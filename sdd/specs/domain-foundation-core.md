@@ -9,9 +9,9 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 ### Estructura por módulo de dominio
 
 - Cada entidad vive en su módulo de dominio de negocio ya nombrado en `architecture.md` (`tenants`, `auth`, `properties`, `guests`, `reservations`, `timeline`) — `User` vive en `auth/`, no en `tenants/`.
-- Cada módulo tiene solo `domain/` (entidades Python puras + enums) e `infrastructure/` (modelos SQLAlchemy) — sin `application/` ni `api/` todavía, porque no existe ningún caso de uso ni router que los necesite (se añaden en el change que primero persista/exponga cada entidad).
-- `domain/entities.py` y `domain/enums.py` no importan `sqlalchemy`, `fastapi` ni `pydantic` (regla de dependencia de `backend-architecture.md`, verificable).
-- Ninguna de las 8 entidades tiene puertos de repositorio (`Protocol`/ABC) ni casos de uso todavía — se difieren al change que primero necesite persistir cada una.
+- Cada módulo tiene al menos `domain/` (entidades Python puras + enums) e `infrastructure/` (modelos SQLAlchemy). `application/` y `api/` los añade el change que primero persiste o expone cada entidad: hoy solo existen en `auth/`, donde los introdujo `auth-tenancy` para `User` y para leer el estado de `Tenant`.
+- `domain/entities.py` y `domain/enums.py` no importan `sqlalchemy`, `fastapi` ni `pydantic` (regla de dependencia de `backend-architecture.md`, verificada por `backend/tests/test_layering.py`).
+- De las 8 entidades, solo `User` y `Tenant` tienen puertos de repositorio y casos de uso, aportados por `auth-tenancy` (`UserRepository`, `TenantStatusReader`; ver spec `auth-tenancy`). Las otras seis siguen siendo solo estructura de datos, y sus puertos se difieren al change que primero necesite persistirlas.
 
 ### Enums de dominio exactos del PRD
 
@@ -22,6 +22,7 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 ### Esquema DB — modelos SQLAlchemy 2.x async
 
 - Cada entidad tiene un modelo SQLAlchemy declarativo en `infrastructure/models.py` que reproduce exactamente el esquema del PRD: columnas, tipos, nullability, `UNIQUE`/`INDEX` (incluidos los compuestos y los que llevan orden `DESC` en tablas de historial/auditoría — `property_state_transitions`, `timeline_events`).
+- **Una excepción deliberada al "exactamente el esquema del PRD"**: la unicidad del email de `users`. PRD §7.3 define `UNIQUE(tenant_id, email)`; el esquema real tiene un índice único funcional **global** sobre `lower(email)` (`uq_users_lower_email`) y **no** tiene la constraint por tenant, que la global ya implica. El motivo es que el login recibe solo email y contraseña, así que una dirección repetible entre tenants no identificaría la cuenta — decidido en la revisión del PR #25, registrado en ADR 0005 y detallado en la spec `auth-tenancy`.
 - Toda entidad tiene PK `UUID` y, salvo `Tenant`, un `tenant_id` FK obligatoria a `tenants.id`, indexado — vía los mixins compartidos `UUIDPrimaryKeyMixin`/`TenantScopedMixin` (`backend/app/core/db.py`). `PropertyStateTransition` y `TimelineEvent` son las únicas dos excepciones sin `updated_at` (solo `created_at`) — son históricos/eventos inmutables, no registros editables (PRD §7.5/§7.8, `architecture.md` "Timeline inmutable").
 - `created_at`/`updated_at` son `TIMESTAMPTZ` (`DateTime(timezone=True)`), nunca `TIMESTAMP WITHOUT TIME ZONE`.
 - Todo enum de dominio se mapea a un tipo `ENUM` nativo de Postgres con nombre explícito (`sa.Enum(X, name="...", native_enum=True)`) — nunca autogenerado, para que el nombre del tipo en Postgres sea estable y predecible.
@@ -41,7 +42,7 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 
 - Cada entidad tiene un test unitario que la instancia en Python puro, sin necesitar la base de datos.
 - Cada modelo SQLAlchemy tiene un test de integración contra Postgres real, incluyendo al menos un caso que viola una constraint `UNIQUE` real (no solo el camino feliz).
-- Los tests de integración corren contra una base de datos **dedicada** (`<nombre-dev>_test`), nunca contra la que gestiona `make up`/`migrate` — se crea automáticamente si no existe. Compartir la base de datos de desarrollo con los tests dropearía su esquema al terminar cada test.
+- Los tests de integración corren contra una base de datos **dedicada y por proceso** (`<nombre-dev>_test_<pid>`), nunca contra la que gestiona `make up`/`migrate` — se crea automáticamente si no existe y se borra al cerrar la sesión de pytest. Compartir la base de datos de desarrollo con los tests dropearía su esquema al terminar cada test, y un nombre fijo hace que dos ejecuciones concurrentes se pisen (ver spec `backend-ci`).
 
 ## Key files
 

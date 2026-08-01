@@ -142,6 +142,71 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
 
+**Cómo confirmar que el rollback surtió efecto, sin entrar en la VM** (change
+`app-version-visibility`). Antes, la única forma era leer `IMAGE_TAG` del `.env` por túnel
+SSH. Ahora basta con abrir la app: el badge del pie muestra la cadena canónica completa
+`<base>+<fecha-build>.<sha-corto>` (p. ej. `0.1.0+2026-07-31.5872022`) de lo que está
+corriendo — la **misma** que el label `org.opencontainers.image.version` de la imagen, así que
+comparar pantalla y VM es comparar dos cadenas idénticas. Ojo: la fecha tiene granularidad de
+día, así que dos builds del mismo commit **el mismo día** se ven iguales en el badge; para
+distinguirlos hace falta `org.opencontainers.image.created`, que lleva la hora. Desde la VM,
+la identidad que lleva la imagen dentro:
+
+```bash
+docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
+  --format '{{json .Config.Labels}}'
+```
+
+Si el badge sigue mostrando la versión **anterior** después de un deploy verde, el problema
+no es el deploy — mira la tabla de §7.
+
+**Si el `migrate` falla por el índice único de emails.** La migración `e1eed2e039ee` crea un índice **único** sobre `lower(email)` en `users` — global, no por tenant (ADR 0005) — y retira la constraint `UNIQUE(tenant_id, email)`. Si la base ya tuviera la misma dirección en dos tenants, o dos variantes de mayúsculas en cualquier sitio, el `migrate` aborta (correctamente: `restart: "no"`, y `backend`/`worker` no arrancan porque dependen de `service_completed_successfully`). El rollback por SHA de arriba **no sirve**, porque el problema son los datos, no el código: el siguiente deploy hacia delante volvería a fallar igual. Hay que limpiar primero:
+
+```bash
+# desde la VM, ver las colisiones (ojo: agrupado SOLO por la dirección, sin tenant_id —
+# dos tenants con el mismo email ya son una colisión)
+docker compose -f docker-compose.deploy.yml exec postgres \
+  psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c \
+  "SELECT lower(email) AS addr, count(*), array_agg(id), array_agg(tenant_id) FROM users
+   GROUP BY lower(email) HAVING count(*) > 1;"
+```
+
+Decidir cuál fila se queda, borrar o corregir el resto, y re-lanzar el deploy. Por qué existe ese índice: el login recibe solo `{email, password}`, así que si una dirección puede existir dos veces **no identifica la cuenta**, y quien pueda crear usuarios en otro tenant deja fuera del producto a una cuenta existente sin que haya endpoint de desbloqueo (ADR 0005, design D16/D19).
+
+### 6.5 Crear los usuarios iniciales en el entorno desplegado (change `auth-tenancy`)
+
+El producto no tiene registro público, así que tras un arranque en frío **no hay ninguna cuenta con la que entrar** hasta que se ejecuta el bootstrap. No está en el pipeline a propósito: las contraseñas las elige una persona, así que no encajan en el patrón `random_*` + Vault que usa el resto de secretos (`steering/security.md` §8) y no deben quedar escritas en el `.env` que el workflow reescribe en cada deploy.
+
+Se hace **una vez**, a mano. **No con `-e` en la línea de comandos**: eso deja las dos contraseñas más privilegiadas del despliegue en el `~/.bash_history` del operador y, mientras corre, en un `/proc/<pid>/cmdline` legible por cualquiera de la máquina (CWE-214). Se pasan por un fichero temporal con permisos `600` que se borra al terminar:
+
+```bash
+# en la VM, en el directorio del proyecto compose
+umask 077 && cat > /tmp/bootstrap.env <<'EOF'
+BOOTSTRAP_TENANT_NAME=...
+BOOTSTRAP_TENANT_BILLING_EMAIL=...
+BOOTSTRAP_OWNER_NAME=...
+BOOTSTRAP_OWNER_EMAIL=...
+BOOTSTRAP_OWNER_PASSWORD=...
+BOOTSTRAP_MANAGER_NAME=...
+BOOTSTRAP_MANAGER_EMAIL=...
+BOOTSTRAP_MANAGER_PASSWORD=...
+EOF
+
+# el heredoc con 'EOF' entre comillas no expande nada, y el fichero nace en 600
+docker compose -f docker-compose.deploy.yml run --rm --no-deps \
+  --env-file /tmp/bootstrap.env backend python -m app.cli.bootstrap
+
+shred -u /tmp/bootstrap.env 2>/dev/null || rm -f /tmp/bootstrap.env
+```
+
+Notas que importan:
+
+- **`python -m`, no `uv run`**: la imagen `prod` no lleva `uv` (solo la etapa `dev` lo copia), pero sí tiene el venv en el `PATH`. El mismo comando vale en local (`make bootstrap`) y aquí.
+- Es **idempotente**: repetirlo no duplica nada. Pero si cambias `BOOTSTRAP_TENANT_NAME` y vuelves a lanzarlo, aborta con `BootstrapConflictError` en vez de crear un segundo tenant con los mismos emails. El índice único global rechazaría esa escritura de todas formas (ADR 0005); lo que aporta el aborto explícito es un mensaje que nombra la variable a revisar en lugar de un `IntegrityError` sobre un índice. Si aborta, es que ya hay usuarios con esas direcciones: revisa el nombre del tenant.
+- Si falta alguna variable, aborta **antes** de escribir nada y las lista todas.
+- `run --rm --no-deps` en vez de `exec`: el contenedor vive solo para este comando y se lleva las variables con él, en vez de inyectarlas en el proceso del `backend` que está sirviendo.
+- Comprueba que funciona con un login: ver `docs/auth-tenancy.md`.
+
 ## 7. Ingress HTTPS — Cloudflare Tunnel (change `ingress-https-dev`)
 
 La app se sirve en **https://autohostai.digitalsec.work** a través de un Cloudflare Tunnel: el contenedor `cloudflared` abre una conexión **saliente** al edge, que termina TLS y entrega a `frontend:3000` por la red interna del compose. **No hay ningún puerto entrante abierto** — el security list solo permite el 22. Decisión y alternativas descartadas en [`docs/adr/0003-https-ingress-dev.md`](../../../docs/adr/0003-https-ingress-dev.md).
@@ -209,6 +274,8 @@ Interpretación rápida:
 | Túnel **healthy** pero HTTPS da **502** | el origen no responde: revisar `frontend` (`docker compose ps`) |
 | HTTPS da **404** en vez de la app | el hostname no casa con la regla de ingress y cae en la catch-all; revisar `PUBLIC_HOSTNAME` vs. el `hostname` del `_config` |
 | **Aviso de certificado** en el navegador | el hostname tiene más de una etiqueta bajo el apex → fuera del Universal SSL gratuito (la `precondition` de Terraform debería haberlo impedido) |
+| El **badge del pie** muestra una versión anterior a la que acabas de desplegar | El edge está sirviendo una **página** cacheada. Compara con los labels OCI de la imagen desplegada (`docker inspect`): si la imagen es la nueva y el navegador muestra la vieja, es caché del edge, no el deploy. Purga la caché de Cloudflare o prueba en incógnito. **Ojo al alcance**: el badge se renderiza en servidor, así que delata una página cacheada pero **no** chunks JS antiguos servidos con HTML fresco — para ese caso hay que mirar los nombres de fichero en la pestaña Network |
+| El badge muestra `versión desconocida` en el entorno desplegado | **Dos causas distintas, y se distinguen mirando la imagen.** (1) *No se horneó identidad*: en dev local es lo normal y correcto (el target `dev` no ejecuta `npm run build`); en la VM significa que el job `provenance` no alimentó el build — revisa sus `outputs` en el run de Actions. (2) *Se horneó pero el frontend la rechazó por no tener la forma esperada*: el snapshot público solo admite `X.Y.Z+YYYY-MM-DD.<7 hex>` (o `local`) y el commit corto solo 7 caracteres hex, y cae a vacío con cualquier otra cosa — a propósito, porque ese valor viaja en el HTML de todas las superficies. Ocurre si alguien ensancha `${GITHUB_SHA:0:7}`, cambia el formato de la fecha o `VERSION` deja de ser `X.Y.Z`. **Cómo separarlas**: `docker inspect ... --format '{{json .Config.Labels}}'` y mira `org.opencontainers.image.version`. Si el label está **vacío**, es la causa 1; si lleva una cadena pero el badge dice "desconocida", es la causa 2 — compara esa cadena con las formas de arriba y corrige el patrón de `frontend/lib/config/public.ts` y el CD en el mismo commit |
 
 ### 7.3 Rotar el secreto del túnel
 

@@ -1,3 +1,12 @@
 node_modules/
 .next/
 coverage/
+
+# Fuera del contexto de build a propósito (change app-version-visibility, hallazgo del
+# panel de seguridad). El .gitignore raíz ignora `.env*`, así que un `frontend/.env.local`
+# de una máquina de desarrollo no está en git pero SÍ entraría en el contexto de build:
+# `COPY . .` lo metería en la imagen y `npm run build` inlinearía en `.next/static`
+# cualquier `NEXT_PUBLIC_*` que contuviera. Esta línea hace que lo que puede llegar al
+# navegador dependa del fichero, no de que nadie cree un `.env.local`. El CD no estaba
+# afectado —`actions/checkout` es limpio—, pero un build a mano sí.
+.env*

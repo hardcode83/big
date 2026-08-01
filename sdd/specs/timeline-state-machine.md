@@ -7,6 +7,14 @@ una propiedad y construye las evidencias correlacionadas para su timeline. Recib
 todo el contexto como datos explícitos y permanece en el dominio: no lee reloj,
 base de datos, red ni servicios externos, ni persiste o muta la propiedad.
 
+**Dónde se persisten sus eventos**: el puerto `TimelineEventRepository`
+(`app/timeline/domain/repositories.py`) y su adaptador SQLAlchemy los añaden a
+`timeline_events`, y los escribe cada capacidad que muta algo — la primera fue
+`reservations` (ver `specs/reservations.md`). El puerto expone únicamente `add`, que es la
+regla "nunca se editan eventos pasados" expresada en una firma, y rechaza un `metadata` que
+la columna `JSONB` no pueda almacenar. Construir el evento sigue siendo exclusivamente
+competencia de la fábrica que esta capacidad define.
+
 ## Requirements
 
 ### Estados canónicos y autoridad única

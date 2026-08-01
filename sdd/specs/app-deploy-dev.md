@@ -11,6 +11,8 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - WHEN se hace push a `main` y el diff toca `backend/**`, `frontend/**`, sus Dockerfiles/lockfiles, `docker-compose.deploy.yml` o el propio workflow (o en `workflow_dispatch`), THE SYSTEM SHALL construir las imágenes `target: prod` de backend y frontend para `linux/arm64` y publicarlas en GHCR bajo el namespace del owner del repo (`ghcr.io/<owner>/autohostai-{backend,frontend}`), autenticando con el `GITHUB_TOKEN` (`packages: write`).
 - THE SYSTEM SHALL etiquetar cada imagen con el **SHA de commit** (`sha-<commit>`, inmutable — el que consume el deploy) y con el tag móvil `dev`.
 - THE SYSTEM SHALL pasar las `NEXT_PUBLIC_*` como **build-args** (horneadas en el bundle de Next standalone), nunca como config de runtime.
+- THE SYSTEM SHALL componer la identidad de build en un **único job previo** (`provenance`), del que dependen los dos builds, de modo que ambas imágenes reciban idénticos valores por construcción y no por disciplina. Ese job lee la base de `VERSION`, la valida y falla el build si no tiene forma `X.Y.Z`. Comportamiento completo en `app-version-visibility`.
+- THE SYSTEM SHALL emitir en ambas imágenes los labels `org.opencontainers.image.{source,revision,version,created}` con los valores de ese job.
 - THE SYSTEM SHALL fijar todas las GitHub Actions por SHA de commit.
 - WHERE falla el build de una de las dos imágenes, THE SYSTEM SHALL abortar el deploy (el job `deploy` tiene `needs` de ambos builds); nunca se despliega un commit a medias.
 

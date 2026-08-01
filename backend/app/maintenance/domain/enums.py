@@ -50,3 +50,22 @@ class IncidentSeverity(str, enum.Enum):
     MEDIUM = "MEDIUM"
     HIGH = "HIGH"
     CRITICAL = "CRITICAL"
+
+
+class OwnerApprovalRelatedType(str, enum.Enum):
+    """ASSUMPTION: name invented — the PRD declares this enum inline
+    (OwnerApproval.related_type) without a named block (§7.19)."""
+
+    INCIDENT = "INCIDENT"
+    MAINTENANCE_COST = "MAINTENANCE_COST"
+    OTHER = "OTHER"
+
+
+class OwnerApprovalStatus(str, enum.Enum):
+    """ASSUMPTION: name invented — the PRD declares this enum inline
+    (OwnerApproval.status) without a named block (§7.19)."""
+
+    PENDING = "PENDING"
+    APPROVED = "APPROVED"
+    REJECTED = "REJECTED"
+    EXPIRED = "EXPIRED"

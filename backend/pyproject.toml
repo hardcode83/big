@@ -4,10 +4,20 @@ version = "0.1.0"
 requires-python = ">=3.12"
 dependencies = [
     "alembic>=1.13",
+    # Declarado explícitamente aunque ya venga por fastapi/starlette: el adaptador de
+    # bcrypt lo importa directo (`anyio.to_thread`, design D21), y depender de una
+    # transitiva es romperse el día que la dependencia de arriba la cambie.
+    "anyio>=4.0",
     "asyncpg>=0.31.0",
+    "bcrypt>=4.2",
     "celery>=5.6.3",
     "fastapi>=0.139.0",
     "pydantic-settings>=2.14.2",
+    "pyjwt>=2.10",
+    # Required by FastAPI to parse `multipart/form-data`, which is how the CSV reservation
+    # import receives its file (R4). Without it the route raises at import time, not at
+    # request time — a missing dependency here takes the whole app down.
+    "python-multipart>=0.0.20",
     "redis>=8.0.1",
     "sqlalchemy[asyncio]>=2.0",
     "uvicorn[standard]>=0.51.0",
