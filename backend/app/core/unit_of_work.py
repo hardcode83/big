@@ -1,13 +1,18 @@
-"""The transactional boundary, shared by the modules that came after `auth` (design D3).
+"""The transactional boundary of the whole application (reservations design D3).
 
-`auth` has its own copy of this pair (`app/auth/infrastructure/unit_of_work.py`) and
-keeps it: refactoring an archived module is not this change's job. The duplication is
-eight lines and is recorded as debt in `sdd/changes/reservations/design.md` D3 — the
-next change that touches `auth` consolidates them.
+`auth` used to carry an identical eight-line copy at
+`app/auth/infrastructure/unit_of_work.py`, recorded as debt for "the next change that
+touches `auth`". `user-management` was that change and deleted it (its design D16), so
+this is now the only `SqlAlchemyUnitOfWork` in the codebase.
 
-The Protocol lives here rather than in a `domain/` package because it has no owner
-domain: reservations, integrations and everything after them commit through the same
-boundary.
+The `UnitOfWork` **Protocol** still exists twice on purpose, and that is not the same
+duplication: `app/auth/domain/ports.py` declares its own so `auth/application/` imports
+its ports from its own `domain/`, which is the purest arrangement of the dependency rule.
+Unifying them would make that layer import this module, and this module imports
+`sqlalchemy`.
+
+The Protocol here lives outside any `domain/` package because it has no owner domain:
+reservations, integrations and everything after them commit through the same boundary.
 """
 
 from typing import Protocol

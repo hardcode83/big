@@ -49,9 +49,17 @@ make bootstrap   # crea el tenant, su config y dos usuarios: TENANT_OWNER y PROP
 Es idempotente y falla antes de escribir nada si falta alguna variable. No está
 enganchado a `make up` para que el arranque siga sin pasos manuales.
 
+A partir de ahí **el resto de las cuentas se dan de alta por API**, sin volver a tocar la
+máquina: `POST /api/v1/users` crea el usuario y devuelve una contraseña temporal una sola vez.
+El bootstrap sigue siendo lo único que da la primera entrada a un entorno nuevo.
+
 Endpoints de auth: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`,
 `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`. Operación, configuración del límite de
 intentos y las cosas que sorprenden: [`docs/auth-tenancy.md`](docs/auth-tenancy.md).
+
+Administración del tenant: `/api/v1/users` (alta, listado, edición, baja, reset de contraseña)
+y `/api/v1/tenants/{id}` (datos del tenant y sus umbrales, SLAs y ventanas). Quién puede hacer
+qué y qué rastro deja: [`docs/user-management.md`](docs/user-management.md).
 
 ## Migraciones (Alembic)
 
@@ -72,7 +80,7 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 
 ## Estructura
 
-- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 16 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `reservations` e `integrations` son los únicos con las cuatro. Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda la tabla `webhook_events`; migraciones en `backend/alembic/`.
+- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 16 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `reservations`, `integrations` y `tenants` son los únicos con las cuatro. Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda la tabla `webhook_events`; migraciones en `backend/alembic/`.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.

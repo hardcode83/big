@@ -16,3 +16,4 @@
 | app-version-badge-date | new, tasks, run+review, archive (sin design: una función) | 135570 | 402614 | 64114944 | 47.5171 | 2026-07-31 | 2026-07-31 |
 | reservations | new, design, run, review, archive | 271778 | 807608 | 217200231 | 133.2077 | 2026-07-31 | 2026-07-31 |
 | domain-foundation-financial | new, design, tasks, run, review, archive | 245831 | 613164 | 151107303 | 106.1815 | 2026-07-31 | 2026-07-31 |
+| user-management | new, design, run, review | 238770 | 866095 | 278557046 | 184.3481 | 2026-07-31 | — |

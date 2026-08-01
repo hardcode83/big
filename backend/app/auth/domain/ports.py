@@ -7,11 +7,13 @@ oversight (design D16).
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 
 from app.auth.domain.entities import User, UserSession
 from app.auth.domain.enums import SessionRevokedReason, UserRole
+from app.auth.domain.repositories import UserFilters, UserPage
 from app.auth.domain.value_objects import AccessTokenClaims, RefreshTokenClaims
 
 
@@ -27,6 +29,75 @@ class UserRepository(Protocol):
         the user on its own. It can, because a normalised email is unique across the
         whole installation (design D16, ADR 0005) — hence at most one user, and no
         "which of these did you mean" case for the caller to handle.
+        """
+        ...
+
+    async def get(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User | None:
+        """One user of this tenant, whatever its status (user-management R2.6).
+
+        Distinct from `get_active_by_id`, which is the authentication lookup and resolves
+        only ACTIVE users of ACTIVE tenants. Administration has to see a suspended account
+        to be able to reactivate it.
+
+        Returns `None` for a user of another tenant just as for one that does not exist —
+        that is what lets the use case answer `404` without ever asking "does this exist
+        somewhere else?" (R7.1).
+        """
+        ...
+
+    async def list(
+        self, tenant_id: uuid.UUID, filters: "UserFilters", *, page: int, per_page: int
+    ) -> "UserPage":
+        """Filtered, ordered and paginated (R2.1). The order must be stable (design D17)."""
+        ...
+
+    async def add(self, tenant_id: uuid.UUID, user: User) -> None:
+        """Persist a new user; refuses an entity of another tenant.
+
+        Raises `EmailAlreadyExistsError` when the normalised address already exists ANYWHERE
+        in the installation — the `uq_users_lower_email` index decides, not a prior read
+        (design D11): two concurrent creates with the same address both pass a check and only
+        one can pass the constraint.
+        """
+        ...
+
+    async def apply_changes(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, values: "Mapping[str, object]"
+    ) -> None:
+        """Write ONLY the named columns of one user (user-management design D21).
+
+        Deliberately not a `save(user)`. `auth-tenancy` deleted `UserRepository.save` (its
+        design D5) because copying the whole row back can revert a suspension, a demotion or
+        a password change committed between the read and the write, and
+        `tests/auth/test_repositories.py::test_no_unconditional_write_primitive_came_back`
+        guards the name against coming back. A partial write cannot revert a column it does
+        not name, which is strictly stronger than an allow-list of "mutable" columns —
+        `role` and `status` would be in such a list.
+
+        Identity columns are never writable through here: `tenant_id` (a repository able to
+        move a row between tenants defeats the isolation rule), `id`, and `last_login_at`
+        (owned by `touch_last_login`).
+        """
+        ...
+
+    async def count_active_owners_excluding(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID
+    ) -> int:
+        """How many OTHER users are ACTIVE `TENANT_OWNER`s (R3.6, design D6).
+
+        Excludes `user_id` so the target cannot count itself as the owner that survives its
+        own demotion. Only trustworthy under the lock below.
+        """
+        ...
+
+    async def lock_tenant_for_admin(self, tenant_id: uuid.UUID) -> None:
+        """Serialise administrative writes on this tenant (R3.6, design D6).
+
+        `SELECT ... FROM tenants WHERE id = :t FOR UPDATE`. Needed because the last-owner
+        rule counts OTHER rows: the single-statement idiom of `SessionRepository.consume`
+        does not help, since Postgres only re-evaluates the WHERE for the row being written.
+        Two concurrent demotions of two different owners would each see the other as active
+        and both succeed, leaving the tenant with none.
         """
         ...
 
@@ -81,6 +152,26 @@ class SessionRepository(Protocol):
         now: datetime,
     ) -> int:
         """Revoke every not-yet-revoked session of a lineage; returns how many (R2.2)."""
+        ...
+
+    async def revoke_all_for_user(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        reason: SessionRevokedReason,
+        now: datetime,
+    ) -> int:
+        """Revoke EVERY family of one user; returns how many rows (user-management R3.7, R4.2).
+
+        Distinct from `revoke_family` on purpose, and not expressible with it: an
+        administrator deactivating an account or resetting its password acts on somebody
+        else, whose families they do not know — the caller has a `user_id`, never a
+        `family_id`. Iterating families in the use case would need a list query that
+        exists only to feed this, and would stop being atomic.
+
+        Idempotent: a session already revoked keeps its original reason and timestamp, so
+        a second call returns 0 rather than rewriting history.
+        """
         ...
 
 
