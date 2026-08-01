@@ -12,11 +12,16 @@ from fastapi.responses import JSONResponse
 
 from app.auth.domain.exceptions import (
     AuthDomainError,
+    EmailAlreadyExistsError,
     InvalidCredentialsError,
     InvalidTokenError,
+    LastOwnerError,
     PasswordTooLongError,
+    SelfRoleChangeError,
     SessionReuseDetectedError,
     TooManyAttemptsError,
+    UnassignableRoleError,
+    UserNotFoundError,
 )
 from app.core.errors import error_envelope
 
@@ -28,6 +33,15 @@ _MAPPING: tuple[tuple[type[AuthDomainError], int, str], ...] = (
     (InvalidTokenError, 401, "INVALID_TOKEN"),
     (TooManyAttemptsError, 429, "RATE_LIMITED"),
     (PasswordTooLongError, 422, "VALIDATION_ERROR"),
+    # Added by `user-management`. `404` for a user of another tenant is requirement R7.1,
+    # not a convention: the answer must not reveal that the resource exists.
+    (UserNotFoundError, 404, "NOT_FOUND"),
+    (EmailAlreadyExistsError, 409, "CONFLICT"),
+    # The three refusals of an operation that is well-formed but not allowed to happen.
+    # `422` and not `403`: the caller HAS the permission, the request is the problem.
+    (SelfRoleChangeError, 422, "VALIDATION_ERROR"),
+    (LastOwnerError, 422, "VALIDATION_ERROR"),
+    (UnassignableRoleError, 422, "VALIDATION_ERROR"),
 )
 
 
