@@ -28,6 +28,7 @@
 - [ ] maintenance — Incident + clasificación IA + OwnerApproval + flujo técnico (PRD §26.11, §12)
 - [ ] messaging-ai — Conversation + Message + MockAIAdapter + escalación (PRD §26.12, §13)
 - [ ] access-notifications — AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17)
+- [ ] dashboard-web-frontend — dashboard FE (property cards, detalle, timeline) adelantado contra mocks/fixtures mientras dashboard-web (backend agregado) sigue su orden natural en el roadmap; consumir vía adapter/mock API para no bloquear en domain-foundation-financial/auth-tenancy/celery-jobs/reservations/cleaning/maintenance/messaging-ai/access-notifications (PRD §26.15-17, §9, §24 — prioridad por §30) → changes/dashboard-web-frontend/
 - [ ] dashboard-web — dashboard API agregado + FE: layout, auth, property cards, detalle + timeline (PRD §26.15-17, §9, §24)
 - [ ] field-apps — apps mobile-first de limpiadora y técnico + bandeja de conversaciones (PRD §26.18-21, §24)
 - [ ] revenue — pricing v1 por reglas + statements/exports + reviews (PRD §26.22-24, §18-20)
