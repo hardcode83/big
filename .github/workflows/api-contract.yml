@@ -1,0 +1,71 @@
+name: api-contract
+
+# El contrato OpenAPI está commiteado en backend/openapi.json, y este job es lo único que
+# lo mantiene veraz: regenera desde el código y falla si el fichero no corresponde. Sirve
+# para que el diff del contrato aparezca en el PR que lo provoca, que es la señal de
+# revisión que justifica versionarlo.
+#
+# Lo que este check NO hace, y conviene no leerlo de más: no protege de un cambio
+# incompatible. Renombrar un campo de un response_model lo deja en verde en cuanto
+# alguien regenera. Quien rompe ante eso es el typecheck del frontend contra los tipos
+# derivados del contrato, que pertenece a la entrada `frontend-ci` del roadmap.
+#
+# Workflow propio y no un paso de backend-tests.yml (design D5): no necesita PostgreSQL ni
+# Redis —generar el contrato no toca ninguno—, así que da señal en segundos en vez de
+# esperar al ciclo completo; y como paso, olvidarse de regenerar cortaría la ejecución
+# antes de la suite y perderías el resultado de los tests en ese PR.
+#
+# SIN filtro `paths`, por el mismo motivo documentado en backend-tests.yml y en
+# specs/backend-ci.md: un required check con filtro de rutas no se ejecuta en los PR que
+# no las tocan, y GitHub deja esos PR esperando para siempre un check que no llegará.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: api-contract-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  api-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+        with:
+          enable-cache: true
+          cache-dependency-glob: backend/uv.lock
+
+      - name: Generar una clave JWT de usar y tirar
+        # `settings` exige >=32 caracteres al importar la aplicación, y este job la importa
+        # para serializar su esquema. La clave no firma nada que salga del job, así que se
+        # genera aquí en vez de guardarse como secret: no hay ningún valor con pinta de
+        # secreto versionado (steering/security.md #8). Mismo criterio que backend-tests.yml.
+        #
+        # Tampoco conviene que venga de un GitHub Secret. Actions enmascara los secrets en
+        # el log por coincidencia exacta, pero si la clave no llegara a 32 caracteres,
+        # `config.py` aborta el import con un error de Pydantic que incluye el valor **y lo
+        # re-codifica** (`ab\cd` sale como `'ab\\cd'`, un salto de línea como `'\n'`). Un
+        # secret con esos caracteres ya no coincide con la cadena registrada y se imprime en
+        # claro, evadiendo el enmascarado. Una clave generada aquí no tiene ese riesgo.
+        run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
+
+      - name: Instalar dependencias
+        working-directory: backend
+        run: uv sync --frozen
+
+      - name: El contrato commiteado corresponde al código
+        working-directory: backend
+        # Mismo comando que `make openapi --check` ejecuta en local, y el mismo generador
+        # que escribe el fichero (R2.4): un workflow con su propia serialización fallaría
+        # por un motivo que nadie puede reproducir en su máquina.
+        run: uv run python -m app.cli.openapi --check

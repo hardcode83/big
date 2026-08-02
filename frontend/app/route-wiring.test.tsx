@@ -1,6 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
 import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
+import { PropertyDetailView } from "@/features/dashboard";
 
 const redirectMock = vi.hoisted(() =>
   vi.fn((url: string) => {
@@ -16,11 +17,11 @@ describe("route wiring (tasks 7.2–7.6)", () => {
     expect(redirectMock).toHaveBeenCalledWith("/dashboard");
   });
 
-  it("wires the property detail page to the property-detail placeholder", async () => {
+  it("wires the property detail page to PropertyDetailView with the awaited id", async () => {
     const Page = (await import("@/app/(workspace)/properties/[id]/page")).default;
-    const element = Page();
-    expect(element.type).toBe(RoutePlaceholder);
-    expect(element.props.routeId).toBe("property-detail");
+    const element = await Page({ params: Promise.resolve({ id: "redes11" }) });
+    expect(element.type).toBe(PropertyDetailView);
+    expect(element.props.propertyId).toBe("redes11");
   });
 
   it("wires the guest token page to the guest placeholder (no token prop)", async () => {

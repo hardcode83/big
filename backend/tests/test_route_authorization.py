@@ -11,6 +11,7 @@ from fastapi.routing import APIRoute
 from app.auth.api.dependencies import REQUIRED_PERMISSION_ATTR
 from app.auth.domain.policy import Permission
 from app.main import create_app
+from tests.route_walk import flatten_routes
 
 # Anonymous on purpose. `/health` is probed by the container healthcheck (design D2);
 # login and refresh are the endpoints that mint credentials, so they cannot require
@@ -45,36 +46,26 @@ def _is_anonymous(path: str, methods: set[str] | None) -> bool:
 def _api_routes(app: FastAPI) -> tuple[list[tuple[str, APIRoute]], list[str]]:
     """Flattens the route tree, and reports every bit of surface it cannot inspect.
 
-    Two vacuity traps here, both found by review rather than by design:
+    The flattening itself lives in `tests/route_walk.py` — it is shared with the contract
+    guard of `test_openapi_contract.py`, which was first written by copying the shape of
+    this file without the walk and passed while inspecting nothing. Its docstring records
+    the `_IncludedRouter` trap that makes the walk necessary.
 
-    1. This FastAPI version keeps an included router as a single `_IncludedRouter`
-       object instead of copying its endpoints into `app.routes`, so walking
-       `app.routes` alone inspects ZERO of the auth endpoints and passes.
-    2. Keeping only `isinstance(route, APIRoute)` and dropping everything else means a
-       `@app.websocket(...)`, an `app.mount(...)` or a plain starlette `Route` adds
-       real, unauthenticated surface this check never sees.
-
-    So the rule is: anything that is not an `APIRoute` and not on the anonymous
-    allowlist comes back as UNINSPECTABLE, and the caller fails on it. FastAPI's own
-    `/docs`, `/redoc` and `/openapi.json` are plain starlette `Route`s, which is exactly
-    why the allowlist — not the route class — is what grants the exemption.
+    What stays here is the second vacuity trap, which is this file's own: keeping only
+    `isinstance(route, APIRoute)` and dropping everything else means a
+    `@app.websocket(...)`, an `app.mount(...)` or a plain starlette `Route` adds real,
+    unauthenticated surface this check never sees. So the rule is: anything that is not an
+    `APIRoute` and not on the anonymous allowlist comes back as UNINSPECTABLE, and the
+    caller fails on it. FastAPI's own `/docs`, `/redoc` and `/openapi.json` are plain
+    starlette `Route`s, which is exactly why the allowlist — not the route class — is what
+    grants the exemption.
     """
-    found: list[tuple[str, APIRoute]] = []
-    uninspectable: list[str] = []
-
-    def walk(routes, prefix: str) -> None:
-        for route in routes:
-            inner = getattr(route, "original_router", None)
-            path = prefix + str(getattr(route, "path", "?"))
-            if inner is not None:
-                context = getattr(route, "include_context", None)
-                walk(inner.routes, prefix + getattr(context, "prefix", ""))
-            elif isinstance(route, APIRoute):
-                found.append((path, route))
-            elif not _is_anonymous(path, getattr(route, "methods", None)):
-                uninspectable.append(f"{type(route).__name__} {path}")
-
-    walk(app.routes, "")
+    found, other = flatten_routes(app)
+    uninspectable = [
+        f"{type(route).__name__} {path}"
+        for path, route in other
+        if not _is_anonymous(path, getattr(route, "methods", None))
+    ]
     return found, uninspectable
 
 
@@ -266,7 +257,10 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     """A snapshot, on purpose: every new protected path has to show up in this diff.
 
     Grown by `reservations` with its five endpoints (two paths, five methods) — the
-    per-method permissions are asserted in `tests/reservations/test_authorization.py`.
+    per-method permissions are asserted in `tests/reservations/test_authorization.py` — and by
+    `user-management` with three user paths (six methods) plus the tenant one (two methods),
+    asserted per method and per role in `tests/auth/test_user_admin_authorization.py` and
+    `tests/tenants/test_api.py`.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -277,4 +271,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/integrations/pms/import-csv",
+        "/api/v1/users",
+        "/api/v1/users/{user_id}",
+        "/api/v1/users/{user_id}/reset-password",
+        "/api/v1/tenants/{tenant_id}",
     }

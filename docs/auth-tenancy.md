@@ -25,6 +25,15 @@ El producto **no tiene registro público**: la propietaria y el manager son dos 
 reales. Un entorno recién levantado no tiene ninguna cuenta con la que entrar hasta que
 se ejecuta el bootstrap.
 
+> **Desde `user-management`**, el bootstrap ya no es la única forma de crear usuarios: sigue
+> siendo la única forma de *entrar* a un entorno nuevo, pero a partir de ahí las cuentas se
+> dan de alta por API (`POST /api/v1/users`) sin tocar la VM. Ver
+> [`user-management.md`](user-management.md). Dos cosas de esta página cambian de matiz:
+> desactivar o suspender una cuenta, y resetear su contraseña, **revocan sus tokens de
+> refresh** (razones `USER_DEACTIVATED` y `PASSWORD_RESET`) — sin eso, `POST /auth/refresh`,
+> que no revalida el estado de la cuenta, seguiría emitiendo pares nuevos durante los 7 días
+> de vida del refresh.
+
 ### En local
 
 ```bash

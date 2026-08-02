@@ -20,6 +20,17 @@ dependencies = [
     "python-multipart>=0.0.20",
     "redis>=8.0.1",
     "sqlalchemy[asyncio]>=2.0",
+    # Declarado explícitamente por el mismo motivo que `anyio` arriba: hoy entra por
+    # `celery` → `kombu`, y `app/tenants/domain/value_objects.py` valida `timezone` con
+    # `zoneinfo`, que necesita la base de datos IANA.
+    #
+    # Matiz que corrigió el panel de QA de `user-management`: en `python:3.12-slim` la zona
+    # **la aporta hoy el paquete `tzdata` del sistema operativo** (`/usr/share/zoneinfo`), que
+    # `zoneinfo` consulta ANTES de caer al paquete PyPI. Así que declararlo no es lo que hace
+    # que funcione ahora — es el seguro para una imagen que no lo traiga (distroless, o un
+    # cambio en la base), y por eso su test comprueba la metadata del paquete y no solo que
+    # las zonas resuelvan: eso último pasaría igual sin la dependencia.
+    "tzdata>=2025.1",
     "uvicorn[standard]>=0.51.0",
 ]
 

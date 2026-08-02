@@ -8,17 +8,35 @@ No method commits: the transactional boundary is the use case (design D10).
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.domain.entities import User, UserSession
-from app.auth.domain.enums import SessionRevokedReason, UserStatus
+from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
+from app.auth.domain.exceptions import EmailAlreadyExistsError
+from app.auth.domain.repositories import UserFilters, UserPage, offset_for
 from app.auth.domain.value_objects import normalize_email
 from app.auth.infrastructure.models import UserModel, UserSessionModel
+from app.core.tenancy import CrossTenantWriteError
 from app.tenants.domain.enums import TenantStatus
 from app.tenants.infrastructure.models import TenantModel
+
+# The functional unique index of ADR 0005. Named here so the translation to `409` matches THIS
+# constraint and re-raises anything else (design D11).
+LOWER_EMAIL_CONSTRAINT = "uq_users_lower_email"
+
+# Columns `apply_changes` may write. `email` is included — it is the login identity and can be
+# corrected — with the duplicate translation that implies.
+WRITABLE_COLUMNS = frozenset(
+    {"name", "email", "phone", "preferred_language", "role", "status", "password_hash"}
+)
+
+# Named separately from "unknown" so the error says WHY, not just "no".
+FORBIDDEN_UPDATE_COLUMNS = frozenset({"tenant_id", "id", "last_login_at", "created_at"})
 
 
 class SqlAlchemyUserRepository:
@@ -71,6 +89,164 @@ class SqlAlchemyUserRepository:
         )
         model = result.scalar_one_or_none()
         return _to_user(model) if model is not None else None
+
+    async def get(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> User | None:
+        """One user of this tenant, whatever its status (user-management R2.6).
+
+        No status clause on purpose, unlike `get_active_by_id`: administration must be able
+        to see a suspended account in order to reactivate it. The tenant clause is what makes
+        a user of another tenant indistinguishable from one that does not exist (R7.1).
+        """
+        result = await self._session.execute(
+            select(UserModel).where(
+                UserModel.tenant_id == tenant_id, UserModel.id == user_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_user(model) if model is not None else None
+
+    async def list(
+        self, tenant_id: uuid.UUID, filters: UserFilters, *, page: int, per_page: int
+    ) -> UserPage:
+        """A page of the tenant's roster (R2.1, R2.3, R2.4, design D17).
+
+        Ordered by `name` with `id` as the tiebreaker. The tiebreaker is not cosmetic: two
+        users called "Ana" would otherwise come back in whatever order Postgres felt like per
+        query, so paginating could show one row twice and skip another.
+        """
+        conditions = [UserModel.tenant_id == tenant_id]
+        if filters.role is not None:
+            conditions.append(UserModel.role == filters.role)
+        if filters.status is not None:
+            conditions.append(UserModel.status == filters.status)
+
+        total = await self._session.scalar(
+            select(func.count()).select_from(UserModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            select(UserModel)
+            .where(*conditions)
+            .order_by(UserModel.name.asc(), UserModel.id.asc())
+            .limit(per_page)
+            .offset(offset_for(page=page, per_page=per_page))
+        )
+        return UserPage(
+            items=tuple(_to_user(model) for model in rows.scalars().all()),
+            total=int(total or 0),
+        )
+
+    async def add(self, tenant_id: uuid.UUID, user: User) -> None:
+        """Insert a new user, letting the index decide about duplicates (R1.4, design D11)."""
+        if user.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="user",
+                entity_tenant_id=user.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            UserModel(
+                id=user.id,
+                tenant_id=user.tenant_id,
+                name=user.name,
+                email=user.email,
+                password_hash=user.password_hash,
+                role=user.role,
+                phone=user.phone,
+                status=user.status,
+                preferred_language=user.preferred_language,
+            )
+        )
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            # The constraint is the authority, not a prior read: two concurrent creates with
+            # the same address both pass a lookup and only one can pass this (design D11).
+            #
+            # Matched by NAME rather than catching every IntegrityError: a foreign-key
+            # violation is not a duplicate address, and answering `409` for it would be a
+            # lie the caller cannot act on.
+            if LOWER_EMAIL_CONSTRAINT in str(error.orig):
+                raise EmailAlreadyExistsError(
+                    "That email address is already in use"
+                ) from error
+            raise
+
+    async def apply_changes(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, values: Mapping[str, object]
+    ) -> None:
+        """Write only the named columns (user-management design D21).
+
+        NOT a `save(user)`: `auth-tenancy` deleted that primitive because copying the whole
+        row back reverts whatever was committed in between, and a partial write cannot revert
+        a column it does not name.
+
+        The duplicate-address translation is here too, because `email` is one of the columns
+        this may write.
+        """
+        if not values:
+            return
+        forbidden = set(values) & FORBIDDEN_UPDATE_COLUMNS
+        if forbidden:
+            raise ValueError(
+                f"Columns {sorted(forbidden)} are not writable through apply_changes: "
+                "tenant_id and id are identity, last_login_at belongs to touch_last_login"
+            )
+        unknown = set(values) - WRITABLE_COLUMNS
+        if unknown:
+            raise ValueError(f"Unknown user columns: {sorted(unknown)}")
+
+        try:
+            result = await self._session.execute(
+                update(UserModel)
+                .where(UserModel.tenant_id == tenant_id, UserModel.id == user_id)
+                .values(**values)
+            )
+        except IntegrityError as error:
+            if LOWER_EMAIL_CONSTRAINT in str(error.orig):
+                raise EmailAlreadyExistsError(
+                    "That email address is already in use"
+                ) from error
+            raise
+        if result.rowcount != 1:
+            raise ValueError("Cannot update a user that does not belong to this tenant")
+
+    async def count_active_owners_excluding(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID
+    ) -> int:
+        """OTHER active owners of this tenant (R3.6, design D6).
+
+        Excluding the target is what makes the count usable: including it, the target would
+        count itself as the owner surviving its own demotion and the rule would never fire.
+        """
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(UserModel)
+            .where(
+                UserModel.tenant_id == tenant_id,
+                UserModel.id != user_id,
+                UserModel.role == UserRole.TENANT_OWNER,
+                UserModel.status == UserStatus.ACTIVE,
+            )
+        )
+        return int(total or 0)
+
+    async def lock_tenant_for_admin(self, tenant_id: uuid.UUID) -> None:
+        """Take a row lock on the tenant so the count above is trustworthy (design D6).
+
+        `SELECT ... FOR UPDATE` on `tenants`, not on the user rows: the invariant is about the
+        POPULATION of owners, and rows that do not exist yet (or that another transaction is
+        about to change) cannot be locked by selecting the ones that do. Locking the tenant
+        serialises every administrative write of that tenant, which at this volume costs
+        nothing.
+
+        A conditional single statement is NOT an alternative here, even though that is the
+        idiom `SessionRepository.consume` uses: Postgres re-evaluates a WHERE only for the row
+        it is writing, so an `EXISTS (another active owner)` clause is evaluated against the
+        transaction's snapshot and two concurrent demotions of two different owners both pass.
+        """
+        await self._session.execute(
+            select(TenantModel.id).where(TenantModel.id == tenant_id).with_for_update()
+        )
 
     async def touch_last_login(
         self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime
@@ -187,6 +363,35 @@ class SqlAlchemySessionRepository:
             .where(
                 UserSessionModel.tenant_id == tenant_id,
                 UserSessionModel.family_id == family_id,
+                UserSessionModel.revoked_at.is_(None),
+            )
+            .values(revoked_at=now, revoked_reason=reason)
+        )
+        return result.rowcount
+
+    async def revoke_all_for_user(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        reason: SessionRevokedReason,
+        now: datetime,
+    ) -> int:
+        """Every family of one user, in one statement (user-management R3.7, R4.2).
+
+        `tenant_id` is in the WHERE even though `user_id` is globally unique: this write
+        is not covered by the session filter of `app/core/db.py` for the tenant it was
+        marked with, and a repository able to revoke another tenant's sessions from a
+        `user_id` alone is the kind of primitive that gets reused wrongly later.
+
+        `revoked_at IS NULL` keeps it idempotent AND truthful: a session revoked earlier
+        by a logout keeps `LOGOUT` instead of being relabelled by an administrative action
+        that did not cause it.
+        """
+        result = await self._session.execute(
+            update(UserSessionModel)
+            .where(
+                UserSessionModel.tenant_id == tenant_id,
+                UserSessionModel.user_id == user_id,
                 UserSessionModel.revoked_at.is_(None),
             )
             .values(revoked_at=now, revoked_reason=reason)

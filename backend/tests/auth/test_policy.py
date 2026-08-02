@@ -67,13 +67,80 @@ def test_managing_reservations_implies_reading_them() -> None:
             assert is_allowed(role, Permission.READ_RESERVATIONS)
 
 
+# The `user-management` matrix (its design D8), written out for the same reason as the one
+# above. PRD §6 names nobody as the administrator of staff, so this is the decision the
+# change took and this table is where it is auditable.
+EXPECTED_ADMIN_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
+    # "configurar preferencias del tenant" (PRD §6) plus staff administration: whoever can
+    # assign roles can escalate privileges, so it stays with the owner.
+    UserRole.TENANT_OWNER: frozenset(
+        {
+            Permission.READ_USERS,
+            Permission.MANAGE_USERS,
+            Permission.READ_TENANT_SETTINGS,
+            Permission.MANAGE_TENANT_SETTINGS,
+        }
+    ),
+    # Reads the roster to assign cleanings and tickets, and the thresholds and SLAs to
+    # operate; mutates neither.
+    UserRole.PROPERTY_MANAGER: frozenset(
+        {Permission.READ_USERS, Permission.READ_TENANT_SETTINGS}
+    ),
+    # The staff listing carries the email and role of every colleague. Their self-service is
+    # `GET /api/v1/auth/me`.
+    UserRole.CLEANER: frozenset(),
+    UserRole.TECHNICIAN: frozenset(),
+    # Same reasoning as the reservation matrix: global powers, not the operation of one
+    # tenant; deferred to `saas-cross-tenant`.
+    UserRole.SUPER_ADMIN: frozenset(),
+}
+
+ADMIN_PERMISSIONS = (
+    Permission.READ_USERS,
+    Permission.MANAGE_USERS,
+    Permission.READ_TENANT_SETTINGS,
+    Permission.MANAGE_TENANT_SETTINGS,
+)
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_the_user_administration_matrix_is_the_one_design_d8_decided(role: UserRole) -> None:
+    granted = {
+        permission for permission in ADMIN_PERMISSIONS if is_allowed(role, permission)
+    }
+    assert granted == EXPECTED_ADMIN_PERMISSIONS[role]
+
+
+def test_managing_users_implies_reading_them() -> None:
+    for role in UserRole:
+        if is_allowed(role, Permission.MANAGE_USERS):
+            assert is_allowed(role, Permission.READ_USERS)
+
+
+def test_managing_tenant_settings_implies_reading_them() -> None:
+    for role in UserRole:
+        if is_allowed(role, Permission.MANAGE_TENANT_SETTINGS):
+            assert is_allowed(role, Permission.READ_TENANT_SETTINGS)
+
+
+def test_only_the_owner_administers_users_or_settings() -> None:
+    """One assertion for the decision that matters most in this change (design D8)."""
+    for permission in (Permission.MANAGE_USERS, Permission.MANAGE_TENANT_SETTINGS):
+        allowed = {role for role in UserRole if is_allowed(role, permission)}
+        assert allowed == {UserRole.TENANT_OWNER}
+
+
 def test_no_permission_is_granted_to_every_role_by_accident() -> None:
     """Catches a future `is_allowed` that always answers True, without a stub.
 
     The self-service pair IS universal, so the guard is that the differentiated ones are
     not: if this ever passes for `MANAGE_RESERVATIONS`, deny-by-default has broken.
     """
-    for permission in (Permission.READ_RESERVATIONS, Permission.MANAGE_RESERVATIONS):
+    for permission in (
+        Permission.READ_RESERVATIONS,
+        Permission.MANAGE_RESERVATIONS,
+        *ADMIN_PERMISSIONS,
+    ):
         assert not all(is_allowed(role, permission) for role in UserRole)
 
 

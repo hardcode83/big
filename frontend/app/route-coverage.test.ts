@@ -17,18 +17,33 @@ function findPageFiles(dir: string): string[] {
   });
 }
 
+// Real (non-placeholder) pages that cover a registered route without a
+// `routeId` prop. As modules graduate from placeholder to implemented, they are
+// listed here by path suffix → route id (dashboard-web-frontend: dashboard,
+// property-detail).
+const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
+  "(workspace)/dashboard/page.tsx": "dashboard",
+  "(workspace)/properties/[id]/page.tsx": "property-detail",
+};
+
 function routeIdOf(file: string): string | undefined {
   const match = readFileSync(file, "utf8").match(/routeId="([^"]+)"/);
-  return match?.[1];
+  if (match) {
+    return match[1];
+  }
+  const real = Object.entries(REAL_PAGE_ROUTE_IDS).find(([suffix]) =>
+    file.endsWith(suffix),
+  );
+  return real?.[1];
 }
 
-describe("App Router placeholder coverage (tasks 7.2–7.6)", () => {
+describe("App Router coverage (tasks 7.2–7.6)", () => {
   const pageFiles = findPageFiles(appDir);
   const wiredRouteIds = pageFiles
     .map(routeIdOf)
     .filter((id): id is string => id !== undefined);
 
-  it("wires exactly one placeholder page per registered route", () => {
+  it("wires exactly one page (placeholder or real) per registered route", () => {
     expect(new Set(wiredRouteIds)).toEqual(
       new Set(routeRegistry.map((route) => route.id)),
     );
@@ -36,10 +51,11 @@ describe("App Router placeholder coverage (tasks 7.2–7.6)", () => {
   });
 
   it("has a page for every PRD §24 surface with no orphan pages", () => {
-    // Every page file either wires a routeId or is the root redirect.
-    const nonPlaceholder = pageFiles.filter(
+    // Every page file either covers a routeId (placeholder or real) or is the
+    // (workspace) root redirect.
+    const uncovered = pageFiles.filter(
       (file) => routeIdOf(file) === undefined,
     );
-    expect(nonPlaceholder.length).toBe(1); // only the (workspace) root redirect
+    expect(uncovered.length).toBe(1); // only the (workspace) root redirect
   });
 });

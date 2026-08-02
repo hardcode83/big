@@ -1,6 +1,6 @@
 SERVICE ?=
 
-.PHONY: up down logs ps sh bootstrap db-clean-test
+.PHONY: up down logs ps sh bootstrap openapi db-clean-test
 
 up:
 	@umask 077; if [ ! -f .env ]; then \
@@ -26,6 +26,16 @@ up:
 # therefore works against the deployed prod image — see RUNBOOK §6.5.
 bootstrap:
 	docker compose exec backend python -m app.cli.bootstrap
+
+# Regenera backend/openapi.json, el contrato que consume el frontend. Ejecútalo cuando
+# cambies la forma de una respuesta: el workflow api-contract lo comprueba en cada PR y
+# falla si el fichero commiteado ya no corresponde al código.
+#
+# `run --rm --no-deps` y no `exec`: no necesita el stack levantado, y `--no-deps` es lo
+# que lo hace cierto — sin él, `depends_on` arranca postgres, redis y migrate para una
+# generación que no toca base de datos, Redis ni red (design D6).
+openapi:
+	docker compose run --rm --no-deps -T backend python -m app.cli.openapi
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, ver
 # backend/tests/db_names.py) y la borra al terminar. Una suite matada a lo bruto deja

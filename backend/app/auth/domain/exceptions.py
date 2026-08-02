@@ -37,3 +37,45 @@ class TooManyAttemptsError(AuthDomainError):
 
 class PasswordTooLongError(AuthDomainError):
     """Longer than bcrypt's 72-byte input limit; refused instead of truncated (R1.3)."""
+
+
+# --- user administration (`user-management`) ---------------------------------------
+
+
+class UserNotFoundError(AuthDomainError):
+    """No such user IN THE ACTING TENANT (user-management R7.1).
+
+    Deliberately does not distinguish "does not exist anywhere" from "exists in another
+    tenant": both answer `404`, so the response never reveals that a resource exists.
+    That is the R4.3 criterion `auth-tenancy` declared out of its own scope because all
+    four of its endpoints were self-referential.
+    """
+
+
+class EmailAlreadyExistsError(AuthDomainError):
+    """The normalised address is taken somewhere in the installation (R1.4).
+
+    Answers `409`. That this leaks "the address exists somewhere" is inherent to the
+    global uniqueness of ADR 0005; the message must not say under WHICH tenant.
+    """
+
+
+class SelfRoleChangeError(AuthDomainError):
+    """An actor tried to change their own role or status (R3.5, design D5, D19).
+
+    A self-demotion leaves the tenant with nobody who can administer it and there is no
+    endpoint back. Covers `DELETE` too, which is a status change (design D19).
+    """
+
+
+class LastOwnerError(AuthDomainError):
+    """The operation would leave the tenant without an ACTIVE `TENANT_OWNER` (R3.6)."""
+
+
+class UnassignableRoleError(AuthDomainError):
+    """`SUPER_ADMIN` cannot be granted through the API (R1.6).
+
+    Its powers in PRD §6 are global, not the operation of one tenant, and cross-tenant
+    visibility is deferred to `saas-cross-tenant`. Granting it from inside a tenant would
+    pre-empt that decision with a role whose scope this capability cannot bound.
+    """
