@@ -10,6 +10,7 @@ one declared place instead of being repeated — or forgotten — per router.
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 from app.reservations.domain.exceptions import (
     DuplicateExternalReservationError,
@@ -21,21 +22,21 @@ from app.reservations.domain.exceptions import (
 )
 
 # Order matters: the first matching entry wins, so subclasses come before their base.
-_MAPPING: tuple[tuple[type[ReservationDomainError], int, str], ...] = (
-    (ReservationNotFoundError, 404, "NOT_FOUND"),
-    (PropertyNotFoundError, 404, "NOT_FOUND"),
-    (GuestNotFoundError, 404, "NOT_FOUND"),
-    (DuplicateExternalReservationError, 409, "CONFLICT"),
-    (ReservationValidationError, 422, "VALIDATION_ERROR"),
+_MAPPING: tuple[tuple[type[ReservationDomainError], int, ErrorCode], ...] = (
+    (ReservationNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (PropertyNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (GuestNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (DuplicateExternalReservationError, 409, ErrorCode.CONFLICT),
+    (ReservationValidationError, 422, ErrorCode.VALIDATION_ERROR),
 )
 
 
-def http_error_for(exc: ReservationDomainError) -> tuple[int, str]:
+def http_error_for(exc: ReservationDomainError) -> tuple[int, ErrorCode]:
     for error_class, status, code in _MAPPING:
         if isinstance(exc, error_class):
             return status, code
     # A reservation error nobody mapped is a bug, not a client problem.
-    return 500, "INTERNAL_ERROR"
+    return 500, ErrorCode.INTERNAL_ERROR
 
 
 def register_reservation_error_handlers(app: FastAPI) -> None:

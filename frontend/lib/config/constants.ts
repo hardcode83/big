@@ -20,3 +20,12 @@ export function isLocale(value: unknown): value is Locale {
     (SUPPORTED_LOCALES as readonly string[]).includes(value)
   );
 }
+
+/**
+ * ASSUMPTION / DEBT (auth-tenancy): tenant identity comes from the authenticated
+ * session, which does not exist yet. Until then, tenant-scoped data access uses
+ * this single, centralized dev tenant id — never hardcoded per component. When
+ * auth-tenancy ships, resolve the tenant from the session context and delete
+ * this constant.
+ */
+export const DEV_TENANT_ID = "dev-tenant";

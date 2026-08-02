@@ -1,0 +1,104 @@
+{
+  "state": {
+    "VACANT_READY": "Libre y lista",
+    "READY_FOR_NEXT_GUEST": "Lista para el próximo huésped",
+    "AWAITING_CHECKIN": "Esperando check-in",
+    "OCCUPIED_ESTIMATED": "Ocupada (estimado)",
+    "CLEANING_IN_PROGRESS": "Limpieza en curso",
+    "AWAITING_CLEANING": "Pendiente de limpieza",
+    "CLEANING_SCHEDULED": "Limpieza programada",
+    "MAINTENANCE_REQUIRED": "Mantenimiento requerido",
+    "CRITICAL_INCIDENT": "Incidencia crítica",
+    "BLOCKED_BY_OWNER": "Bloqueada por el propietario",
+    "OUT_OF_SERVICE": "Fuera de servicio"
+  },
+  "card": {
+    "reservation": "Reserva",
+    "noReservation": "Sin reserva",
+    "guest": "Huésped",
+    "noGuest": "Sin huésped",
+    "checkIn": "Entrada",
+    "checkOut": "Salida",
+    "cleaning": "Limpieza",
+    "noCleaning": "Sin limpieza pendiente",
+    "openIncidents": "Incidencias abiertas",
+    "nextAction": "Próxima acción",
+    "responsible": "Responsable",
+    "lastEvent": "Último evento",
+    "openDetail": "Ver detalle"
+  },
+  "cards": {
+    "empty": {
+      "title": "Sin propiedades",
+      "description": "Todavía no hay propiedades que mostrar."
+    },
+    "error": {
+      "title": "No se pudo cargar el panel",
+      "description": "Vuelve a intentarlo en unos segundos."
+    }
+  },
+  "detail": {
+    "reservation": "Reserva",
+    "guest": "Huésped",
+    "access": "Acceso",
+    "cleaning": "Limpieza",
+    "incidents": "Incidencias",
+    "financial": "Financiero",
+    "notes": "Notas",
+    "approvals": "Aprobaciones pendientes",
+    "photos": "Fotos de la última limpieza",
+    "noAccess": "Sin información de acceso",
+    "noCleaning": "Sin limpieza pendiente",
+    "noNotes": "Sin notas",
+    "noIncidents": "Sin incidencias abiertas",
+    "noApprovals": "Sin aprobaciones pendientes",
+    "noPhotos": "Sin fotos de la última limpieza",
+    "photoAlt": "Foto de la última limpieza",
+    "notFound": {
+      "title": "Propiedad no encontrada",
+      "description": "No existe ninguna propiedad con ese identificador."
+    }
+  },
+  "financial": {
+    "reservationTotal": "Total de la reserva",
+    "pendingExpenses": "Gastos pendientes"
+  },
+  "incident": {
+    "severity": {
+      "LOW": "Baja",
+      "MEDIUM": "Media",
+      "HIGH": "Alta",
+      "CRITICAL": "Crítica"
+    }
+  },
+  "timeline": {
+    "title": "Cronología",
+    "empty": "No hay eventos para los filtros seleccionados.",
+    "filters": {
+      "type": "Tipo",
+      "actor": "Actor",
+      "severity": "Severidad"
+    },
+    "eventType": {
+      "CHECKOUT_WINDOW_REACHED": "Hora de checkout alcanzada",
+      "CLEANING_TASK_CREATED": "Tarea de limpieza creada",
+      "PROPERTY_STATE_CHANGED": "Cambio de estado",
+      "ACCESS_CODE_DELIVERED": "Código de acceso entregado",
+      "GUEST_MESSAGE_RECEIVED": "Mensaje del huésped recibido"
+    },
+    "actor": {
+      "SYSTEM": "Sistema",
+      "USER": "Usuario",
+      "GUEST": "Huésped",
+      "SCHEDULER": "Programador",
+      "WEBHOOK": "Webhook",
+      "AI": "IA"
+    },
+    "severity": {
+      "INFO": "Información",
+      "WARNING": "Aviso",
+      "ERROR": "Error",
+      "CRITICAL": "Crítico"
+    }
+  }
+}

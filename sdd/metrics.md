@@ -11,8 +11,11 @@
 | infra-dev-hardening | new, tasks, archive (design/run/review sin registrar) | 14 | 12237 | 3739887 | 13.1693 | 2026-07-22 | 2026-07-24 |
 | app-deploy-dev | new, design, tasks, run, review, archive | 38176 | 196026 | 30323880 | 24.4177 | 2026-07-24 | 2026-07-29 |
 | ingress-https-dev | new, archive (design/tasks/run/review sin registrar — tracking caído) | 26 | 21236 | 6714997 | 10.5150 | 2026-07-29 | 2026-07-29 |
+| dashboard-web-frontend | new, tasks, run, review, archive | 2327 | 345759 | 56235827 | 56.5514 | 2026-07-30 | 2026-08-01 |
 | auth-tenancy | new, design, tasks, archive (run/review sin registrar) | 83 | 74257 | 11714127 | 10.0592 | 2026-07-30 | 2026-07-30 |
 | app-version-visibility | new+design+tasks+run+archive | 168599 | 611287 | 148801977 | 92.3229 | 2026-07-30 | 2026-07-31 |
 | app-version-badge-date | new, tasks, run+review, archive (sin design: una función) | 135570 | 402614 | 64114944 | 47.5171 | 2026-07-31 | 2026-07-31 |
 | reservations | new, design, run, review, archive | 271778 | 807608 | 217200231 | 133.2077 | 2026-07-31 | 2026-07-31 |
 | domain-foundation-financial | new, design, tasks, run, review, archive | 245831 | 613164 | 151107303 | 106.1815 | 2026-07-31 | 2026-07-31 |
+| user-management | new, design, run, review, archive | 238868 | 905456 | 322824807 | 216.0134 | 2026-07-31 | 2026-08-01 |
+| api-contract-export | new, design, tasks, run, review, archive | 193212 | 479349 | 82884327 | 60.9954 | 2026-08-01 | 2026-08-02 |

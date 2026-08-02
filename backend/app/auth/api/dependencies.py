@@ -27,10 +27,13 @@ from app.auth.infrastructure.repositories import (
 )
 from app.auth.infrastructure.throttle import RedisLoginThrottle
 from app.auth.infrastructure.token_codec import JwtTokenCodec
-from app.auth.infrastructure.unit_of_work import SqlAlchemyUnitOfWork
 from app.core.config import settings
 from app.core.db import bind_session_to_tenant, get_db_session
 from app.core.errors import ForbiddenError
+# The single SqlAlchemyUnitOfWork of the project. `auth` used to carry its own
+# eight-line copy; `user-management` consolidated them (its design D16), which was the
+# debt `sdd/specs/reservations.md` assigned to "the next change that touches auth".
+from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.core.redis import get_redis
 
 # auto_error=False so a missing or non-Bearer header reaches our own handler and comes

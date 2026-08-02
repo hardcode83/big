@@ -6,9 +6,13 @@ from datetime import timedelta
 import pytest
 from sqlalchemy import select
 
-from app.auth.domain.entities import UserSession
+from app.auth.domain.entities import User, UserSession
 from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
-from app.auth.infrastructure.models import UserSessionModel
+from app.auth.domain.exceptions import EmailAlreadyExistsError
+from app.auth.domain.repositories import MAX_PAGE, MAX_PER_PAGE, UserFilters
+from app.auth.domain.value_objects import normalize_email
+from app.core.tenancy import CrossTenantWriteError
+from app.auth.infrastructure.models import UserModel, UserSessionModel
 from app.auth.infrastructure.repositories import (
     SqlAlchemySessionRepository,
     SqlAlchemyTenantStatusReader,
@@ -354,6 +358,128 @@ async def test_role_is_mapped_back_as_an_enum(db_session, tenant_a) -> None:
     assert found.role is UserRole.CLEANER
 
 
+@pytest.mark.asyncio
+async def test_revoke_all_for_user_reaches_every_family(db_session, tenant_a) -> None:
+    """user-management R3.7/R4.2: an administrator kills sessions they cannot enumerate.
+
+    `revoke_family` cannot express this — the caller has a `user_id`, not the
+    `family_id`s of somebody else's logins across devices.
+    """
+    user = await insert_user(db_session, tenant=tenant_a)
+    other_user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemySessionRepository(db_session)
+    families = [_session_entity(tenant_a.id, user.id) for _ in range(3)]
+    someone_else = _session_entity(tenant_a.id, other_user.id)
+    for entity in [*families, someone_else]:
+        await repo.add(tenant_a.id, entity)
+    await db_session.flush()
+    now = utc_now()
+
+    revoked = await repo.revoke_all_for_user(
+        tenant_a.id, user.id, SessionRevokedReason.USER_DEACTIVATED, now
+    )
+
+    assert revoked == 3
+    for entity in families:
+        stored = await repo.get(tenant_a.id, entity.id)
+        assert stored is not None
+        assert stored.revoked_reason is SessionRevokedReason.USER_DEACTIVATED
+        assert stored.is_usable(now) is False
+    untouched = await repo.get(tenant_a.id, someone_else.id)
+    assert untouched is not None and untouched.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_for_user_will_not_cross_tenants(db_session, tenant_a, tenant_b) -> None:
+    """`user_id` is globally unique, so only the tenant clause stops this crossing over."""
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemySessionRepository(db_session)
+    entity = _session_entity(tenant_b.id, user_b.id)
+    await repo.add(tenant_b.id, entity)
+    await db_session.flush()
+
+    revoked = await repo.revoke_all_for_user(
+        tenant_a.id, user_b.id, SessionRevokedReason.USER_DEACTIVATED, utc_now()
+    )
+
+    assert revoked == 0
+    stored = await repo.get(tenant_b.id, entity.id)
+    assert stored is not None and stored.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_for_user_is_idempotent(db_session, tenant_a) -> None:
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemySessionRepository(db_session)
+    entity = _session_entity(tenant_a.id, user.id)
+    await repo.add(tenant_a.id, entity)
+    await db_session.flush()
+
+    first = await repo.revoke_all_for_user(
+        tenant_a.id, user.id, SessionRevokedReason.PASSWORD_RESET, utc_now()
+    )
+    second = await repo.revoke_all_for_user(
+        tenant_a.id, user.id, SessionRevokedReason.USER_DEACTIVATED, utc_now()
+    )
+
+    assert (first, second) == (1, 0)
+    stored = await repo.get(tenant_a.id, entity.id)
+    assert stored is not None
+    # The first reason survives: a later administrative action did not cause this
+    # revocation and must not relabel it.
+    assert stored.revoked_reason is SessionRevokedReason.PASSWORD_RESET
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_for_user_leaves_an_earlier_logout_labelled_as_such(
+    db_session, tenant_a
+) -> None:
+    """A session the user closed themselves keeps `LOGOUT`, not `USER_DEACTIVATED`."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemySessionRepository(db_session)
+    logged_out = _session_entity(tenant_a.id, user.id)
+    still_open = _session_entity(tenant_a.id, user.id)
+    for entity in (logged_out, still_open):
+        await repo.add(tenant_a.id, entity)
+    await db_session.flush()
+    await repo.revoke_family(
+        tenant_a.id, logged_out.family_id, SessionRevokedReason.LOGOUT, utc_now()
+    )
+
+    revoked = await repo.revoke_all_for_user(
+        tenant_a.id, user.id, SessionRevokedReason.USER_DEACTIVATED, utc_now()
+    )
+
+    assert revoked == 1
+    first = await repo.get(tenant_a.id, logged_out.id)
+    second = await repo.get(tenant_a.id, still_open.id)
+    assert first is not None and first.revoked_reason is SessionRevokedReason.LOGOUT
+    assert second is not None
+    assert second.revoked_reason is SessionRevokedReason.USER_DEACTIVATED
+
+
+@pytest.mark.asyncio
+async def test_revoke_all_for_user_does_not_commit(db_session, tenant_a) -> None:
+    """Deactivation and its audit row must roll back together (R6.4)."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemySessionRepository(db_session)
+    entity = _session_entity(tenant_a.id, user.id)
+    await repo.add(tenant_a.id, entity)
+    await db_session.flush()
+
+    await repo.revoke_all_for_user(
+        tenant_a.id, user.id, SessionRevokedReason.USER_DEACTIVATED, utc_now()
+    )
+    await db_session.rollback()
+
+    stored = (
+        await db_session.execute(
+            select(UserSessionModel).where(UserSessionModel.id == entity.id)
+        )
+    ).scalar_one_or_none()
+    assert stored is None
+
+
 def test_no_unconditional_write_primitive_came_back() -> None:
     """Regression guard for the two methods 11.9 removed (design D5, R2.1).
 
@@ -377,3 +503,322 @@ def test_no_unconditional_write_primitive_came_back() -> None:
         "SqlAlchemyUserRepository.save is back — writing the whole row can revert a "
         "concurrent status, role or password change; use touch_last_login"
     )
+
+
+# --- user administration adapter (user-management R1, R2, R3, R7) -------------------
+
+
+def _domain_user(tenant_id, *, name="Ana", role=UserRole.CLEANER, email=None) -> User:
+    return User.create(
+        tenant_id=tenant_id,
+        name=name,
+        email=email or f"user-{uuid.uuid4().hex[:8]}@example.com",
+        password_hash="hashed",
+        role=role,
+        now=utc_now(),
+    )
+
+
+@pytest.mark.asyncio
+async def test_get_returns_a_user_whatever_its_status(db_session, tenant_a) -> None:
+    """Administration must see a suspended account to be able to reactivate it (R2.6)."""
+    suspended = await insert_user(db_session, tenant=tenant_a, status=UserStatus.SUSPENDED)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    found = await repo.get(tenant_a.id, suspended.id)
+
+    assert found is not None and found.status is UserStatus.SUSPENDED
+    # The authentication lookup still refuses it, which is the difference between the two.
+    assert await repo.get_active_by_id(tenant_a.id, suspended.id) is None
+
+
+@pytest.mark.asyncio
+async def test_get_will_not_cross_tenants(db_session, tenant_a, tenant_b) -> None:
+    """R7.1: indistinguishable from "does not exist", which is what makes the 404 honest."""
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    assert await repo.get(tenant_a.id, user_b.id) is None
+    assert await repo.get(tenant_a.id, uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_add_persists_a_user(db_session, tenant_a) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    user = _domain_user(tenant_a.id)
+
+    await repo.add(tenant_a.id, user)
+
+    stored = await repo.get(tenant_a.id, user.id)
+    assert stored is not None and stored.email == user.email
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_a_user_of_another_tenant(db_session, tenant_a, tenant_b) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(CrossTenantWriteError):
+        await repo.add(tenant_a.id, _domain_user(tenant_b.id))
+
+
+@pytest.mark.asyncio
+async def test_add_translates_a_duplicate_address_to_its_own_error(db_session, tenant_a) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    existing = await insert_user(db_session, tenant=tenant_a, email="ana@example.com")
+
+    with pytest.raises(EmailAlreadyExistsError) as caught:
+        await repo.add(tenant_a.id, _domain_user(tenant_a.id, email="ana@example.com"))
+
+    assert existing.email == "ana@example.com"
+    # The message must not name the tenant the address belongs to (R1.4).
+    assert "tenant" not in str(caught.value).lower()
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_an_address_taken_in_another_tenant(
+    db_session, tenant_a, tenant_b
+) -> None:
+    """Uniqueness is global since ADR 0005, so this is a `409` and not a silent success."""
+    await insert_user(db_session, tenant=tenant_b, email="shared@example.com")
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(EmailAlreadyExistsError):
+        await repo.add(tenant_a.id, _domain_user(tenant_a.id, email="shared@example.com"))
+
+
+@pytest.mark.asyncio
+async def test_add_refuses_an_address_that_differs_only_in_case(db_session, tenant_a) -> None:
+    """The index is on `lower(email)` (design D19), so this must not create a twin."""
+    await insert_user(db_session, tenant=tenant_a, email="ana@example.com")
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(EmailAlreadyExistsError):
+        await repo.add(
+            tenant_a.id, _domain_user(tenant_a.id, email=normalize_email("ANA@Example.COM"))
+        )
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_writes_only_the_named_columns(db_session, tenant_a) -> None:
+    """The whole point of design D21: an unnamed column is not touched."""
+    user = await insert_user(db_session, tenant=tenant_a, role=UserRole.CLEANER)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    await repo.apply_changes(tenant_a.id, user.id, {"name": "Ana Ruiz"})
+
+    stored = await repo.get(tenant_a.id, user.id)
+    assert stored is not None
+    assert stored.name == "Ana Ruiz"
+    assert stored.role is UserRole.CLEANER
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_cannot_revert_a_concurrent_column(db_session, tenant_a) -> None:
+    """The regression `auth-tenancy` deleted `save` to prevent (its design D5, D21 here).
+
+    A profile write issued after a suspension must not resurrect the account, which is
+    exactly what copying a whole entity read before the suspension would do.
+    """
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+    await repo.apply_changes(tenant_a.id, user.id, {"status": UserStatus.SUSPENDED})
+
+    await repo.apply_changes(tenant_a.id, user.id, {"name": "Ana Ruiz"})
+
+    stored = await repo.get(tenant_a.id, user.id)
+    assert stored is not None
+    assert stored.status is UserStatus.SUSPENDED
+    assert stored.name == "Ana Ruiz"
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_will_not_cross_tenants(db_session, tenant_a, tenant_b) -> None:
+    user_b = await insert_user(db_session, tenant=tenant_b, role=UserRole.CLEANER)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(ValueError):
+        await repo.apply_changes(tenant_a.id, user_b.id, {"role": UserRole.TENANT_OWNER})
+
+    stored = await repo.get(tenant_b.id, user_b.id)
+    assert stored is not None and stored.role is UserRole.CLEANER
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_refuses_identity_columns(db_session, tenant_a, tenant_b) -> None:
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    for values in (
+        {"tenant_id": tenant_b.id},
+        {"id": uuid.uuid4()},
+        {"last_login_at": utc_now()},
+        {"created_at": utc_now()},
+    ):
+        with pytest.raises(ValueError):
+            await repo.apply_changes(tenant_a.id, user.id, values)
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_refuses_an_unknown_column(db_session, tenant_a) -> None:
+    """A typo must fail loudly rather than write nothing and report success."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(ValueError):
+        await repo.apply_changes(tenant_a.id, user.id, {"nmae": "Ana"})
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_translates_a_duplicate_address(db_session, tenant_a) -> None:
+    await insert_user(db_session, tenant=tenant_a, email="taken@example.com")
+    user = await insert_user(db_session, tenant=tenant_a, email="mine@example.com")
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(EmailAlreadyExistsError):
+        await repo.apply_changes(tenant_a.id, user.id, {"email": "taken@example.com"})
+
+
+@pytest.mark.asyncio
+async def test_apply_changes_with_nothing_to_write_is_a_no_op(db_session, tenant_a) -> None:
+    """Design D15: a PATCH that changes nothing must not even reach the database."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    await repo.apply_changes(tenant_a.id, user.id, {})
+
+    assert await repo.get(tenant_a.id, user.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_the_listing_is_ordered_by_name_with_a_stable_tiebreaker(
+    db_session, tenant_a
+) -> None:
+    """Two users with the same name must not swap places between pages (design D17)."""
+    repo = SqlAlchemyUserRepository(db_session)
+    for name in ("Zoe", "Ana", "Ana", "Marta"):
+        await repo.add(tenant_a.id, _domain_user(tenant_a.id, name=name))
+
+    page = await repo.list(tenant_a.id, UserFilters(), page=1, per_page=10)
+
+    assert [user.name for user in page.items] == ["Ana", "Ana", "Marta", "Zoe"]
+    ana_ids = [user.id for user in page.items if user.name == "Ana"]
+    assert ana_ids == sorted(ana_ids)
+
+
+@pytest.mark.asyncio
+async def test_paginating_neither_repeats_nor_skips_a_row(db_session, tenant_a) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    for index in range(7):
+        await repo.add(tenant_a.id, _domain_user(tenant_a.id, name=f"user-{index:02d}"))
+
+    first = await repo.list(tenant_a.id, UserFilters(), page=1, per_page=3)
+    second = await repo.list(tenant_a.id, UserFilters(), page=2, per_page=3)
+    third = await repo.list(tenant_a.id, UserFilters(), page=3, per_page=3)
+
+    seen = [user.id for user in (*first.items, *second.items, *third.items)]
+    assert len(seen) == len(set(seen)) == 7
+    assert first.total == second.total == third.total == 7
+
+
+@pytest.mark.asyncio
+async def test_the_listing_only_sees_its_own_tenant(db_session, tenant_a, tenant_b) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    await repo.add(tenant_a.id, _domain_user(tenant_a.id, name="Mine"))
+    await repo.add(tenant_b.id, _domain_user(tenant_b.id, name="Theirs"))
+
+    page = await repo.list(tenant_a.id, UserFilters(), page=1, per_page=10)
+
+    assert [user.name for user in page.items] == ["Mine"]
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_the_listing_filters_by_role_and_by_status(db_session, tenant_a) -> None:
+    repo = SqlAlchemyUserRepository(db_session)
+    await repo.add(tenant_a.id, _domain_user(tenant_a.id, role=UserRole.CLEANER))
+    await repo.add(tenant_a.id, _domain_user(tenant_a.id, role=UserRole.TECHNICIAN))
+    suspended = _domain_user(tenant_a.id, role=UserRole.CLEANER)
+    await repo.add(tenant_a.id, suspended)
+    await repo.apply_changes(tenant_a.id, suspended.id, {"status": UserStatus.SUSPENDED})
+
+    by_role = await repo.list(
+        tenant_a.id, UserFilters(role=UserRole.CLEANER), page=1, per_page=10
+    )
+    by_status = await repo.list(
+        tenant_a.id, UserFilters(status=UserStatus.SUSPENDED), page=1, per_page=10
+    )
+    both = await repo.list(
+        tenant_a.id,
+        UserFilters(role=UserRole.TECHNICIAN, status=UserStatus.SUSPENDED),
+        page=1,
+        per_page=10,
+    )
+
+    assert by_role.total == 2
+    assert by_status.total == 1
+    assert both.total == 0  # filters combine with AND
+
+
+@pytest.mark.asyncio
+async def test_the_listing_rejects_pagination_outside_its_bounds(db_session, tenant_a) -> None:
+    """`page` becomes a SQL OFFSET; unbounded it overflows int8 at the driver (R2.2)."""
+    repo = SqlAlchemyUserRepository(db_session)
+
+    for page, per_page in ((0, 20), (MAX_PAGE + 1, 20), (1, 0), (1, MAX_PER_PAGE + 1)):
+        with pytest.raises(ValueError):
+            await repo.list(tenant_a.id, UserFilters(), page=page, per_page=per_page)
+
+
+@pytest.mark.asyncio
+async def test_counting_active_owners_excludes_the_target(db_session, tenant_a) -> None:
+    """Otherwise the target counts as the owner surviving its own demotion (R3.6)."""
+    owner = await insert_user(db_session, tenant=tenant_a, role=UserRole.TENANT_OWNER)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    assert await repo.count_active_owners_excluding(tenant_a.id, owner.id) == 0
+
+    second = await insert_user(db_session, tenant=tenant_a, role=UserRole.TENANT_OWNER)
+    assert await repo.count_active_owners_excluding(tenant_a.id, owner.id) == 1
+    assert await repo.count_active_owners_excluding(tenant_a.id, second.id) == 1
+
+
+@pytest.mark.asyncio
+async def test_counting_active_owners_ignores_inactive_ones_and_other_tenants(
+    db_session, tenant_a, tenant_b
+) -> None:
+    target = await insert_user(db_session, tenant=tenant_a, role=UserRole.TENANT_OWNER)
+    await insert_user(
+        db_session,
+        tenant=tenant_a,
+        role=UserRole.TENANT_OWNER,
+        status=UserStatus.SUSPENDED,
+    )
+    await insert_user(db_session, tenant=tenant_b, role=UserRole.TENANT_OWNER)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    assert await repo.count_active_owners_excluding(tenant_a.id, target.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_locking_the_tenant_does_not_fail_on_a_real_tenant(db_session, tenant_a) -> None:
+    """The lock itself; the concurrency it buys is proved in test_last_owner_concurrency.py."""
+    repo = SqlAlchemyUserRepository(db_session)
+
+    await repo.lock_tenant_for_admin(tenant_a.id)
+
+    assert await repo.count_active_owners_excluding(tenant_a.id, uuid.uuid4()) >= 0
+
+
+@pytest.mark.asyncio
+async def test_no_administration_method_commits(db_session, tenant_a) -> None:
+    """A user and its audit row must roll back together (R6.4)."""
+    repo = SqlAlchemyUserRepository(db_session)
+    user = _domain_user(tenant_a.id)
+    await repo.add(tenant_a.id, user)
+    await repo.apply_changes(tenant_a.id, user.id, {"name": "Ana Ruiz"})
+
+    await db_session.rollback()
+
+    assert (
+        await db_session.execute(select(UserModel).where(UserModel.id == user.id))
+    ).scalar_one_or_none() is None

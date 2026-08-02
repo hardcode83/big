@@ -12,11 +12,13 @@ from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
+from app.core.error_codes import ErrorCode
+
 
 class AppError(Exception):
     """Base for errors that map onto the PRD §23 envelope."""
 
-    code = "INTERNAL_ERROR"
+    code: ErrorCode = ErrorCode.INTERNAL_ERROR
     http_status = 500
 
     def __init__(self, message: str, details: dict[str, Any] | None = None) -> None:
@@ -26,45 +28,47 @@ class AppError(Exception):
 
 
 class ValidationFailedError(AppError):
-    code = "VALIDATION_ERROR"
+    code = ErrorCode.VALIDATION_ERROR
     http_status = 422
 
 
 class InvalidCredentialsError(AppError):
-    code = "INVALID_CREDENTIALS"
+    code = ErrorCode.INVALID_CREDENTIALS
     http_status = 401
 
 
 class InvalidTokenError(AppError):
-    code = "INVALID_TOKEN"
+    code = ErrorCode.INVALID_TOKEN
     http_status = 401
 
 
 class ForbiddenError(AppError):
-    code = "FORBIDDEN"
+    code = ErrorCode.FORBIDDEN
     http_status = 403
 
 
 class NotFoundError(AppError):
-    code = "NOT_FOUND"
+    code = ErrorCode.NOT_FOUND
     http_status = 404
 
 
 class RateLimitedError(AppError):
-    code = "RATE_LIMITED"
+    code = ErrorCode.RATE_LIMITED
     http_status = 429
 
 
-def error_envelope(code: str, message: str, details: dict[str, Any] | None = None) -> dict[str, Any]:
+def error_envelope(
+    code: ErrorCode, message: str, details: dict[str, Any] | None = None
+) -> dict[str, Any]:
     return {"error": {"code": code, "message": message, "details": details or {}}}
 
 
-_HTTP_STATUS_CODES = {
-    401: "INVALID_TOKEN",
-    403: "FORBIDDEN",
-    404: "NOT_FOUND",
-    405: "METHOD_NOT_ALLOWED",
-    429: "RATE_LIMITED",
+_HTTP_STATUS_CODES: dict[int, ErrorCode] = {
+    401: ErrorCode.INVALID_TOKEN,
+    403: ErrorCode.FORBIDDEN,
+    404: ErrorCode.NOT_FOUND,
+    405: ErrorCode.METHOD_NOT_ALLOWED,
+    429: ErrorCode.RATE_LIMITED,
 }
 
 
@@ -83,7 +87,7 @@ def register_error_handlers(app: FastAPI) -> None:
         return JSONResponse(
             status_code=422,
             content=error_envelope(
-                "VALIDATION_ERROR",
+                ErrorCode.VALIDATION_ERROR,
                 "Request validation failed",
                 {"errors": _serialisable_validation_errors(exc)},
             ),
@@ -91,7 +95,7 @@ def register_error_handlers(app: FastAPI) -> None:
 
     @app.exception_handler(StarletteHTTPException)
     async def _http_error(_: Request, exc: StarletteHTTPException) -> JSONResponse:
-        code = _HTTP_STATUS_CODES.get(exc.status_code, "HTTP_ERROR")
+        code = _HTTP_STATUS_CODES.get(exc.status_code, ErrorCode.HTTP_ERROR)
         message = exc.detail if isinstance(exc.detail, str) else "Request failed"
         return JSONResponse(
             status_code=exc.status_code,
