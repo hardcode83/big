@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
+state: READY_FOR_PR
+local_review: APPROVED
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/api-contract-export
+implementation_sha: 984e89b58a81a4bf0fa7ff3796735c0c8077e1c5
 pr_number: 
 pr_url: 
 pr_state: 

@@ -17,3 +17,4 @@
 | reservations | new, design, run, review, archive | 271778 | 807608 | 217200231 | 133.2077 | 2026-07-31 | 2026-07-31 |
 | domain-foundation-financial | new, design, tasks, run, review, archive | 245831 | 613164 | 151107303 | 106.1815 | 2026-07-31 | 2026-07-31 |
 | user-management | new, design, run, review, archive | 238868 | 905456 | 322824807 | 216.0134 | 2026-07-31 | 2026-08-01 |
+| api-contract-export | new, design, tasks, run, review | 192573 | 465119 | 73969559 | 55.9913 | 2026-08-01 | — |
