@@ -18,4 +18,4 @@
 - [x] 3.2 En un entorno limpio con Node 22, verificar la instalación reproducible y la suite completa del frontend: `cd frontend && npm ci`, `npm test`, `npm run lint` y `npm run typecheck`. Si aparece un fallo preexistente, registrarlo como bloqueo/hallazgo separado sin modificar tests, lint, configuración TypeScript ni código de producto en este change. [R2, R3]
 - [x] 3.3 Ejecutar `git diff --check` y revisar el diff para confirmar que la implementación solo añade `.github/workflows/frontend-tests.yml`, no modifica los workflows de build/deploy existentes y mantiene `npm run build` fuera de este gate. [R4]
 
-**Gate remoto obligatorio de la fase PR — PENDIENTE:** antes del merge, GitHub Actions debe aceptar el workflow, crear el check `frontend-tests`, ejecutarlo en el Pull Request y finalizar correctamente. Esta comprobación no forma parte del cierre local de `/sdd:run` y no se considera ejecutada todavía.
+**Gate remoto obligatorio de la fase PR — SATISFECHO:** GitHub Actions aceptó el workflow, creó y ejecutó el check `frontend-tests` en el PR [#34](https://github.com/autohostai-labs/AutoHostAI/pull/34), y finalizó correctamente antes del merge.

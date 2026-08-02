@@ -78,8 +78,8 @@ Es una capacidad separada del despliegue (`app-deploy-dev`): valida, no publica 
   Pro o hacer público el repositorio; queda como decisión pendiente.
 - No hay comando de lint ni de typecheck en el proyecto: `sdd/project.md` no declara ninguno
   y este workflow no inventa uno.
-- El frontend tiene sus propios comandos de verificación (`npm test`, `npm run typecheck`,
-  `npm run lint`) que ningún workflow ejecuta todavía.
+- El frontend tiene su workflow independiente `frontend-tests`, descrito en
+  `sdd/specs/frontend-ci.md`; `backend-tests` no duplica sus verificaciones.
 
 ## Key files
 
