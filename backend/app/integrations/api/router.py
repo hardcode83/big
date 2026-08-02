@@ -11,13 +11,16 @@ from fastapi import APIRouter, Depends, File, UploadFile
 
 from app.auth.api.dependencies import AuthenticatedRequest, now_utc, require
 from app.auth.domain.policy import Permission
+from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.core.config import settings
 from app.integrations.api.dependencies import get_import_csv_use_case
 from app.integrations.api.schemas import ImportReportResponse
 from app.integrations.application.use_cases import ImportReservationsFromCsvUseCase
 from app.integrations.infrastructure.csv_parser import CsvFileError, CsvTooLargeError
 
-router = APIRouter(prefix="/integrations", tags=["integrations"])
+router = APIRouter(
+    prefix="/integrations", tags=["integrations"], responses=AUTHENTICATED_RESPONSES
+)
 
 # The declared type is client-supplied, so it is a courtesy check, not the gate — the real gate
 # is the UTF-8 + required-columns parse. But it is not opt-out either: an absent or empty type is

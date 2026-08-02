@@ -11,6 +11,7 @@ design D12.
 from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
+from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 from app.tenants.domain.exceptions import (
     TenantDomainError,
@@ -18,18 +19,18 @@ from app.tenants.domain.exceptions import (
     TenantValidationError,
 )
 
-_MAPPING: tuple[tuple[type[TenantDomainError], int, str], ...] = (
-    (TenantNotFoundError, 404, "NOT_FOUND"),
-    (TenantValidationError, 422, "VALIDATION_ERROR"),
+_MAPPING: tuple[tuple[type[TenantDomainError], int, ErrorCode], ...] = (
+    (TenantNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (TenantValidationError, 422, ErrorCode.VALIDATION_ERROR),
 )
 
 
-def http_error_for(exc: TenantDomainError) -> tuple[int, str]:
+def http_error_for(exc: TenantDomainError) -> tuple[int, ErrorCode]:
     for error_class, status, code in _MAPPING:
         if isinstance(exc, error_class):
             return status, code
     # A tenant error nobody mapped is a bug, not a client problem.
-    return 500, "INTERNAL_ERROR"
+    return 500, ErrorCode.INTERNAL_ERROR
 
 
 def register_tenant_error_handlers(app: FastAPI) -> None:

@@ -27,6 +27,7 @@ from app.auth.application.use_cases import (
     RefreshTokenUseCase,
 )
 from app.auth.domain.policy import Permission
+from app.core.openapi import AUTHENTICATED_RESPONSES
 
 router = APIRouter(prefix="/auth", tags=["auth"])
 
@@ -80,6 +81,7 @@ async def refresh(
         "Revokes the refresh family named by the token. Access tokens already issued "
         "keep working until they expire — at most their configured lifetime."
     ),
+    responses=AUTHENTICATED_RESPONSES,
 )
 async def logout(
     authenticated: Annotated[
@@ -99,6 +101,12 @@ async def logout(
     "/me",
     response_model=CurrentUserResponse,
     summary="The authenticated user's own profile",
+    description=(
+        "Returns the identity behind the access token: the user, their role and the "
+        "tenant the token is scoped to. Reads nothing from the request beyond the "
+        "token, so it never resolves another tenant's data."
+    ),
+    responses=AUTHENTICATED_RESPONSES,
 )
 async def me(
     authenticated: Annotated[
