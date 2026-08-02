@@ -31,4 +31,4 @@ Mantiene el árbol de dependencias del frontend reproducible y fuera de los rang
 - `frontend/package.json` — direct dependency range and scoped temporary overrides.
 - `frontend/package-lock.json` — reproducible resolved versions and integrity metadata.
 - `frontend/devops/Dockerfile` — Node 22 standalone production image and build verification surface.
-- `sdd/changes/frontend-dependency-security/design.md` — baseline evidence, decisions and verification record for the archived remediation.
+- `sdd/changes/archive/2026-08-02-frontend-dependency-security/design.md` — baseline evidence, decisions and verification record for the archived remediation.
