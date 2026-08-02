@@ -9,6 +9,11 @@ un hecho reproducible por cualquiera y no una afirmación de la máquina de quie
 
 Es una capacidad separada del despliegue (`app-deploy-dev`): valida, no publica ni despliega.
 
+No es el único workflow que valida el backend en cada PR: `api-contract` comprueba que
+`backend/openapi.json` corresponde al código (`specs/api-contract.md`). Vive aparte porque no
+necesita PostgreSQL ni Redis y da señal en segundos, y porque mezclar ambas señales haría que
+olvidar regenerar el contrato cortara la ejecución antes de la suite.
+
 ## Requirements
 
 ### Disparadores y alcance
