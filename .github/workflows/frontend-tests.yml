@@ -1,0 +1,91 @@
+name: frontend-tests
+
+# Gate reproducible para la calidad del frontend. Se ejecuta sin filtros de paths
+# para que el check exista en todos los Pull Requests, igual que backend-tests.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: frontend-tests-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  frontend-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          # Los pasos posteriores no necesitan Git autenticado; no dejar el token
+          # disponible para lifecycle scripts o comandos controlados por un PR.
+          persist-credentials: false
+
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Misma autoridad que las dos etapas node:22-slim del Dockerfile.
+          node-version: "22"
+          # Cachea descargas de npm, nunca node_modules; npm ci sigue siendo limpio.
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Instalar dependencias desde el lockfile
+        id: install
+        working-directory: frontend
+        run: npm ci
+
+      - name: Tests (Vitest)
+        id: tests
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        run: npm test
+
+      - name: Lint (ESLint)
+        id: lint
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        run: npm run lint
+
+      - name: Typecheck (TypeScript)
+        id: typecheck
+        if: ${{ steps.install.outcome == 'success' && !cancelled() }}
+        continue-on-error: true
+        working-directory: frontend
+        run: npm run typecheck
+
+      - name: Consolidar resultados
+        if: always()
+        env:
+          INSTALL_OUTCOME: ${{ steps.install.outcome }}
+          TESTS_OUTCOME: ${{ steps.tests.outcome }}
+          LINT_OUTCOME: ${{ steps.lint.outcome }}
+          TYPECHECK_OUTCOME: ${{ steps.typecheck.outcome }}
+        run: |
+          set -euo pipefail
+          {
+            echo "## Frontend checks"
+            echo ""
+            echo "| Verificación | Resultado |"
+            echo "|---|---|"
+            echo "| npm ci | ${INSTALL_OUTCOME:-not-run} |"
+            echo "| Tests (Vitest) | ${TESTS_OUTCOME:-not-run} |"
+            echo "| Lint (ESLint) | ${LINT_OUTCOME:-not-run} |"
+            echo "| Typecheck (TypeScript) | ${TYPECHECK_OUTCOME:-not-run} |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+          if [ "$INSTALL_OUTCOME" != "success" ] || \
+             [ "$TESTS_OUTCOME" != "success" ] || \
+             [ "$LINT_OUTCOME" != "success" ] || \
+             [ "$TYPECHECK_OUTCOME" != "success" ]; then
+            echo "::error::Una o más verificaciones del frontend fallaron, se cancelaron o no llegaron a ejecutarse."
+            exit 1
+          fi
