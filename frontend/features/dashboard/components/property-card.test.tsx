@@ -71,6 +71,25 @@ describe("PropertyCard (R1, R5)", () => {
     expect(screen.getByText("View detail")).toBeInTheDocument();
   });
 
+  it("keeps the operational regions in priority order", () => {
+    renderCard(<PropertyCard card={card} />);
+
+    const sections = Array.from(screen.getByRole("article").querySelectorAll("section"));
+    expect(
+      sections.map(
+        (section) => section.getAttribute("aria-label") ?? section.querySelector("h4")?.textContent,
+      ),
+    ).toEqual(["Incidencias abiertas", "Próxima acción", "Reserva", "Limpieza", "Último evento"]);
+  });
+
+  it("exposes a localized accessible detail link", () => {
+    renderCard(<PropertyCard card={card} />);
+    expect(screen.getByRole("link", { name: "Ver detalle" })).toHaveAttribute(
+      "href",
+      "/properties/redes11",
+    );
+  });
+
   it("has no axe violations", async () => {
     const { container } = renderCard(<PropertyCard card={card} />);
     expect(await getA11yViolations(container)).toEqual([]);
