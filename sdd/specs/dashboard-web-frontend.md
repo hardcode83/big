@@ -30,6 +30,18 @@ future HTTP implementation replaces the mock without changing the UI.
 - THE SYSTEM SHALL NOT compute operational state, colors, or the next action in
   the component: those are rendered as provided by the data source (the backend
   is the source of truth).
+- WHEN a property card is rendered, THE SYSTEM SHALL present its visual and DOM
+  regions in this priority order: operational state, open incidents, next
+  action, reservation and guest, cleaning, and last event.
+- WHEN cards with different amounts of content are shown in the same grid, THE
+  SYSTEM SHALL keep their headers, primary regions, and detail links visually
+  aligned without hiding required values or introducing horizontal overflow.
+- WHEN the viewport is desktop, tablet, or mobile, THE SYSTEM SHALL reflow the
+  card grid and its internal content while preserving the same hierarchy and
+  readable wrapping in the active locale.
+- WHEN a user navigates the card with a keyboard, THE SYSTEM SHALL preserve
+  native semantics, a visible focus indicator, and the localized accessible
+  name of the property-detail link.
 
 ### Property detail (`/properties/[id]`)
 
