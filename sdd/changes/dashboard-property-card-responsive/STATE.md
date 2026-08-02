@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/dashboard-property-card-responsive
-implementation_sha: 53e3368b8ec399e43aecff0656a93e100564aee5
+implementation_sha: cbcdbd5fe2213a3776aaa6c316ab83e00b34d043
 pr_number: 
 pr_url: 
 pr_state: 
