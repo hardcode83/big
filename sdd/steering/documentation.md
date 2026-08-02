@@ -9,7 +9,7 @@ phases: [tasks, archive]
 
 ## Qué debe mantenerse al día (genera tareas)
 
-- Endpoint nuevo/cambiado → visible en OpenAPI auto-generado (FastAPI); anotar summary/description y modelos de respuesta.
+- Endpoint nuevo/cambiado → visible en OpenAPI auto-generado (FastAPI); anotar summary/description y modelos de respuesta. **Regenerar `backend/openapi.json` con `make openapi` y commitearlo en el mismo PR** — el workflow `api-contract` lo exige.
 - Variable de entorno nueva → `.env.example` actualizado con nombre y comentario, sin valores (PRD §25).
 - String de UI nueva → claves en `locales/es/` **y** `locales/en/`.
 - Supuesto o proveedor sin credenciales → marcar `ASSUMPTION` / `EXTERNAL_DEPENDENCY` donde corresponda.
@@ -22,7 +22,7 @@ phases: [tasks, archive]
 
 - README raíz: cómo arrancar, estructura, seed users (PRD §27), URLs locales, cómo se desarrolla (SDD).
 - `docs/`: documentación extendida — una página por capability operativa + `docs/diagrams/`.
-- OpenAPI/Swagger: contrato para el frontend.
+- OpenAPI/Swagger: contrato para el frontend. Vive **versionado** en `backend/openapi.json`, regenerado con `make openapi`; el `/docs` servido es la misma información, pero solo con el stack levantado. El workflow `api-contract` falla si el fichero commiteado no corresponde al código, así que un cambio de forma de una respuesta se ve en el diff de su Pull Request. **No es una red de seguridad contra cambios incompatibles**: eso lo atrapa el typecheck del frontend contra los tipos derivados (entrada `frontend-ci` del roadmap).
 - `sdd/specs/`: comportamiento del sistema (lo mantiene el flujo SDD).
 
 ## Checklist de archivado

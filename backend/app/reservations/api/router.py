@@ -11,6 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.auth.api.dependencies import AuthenticatedRequest, now_utc, require
 from app.auth.domain.policy import Permission
 from app.reservations.api.dependencies import (
@@ -40,7 +41,9 @@ from app.reservations.application.use_cases import (
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.domain.repositories import ReservationFilters
 
-router = APIRouter(prefix="/reservations", tags=["reservations"])
+router = APIRouter(
+    prefix="/reservations", tags=["reservations"], responses=AUTHENTICATED_RESPONSES
+)
 
 ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_RESERVATIONS))]
 ManageDep = Annotated[AuthenticatedRequest, Depends(require(Permission.MANAGE_RESERVATIONS))]

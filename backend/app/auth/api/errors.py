@@ -23,34 +23,35 @@ from app.auth.domain.exceptions import (
     UnassignableRoleError,
     UserNotFoundError,
 )
+from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 
 # Order matters: the first matching entry wins, so subclasses come before their base
 # (TokenTypeMismatchError is an InvalidTokenError).
-_MAPPING: tuple[tuple[type[AuthDomainError], int, str], ...] = (
-    (InvalidCredentialsError, 401, "INVALID_CREDENTIALS"),
-    (SessionReuseDetectedError, 401, "INVALID_TOKEN"),
-    (InvalidTokenError, 401, "INVALID_TOKEN"),
-    (TooManyAttemptsError, 429, "RATE_LIMITED"),
-    (PasswordTooLongError, 422, "VALIDATION_ERROR"),
+_MAPPING: tuple[tuple[type[AuthDomainError], int, ErrorCode], ...] = (
+    (InvalidCredentialsError, 401, ErrorCode.INVALID_CREDENTIALS),
+    (SessionReuseDetectedError, 401, ErrorCode.INVALID_TOKEN),
+    (InvalidTokenError, 401, ErrorCode.INVALID_TOKEN),
+    (TooManyAttemptsError, 429, ErrorCode.RATE_LIMITED),
+    (PasswordTooLongError, 422, ErrorCode.VALIDATION_ERROR),
     # Added by `user-management`. `404` for a user of another tenant is requirement R7.1,
     # not a convention: the answer must not reveal that the resource exists.
-    (UserNotFoundError, 404, "NOT_FOUND"),
-    (EmailAlreadyExistsError, 409, "CONFLICT"),
+    (UserNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (EmailAlreadyExistsError, 409, ErrorCode.CONFLICT),
     # The three refusals of an operation that is well-formed but not allowed to happen.
     # `422` and not `403`: the caller HAS the permission, the request is the problem.
-    (SelfRoleChangeError, 422, "VALIDATION_ERROR"),
-    (LastOwnerError, 422, "VALIDATION_ERROR"),
-    (UnassignableRoleError, 422, "VALIDATION_ERROR"),
+    (SelfRoleChangeError, 422, ErrorCode.VALIDATION_ERROR),
+    (LastOwnerError, 422, ErrorCode.VALIDATION_ERROR),
+    (UnassignableRoleError, 422, ErrorCode.VALIDATION_ERROR),
 )
 
 
-def http_error_for(exc: AuthDomainError) -> tuple[int, str]:
+def http_error_for(exc: AuthDomainError) -> tuple[int, ErrorCode]:
     for error_class, status, code in _MAPPING:
         if isinstance(exc, error_class):
             return status, code
     # An auth error nobody mapped is a bug, not a client problem.
-    return 500, "INTERNAL_ERROR"
+    return 500, ErrorCode.INTERNAL_ERROR
 
 
 def register_auth_error_handlers(app: FastAPI) -> None:

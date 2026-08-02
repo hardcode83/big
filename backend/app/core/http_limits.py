@@ -27,9 +27,10 @@ from collections.abc import Callable, Iterable
 from starlette.datastructures import Headers
 from starlette.types import ASGIApp, Message, Receive, Scope, Send
 
+from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 
-TOO_LARGE_CODE = "PAYLOAD_TOO_LARGE"
+TOO_LARGE_CODE = ErrorCode.PAYLOAD_TOO_LARGE
 
 
 class MaxBodySizeMiddleware:

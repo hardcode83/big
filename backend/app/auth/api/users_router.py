@@ -14,6 +14,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, Response, status
 
+from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.auth.api.dependencies import AuthenticatedRequest, get_client_ip, now_utc, require
 from app.auth.api.user_schemas import (
     MAX_PAGE,
@@ -45,7 +46,9 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.policy import Permission
 from app.auth.domain.repositories import UserFilters
 
-router = APIRouter(prefix="/users", tags=["users"])
+router = APIRouter(
+    prefix="/users", tags=["users"], responses=AUTHENTICATED_RESPONSES
+)
 
 ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_USERS))]
 ManageDep = Annotated[AuthenticatedRequest, Depends(require(Permission.MANAGE_USERS))]

@@ -10,6 +10,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Depends
 
+from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.auth.api.dependencies import AuthenticatedRequest, get_client_ip, now_utc, require
 from app.auth.domain.policy import Permission
 from app.tenants.api.dependencies import (
@@ -22,7 +23,9 @@ from app.tenants.application.use_cases import (
     UpdateTenantSettingsUseCase,
 )
 
-router = APIRouter(prefix="/tenants", tags=["tenants"])
+router = APIRouter(
+    prefix="/tenants", tags=["tenants"], responses=AUTHENTICATED_RESPONSES
+)
 
 ReadDep = Annotated[AuthenticatedRequest, Depends(require(Permission.READ_TENANT_SETTINGS))]
 ManageDep = Annotated[

@@ -21,6 +21,7 @@ Al cabo de unos segundos:
 
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
+make openapi           # regenera el contrato de API (ver abajo)
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -73,6 +74,37 @@ uv run alembic downgrade -1                                           # revierte
 ```
 
 Requiere Postgres alcanzable (`make up` levantado, o al menos `docker compose up -d postgres`).
+
+## Contrato de API (OpenAPI)
+
+`backend/openapi.json` es el contrato de la API, versionado en el repositorio. Es lo que
+consume el frontend para saber la forma de cada endpoint, y el sitio donde un cambio de
+respuesta se ve en el diff del Pull Request que lo provoca.
+
+```bash
+make openapi   # regenéralo tras cambiar la forma de una respuesta
+```
+
+No necesita el stack levantado: la generación no toca base de datos, Redis ni red. El
+workflow `api-contract` lo comprueba en cada PR y falla si el fichero commiteado ya no
+corresponde al código, indicando este mismo comando.
+
+Para derivar los tipos TypeScript del contrato:
+
+```bash
+npx openapi-typescript backend/openapi.json -o frontend/lib/api/schema.d.ts
+```
+
+Todavía **no está cableado**: hacerlo es trabajo de la entrada `frontend-ci` del roadmap,
+que añadirá `openapi-typescript` como `devDependency` del frontend —con versión en el
+lockfile, en vez de este `npx` flotante— junto a un script de npm y la comprobación de que
+los tipos no han derivado del contrato.
+
+Ese typecheck es lo que rompe ante un cambio incompatible. El workflow `api-contract`
+**no**: solo garantiza que `backend/openapi.json` esté al día respecto al código.
+
+La documentación interactiva sigue disponible en http://localhost:8000/docs con el stack
+levantado.
 
 ## Variables de entorno
 
