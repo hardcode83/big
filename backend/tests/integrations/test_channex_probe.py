@@ -315,6 +315,30 @@ def test_card_data_is_scrubbed_including_the_expiry_date():
     assert cleaned["guarantee"]["is_virtual"] is False
 
 
+def test_a_date_shaped_key_preserves_a_price_but_not_free_text():
+    """The handover item the security panel said was worth closing properly.
+
+    The branch exists for `rooms[].days`, whose values are decimal price strings. It used to
+    preserve **any** scalar, so a provider (or a `--capture=` against a new endpoint) that keyed
+    free text by date published it verbatim.
+    """
+    assert probe.anonymise({"days": {"2026-09-05": "120.00"}}) == {"days": {"2026-09-05": "120.00"}}
+    assert probe.anonymise({"2026-09-05": 120}) == {"2026-09-05": 120}
+
+    leaked = probe.anonymise({"2026-09-05": "call Ana at +34611223344"})
+    assert leaked["2026-09-05"] == probe.SCRUBBED
+
+
+@pytest.mark.parametrize("key", ["34-611-223-344", "34611223344", "12345678", "34.611.223.344"])
+def test_a_digit_shaped_key_is_scrubbed_even_with_separators(key):
+    """A phone or document number used as a dict key. Separators are stripped before the check —
+    the earlier version only caught an unbroken run of digits."""
+    cleaned = probe.anonymise({key: {"nights": 3}})
+    assert probe.SCRUBBED_KEY in cleaned
+    # The value underneath is still judged on its own merits, not destroyed.
+    assert cleaned[probe.SCRUBBED_KEY] == {"nights": 3}
+
+
 def test_capture_writes_the_anonymised_body_not_the_raw_one(tmp_path, monkeypatch):
     """R4.1 + R4.2 — the **write path**, which had no test at all.
 

@@ -279,8 +279,16 @@ def _anonymise_value(key: str | None, value: Any) -> Any:
 def _anonymise_key(key: str) -> str:
     if not isinstance(key, str) or not _IDENTIFIER_KEY.match(key):
         return SCRUBBED_KEY
-    if key.isdigit() and len(key) >= 7:
-        # A long run of digits used as a key: could be a document or phone number.
+    # A date key is structure, and it has to be checked BEFORE the digit heuristic below —
+    # `2026-09-05` stripped of separators is `20260905`, eight digits, so the phone/document check
+    # ate every nightly-rate key in `rooms[].days`. Caught by its own test and by the fixture
+    # idempotency check, which is what that check is for.
+    if _DATE_KEY.match(key):
+        return key
+    # A long run of digits used as a key: could be a document or phone number. Separators are
+    # stripped first, so `34-611-223-344` is caught as well as `34611223344`.
+    bare = re.sub(r"[-. ]", "", key)
+    if bare.isdigit() and len(bare) >= 7:
         return SCRUBBED_KEY
     lowered = key.lower()
     if lowered in PRESERVED_KEYS or lowered.endswith(PRESERVED_SUFFIXES):
@@ -293,13 +301,30 @@ def _anonymise_key(key: str) -> str:
     return key
 
 
+def _looks_numeric(value: Any) -> bool:
+    """A number, or a string that is only one — `"120.00"`, not `"call Ana at 611223344"`."""
+    if isinstance(value, (int, float)):
+        return True
+    if not isinstance(value, str):
+        return False
+    return re.fullmatch(r"-?\d+(\.\d+)?", value.strip()) is not None
+
+
 def _anonymise_leaf(key: str | None, value: Any) -> Any:
     """Judge one scalar by the key it sits under — a dict entry's key, or its list's key."""
     if value is None or isinstance(value, bool):
         return value
 
     lowered = key.lower() if isinstance(key, str) else ""
-    if lowered in PRESERVED_KEYS or _DATE_KEY.match(lowered):
+    if lowered in PRESERVED_KEYS:
+        return value
+    # A date-shaped key preserves its value **only if that value is a number**. The branch exists
+    # for `rooms[].days`, whose values are decimal price strings, and it used to preserve *any*
+    # scalar — so `{"2026-09-05": "call Ana at +34611223344"}` survived verbatim. Same move as the
+    # list fix: take the position out of the decision for value types it was never meant to cover.
+    # Recommended by the feature-scale security panel as the one handover item worth closing
+    # properly rather than hardening; no fixture impact, since `days` values stay.
+    if _DATE_KEY.match(lowered) and _looks_numeric(value):
         return value
 
     for needles, placeholder in PII_PLACEHOLDERS:
