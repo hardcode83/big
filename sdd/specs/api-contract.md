@@ -129,12 +129,23 @@ Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFL
 
 ### Consumo
 
-- THE SYSTEM SHALL documentar en el README la ruta del artefacto, el comando que lo
-  regenera y el comando que deriva tipos TypeScript de él.
-- El frontend **no** consume todavía esos tipos. Cablearlos en `frontend/lib/api/` —hoy
-  `client.ts` devuelve `unknown` a propósito— pertenece a la entrada `frontend-ci` del
-  roadmap, que añadirá `openapi-typescript` como `devDependency` con lockfile y la
-  comprobación de que los tipos no han derivado del contrato.
+- THE SYSTEM SHALL mantener `backend/openapi.json` como única fuente de la que el frontend
+  deriva sus tipos TypeScript.
+- THE SYSTEM SHALL usar un único generador oficial, `openapi-typescript`, fijado exactamente
+  en `frontend/package.json` y `frontend/package-lock.json`.
+- THE SYSTEM SHALL escribir el artefacto generado en
+  `frontend/lib/api/generated/openapi.d.ts`, que contiene declaraciones TypeScript y no
+  clientes, wrappers ni lógica runtime.
+- THE SYSTEM SHALL ofrecer desde `frontend/` los comandos `npm run api:generate` para regenerar
+  el artefacto y `npm run api:check` para compararlo sin modificarlo.
+- WHEN `npm run api:check` detecta una diferencia, THE SYSTEM SHALL fallar mostrando un diff
+  del artefacto y el comando exacto de regeneración.
+- THE SYSTEM SHALL ejecutar el mismo flujo versionado en macOS, Linux y CI, con Node 22,
+  `npm ci` y salida normalizada a bytes reproducibles.
+- THE SYSTEM SHALL mantener el transporte en `frontend/lib/api/` genérico: sus rutas y métodos
+  se restringen a `paths` y sus cuerpos JSON/respuestas de éxito se derivan del contrato; las
+  respuestas no-OK continúan pasando por `ApiError` y `parseApiError`, sin tipos de error por
+  endpoint ni wrappers de dominio.
 
 ## Estado
 
