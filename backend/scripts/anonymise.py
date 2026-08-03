@@ -146,10 +146,23 @@ class _Anonymiser:
 
     def value(self, key: str | None, value: Any) -> Any:
         if isinstance(value, dict):
-            return {
-                self.key(member_key): self.value(member_key, member)
-                for member_key, member in value.items()
-            }
+            # Scrubbed keys are disambiguated, because two different personal-datum keys under
+            # the same parent both collapse to `SCRUBBED_KEY` and the second would overwrite
+            # the first — silently deleting a whole entry from the fixture, with nothing left
+            # to show it existed. A provider that keys bookings by guest email
+            # (`{"a@x.com": {...}, "b@x.com": {...}}`) would publish one booking and lose the
+            # other, and the capture's own substituted-keys report would still list both.
+            # Losing data is a safe direction for privacy and a terrible one for a fixture.
+            cleaned: dict[Any, Any] = {}
+            for member_key, member in value.items():
+                new_key = self.key(member_key)
+                if new_key in cleaned and new_key in (SCRUBBED_KEY, SCRUBBED):
+                    suffix = 2
+                    while f"{new_key}#{suffix}" in cleaned:
+                        suffix += 1
+                    new_key = f"{new_key}#{suffix}"
+                cleaned[new_key] = self.value(member_key, member)
+            return cleaned
         if isinstance(value, list):
             # **A scalar inside a list is treated as UNNAMED** — `key=None` — so it falls straight
             # to the fail-closed default. Dicts and nested lists keep recursing and are judged by

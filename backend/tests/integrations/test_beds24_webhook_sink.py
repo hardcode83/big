@@ -183,3 +183,109 @@ def test_unrecognised_arguments_are_refused_without_echoing(argument):
         sink.main([argument])
 
     assert argument not in str(excinfo.value)
+
+
+# --- Panel fixes (sections 2-6 review) -------------------------------------------------------
+
+
+def test_booking_ref_is_not_confused_with_a_property_id():
+    """A wrong join key is worse than a missing one: it produces a plausible wrong number.
+
+    Regression for the DFS that accepted whichever of the candidate keys a node happened to
+    have, returning the property id from `{"property": {"id": 99}, "booking": {"id": 555}}`.
+    """
+    record = _record(
+        {
+            "type": "booking",
+            "property": {"id": 99, "name": "Redes 11"},
+            "booking": {"id": 555, "arrival": "2026-09-01", "status": "confirmed"},
+        }
+    )
+
+    assert record["booking_ref"] != "99"
+    assert record["booking_ref"] is None, "two bare ids is ambiguous — refuse rather than guess"
+
+
+def test_an_unambiguous_booking_key_wins_over_a_bare_id():
+    record = _record({"property": {"id": 99}, "booking": {"bookingId": 555}})
+
+    assert record["booking_ref"] == "555"
+
+
+def test_a_single_bare_id_is_still_accepted():
+    record = _record({"booking": {"id": 555, "status": "confirmed"}})
+
+    assert record["booking_ref"] == "555"
+
+
+def test_the_query_string_never_reaches_disk():
+    """The runbook has the operator paste a tunnel URL into a panel; secrets land in URLs."""
+    record = sink.build_webhook_record(
+        method="POST",
+        path="/hook?token=STATIC-AUTH-SECRET&mail=ana@gmail.com",
+        headers={},
+        body=b"{}",
+    )
+
+    rendered = json.dumps(record)
+    assert "STATIC-AUTH-SECRET" not in rendered
+    assert "ana@gmail.com" not in rendered
+    assert record["path"] == "/hook"
+    assert record["query_keys"] == ["mail", "token"]
+
+
+@pytest.mark.parametrize("declared,expected", [("-1", None), ("12abc", None), ("", None),
+                                               ("50", 50), ("99999999", 1_000_000)])
+def test_content_length_is_clamped_and_never_negative(declared, expected):
+    """`min(-1, MAX)` is -1, and `rfile.read(-1)` reads until EOF — an unbounded write to disk."""
+
+    from pathlib import Path
+
+    handler_cls = sink.make_handler(Path("/tmp/unused.jsonl"), [])
+    instance = handler_cls.__new__(handler_cls)
+    instance.headers = {"Content-Length": declared}
+
+    assert handler_cls._body_length(instance) == expected
+
+
+def test_probe_fallback_picks_the_latest_preceding_line_for_a_repeated_ref():
+    """`provoke` writes three lines for one booking, so a ref legitimately repeats."""
+    webhooks = [
+        {
+            "received_at_utc": "2026-08-03T13:10:05+00:00",
+            "booking_ref": "BK-1",
+            "event_time": None,
+        }
+    ]
+    probe_records = [
+        {"ts_utc": "2026-08-03T13:00:00+00:00", "booking_ref": "BK-1"},
+        {"ts_utc": "2026-08-03T13:10:00+00:00", "booking_ref": "BK-1"},
+    ]
+
+    [result] = sink.compute_latencies(webhooks, probe_records)
+
+    assert result["latency_seconds"] == 5.0, "must not measure against the create request"
+
+
+def test_ref_matching_is_not_nearest_timestamp_matching():
+    """The discriminator the previous test lacked: the nearest line has the WRONG ref.
+
+    Design D11 rejects proximity matching explicitly — "falla en cuanto hay dos hechos en la
+    misma ventana". This fails if the implementation ever drifts back to it.
+    """
+    webhooks = [
+        {
+            "received_at_utc": "2026-08-03T13:10:05+00:00",
+            "booking_ref": "BK-1",
+            "event_time": None,
+        }
+    ]
+    probe_records = [
+        {"ts_utc": "2026-08-03T13:00:00+00:00", "booking_ref": "BK-1"},
+        # Nearest in time, but a DIFFERENT booking.
+        {"ts_utc": "2026-08-03T13:10:04+00:00", "booking_ref": "BK-OTHER"},
+    ]
+
+    [result] = sink.compute_latencies(webhooks, probe_records)
+
+    assert result["latency_seconds"] == 605.0, "proximity matching would report 1.0"

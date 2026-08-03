@@ -127,6 +127,11 @@ class CatalogueEntry:
 
 # The requests the `celery-jobs` sync is expected to make. The axis varied per endpoint is the
 # one suspected of moving the cost: page size, date-range width, number of properties.
+#
+# ASSUMPTION: these paths and their parameter names come from ADR 0006's reading of the V2 API,
+# not from a response we have seen. Same status as the header names above, and the same
+# remedy — step 0 of the runbook confirms them against the published OpenAPI document before
+# the first authenticated call.
 CATALOGUE: tuple[CatalogueEntry, ...] = (
     CatalogueEntry(
         name="bookings",
@@ -165,7 +170,13 @@ CAPTURES: dict[str, str] = {
     "messages": "/bookings/messages",
 }
 
-SUBCOMMANDS = ("probe", "capture", "report")
+SUBCOMMANDS = ("probe", "capture", "report", "provoke")
+
+# ASSUMPTION: the write endpoint for bookings, used only by `provoke`. Confirmed in step 0.
+BOOKINGS_WRITE_PATH = "/bookings"
+
+# The three events `provoke` causes, in order, to give R2.3 its minimum of three measurements.
+PROVOKE_ACTIONS = ("create", "modify", "cancel")
 
 
 class QuotaExhausted(RuntimeError):
@@ -173,22 +184,43 @@ class QuotaExhausted(RuntimeError):
 
 
 def _redact(text: str, secrets: tuple[str, ...]) -> str:
-    """Remove any secret that managed to reach a string bound for a log or an exception."""
+    """Remove any secret that managed to reach a string bound for a log or an exception.
+
+    Covers the **escaped** rendering as well as the literal one. A credential pasted with a
+    stray newline reaches h11 as `b'token\\n'` and comes back embedded in the error message in
+    its `repr` form, where a plain `str.replace` of the raw value finds nothing.
+    """
     for secret in secrets:
-        if secret:
-            text = text.replace(secret, "***redacted***")
+        if not secret:
+            continue
+        for form in {secret, repr(secret)[1:-1], repr(secret.encode())[2:-1]}:
+            if form:
+                text = text.replace(form, "***redacted***")
     return text
 
 
 def assert_host_allowed(url: str) -> None:
-    """Refuse any URL whose host is not exactly one of `ALLOWED_HOSTS` (R6.5).
+    """Refuse any URL that is not HTTPS to an allowlisted host (R6.5).
 
     Compares the **hostname**, never a substring of the URL: `api.beds24.com.evil.tld` contains
     `api.beds24.com` and a substring check would wave it through. The allowlist is a constant
     here rather than derived from `BEDS24_BASE_URL`, because deriving it would mean whoever
     controls the environment controls the destination — which is the attack it exists to stop.
+
+    **The scheme is checked too, and that is not a formality.** The credential this script
+    sends is `BEDS24_REFRESH_TOKEN`, which ADR 0006 records as an **account** credential: it
+    grants write access over every property in the account. Allowing `http://beds24.com` would
+    put it on the wire in cleartext for any on-path observer, and it takes exactly one dropped
+    `s` in an environment variable to get there.
     """
-    host = (urlsplit(url).hostname or "").lower()
+    parts = urlsplit(url)
+    scheme = (parts.scheme or "").lower()
+    host = (parts.hostname or "").lower()
+    if scheme != "https":
+        raise SystemExit(
+            f"beds24-probe: refusing scheme {scheme!r} — only https. An account-level "
+            "credential must never travel in cleartext."
+        )
     if host not in ALLOWED_HOSTS:
         raise SystemExit(
             f"beds24-probe: refusing to talk to host {host!r}. "
@@ -318,7 +350,16 @@ class Beds24Probe:
         """Exchange the long-lived refresh token for a 24 h access token."""
         url = f"{self.base_url}{TOKEN_PATH}"
         assert_host_allowed(url)
-        response = self._client.get(url, headers={REFRESH_HEADER: self._refresh_token})
+        try:
+            response = self._client.get(url, headers={REFRESH_HEADER: self._refresh_token})
+        except httpx.HTTPError as exc:
+            # This is the ONLY call that carries the refresh token, so it is the one that most
+            # needs the redaction wrapper — and it was the one that lacked it. h11 embeds an
+            # illegal header value verbatim in its error, so a token pasted with a stray
+            # newline would print in full on the operator's very first run.
+            raise SystemExit(
+                f"beds24-probe: token exchange failed: {_redact(str(exc), self._secrets)}"
+            ) from None
         if response.status_code != 200:
             raise SystemExit(
                 f"beds24-probe: token exchange failed with HTTP {response.status_code}. "
@@ -338,7 +379,14 @@ class Beds24Probe:
                 self._sleep(remaining)
         self._last_request_at = self._monotonic()
 
-    def request(self, method: str, path: str, params: dict[str, Any] | None = None):
+    def request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        json_body: Any = None,
+    ):
         """One paced, host-checked call. Raises `QuotaExhausted` instead of retrying (R4.2)."""
         if self._access_token is None:
             raise RuntimeError("authenticate() must run before any request")
@@ -347,7 +395,11 @@ class Beds24Probe:
         self._pace()
         try:
             response = self._client.request(
-                method, url, params=params or {}, headers={ACCESS_HEADER: self._access_token}
+                method,
+                url,
+                params=params or {},
+                json=json_body,
+                headers={ACCESS_HEADER: self._access_token},
             )
         except httpx.HTTPError as exc:  # transport failure: never let the token reach the text
             raise SystemExit(
@@ -402,6 +454,73 @@ def probe(
     return records
 
 
+def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
+    """Cause three booking events and record each with its `booking_ref` (R2.2, R2.3, D11).
+
+    This exists because R2.2's fallback is worded as *"el registro del sondeo **que provocó el
+    hecho**"* — the join between the cost log and the webhook log only works if something on
+    our side both causes an event and knows its booking id. Without this the probe log carries
+    `booking_ref: null` on every line, the fallback branch is dead code, and any webhook whose
+    payload lacks its own timestamp reports no latency at all.
+
+    Create, then modify, then cancel: three events (R2.3's minimum) on one booking, in a known
+    order, which is also what makes the out-of-order check of R2.4 meaningful — a single event
+    cannot be out of order with anything.
+
+    ASSUMPTION: the request bodies below follow ADR 0006's reading of the V2 write API and are
+    confirmed in step 0 of the runbook. `provoke` is the only part of this script that WRITES;
+    everything else is a read.
+    """
+    records: list[dict[str, Any]] = []
+    booking_ref: str | None = None
+
+    for action in PROVOKE_ACTIONS:
+        if action == "create":
+            body = [{"roomId": property_id, "status": "confirmed", "numAdult": 1}]
+        elif action == "modify":
+            body = [{"id": booking_ref, "numAdult": 2}]
+        else:
+            body = [{"id": booking_ref, "status": "cancelled"}]
+
+        if action != "create" and booking_ref is None:
+            # The create did not give us an id, so the two follow-ups have nothing to act on.
+            # Stopping is right: writing without an id could create two more bookings.
+            break
+
+        response = bench.request("POST", BOOKINGS_WRITE_PATH, json_body=body)
+        if action == "create":
+            booking_ref = _extract_booking_ref(response)
+
+        records.append(
+            build_cost_record(
+                endpoint=BOOKINGS_WRITE_PATH,
+                method="POST",
+                shape=f"provoke-{action}",
+                status=response.status_code,
+                headers=response.headers,
+                booking_ref=booking_ref,
+            )
+        )
+    return records
+
+
+def _extract_booking_ref(response) -> str | None:
+    """The id of the booking just created, or `None` if the response did not say."""
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if isinstance(payload, list) and payload:
+        payload = payload[0]
+    if not isinstance(payload, dict):
+        return None
+    for key in ("id", "bookingId", "bookId"):
+        value = payload.get(key) or (payload.get("new") or {}).get(key)
+        if value:
+            return str(value)
+    return None
+
+
 def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
     """Fetch one payload and write it anonymised (R3.1, R3.2).
 
@@ -430,22 +549,37 @@ def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
 
 
 def _substituted_keys(original: Any, clean: Any, prefix: str = "") -> set[str]:
-    """Which keys the anonymiser replaced (R3.5).
+    """Which key paths the anonymiser replaced (R3.5).
 
     Recorded in the fixture so whoever reads the mapping can tell a real value from a
     placeholder — and so the widening loop of design D3 has something to read.
+
+    **It walks the CLEAN tree, never the original.** Walking the original was the first
+    version and it defeated the whole point: a key the anonymiser had scrubbed *because it was
+    itself a personal datum* — the `{"john.smith@gmail.com": {...}}` case that
+    `anonymise.py`'s key-position rule exists for — got its original spelling written straight
+    back into the fixture's header, in a field nobody thinks to check. The `payload` block
+    looked clean while the PII sat two lines above it, committed to git forever.
+
+    So the paths reported here are built from the **anonymised** keys. A scrubbed key appears
+    as `***scrubbed-key***`, which says "something was replaced here" without saying what.
     """
     changed: set[str] = set()
-    if isinstance(original, dict) and isinstance(clean, dict):
-        for key, value in original.items():
-            here = f"{prefix}.{key}" if prefix else str(key)
-            if key not in clean:
+    if isinstance(clean, dict):
+        original_items = list(original.items()) if isinstance(original, dict) else []
+        for index, (clean_key, clean_value) in enumerate(clean.items()):
+            here = f"{prefix}.{clean_key}" if prefix else str(clean_key)
+            original_key, original_value = (
+                original_items[index] if index < len(original_items) else (None, None)
+            )
+            if original_key is not None and str(original_key) != str(clean_key):
                 changed.add(here)
-                continue
-            changed |= _substituted_keys(value, clean[key], here)
-    elif isinstance(original, list) and isinstance(clean, list) and len(original) == len(clean):
-        for index, (value, cleaned) in enumerate(zip(original, clean)):
-            changed |= _substituted_keys(value, cleaned, f"{prefix}[{index}]")
+            changed |= _substituted_keys(original_value, clean_value, here)
+    elif isinstance(clean, list):
+        original_members = original if isinstance(original, list) else []
+        for index, clean_member in enumerate(clean):
+            member = original_members[index] if index < len(original_members) else None
+            changed |= _substituted_keys(member, clean_member, f"{prefix}[{index}]")
     elif original != clean:
         changed.add(prefix or "<root>")
     return changed
@@ -504,7 +638,9 @@ def report(records: list[dict[str, Any]]) -> str:
 def _is_known_argument(argument: str) -> bool:
     if argument in SUBCOMMANDS or argument in CAPTURES:
         return True
-    return bool(re.fullmatch(r"--out=\S+|--min-interval=\d+(\.\d+)?", argument))
+    return bool(
+        re.fullmatch(r"--out=\S+|--min-interval=\d+(\.\d+)?|--property=[A-Za-z0-9_-]+", argument)
+    )
 
 
 def _reject_unknown_arguments(argv: list[str]) -> None:
@@ -566,6 +702,17 @@ def main(argv: list[str] | None = None) -> int:
         records = probe(bench)
         written = write_records(records, out_path)
         print(f"beds24-probe: {len(records)} measurements -> {written}")
+        return 0
+
+    if subcommand == "provoke":
+        property_id = _option(args, "--property=", "")
+        if not property_id:
+            raise SystemExit("beds24-probe: provoke needs --property=<room or property id>")
+        records = provoke(bench, property_id=property_id)
+        existing = read_records(out_path) if out_path.exists() else []
+        written = write_records(existing + records, out_path)
+        refs = sorted({r["booking_ref"] for r in records if r["booking_ref"]})
+        print(f"beds24-probe: {len(records)} events (booking_ref={refs or 'none'}) -> {written}")
         return 0
 
     requested = [a for a in args if a in CAPTURES] or list(CAPTURES)

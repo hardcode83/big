@@ -49,10 +49,27 @@ Antes de registrarte, ten listo:
 - `cloudflared` instalado, para el túnel efímero de la medición de webhooks.
 - Una hora seguida: la medición de webhooks necesita provocar hechos y esperarlos.
 
+### Paso 0 — confirmar los supuestos antes de gastar un solo crédito
+
+El banco se escribió sin cuenta, así que lleva **supuestos marcados como `ASSUMPTION`** en el
+código. Confírmalos contra la especificación OpenAPI 3.0 publicada de la API V2 **antes** de la
+primera llamada autenticada, porque uno de ellos decide a qué host se manda la credencial:
+
+| Supuesto | Dónde | Qué comprobar |
+|---|---|---|
+| Host y base de la API | `beds24_probe.py` → `ALLOWED_HOSTS`, `DEFAULT_BASE_URL` | Cuál de `beds24.com` / `api.beds24.com` es el real. **Deja solo ese** en el allowlist. |
+| Cabeceras del flujo de token | `beds24_probe.py` → `REFRESH_HEADER`, `ACCESS_HEADER`, `TOKEN_PATH` | Nombres reales del canje refresh → access. |
+| Rutas del catálogo | `beds24_probe.py` → `CATALOGUE` | Que `/bookings`, `/properties` y `/inventory/rooms/calendar` existan y sean las que el sync usará. |
+| Claves de identidad y de tiempo | `beds24_webhook_sink.py` → `BOOKING_REF_KEYS`, `EVENT_TIME_KEYS` | Qué clave lleva el id de reserva y cuál el instante del hecho. |
+
+Si alguno falla el arreglo es de una línea, pero descubrirlo a mitad de la ventana de medición
+cuesta créditos y tiempo del trial.
+
 ### Credencial
 
 Beds24 usa su **API V2** (REST, OpenAPI 3.0). El flujo es: código de invitación → refresh token
-de larga vida → access token de 24 h.
+de larga vida → access token de 24 h. **Esto también es un supuesto** tomado de ADR 0006, no
+algo verificado contra la API: forma parte del paso 0.
 
 ```bash
 export BEDS24_REFRESH_TOKEN=...   # nunca en el repo, nunca en la línea de comandos de otro
@@ -82,7 +99,7 @@ Nada de eso dice cuánto cuesta *nuestro* ciclo de sync, y la cadencia del sched
 
 ```bash
 docker compose exec backend uv run python scripts/beds24_probe.py probe \
-    --out /tmp/beds24-request-cost.jsonl
+    --out=/tmp/beds24-request-cost.jsonl
 ```
 
 El sondeo recorre un catálogo de peticiones y registra, por cada una, el `X-RequestCost` que
@@ -106,7 +123,7 @@ informe se deriva de datos revisables, no de una transcripción.
 
 ```bash
 docker compose exec backend uv run python scripts/beds24_probe.py report \
-    --out /tmp/beds24-request-cost.jsonl
+    --out=/tmp/beds24-request-cost.jsonl
 ```
 
 renderiza la tabla de coste y la **cadencia máxima sostenible** — el intervalo mínimo entre
@@ -123,21 +140,42 @@ Beds24 **no tiene API de configuración de webhooks**: se configuran por propied
 panel. Es un matiz frente a Channex, que sí la tiene, y que `channex-staging-adapter` dejó
 anotado. Así que el paso es manual por diseño ajeno, no por pereza nuestra.
 
-1. Levanta el receptor:
+**El receptor y el túnel corren en el mismo lado de la frontera del contenedor.** El sink hace
+bind a `127.0.0.1` a propósito: mientras dura la medición es un endpoint **sin autenticar que
+escribe a disco**, y su única puerta debe ser el túnel efímero, nunca la LAN. Si lo arrancas
+dentro del contenedor con `docker compose exec`, un `cloudflared` del host no lo alcanza — y la
+salida obvia a ese problema (bindear `0.0.0.0` o publicar el puerto) es justo lo que abre esa
+superficie. Así que ambos van en el contenedor:
+
+1. Levanta el receptor y déjalo corriendo:
 
    ```bash
    docker compose exec backend uv run python scripts/beds24_webhook_sink.py \
-       --out /tmp/beds24-webhooks.jsonl
+       --out=/tmp/beds24-webhooks.jsonl
    ```
 
-2. Expónlo con un túnel efímero y copia la URL que imprime:
+2. En **otra shell del mismo contenedor**, levanta el túnel y copia la URL que imprime:
 
    ```bash
-   cloudflared tunnel --url http://localhost:8099
+   docker compose exec backend cloudflared tunnel --url http://127.0.0.1:8099
    ```
 
+   Si `cloudflared` no está en la imagen del backend, la alternativa correcta es correr **las
+   dos** cosas en el host (`uv run` desde `backend/`), no publicar el puerto del contenedor.
+
 3. Pega esa URL en el panel de Beds24, por propiedad.
-4. Provoca al menos **tres** hechos (crear, modificar y cancelar una reserva por API) y espera.
+4. Provoca los hechos **con el sondeo**, no a mano:
+
+   ```bash
+   docker compose exec backend uv run python scripts/beds24_probe.py provoke \
+       --property=<room-id> --out=/tmp/beds24-request-cost.jsonl
+   ```
+
+   Crea, modifica y cancela una reserva —tres hechos, el mínimo de R2.3— y **anota el
+   `booking_ref` de cada uno en el registro de coste**. Ese es el detalle que hace calculable
+   la latencia: si provocas los hechos por tu cuenta desde el panel, el registro del sondeo no
+   sabe a qué reserva corresponden y todo webhook que no traiga su propio sello temporal se
+   quedará sin latencia medida.
 
 La URL del quick tunnel cambia en cada sesión, así que el paso 3 se repite cada vez que se
 retoma la medición.

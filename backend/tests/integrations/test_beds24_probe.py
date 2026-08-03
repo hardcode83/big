@@ -98,8 +98,13 @@ def test_token_exchange_stores_the_access_token_in_memory_only(tmp_path):
     ],
 )
 def test_host_allowlist_rejects_lookalikes(url):
-    """R6.5 — compared by hostname, so a substring of the URL buys nothing."""
-    with pytest.raises(SystemExit, match="refusing to talk to host"):
+    """R6.5 — compared by hostname, so a substring of the URL buys nothing.
+
+    `refusing` rather than `refusing to talk to host`: the plain-HTTP entry is now caught by
+    the scheme check first, which is a stricter refusal for a better reason. What this test
+    pins is that none of these URLs is reachable, not which guard stops them.
+    """
+    with pytest.raises(SystemExit, match="refusing"):
         beds24.assert_host_allowed(url)
 
 
@@ -366,3 +371,77 @@ def test_report_says_so_when_nothing_could_be_measured():
     rendered = beds24.report([_record("/bookings", "page-10", None)])
 
     assert "no calculable" in rendered
+
+
+# --- Panel fixes (sections 2-6 review) -------------------------------------------------------
+
+
+@pytest.mark.parametrize("url", ["http://beds24.com/api/v2", "http://api.beds24.com/v2",
+                                 "ftp://beds24.com/x"])
+def test_non_https_schemes_are_refused(url):
+    """The refresh token is an ACCOUNT credential; cleartext is one dropped `s` away."""
+    with pytest.raises(SystemExit, match="refusing scheme"):
+        beds24.assert_host_allowed(url)
+
+
+def test_token_exchange_errors_are_redacted_even_in_their_escaped_form():
+    """h11 embeds an illegal header value in its error, in repr form."""
+
+    def handler(request):
+        raise httpx.LocalProtocolError("Illegal header value b'refresh\\nsecret'")
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    bench = beds24.Beds24Probe(refresh_token="refresh\nsecret", client=client)
+
+    with pytest.raises(SystemExit) as excinfo:
+        bench.authenticate()
+
+    assert "refresh\\nsecret" not in str(excinfo.value)
+    assert "***redacted***" in str(excinfo.value)
+
+
+def test_substituted_keys_never_republish_a_scrubbed_key(tmp_path, monkeypatch):
+    """The fixture header must not carry the PII the payload block had scrubbed out."""
+    written = _capture_payload(
+        {"guests_by_mail": {"john.smith@gmail.com": {"adults": 2}}}, tmp_path, monkeypatch
+    )
+
+    rendered = json.dumps(written)
+    assert "john.smith@gmail.com" not in rendered
+    assert any("scrubbed-key" in key for key in written["_substituted"])
+
+
+def test_two_colliding_scrubbed_keys_do_not_collapse_into_one(tmp_path, monkeypatch):
+    """Losing an entry is safe for privacy and useless for a fixture."""
+    written = _capture_payload(
+        {"bookings": {"ana@x.com": {"adults": 1}, "bob@x.com": {"adults": 2}}},
+        tmp_path,
+        monkeypatch,
+    )
+
+    assert len(written["payload"]["bookings"]) == 2
+
+
+def test_provoke_records_the_booking_ref_so_the_latency_join_works():
+    """R2.2's fallback is dead unless something on our side causes the event AND knows its id."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        if len(calls) == 1:
+            return httpx.Response(200, json=[{"id": 777}])
+        return httpx.Response(200, json=[{"id": 777}])
+
+    records = beds24.provoke(_bench(handler), property_id="R1")
+
+    assert [r["shape"] for r in records] == ["provoke-create", "provoke-modify", "provoke-cancel"]
+    assert {r["booking_ref"] for r in records} == {"777"}
+
+
+def test_provoke_stops_when_the_create_returns_no_id():
+    """Writing the follow-ups without an id could create two more bookings."""
+    records = beds24.provoke(
+        _bench(lambda request: httpx.Response(200, json=[{}])), property_id="R1"
+    )
+
+    assert [r["shape"] for r in records] == ["provoke-create"]

@@ -24,6 +24,7 @@ one of them is the static credential Beds24 uses in place of a signature.
 """
 
 import json
+import re
 import sys
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -71,22 +72,78 @@ def _utc_now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-def _first_present(payload: Any, keys: tuple[str, ...]) -> Any:
-    """Depth-first search for the first of `keys` present anywhere in the payload."""
+def _find_key(payload: Any, key: str) -> Any:
+    """Depth-first search for one exact key anywhere in the payload."""
     if isinstance(payload, dict):
-        for key in keys:
-            if key in payload and payload[key] not in (None, ""):
-                return payload[key]
+        if key in payload and payload[key] not in (None, ""):
+            return payload[key]
         for value in payload.values():
-            found = _first_present(value, keys)
+            found = _find_key(value, key)
             if found is not None:
                 return found
     elif isinstance(payload, list):
         for member in payload:
-            found = _first_present(member, keys)
+            found = _find_key(member, key)
             if found is not None:
                 return found
     return None
+
+
+def _first_present(payload: Any, keys: tuple[str, ...]) -> Any:
+    """The value of the most specific of `keys` present anywhere in the payload.
+
+    **Priority is per key, not per nesting level**, and that distinction is the whole point.
+    The first version walked the tree once and, at each node, accepted whichever of `keys` that
+    node happened to have — so on a payload shaped like
+
+        {"property": {"id": 99}, "booking": {"id": 555}}
+
+    it returned the *property* id, because `property` sorts first among the dict's values. A
+    wrong join key is worse than a missing one: `None` shows up as an unmeasured latency, while
+    99 quietly produces a plausible wrong number in the published findings.
+
+    So each key is searched across the whole payload before the next is tried, which puts the
+    unambiguous spellings (`bookingId`, `booking_id`) ahead of the bare `id` fallback.
+    """
+    for key in keys:
+        found = _find_key(payload, key)
+        if found is not None:
+            return found
+    return None
+
+
+def _booking_ref(payload: Any) -> str | None:
+    """The booking identity, or `None` when it cannot be established unambiguously.
+
+    The bare `id` fallback only applies when the payload carries **exactly one** `id` anywhere.
+    With more than one there is no way to tell the booking's from a room's or a property's, and
+    guessing would corrupt both the latency of R2.2 and the ordering check of R2.4 with a
+    number that looks perfectly reasonable in the output.
+    """
+    for key in BOOKING_REF_KEYS:
+        if key == "id":
+            continue
+        found = _find_key(payload, key)
+        if found is not None:
+            return str(found)
+
+    ids = _collect_key(payload, "id")
+    if len(ids) == 1:
+        return str(ids[0])
+    return None
+
+
+def _collect_key(payload: Any, key: str) -> list[Any]:
+    found: list[Any] = []
+    if isinstance(payload, dict):
+        for member_key, value in payload.items():
+            if member_key == key and value not in (None, ""):
+                found.append(value)
+            found.extend(_collect_key(value, key))
+    elif isinstance(payload, list):
+        for member in payload:
+            found.extend(_collect_key(member, key))
+    return found
 
 
 def build_webhook_record(
@@ -108,15 +165,23 @@ def build_webhook_record(
     except (UnicodeDecodeError, json.JSONDecodeError):
         payload = None
 
-    booking_ref = _first_present(payload, BOOKING_REF_KEYS)
+    booking_ref = _booking_ref(payload)
     event_time = _first_present(payload, EVENT_TIME_KEYS)
+
+    # Only the path, never the query string. `self.path` is the full request target, and the
+    # runbook has the operator paste a tunnel URL into the Beds24 panel — since Beds24 offers
+    # no signature, putting a shared secret in that URL is the natural thing for an operator to
+    # do. Persisting it raw would contradict this script's own reason for silencing the stdlib
+    # request log, which is that a query string can carry data.
+    path_only, _, query = path.partition("?")
 
     return {
         "received_at_utc": received_at,
         "booking_ref": str(booking_ref) if booking_ref is not None else None,
         "event_time": str(event_time) if event_time is not None else None,
         "method": method,
-        "path": path,
+        "path": path_only,
+        "query_keys": sorted({pair.partition("=")[0] for pair in query.split("&") if pair}),
         # Names only. One of these is the static header Beds24 offers instead of a signature,
         # and its value is a credential (R2.5).
         "header_names": sorted(name.lower() for name in headers),
@@ -147,11 +212,12 @@ def compute_latencies(
     Matching by temporal proximity was rejected: it breaks as soon as two events share a
     window, which is exactly the scenario R2.4 wants to measure.
     """
-    by_ref = {}
+    by_ref: dict[str, list[datetime]] = {}
     for record in probe_records or []:
         ref = record.get("booking_ref")
-        if ref is not None:
-            by_ref.setdefault(str(ref), record)
+        moment = _parse(record.get("ts_utc"))
+        if ref is not None and moment is not None:
+            by_ref.setdefault(str(ref), []).append(moment)
 
     results = []
     for webhook in webhooks:
@@ -160,8 +226,17 @@ def compute_latencies(
         event_at = _parse(webhook.get("event_time"))
         if event_at is None:
             source = "probe"
-            match = by_ref.get(webhook.get("booking_ref") or "")
-            event_at = _parse(match.get("ts_utc")) if match else None
+            # The LATEST probe line for this ref that precedes the webhook, not the first one
+            # in the file. `provoke` writes three lines for one booking — create, modify,
+            # cancel — so a booking_ref legitimately repeats, and taking the first would
+            # measure the cancel webhook against the create request and report a latency of
+            # minutes where the real one is seconds.
+            candidates = [
+                moment
+                for moment in by_ref.get(webhook.get("booking_ref") or "", [])
+                if received is None or moment <= received
+            ]
+            event_at = max(candidates) if candidates else None
         if event_at is None or received is None:
             results.append(
                 {"booking_ref": webhook.get("booking_ref"), "latency_seconds": None, "source": None}
@@ -197,20 +272,56 @@ def detect_out_of_order(latencies: list[dict[str, Any]], webhooks: list[dict[str
 def make_handler(out_path: Path, records: list[dict[str, Any]]):
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — the stdlib dictates this name
-            length = min(int(self.headers.get("Content-Length") or 0), MAX_BODY_BYTES)
-            body = self.rfile.read(length) if length else b""
-            record = build_webhook_record(
-                method="POST",
-                path=self.path,
-                headers=dict(self.headers.items()),
-                body=body,
-            )
-            records.append(record)
-            with out_path.open("a", encoding="utf-8") as handle:
-                handle.write(json.dumps(record, ensure_ascii=False) + "\n")
-            self.send_response(200)
-            self.end_headers()
-            self.wfile.write(b"ok")
+            # Everything is wrapped, because an exception escaping this method is handled by
+            # `socketserver.BaseServer.handle_error`, which prints a traceback straight to
+            # stderr and never passes through `log_message`. That traceback embeds
+            # request-derived text — a raw header value, a fragment of the body — which is
+            # exactly what this sink promises never to emit.
+            try:
+                length = self._body_length()
+                if length is None:
+                    self.send_response(400)
+                    self.end_headers()
+                    return
+                body = self.rfile.read(length) if length else b""
+                record = build_webhook_record(
+                    method="POST",
+                    path=self.path,
+                    headers=dict(self.headers.items()),
+                    body=body,
+                )
+                records.append(record)
+                with out_path.open("a", encoding="utf-8") as handle:
+                    handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+                self.send_response(200)
+                self.end_headers()
+                self.wfile.write(b"ok")
+            except Exception:  # noqa: BLE001 — nothing request-derived may reach stderr
+                try:
+                    self.send_response(500)
+                    self.end_headers()
+                except Exception:  # noqa: BLE001 — the connection is already gone
+                    pass
+
+        def _body_length(self) -> int | None:
+            """The declared body size, clamped, or `None` if the header is unusable.
+
+            `min(int(...), MAX_BODY_BYTES)` was the first version and a negative
+            `Content-Length` sailed through it: `min(-1, 1_000_000)` is `-1`, and
+            `rfile.read(-1)` reads until EOF. For the whole measurement window this sink is an
+            unauthenticated, internet-reachable endpoint that writes to disk, so an unbounded
+            read is somebody filling the operator's disk and ending the session.
+            """
+            raw = self.headers.get("Content-Length")
+            if raw is None:
+                return 0
+            try:
+                declared = int(raw)
+            except (TypeError, ValueError):
+                return None
+            if declared < 0:
+                return None
+            return min(declared, MAX_BODY_BYTES)
 
         def log_message(self, format, *args):  # noqa: A002 — stdlib signature
             """Silenced: the default logs the request line, and a query string could carry data."""
@@ -222,18 +333,28 @@ def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     out_path = DEFAULT_OUT
     port = DEFAULT_PORT
+    # Shape-checked BEFORE conversion, and nothing is ever echoed. Matching the prefix was not
+    # enough: `--port=<pasted token>` used to reach `int()`, whose ValueError prints the value
+    # verbatim in a traceback — which is precisely the fumble R6.6 exists to prevent, just
+    # arriving through an accepted flag instead of a rejected one.
     for argument in args:
-        if argument.startswith("--out="):
+        if re.fullmatch(r"--out=\S+", argument):
             out_path = Path(argument.removeprefix("--out="))
-        elif argument.startswith("--port="):
+        elif re.fullmatch(r"--port=\d{1,5}", argument):
             port = int(argument.removeprefix("--port="))
         else:
             raise SystemExit(
-                "beds24-webhook-sink: unrecognised argument (value not echoed on purpose). "
-                "Accepted: --out=PATH, --port=N."
+                "beds24-webhook-sink: unrecognised or malformed argument (value not echoed on "
+                "purpose — it may be a credential). Accepted: --out=PATH, --port=N."
             )
 
-    out_path.parent.mkdir(parents=True, exist_ok=True)
+    try:
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+        # `exc` renders the path, which came from argv — same non-echoing rule applies.
+        raise SystemExit(
+            f"beds24-webhook-sink: cannot create the output directory ({exc.strerror})."
+        ) from None
     server = HTTPServer(("127.0.0.1", port), make_handler(out_path, []))
     print(f"beds24-webhook-sink: listening on http://127.0.0.1:{port} -> {out_path}")
     print("expose it with:  cloudflared tunnel --url http://localhost:%d" % port)
