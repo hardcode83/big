@@ -41,9 +41,11 @@ staging** y **Docker no arranca en esta máquina**.
   tiene que coincidir con la del rate plan (el nuestro es EUR, así que solo sirve
   `4372137`). ADR 0006 presenta esta capacidad como la ventaja decisiva de Channex sobre
   Beds24 y sigue siéndolo, pero con una latencia de agenda que el ADR no contempla.
-- **Bloquea todavía**: 2.3 (el fixture de mensaje necesita una conversación real de huésped,
-  que una reserva creada por CRS no genera), 6.2, 6.3, y 8.7 (que además necesita un tenant
-  sembrado en la base de datos de dev).
+- **RESUELTO 2026-08-03**: la reserva real se hizo (`BDC-6558139322`), el hilo de mensajes se
+  capturó, y 6.1/6.3/8.7 se cerraron corriendo `pms_sync --provider channex` contra la API real —
+  `created 3`, tres `TimelineEvent`, evidencia en `docs/channex-staging.md`. **Queda solo 2.4**
+  (fixture de webhook), reasignada a `reservations-webhooks` porque exige un receptor público y el
+  payload lleva `cvv`.
 - **El riesgo con peor consecuencia del change sigue intacto**: nada de esto toca los
   anuncios reales. `4372137` es un hotel de test de Booking.com, no REDES11 ni PAJARITOS8.
   No conectar la cuenta real de Airbnb (un solo channel manager por cuenta; Channex falla en

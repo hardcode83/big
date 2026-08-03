@@ -296,6 +296,40 @@ operativa: **es pérdida de datos**. Cualquier plan de migración tiene que expo
 antes de desconectar nada, y `messaging-ai` no puede tratar a Channex como el archivo de las
 conversaciones.
 
+### Evidencia del sync end-to-end (R5.1, R5.2)
+
+Ejecutado el 2026-08-03 contra la **API real**, sin mocks y con red:
+
+```
+$ pms_sync 5327dad1-f102-4c13-9027-45e5fc6ecc8d 400 --provider channex
+pms-sync: created 3, updated 0, skipped 0
+```
+
+Y sin el flag, el mismo comando sigue usando `MockPMSAdapter` — reporta las cuatro filas del
+mock como saltadas porque este tenant no tiene la propiedad `PMS-REDES11`, que es exactamente la
+prueba de que R3.1 se cumple por construcción.
+
+Lo que quedó en la base de datos, con **cada decisión de mapeo verificada sobre datos reales**:
+
+| `external_pms_id` | canal | status | importe | comisión |
+|---|---|---|---|---|
+| `BDC-6558139322` — **reserva real de Booking.com** | `BOOKING` ← `BookingCom` | `CONFIRMED` ← `new` | 834.69 GBP | **`None`** ← `"0.00"` |
+| `OFL-AUTOHOST-TEST-OFFLINE-001` | `MANUAL` ← `Offline` | `CONFIRMED` | 360.00 EUR | `None` |
+| `BDC-AUTOHOST-TEST-BDC-001` | `BOOKING` ← `Booking.com` | `CONFIRMED` | 360.00 EUR | **`54.00`** |
+
+Más **3 `TimelineEvent`** de tipo `RESERVATION_IMPORTED` con actor `SYSTEM` —la primera
+persistencia de timeline del proyecto alimentada por un PMS real— y **2 `Guest`** para tres
+reservas, porque las dos sembradas comparten huésped y la deduplicación por email funcionó.
+
+Las cuatro traducciones que este change decidió, confirmadas en la fila que las ejercita:
+`new` → `CONFIRMED`, `BookingCom` → `BOOKING`, `Offline` → `MANUAL`, y un `"0.00"` de
+Booking.com → `None` mientras un `54.00` legítimo se conserva.
+
+**Cableado previo** (tarea 6.1): tenant `5327dad1-…` y propiedad `CHANNEX-SANDBOX` con
+`pms_external_id = 7963f1e3-…` (el UUID de la propiedad en Channex), creados con los modelos del
+dominio. No se tocó `app/cli/bootstrap.py` ni se añadió migración: es una propiedad de un
+proveedor que no es el del MVP.
+
 ### Límite de tasa: **no medido**, con una observación acotada
 
 Channex no publica límite de tasa, y **no se ha buscado su techo**. Averiguarlo exige

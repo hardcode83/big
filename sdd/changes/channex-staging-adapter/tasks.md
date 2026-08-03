@@ -171,7 +171,7 @@ comportamiento de nadie.
 
 ## 6. Reserva end-to-end desde Booking.com
 
-- [ ] 6.1 Escribir el `property_id` de Channex en `Property.pms_external_id` de la
+- [x] 6.1 Escribir el `property_id` de Channex en `Property.pms_external_id` de la
       propiedad de test mediante el paso documentado del runbook — **no** migración ni
       cambio en `app/cli/bootstrap.py`, que contaminaría el arranque de todo el mundo con
       un proveedor de dev. [R5]
@@ -202,10 +202,13 @@ comportamiento de nadie.
       `https://secure.booking.com/book.html?hotel_id=4372137&test=1` con la tarjeta de test
       `4111-1111-1111-1111`. Las propiedades de test son **compartidas** entre integradores:
       pueden aparecer reservas ajenas.
-- [ ] 6.3 Persistirla con `pms_sync <tenant> --provider channex` y registrar en
+- [x] 6.3 Persistirla con `pms_sync <tenant> --provider channex` y registrar en
       `docs/channex-staging.md` la evidencia: reserva creada, payload recibido
       (anonimizado) y `TimelineEvent` resultante. [R5]
-- [ ] 6.4 IF Channex no concede el acceso al entorno de test de Booking.com: registrar el
+- [x] 6.4 **NO invocada**: Channex sí concedió el acceso y la reserva real se hizo, así que la
+      salida de emergencia de R5.3 no aplica. Se marca hecha en el sentido de resuelta, no de
+      ejecutada. Lo que sí quedó sin verificar —la estabilidad de `unique_id` entre revisions— está
+      documentado como tal en `docs/channex-staging.md`, con las cuatro vías cerradas. IF Channex no concede el acceso al entorno de test de Booking.com: registrar el
       bloqueo en `BLOCKED.md` como `decision` con el comando de reanudación, y cerrar el
       resto del change. R5 es la única parte que depende de un tercero. [R5]
 
@@ -258,10 +261,10 @@ comportamiento de nadie.
       despliegue.
 - [x] 8.6 Ningún test toca la red: la suite pasa con la cuenta de staging inalcanzable
       (variables de Channex sin definir).
-- [ ] 8.7 Comprobación manual end-to-end: `pms_sync <tenant> --provider channex` sobre la
+- [x] 8.7 Comprobación manual end-to-end: `pms_sync <tenant> --provider channex` sobre la
       propiedad de test trae la reserva de 6.2 y deja su `TimelineEvent`; sin `--provider`
       el comando sigue usando el mock.
-- [ ] 8.8 Revisar el diff de `backend/tests/integrations/fixtures/channex/` buscando datos
+- [x] 8.8 Revisar el diff de `backend/tests/integrations/fixtures/channex/` buscando datos
       personales reales antes de commitear — los payloads del entorno de test de
       Booking.com pueden traer nombres y correos.
 
