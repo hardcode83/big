@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
+state: READY_FOR_PR
+local_review: APPROVED
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/pms-provider-decision
+implementation_sha: 55f6e8992acb096e2498d89cf336565862ff7326
 pr_number: 
 pr_url: 
 pr_state: 
