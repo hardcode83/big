@@ -18,6 +18,13 @@ name: api-contract
 # SIN filtro `paths`, por el mismo motivo documentado en backend-tests.yml y en
 # specs/backend-ci.md: un required check con filtro de rutas no se ejecuta en los PR que
 # no las tocan, y GitHub deja esos PR esperando para siempre un check que no llegará.
+#
+# Ese motivo sigue siendo válido y no ha cambiado. Lo que cambió (change
+# `ci-backend-tests-conditional-gate`) es que backend-tests ya NO ejecuta su suite en todos
+# los PR: separó "el check reporta siempre" de "el trabajo se hace siempre", moviendo la
+# decisión de `on:` al interior de la ejecución. Aquí no se ha aplicado ese patrón **a
+# propósito**: este job tarda menos de un minuto, así que la complejidad de tres jobs no se
+# paga. Si algún día dejara de ser rápido, backend-tests.yml es el precedente a copiar.
 
 on:
   pull_request: {}

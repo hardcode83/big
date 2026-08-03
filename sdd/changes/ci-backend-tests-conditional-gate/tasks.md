@@ -64,16 +64,16 @@ nada.
 Tres sitios afirman hoy que el workflow no filtra rutas, y dos de ellos dan la cifra "~1
 minuto". Al terminar la sección 2 las tres afirmaciones son falsas.
 
-- [ ] 3.1 Reescribir la cabecera de `.github/workflows/backend-tests.yml`: sustituir el "~1
+- [x] 3.1 Reescribir la cabecera de `.github/workflows/backend-tests.yml`: sustituir el "~1
   minuto" por la duración medida y fechada (~7m05s totales, `pytest` 6m15s, medido el
   2026-08-03) con el desglose del paso dominante, y explicar por qué `paths:` en `on:` sigue
   prohibido pese a que ahora la ejecución sea condicional. [R5.1]
-- [ ] 3.2 Actualizar `README.md:137-143`, que afirma "No lleva filtro de rutas a propósito — un
+- [x] 3.2 Actualizar `README.md:137-143`, que afirma "No lleva filtro de rutas a propósito — un
   check con filtro deja bloqueados los PR que no tocan esas rutas": describir el
   comportamiento nuevo (el check reporta siempre, la suite corre cuando el diff toca el
   backend) conservando la nota de que no está marcado como obligatorio. `steering/documentation.md`
   exige que ninguna doc describa comportamiento eliminado. [R5.2]
-- [ ] 3.3 Reescribir **solo el comentario** de `.github/workflows/api-contract.yml:18-20` y la
+- [x] 3.3 Reescribir **solo el comentario** de `.github/workflows/api-contract.yml:18-20` y la
   cabecera de `.github/workflows/frontend-tests.yml:3-4` para que apunten al invariante nuevo.
   **Sin tocar `on:`, jobs, pasos ni comportamiento**: los dos siguen ejecutándose en todos los
   PR. [D8]
@@ -84,7 +84,7 @@ El proyecto no declara comando de lint ni de typecheck (`sdd/specs/backend-ci.md
 hace explícito), y este change no toca `backend/`, así que la suite del backend no es la
 verificación pertinente: lo que hay que probar es el comportamiento del propio workflow.
 
-- [ ] 4.1 El YAML es válido y tiene la estructura esperada, con `yq`: los tres jobs existen,
+- [x] 4.1 El YAML es válido y tiene la estructura esperada, con `yq`: los tres jobs existen,
   el consolidador se llama exactamente `backend-tests`, `on:` no contiene ninguna clave `paths`
   ni `paths-ignore`, y los tres jobs declaran `timeout-minutes`.
   `yq '.jobs | keys' .github/workflows/backend-tests.yml` y

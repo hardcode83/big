@@ -136,11 +136,23 @@ cd frontend && npm test
 
 El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`):
 migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
-`downgrade base`, con Postgres y Redis como services. No lleva filtro de rutas a propósito
-— un check con filtro deja bloqueados los PR que no tocan esas rutas. Hoy **no está marcado
-como obligatorio**: el repositorio es privado en un plan sin protección de rama, así que se
-ejecuta y reporta pero nada impide fusionar con él en rojo (ver `sdd/specs/backend-ci.md`
-§Estado).
+`downgrade base`, con Postgres y Redis como services.
+
+La suite tarda ~6 minutos, así que **solo se ejecuta cuando el diff toca `backend/**` o el
+propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
+no toca el backend termina en verde en segundos, y el resumen de la ejecución dice
+explícitamente que la suite se omitió, para que ese verde no se lea como una suite que pasó.
+Un `workflow_dispatch` manual la ejecuta entera en cualquier caso.
+
+Que el check reporte siempre no es un detalle: un filtro de rutas en el disparador `on:`
+haría que el workflow no arrancase, y un check requerido que nunca reporta deja el PR
+bloqueado para siempre. Por eso la decisión vive dentro de la ejecución y no en `on:`.
+
+Hoy **no está marcado como obligatorio**: el repositorio es privado en un plan sin protección
+de rama, así que se ejecuta y reporta pero nada impide fusionar con él en rojo (ver
+`sdd/specs/backend-ci.md` §Estado). Cuando pueda marcarse, el contexto a exigir es
+`backend-tests` —el job consolidador—, nunca `backend-tests-suite`, que se salta de forma
+legítima.
 
 Al abrir la app, el pie muestra la **versión desplegada** (`0.1.0+2026-07-31.5872022`), en el
 workspace, las apps de campo y también en `/login` sin sesión — así no hace falta entrar en la
