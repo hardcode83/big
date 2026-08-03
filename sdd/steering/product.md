@@ -6,7 +6,7 @@ phases: [new, design]
 
 ## Qué construimos
 
-Sistema operativo de viviendas turísticas que sustituye a la gestora externa (MAGNO): atención al huésped con IA y escalado humano, coordinación de limpiezas y mantenimiento, accesos, pricing por reglas, reporting al propietario y timeline auditable. Capa encima de un PMS externo (Octorate/Smoobu/Beds24) — **el PMS es la fuente de verdad de reservas, calendarios y precios publicados**.
+Sistema operativo de viviendas turísticas que sustituye a la gestora externa (MAGNO): atención al huésped con IA y escalado humano, coordinación de limpiezas y mantenimiento, accesos, pricing por reglas, reporting al propietario y timeline auditable. Capa encima de un PMS externo (**Beds24**, elegido en [ADR 0006](../../docs/adr/0006-pms-channel-manager-provider.md); Octorate como segunda opción, Channex en fase SaaS) — **el PMS es la fuente de verdad de reservas, calendarios y precios publicados**.
 
 **No es**: un PMS, un Channel Manager, ni integra OTAs directamente.
 

@@ -50,3 +50,7 @@ infra/environments/dev/apply_loop.sh
 
 # Artefactos de sesiones de Playwright (capturas, snapshots, logs de consola)
 .playwright-mcp/
+
+# Exports del preview de Markdown de VS Code sobre los ADR — artefacto local del visor,
+# la fuente es el .md
+docs/adr/*.html
