@@ -103,7 +103,21 @@ y su job de `celery-jobs`), ni transiciones de estado operacional dependientes d
 ### Sincronización con el PMS
 
 - THE SYSTEM SHALL declarar su dependencia del PMS como un puerto `PMSAdapter` en el
-  dominio, con `MockPMSAdapter` como única implementación (`EXTERNAL_DEPENDENCY`).
+  dominio, con dos implementaciones: `MockPMSAdapter` (el defecto) y `ChannexAdapter`, que
+  habla con la API real de Channex staging y se documenta en
+  `sdd/specs/pms-channex-staging.md`.
+- THE SYSTEM SHALL exponer en el puerto un `unmappable_rows: list[str]` que toda
+  implementación debe ofrecer, porque `list_reservations` devuelve DTOs y no tiene otro sitio
+  donde reportar una fila cuyo payload no pudo mapear. IF una implementación no lo define,
+  THEN el comando SHALL fallar con `AttributeError` en lugar de informar cero filas
+  descartadas mientras descarta algunas.
+- THE SYSTEM SHALL mapear cada elemento del proveedor **por separado**, y WHEN uno resulta
+  imposible de mapear THE SYSTEM SHALL saltarlo reportándolo y conservar los demás, en vez de
+  abortar la sincronización completa. El mapeo ocurre en el adapter, antes de que ninguna fila
+  alcance el `try/except` por fila del `ReservationIngestor`, así que sin esto un solo payload
+  malformado perdía todas las reservas buenas de la página.
+- THE SYSTEM SHALL incluir en el informe del comando, como filas saltadas con su motivo, las
+  que el adapter no pudo mapear — nunca en silencio.
 - THE SYSTEM SHALL resolver la propiedad de cada reserva del PMS por su `pms_external_id`
   dentro del tenant.
 - IF dos propiedades del tenant comparten `pms_external_id`, THEN THE SYSTEM SHALL fallar
@@ -122,12 +136,30 @@ y su job de `celery-jobs`), ni transiciones de estado operacional dependientes d
   tenant reutilizando el que coincida por email normalizado y creándolo si no existe.
 - THE SYSTEM SHALL tratar un email en blanco como ausencia de email: no coincide con nadie
   y no se almacena, de modo que dos filas sin email son dos personas y no una.
-- WHEN se ejecuta el comando `python -m app.integrations.cli.pms_sync <tenant> [días]`, THE
-  SYSTEM SHALL sincronizar ese tenant e imprimir el informe, marcando la sesión con el
-  tenant indicado porque un comando no atraviesa la verificación del token.
+- WHEN se ejecuta el comando `python -m app.integrations.cli.pms_sync <tenant> [días]
+  [--provider {mock,channex}]`, THE SYSTEM SHALL sincronizar ese tenant e imprimir el informe,
+  marcando la sesión con el tenant indicado porque un comando no atraviesa la verificación del
+  token.
+- WHEN no se pasa `--provider`, THE SYSTEM SHALL usar `MockPMSAdapter`, de modo que el
+  comportamiento del comando, de la suite y del arranque local no dependa de configuración
+  alguna.
+- IF `--provider channex` se selecciona sin `CHANNEX_API_KEY` en el entorno, THEN THE SYSTEM
+  SHALL abortar nombrando la variable ausente y no SHALL caer al mock: un fallback silencioso
+  informaría «created 0» y sería indistinguible de un PMS vacío.
+- IF `--provider` recibe un valor desconocido, THEN THE SYSTEM SHALL rechazarlo con el uso del
+  comando y código de salida 2, **sin imprimir el valor recibido** — un valor mal puesto puede
+  ser una credencial pegada por error.
+- IF el proveedor no puede responder, THEN THE SYSTEM SHALL salir con código 3, distinto del 2
+  de un argumento inválido: un sync que no ocurrió no es un sync vacío.
 - IF el tenant indicado al comando no existe, THEN THE SYSTEM SHALL fallar con código de
   salida 2 en lugar de informar un resultado vacío indistinguible de "el PMS no tenía
   datos".
+
+> **La elección de proveedor es un flag del comando y no configuración global a propósito.**
+> PRD §22 definía un `PMS_PROVIDER` global que [ADR 0006](../../docs/adr/0006-pms-channel-manager-provider.md)
+> retiró en favor de resolución **por propiedad** con credenciales cifradas. Un flag de operador
+> no puede filtrarse a la aplicación ni resucitar ese nombre. La `PMSAdapterFactory` definitiva
+> pertenece a `pms-beds24-adapter`.
 - THE SYSTEM SHALL terminar el comando con código 0 cuando haya filas omitidas: informarlas
   es el comportamiento correcto, no un fallo de la ejecución.
 
@@ -227,10 +259,11 @@ y su job de `celery-jobs`), ni transiciones de estado operacional dependientes d
 - `backend/app/reservations/infrastructure/repositories.py` — adaptador SQLAlchemy.
 - `backend/app/reservations/api/` — `router.py`, `schemas.py`, `dependencies.py`,
   `errors.py`.
-- `backend/app/integrations/` — `domain/{ports,dtos}.py` (puertos `PMSAdapter` y
-  `ReservationCsvParser`, DTOs), `application/ingest.py` (`ReservationIngestor`, la única
-  ruta de upsert), `application/use_cases.py`, `infrastructure/{mock_pms,csv_parser}.py`,
-  `api/`, `cli/pms_sync.py`.
+- `backend/app/integrations/` — `domain/{ports,dtos,errors}.py` (puertos `PMSAdapter` y
+  `ReservationCsvParser`, DTOs, `PmsUnavailableError`), `application/ingest.py`
+  (`ReservationIngestor`, la única ruta de upsert), `application/use_cases.py`,
+  `infrastructure/{mock_pms,csv_parser}.py`,
+  `infrastructure/channex/{client,mapping,adapter}.py`, `api/`, `cli/pms_sync.py`.
 - `backend/app/timeline/{domain,infrastructure}/repositories.py` — persistencia del
   timeline.
 - `backend/app/{properties,guests}/{domain,infrastructure}/repositories.py` — resolución
