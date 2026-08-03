@@ -50,8 +50,17 @@ contenedor, no al arrancarlo.
 > «que no vivan en el entorno», y esta vive ahí. Las credenciales cifradas por propiedad
 > llegan con `pms-beds24-adapter`, que es el change donde nacen esas columnas.
 
-El alcance de la key es *todas las propiedades* por defecto, o un subconjunto si se desmarca
-«Access to all properties». Cualquiera de las dos sirve.
+**Desmarca «Access to all properties» y acota la key a la propiedad del sandbox.** El panel
+ofrece *todas las propiedades* por defecto, y la primera versión de este runbook decía que
+«cualquiera de las dos sirve» — lo cual contradice de lleno la **regla 3** de
+`sdd/steering/security.md`: *«Las de cuenta u organización son las más peligrosas, no las menos:
+una sola concede escritura sobre **todas** las propiedades de esa cuenta, no sobre una»*.
+
+No es teórico aquí: dos scripts de este change **escriben** con esa key —
+`channex_bootstrap.py` crea propiedades, rate plans y reservas, y `channex_claim_test_hotel.py`
+crea y vincula canales—, así que una key de organización filtrada concede escritura sobre toda
+la cuenta en vez de sobre un sandbox. La key amplia solo se justifica si de verdad hace falta
+operar varias propiedades, y entonces conviene decirlo explícitamente.
 
 ### Provisión del sandbox — por API, no a mano
 
@@ -65,12 +74,19 @@ reservas de test. **Es idempotente**: una segunda corrida imprime `reused` y no 
 Existe como script y no como lista de clics por dos razones: la tarea 1.1 exige que el alta sea
 **reproducible**, y una lista de siete campos que rellenar en un panel no lo es.
 
-Dos cosas que el script protege y conviene no desactivar:
+Dos guards que conviene no desactivar, los dos endurecidos tras encontrar que su primera
+versión no protegía:
 
-- **Aborta si una app tuviera precio.** Un script de setup no debe poder contratar nada.
-- **Se niega a escribir contra una base URL que no contenga `staging`.** Escribe de verdad
-  (propiedades, reservas), así que un `CHANNEX_BASE_URL` mal puesto no puede provisionar datos
-  de prueba en una cuenta viva.
+- **Apps por allowlist** (`KNOWN_FREE_APPS`), no por «no tiene precio». La primera versión
+  abortaba solo si el catálogo reportaba un precio, y **en el único caso para el que existía no
+  disparó**: `channex_messages` es de pago según ADR 0006 y staging la reporta con
+  `price: null`. Un script de setup no debe poder contratar nada, y la ausencia de precio no
+  demuestra que sea gratis.
+- **Host exacto** (`ALLOWED_HOSTS`), no `"staging" in base_url`. Esa comprobación aceptaba
+  `https://app.channex.io/api/v1?env=staging` —una cuenta viva— y
+  `https://staging.channex.io.example.net/`, que además habría recibido la API key en la
+  cabecera. El script escribe de verdad (propiedades, rate plans, reservas), así que es el único
+  control entre un `CHANNEX_BASE_URL` mal puesto y provisionar datos de prueba en producción.
 
 El título de la propiedad es la **clave de idempotencia**. Si se renombra en el panel hay que
 cambiar también `PROPERTY_TITLE` en el script, o la siguiente corrida creará una propiedad
@@ -124,6 +140,8 @@ configuración ya descartado.
 **No hay que pedir nada a soporte.** Channex publica hoteles de test ya conectados en staging,
 self-serve — lo que corrige una premisa de ADR 0006, que asumía propiedades «prestadas» previa
 petición ([guía oficial](https://docs.channex.io/guides/test-account-for-booking.com)).
+
+**Y algunos IDs no aceptan reservas en absoluto**: la ficha de cada hotel en esa misma guía puede llevar un aviso `Bookings not possible currently for this ID` — `10745030` lo tiene, y por eso Booking.com rechazó todas las tarjetas de test contra él. La lista resumen del formulario de Channex NO muestra ese aviso, solo la ficha por hotel; conviene leerla antes de gastar un turno.
 
 Pero **son un pool con reserva por franjas horarias, no recursos a demanda**. Medido el
 2026-08-03 a las ~12:30: los **ocho** IDs figuraban simultáneamente como *"In use until August
@@ -364,10 +382,12 @@ está documentado con detalle porque ahorra repetirlo:
 2. **«Resend the latest revision»** desde el panel — no crea ninguna revision nueva; re-entrega
    por webhook, que es un canal que este change no recibe.
 3. **Reservar y cancelar en un segundo hotel** (`10745030`) — Booking.com **rechazó todas las
-   tarjetas de test** (`4111…`, `5555…`), así que no llegó a existir reserva. Ese hotel es un
-   *Holiday Home*, no un hotel, y la documentación de Channex marca únicamente `12152494` como
-   «requires a real credit card» — esa anotación está **incompleta**, y conviene contar con que
-   otros hoteles del pool tampoco acepten tarjetas dummy.
+   tarjetas de test** (`4111…`, `5555…`), así que no llegó a existir reserva. **La causa estaba
+   documentada y no la busqué**: la ficha de ese hotel en la guía de Channex lleva el aviso
+   `Bookings not possible currently for this ID`. Yo solo había leído la lista resumen que
+   muestra el formulario *Create Channel*, que **no** incluye ese aviso. Una versión anterior de
+   este documento concluía que «la anotación de Channex está incompleta» — era falso: la
+   información existía, en la ficha por hotel. Leerla antes de gastar un turno.
 4. **Re-enviar por la API de CRS** el mismo `ota_reservation_code` con fechas distintas —
    rechazado con `422 {"ota_reservation_code": ["already exists"]}`. La Booking CRS API es de
    **creación únicamente**: no ofrece camino a una modificación, así que no se puede fabricar

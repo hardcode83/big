@@ -182,10 +182,26 @@ reescribir D7, para que quede el rastro de qué se supuso y qué se midió.
 2. **`ota_commission` nunca es `null`: siempre es un string, y `"0.00"` cuando no hay
    dato.** R2.4 prohibía el cero *porque afirma en falso que no hubo comisión*, y el
    proveedor hace exactamente eso. Como el contrato del puerto sí distingue —`Decimal |
-   None`, donde `None` es "el proveedor no informa"— **la traducción vive en el adapter**:
-   si `ota_name` está entre las OTAs de las que Channex informa comisión (Booking.com,
-   Airbnb) el valor se respeta, incluido un cero legítimo; en cualquier otro caso `None`.
-   Una OTA nueva y desconocida cae del lado de `None`, que es el lado seguro.
+   None`, donde `None` es "el proveedor no informa"— **la traducción vive en el adapter**.
+
+   **Esta decisión se tomó dos veces, y la primera versión era incorrecta.** Se anota el
+   recorrido porque el error es instructivo:
+
+   - **Primer intento (descartado)**: respetar el valor si `ota_name` estaba entre las OTAs
+     de las que la documentación dice que Channex informa comisión (Booking.com, Airbnb), y
+     `None` en el resto. La premisa era que un `"0.00"` procedente de esas OTAs tenía que
+     ser un cero legítimo.
+   - **Lo que lo tumbó**: `BDC-6558139322`, reserva **real** llegada de Booking.com por el
+     canal, con `ota_commission: "0.00"`. Booking.com siempre cobra comisión. Es `0.00`
+     porque el hotel de test no la tiene configurada, pero eso demuestra que el campo no
+     distingue «sin comisión» de «sin dato» **ni siquiera para las OTAs que supuestamente lo
+     informan**. La allowlist no resolvía la ambigüedad: la movía de sitio.
+   - **Regla definitiva**: el cero significa **desconocido, para cualquier OTA**, sin
+     excepción por proveedor. Se pierde el cero legítimo —raro— a cambio de no afirmar nunca
+     en falso. `ota_name` sigue en la firma de `_ota_commission` a propósito: es el sitio
+     natural para tratar de forma especial a un proveedor que algún día informe con
+     honestidad, y quitarlo ocultaría que esto es una decisión sobre *proveedores*, no
+     sobre números.
 
 3. **`status` usa el vocabulario de Channex**: `new`, `modified`, `cancelled`. Ninguno
    existe en `ReservationStatus`, y `parse_ingested` **lanza** ante un valor desconocido,

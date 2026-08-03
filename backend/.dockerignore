@@ -3,3 +3,12 @@ __pycache__/
 *.pyc
 .pytest_cache/
 tests/
+# Herramientas de un solo uso contra servicios externos (sondeo y provisión del sandbox de
+# Channex). Design D9 de `channex-staging-adapter` dice que "no deben viajar en el paquete
+# desplegado", y sin esta línea sí viajaban: `.dockerignore` excluía `tests/` pero no `scripts/`,
+# así que la etapa `prod` los incluía vía `COPY . .`. Lo cazó el panel de CI/CD construyendo la
+# imagen y listando `/app/scripts/`.
+#
+# En desarrollo siguen disponibles: `docker-compose.yml` monta `./backend:/app` como volumen, así
+# que aparecen en tiempo de ejecución sin depender de la imagen.
+scripts/

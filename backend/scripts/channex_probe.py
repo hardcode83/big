@@ -87,7 +87,6 @@ PRESERVED_KEYS = frozenset(
         "amount",
         "total_price",
         "ota_commission",
-        "taxes",
         "page",
         "total",
         "limit",
@@ -103,7 +102,13 @@ PRESERVED_KEYS = frozenset(
         # or phone to hide — the fail-closed default is right to scrub it.
         "acknowledge_status",
         "booking_room_id",
-        "ages",
+        # `ages`, `taxes` and `attachments` were here and came OUT. All three are lists, and
+        # since list members inherit their list's key, allowlisting the key waved through every
+        # **scalar** member untouched — `{"attachments": ["dni_12345678Z.pdf"]}` survived
+        # verbatim. It is the same hole the section-4 panel closed for `guests`, reopened by the
+        # edit that added the message-thread keys. None of the three has ever been observed
+        # non-empty and the mapping reads none of them, so preserving them bought nothing.
+        # Numbers inside them still survive on their own merit (below the identifying floor).
         "is_crs_revision",
         "has_unacked_revisions",
         # `guarantee` was here as "an enum or identifier". It is neither: it is the **card**
@@ -124,7 +129,6 @@ PRESERVED_KEYS = frozenset(
         "message_count",
         "is_closed",
         "sender",
-        "attachments",
         "last_message_received_at",
         # Occupancy — small counts the mapping puts straight into `ReservationDTO`.
         "adults",

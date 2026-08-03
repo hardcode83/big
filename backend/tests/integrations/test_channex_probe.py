@@ -236,6 +236,34 @@ def test_empty_strings_and_booleans_are_left_alone():
     assert probe.anonymise(payload) == payload
 
 
+@pytest.mark.parametrize("key", ["attachments", "taxes", "ages", "special_requests", "notes"])
+def test_a_scalar_inside_a_list_is_scrubbed_whatever_the_lists_key(key):
+    """R4.2, and the hole the feature-scale security panel found.
+
+    List members inherit their list's key, so allowlisting a list's key waved through every
+    **scalar** member untouched: `{"attachments": ["dni_12345678Z.pdf"]}` survived verbatim.
+    Same class as the `guests` hole an earlier panel closed, reopened by the edit that added
+    the message-thread keys — and there was no test for the list-inheritance fix at all, only
+    a comment claiming it had been measured.
+    """
+    payload = {key: ["dni_12345678Z.pdf", "ana.perez@gmail.com", "+34611223344"]}
+    serialised = json.dumps(probe.anonymise(payload))
+
+    for leaked in ("dni_12345678Z.pdf", "ana.perez@gmail.com", "+34611223344"):
+        assert leaked not in serialised, f"{key} -> {leaked}"
+
+
+def test_numbers_inside_a_list_still_survive_on_their_own_merit():
+    """Dropping those keys from the allowlist must not empty legitimate numeric lists."""
+    assert probe.anonymise({"ages": [12, 8, 0]}) == {"ages": [12, 8, 0]}
+
+
+def test_dicts_inside_a_list_are_still_recursed_into():
+    cleaned = probe.anonymise({"rooms": [{"guest_name": "Ana Perez", "adults": 2}]})
+    assert cleaned["rooms"][0]["adults"] == 2
+    assert "Ana Perez" not in json.dumps(cleaned)
+
+
 def test_card_data_is_scrubbed_including_the_expiry_date():
     """R4.2 and the worst near-miss of this change.
 
@@ -266,22 +294,39 @@ def test_card_data_is_scrubbed_including_the_expiry_date():
     assert cleaned["guarantee"]["is_virtual"] is False
 
 
-def test_the_captured_fixture_carries_no_card_data():
-    """Guards the committed artefact itself, not just the function.
+@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")), ids=lambda p: p.name)
+def test_no_committed_fixture_carries_card_data(fixture_path):
+    """Guards the committed artefacts themselves, not just the function.
 
-    A future capture that reintroduces a card field would fail here even if somebody weakened
-    the anonymiser, because this reads what is actually on disk.
+    **Parametrised over every fixture on disk**, not one filename. The first version read only
+    `bookings.json` while `revisions.json` carries the identical `guarantee` object — so the
+    guard covered one of three files, which is exactly how `expiration_date` got committed the
+    first time. Globbing means a fixture added later is covered without anyone remembering to.
     """
     import re
 
-    raw = (FIXTURE_DIR / "bookings.json").read_text(encoding="utf-8")
-    assert not re.search(r"\b\d{13,19}\b", raw), "a PAN-shaped number is in the fixture"
+    raw = fixture_path.read_text(encoding="utf-8")
+    assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
     assert "12/2027" not in raw
-    for row in json.loads(raw)["data"]:
-        guarantee = (row.get("attributes") or {}).get("guarantee") or {}
-        for field in ("card_number", "card_type", "cvv", "cardholder_name", "expiration_date"):
-            value = guarantee.get(field)
-            assert value in (None, probe.SCRUBBED, "***card-data***"), (field, value)
+
+    allowed = (None, probe.SCRUBBED, "***card-data***")
+
+    def walk(node):
+        if isinstance(node, dict):
+            for key, value in node.items():
+                lowered = key.lower()
+                if any(n in lowered for n in ("card", "cvv", "cvc", "expiration", "expiry")):
+                    assert not isinstance(value, str) or value in allowed, (
+                        fixture_path.name,
+                        key,
+                        value,
+                    )
+                walk(value)
+        elif isinstance(node, list):
+            for member in node:
+                walk(member)
+
+    walk(json.loads(raw))
 
 
 def test_scrubs_a_dict_key_that_is_itself_personal_data():

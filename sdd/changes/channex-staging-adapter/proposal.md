@@ -111,9 +111,18 @@ Acceptance criteria:
 
 6. WHERE el proveedor entregue un valor de comisión que **no distingue** "cero" de "no
    informado" —Channex devuelve siempre un string y normaliza el ausente a `"0.00"`—, THE
-   SYSTEM SHALL resolver la ambigüedad **en el adapter**, respetando el valor solo cuando
-   la OTA es de las que ese proveedor informa y devolviendo `None` en cualquier otro caso,
-   incluida una OTA desconocida.
+   SYSTEM SHALL resolver la ambigüedad **en el adapter** tratando el cero como **ausencia
+   de dato para cualquier OTA**, sin excepción por proveedor.
+
+   > **Revisado el 2026-08-03** tras capturar una reserva **real** de Booking.com. La
+   > primera redacción de este criterio permitía respetar el valor «cuando la OTA es de las
+   > que ese proveedor informa (Booking.com, Airbnb)», sobre la base de que un `"0.00"`
+   > procedente de ellas tenía que ser un cero legítimo. **Es falso**: `BDC-6558139322`
+   > llegó de Booking.com con `ota_commission: "0.00"`, y Booking.com siempre cobra
+   > comisión. Ninguna regla basada en *qué* OTA lo envía puede distinguir el cero real del
+   > dato ausente, así que la allowlist no resolvía la ambigüedad — la movía de sitio. El
+   > coste asumido es perder el cero legítimo, que es raro: `None` dice «no lo sabemos», y
+   > eso es verdad; `0` sería una afirmación, y R2.4 prohíbe esa afirmación.
 7. WHEN el proveedor use un vocabulario de estado propio, THE SYSTEM SHALL traducirlo en
    el adapter al vocabulario canónico de `ReservationStatus`, y IF el estado recibido no
    está en esa traducción, THEN THE SYSTEM SHALL propagarlo sin traducir para que la
@@ -243,6 +252,32 @@ apuntan aquí para que no se pierdan):
 - `steering/security.md` regla 8 — su enumeración dice que el `PMS_API_KEY` de
   bootstrap/mock es la **única** credencial de PMS que vive en el entorno; este change
   añade la de Channex staging y la regla necesita una línea que lo recoja.
+
+- 🔴 **`steering/security.md` necesita una regla nueva sobre datos de titular de tarjeta**, y
+  esto es lo más importante que este change deja pendiente para el proyecto. Lo levantó el panel
+  de seguridad a escala de feature y el hueco es concreto:
+
+  Este change **midió** que toda reserva de OTA llega con un objeto `guarantee` que contiene
+  `card_number`, `card_type`, `cvv`, `cardholder_name` y `expiration_date`. La enumeración de la
+  regla 3 cubre `wifi_password`, `document_number`, códigos de acceso y credenciales de
+  proveedor — **los datos de tarjeta no aparecen en ninguna parte**, ni bajo «Datos sensibles».
+  Y la regla 11 se acota a sí misma a *«un valor de la regla 3»*.
+
+  Consecuencia: quien implemente `reservations-webhooks` y escriba el cuerpo del webhook de
+  Channex en `webhook_events.payload` «en forma estructurada» **cumple la regla 11 tal como está
+  escrita** mientras persiste un `cvv` y un `card_number` en una columna JSON.
+
+  Dos propiedades que la regla nueva necesita y que ninguna existente aporta: **no puede ser
+  «Fernet en reposo»** —PCI DSS prohíbe retener el CVV en absoluto tras la autorización, así que
+  la obligación es **descartar en la frontera** del adapter o del webhook, antes de que nada
+  pueda persistirlo, loguearlo o reenviarlo—, y debe **nombrar `raw_payload` explícitamente**
+  como la trampa: el docstring de `ReservationDTO` invita a conservar la respuesta del proveedor
+  sin tocar, y hoy es lo único que separa un número de tarjeta de un `logger.debug`.
+
+  Hoy no muerde: `raw_payload` vive solo en memoria y **nadie lo persiste** (verificado dos veces
+  por el panel: no existe la columna, `ingest.py` no lo lee, y el `assert set(changes) <=
+  INGEST_OWNED_FIELDS` impide añadirlo en silencio). Muerde el día que `pms-beds24-adapter` o
+  `reservations-webhooks` lo guarden.
 - `steering/product.md` — dice "Channex en fase SaaS", que sigue siendo cierto **para
   producción**; conviene una línea que distinga el uso de su staging como entorno de
   validación desde ya, tal como prescribe ADR 0006 decisión 2.

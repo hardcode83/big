@@ -26,6 +26,7 @@ mapping step needs.
 import asyncio
 import os
 import sys
+import uuid
 from datetime import datetime
 from typing import Any
 
@@ -55,6 +56,28 @@ CANDIDATES: tuple[tuple[str, str], ...] = (
 )
 
 TAKEN_MARKER = "already exists"
+
+# Statuses that mean "stop", not "retry": bad or revoked credential, no access, wrong ids.
+FATAL_STATUSES = frozenset({401, 403, 404})
+# Throttling and provider faults: back off instead of hammering at the fixed sweep rate.
+BACKOFF_STATUSES = frozenset({429, 500, 502, 503, 504})
+BACKOFF_SECONDS = 60.0
+
+
+def _error_detail(response: httpx.Response) -> str:
+    """The documented `{"errors": {...}}` envelope, never the raw body.
+
+    Same posture as `app/integrations/infrastructure/channex/client.py`: a 4xx body can echo what
+    was sent, and what was sent might be a pasted credential.
+    """
+    try:
+        body = response.json()
+    except ValueError:
+        return "unparseable error body"
+    errors = body.get("errors") if isinstance(body, dict) else None
+    if isinstance(errors, dict):
+        return f"code={errors.get('code')!r} details={errors.get('details')!r}"
+    return "no `errors` object"
 
 
 def _env(name: str) -> str:
@@ -90,6 +113,15 @@ async def _attempt(
         }
     }
     response = await client.post("/channels", json=body)
+    if response.status_code in FATAL_STATUSES:
+        # Abort, do not retry. With a 5s sweep over 7 candidates for up to 4 hours, a revoked or
+        # mistyped key would otherwise produce ~17.000 failed WRITE attempts against a third
+        # party's account shared with other integrators — the opposite of the politeness this
+        # module claims in its own docstring. Found by the feature-scale security panel.
+        raise SystemExit(
+            f"channex-claim: aborting — provider answered {response.status_code} "
+            f"({_error_detail(response)}). Check {API_KEY_ENV} and the ids."
+        )
     if response.status_code < 300:
         created = response.json().get("data")
         # **`property_id` in the create body is silently ignored.** The channel comes back with
@@ -104,16 +136,23 @@ async def _attempt(
                 f"/channels/{created['id']}", json={"channel": {"properties": [property_id]}}
             )
             if attach.status_code >= 300:
-                print(
-                    f"  WARNING: won {hotel_id} but could not attach the property: "
-                    f"{attach.status_code} {attach.text[:150]}",
-                    flush=True,
+                # **Fatal, not a warning.** The first version printed and still returned "won",
+                # which hands the operator a channel that is invisible in the panel and cannot be
+                # mapped — while the slot is consumed and another integrator cannot take it. Worth
+                # failing loudly so it gets fixed instead of looking like a success.
+                # `_error_detail`, not the raw body, for the same reason as everywhere else.
+                raise SystemExit(
+                    f"channex-claim: won {hotel_id} but could NOT attach the property "
+                    f"({attach.status_code} {_error_detail(attach)}). Channel "
+                    f"{created['id']} exists and is unusable — attach it or delete it."
                 )
         return "won", created
-    text = response.text
-    if response.status_code == 422 and TAKEN_MARKER in text:
+    if response.status_code == 422 and TAKEN_MARKER in response.text:
         return "taken", None
-    return "error", f"{response.status_code} {text[:200]}"
+    # Status plus the documented `errors` object — never the raw body. A 4xx validation body
+    # echoes back what was sent, so if an operator pasted the API key where an id belongs it
+    # would land in the terminal or a CI log (R2.3). `client.py` refuses the same fallback.
+    return "error", f"{response.status_code} {_error_detail(response)}"
 
 
 async def run(property_id: str, group_id: str) -> int:
@@ -146,6 +185,11 @@ async def run(property_id: str, group_id: str) -> int:
                     # Anything that is not plain contention is worth seeing immediately: it may
                     # mean the payload contract moved, and silently retrying would hide it.
                     print(f"  {hotel_id} ({currency}) -> unexpected: {payload}", flush=True)
+                    if any(str(code) in str(payload).split()[0] for code in BACKOFF_STATUSES):
+                        # Throttled or the provider is unwell: waiting is the cooperative move,
+                        # and retrying at the sweep rate would make it worse.
+                        print(f"  backing off {BACKOFF_SECONDS:.0f}s", flush=True)
+                        await asyncio.sleep(BACKOFF_SECONDS)
             if sweeps % 12 == 1:
                 print(
                     f"[{datetime.now().strftime('%H:%M:%S')}] sweep {sweeps}: all "
@@ -158,13 +202,30 @@ async def run(property_id: str, group_id: str) -> int:
     return 1
 
 
+USAGE = (
+    "usage: channex_claim_test_hotel.py <property-id> <group-id>  "
+    "(both are UUIDs, printed by channex_bootstrap.py / GET /groups). "
+    f"The API key comes from {API_KEY_ENV} and must never be passed as an argument."
+)
+
+
 def main(argv: list[str] | None = None) -> int:
     args = list(sys.argv[1:] if argv is None else argv)
     if len(args) != 2:
-        raise SystemExit(
-            "usage: channex_claim_test_hotel.py <property-id> <group-id>  "
-            "(both are printed by channex_bootstrap.py / GET /groups)"
-        )
+        raise SystemExit(USAGE)
+    # **Both positionals must parse as UUIDs, and a rejected value is never echoed.** Without
+    # this, an operator who pastes the organisation API key where `<group-id>` belongs sends it
+    # to Channex as a `group_id`, and it comes back inside the 422 validation body — into the
+    # terminal and any CI log, on top of the shell history. R4.4 and R2.3, and the posture
+    # `channex_probe.py` already takes for the same class of mistake.
+    for label, value in (("property-id", args[0]), ("group-id", args[1])):
+        try:
+            uuid.UUID(value)
+        except ValueError:
+            raise SystemExit(
+                f"channex-claim: {label} is not a UUID (value not echoed on purpose — it may "
+                f"be a credential).\n{USAGE}"
+            ) from None
     return asyncio.run(run(args[0], args[1]))
 
 

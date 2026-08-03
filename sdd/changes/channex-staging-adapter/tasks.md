@@ -110,12 +110,16 @@ comportamiento de nadie.
       reconocido**: `ReservationChannel.parse` lanza ante desconocidos y el ingestor lo
       convierte en fila saltada, así que propagar el literal de Channex haría que una OTA
       nueva descarte reservas válidas. Test con un nombre de OTA inventado. [R2]
-- [x] 4.3 `ota_commission`: **corregido contra el payload real** — Channex no devuelve `null`
-      nunca, devuelve `"0.00"`, así que el campo no distingue "sin comisión" de "sin dato".
-      El adapter respeta el valor solo si `ota_name` es de las OTAs de las que Channex
-      informa (Booking.com, Airbnb) y devuelve `None` en el resto, **incluida una OTA
-      desconocida**. Documentar con `None` todo campo de PRD §16 que Channex no dé. Test por
-      cada caso, incluido el cero legítimo de Booking.com. [R2, R6 (§D7 bis)]
+- [x] 4.3 `ota_commission`: **corregido dos veces contra el payload real**. Channex no devuelve
+      `null` nunca, devuelve `"0.00"`, así que el campo no distingue "sin comisión" de "sin
+      dato". El primer arreglo fue una allowlist de OTAs (respetar el valor si `ota_name` era
+      Booking.com o Airbnb) y **duró hasta que llegó una reserva real de Booking.com con
+      `ota_commission: "0.00"`** — Booking.com siempre cobra comisión, así que ninguna regla
+      basada en *qué* OTA lo envía puede distinguir el cero real del dato ausente.
+      **Regla definitiva**: el cero es `None` **para cualquier OTA**, sin excepción por
+      proveedor. Documentar con `None` todo campo de PRD §16 que Channex no dé. Tests: cero →
+      `None` en las cinco grafías de OTA, y valor no nulo conservado incluso en una OTA
+      desconocida. [R2, R2.6, R6 (§D7 bis)]
 - [x] 4.6 Traducción de `status`: `new`/`modified` → `CONFIRMED`, `cancelled` → `CANCELLED`.
       Un valor **fuera** de esa tabla se propaga sin traducir para que `parse_ingested` lo
       rechace y el ingestor reporte la fila — asimetría deliberada frente al canal (4.2),
@@ -167,6 +171,22 @@ comportamiento de nadie.
 
 ## 6. Reserva end-to-end desde Booking.com
 
+- [x] 6.5 `backend/scripts/channex_claim_test_hotel.py` (nuevo, **no estaba en el plan** —
+      añadido 2026-08-03 y registrado aquí con el mismo trato documental que 1.4, porque el
+      panel de arquitectura señaló con razón que se había quedado sin registrar mientras su
+      script hermano sí lo estaba): adquiere uno de los hoteles de test de Booking.com **en el
+      instante en que se libera**.
+      **Por qué existe**: los ocho hoteles son un pool compartido entre integradores y se
+      re-arriendan en segundos —medido: el de EUR pasó de vencer a las 13:50 a estar ocupado
+      hasta las 17:00—, así que un humano pulsando un botón no gana la carrera. El script la
+      ganó dos veces, a los **6** y a los **29 segundos** del vencimiento.
+      **Por qué es posible**: `POST /channels` funciona con una key normal (la documentación de
+      Channex afirma lo contrario) y devuelve `422 {"settings": ["channel with the same settings
+      already exists"]}` cuando el hotel está cogido, así que la contención es detectable y
+      adquirir es reintentar.
+      **Cortesía deliberada**: un barrido cada 5 s (~1,4 req/s), parada inmediata al ganar, tope
+      de 4 h, y `12152494` excluido porque exige tarjeta real. Channex **no publica límite de
+      tasa**, y eso no es permiso para machacarlo. [R5]
 - [ ] 6.1 Escribir el `property_id` de Channex en `Property.pms_external_id` de la
       propiedad de test mediante el paso documentado del runbook — **no** migración ni
       cambio en `app/cli/bootstrap.py`, que contaminaría el arranque de todo el mundo con

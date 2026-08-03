@@ -133,10 +133,14 @@ async def sync_with_session(
         now=at,
     )
     # Rows the adapter could not even turn into a DTO fold into the report's skipped count and
-    # errors, so the command reports them like any other unusable row. The port has no channel
-    # for this (`list_reservations` returns bare DTOs), so the adapter exposes it as state —
-    # noted as a limitation to fix properly in `pms-beds24-adapter`.
-    for reason in getattr(adapter, "unmappable_rows", []):
+    # errors, so the command reports them like any other unusable row.
+    #
+    # Plain attribute access, not `getattr(..., [])`. The default was the bug: an adapter that
+    # simply did not define the attribute would report **zero** unmappable rows while dropping
+    # some, silently. `unmappable_rows` is now declared on `PMSAdapter` so every implementation
+    # owes it — see that docstring for why widening the return type is the real fix and why it
+    # belongs to `pms-beds24-adapter`.
+    for reason in adapter.unmappable_rows:
         report.skipped += 1
         report.errors.append(RowError(reason=f"provider row could not be mapped: {reason}"))
     return report
