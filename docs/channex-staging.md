@@ -262,15 +262,39 @@ Hay dos endpoints y hacen cosas diferentes:
 | `GET /booking_revisions` | **todas** las revisions — 3: dos de CRS y la de OTA |
 | `GET /booking_revisions/feed` | solo las **pendientes de acuse** — 1, la de OTA |
 
-Y aquí está el hallazgo que importa: por la mañana el **feed** tenía **2** entradas (las de las
-reservas de CRS) y horas más tarde estaba a **0**, **sin que nadie llamara a `ack`**. Las
-revisions siguen existiendo en `/booking_revisions`; lo que desapareció fue su presencia en el
-feed.
+Y aquí está el hallazgo que importa, **medido con reloj sobre la reserva real** y no inferido:
 
-O sea: **el feed vacía entradas por su cuenta**. Cualquier diseño que lo trate como una cola
-durable —«leo, proceso, confirmo, y hasta que confirme sigue ahí»— está equivocado. Eso es
-entrada de diseño directa para `reservations-webhooks`, que iba a construirse exactamente sobre
-esa suposición.
+| Hora (UTC) | Feed | `acknowledge_status` de la reserva |
+|---|---|---|
+| 13:19:39 | la revision entra | `pending` |
+| 13:31:17 | 1 entrada | `pending` |
+| ~13:46 | 1 entrada | `pending` |
+| **14:13:44** | **0 entradas** | **`pending`** |
+
+**Nadie llamó a `ack` en ningún momento.** La revision sigue existiendo en
+`/booking_revisions` (3 en total); lo que desapareció fue su presencia en el feed. La ventana de
+desaparición queda acotada entre **27 y 54 minutos** desde la inserción, lo que encaja con que el
+límite de 30 minutos que la documentación presenta como «confirma antes de 30 min o recibirás
+avisos por correo» sea en realidad un **TTL duro**: pasado ese tiempo la entrada se va del feed,
+la hayas procesado o no.
+
+Peor: en ese estado Channex afirma **tres cosas incompatibles a la vez**.
+
+| Señal | Dice |
+|---|---|
+| `acknowledge_status` | `pending` — la revision espera confirmación |
+| `has_unacked_revisions` | `false` — no hay nada pendiente |
+| `/booking_revisions/feed` | vacío — no hay nada que procesar |
+
+Un consumidor que se fíe de `acknowledge_status` sigue esperando algo que ya no puede leer; uno
+que se fíe del feed cree que no hay trabajo; uno que se fíe de `has_unacked_revisions` cree que
+está al día. **Ninguna de las tres señales basta por sí sola, y no coinciden.**
+
+**Consecuencia directa, y es grave**: un PMS que consulte el feed cada pocas horas —la cadencia
+que la documentación de Beds24 recomienda para su propio sync— **perdería revisions en silencio**.
+Cualquier diseño que trate el feed como cola durable («leo, proceso, confirmo, y hasta que
+confirme sigue ahí») está equivocado. Es entrada de diseño directa para
+`reservations-webhooks`, que iba a construirse exactamente sobre esa suposición.
 
 Refuerza además la decisión D1 de leer `/bookings`, aunque por un motivo distinto del que se
 escribió: no es solo que consumir el feed obligue a una escritura destructiva, es que **el feed
