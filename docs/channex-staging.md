@@ -356,12 +356,26 @@ documentación dice que `unique_id` es estable entre revisions y que `system_id`
 y todo el mapeo se apoya en eso. Lo que **no** se ha observado nunca es una reserva con **dos**
 revisions: cada una de las tres tiene exactamente una.
 
-Los tres intentos de provocar una segunda revision fracasaron por motivos distintos:
+**Cuatro vías intentadas, las cuatro cerradas**, cada una por un motivo distinto. El negativo
+está documentado con detalle porque ahorra repetirlo:
 
-- **modificar fechas** — la tarifa que quedó mapeada es *no reembolsable* y Booking.com no
-  permite cambiar fechas;
-- **cancelar** — habría dado un `status: cancelled`, no una segunda revision de una reserva viva;
-- **reenviar la revision** — no crea ninguna nueva (arriba).
+1. **Modificar fechas en Booking.com** (hotel `5868189`) — la tarifa que quedó mapeada resultó
+   *no reembolsable*: «No se pueden cambiar las fechas de estancia».
+2. **«Resend the latest revision»** desde el panel — no crea ninguna revision nueva; re-entrega
+   por webhook, que es un canal que este change no recibe.
+3. **Reservar y cancelar en un segundo hotel** (`10745030`) — Booking.com **rechazó todas las
+   tarjetas de test** (`4111…`, `5555…`), así que no llegó a existir reserva. Ese hotel es un
+   *Holiday Home*, no un hotel, y la documentación de Channex marca únicamente `12152494` como
+   «requires a real credit card» — esa anotación está **incompleta**, y conviene contar con que
+   otros hoteles del pool tampoco acepten tarjetas dummy.
+4. **Re-enviar por la API de CRS** el mismo `ota_reservation_code` con fechas distintas —
+   rechazado con `422 {"ota_reservation_code": ["already exists"]}`. La Booking CRS API es de
+   **creación únicamente**: no ofrece camino a una modificación, así que no se puede fabricar
+   una segunda revision sin pasar por una OTA.
+
+Una cancelación **sí** valdría (genera una revision con `status: cancelled` sobre la misma
+reserva, que es la comparación que hace falta), pero exige una reserva viva sobre un hotel que
+acepte tarjeta de test.
 
 **Qué debe hacer `pms-beds24-adapter` antes de construir deduplicación encima**: provocar una
 modificación real (tarifa flexible, o el equivalente en Beds24) y verificar que `unique_id` no se
