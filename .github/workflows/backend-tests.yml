@@ -85,10 +85,17 @@ jobs:
         # puede fallar se comprueba explícitamente y `backend` arranca en `true`: solo
         # una ruta afirmativa lo baja a `false`.
         run: |
-          # `set +e` EXPLÍCITO y no simplemente "omitir -e": GitHub invoca los `run:`
-          # con `bash -e {0}`, así que `-e` está activo por defecto y un `set -uo
-          # pipefail` no lo desactiva. Sin esta línea el fail-open de R2.4 sería una
-          # intención escrita en un comentario, no un comportamiento.
+          # `set +e` explícito porque GitHub invoca los `run:` con `bash -e {0}`: `-e`
+          # está activo por defecto y un `set -uo pipefail` NO lo desactiva.
+          #
+          # Es una medida defensiva, no la que hace funcionar el fail-open de R2.4 hoy.
+          # Comprobado: `-e` queda suspendido en todo el cuerpo de una función invocada
+          # como test de un `if`/`elif` (o negada con `!`), y ahora mismo TODOS los
+          # comandos que pueden fallar —`git cat-file`, `read_diff`— se invocan así, de
+          # modo que ya degradaban correctamente sin esta línea. Lo que `set +e` cubre es
+          # el futuro: el día que alguien añada aquí un comando fuera de un condicional,
+          # su fallo abortaría el paso y el gate reportaría rojo en vez de caer al camino
+          # completo, que es lo contrario de lo que R2.4 pide.
           set +e
           set -uo pipefail
 
@@ -187,12 +194,19 @@ jobs:
 
           if [ "${#files[@]}" -gt 0 ]; then
             echo "Ficheros cambiados considerados (${#files[@]}):"
-            # El prefijo de dos espacios es una medida de seguridad, no formato: quien
-            # abre el PR elige los nombres de fichero, y un fichero llamado
-            # `::notice::…`, `::error::…` o `::stop-commands::…` impreso al principio de
-            # línea lo ejecutaría el runner como comando de workflow — falsificando la
-            # anotación de la decisión o silenciando el resto del log.
-            printf '  %s\n' "${files[@]:0:50}"
+            # `%q` y el prefijo son contención, no formato. Quien abre el PR elige los
+            # nombres de fichero, y un nombre puesto al principio de una línea del log
+            # lo ejecuta el runner como comando de workflow (`::notice::`, `::error::`,
+            # `::add-mask::`, `::stop-commands::`): permitiría falsificar la anotación de
+            # la decisión que R2.1 exige, o silenciar el resto del log.
+            #
+            # El prefijo de dos espacios NO basta por sí solo: un nombre de fichero puede
+            # contener SALTOS DE LÍNEA, y con `-z` llegan crudos, así que el prefijo solo
+            # protegería la primera línea y las demás empezarían en la columna 0. `%q`
+            # colapsa cada ruta a una sola línea (`$'backend/z\n::error::…'`), con lo que
+            # el prefijo vuelve a cubrirla entera — y de paso el tope de 50 pasa a contar
+            # líneas de verdad y no elementos que pueden expandirse a muchas.
+            printf '  %q\n' "${files[@]:0:50}"
           fi
 
   # --- La verificación de verdad. Intacta respecto a antes del change, salvo el ------

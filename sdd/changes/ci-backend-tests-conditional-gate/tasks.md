@@ -26,8 +26,11 @@ nada.
   puntos, `push` con `github.event.before`, `workflow_dispatch` → `true` sin calcular);
   comparación ruta a ruta con `case` contra `backend/*` y
   `.github/workflows/backend-tests.yml`; escritura de `backend`/`reason` a `$GITHUB_OUTPUT`.
-  Abrir con **`set +e` explícito** seguido de `set -uo pipefail`: GitHub invoca los `run:` con
-  `bash -e {0}`, así que sin `set +e` el fail-open de R2.4 no existiría (ver D3).
+  Abrir con **`set +e` explícito** seguido de `set -uo pipefail`, porque GitHub invoca los `run:`
+  con `bash -e {0}` y `set -uo pipefail` no apaga `-e`. Es defensa a futuro, **no** lo que hace
+  funcionar el fail-open hoy: `-e` ya queda suspendido en el cuerpo de una función invocada como
+  test de `if`/`elif`, que es como se invocan todos los comandos que pueden fallar (ver D3, donde
+  se corrige la afirmación contraria).
   [R2.1, R2.2, R2.3, D3, D4, D5]
 - [x] 1.2b Leer el diff con `git -c core.quotePath=false diff -z --no-renames --name-only` e
   iterarlo como array (`mapfile -d ''`), **no** con `grep` sobre la salida por defecto. Los tres
@@ -41,10 +44,13 @@ nada.
 - [x] 1.4 Emitir la decisión al log del propio job con
   `echo "::notice::backend=<v> (<reason>)"` — `$GITHUB_OUTPUT` no imprime nada y el resumen lo
   escribe otro job, así que sin esto R2.1 queda sin mecanismo. [R2.1, D3]
-- [x] 1.5 Imprimir la lista de ficheros considerados **prefijando cada línea con dos espacios**.
-  Es contención, no formato: quien abre el PR elige los nombres, y un fichero llamado
-  `::notice::…` o `::stop-commands::…` al principio de línea lo ejecuta el runner como comando de
-  workflow, falsificando la anotación de la decisión o silenciando el log. [D10]
+- [x] 1.5 Imprimir la lista de ficheros con `printf '  %q\n'`: prefijo de dos espacios **y** `%q`.
+  Es contención, no formato — quien abre el PR elige los nombres, y uno puesto al principio de
+  línea lo ejecuta el runner como comando de workflow. El prefijo solo no basta: un nombre puede
+  llevar **saltos de línea** y con `-z` llegan crudos, así que las líneas siguientes empezarían en
+  la columna 0 (reproducido: un solo fichero colocaba tres comandos). `%q` colapsa cada ruta a una
+  línea. El listado se trunca a 50 rutas para no llenar el log; la **decisión** usa el array
+  completo, así que el tope no puede afectarla. [D10]
 - [x] 1.6 Batería de casos adversariales sobre la lógica de detección, ejecutada con `bash` y con
   `-e` activo (como la invoca GitHub), sobre repositorios git de usar y tirar: rutas con acentos,
   con espacios, deleciones, el propio workflow, y las trampas `docs/backend-notes.md`,
@@ -133,9 +139,10 @@ verificación pertinente: lo que hay que probar es el comportamiento del propio 
 | Requisito | Tareas |
 |---|---|
 | R1 — el check reporta siempre | 2.2, 2.3, 2.5, 4.1, 4.2, 4.3 |
-| R2 — detección de área | 1.1, 1.2, 1.3, 1.4, 4.6 |
+| R2 — detección de área | 1.1, 1.2, 1.2b, 1.3, 1.4, 1.6, 4.6 |
 | R3 — el camino largo conserva la verificación | 2.1, 2.5, 4.1, 4.2 |
 | R4 — el camino corto es rápido y legible | 2.4, 4.3, 4.4, 4.5 |
+| D10 (endurecimiento salido del panel) | 1.2b, 1.5, 1.6 |
 | R5.1 — el coste declarado es el medido | 3.1, 3.2 |
 | R5.2 — la spec recoge el invariante nuevo | **ninguna: se aplica al archivar**, no en este change (D "Changes by area"). `specs/backend-ci.md:23` seguirá afirmando "sin filtro de rutas" hasta entonces, y es correcto por el flujo SDD — pero R5.2 **no está cumplido en el repo** al cerrar este PR. Señalado por la revisión de QA, que avisó de que la tabla anterior lo daba por cubierto. |
 | D8 (alcance añadido en design) | 3.3 |

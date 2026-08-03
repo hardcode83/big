@@ -82,13 +82,23 @@ no se puede determinar el diff, se ejecuta la suite), y una action de terceros f
 cuando algo va mal en lugar de degradar. Además evita añadir superficie externa que habría que
 pinear por SHA y auditar para algo que son tres líneas de git.
 
-**El paso desactiva `-e` de forma explícita con `set +e`.** No basta con "no escribir `-e`":
-GitHub invoca los `run:` con `bash -e {0}`, así que `-e` está **activo por defecto** y un
-`set -uo pipefail` no lo apaga. Con `-e` vivo, un `git diff` que fallara abortaría el paso → el
-job entra en `failure` → el gate reporta rojo (D6), que es lo contrario de lo que R2.4 pide. Una
-primera versión de este diseño creía que omitir `-e` bastaba; el fail-open era entonces una
-intención escrita en un comentario, no un comportamiento. El consolidador sí usa
-`set -euo pipefail`: ahí un fallo inesperado **debe** dar rojo.
+**El paso desactiva `-e` de forma explícita con `set +e`**, porque GitHub invoca los `run:` con
+`bash -e {0}`: `-e` está **activo por defecto** y un `set -uo pipefail` no lo apaga. El
+consolidador, en cambio, sí usa `set -euo pipefail`: ahí un fallo inesperado **debe** dar rojo.
+
+**Corrección de una afirmación previa de este documento, señalada por la revisión de
+arquitectura y verificada.** Una versión anterior de D3 sostenía que sin `set +e` el fail-open de
+R2.4 "no existiría" y que un `git diff` fallido abortaría el paso. **Es falso**: `-e` queda
+suspendido en todo el cuerpo de una función invocada como test de un `if`/`elif` o negada con
+`!`, y todos los comandos que pueden fallar (`git cat-file -e`, `read_diff`) se invocan
+exactamente así, de modo que ya degradaban bien sin esa línea. Reproducido en ambos sentidos: una
+función con un `/bin/false` incondicional llamada como `elif ! fn` no aborta bajo `bash -e`,
+mientras que el mismo `/bin/false` fuera de un condicional sí aborta con `exit 127`.
+
+El valor real de `set +e` es por tanto **defensivo y a futuro**, no correctivo: el día que alguien
+añada a este paso un comando fuera de un condicional, su fallo pasaría a abortar el job y el gate
+reportaría rojo en lugar de caer al camino completo. Se conserva por eso, con la justificación
+correcta en lugar de la que había.
 
 **La decisión se escribe además a stdout** con `echo "::notice::backend=<v> (<reason>)"` en el
 propio paso de detección. No es redundante con D7: `$GITHUB_OUTPUT` es un canal entre jobs y
@@ -134,8 +144,24 @@ Alcance del riesgo, para no exagerarlo: el disparador es `pull_request` y no
 que no había vía de exfiltración ni de escritura. Lo que había era falsificación de la señal y un
 falso verde.
 
-Rejected: sanear con `sed` las líneas que empiecen por `::` — el prefijo es más simple y no puede
-fallar por un patrón mal escrito.
+**El prefijo de dos espacios no basta solo, y por eso va acompañado de `%q`.** Un nombre de
+fichero puede contener **saltos de línea**, y con `-z` llegan crudos: el prefijo protegería solo
+la primera línea y las siguientes empezarían en la columna 0. Reproducido — un único fichero
+llamado `backend/z\n::stop-commands::…\n::notice::…\n::error::….py` colocaba **tres** comandos de
+workflow al principio de línea. `printf '  %q\n'` colapsa cada ruta a una sola línea
+(`$'backend/z\n::error::…'`), con lo que el prefijo vuelve a cubrirla entera. Lo encontró la
+segunda ronda de la revisión de seguridad, sobre la corrección de la primera.
+
+**El listado se trunca a 50 rutas** (`"${files[@]:0:50}"`) para que un diff enorme no llene el log;
+la **decisión** usa el array completo, sin truncar, así que el tope no puede afectarla. Con `%q`
+cada elemento ocupa exactamente una línea, de modo que el tope cuenta líneas de verdad — antes,
+un solo elemento con saltos podía expandirse a muchas.
+
+Rejected: sanear con `sed` las líneas que empiecen por `::` — el prefijo más `%q` es más simple y
+no puede fallar por un patrón mal escrito.
+Rejected: envolver el listado entre `::stop-commands::<token>` y `::<token>::` — defensa en
+profundidad razonable, pero si el paso muriera entre ambos marcadores dejaría el parseo de comandos
+desactivado para lo que viniera después; `%q` resuelve el problema de raíz sin ese efecto lateral.
 Rejected: no imprimir la lista de ficheros — es lo que hace diagnosticable una decisión
 sorprendente.
 
