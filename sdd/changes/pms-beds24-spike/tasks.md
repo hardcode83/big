@@ -4,7 +4,7 @@ Las secciones 1-6 construyen el banco de medición y se verifican **sin red y si
 La sección 7 son las mediciones contra la cuenta real de Beds24 y depende de un
 `EXTERNAL_DEPENDENCY` que solo puede resolver una persona (ver D10 y `BLOCKED.md`).
 
-## 1. Extracción del anonimizador
+## 1. Extracción del anonimizador <!-- panel: PASS 2026-08-03 -->
 
 Va primero porque toca código existente y probado: si rompe algo, se ve antes de construir nada encima.
 
@@ -42,11 +42,11 @@ Va primero porque toca código existente y probado: si rompe algo, se ve antes d
 ## 6. Informe, configuración y documentación
 
 - [ ] 6.1 Subcomando `report` de `beds24_probe.py`: lee el JSONL y renderiza la tabla de coste por endpoint y forma, más la **cadencia máxima sostenible** derivada del coste del ciclo completo contra la ventana de 100 créditos / 5 min. Tests sobre un JSONL sintético, incluido el caso con costes `null` (que no pueden sumarse y deben reportarse como tales). [R4.1, R4.4]
-- [ ] 6.2 `docs/beds24-spike.md`: runbook (alta de la cuenta, canje de credencial, levantar el quick tunnel, configurar el webhook **a mano en el panel de Beds24** porque no hay API para ello, correr sondeo y captura), la **regla dura** de que la cuenta no lleva ningún canal OTA conectado, y la sección de hallazgos con cada medida marcada *no medido*. [R5.1, R5.2, R6.1]
-- [ ] 6.3 En ese mismo documento, responder explícitamente a la pregunta que `reservations-webhooks` arrastra: Beds24 **no** firma sus webhooks, solo ofrece una cabecera estática, y eso convierte «valida la firma» en «trata todo webhook como aviso no fiable y re-lee por API». [R5.3]
-- [ ] 6.4 `.env.example`: bloque `BEDS24_REFRESH_TOKEN` (solo el nombre, nunca un valor) y `BEDS24_BASE_URL`, con el estilo del bloque de Channex y la nota de por qué no lo gobierna la regla 3. [R6.2]
-- [ ] 6.5 `sdd/steering/security.md` regla 8: la enumeración cerrada («esas dos y nada más») pasa a tres, anotando que `BEDS24_REFRESH_TOKEN` es credencial **de cuenta** y por tanto de radio de daño mayor que una de propiedad. [R6.2]
-- [ ] 6.6 `docs/README.md`: entrada de índice para `beds24-spike.md`, igual que la de `channex-staging.md`. Actualizar el `README.md` de raíz solo si `steering/documentation.md` lo exige por la herramienta nueva. [R5.1]
+- [x] 6.2 `docs/beds24-spike.md`: runbook (alta de la cuenta, canje de credencial, levantar el quick tunnel, configurar el webhook **a mano en el panel de Beds24** porque no hay API para ello, correr sondeo y captura), la **regla dura** de que la cuenta no lleva ningún canal OTA conectado, y la sección de hallazgos con cada medida marcada *no medido*. [R5.1, R5.2, R6.1]
+- [x] 6.3 En ese mismo documento, responder explícitamente a la pregunta que `reservations-webhooks` arrastra: Beds24 **no** firma sus webhooks, solo ofrece una cabecera estática, y eso convierte «valida la firma» en «trata todo webhook como aviso no fiable y re-lee por API». [R5.3]
+- [x] 6.4 `.env.example`: bloque `BEDS24_REFRESH_TOKEN` (solo el nombre, nunca un valor) y `BEDS24_BASE_URL`, con el estilo del bloque de Channex y la nota de por qué no lo gobierna la regla 3. [R6.2]
+- [x] 6.5 `sdd/steering/security.md` regla 8: la enumeración cerrada («esas dos y nada más») pasa a tres, anotando que `BEDS24_REFRESH_TOKEN` es credencial **de cuenta** y por tanto de radio de daño mayor que una de propiedad. [R6.2]
+- [x] 6.6 `docs/README.md`: entrada de índice para `beds24-spike.md`, igual que la de `channex-staging.md`. Actualizar el `README.md` de raíz solo si `steering/documentation.md` lo exige por la herramienta nueva. [R5.1]
 
 ## 7. Mediciones contra la cuenta real — `EXTERNAL_DEPENDENCY`
 

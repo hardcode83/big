@@ -94,7 +94,7 @@ PII_PLACEHOLDERS: tuple[tuple[tuple[str, ...], str], ...] = (
 )
 
 
-def anonymise(value: Any, *, business_keys: frozenset[str]) -> Any:
+def anonymise(payload: Any, *, business_keys: frozenset[str]) -> Any:
     """Strip every personal datum from a captured payload, preserving shape and types.
 
     **Fail-closed.** The first version was a key denylist: match a needle, replace it; pass
@@ -131,7 +131,7 @@ def anonymise(value: Any, *, business_keys: frozenset[str]) -> Any:
     `None` and booleans stay as they are: absence and flags are not personal data, and the
     fixture has to keep exercising the same optionality the real payload has.
     """
-    return _Anonymiser(business_keys).value(None, value)
+    return _Anonymiser(business_keys).value(None, payload)
 
 
 @dataclass(frozen=True)

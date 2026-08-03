@@ -16,7 +16,7 @@ import httpx
 
 import pytest
 
-from tests.integrations.conftest import FIXTURE_DIR, load_script  # noqa: E402
+from tests.integrations.conftest import FIXTURE_ROOT, load_script  # noqa: E402
 
 probe = load_script("channex_probe")
 
@@ -368,7 +368,11 @@ def test_capture_writes_the_anonymised_body_not_the_raw_one(tmp_path, monkeypatc
     assert "BDC-1" in raw
 
 
-@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted(FIXTURE_ROOT.rglob("*.json")),
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
 def test_no_committed_fixture_carries_card_data(fixture_path):
     """Guards the committed artefacts themselves, not just the function.
 
@@ -376,6 +380,12 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     `bookings.json` while `revisions.json` carries the identical `guarantee` object — so the
     guard covered one of three files, which is exactly how `expiration_date` got committed the
     first time. Globbing means a fixture added later is covered without anyone remembering to.
+
+    It walks `FIXTURE_ROOT` recursively, not the Channex subdirectory, since
+    `pms-beds24-spike` added a second provider. The narrower glob honoured the sentence above
+    only for new files of a provider that already existed: a whole new `fixtures/<provider>/`
+    would have slipped in unguarded, which is the same class of gap one directory up. Rule
+    13(c) of `steering/security.md` asks for a guard over the files on disk — all of them.
     """
     import re
 
