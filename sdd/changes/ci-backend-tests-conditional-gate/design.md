@@ -39,6 +39,13 @@ R4.1—, y sobre todo **el check que se reporta es el job**: un job único con `
 el bloqueo que R1 existe para evitar, solo que trasladado del disparador al job. Únicamente un
 job incondicional y distinto del que trabaja puede garantizar el invariante de R1.1.
 
+**Los tres jobs llevan `timeout-minutes` explícito**: `backend-tests-suite` conserva sus 20, y
+los dos nuevos reciben **5**. Sin declararlo heredarían el default de Actions, **360 minutos**:
+un `git diff` colgado o un bash del gate bloqueado dejaría el PR esperando seis horas, que es
+el mismo bloqueo indefinido que R1 y R4 existen para eliminar, reintroducido en los jobs nuevos
+después de haberlo quitado del disparador. Lo señaló la revisión de arquitectura sobre la
+primera versión de este diseño, que solo preservaba el límite del job que ya lo tenía.
+
 Rejected: un job con pasos condicionales — paga el arranque de services siempre y no resuelve
 el reporte.
 Rejected: `paths:` en `on:` — es el mecanismo que R1.2 prohíbe; el workflow no arrancaría.
@@ -68,7 +75,14 @@ publicado a cambio de estética.
 
 **Chosen:** checkout + un paso bash que resuelve la base según el evento y publica
 `backend=true|false` y `reason=<texto>` por `$GITHUB_OUTPUT`, con la forma del job
-`provenance` de `deploy-dev.yml:34-55`. La razón decisiva es R2.4: la degradación tiene que
+`provenance` de `deploy-dev.yml:34-55`.
+
+**La decisión se escribe además a stdout** con `echo "::notice::backend=<v> (<reason>)"` en el
+propio paso de detección. No es redundante con D7: `$GITHUB_OUTPUT` es un canal entre jobs y
+**no imprime nada en el log**, y el resumen de D7 lo escribe el job consolidador, no el que
+toma la decisión. Sin este `echo`, R2.1 ("dejar esa decisión visible en el log") quedaría
+cubierto solo de palabra — lo detectó la revisión de arquitectura. Un `::notice::` lo deja
+además visible en la propia página del run, no solo enterrado en el log del paso. La razón decisiva es R2.4: la degradación tiene que
 ser **explícita y hacia el lado seguro** (si no se puede determinar el diff, se ejecuta la
 suite), y una action de terceros falla el job cuando algo va mal en lugar de degradar. Además
 evita añadir superficie externa que habría que pinear por SHA y auditar para algo que son tres
@@ -108,11 +122,25 @@ los tres workflows del repo que filtran (`deploy-dev.yml:15`,
 `multiarch-build-check.yml:16`): si cambias el gate, el gate se ejecuta.
 
 La investigación del código respalda que `backend/**` es el ámbito **exacto**, no una
-aproximación prudente: todas las lecturas de disco de la suite resuelven como máximo a
-`backend/`, nunca a la raíz — `tests/test_layering.py:16` y `tests/test_session_marking.py:30`
-parsean el AST de `backend/app`, `tests/test_models_registry.py:16` y
-`tests/test_migrations.py:20` usan `backend/`, y `tests/integrations/test_channex_probe.py:14`
-usa `backend/scripts/`.
+aproximación prudente. Todas las lecturas de disco *de los tests* resuelven como máximo a
+`backend/` — `tests/test_layering.py:16` y `tests/test_session_marking.py:30` parsean el AST de
+`backend/app`, `tests/test_models_registry.py:16` y `tests/test_migrations.py:20` usan
+`backend/`, y `tests/integrations/test_channex_probe.py:14` usa `backend/scripts/`.
+
+**Con una excepción que hay que nombrar, porque una primera versión de este diseño afirmaba un
+"nunca" que el código contradice** (la encontró la revisión de arquitectura):
+`backend/app/core/config.py:6` resuelve `REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3]
+/ ".env"` y lo pasa como `env_file` (línea 14), con `settings = Settings()` instanciado a nivel
+de módulo (línea 86). Cualquier test que importe `app.core.config` —por ejemplo
+`tests/test_migrations.py`— intenta por tanto leer el **`.env` de la raíz del repositorio**, no
+uno de `backend/`.
+
+No invalida el ámbito de gating, por dos razones que se sostienen de forma independiente: ese
+fichero está en `.gitignore:5` (`.env*`), así que **no puede aparecer en el diff de un PR** ni
+disparar nada; y en CI no existe siquiera —el checkout es limpio y `pydantic-settings` ignora en
+silencio un `env_file` ausente—, así que no influye en el resultado de la suite. `backend/**`
+sigue siendo exacto **para decidir el gating**, que es lo que D5 necesita; lo que no era exacto
+era la frase absoluta.
 
 Quedan fuera a propósito, y conviene dejar dicho por qué para que nadie los añada "por si
 acaso": `docker-compose.yml` y el `Makefile` no los ejecuta este gate (usa `services:`, no
@@ -156,7 +184,7 @@ es el modo de fallo social de este diseño.
 
 | Area | Files | Change |
 |---|---|---|
-| CI | `.github/workflows/backend-tests.yml` | Reestructurado a tres jobs (D1). Nuevo `backend-tests-detect` (checkout `fetch-depth: 0` + bash de detección, sin services). El job actual pasa a `backend-tests-suite` con `if:` sobre el output y **sus diez pasos, `services:`, `env:`, permisos y timeout intactos** (R3.1, R3.2). Nuevo `backend-tests` consolidador (D6, D7). Cabecera reescrita: duración medida y fechada en lugar del "~1 minuto" (R5.1), y la razón por la que `paths:` en `on:` sigue prohibido. |
+| CI | `.github/workflows/backend-tests.yml` | Reestructurado a tres jobs (D1). Nuevo `backend-tests-detect` (checkout `fetch-depth: 0` + bash de detección + `::notice::`, sin services, `timeout-minutes: 5`). El job actual pasa a `backend-tests-suite` con `if:` sobre el output y **sus diez pasos, `services:`, `env:`, permisos y `timeout-minutes: 20` intactos** (R3.1, R3.2). Nuevo `backend-tests` consolidador (D6, D7), `timeout-minutes: 5`. Cabecera reescrita: duración medida y fechada en lugar del "~1 minuto" (R5.1), y la razón por la que `paths:` en `on:` sigue prohibido. |
 | CI (solo comentarios) | `.github/workflows/api-contract.yml`, `.github/workflows/frontend-tests.yml` | D8: reescribir el comentario que justifica la ausencia de filtro para que apunte al invariante nuevo. **Sin tocar `on:`, jobs, pasos ni comportamiento** — ambos siguen ejecutándose en todos los PR. |
 | Especificación | `sdd/specs/backend-ci.md` | **Al archivar, no ahora.** Sustituir el requisito "sin filtro de rutas" (línea 23) por el invariante de R1 conservando su razón original; añadir detección de área, camino corto y la nota de D2 sobre qué contexto es el marcable como obligatorio; corregir la duración declarada. |
 
