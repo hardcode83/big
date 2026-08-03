@@ -52,6 +52,24 @@ class Settings(BaseSettings):
     csv_import_max_bytes: int = 10 * 1024 * 1024
     csv_import_max_rows: int = 1000
 
+    # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
+    # `cli/pms_sync.py --provider channex` reads these; the application never does.
+    #
+    # The key has NO default: rule 8 of steering/security.md, and R3.2 requires the
+    # command to abort naming the missing variable instead of falling back to the mock.
+    channex_api_key: str = ""
+    # Defaults to STAGING on purpose: this adapter is a dev/validation tool (ADR 0006 keeps
+    # Beds24 as the MVP provider), so a misconfiguration must land on staging and never on
+    # a production Channex account that could be talking to real OTA listings.
+    channex_base_url: str = "https://staging.channex.io/api/v1"
+    # Channex pages with a default `limit` of 10, so a sync MUST paginate. The cap exists
+    # so a provider bug reporting an ever-growing `total` cannot spin forever; reaching it
+    # raises rather than truncating (design D6) — silently returning a short list inside a
+    # sync is indistinguishable from "the PMS had nothing more".
+    channex_max_pages: int = 50
+    channex_page_limit: int = 100
+    channex_timeout_seconds: float = 30.0
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""

@@ -20,3 +20,4 @@
 | user-management | new, design, run, review, archive | 238868 | 905456 | 322824807 | 216.0134 | 2026-07-31 | 2026-08-01 |
 | api-contract-export | new, design, tasks, run, review, archive | 193212 | 479349 | 82884327 | 60.9954 | 2026-08-01 | 2026-08-02 |
 | pms-provider-decision | new, tasks, run, review, archive | 158067 | 293291 | 72404185 | 55.4397 | 2026-08-03 | 2026-08-03 |
+| channex-staging-adapter | new, design, tasks, run, review | 244976 | 521367 | 126692162 | 81.4985 | 2026-08-03 | — |

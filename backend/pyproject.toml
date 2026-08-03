@@ -12,6 +12,12 @@ dependencies = [
     "bcrypt>=4.2",
     "celery>=5.6.3",
     "fastapi>=0.139.0",
+    # Runtime dependency since `channex-staging-adapter` (design D4): `ChannexAdapter`
+    # talks HTTP in production code, so a dev-group httpx would be absent from the
+    # deployed image — `devops/Dockerfile`'s prod stage installs with
+    # `uv sync --frozen --no-dev`. It was already here for the test client, which is
+    # what made the gap easy to miss: the suite passed and the image would not have run.
+    "httpx>=0.28.1",
     "pydantic-settings>=2.14.2",
     "pyjwt>=2.10",
     # Required by FastAPI to parse `multipart/form-data`, which is how the CSV reservation
@@ -36,7 +42,6 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "httpx>=0.28.1",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.0.0",

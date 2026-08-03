@@ -27,6 +27,11 @@ UNKNOWN_PROPERTY_CODE = "PMS-DOES-NOT-EXIST"
 class MockPMSAdapter:
     def __init__(self, *, include_broken_rows: bool = True) -> None:
         self._include_broken_rows = include_broken_rows
+        # Part of the port's contract, not a courtesy (see `PMSAdapter.unmappable_rows`). The
+        # mock builds its own rows, so it can never fail to map one — but leaving the attribute
+        # off would be exactly the silent-zero hazard the port's docstring warns about, and it
+        # would break substitutability with the real adapter (Liskov, `backend-architecture.md`).
+        self.unmappable_rows: list[str] = []
 
     async def list_reservations(
         self, since: datetime, property_external_id: str | None = None

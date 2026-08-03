@@ -24,6 +24,29 @@ from app.integrations.domain.dtos import ParseResult, ReservationDTO
 
 
 class PMSAdapter(Protocol):
+    unmappable_rows: list[str]
+    """Rows the adapter received but could not turn into a `ReservationDTO`, last call only.
+
+    **Declared on the port, not left as an implementation detail**, and the reason is a finding
+    from the feature-scale architecture panel. `list_reservations` returns bare DTOs, so it has
+    nowhere to report a row whose shape the adapter could not use — unlike
+    `ReservationCsvParser`, whose `ParseResult` carries `failures` for exactly this. The first
+    version put the list on `ChannexAdapter` alone and had the caller reach for it with
+    `getattr(adapter, "unmappable_rows", [])`, which meant a future adapter that simply did not
+    define the attribute would silently report **zero** unmappable rows while dropping some.
+
+    Declaring it here makes it part of the contract every implementation must satisfy: a skip is
+    never silent, which is the same principle that makes pagination raise instead of truncating
+    (design D6).
+
+    **Still a stopgap.** The structurally right fix is to widen the return type the way
+    `ParseResult` does — `pms-beds24-adapter` owns the port restructuring (ADR 0006 decision 3
+    already splits `PMSMessagingPort` off) and should do it there rather than inherit this.
+
+    Contains only strings safe to log: the provider's id and the error class, never the payload,
+    which carries guest name, email, phone and card data.
+    """
+
     async def list_reservations(
         self, since: datetime, property_external_id: str | None = None
     ) -> list[ReservationDTO]:

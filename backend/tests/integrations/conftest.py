@@ -4,7 +4,9 @@ The property codes match `MockPMSAdapter`'s expectations (`PMS-REDES11`) so the 
 something to resolve, and the `internal_code` is the one a person would type into a CSV.
 """
 
+import json
 import uuid
+from pathlib import Path
 
 import pytest
 import pytest_asyncio
@@ -28,6 +30,34 @@ from tests.auth.conftest import (  # noqa: F401
 )
 
 SECRET = "i" * 64
+
+FIXTURE_DIR = Path(__file__).parent / "fixtures" / "channex"
+
+
+def channex_fixture(name: str) -> dict:
+    """Load a payload captured from the real Channex staging API (task 2.5).
+
+    The first on-disk fixture directory in this repo — the CSV tests build their content
+    inline, which stops being readable at the size of a real booking payload. These files come
+    from `scripts/channex_probe.py`, which anonymises at capture time (R4.2), so what is
+    versioned here has never contained personal data.
+
+    Reading them is what keeps the mapping tests offline (R2.5) while still asserting against
+    field names the provider really uses, rather than the ones its documentation claims.
+    """
+    return json.loads((FIXTURE_DIR / f"{name}.json").read_text(encoding="utf-8"))
+
+
+def channex_booking(*, ota_name: str) -> dict:
+    """One booking element from the captured collection, picked by its OTA.
+
+    Two were seeded on purpose (`scripts/channex_bootstrap.py`): `Booking.com`, which reports
+    a commission, and `Offline`, which does not — the two branches R2.6 has to tell apart.
+    """
+    for row in channex_fixture("bookings")["data"]:
+        if (row.get("attributes") or {}).get("ota_name") == ota_name:
+            return row
+    raise AssertionError(f"no captured booking for ota_name={ota_name!r}")
 
 
 @pytest_asyncio.fixture

@@ -1,0 +1,491 @@
+{
+  "data": [
+    {
+      "attributes": {
+        "id": "02003e03-dab1-4970-a623-abc8e56f40f4",
+        "meta": {
+          "converter_version": "***scrubbed***",
+          "ruid": "***scrubbed***"
+        },
+        "status": "new",
+        "services": [],
+        "currency": "GBP",
+        "amount": "834.69",
+        "agent": null,
+        "unique_id": "BDC-6558139322",
+        "inserted_at": "2026-08-03T13:19:39.904443",
+        "ota_name": "BookingCom",
+        "property_id": "7963f1e3-72f5-4edd-a0fb-199e9b919d26",
+        "channel_id": "4fbc4f3d-febb-4291-9832-c99224061049",
+        "booking_id": "02003e03-dab1-4970-a623-abc8e56f40f4",
+        "arrival_date": "2026-09-05",
+        "arrival_hour": null,
+        "customer": {
+          "meta": {
+            "is_genius": false
+          },
+          "name": "Test Guest",
+          "state": null,
+          "zip": "Redacted",
+          "address": "Redacted",
+          "city": "Redacted",
+          "country": "Redacted",
+          "language": "es",
+          "mail": "guest@example.invalid",
+          "phone": "+34600000000",
+          "surname": "Test Guest",
+          "company": null
+        },
+        "departure_date": "2026-09-08",
+        "deposits": [],
+        "notes": "***scrubbed***",
+        "ota_commission": "0.00",
+        "ota_reservation_code": "6558139322",
+        "payment_collect": "property",
+        "payment_type": "credit_card",
+        "rooms": [
+          {
+            "meta": {
+              "mapping_id": null,
+              "promotion": null,
+              "rate_plan_code": 0,
+              "room_type_code": "***scrubbed***",
+              "cancel_penalties": [
+                {
+                  "amount": "234.69",
+                  "currency": "GBP",
+                  "from": "***scrubbed***"
+                }
+              ],
+              "days_breakdown": [
+                {
+                  "amount": "78.23",
+                  "date": "***scrubbed***",
+                  "promotion": null,
+                  "rate_code": 0,
+                  "rate_plan": null
+                },
+                {
+                  "amount": "78.23",
+                  "date": "***scrubbed***",
+                  "promotion": null,
+                  "rate_code": 0,
+                  "rate_plan": null
+                },
+                {
+                  "amount": "78.23",
+                  "date": "***scrubbed***",
+                  "promotion": null,
+                  "rate_code": 0,
+                  "rate_plan": null
+                }
+              ],
+              "promotions": [],
+              "booking_com_room_index": 80,
+              "meal_plan": "***scrubbed***",
+              "additional_details": [],
+              "policies": "***scrubbed***",
+              "price_details": {
+                "guest_view": {
+                  "taxes": [
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    }
+                  ],
+                  "total": {
+                    "amount": "83469",
+                    "decimal_places": 2
+                  }
+                },
+                "hotel_view": {
+                  "taxes": [
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    },
+                    {
+                      "amount": "15000",
+                      "charge_frequency": 12,
+                      "code": "***scrubbed***",
+                      "currency_code": "***scrubbed***",
+                      "decimal_places": 2,
+                      "tax_description": "***scrubbed***",
+                      "type": "Inclusive",
+                      "version": 2
+                    }
+                  ],
+                  "total": {
+                    "amount": "83469",
+                    "decimal_places": 2
+                  }
+                }
+              },
+              "room_remarks": [],
+              "smoking_preferences": "***scrubbed***",
+              "charge_periods": {
+                "BEDLINEN": [
+                  {
+                    "excluded": true,
+                    "from": "***scrubbed***",
+                    "to": null
+                  }
+                ],
+                "CLEANINGFEE": [
+                  {
+                    "excluded": true,
+                    "from": "***scrubbed***",
+                    "to": null
+                  }
+                ],
+                "ELECTRICITYFEE": [
+                  {
+                    "excluded": true,
+                    "from": "***scrubbed***",
+                    "to": null
+                  }
+                ],
+                "SERVICECHARGE": [
+                  {
+                    "excluded": true,
+                    "from": "***scrubbed***",
+                    "to": null
+                  }
+                ]
+              }
+            },
+            "taxes": [
+              {
+                "is_inclusive": false,
+                "name": "Test Guest",
+                "nights": 3,
+                "persons": 2,
+                "price_mode": "***scrubbed***",
+                "price_per_unit": "***scrubbed***",
+                "total_price": "150.00",
+                "type": "Service Charge",
+                "version": 2
+              },
+              {
+                "is_inclusive": false,
+                "name": "Test Guest",
+                "nights": 3,
+                "persons": 2,
+                "price_mode": "***scrubbed***",
+                "price_per_unit": "***scrubbed***",
+                "total_price": "150.00",
+                "type": "Service Charge",
+                "version": 2
+              },
+              {
+                "is_inclusive": false,
+                "name": "Test Guest",
+                "nights": 3,
+                "persons": 2,
+                "price_mode": "***scrubbed***",
+                "price_per_unit": "***scrubbed***",
+                "total_price": "150.00",
+                "type": "Service Charge",
+                "version": 2
+              },
+              {
+                "is_inclusive": false,
+                "name": "Test Guest",
+                "nights": 3,
+                "persons": 2,
+                "price_mode": "***scrubbed***",
+                "price_per_unit": "***scrubbed***",
+                "total_price": "150.00",
+                "type": "Service Charge",
+                "version": 2
+              }
+            ],
+            "services": [],
+            "amount": "834.69",
+            "days": {
+              "2026-09-05": "78.23",
+              "2026-09-06": "78.23",
+              "2026-09-07": "78.23"
+            },
+            "ota_commission": "0.00",
+            "guests": [
+              {
+                "name": "Test Guest",
+                "surname": "Test Guest"
+              }
+            ],
+            "occupancy": {
+              "children": 0,
+              "adults": 2,
+              "ages": [],
+              "infants": 0
+            },
+            "rate_plan_id": null,
+            "room_type_id": "6907ddd0-e532-43e2-8d5c-56784a2860d5",
+            "booking_room_id": "c6a29e03-a5fa-4d6b-b2f4-4fcfdcb5209e",
+            "checkout_date": "2026-09-08",
+            "checkin_date": "2026-09-05",
+            "is_cancelled": false,
+            "ota_unique_id": "***scrubbed***"
+          }
+        ],
+        "occupancy": {
+          "children": 0,
+          "adults": 2,
+          "ages": [],
+          "infants": 0
+        },
+        "guarantee": {
+          "token": null,
+          "card_number": "***card-data***",
+          "card_type": "***card-data***",
+          "cardholder_name": "***card-data***",
+          "cvv": "***card-data***",
+          "expiration_date": "***card-data***",
+          "is_virtual": false
+        },
+        "secondary_ota": null,
+        "acknowledge_status": "pending",
+        "has_unacked_revisions": false,
+        "raw_message": "***scrubbed***",
+        "revision_id": "08ffdd91-9ca2-4c89-ae6f-3fd59295156d",
+        "is_crs_revision": false
+      },
+      "id": "02003e03-dab1-4970-a623-abc8e56f40f4",
+      "type": "booking"
+    },
+    {
+      "attributes": {
+        "id": "8d5249c9-2e39-4702-98e7-286eee5ded1a",
+        "meta": {},
+        "status": "new",
+        "services": [],
+        "currency": "EUR",
+        "amount": "360.00",
+        "agent": null,
+        "unique_id": "OFL-AUTOHOST-TEST-OFFLINE-001",
+        "inserted_at": "2026-08-03T09:53:00.945463",
+        "ota_name": "Offline",
+        "property_id": "7963f1e3-72f5-4edd-a0fb-199e9b919d26",
+        "channel_id": null,
+        "booking_id": "8d5249c9-2e39-4702-98e7-286eee5ded1a",
+        "arrival_date": "2026-09-15",
+        "arrival_hour": null,
+        "customer": {
+          "meta": null,
+          "name": "Test Guest",
+          "state": null,
+          "zip": "Redacted",
+          "address": "Redacted",
+          "city": "Redacted",
+          "country": "Redacted",
+          "language": null,
+          "mail": "guest@example.invalid",
+          "phone": "+34600000000",
+          "surname": "Test Guest"
+        },
+        "departure_date": "2026-09-18",
+        "deposits": [],
+        "notes": null,
+        "ota_commission": "0.00",
+        "ota_reservation_code": "AUTOHOST-TEST-OFFLINE-001",
+        "payment_collect": null,
+        "payment_type": null,
+        "rooms": [
+          {
+            "meta": null,
+            "taxes": [],
+            "services": [],
+            "amount": "360.00",
+            "days": {
+              "2026-09-15": "120.00",
+              "2026-09-16": "120.00",
+              "2026-09-17": "120.00"
+            },
+            "ota_commission": null,
+            "guests": null,
+            "occupancy": {
+              "children": 0,
+              "adults": 2,
+              "ages": [],
+              "infants": 0
+            },
+            "rate_plan_id": "81c384be-6a6c-4f4a-b842-9f68180c6ce7",
+            "room_type_id": "6907ddd0-e532-43e2-8d5c-56784a2860d5",
+            "booking_room_id": "ce8ee986-33ab-4b87-a376-4a24f94894a6",
+            "checkout_date": "2026-09-18",
+            "checkin_date": "2026-09-15",
+            "is_cancelled": false,
+            "ota_unique_id": null
+          }
+        ],
+        "occupancy": {
+          "children": 0,
+          "adults": 2,
+          "ages": [],
+          "infants": 0
+        },
+        "guarantee": null,
+        "secondary_ota": null,
+        "acknowledge_status": "pending",
+        "has_unacked_revisions": false,
+        "raw_message": "***scrubbed***",
+        "revision_id": "63880086-032d-4c07-9de5-87f22eec5d09",
+        "is_crs_revision": false
+      },
+      "id": "8d5249c9-2e39-4702-98e7-286eee5ded1a",
+      "type": "booking"
+    },
+    {
+      "attributes": {
+        "id": "233c930b-de5e-4b1e-bd7b-f935ad38a24b",
+        "meta": {},
+        "status": "new",
+        "services": [],
+        "currency": "EUR",
+        "amount": "360.00",
+        "agent": null,
+        "unique_id": "BDC-AUTOHOST-TEST-BDC-001",
+        "inserted_at": "2026-08-03T09:53:00.592788",
+        "ota_name": "Booking.com",
+        "property_id": "7963f1e3-72f5-4edd-a0fb-199e9b919d26",
+        "channel_id": null,
+        "booking_id": "233c930b-de5e-4b1e-bd7b-f935ad38a24b",
+        "arrival_date": "2026-09-15",
+        "arrival_hour": null,
+        "customer": {
+          "meta": null,
+          "name": "Test Guest",
+          "state": null,
+          "zip": "Redacted",
+          "address": "Redacted",
+          "city": "Redacted",
+          "country": "Redacted",
+          "language": null,
+          "mail": "guest@example.invalid",
+          "phone": "+34600000000",
+          "surname": "Test Guest"
+        },
+        "departure_date": "2026-09-18",
+        "deposits": [],
+        "notes": null,
+        "ota_commission": "54.00",
+        "ota_reservation_code": "AUTOHOST-TEST-BDC-001",
+        "payment_collect": null,
+        "payment_type": null,
+        "rooms": [
+          {
+            "meta": null,
+            "taxes": [],
+            "services": [],
+            "amount": "360.00",
+            "days": {
+              "2026-09-15": "120.00",
+              "2026-09-16": "120.00",
+              "2026-09-17": "120.00"
+            },
+            "ota_commission": null,
+            "guests": null,
+            "occupancy": {
+              "children": 0,
+              "adults": 2,
+              "ages": [],
+              "infants": 0
+            },
+            "rate_plan_id": "81c384be-6a6c-4f4a-b842-9f68180c6ce7",
+            "room_type_id": "6907ddd0-e532-43e2-8d5c-56784a2860d5",
+            "booking_room_id": "60cdfafe-4812-4400-8f78-b31f7f8f8c56",
+            "checkout_date": "2026-09-18",
+            "checkin_date": "2026-09-15",
+            "is_cancelled": false,
+            "ota_unique_id": null
+          }
+        ],
+        "occupancy": {
+          "children": 0,
+          "adults": 2,
+          "ages": [],
+          "infants": 0
+        },
+        "guarantee": null,
+        "secondary_ota": null,
+        "acknowledge_status": "pending",
+        "has_unacked_revisions": false,
+        "raw_message": "***scrubbed***",
+        "revision_id": "e373f552-6af3-4ac1-bb4d-b933785bee84",
+        "is_crs_revision": false
+      },
+      "id": "233c930b-de5e-4b1e-bd7b-f935ad38a24b",
+      "type": "booking"
+    }
+  ],
+  "meta": {
+    "total": 3,
+    "limit": 10,
+    "order_by": "inserted_at",
+    "page": 1,
+    "order_direction": "desc"
+  }
+}

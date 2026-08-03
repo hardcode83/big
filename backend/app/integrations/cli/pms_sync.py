@@ -25,11 +25,16 @@ import app.core.models_registry  # noqa: F401
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.config import settings
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
-from app.integrations.application.ingest import IngestReport
+from app.integrations.application.ingest import IngestReport, RowError
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
+from app.integrations.domain.errors import PmsUnavailableError
+from app.integrations.domain.ports import PMSAdapter
+from app.integrations.infrastructure.channex.adapter import ChannexAdapter
+from app.integrations.infrastructure.channex.client import ChannexClient
 from app.integrations.infrastructure.mock_pms import MockPMSAdapter
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.tenants.infrastructure.models import TenantModel
@@ -37,7 +42,49 @@ from app.reservations.infrastructure.repositories import SqlAlchemyReservationRe
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 
 DEFAULT_WINDOW_DAYS = 30
-USAGE = "usage: python -m app.integrations.cli.pms_sync <tenant-uuid> [window-days]"
+MOCK_PROVIDER = "mock"
+CHANNEX_PROVIDER = "channex"
+PROVIDERS = (MOCK_PROVIDER, CHANNEX_PROVIDER)
+USAGE = (
+    "usage: python -m app.integrations.cli.pms_sync <tenant-uuid> [window-days] "
+    f"[--provider {{{','.join(PROVIDERS)}}}]"
+)
+
+
+def build_adapter(provider: str) -> PMSAdapter:
+    """Resolve the PMS adapter for this run (R3, design D3).
+
+    **A stopgap, and deliberately a small one.** [ADR 0006](../../../../docs/adr/0006-pms-channel-manager-provider.md)
+    retired PRD §22's global `PMS_PROVIDER` in favour of resolving the provider **per
+    property**, with credentials stored encrypted on `Property`. That is
+    `pms-beds24-adapter`'s job, and it replaces this function with a `PMSAdapterFactory`.
+
+    Which is exactly why the choice lives in a command-line flag and not in `Settings`: a flag
+    on an operator's command cannot leak into the application or the test suite, and it does
+    not resurrect a configuration name that a later reader would mistake for the real
+    mechanism. `mock` stays the default, so nothing changes for anyone who does not ask.
+    """
+    if provider == MOCK_PROVIDER:
+        return MockPMSAdapter()
+    if provider == CHANNEX_PROVIDER:
+        if not settings.channex_api_key.strip():
+            # Refuses to start rather than falling back to the mock (R3.2). A silent fallback
+            # would report "created 0, updated 0" — indistinguishable from a real empty sync,
+            # which is the worst possible outcome for a misconfigured credential.
+            raise PmsUnavailableError(
+                "CHANNEX_API_KEY is not set; refusing to run a Channex sync against no "
+                "credentials (set it in .env, see .env.example)"
+            )
+        return ChannexAdapter(
+            ChannexClient(
+                api_key=settings.channex_api_key,
+                base_url=settings.channex_base_url,
+                max_pages=settings.channex_max_pages,
+                page_limit=settings.channex_page_limit,
+                timeout=settings.channex_timeout_seconds,
+            )
+        )
+    raise ValueError(f"Unknown PMS provider {provider!r}")
 
 
 class UnknownTenantError(RuntimeError):
@@ -56,6 +103,7 @@ async def sync_with_session(
     *,
     window_days: int = DEFAULT_WINDOW_DAYS,
     now: datetime | None = None,
+    provider: str = MOCK_PROVIDER,
 ) -> IngestReport:
     """The command's actual work, against a session somebody else owns.
 
@@ -70,28 +118,83 @@ async def sync_with_session(
     bind_session_to_tenant(session, tenant_id)
     if await session.scalar(select(TenantModel.id).where(TenantModel.id == tenant_id)) is None:
         raise UnknownTenantError(f"No tenant with id {tenant_id}")
+    adapter = build_adapter(provider)
     use_case = SyncReservationsFromPmsUseCase(
-        pms=MockPMSAdapter(),
+        pms=adapter,
         reservations=SqlAlchemyReservationRepository(session),
         properties=SqlAlchemyPropertyRepository(session),
         guests=SqlAlchemyGuestRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
-    return await use_case.execute(
+    report = await use_case.execute(
         tenant_id=tenant_id,
         since=at - timedelta(days=window_days),
         now=at,
     )
+    # Rows the adapter could not even turn into a DTO fold into the report's skipped count and
+    # errors, so the command reports them like any other unusable row.
+    #
+    # Plain attribute access, not `getattr(..., [])`. The default was the bug: an adapter that
+    # simply did not define the attribute would report **zero** unmappable rows while dropping
+    # some, silently. `unmappable_rows` is now declared on `PMSAdapter` so every implementation
+    # owes it — see that docstring for why widening the return type is the real fix and why it
+    # belongs to `pms-beds24-adapter`.
+    for reason in adapter.unmappable_rows:
+        report.skipped += 1
+        report.errors.append(RowError(reason=f"provider row could not be mapped: {reason}"))
+    return report
 
 
-async def run(tenant_id: uuid.UUID, *, window_days: int = DEFAULT_WINDOW_DAYS) -> IngestReport:
+async def run(
+    tenant_id: uuid.UUID,
+    *,
+    window_days: int = DEFAULT_WINDOW_DAYS,
+    provider: str = MOCK_PROVIDER,
+) -> IngestReport:
     async with async_session_factory() as session:
-        return await sync_with_session(session, tenant_id, window_days=window_days)
+        return await sync_with_session(
+            session, tenant_id, window_days=window_days, provider=provider
+        )
+
+
+def _extract_provider(args: list[str]) -> tuple[list[str], str]:
+    """Pull `--provider` out of argv, leaving the positional arguments untouched.
+
+    Hand-rolled rather than `argparse` to keep the existing positional contract and its exact
+    error messages, which `tests/integrations/test_pms_sync_cli.py` already pins.
+    """
+    provider = MOCK_PROVIDER
+    remaining: list[str] = []
+    index = 0
+    while index < len(args):
+        argument = args[index]
+        if argument.startswith("--provider="):
+            provider = argument.removeprefix("--provider=")
+        elif argument == "--provider":
+            if index + 1 >= len(args):
+                raise ValueError("--provider needs a value")
+            provider = args[index + 1]
+            index += 1
+        else:
+            remaining.append(argument)
+        index += 1
+    if provider not in PROVIDERS:
+        # The rejected value is NOT echoed (R2.3). `--provider=<pasted-api-key>` is a plausible
+        # fumble, and printing it would put the credential in a terminal transcript or a CI log
+        # on top of the shell history. `channex_probe.py` already took this posture for the same
+        # reason; the security panel caught that this path had not.
+        raise ValueError(f"unknown provider (value not echoed); accepted: {', '.join(PROVIDERS)}")
+    return remaining, provider
 
 
 def main(argv: list[str] | None = None) -> int:
-    args = list(sys.argv[1:] if argv is None else argv)
+    raw = list(sys.argv[1:] if argv is None else argv)
+    try:
+        args, provider = _extract_provider(raw)
+    except ValueError as error:
+        print(f"pms-sync: {error}\n{USAGE}", file=sys.stderr)
+        return 2
     if not args:
         print(USAGE, file=sys.stderr)
         return 2
@@ -109,10 +212,15 @@ def main(argv: list[str] | None = None) -> int:
             return 2
 
     try:
-        report = asyncio.run(run(tenant_id, window_days=window_days))
+        report = asyncio.run(run(tenant_id, window_days=window_days, provider=provider))
     except UnknownTenantError as error:
         print(f"pms-sync: {error}", file=sys.stderr)
         return 2
+    except PmsUnavailableError as error:
+        # A provider that could not answer is not an empty sync, and the exit code has to say
+        # so — this is the whole reason the port gained an error contract (design D5).
+        print(f"pms-sync: {error}", file=sys.stderr)
+        return 3
     print(
         f"pms-sync: created {report.created}, updated {report.updated}, "
         f"skipped {report.skipped}"

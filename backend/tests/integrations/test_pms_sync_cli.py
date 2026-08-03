@@ -32,7 +32,7 @@ def test_it_refuses_a_non_numeric_window(capsys) -> None:
 def test_it_prints_the_report_and_exits_zero(monkeypatch, capsys) -> None:
     called = {}
 
-    async def _fake_run(tenant_id, *, window_days):
+    async def _fake_run(tenant_id, *, window_days, provider=pms_sync.MOCK_PROVIDER):
         called["tenant_id"] = tenant_id
         called["window_days"] = window_days
         return IngestReport(created=2, updated=1, skipped=0)
@@ -51,7 +51,7 @@ def test_it_prints_the_report_and_exits_zero(monkeypatch, capsys) -> None:
 def test_skipped_rows_are_reported_but_do_not_fail_the_command(monkeypatch, capsys) -> None:
     """R3.4: rows the sync could not import are information, not a failed run."""
 
-    async def _fake_run(tenant_id, *, window_days):
+    async def _fake_run(tenant_id, *, window_days, provider=pms_sync.MOCK_PROVIDER):
         return IngestReport(
             created=1,
             skipped=1,
@@ -70,7 +70,7 @@ def test_skipped_rows_are_reported_but_do_not_fail_the_command(monkeypatch, caps
 def test_the_default_window_is_used_when_not_given(monkeypatch) -> None:
     seen = {}
 
-    async def _fake_run(tenant_id, *, window_days):
+    async def _fake_run(tenant_id, *, window_days, provider=pms_sync.MOCK_PROVIDER):
         seen["window_days"] = window_days
         return IngestReport()
 
@@ -110,7 +110,7 @@ async def test_it_refuses_a_tenant_that_does_not_exist(db_session, tenant_a) -> 
 
 
 def test_main_reports_an_unknown_tenant_as_a_failure(monkeypatch, capsys) -> None:
-    async def _fake_run(tenant_id, *, window_days):
+    async def _fake_run(tenant_id, *, window_days, provider=pms_sync.MOCK_PROVIDER):
         raise UnknownTenantError(f"No tenant with id {tenant_id}")
 
     monkeypatch.setattr(pms_sync, "run", _fake_run)
