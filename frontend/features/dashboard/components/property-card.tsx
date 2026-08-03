@@ -26,11 +26,26 @@ const STATE_BADGE_CLASS: Record<StateColorGroup, string> = {
   gray: "bg-muted text-muted-foreground border-border",
 };
 
-function Field({ label, children }: { label: string; children: React.ReactNode }) {
+function Field({
+  label,
+  children,
+  className,
+}: {
+  label: string;
+  children: React.ReactNode;
+  className?: string;
+}) {
   return (
-    <div className="flex items-baseline justify-between gap-3 text-sm">
+    <div
+      className={cn(
+        "grid min-w-0 grid-cols-[minmax(0,auto)_minmax(0,1fr)] items-baseline gap-x-3 text-sm",
+        className,
+      )}
+    >
       <span className="text-muted-foreground">{label}</span>
-      <span className="text-right font-medium text-foreground">{children}</span>
+      <span className="min-w-0 break-words text-right font-medium text-foreground">
+        {children}
+      </span>
     </div>
   );
 }
@@ -39,11 +54,21 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = i18n.language;
   const reservation = card.currentOrNextReservation;
+  const headingId = `property-card-${card.propertyId}`;
+  const incidentsHeadingId = `${headingId}-incidents`;
+  const actionHeadingId = `${headingId}-action`;
+  const lastEventHeadingId = `${headingId}-last-event`;
 
   return (
-    <article className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm">
-      <div className="flex items-center justify-between gap-3">
-        <h3 className="truncate text-base font-semibold text-foreground">
+    <article
+      aria-labelledby={headingId}
+      className="flex h-full min-w-0 flex-col gap-4 rounded-lg border bg-card p-4 shadow-sm"
+    >
+      <header className="flex items-start justify-between gap-3">
+        <h3
+          id={headingId}
+          className="min-w-0 flex-1 break-words text-base font-semibold text-foreground"
+        >
           {card.propertyCode}
         </h3>
         <Badge
@@ -52,47 +77,84 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
         >
           {t(`state.${card.operationalState}`)}
         </Badge>
-      </div>
+      </header>
 
-      <div className="flex flex-col gap-1.5">
-        <Field label={t("card.reservation")}>
-          {reservation?.reference ?? t("card.noReservation")}
-        </Field>
-        <Field label={t("card.guest")}>
-          {reservation?.guestName ?? t("card.noGuest")}
-        </Field>
-        {reservation ? (
-          <>
-            <Field label={t("card.checkIn")}>
-              {formatDate(reservation.checkIn, locale)}
-            </Field>
-            <Field label={t("card.checkOut")}>
-              {formatDate(reservation.checkOut, locale)}
-            </Field>
-          </>
-        ) : null}
-        <Field label={t("card.cleaning")}>
-          {card.cleaningStatus ?? t("card.noCleaning")}
-        </Field>
-        <Field label={t("card.openIncidents")}>{card.openIncidentsCount}</Field>
+      <div className="flex min-w-0 flex-col gap-3">
+        <section
+          aria-labelledby={incidentsHeadingId}
+          className="flex items-center justify-between gap-3 rounded-md border bg-muted p-3"
+        >
+          <h4 id={incidentsHeadingId} className="text-sm font-semibold text-foreground">
+            {t("card.openIncidents")}
+          </h4>
+          <span className="text-lg font-semibold text-foreground">
+            {card.openIncidentsCount}
+          </span>
+        </section>
+
         {card.nextAction ? (
-          <Field label={t("card.nextAction")}>
-            {card.nextAction.label}
-            {card.nextAction.responsible
-              ? ` · ${t("card.responsible")}: ${card.nextAction.responsible}`
-              : null}
-          </Field>
+          <section
+            aria-labelledby={actionHeadingId}
+            className="rounded-md border border-primary p-3"
+          >
+            <h4 id={actionHeadingId} className="text-sm font-semibold text-foreground">
+              {t("card.nextAction")}
+            </h4>
+            <p className="mt-1 break-words text-sm font-semibold text-foreground">
+              {card.nextAction.label}
+            </p>
+            {card.nextAction.responsible ? (
+              <p className="mt-1 break-words text-sm text-muted-foreground">
+                {t("card.responsible")}: {card.nextAction.responsible}
+              </p>
+            ) : null}
+          </section>
         ) : null}
+
+        <section aria-label={t("card.reservation")} className="min-w-0">
+          <div className="mt-2 grid min-w-0 gap-1.5 sm:grid-cols-2">
+            <Field label={t("card.reservation")} className="sm:col-span-2">
+              {reservation?.reference ?? t("card.noReservation")}
+            </Field>
+            <Field label={t("card.guest")} className="sm:col-span-2">
+              {reservation?.guestName ?? t("card.noGuest")}
+            </Field>
+            {reservation ? (
+              <>
+                <Field label={t("card.checkIn")}>
+                  {formatDate(reservation.checkIn, locale)}
+                </Field>
+                <Field label={t("card.checkOut")}>
+                  {formatDate(reservation.checkOut, locale)}
+                </Field>
+              </>
+            ) : null}
+          </div>
+        </section>
+
+        <section aria-label={t("card.cleaning")} className="min-w-0">
+          <div className="mt-2">
+            <Field label={t("card.cleaning")}>
+              {card.cleaningStatus ?? t("card.noCleaning")}
+            </Field>
+          </div>
+        </section>
+
         {card.lastEventLabel && card.lastEventAt ? (
-          <Field label={t("card.lastEvent")}>
-            {card.lastEventLabel} · {formatDateTime(card.lastEventAt, locale)}
-          </Field>
+          <section aria-labelledby={lastEventHeadingId} className="min-w-0">
+            <h4 id={lastEventHeadingId} className="text-sm font-semibold text-foreground">
+              {t("card.lastEvent")}
+            </h4>
+            <p className="mt-2 break-words text-sm text-muted-foreground">
+              {card.lastEventLabel} · {formatDateTime(card.lastEventAt, locale)}
+            </p>
+          </section>
         ) : null}
       </div>
 
       <Link
         href={`/properties/${card.propertyId}`}
-        className="mt-1 text-sm font-medium text-primary underline-offset-4 hover:underline"
+        className="tap-target mt-auto inline-flex items-center text-sm font-medium text-primary underline-offset-4 hover:underline"
       >
         {t("card.openDetail")}
       </Link>

@@ -19,6 +19,15 @@ aquí va el *cómo se trabaja con ello*.
   incidencias, financiero, notas, aprobaciones pendientes, fotos de la última
   limpieza, y la **cronología** de la propiedad.
 
+## Lectura rápida de las tarjetas
+
+En `/dashboard`, la tarjeta prioriza la lectura en este orden: estado
+operacional, incidencias abiertas, próxima acción, reserva y huésped, limpieza y
+último evento. En desktop, tablet y móvil las tarjetas conservan esa jerarquía,
+alinean cabecera, regiones principales y enlace «Ver detalle», y envuelven los
+textos largos sin desplazamiento horizontal. El enlace mantiene navegación por
+teclado, foco visible y nombre localizado en ES/EN.
+
 ## Colores de estado (PRD §9.1)
 
 | Color | Estados operacionales |

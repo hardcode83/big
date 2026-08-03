@@ -88,10 +88,27 @@ describe("DashboardView (R1)", () => {
     useDashboardCards.mockReturnValue({
       isPending: false,
       isError: false,
-      data: page([sampleCard]),
+      data: page([
+        sampleCard,
+        {
+          ...sampleCard,
+          propertyId: "pajaritos8",
+          propertyCode: "PAJARITOS8",
+          operationalState: "CRITICAL_INCIDENT",
+          openIncidentsCount: 1,
+          nextAction: { label: "Revisar incidencia", responsible: "Manager" },
+        },
+      ]),
     });
     renderView();
     expect(screen.getByText("REDES11")).toBeInTheDocument();
+    expect(screen.getByText("PAJARITOS8")).toBeInTheDocument();
     expect(screen.getByText("Libre y lista")).toBeInTheDocument();
+
+    const cards = screen.getAllByRole("article");
+    const grid = cards[0].parentElement;
+    expect(grid).toHaveClass("items-stretch");
+    expect(cards).toHaveLength(2);
+    expect(cards.every((card) => card.classList.contains("h-full"))).toBe(true);
   });
 });
