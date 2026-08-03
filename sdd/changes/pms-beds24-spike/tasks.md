@@ -14,34 +14,34 @@ Va primero porque toca código existente y probado: si rompe algo, se ve antes d
 
 ## 2. Transporte, credencial y frenos del sondeo
 
-- [ ] 2.1 `backend/scripts/beds24_probe.py`: lee `BEDS24_REFRESH_TOKEN` del entorno, lo canja por el access token de 24 h, lo mantiene **solo en memoria**. `__repr__` redactado. Tests con `httpx.MockTransport`: canje correcto, y ni el refresh ni el access aparecen en `repr`, logs ni excepciones. [R6.4]
-- [ ] 2.2 Rechazo de credencial ausente o vacía **antes de emitir petición alguna**, nombrando la variable. Test. [R6.3]
-- [ ] 2.3 Constante `ALLOWED_HOSTS` con el hostname de la API V2 tomado de su OpenAPI 3.0 publicada; comparación por **hostname exacto**, no por subcadena. Tests: host válido pasa, `api.beds24.com.evil.tld` se rechaza, una subcadena en el path no cuela. [R6.5]
-- [ ] 2.4 Rechazo de argumentos no reconocidos **sin imprimir su valor**. Test que afirma que el valor no aparece en la salida. [R6.6]
-- [ ] 2.5 Límite de ritmo propio configurable con default conservador, y parada con espera a la siguiente ventana cuando la respuesta indica cuota agotada (nunca reintento inmediato). Tests sobre reloj inyectado. [R4.2, R4.3]
+- [x] 2.1 `backend/scripts/beds24_probe.py`: lee `BEDS24_REFRESH_TOKEN` del entorno, lo canja por el access token de 24 h, lo mantiene **solo en memoria**. `__repr__` redactado. Tests con `httpx.MockTransport`: canje correcto, y ni el refresh ni el access aparecen en `repr`, logs ni excepciones. [R6.4]
+- [x] 2.2 Rechazo de credencial ausente o vacía **antes de emitir petición alguna**, nombrando la variable. Test. [R6.3]
+- [x] 2.3 Constante `ALLOWED_HOSTS` con el hostname de la API V2 tomado de su OpenAPI 3.0 publicada; comparación por **hostname exacto**, no por subcadena. Tests: host válido pasa, `api.beds24.com.evil.tld` se rechaza, una subcadena en el path no cuela. [R6.5]
+- [x] 2.4 Rechazo de argumentos no reconocidos **sin imprimir su valor**. Test que afirma que el valor no aparece en la salida. [R6.6]
+- [x] 2.5 Límite de ritmo propio configurable con default conservador, y parada con espera a la siguiente ventana cuando la respuesta indica cuota agotada (nunca reintento inmediato). Tests sobre reloj inyectado. [R4.2, R4.3]
 
 ## 3. Registro de coste por petición
 
-- [ ] 3.1 Construcción del registro con el esquema de D4/D11: `{ts_utc, booking_ref, endpoint, method, shape, x_request_cost, credit_headers, status}`. Tests: `X-RequestCost` presente se registra; **ausente se registra `null`, nunca `0`**; las cabeceras de crédito restante que vengan se capturan. [R1.1, R1.3, R1.4]
-- [ ] 3.2 Escritura JSONL en la ruta de `--out`, una línea por petición. Test sobre `tmp_path`. [R1.5]
-- [ ] 3.3 Catálogo de peticiones a sondear: cada endpoint que el sync de `celery-jobs` va a usar, con **al menos dos formas** en el eje que se sospecha que mueve el coste (tamaño de página, amplitud del rango de fechas, número de propiedades). Test que afirma que ningún endpoint del catálogo queda con una sola forma. [R1.2]
+- [x] 3.1 Construcción del registro con el esquema de D4/D11: `{ts_utc, booking_ref, endpoint, method, shape, x_request_cost, credit_headers, status}`. Tests: `X-RequestCost` presente se registra; **ausente se registra `null`, nunca `0`**; las cabeceras de crédito restante que vengan se capturan. [R1.1, R1.3, R1.4]
+- [x] 3.2 Escritura JSONL en la ruta de `--out`, una línea por petición. Test sobre `tmp_path`. [R1.5]
+- [x] 3.3 Catálogo de peticiones a sondear: cada endpoint que el sync de `celery-jobs` va a usar, con **al menos dos formas** en el eje que se sospecha que mueve el coste (tamaño de página, amplitud del rango de fechas, número de propiedades). Test que afirma que ningún endpoint del catálogo queda con una sola forma. [R1.2]
 
 ## 4. Captura de fixtures
 
-- [ ] 4.1 Subcomando de captura que anonimiza **en el momento** con la allowlist inicial de Beds24, y deja constancia en el fichero de qué claves se sustituyeron. Tests sobre payloads sintéticos. [R3.1, R3.2, R3.5]
-- [ ] 4.2 Conservación de `None` y de los booleanos a través de la anonimización. Test. [R3.3]
-- [ ] 4.3 Descarte de datos de titular de tarjeta en la captura, antes de disco: nada con forma de tarjeta llega al fichero. Test que afirma que ni `card_number`, ni `cvv`, ni `expiration_date` sobreviven. [R3.4]
-- [ ] 4.4 Loader `beds24_fixture(name)` en `backend/tests/integrations/conftest.py` junto al de Channex, y test parametrizado sobre `fixtures/beds24/*.json` que afirma que **todo fixture commiteado está limpio** — el mismo contrato que tiene Channex. [R3.1]
+- [x] 4.1 Subcomando de captura que anonimiza **en el momento** con la allowlist inicial de Beds24, y deja constancia en el fichero de qué claves se sustituyeron. Tests sobre payloads sintéticos. [R3.1, R3.2, R3.5]
+- [x] 4.2 Conservación de `None` y de los booleanos a través de la anonimización. Test. [R3.3]
+- [x] 4.3 Descarte de datos de titular de tarjeta en la captura, antes de disco: nada con forma de tarjeta llega al fichero. Test que afirma que ni `card_number`, ni `cvv`, ni `expiration_date` sobreviven. [R3.4]
+- [x] 4.4 Loader `beds24_fixture(name)` en `backend/tests/integrations/conftest.py` junto al de Channex, y test parametrizado sobre `fixtures/beds24/*.json` que afirma que **todo fixture commiteado está limpio** — el mismo contrato que tiene Channex. [R3.1]
 
 ## 5. Receptor de webhooks
 
-- [ ] 5.1 `backend/scripts/beds24_webhook_sink.py`: servidor mínimo sobre `http.server` que sella cada petición con el instante UTC de recepción. **El cuerpo pasa por el anonimizador y las cabeceras también**: se persiste `header_names` (nombres, nunca valores) y `body` anonimizado. Tests: un cuerpo con datos de tarjeta no deja rastro en el JSONL; el valor de la cabecera estática de autenticación tampoco. [R2.1, R2.5]
-- [ ] 5.2 Cálculo de latencia por `booking_ref` con la regla de dos pasos de D11: sello del propio payload si lo trae, si no el `ts_utc` de la línea del sondeo con el mismo `booking_ref`. Tests para ambas ramas y para el caso sin correlación posible. [R2.2]
-- [ ] 5.3 Detección de desorden comparando la secuencia de llegada con la secuencia de hechos. Test con dos eventos invertidos. [R2.4]
+- [x] 5.1 `backend/scripts/beds24_webhook_sink.py`: servidor mínimo sobre `http.server` que sella cada petición con el instante UTC de recepción. **El cuerpo pasa por el anonimizador y las cabeceras también**: se persiste `header_names` (nombres, nunca valores) y `body` anonimizado. Tests: un cuerpo con datos de tarjeta no deja rastro en el JSONL; el valor de la cabecera estática de autenticación tampoco. [R2.1, R2.5]
+- [x] 5.2 Cálculo de latencia por `booking_ref` con la regla de dos pasos de D11: sello del propio payload si lo trae, si no el `ts_utc` de la línea del sondeo con el mismo `booking_ref`. Tests para ambas ramas y para el caso sin correlación posible. [R2.2]
+- [x] 5.3 Detección de desorden comparando la secuencia de llegada con la secuencia de hechos. Test con dos eventos invertidos. [R2.4]
 
 ## 6. Informe, configuración y documentación
 
-- [ ] 6.1 Subcomando `report` de `beds24_probe.py`: lee el JSONL y renderiza la tabla de coste por endpoint y forma, más la **cadencia máxima sostenible** derivada del coste del ciclo completo contra la ventana de 100 créditos / 5 min. Tests sobre un JSONL sintético, incluido el caso con costes `null` (que no pueden sumarse y deben reportarse como tales). [R4.1, R4.4]
+- [x] 6.1 Subcomando `report` de `beds24_probe.py`: lee el JSONL y renderiza la tabla de coste por endpoint y forma, más la **cadencia máxima sostenible** derivada del coste del ciclo completo contra la ventana de 100 créditos / 5 min. Tests sobre un JSONL sintético, incluido el caso con costes `null` (que no pueden sumarse y deben reportarse como tales). [R4.1, R4.4]
 - [x] 6.2 `docs/beds24-spike.md`: runbook (alta de la cuenta, canje de credencial, levantar el quick tunnel, configurar el webhook **a mano en el panel de Beds24** porque no hay API para ello, correr sondeo y captura), la **regla dura** de que la cuenta no lleva ningún canal OTA conectado, y la sección de hallazgos con cada medida marcada *no medido*. [R5.1, R5.2, R6.1]
 - [x] 6.3 En ese mismo documento, responder explícitamente a la pregunta que `reservations-webhooks` arrastra: Beds24 **no** firma sus webhooks, solo ofrece una cabecera estática, y eso convierte «valida la firma» en «trata todo webhook como aviso no fiable y re-lee por API». [R5.3]
 - [x] 6.4 `.env.example`: bloque `BEDS24_REFRESH_TOKEN` (solo el nombre, nunca un valor) y `BEDS24_BASE_URL`, con el estilo del bloque de Channex y la nota de por qué no lo gobierna la regla 3. [R6.2]
