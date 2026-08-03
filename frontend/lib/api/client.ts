@@ -1,12 +1,46 @@
+import type { paths } from "./generated/openapi";
 import { parseApiError } from "./errors";
 
-/**
- * Centralized fetch transport (design D12). It is deliberately generic: it knows
- * about a base URL, a JSON envelope error shape, and documented extension points
- * for future auth — but no endpoints, DTOs, tokens, or business logic. Responses
- * are returned as `unknown`; each feature validates and types its own contract.
- * The transport never reads Zustand or any UI store.
- */
+type SuccessfulStatus = 200 | 201 | 202 | 203 | 204 | 205 | 206 | 207 | 208 | 226;
+
+type HttpMethod = "GET" | "POST" | "PUT" | "PATCH" | "DELETE" | "OPTIONS" | "HEAD" | "TRACE";
+
+type MethodForPath<Path extends keyof paths> = Extract<
+  keyof paths[Path],
+  Lowercase<HttpMethod>
+>;
+
+type OperationFor<
+  Path extends keyof paths,
+  Method extends string,
+> = paths[Path][Lowercase<Method> & keyof paths[Path]];
+
+type RequestBodyFor<Operation> = Operation extends {
+  requestBody?: infer RequestBody;
+}
+  ? RequestBody extends { content: infer Content }
+    ? Content extends { "application/json": infer Body }
+      ? Body
+      : never
+    : never
+  : never;
+
+type ResponseBodyFor<Response> = Response extends { content: infer Content }
+  ? Content extends object
+    ? "application/json" extends keyof Content
+      ? Content["application/json"]
+      : never
+    : never
+  : never;
+
+type ResponseFor<Operation> = Operation extends { responses: infer Responses }
+  ? Responses extends object
+    ? ResponseBodyFor<Responses[Extract<keyof Responses, SuccessfulStatus>]> extends never
+      ? undefined
+      : ResponseBodyFor<Responses[Extract<keyof Responses, SuccessfulStatus>]>
+    : undefined
+  : undefined;
+
 export interface ApiClientOptions {
   baseUrl: string;
   /** Contributes request headers (extension point for future auth). */
@@ -17,15 +51,32 @@ export interface ApiClientOptions {
   fetchImpl?: typeof fetch;
 }
 
-export interface RequestOptions {
-  method?: string;
-  body?: unknown;
+export interface RequestOptions<Body, Method extends string> {
+  method?: Method;
+  body?: Body;
   headers?: HeadersInit;
   signal?: AbortSignal;
 }
 
+type RequestArguments<
+  Path extends keyof paths,
+  Method extends Uppercase<MethodForPath<Path>>,
+> = "get" extends MethodForPath<Path>
+  ? [options?: RequestOptions<RequestBodyFor<OperationFor<Path, Method>>, Method>]
+  : [
+      options: RequestOptions<RequestBodyFor<OperationFor<Path, Method>>, Method> & {
+        method: Method;
+      },
+    ];
+
 export interface ApiClient {
-  request(path: string, options?: RequestOptions): Promise<unknown>;
+  request<
+    Path extends keyof paths,
+    Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
+  >(
+    path: Path,
+    ...options: RequestArguments<Path, Method>
+  ): Promise<ResponseFor<OperationFor<Path, Method>>>;
 }
 
 function joinUrl(baseUrl: string, path: string): string {
@@ -37,10 +88,14 @@ function joinUrl(baseUrl: string, path: string): string {
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const doFetch = options.fetchImpl ?? fetch;
 
-  async function request(
-    path: string,
-    { method = "GET", body, headers, signal }: RequestOptions = {},
-  ): Promise<unknown> {
+  async function request<
+    Path extends keyof paths,
+    Method extends Uppercase<MethodForPath<Path>> = Uppercase<MethodForPath<Path>>,
+  >(
+    path: Path,
+    ...requestArguments: RequestArguments<Path, Method>
+  ): Promise<ResponseFor<OperationFor<Path, Method>>> {
+    const { method, body, headers, signal } = requestArguments[0] ?? {};
     const finalHeaders = new Headers(headers);
 
     if (options.getHeaders) {
@@ -53,8 +108,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       finalHeaders.set("Content-Type", "application/json");
     }
 
-    const response = await doFetch(joinUrl(options.baseUrl, path), {
-      method,
+    const response = await doFetch(joinUrl(options.baseUrl, String(path)), {
+      method: method ?? "GET",
       headers: finalHeaders,
       body: hasBody ? JSON.stringify(body) : undefined,
       signal,
@@ -69,10 +124,10 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     }
 
     if (response.status === 204) {
-      return undefined;
+      return undefined as ResponseFor<OperationFor<Path, Method>>;
     }
 
-    return (await response.json()) as unknown;
+    return (await response.json()) as ResponseFor<OperationFor<Path, Method>>;
   }
 
   return { request };

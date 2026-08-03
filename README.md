@@ -89,19 +89,16 @@ No necesita el stack levantado: la generación no toca base de datos, Redis ni r
 workflow `api-contract` lo comprueba en cada PR y falla si el fichero commiteado ya no
 corresponde al código, indicando este mismo comando.
 
-Para derivar los tipos TypeScript del contrato:
+El frontend consume el contrato mediante el generador fijado
+`openapi-typescript@6.7.6`. Desde `frontend/`, `npm run api:generate` regenera
+`frontend/lib/api/generated/openapi.d.ts` y `npm run api:check` comprueba que el artefacto
+versionado no ha derivado. Ambos comandos usan Node 22, `npm ci` y la misma implementación
+versionada en macOS, Linux y CI. El workflow `frontend-api-contract` ejecuta ese check en cada
+PR y push a `main`; si hay diferencias muestra el diff y el comando de regeneración.
 
-```bash
-npx openapi-typescript backend/openapi.json -o frontend/lib/api/schema.d.ts
-```
-
-Todavía **no está cableado**: hacerlo es trabajo de la entrada `frontend-ci` del roadmap,
-que añadirá `openapi-typescript` como `devDependency` del frontend —con versión en el
-lockfile, en vez de este `npx` flotante— junto a un script de npm y la comprobación de que
-los tipos no han derivado del contrato.
-
-Ese typecheck es lo que rompe ante un cambio incompatible. El workflow `api-contract`
-**no**: solo garantiza que `backend/openapi.json` esté al día respecto al código.
+El cliente permanece genérico y solo expone tipos derivados de OpenAPI: no crea wrappers por
+endpoint ni conecta todavía el dashboard al backend real. El workflow `api-contract` del backend
+continúa comprobando por separado que `backend/openapi.json` corresponde al código backend.
 
 La documentación interactiva sigue disponible en http://localhost:8000/docs con el stack
 levantado.

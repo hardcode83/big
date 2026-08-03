@@ -12,17 +12,32 @@ function jsonResponse(body: unknown, init: ResponseInit = {}): Response {
 }
 
 describe("createApiClient (D12)", () => {
-  it("joins base URL and path and returns parsed JSON as unknown", async () => {
+  it("restricts paths to their declared OpenAPI methods", () => {
+    const client = createApiClient({ baseUrl: "https://api" });
+
+    if (false) {
+      // @ts-expect-error POST is not declared for /health.
+      client.request("/health", { method: "POST" });
+      // @ts-expect-error A POST-only route requires its declared method.
+      client.request("/api/v1/auth/login");
+      client.request("/api/v1/auth/login", {
+        method: "POST",
+        body: { email: "user@example.com", password: "x" },
+      });
+    }
+  });
+
+  it("joins base URL and path and returns the typed health response", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ ok: 1 }));
     const client = createApiClient({
       baseUrl: "https://api.example.com/",
       fetchImpl,
     });
 
-    const result = await client.request("/things");
+    const result = await client.request("/health");
 
     expect(fetchImpl).toHaveBeenCalledWith(
-      "https://api.example.com/things",
+      "https://api.example.com/health",
       expect.objectContaining({ method: "GET" }),
     );
     expect(result).toEqual({ ok: 1 });
@@ -32,10 +47,15 @@ describe("createApiClient (D12)", () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });
 
-    await client.request("/things", { method: "POST", body: { name: "x" } });
+    await client.request("/api/v1/auth/login", {
+      method: "POST",
+      body: { email: "user@example.com", password: "x" },
+    });
 
     const init = fetchImpl.mock.calls[0][1] as RequestInit;
-    expect(init.body).toBe(JSON.stringify({ name: "x" }));
+    expect(init.body).toBe(
+      JSON.stringify({ email: "user@example.com", password: "x" }),
+    );
     expect(new Headers(init.headers).get("Content-Type")).toBe(
       "application/json",
     );
@@ -49,7 +69,7 @@ describe("createApiClient (D12)", () => {
       getHeaders: () => ({ Authorization: "Bearer future-token" }),
     });
 
-    await client.request("/things");
+    await client.request("/health");
 
     const init = fetchImpl.mock.calls[0][1] as RequestInit;
     expect(new Headers(init.headers).get("Authorization")).toBe(
@@ -63,7 +83,9 @@ describe("createApiClient (D12)", () => {
       .mockResolvedValue(new Response(null, { status: 204 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });
 
-    expect(await client.request("/things", { method: "DELETE" })).toBeUndefined();
+    expect(
+      await client.request("/api/v1/auth/logout", { method: "POST" }),
+    ).toBeUndefined();
   });
 
   it("maps a PRD §23 error envelope to ApiError", async () => {
@@ -81,7 +103,7 @@ describe("createApiClient (D12)", () => {
     );
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });
 
-    await expect(client.request("/things")).rejects.toMatchObject({
+    await expect(client.request("/health")).rejects.toMatchObject({
       code: "VALIDATION_ERROR",
       message: "Invalid payload",
       status: 422,
@@ -95,7 +117,7 @@ describe("createApiClient (D12)", () => {
       .mockResolvedValue(new Response("<html>502</html>", { status: 502 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });
 
-    const error = (await client.request("/things").catch((e) => e)) as ApiError;
+    const error = (await client.request("/health").catch((e) => e)) as ApiError;
     expect(error).toBeInstanceOf(ApiError);
     expect(error.code).toBe("UNKNOWN_ERROR");
     expect(error.status).toBe(502);
@@ -115,7 +137,7 @@ describe("createApiClient (D12)", () => {
       onUnauthorized,
     });
 
-    await client.request("/things").catch(() => undefined);
+    await client.request("/health").catch(() => undefined);
 
     expect(onUnauthorized).toHaveBeenCalledOnce();
   });
