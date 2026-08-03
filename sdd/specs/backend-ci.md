@@ -20,12 +20,46 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
 
 - WHEN se abre o actualiza un Pull Request, o se hace push a `main`, THE SYSTEM SHALL
   ejecutar el workflow `backend-tests`.
-- THE SYSTEM SHALL ejecutarlo **sin filtro de rutas**, aunque el diff no toque `backend/**`.
-  Un check requerido con filtro de rutas no se ejecuta en los PR que no las tocan, y GitHub
-  deja esos PR bloqueados esperando indefinidamente un check que no va a llegar.
+- THE SYSTEM SHALL **reportar siempre un resultado del check `backend-tests`**, toque el diff
+  el backend o no. Este es el invariante del que dependen los demás: un check requerido que
+  *no se ejecuta* deja el Pull Request bloqueado esperando indefinidamente uno que no va a
+  llegar, mientras que uno que se ejecuta y reporta verde en segundos no bloquea a nadie.
+- THE SYSTEM SHALL conseguirlo **sin `paths:` en `on:`**. La prohibición sigue en pie y por el
+  motivo original: un filtro de rutas a nivel de disparador no produce check alguno en los PR
+  que no tocan esas rutas. El filtrado ocurre **dentro** del workflow, no en su disparador.
+- THE SYSTEM SHALL estructurarlo en tres jobs: `backend-tests-detect` decide el área a partir
+  del diff, `backend-tests-suite` corre la verificación completa **solo si** la detección dice
+  que el diff toca el backend, y `backend-tests` publica el resultado con `if: always()` — que
+  es lo que garantiza el invariante incluso cuando la suite se salta.
 - THE SYSTEM SHALL cancelar la ejecución anterior de la misma referencia cuando llega una
-  nueva (`concurrency` con `cancel-in-progress`), y limitar el job a 20 minutos.
+  nueva (`concurrency` con `cancel-in-progress`), y limitar cada job a su propio tope: 5
+  minutos para detección y publicación, 20 para la suite.
 - THE SYSTEM SHALL conceder al workflow solo `contents: read`.
+
+### Detección del área y camino corto
+
+- THE SYSTEM SHALL derivar del diff una decisión booleana sobre si el cambio afecta al backend,
+  y exponerla junto a un **motivo legible** como salidas del job de detección.
+- WHEN la detección concluye que el diff **no** toca el backend, THE SYSTEM SHALL saltarse la
+  suite y publicar el check en verde con ese motivo, de modo que un PR que solo toca
+  documentación o `sdd/` obtenga su resultado en segundos en lugar de esperar la suite entera.
+- WHEN la detección concluye que **sí** lo toca, THE SYSTEM SHALL ejecutar la verificación
+  completa descrita abajo **sin recortarla**: el camino corto es una vía rápida para diffs
+  ajenos al backend, nunca una versión reducida de la verificación.
+- IF la detección falla o no puede determinar el área, THEN THE SYSTEM SHALL decidir a favor de
+  ejecutar la suite: la decisión **arranca en «sí toca»** y solo una comprobación afirmativa la
+  baja. Equivocarse hacia «ejecuta» cuesta minutos; equivocarse hacia «salta» publica un verde
+  que no verificó nada.
+- THE SYSTEM SHALL leer el diff con las rutas **sin escapar** (`core.quotePath=false`) y
+  separadas por NUL (`-z`). Por defecto git escapa las rutas no ASCII y las entrecomilla, con lo
+  que un patrón anclado en `backend/` no casaría: un PR cuyo único cambio de backend fuera un
+  fichero con acento se saltaría la suite y el check saldría **verde**.
+- THE SYSTEM SHALL leer el diff **sin detección de renombrados** (`--no-renames`). Con
+  renombrados activos un movimiento colapsa a la ruta destino, así que un PR que **saca** un
+  módulo de `backend/` se juzgaría «no toca el backend» y publicaría verde con código del
+  backend desaparecido.
+- THE SYSTEM SHALL comparar cada ruta individualmente en lugar de aplicar una expresión regular
+  sobre el conjunto concatenado, para que un acierto parcial no pueda decidir por el conjunto.
 
 ### Servicios de los que depende
 
@@ -73,6 +107,19 @@ olvidar regenerar el contrato cortara la ejecución antes de la suite.
   para que un job de CI pueda fijar un nombre reproducible.
 - `make db-clean-test` borra las bases huérfanas que deje una ejecución interrumpida, sin
   tocar la base de datos de desarrollo.
+
+## Coste
+
+- **Medido el 2026-08-03**: la suite tarda **~6m15s** y el workflow completo **~7m05s**; el paso
+  dominante es `pytest`. El camino corto —diff que no toca el backend— cuesta **segundos**,
+  porque el job de detección no levanta `services:` ni instala dependencias: solo necesita git.
+- La cifra se registra **fechada y con el paso dominante identificado** a propósito. Una versión
+  anterior de la cabecera del workflow afirmaba «~1 minuto», y sobre esa cifra obsoleta se tomó
+  una decisión de pipeline. Cualquier decisión futura sobre este gate debe partir de una medición
+  con fecha, no de la anterior heredada.
+- **Reducir esos 6m15s queda fuera de esta capacidad**: es la palanca mayor y la única que ayuda
+  también a los PR que **sí** tocan el backend, pero es trabajo sobre la suite, no sobre el
+  workflow.
 
 ## Estado
 
