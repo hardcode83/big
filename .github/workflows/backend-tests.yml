@@ -79,27 +79,57 @@ jobs:
           PR_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
           PUSH_BEFORE: ${{ github.event.before }}
           PUSH_AFTER: ${{ github.sha }}
-        # `set -uo pipefail` a propósito, SIN `-e`, que es lo que usa el resto del repo:
-        # aquí un fallo inesperado no debe abortar el paso. Si el diff no se puede
+        # Aquí un fallo inesperado NO debe abortar el paso: si el diff no se puede
         # determinar, el requisito (R2.4) es ejecutar la suite completa, no dejar el
         # check en rojo — la duda se resuelve verificando. Por eso cada comando que
         # puede fallar se comprueba explícitamente y `backend` arranca en `true`: solo
         # una ruta afirmativa lo baja a `false`.
         run: |
+          # `set +e` EXPLÍCITO y no simplemente "omitir -e": GitHub invoca los `run:`
+          # con `bash -e {0}`, así que `-e` está activo por defecto y un `set -uo
+          # pipefail` no lo desactiva. Sin esta línea el fail-open de R2.4 sería una
+          # intención escrita en un comentario, no un comportamiento.
+          set +e
           set -uo pipefail
 
           backend=true
           reason="unknown-event-defaults-to-full-suite"
-          changed=""
+          files=()
 
-          evaluate() {
-            if printf '%s\n' "$1" | grep -qE '^(backend/|\.github/workflows/backend-tests\.yml$)'; then
-              backend=true
-              reason="diff-touches-backend"
-            else
-              backend=false
-              reason="no-backend-changes"
+          # `core.quotePath=false` y `-z` no son cosmética. Por defecto git ESCAPA las
+          # rutas no ASCII y las envuelve en comillas —`"backend/caf\303\251.py"`—, con
+          # lo que un patrón anclado en `^backend/` no casa: un PR cuyo único cambio de
+          # backend fuese un fichero con acento se saltaría la suite y el check saldría
+          # VERDE. Con el quoting desactivado las rutas llegan literales, y `-z` las
+          # separa por NUL, que es lo único seguro con nombres que llevan espacios o
+          # saltos de línea.
+          read_diff() {
+            local out rc
+            out="$(mktemp)"
+            git -c core.quotePath=false diff -z --name-only "$@" >"$out" 2>/dev/null
+            rc=$?
+            if [ "$rc" -eq 0 ]; then
+              mapfile -d '' -t files <"$out"
             fi
+            rm -f "$out"
+            return "$rc"
+          }
+
+          # Comparación ruta a ruta con `case`, no un regex sobre el conjunto pegado:
+          # evita escapar el punto de `.github` y hace imposible un acierto parcial.
+          evaluate() {
+            local f
+            for f in "${files[@]}"; do
+              case "$f" in
+                backend/* | .github/workflows/backend-tests.yml)
+                  backend=true
+                  reason="diff-touches-backend"
+                  return
+                  ;;
+              esac
+            done
+            backend=false
+            reason="no-backend-changes"
           }
 
           case "$EVENT_NAME" in
@@ -116,10 +146,10 @@ jobs:
               # Tres puntos, no dos: interesan los cambios de la rama desde el ancestro
               # común. Con dos puntos, fusionar `main` en la rama dispararía la suite
               # sin que el PR haya tocado el backend.
-              elif ! changed="$(git diff --name-only "${PR_BASE_SHA}...${PR_HEAD_SHA}" 2>/dev/null)"; then
+              elif ! read_diff "${PR_BASE_SHA}...${PR_HEAD_SHA}"; then
                 reason="git-diff-failed"
               else
-                evaluate "$changed"
+                evaluate
               fi
               ;;
 
@@ -130,10 +160,10 @@ jobs:
               elif ! git cat-file -e "${PUSH_BEFORE}^{commit}" 2>/dev/null; then
                 # Force-push: el commit anterior ya no es alcanzable.
                 reason="push-before-unreachable"
-              elif ! changed="$(git diff --name-only "${PUSH_BEFORE}" "${PUSH_AFTER}" 2>/dev/null)"; then
+              elif ! read_diff "${PUSH_BEFORE}" "${PUSH_AFTER}"; then
                 reason="git-diff-failed"
               else
-                evaluate "$changed"
+                evaluate
               fi
               ;;
           esac
@@ -145,11 +175,18 @@ jobs:
 
           # A stdout además del output: `$GITHUB_OUTPUT` es un canal entre jobs y no
           # imprime nada en el log, y el resumen lo escribe el job consolidador. Sin
-          # esto la decisión no sería visible donde se toma.
+          # esto la decisión no sería visible donde se toma. Ambos valores salen de un
+          # conjunto cerrado de literales de este script, así que no son inyectables.
           echo "::notice::backend=${backend} (${reason})"
-          if [ -n "$changed" ]; then
-            echo "Ficheros cambiados considerados ($(printf '%s\n' "$changed" | wc -l | tr -d ' ')):"
-            printf '%s\n' "$changed" | head -50
+
+          if [ "${#files[@]}" -gt 0 ]; then
+            echo "Ficheros cambiados considerados (${#files[@]}):"
+            # El prefijo de dos espacios es una medida de seguridad, no formato: quien
+            # abre el PR elige los nombres de fichero, y un fichero llamado
+            # `::notice::…`, `::error::…` o `::stop-commands::…` impreso al principio de
+            # línea lo ejecutaría el runner como comando de workflow — falsificando la
+            # anotación de la decisión o silenciando el resto del log.
+            printf '  %s\n' "${files[@]:0:50}"
           fi
 
   # --- La verificación de verdad. Intacta respecto a antes del change, salvo el ------

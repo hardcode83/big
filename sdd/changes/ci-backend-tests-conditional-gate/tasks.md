@@ -20,27 +20,40 @@ nada.
   `runs-on: ubuntu-latest`, `timeout-minutes: 5`, `permissions: contents: read`, sin
   `services:`, con `actions/checkout` pineado por SHA (el mismo que ya usa el fichero) y
   `fetch-depth: 0`. Declara `outputs: backend`, `reason`. [R2, D1, D3]
-- [x] 1.2 Escribir el paso de detección en bash con `set -uo pipefail` —**sin `-e`**, ver D3: con
-  `-e` un `git diff` fallido abortaría el paso y daría rojo, cuando R2.4 exige ejecutar la suite—,
-  con la forma del job
-  `provenance` de `deploy-dev.yml:34-55`: variable inicializada a `backend=true` y bajada a
-  `false` **solo** por una ruta afirmativa; tres ramas por evento (`pull_request` con
-  `base.sha...head.sha` de tres puntos, `push` con `github.event.before`,
-  `workflow_dispatch` → `true` sin calcular); patrones `backend/**` y
+- [x] 1.2 Escribir el paso de detección en bash con la forma del job `provenance` de
+  `deploy-dev.yml:34-55`: variable inicializada a `backend=true` y bajada a `false` **solo** por
+  una ruta afirmativa; tres ramas por evento (`pull_request` con `base.sha...head.sha` de tres
+  puntos, `push` con `github.event.before`, `workflow_dispatch` → `true` sin calcular);
+  comparación ruta a ruta con `case` contra `backend/*` y
   `.github/workflows/backend-tests.yml`; escritura de `backend`/`reason` a `$GITHUB_OUTPUT`.
-  [R2.1, R2.2, R2.3, D4, D5]
+  Abrir con **`set +e` explícito** seguido de `set -uo pipefail`: GitHub invoca los `run:` con
+  `bash -e {0}`, así que sin `set +e` el fail-open de R2.4 no existiría (ver D3).
+  [R2.1, R2.2, R2.3, D3, D4, D5]
+- [x] 1.2b Leer el diff con `git -c core.quotePath=false diff -z --name-only` e iterarlo como
+  array (`mapfile -d ''`), **no** con `grep` sobre la salida por defecto: git escapa las rutas no
+  ASCII (`"backend/caf\303\251.py"`), con lo que un ancla `^backend/` no casa y un PR cuyo único
+  cambio de backend fuese un fichero con acento se saltaría la suite en verde. [R2.4, D10]
 - [x] 1.3 Cubrir explícitamente los tres caminos de *fail-open* con su `reason` propia:
   `github.event.before` con los 40 ceros, base o `before` inalcanzables, y salida no cero de
   `git diff`. Todos dejan `backend=true`. [R2.4, D4]
 - [x] 1.4 Emitir la decisión al log del propio job con
   `echo "::notice::backend=<v> (<reason>)"` — `$GITHUB_OUTPUT` no imprime nada y el resumen lo
   escribe otro job, así que sin esto R2.1 queda sin mecanismo. [R2.1, D3]
+- [x] 1.5 Imprimir la lista de ficheros considerados **prefijando cada línea con dos espacios**.
+  Es contención, no formato: quien abre el PR elige los nombres, y un fichero llamado
+  `::notice::…` o `::stop-commands::…` al principio de línea lo ejecuta el runner como comando de
+  workflow, falsificando la anotación de la decisión o silenciando el log. [D10]
+- [x] 1.6 Batería de casos adversariales sobre la lógica de detección, ejecutada con `bash` y con
+  `-e` activo (como la invoca GitHub), sobre repositorios git de usar y tirar: rutas con acentos,
+  con espacios, deleciones, el propio workflow, y las trampas `docs/backend-notes.md`,
+  `frontend/backend/x.ts` y un fichero con nombre inyector. Es la mitigación que faltaba al
+  riesgo 2 del design, porque las otras tres no atrapan un bug en la ruta afirmativa. [R2, D10]
 
 ## 2. El gate condicional (unidad indivisible)
 
 - [x] 2.1 Renombrar el job actual a `backend-tests-suite` y añadirle
   `needs: backend-tests-detect` + `if: needs.backend-tests-detect.outputs.backend == 'true'`.
-  **Conservar sin alterar** sus diez pasos, `services:` (Postgres 16 + Redis 7 con
+  **Conservar sin alterar** sus ocho pasos, `services:` (Postgres 16 + Redis 7 con
   healthcheck), el bloque `env:` completo (`DATABASE_URL`, `REDIS_URL`, `PYTEST_DB_SUFFIX`), el
   paso de la clave JWT de usar y tirar, `uv sync --frozen`, los SHA pineados,
   `permissions: contents: read` y `timeout-minutes: 20`. [R3.1, R3.2, R3.3]

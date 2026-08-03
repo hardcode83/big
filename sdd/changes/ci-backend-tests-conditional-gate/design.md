@@ -4,7 +4,7 @@
 
 `.github/workflows/backend-tests.yml` es hoy **un workflow de un solo job**, llamado igual que
 el workflow (`backend-tests`), con `services:` de PostgreSQL 16 y Redis 7 a nivel de job y
-diez pasos secuenciales. Su disparador es `pull_request: {}` + `push: main` +
+ocho pasos secuenciales. Su disparador es `pull_request: {}` + `push: main` +
 `workflow_dispatch`, deliberadamente sin `paths:`, y las líneas 14-16 documentan por qué.
 
 El repositorio ya tiene **dos clases de workflow con políticas opuestas**, y son coherentes
@@ -77,30 +77,67 @@ publicado a cambio de estética.
 `backend=true|false` y `reason=<texto>` por `$GITHUB_OUTPUT`, con la forma del job
 `provenance` de `deploy-dev.yml:34-55`.
 
-**Con una desviación deliberada de la convención del repo, encontrada al implementar**: el paso
-usa `set -uo pipefail`, **sin `-e`**. Con `-e`, un `git diff` que falle abortaría el paso → el
-job entra en `failure` → el gate reporta rojo (D6). Pero R2.4 dice lo contrario: cuando el diff
-no se puede determinar hay que **ejecutar la suite**, no bloquear el PR. Con `-e` el requisito
-sería inalcanzable, así que cada comando que puede fallar se comprueba de forma explícita
-(`if ! git cat-file …`, `if ! changed="$(git diff …)"`) y la variable arranca en `true`. El resto
-de pasos bash del change (el consolidador) sí usa `set -euo pipefail`: ahí un fallo inesperado
-*debe* dar rojo.
+La razón decisiva es R2.4: la degradación tiene que ser **explícita y hacia el lado seguro** (si
+no se puede determinar el diff, se ejecuta la suite), y una action de terceros falla el job
+cuando algo va mal en lugar de degradar. Además evita añadir superficie externa que habría que
+pinear por SHA y auditar para algo que son tres líneas de git.
+
+**El paso desactiva `-e` de forma explícita con `set +e`.** No basta con "no escribir `-e`":
+GitHub invoca los `run:` con `bash -e {0}`, así que `-e` está **activo por defecto** y un
+`set -uo pipefail` no lo apaga. Con `-e` vivo, un `git diff` que fallara abortaría el paso → el
+job entra en `failure` → el gate reporta rojo (D6), que es lo contrario de lo que R2.4 pide. Una
+primera versión de este diseño creía que omitir `-e` bastaba; el fail-open era entonces una
+intención escrita en un comentario, no un comportamiento. El consolidador sí usa
+`set -euo pipefail`: ahí un fallo inesperado **debe** dar rojo.
 
 **La decisión se escribe además a stdout** con `echo "::notice::backend=<v> (<reason>)"` en el
 propio paso de detección. No es redundante con D7: `$GITHUB_OUTPUT` es un canal entre jobs y
 **no imprime nada en el log**, y el resumen de D7 lo escribe el job consolidador, no el que
 toma la decisión. Sin este `echo`, R2.1 ("dejar esa decisión visible en el log") quedaría
-cubierto solo de palabra — lo detectó la revisión de arquitectura. Un `::notice::` lo deja
-además visible en la propia página del run, no solo enterrado en el log del paso. La razón decisiva es R2.4: la degradación tiene que
-ser **explícita y hacia el lado seguro** (si no se puede determinar el diff, se ejecuta la
-suite), y una action de terceros falla el job cuando algo va mal en lugar de degradar. Además
-evita añadir superficie externa que habría que pinear por SHA y auditar para algo que son tres
-líneas de git.
+cubierto solo de palabra — lo detectó la revisión de arquitectura.
 
 Rejected: `dorny/paths-filter` — bien probada y resuelve los dos eventos, pero su modo de
 fallo es abortar, no degradar, que es lo contrario de lo que R2.4 pide.
 Rejected: `gh api .../compare/` — depende de red y de un token con permisos, para un dato que
 el checkout ya tiene en local.
+
+### D10 — El diff se lee sin quoting y separado por NUL, y las rutas nunca se imprimen al principio de línea
+
+Las dos correcciones que la revisión de seguridad encontró sobre la primera implementación.
+Ambas se verificaron reproduciéndolas en un repositorio de usar y tirar antes de aceptarlas, no
+solo leyendo el código.
+
+**`git -c core.quotePath=false diff -z --name-only`, e iteración de un array**, en lugar de
+`git diff --name-only` volcado a una variable y filtrado con `grep -E '^backend/'`. Por defecto
+git **escapa** las rutas no ASCII y las envuelve en comillas: `backend/café.py` sale como
+`"backend/caf\303\251.py"`, con comilla inicial, así que un patrón anclado en `^backend/` **no
+casa**. Consecuencia real y grave: un PR cuyo único cambio de backend fuese un fichero con
+acento se saltaba la suite y el check salía **verde**. Es exactamente el falso verde del riesgo 2,
+materializado. `-z` además separa por NUL, que es lo único seguro con rutas que contienen
+espacios o saltos de línea.
+
+La comparación pasa a ser un `case "$f" in backend/* | .github/workflows/backend-tests.yml)`
+ruta a ruta, en vez de un regex sobre el conjunto pegado: no hay que escapar el punto de
+`.github` y un acierto parcial deja de ser posible.
+
+**Toda ruta que se imprime al log va prefijada con dos espacios.** No es formato, es contención:
+quien abre el PR elige los nombres de los ficheros, y un fichero llamado `::notice::…`,
+`::error::…` o `::stop-commands::…` impreso al principio de línea lo **ejecuta el runner como
+comando de workflow**. Verificado: `git diff --name-only` emite un nombre así literal, sin
+escapar. Permitía falsificar precisamente la anotación de la decisión que R2.1 exige, y con
+`::add-mask::`/`::stop-commands::` silenciar el resto del log. Los valores que sí interpolamos
+(`backend`, `reason`) salen de un conjunto cerrado de literales del propio script y no son
+inyectables.
+
+Alcance del riesgo, para no exagerarlo: el disparador es `pull_request` y no
+`pull_request_target`, no hay ninguna referencia a `secrets.*` y el token es `contents: read`, así
+que no había vía de exfiltración ni de escritura. Lo que había era falsificación de la señal y un
+falso verde.
+
+Rejected: sanear con `sed` las líneas que empiecen por `::` — el prefijo es más simple y no puede
+fallar por un patrón mal escrito.
+Rejected: no imprimir la lista de ficheros — es lo que hace diagnosticable una decisión
+sorprendente.
 
 ### D4 — La base del diff se resuelve por evento, y toda duda cae del lado de ejecutar
 
@@ -193,7 +230,7 @@ es el modo de fallo social de este diseño.
 
 | Area | Files | Change |
 |---|---|---|
-| CI | `.github/workflows/backend-tests.yml` | Reestructurado a tres jobs (D1). Nuevo `backend-tests-detect` (checkout `fetch-depth: 0` + bash de detección + `::notice::`, sin services, `timeout-minutes: 5`). El job actual pasa a `backend-tests-suite` con `if:` sobre el output y **sus diez pasos, `services:`, `env:`, permisos y `timeout-minutes: 20` intactos** (R3.1, R3.2). Nuevo `backend-tests` consolidador (D6, D7), `timeout-minutes: 5`. Cabecera reescrita: duración medida y fechada en lugar del "~1 minuto" (R5.1), y la razón por la que `paths:` en `on:` sigue prohibido. |
+| CI | `.github/workflows/backend-tests.yml` | Reestructurado a tres jobs (D1). Nuevo `backend-tests-detect` (checkout `fetch-depth: 0` + bash de detección + `::notice::`, sin services, `timeout-minutes: 5`). El job actual pasa a `backend-tests-suite` con `if:` sobre el output y **sus ocho pasos, `services:`, `env:`, permisos y `timeout-minutes: 20` intactos** (R3.1, R3.2). Nuevo `backend-tests` consolidador (D6, D7), `timeout-minutes: 5`. Cabecera reescrita: duración medida y fechada en lugar del "~1 minuto" (R5.1), y la razón por la que `paths:` en `on:` sigue prohibido. |
 | CI (solo comentarios) | `.github/workflows/api-contract.yml`, `.github/workflows/frontend-tests.yml` | D8: reescribir el comentario que justifica la ausencia de filtro para que apunte al invariante nuevo. **Sin tocar `on:`, jobs, pasos ni comportamiento** — ambos siguen ejecutándose en todos los PR. |
 | Especificación | `sdd/specs/backend-ci.md` | **Al archivar, no ahora.** Sustituir el requisito "sin filtro de rutas" (línea 23) por el invariante de R1 conservando su razón original; añadir detección de área, camino corto y la nota de D2 sobre qué contexto es el marcable como obligatorio; corregir la duración declarada. |
 
@@ -229,6 +266,16 @@ aplicación ni tocan la base de datos.
    tres vías: el valor inicial de la variable es `true` y solo una ruta afirmativa la baja
    (D4), la `reason` viaja al resumen y queda auditable (D7), y la última fila de la tabla de
    verdad falla el gate ante el estado incoherente (D6).
+
+   **No era un riesgo teórico: se materializó y el panel lo cazó.** La primera implementación
+   filtraba el diff con `grep -E '^backend/'` sobre la salida por defecto de `git diff`, que
+   escapa las rutas no ASCII — un fichero `backend/café.py` se saltaba la suite con el check en
+   verde (ver D10). Las tres mitigaciones de arriba **no lo habrían atrapado**, porque el bug
+   estaba en la ruta afirmativa misma: la variable bajaba a `false` "legítimamente". La
+   mitigación que faltaba, y que ahora existe, es una batería de casos adversariales sobre la
+   lógica de detección ejecutada fuera de CI (11 casos, incluidos acentos, espacios, deleciones
+   y las trampas `docs/backend-notes.md` y `frontend/backend/x.ts`). Cualquier cambio futuro a
+   esa lógica debe volver a pasarla.
 3. **Deriva de coherencia documental.** `api-contract.yml:18-20` y `frontend-tests.yml:3-4`
    seguirán justificando "sin filtro de rutas" con el argumento que este change supera,
    citando además `specs/backend-ci.md`, cuyo texto habrá cambiado. **Mitigado por D8**: se
