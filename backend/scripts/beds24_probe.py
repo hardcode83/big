@@ -454,6 +454,57 @@ def probe(
     return records
 
 
+def assert_account_has_no_ota_channels(bench: Beds24Probe) -> None:
+    """Refuse to write unless the account is the empty measurement account (R6.1).
+
+    This is the pre-flight that `steering/security.md` rule 8 assigns to `CHANNEX_BASE_URL`'s
+    staging default — *"ese default apuntando a staging es lo que impide que un descuido
+    escriba en una cuenta viva"*. **Beds24 has no staging**, so nothing plays that role here
+    and the guard has to be an explicit check instead of a safe default.
+
+    What it protects: REDES11 and PAJARITOS8 are live listings, and Airbnb allows a single
+    channel manager per account. An operator with the wrong `BEDS24_REFRESH_TOKEN` exported
+    would otherwise create, modify and cancel a booking on a flat that is actually selling.
+    """
+    response = bench.request("GET", "/properties")
+    if response.status_code != 200:
+        raise SystemExit(
+            "beds24-probe: refusing to write — could not read /properties to confirm the "
+            f"account has no OTA channels connected (HTTP {response.status_code})."
+        )
+    try:
+        payload = response.json()
+    except ValueError:
+        raise SystemExit(
+            "beds24-probe: refusing to write — /properties did not return JSON, so the "
+            "no-OTA-channels precondition of R6.1 could not be verified."
+        ) from None
+
+    connected = _connected_channels(payload)
+    if connected:
+        raise SystemExit(
+            "beds24-probe: REFUSING TO WRITE. This account has OTA channels connected "
+            f"({', '.join(sorted(connected))}). R6.1 is a hard rule: the measurement account "
+            "carries no channels, because writing to one that does can touch a live listing. "
+            "Check which account BEDS24_REFRESH_TOKEN belongs to."
+        )
+
+
+def _connected_channels(payload: Any) -> set[str]:
+    """Every channel name the account reports as connected, at any nesting depth."""
+    found: set[str] = set()
+    if isinstance(payload, dict):
+        for key, value in payload.items():
+            lowered = str(key).lower()
+            if lowered in ("channels", "connectedchannels", "ota") and isinstance(value, list):
+                found |= {str(member) for member in value if member}
+            found |= _connected_channels(value)
+    elif isinstance(payload, list):
+        for member in payload:
+            found |= _connected_channels(member)
+    return found
+
+
 def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
     """Cause three booking events and record each with its `booking_ref` (R2.2, R2.3, D11).
 
@@ -488,8 +539,27 @@ def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
             break
 
         response = bench.request("POST", BOOKINGS_WRITE_PATH, json_body=body)
+
         if action == "create":
+            if response.status_code >= 300:
+                raise SystemExit(
+                    f"beds24-probe: create failed (HTTP {response.status_code}); not "
+                    "attempting modify or cancel. Nothing was written."
+                )
             booking_ref = _extract_booking_ref(response)
+            if booking_ref is None:
+                # The follow-ups are a modify and a CANCEL. Acting on an id we are not certain
+                # about means cancelling somebody else's booking, so an unrecognised response
+                # shape stops the run. The read-only join refuses an ambiguous id
+                # (`beds24_webhook_sink._booking_ref`); the destructive path must be at least
+                # as strict, not less.
+                raise SystemExit(
+                    "beds24-probe: the create response did not carry a booking id in a shape "
+                    "this script recognises, so it cannot safely modify or cancel.\n"
+                    "  *** A CONFIRMED BOOKING MAY NOW EXIST AND WILL NOT BE CANCELLED. ***\n"
+                    "  Check the Beds24 panel and remove it by hand, then fix "
+                    "`_extract_booking_ref` against the real response shape (step 0)."
+                )
 
         records.append(
             build_cost_record(
@@ -505,14 +575,24 @@ def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
 
 
 def _extract_booking_ref(response) -> str | None:
-    """The id of the booking just created, or `None` if the response did not say."""
+    """The id of the booking just created, or `None` if the response did not clearly say.
+
+    Deliberately strict, because the caller uses the result to CANCEL. It accepts an id only
+    from a success-shaped element — an error envelope that happens to carry an `id` is not a
+    created booking, and treating it as one would send a cancel for something we never made.
+    """
     try:
         payload = response.json()
     except ValueError:
         return None
-    if isinstance(payload, list) and payload:
+    if isinstance(payload, list):
+        if len(payload) != 1:
+            return None
         payload = payload[0]
     if not isinstance(payload, dict):
+        return None
+    # An explicit failure marker disqualifies the element regardless of what else it carries.
+    if payload.get("success") is False or payload.get("errors") or payload.get("error"):
         return None
     for key in ("id", "bookingId", "bookId"):
         value = payload.get(key) or (payload.get("new") or {}).get(key)
@@ -639,7 +719,10 @@ def _is_known_argument(argument: str) -> bool:
     if argument in SUBCOMMANDS or argument in CAPTURES:
         return True
     return bool(
-        re.fullmatch(r"--out=\S+|--min-interval=\d+(\.\d+)?|--property=[A-Za-z0-9_-]+", argument)
+        re.fullmatch(
+            r"--out=\S+|--min-interval=\d+(\.\d+)?|--property=[A-Za-z0-9_-]+|--confirm-writes",
+            argument,
+        )
     )
 
 
@@ -689,6 +772,16 @@ def main(argv: list[str] | None = None) -> int:
         print(report(read_records(out_path)), end="")
         return 0
 
+    # Checked before the credential is even read: the operator must be told that this
+    # subcommand writes before they are told anything else about why it will not run.
+    if subcommand == "provoke" and "--confirm-writes" not in args:
+        raise SystemExit(
+            "beds24-probe: `provoke` is the only subcommand that WRITES to the provider — it "
+            "creates, modifies and cancels a booking. Re-run with --confirm-writes once you "
+            "have checked that BEDS24_REFRESH_TOKEN belongs to the empty measurement account "
+            "and not to one with live listings (R6.1)."
+        )
+
     bench = Beds24Probe(
         refresh_token=_refresh_token(),
         base_url=os.environ.get(BASE_URL_ENV, "").strip() or DEFAULT_BASE_URL,
@@ -708,6 +801,7 @@ def main(argv: list[str] | None = None) -> int:
         property_id = _option(args, "--property=", "")
         if not property_id:
             raise SystemExit("beds24-probe: provoke needs --property=<room or property id>")
+        assert_account_has_no_ota_channels(bench)
         records = provoke(bench, property_id=property_id)
         existing = read_records(out_path) if out_path.exists() else []
         written = write_records(existing + records, out_path)

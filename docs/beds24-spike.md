@@ -61,6 +61,7 @@ primera llamada autenticada, porque uno de ellos decide a qué host se manda la 
 | Cabeceras del flujo de token | `beds24_probe.py` → `REFRESH_HEADER`, `ACCESS_HEADER`, `TOKEN_PATH` | Nombres reales del canje refresh → access. |
 | Rutas del catálogo | `beds24_probe.py` → `CATALOGUE` | Que `/bookings`, `/properties` y `/inventory/rooms/calendar` existan y sean las que el sync usará. |
 | Claves de identidad y de tiempo | `beds24_webhook_sink.py` → `BOOKING_REF_KEYS`, `EVENT_TIME_KEYS` | Qué clave lleva el id de reserva y cuál el instante del hecho. |
+| **Escritura de reservas** | `beds24_probe.py` → `BOOKINGS_WRITE_PATH`, los cuerpos de `provoke`, y `_extract_booking_ref` | **El más importante de la tabla**, porque es el único cuyo fallo cuesta una escritura. Confirma la ruta, la forma del cuerpo y —sobre todo— **cómo devuelve el id la respuesta de creación**: si el script no lo reconoce, aborta y te deja una reserva confirmada que hay que borrar a mano. |
 
 Si alguno falla el arreglo es de una línea, pero descubrirlo a mitad de la ventana de medición
 cuesta créditos y tiempo del trial.
@@ -168,8 +169,16 @@ superficie. Así que ambos van en el contenedor:
 
    ```bash
    docker compose exec backend uv run python scripts/beds24_probe.py provoke \
-       --property=<room-id> --out=/tmp/beds24-request-cost.jsonl
+       --property=<room-id> --confirm-writes --out=/tmp/beds24-request-cost.jsonl
    ```
+
+   > ⚠️ **`provoke` es la única subcomanda que escribe.** Por eso exige `--confirm-writes` y,
+   > antes de tocar nada, lee `/properties` y **se niega a continuar si la cuenta tiene algún
+   > canal OTA conectado**. Beds24 no tiene entorno de staging, así que ese chequeo es lo que
+   > aquí hace el papel que en Channex hacía el default apuntando a staging: lo único que
+   > separa una medición de escribir en una vivienda que está vendiendo. Si aborta quejándose
+   > de canales conectados, **no insistas**: mira a qué cuenta pertenece tu
+   > `BEDS24_REFRESH_TOKEN`.
 
    Crea, modifica y cancela una reserva —tres hechos, el mínimo de R2.3— y **anota el
    `booking_ref` de cada uno en el registro de coste**. Ese es el detalle que hace calculable

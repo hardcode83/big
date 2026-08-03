@@ -438,10 +438,83 @@ def test_provoke_records_the_booking_ref_so_the_latency_join_works():
     assert {r["booking_ref"] for r in records} == {"777"}
 
 
-def test_provoke_stops_when_the_create_returns_no_id():
-    """Writing the follow-ups without an id could create two more bookings."""
-    records = beds24.provoke(
-        _bench(lambda request: httpx.Response(200, json=[{}])), property_id="R1"
+def test_provoke_refuses_the_follow_ups_when_the_create_returns_no_id():
+    """Writing modify/cancel without a certain id could act on somebody else's booking.
+
+    It raises rather than returning a partial record set: a confirmed booking may exist and
+    the operator has to be told, not left to notice a short list.
+    """
+    with pytest.raises(SystemExit, match="WILL NOT BE CANCELLED"):
+        beds24.provoke(
+            _bench(lambda request: httpx.Response(200, json=[{}])), property_id="R1"
+        )
+
+
+# --- Round-2 panel fixes: the write path ------------------------------------------------------
+
+
+def test_provoke_refuses_to_run_without_explicit_confirmation():
+    """It is the only subcommand that writes, against an account with no staging twin."""
+    with pytest.raises(SystemExit, match="--confirm-writes"):
+        beds24.main(["provoke", "--property=R1"])
+
+
+def test_write_is_refused_when_the_account_has_ota_channels_connected():
+    """R6.1 as an executable pre-flight: Beds24 has no staging to fall back on."""
+    bench = _bench(
+        lambda request: httpx.Response(
+            200, json=[{"id": 1, "channels": ["Airbnb", "BookingCom"]}]
+        )
     )
 
-    assert [r["shape"] for r in records] == ["provoke-create"]
+    with pytest.raises(SystemExit, match="REFUSING TO WRITE"):
+        beds24.assert_account_has_no_ota_channels(bench)
+
+
+def test_write_proceeds_on_an_account_with_no_channels():
+    bench = _bench(lambda request: httpx.Response(200, json=[{"id": 1, "channels": []}]))
+
+    beds24.assert_account_has_no_ota_channels(bench)
+
+
+def test_write_is_refused_when_the_precondition_cannot_be_verified():
+    """Unverifiable is not the same as fine."""
+    bench = _bench(lambda request: httpx.Response(500))
+
+    with pytest.raises(SystemExit, match="could not read /properties"):
+        beds24.assert_account_has_no_ota_channels(bench)
+
+
+def test_a_failed_create_never_leads_to_a_modify_or_cancel():
+    """Acting on an id from an error envelope means cancelling somebody else's booking."""
+    calls = []
+
+    def handler(request):
+        calls.append(request)
+        return httpx.Response(400, json=[{"id": 999, "error": "bad request"}])
+
+    with pytest.raises(SystemExit, match="create failed"):
+        beds24.provoke(_bench(handler), property_id="R1")
+
+    assert len(calls) == 1, "it must not issue the follow-up writes"
+
+
+def test_an_error_envelope_carrying_an_id_is_not_treated_as_a_created_booking():
+    response = httpx.Response(200, json=[{"id": 999, "success": False}])
+
+    assert beds24._extract_booking_ref(response) is None
+
+
+def test_an_ambiguous_multi_element_response_is_not_treated_as_a_created_booking():
+    response = httpx.Response(200, json=[{"id": 1}, {"id": 2}])
+
+    assert beds24._extract_booking_ref(response) is None
+
+
+def test_an_unparseable_create_response_warns_about_the_orphan_booking():
+    """A confirmed booking may exist and will not be cancelled — say so loudly."""
+    with pytest.raises(SystemExit, match="WILL NOT BE CANCELLED"):
+        beds24.provoke(
+            _bench(lambda request: httpx.Response(200, json={"unexpected": "shape"})),
+            property_id="R1",
+        )

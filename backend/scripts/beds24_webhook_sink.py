@@ -269,7 +269,11 @@ def detect_out_of_order(latencies: list[dict[str, Any]], webhooks: list[dict[str
     return arrival_by_event != sorted(arrival_by_event)
 
 
-def make_handler(out_path: Path, records: list[dict[str, Any]]):
+def make_handler(
+    out_path: Path, records: list[dict[str, Any]], dropped_counter: list[int] | None = None
+):
+    dropped: list[int] = [] if dropped_counter is None else dropped_counter
+
     class Handler(BaseHTTPRequestHandler):
         def do_POST(self):  # noqa: N802 — the stdlib dictates this name
             # Everything is wrapped, because an exception escaping this method is handled by
@@ -297,6 +301,17 @@ def make_handler(out_path: Path, records: list[dict[str, Any]]):
                 self.end_headers()
                 self.wfile.write(b"ok")
             except Exception:  # noqa: BLE001 — nothing request-derived may reach stderr
+                # Silence would be worse than the traceback this replaced. R2.3 needs at least
+                # three events, and a webhook dropped to a full disk during the measurement
+                # window has to be visible NOW — reconstructing it later means re-provoking on
+                # a trial that is counting down. The message is a fixed string: nothing derived
+                # from the request, which is the whole reason the traceback had to go.
+                dropped.append(1)
+                print(
+                    f"beds24-webhook-sink: DROPPED a webhook (write or parse failed). "
+                    f"{len(dropped)} lost so far — the measurement is incomplete.",
+                    file=sys.stderr,
+                )
                 try:
                     self.send_response(500)
                     self.end_headers()
@@ -355,13 +370,21 @@ def main(argv: list[str] | None = None) -> int:
         raise SystemExit(
             f"beds24-webhook-sink: cannot create the output directory ({exc.strerror})."
         ) from None
-    server = HTTPServer(("127.0.0.1", port), make_handler(out_path, []))
+    received: list[dict[str, Any]] = []
+    dropped: list[int] = []
+    server = HTTPServer(("127.0.0.1", port), make_handler(out_path, received, dropped))
     print(f"beds24-webhook-sink: listening on http://127.0.0.1:{port} -> {out_path}")
-    print("expose it with:  cloudflared tunnel --url http://localhost:%d" % port)
+    print(f"expose it with:  cloudflared tunnel --url http://127.0.0.1:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
-        print("\nbeds24-webhook-sink: stopped")
+        print(f"\nbeds24-webhook-sink: stopped. {len(received)} received, {len(dropped)} dropped.")
+        if dropped:
+            print(
+                "  Some webhooks were lost, so the latency sample is incomplete — "
+                "provoke the missing events again before writing the findings.",
+                file=sys.stderr,
+            )
     return 0
 
 
