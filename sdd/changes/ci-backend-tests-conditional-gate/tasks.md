@@ -16,44 +16,46 @@ exactamente como hoy (la suite sigue ejecutándose siempre), solo que además pu
 decisión. Es lo que permite verificar la detección de forma aislada antes de que condicione
 nada.
 
-- [ ] 1.1 Añadir el job `backend-tests-detect` a `.github/workflows/backend-tests.yml`:
+- [x] 1.1 Añadir el job `backend-tests-detect` a `.github/workflows/backend-tests.yml`:
   `runs-on: ubuntu-latest`, `timeout-minutes: 5`, `permissions: contents: read`, sin
   `services:`, con `actions/checkout` pineado por SHA (el mismo que ya usa el fichero) y
   `fetch-depth: 0`. Declara `outputs: backend`, `reason`. [R2, D1, D3]
-- [ ] 1.2 Escribir el paso de detección en bash con `set -euo pipefail`, con la forma del job
+- [x] 1.2 Escribir el paso de detección en bash con `set -uo pipefail` —**sin `-e`**, ver D3: con
+  `-e` un `git diff` fallido abortaría el paso y daría rojo, cuando R2.4 exige ejecutar la suite—,
+  con la forma del job
   `provenance` de `deploy-dev.yml:34-55`: variable inicializada a `backend=true` y bajada a
   `false` **solo** por una ruta afirmativa; tres ramas por evento (`pull_request` con
   `base.sha...head.sha` de tres puntos, `push` con `github.event.before`,
   `workflow_dispatch` → `true` sin calcular); patrones `backend/**` y
   `.github/workflows/backend-tests.yml`; escritura de `backend`/`reason` a `$GITHUB_OUTPUT`.
   [R2.1, R2.2, R2.3, D4, D5]
-- [ ] 1.3 Cubrir explícitamente los tres caminos de *fail-open* con su `reason` propia:
+- [x] 1.3 Cubrir explícitamente los tres caminos de *fail-open* con su `reason` propia:
   `github.event.before` con los 40 ceros, base o `before` inalcanzables, y salida no cero de
   `git diff`. Todos dejan `backend=true`. [R2.4, D4]
-- [ ] 1.4 Emitir la decisión al log del propio job con
+- [x] 1.4 Emitir la decisión al log del propio job con
   `echo "::notice::backend=<v> (<reason>)"` — `$GITHUB_OUTPUT` no imprime nada y el resumen lo
   escribe otro job, así que sin esto R2.1 queda sin mecanismo. [R2.1, D3]
 
 ## 2. El gate condicional (unidad indivisible)
 
-- [ ] 2.1 Renombrar el job actual a `backend-tests-suite` y añadirle
+- [x] 2.1 Renombrar el job actual a `backend-tests-suite` y añadirle
   `needs: backend-tests-detect` + `if: needs.backend-tests-detect.outputs.backend == 'true'`.
   **Conservar sin alterar** sus diez pasos, `services:` (Postgres 16 + Redis 7 con
   healthcheck), el bloque `env:` completo (`DATABASE_URL`, `REDIS_URL`, `PYTEST_DB_SUFFIX`), el
   paso de la clave JWT de usar y tirar, `uv sync --frozen`, los SHA pineados,
   `permissions: contents: read` y `timeout-minutes: 20`. [R3.1, R3.2, R3.3]
-- [ ] 2.2 Añadir el job consolidador `backend-tests` —**este nombre exacto**, porque el check
+- [x] 2.2 Añadir el job consolidador `backend-tests` —**este nombre exacto**, porque el check
   run toma el nombre del job y es el único contexto marcable como obligatorio— con
   `needs: [backend-tests-detect, backend-tests-suite]`, `if: always()`,
   `timeout-minutes: 5`, `permissions: contents: read` y sin `services:`. [R1.1, D1, D2]
-- [ ] 2.3 Implementar la tabla de verdad de D6 sobre `needs.*.result` enumerando los casos, no
+- [x] 2.3 Implementar la tabla de verdad de D6 sobre `needs.*.result` enumerando los casos, no
   con un `!= 'failure'` abreviado: `suite == success` → verde; `suite == skipped` **y**
   `detect == success` **y** `backend == 'false'` → verde; `failure`/`cancelled` de cualquiera de
   los dos → rojo; y `skipped` con `backend == 'true'` → rojo por incoherencia. [R1.3, R1.4, D6]
-- [ ] 2.4 Escribir el resumen en `$GITHUB_STEP_SUMMARY` con la forma de tabla de
+- [x] 2.4 Escribir el resumen en `$GITHUB_STEP_SUMMARY` con la forma de tabla de
   `frontend-tests.yml:72-83`: camino tomado, `reason` de la detección y, en el camino corto,
   que la suite **no** se ejecutó. [R4.2, D7]
-- [ ] 2.5 Verificar que el disparador `on:` sigue siendo `pull_request: {}` + `push: main` +
+- [x] 2.5 Verificar que el disparador `on:` sigue siendo `pull_request: {}` + `push: main` +
   `workflow_dispatch`, **sin `paths:` ni `paths-ignore:`**, y que el grupo de `concurrency` con
   `cancel-in-progress` sigue intacto. [R1.2, R3.2]
 

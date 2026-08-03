@@ -77,6 +77,15 @@ publicado a cambio de estética.
 `backend=true|false` y `reason=<texto>` por `$GITHUB_OUTPUT`, con la forma del job
 `provenance` de `deploy-dev.yml:34-55`.
 
+**Con una desviación deliberada de la convención del repo, encontrada al implementar**: el paso
+usa `set -uo pipefail`, **sin `-e`**. Con `-e`, un `git diff` que falle abortaría el paso → el
+job entra en `failure` → el gate reporta rojo (D6). Pero R2.4 dice lo contrario: cuando el diff
+no se puede determinar hay que **ejecutar la suite**, no bloquear el PR. Con `-e` el requisito
+sería inalcanzable, así que cada comando que puede fallar se comprueba de forma explícita
+(`if ! git cat-file …`, `if ! changed="$(git diff …)"`) y la variable arranca en `true`. El resto
+de pasos bash del change (el consolidador) sí usa `set -euo pipefail`: ahí un fallo inesperado
+*debe* dar rojo.
+
 **La decisión se escribe además a stdout** con `echo "::notice::backend=<v> (<reason>)"` en el
 propio paso de detección. No es redundante con D7: `$GITHUB_OUTPUT` es un canal entre jobs y
 **no imprime nada en el log**, y el resumen de D7 lo escribe el job consolidador, no el que
