@@ -10,6 +10,8 @@ npm run typecheck   # tsc --noEmit (strict)
 npm run lint        # eslint (incluye fronteras de imports)
 npm test            # vitest + Testing Library
 npm run build       # build de producción
+npm run api:generate # deriva tipos desde ../backend/openapi.json
+npm run api:check    # comprueba deriva sin modificar el artefacto
 ```
 
 La verificación no depende de un backend ni de datos de negocio.
@@ -97,7 +99,9 @@ Zustand no necesita provider. No se añaden providers de theme/analytics/flags.
 
 ## Cliente API
 
-`lib/api`: transporte genérico basado en `fetch`, configurable por base URL, con el envelope de error de PRD §23 (`{error:{code,message,details}}`). Devuelve `unknown` en la frontera — cada feature valida y tipa su contrato. No contiene endpoints, DTOs, mocks, tokens ni llamadas. Puntos de extensión para auth futura (`getHeaders`, `onUnauthorized`) sin implementar tokens. Nunca lee Zustand.
+`lib/api`: transporte genérico basado en `fetch`, configurable por base URL, con el envelope de error de PRD §23 (`{error:{code,message,details}}`). Sus tipos se derivan exclusivamente de `../backend/openapi.json` mediante el generador fijado `openapi-typescript@6.7.6`; el artefacto versionado vive en `lib/api/generated/openapi.d.ts`. `npm run api:generate` lo regenera y `npm run api:check` falla mostrando la deriva si la salida cambia. El flujo usa Node 22, `npm ci` y normaliza la salida para producir bytes idénticos en macOS, Linux y CI.
+
+El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tipa sus cuerpos JSON y respuestas de éxito. No contiene endpoints, DTOs escritos a mano, wrappers, repositorios, servicios de dominio, tokens ni llamadas funcionales desde el shell. Los errores siguen pasando por `ApiError` y `parseApiError`; los hooks `getHeaders` y `onUnauthorized` quedan como puntos de extensión para auth futura. Nunca lee Zustand.
 
 ## Internacionalización (ES/EN)
 

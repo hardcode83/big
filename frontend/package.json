@@ -9,7 +9,9 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
-    "test:entrypoint": "sh devops/test-entrypoint.sh"
+    "test:entrypoint": "sh devops/test-entrypoint.sh",
+    "api:generate": "node scripts/generate-api-types.mjs",
+    "api:check": "node scripts/generate-api-types.mjs --check"
   },
   "dependencies": {
     "@radix-ui/react-dialog": "^1.1.19",
@@ -41,6 +43,7 @@
     "eslint": "^9.39.5",
     "eslint-config-next": "^16.2.10",
     "jsdom": "^29.1.1",
+    "openapi-typescript": "6.7.6",
     "tailwindcss": "^4.3.2",
     "typescript": "^6.0.3",
     "vitest": "^4.1.10"
