@@ -7,6 +7,8 @@ Loaded by path rather than imported: `backend/scripts/` is deliberately NOT a pa
 
 import importlib.util
 import json
+
+import httpx
 from pathlib import Path
 
 import pytest
@@ -236,7 +238,26 @@ def test_empty_strings_and_booleans_are_left_alone():
     assert probe.anonymise(payload) == payload
 
 
-@pytest.mark.parametrize("key", ["attachments", "taxes", "ages", "special_requests", "notes"])
+@pytest.mark.parametrize(
+    "key",
+    [
+        "attachments",
+        "taxes",
+        "ages",
+        "special_requests",
+        "notes",
+        # The class, not just the instances. These are the ones that survived the SECOND fix:
+        # `_amount`/`_price`/`_count`/`_date` are preserved *suffixes*, and a date-shaped key gets
+        # its own branch — in a provider that keys nightly rates by date. A scalar list member is
+        # now judged as unnamed, so its list's key cannot grant it anything.
+        "charge_amount",
+        "extra_price",
+        "guest_count",
+        "blocked_date",
+        "2026-09-05",
+        "some_key_nobody_predicted",
+    ],
+)
 def test_a_scalar_inside_a_list_is_scrubbed_whatever_the_lists_key(key):
     """R4.2, and the hole the feature-scale security panel found.
 
@@ -294,6 +315,43 @@ def test_card_data_is_scrubbed_including_the_expiry_date():
     assert cleaned["guarantee"]["is_virtual"] is False
 
 
+def test_capture_writes_the_anonymised_body_not_the_raw_one(tmp_path, monkeypatch):
+    """R4.1 + R4.2 — the **write path**, which had no test at all.
+
+    Only `anonymise()` was covered, so a regression that wrote `response.json()` straight to disk
+    would have shipped a fixture full of real guest and card data with the whole suite green.
+    That is the one failure this module exists to prevent, so it gets an assertion.
+    """
+    payload = {
+        "data": [
+            {
+                "attributes": {
+                    "unique_id": "BDC-1",
+                    "customer": {"name": "Ana Perez", "mail": "ana.perez@gmail.com"},
+                    "guarantee": {"card_number": "4111111111111111", "cvv": "123"},
+                }
+            }
+        ]
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=payload)
+
+    monkeypatch.setattr(probe, "FIXTURE_DIR", tmp_path)
+    with httpx.Client(
+        base_url="https://staging.channex.io/api/v1",
+        headers={"user-api-key": "k"},
+        transport=httpx.MockTransport(handler),
+    ) as client:
+        written = probe.capture("probe_out", "/bookings", client=client)
+
+    raw = written.read_text(encoding="utf-8")
+    for leaked in ("Ana Perez", "ana.perez@gmail.com", "4111111111111111", "123"):
+        assert leaked not in raw, leaked
+    # The business identifier still survives, or the fixture would be useless.
+    assert "BDC-1" in raw
+
+
 @pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")), ids=lambda p: p.name)
 def test_no_committed_fixture_carries_card_data(fixture_path):
     """Guards the committed artefacts themselves, not just the function.
@@ -309,14 +367,18 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
     assert "12/2027" not in raw
 
-    allowed = (None, probe.SCRUBBED, "***card-data***")
+    # Whatever the TYPE. The first version exempted non-strings, so `{"cvv": 123}` passed both
+    # gates — the PAN regex needs 13+ digits and the per-key assertion only looked at strings.
+    # The anonymiser does zero it today, but a guard narrower than its own promise is how
+    # `expiration_date` got committed in the first place.
+    allowed = (None, probe.SCRUBBED, "***card-data***", 0, 0.0, False)
 
     def walk(node):
         if isinstance(node, dict):
             for key, value in node.items():
                 lowered = key.lower()
                 if any(n in lowered for n in ("card", "cvv", "cvc", "expiration", "expiry")):
-                    assert not isinstance(value, str) or value in allowed, (
+                    assert isinstance(value, (dict, list)) or value in allowed, (
                         fixture_path.name,
                         key,
                         value,

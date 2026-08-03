@@ -161,6 +161,42 @@ def test_zero_is_none_for_every_ota_including_the_reporting_ones():
         assert to_reservation_dto(element).ota_commission is None, ota
 
 
+@pytest.mark.parametrize("raw", ["NaN", "Infinity", "-Infinity", "sNaN", "", "  ", "abc", None])
+def test_non_finite_or_unparseable_amounts_become_none_and_never_raise(raw):
+    """R2.6/R2.2, from the feature-scale QA panel.
+
+    `Decimal("NaN")` and `Decimal("Infinity")` construct successfully, so an earlier version let
+    them straight into the DTO — a `NaN` amount poisons every downstream comparison instead of
+    being visibly absent. And `Decimal("sNaN")` made the `== 0` test inside `_ota_commission`
+    raise `InvalidOperation` **uncaught**: `get_reservation` has no per-element guard, so one
+    malformed value broke the `None`-on-unknown-id promise the port makes.
+    """
+    element = {
+        "attributes": {**_minimal_attributes(), "ota_commission": raw, "amount": raw}
+    }
+    dto = to_reservation_dto(element)
+
+    assert dto.ota_commission is None
+    assert dto.gross_amount is None
+
+
+@pytest.mark.asyncio
+async def test_get_reservation_survives_a_malformed_amount():
+    """The path with no per-element guard: it must return a DTO, not raise."""
+    element = {
+        "type": "booking",
+        "id": "x",
+        "attributes": {**_minimal_attributes(), "ota_commission": "sNaN"},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"data": element})
+
+    dto = await ChannexAdapter(_client(handler)).get_reservation("TEST-0001")
+    assert dto is not None
+    assert dto.ota_commission is None
+
+
 def test_an_unknown_ota_still_keeps_a_non_zero_commission():
     """Changed by the revision: the OTA no longer gates the value, only zero does."""
     element = {

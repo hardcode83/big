@@ -253,19 +253,26 @@ def _anonymise_value(key: str | None, value: Any) -> Any:
             for member_key, member in value.items()
         }
     if isinstance(value, list):
-        # **List members inherit the list's key.** A bare string inside a list has no name of
-        # its own, and the first version simply returned it untouched — so
-        # `special_requests: ["John Smith", "+34611223344"]` sailed through every layer of the
-        # fail-closed logic while the function's docstring claimed otherwise. Measured by the
-        # section-4 security panel; the section-3 test could not catch it because its only list
-        # (`rooms`) contains dicts, never scalars.
+        # **A scalar inside a list is treated as UNNAMED** — `key=None` — so it falls straight to
+        # the fail-closed default. Dicts and nested lists keep recursing and are judged by their
+        # own keys as usual.
         #
-        # It is not hypothetical: the captured bookings carry four array fields (`services`,
-        # `deposits`, `taxes`, `ages`) that are empty ONLY because these bookings came from the
-        # CRS, and the captures still ahead — a real message thread, a webhook body, a
-        # Booking.com booking off a test hotel **shared with other integrators** — run this same
-        # anonymiser over payloads that can hold third parties' guest data.
-        return [_anonymise_value(key, member) for member in value]
+        # This is the third version of this branch and the first that closes the class rather
+        # than instances. The first returned scalars untouched. The second made them inherit the
+        # list's key, which fixed `special_requests` but left the same hole open for every key
+        # the allowlist happened to accept: with `attachments`/`taxes`/`ages` removed it still let
+        # `{"charge_amount": ["4111111111111111"]}` publish a card number verbatim, because
+        # `_amount` is a preserved *suffix* — and `{"2026-09-05": ["John Smith"]}` through the
+        # date-key branch, in a provider that keys data by date (`rooms[].days`). A test that pins
+        # five key names cannot catch the sixth; removing the name from the decision can.
+        #
+        # Nothing observed is lost: `days` is a dict, `taxes` a list of dicts, `ages` numeric —
+        # and numbers still survive on their own merit via `IDENTIFYING_NUMBER_FLOOR`.
+        return [
+            _anonymise_value(key, member) if isinstance(member, (dict, list)) else
+            _anonymise_leaf(None, member)
+            for member in value
+        ]
     return _anonymise_leaf(key, value)
 
 

@@ -125,12 +125,12 @@ comportamiento de nadie.
       rechace y el ingestor reporte la fila — asimetría deliberada frente al canal (4.2),
       porque un status inventado conduce la `PropertyStateMachine`. Sin esto el sync
       importaría **cero reservas**: `ReservationStatus.parse_ingested("new")` lanza. Test de
-      las tres traducciones y del desconocido. [R2, R7]
+      las tres traducciones y del desconocido. [R2.7]
 - [x] 4.7 El filtro temporal va en **UTC sin offset**: Channex ignora el offset recibido y
       compara el reloj de pared literal, así que un `since` tz-aware desde Madrid en verano
       deja fuera las reservas de las dos últimas horas **sin error alguno**. Medido, tabla en
       `design.md` §D7 bis. Test con un `since` en `Europe/Madrid` que demuestre que se envía
-      convertido. [R2, R8]
+      convertido. [R2.8]
 - [x] 4.4 `infrastructure/channex/adapter.py` (nuevo): `list_reservations` sobre
       `GET /bookings` con `filter[inserted_at][gte]=<since>`. Docstring que registre que
       **no existe filtro por fecha de modificación** en la API, así que no ve
@@ -171,6 +171,10 @@ comportamiento de nadie.
 
 ## 6. Reserva end-to-end desde Booking.com
 
+- [ ] 6.1 Escribir el `property_id` de Channex en `Property.pms_external_id` de la
+      propiedad de test mediante el paso documentado del runbook — **no** migración ni
+      cambio en `app/cli/bootstrap.py`, que contaminaría el arranque de todo el mundo con
+      un proveedor de dev. [R5]
 - [x] 6.5 `backend/scripts/channex_claim_test_hotel.py` (nuevo, **no estaba en el plan** —
       añadido 2026-08-03 y registrado aquí con el mismo trato documental que 1.4, porque el
       panel de arquitectura señaló con razón que se había quedado sin registrar mientras su
@@ -187,10 +191,6 @@ comportamiento de nadie.
       **Cortesía deliberada**: un barrido cada 5 s (~1,4 req/s), parada inmediata al ganar, tope
       de 4 h, y `12152494` excluido porque exige tarjeta real. Channex **no publica límite de
       tasa**, y eso no es permiso para machacarlo. [R5]
-- [ ] 6.1 Escribir el `property_id` de Channex en `Property.pms_external_id` de la
-      propiedad de test mediante el paso documentado del runbook — **no** migración ni
-      cambio en `app/cli/bootstrap.py`, que contaminaría el arranque de todo el mundo con
-      un proveedor de dev. [R5]
 - [x] 6.2 Crear una reserva desde el entorno de test de Booking.com sobre la propiedad de
       test y recuperarla con `list_reservations` del `ChannexAdapter`. [R5]
       **Vía concreta, medida 2026-08-03 y distinta de lo que asumía ADR 0006**: no hay que
@@ -211,7 +211,14 @@ comportamiento de nadie.
 
 ## 7. Hallazgos y límites medidos
 
-- [x] 7.1 En `docs/channex-staging.md`: paginación, **límite de tasa medido** (no está
+- [x] 7.1 En `docs/channex-staging.md`: paginación, latencia y desorden de webhooks — **el
+      límite de tasa NO se midió**, y el enunciado original decía que sí. Corregido tras el panel
+      de QA a escala de feature, que comprobó que el documento no contiene ninguna observación de
+      `429`, cabecera `X-RateLimit*` ni nota de «N peticiones sin tocar techo». No se midió a
+      propósito y consta por qué: averiguar el techo de un tercero exige provocárselo, y este
+      change sostiene lo contrario —«Channex no publica límite de tasa y eso no es permiso para
+      machacarlo»—. Queda anotado como no medido en el propio documento. Lo demás sí: [R6]
+- [x] 7.1b En `docs/channex-staging.md`: paginación, latencia (no está
       documentado por Channex — medirlo es el punto), latencia típica, y el desorden de
       webhooks observado en 2.4, cada uno con la observación que lo respalda. [R6]
 - [x] 7.2 Registrar las desviaciones siguiendo la convención de ADR 0005 (se anotan, **no

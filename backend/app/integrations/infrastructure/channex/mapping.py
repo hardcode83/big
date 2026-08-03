@@ -182,13 +182,24 @@ def _time(value: Any) -> time | None:
 
 
 def _decimal(value: Any) -> Decimal | None:
+    """A finite `Decimal`, or `None`. **Non-finite is rejected, not passed through.**
+
+    `Decimal("NaN")` and `Decimal("Infinity")` construct just fine, so catching only
+    `InvalidOperation` let them into the DTO — worse than an invented value, because a `NaN`
+    amount poisons every downstream comparison and DB write instead of being visibly absent.
+    And `Decimal("sNaN")` made the `commission == 0` test inside `_ota_commission` raise
+    `InvalidOperation` **uncaught**, which `get_reservation` (unlike `list_reservations`) has no
+    per-element guard to absorb — so a single malformed value broke the `None`-on-unknown-id
+    promise R2.2 makes. Found by the feature-scale QA panel, reproduced against the container.
+    """
     text = _text(value)
     if text is None:
         return None
     try:
-        return Decimal(text)
-    except InvalidOperation:
+        parsed = Decimal(text)
+    except (InvalidOperation, ValueError):
         return None
+    return parsed if parsed.is_finite() else None
 
 
 def _count(value: Any, *, default: int) -> int:
