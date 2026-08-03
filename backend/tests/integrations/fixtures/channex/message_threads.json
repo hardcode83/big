@@ -1,0 +1,51 @@
+{
+  "data": [
+    {
+      "attributes": {
+        "title": "***scrubbed***",
+        "last_message": {
+          "message": "***scrubbed***",
+          "sender": "property",
+          "inserted_at": "2026-08-03T13:40:58.154343",
+          "attachments": []
+        },
+        "inserted_at": "2026-08-03T13:19:40.517059",
+        "updated_at": "2026-08-03T13:40:58.159445",
+        "is_closed": false,
+        "last_message_received_at": "2026-08-03T13:40:58.154343",
+        "message_count": 1,
+        "provider": "BookingCom",
+        "ota_message_thread_id": "ef63ac3a-ecce-5d52-a552-826083ee7977"
+      },
+      "id": "e91a7a46-1c3f-4f37-8d11-1fdb62b2b403",
+      "type": "message_thread",
+      "relationships": {
+        "property": {
+          "data": {
+            "id": "7963f1e3-72f5-4edd-a0fb-199e9b919d26",
+            "type": "property"
+          }
+        },
+        "channel": {
+          "data": {
+            "id": "4fbc4f3d-febb-4291-9832-c99224061049",
+            "type": "channel"
+          }
+        },
+        "booking": {
+          "data": {
+            "id": "02003e03-dab1-4970-a623-abc8e56f40f4",
+            "type": "booking"
+          }
+        }
+      }
+    }
+  ],
+  "meta": {
+    "total": 1,
+    "limit": 10,
+    "order_by": "last_message_received_at",
+    "page": 1,
+    "order_direction": "desc"
+  }
+}
