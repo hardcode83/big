@@ -296,6 +296,27 @@ operativa: **es pérdida de datos**. Cualquier plan de migración tiene que expo
 antes de desconectar nada, y `messaging-ai` no puede tratar a Channex como el archivo de las
 conversaciones.
 
+### Límite de tasa: **no medido**, con una observación acotada
+
+Channex no publica límite de tasa, y **no se ha buscado su techo**. Averiguarlo exige
+provocárselo, y este documento sostiene lo contrario en el mismo párrafo donde limita el script
+de adquisición: *la ausencia de un límite documentado no es permiso para machacarlo*. Así que
+esto **no es una medición del límite**, es lo que se observó haciendo otra cosa:
+
+| Observación | Valor |
+|---|---|
+| Peticiones `POST /channels` del script de adquisición antes de ganar | ~**1.350** (193 barridos × 7 candidatos) |
+| Ventana | ~**16 minutos** (barrido cada 5 s) |
+| Respuestas `429` | **cero** |
+| Cabecera tipo `X-RateLimit-*` | ninguna observada |
+
+Es decir: ~1,4 req/s sostenidos durante un cuarto de hora no tocaron techo ni provocaron
+throttling. **No concluir de aquí que no haya límite** — solo que está por encima de eso, y que
+un `429` no llegó a verse nunca durante todo el change.
+
+Para `pms-beds24-adapter` esto no se extrapola: Beds24 sí publica su modelo —créditos con coste
+dinámico, 100 por 5 minutos y **por cuenta**— y es de otra naturaleza.
+
 ### Latencia OTA → Channex: por debajo del minuto
 
 Medido el 2026-08-03: la reserva **no estaba** en `GET /bookings` a las 13:19:05 UTC y su

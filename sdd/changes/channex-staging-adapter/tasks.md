@@ -217,7 +217,10 @@ comportamiento de nadie.
       `429`, cabecera `X-RateLimit*` ni nota de «N peticiones sin tocar techo». No se midió a
       propósito y consta por qué: averiguar el techo de un tercero exige provocárselo, y este
       change sostiene lo contrario —«Channex no publica límite de tasa y eso no es permiso para
-      machacarlo»—. Queda anotado como no medido en el propio documento. Lo demás sí: [R6]
+      machacarlo»—. Queda anotado en `docs/channex-staging.md` como **no medido**, con una observación acotada de lo
+      que sí se vio haciendo otra cosa: ~1.350 `POST /channels` en ~16 minutos (los 193 barridos
+      del script de adquisición) **sin un solo `429`** ni cabecera `X-RateLimit-*`. Es un suelo
+      observado, no un techo medido. Lo demás sí: [R6]
 - [x] 7.1b En `docs/channex-staging.md`: paginación, latencia (no está
       documentado por Channex — medirlo es el punto), latencia típica, y el desorden de
       webhooks observado en 2.4, cada uno con la observación que lo respalda. [R6]
