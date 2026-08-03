@@ -246,6 +246,38 @@ de cama) que salen de su propia configuración de impuestos — se ven en
 `channel.settings.tax_settings.property_charges`, con `BEDLINEN` entre ellos. Son datos dummy del
 hotel compartido, no un fallo del push de ARI.
 
+### ⚠️ Al desconectar un canal, Channex borra el hilo de mensajes y la procedencia de las reservas
+
+Observado cuando expiró el arrendamiento del hotel de test compartido (17:00 Madrid). Channex
+eliminó el canal, y con él:
+
+| Recurso | Antes | Después |
+|---|---|---|
+| `/channels` | 1, activo | **0** |
+| `BDC-6558139322` → `channel_id` | poblado | **`null`** |
+| `/message_threads` | 1 (con su mensaje) | **0** |
+| `/booking_revisions` | 3 | 3 — sobreviven |
+| `/bookings` | 3 | 3 — sobreviven |
+| `/properties` | 1 | 1 — sobrevive |
+
+Dos consecuencias, y la segunda es la que importa para el negocio:
+
+**1. `channel_id` no es un marcador durable de procedencia.** Es lo que distingue una reserva
+llegada de una OTA de una creada por la API de CRS — y **se borra** cuando el canal desaparece.
+Cualquier lógica que clasifique el origen de una reserva por ese campo clasificará mal todo el
+histórico en cuanto se desconecte el canal. Los fixtures de este change conservan el valor porque
+se capturaron a tiempo; el test que buscaba la reserva real *por* `channel_id` se cambió a
+buscarla por `ota_name`.
+
+**2. El historial de mensajes se pierde al desconectar.** El hilo con su mensaje desapareció por
+completo: no quedó vacío, dejó de existir. Y esto **muerde de lleno en la decisión 2 de
+ADR 0006**, que planifica migrar de Beds24 a Channex al llegar a 25–50 unidades y admite que
+«durante semanas habrá viviendas en Beds24 y viviendas en Channex». Si desconectar un canal
+destruye las conversaciones con los huéspedes, la ventana de migración no es solo una molestia
+operativa: **es pérdida de datos**. Cualquier plan de migración tiene que exportar la mensajería
+antes de desconectar nada, y `messaging-ai` no puede tratar a Channex como el archivo de las
+conversaciones.
+
 ### Latencia OTA → Channex: por debajo del minuto
 
 Medido el 2026-08-03: la reserva **no estaba** en `GET /bookings` a las 13:19:05 UTC y su

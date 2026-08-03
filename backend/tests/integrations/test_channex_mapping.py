@@ -123,13 +123,18 @@ def test_a_real_booking_com_reservation_reporting_zero_maps_to_none():
     and Booking.com always charges commission. So no rule keyed on WHICH OTA sent the value can
     tell a real zero from missing data — the zero has to mean "unknown".
     """
+    # Selected by `ota_name`, NOT by `channel_id`. The first version keyed on `channel_id`
+    # being populated — the marker that tells an OTA reservation from a CRS one — and that
+    # marker is **not durable**: when the shared test hotel's lease expired, Channex deleted
+    # the channel and every booking's `channel_id` went to `null`. The committed fixture still
+    # has it (captured in time), but a re-capture would have made this test unable to find its
+    # own subject.
     real = next(
         row
         for row in channex_fixture("bookings")["data"]
-        if (row.get("attributes") or {}).get("channel_id")
+        if (row.get("attributes") or {}).get("ota_name") == "BookingCom"
     )
     assert real["attributes"]["ota_commission"] == "0.00"
-    assert real["attributes"]["ota_name"] == "BookingCom"
     assert to_reservation_dto(real).ota_commission is None
 
 
