@@ -29,10 +29,12 @@ nada.
   Abrir con **`set +e` explícito** seguido de `set -uo pipefail`: GitHub invoca los `run:` con
   `bash -e {0}`, así que sin `set +e` el fail-open de R2.4 no existiría (ver D3).
   [R2.1, R2.2, R2.3, D3, D4, D5]
-- [x] 1.2b Leer el diff con `git -c core.quotePath=false diff -z --name-only` e iterarlo como
-  array (`mapfile -d ''`), **no** con `grep` sobre la salida por defecto: git escapa las rutas no
-  ASCII (`"backend/caf\303\251.py"`), con lo que un ancla `^backend/` no casa y un PR cuyo único
-  cambio de backend fuese un fichero con acento se saltaría la suite en verde. [R2.4, D10]
+- [x] 1.2b Leer el diff con `git -c core.quotePath=false diff -z --no-renames --name-only` e
+  iterarlo como array (`mapfile -d ''`), **no** con `grep` sobre la salida por defecto. Los tres
+  flags corrigen un falso verde cada uno: sin `core.quotePath=false` git escapa las rutas no ASCII
+  (`"backend/caf\303\251.py"`) y el ancla no casa; sin `-z` las rutas con espacios o saltos se
+  parten; y sin `--no-renames` un movimiento colapsa a la ruta destino, así que sacar un módulo
+  **de** `backend/` se leería como «no toca el backend». [R2.4, D10]
 - [x] 1.3 Cubrir explícitamente los tres caminos de *fail-open* con su `reason` propia:
   `github.event.before` con los 40 ceros, base o `before` inalcanzables, y salida no cero de
   `git diff`. Todos dejan `backend=true`. [R2.4, D4]
@@ -106,10 +108,14 @@ verificación pertinente: lo que hay que probar es el comportamiento del propio 
   está dentro del área, así que su propia ejecución debe recorrerlo entero. Comprobar en el run
   del PR que `backend-tests-suite` se ejecutó, que los cuatro pasos de Alembic/pytest siguen
   presentes y verdes, y que el consolidador `backend-tests` reporta `success`. [R3.1, R1.3]
-- [ ] 4.3 **Camino corto** (D9): añadir a esta misma rama un commit que toque **solo** un `.md`,
-  **posterior** al commit del workflow —si va antes compara contra una base que todavía no
-  tiene el gate nuevo—. Verificar en su run que `backend-tests-suite` sale `skipped`, que
-  `backend-tests` reporta `success`, y medir la duración total. [R1.1, R1.3, R4.1]
+- [ ] 4.3 **Camino corto** (D9 corregido): abrir un PR sonda desechable
+  `sdd/ci-backend-tests-conditional-gate-shortpath` con **base la rama de este change** (no
+  `main`) y un único commit que toque un `.md`. Así el `base...head` contiene solo ese `.md` y el
+  gate nuevo llega heredado de la base. **No sirve** un commit de solo-docs en esta misma rama: en
+  un `pull_request` la comparación es el diff acumulado contra la base, que sigue conteniendo el
+  workflow, así que tomaría el camino largo (lo demostró la revisión de QA). Verificar que
+  `backend-tests-suite` sale `skipped` y `backend-tests` reporta `success`. Cerrar sin fusionar.
+  [R1.1, R1.3, R4.1]
 - [ ] 4.4 El resumen del camino corto dice que la suite se omitió y por qué, de modo que un
   verde en segundos no se confunda con una suite que pasó. Comprobar el
   `$GITHUB_STEP_SUMMARY` del run de 4.3. [R4.2]
@@ -130,7 +136,8 @@ verificación pertinente: lo que hay que probar es el comportamiento del propio 
 | R2 — detección de área | 1.1, 1.2, 1.3, 1.4, 4.6 |
 | R3 — el camino largo conserva la verificación | 2.1, 2.5, 4.1, 4.2 |
 | R4 — el camino corto es rápido y legible | 2.4, 4.3, 4.4, 4.5 |
-| R5 — la documentación deja de mentir | 3.1, 3.2 |
+| R5.1 — el coste declarado es el medido | 3.1, 3.2 |
+| R5.2 — la spec recoge el invariante nuevo | **ninguna: se aplica al archivar**, no en este change (D "Changes by area"). `specs/backend-ci.md:23` seguirá afirmando "sin filtro de rutas" hasta entonces, y es correcto por el flujo SDD — pero R5.2 **no está cumplido en el repo** al cerrar este PR. Señalado por la revisión de QA, que avisó de que la tabla anterior lo daba por cubierto. |
 | D8 (alcance añadido en design) | 3.3 |
 | D9 (verificación del camino corto) | 4.3 |
 

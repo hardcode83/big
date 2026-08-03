@@ -139,6 +139,46 @@ fallar por un patrón mal escrito.
 Rejected: no imprimir la lista de ficheros — es lo que hace diagnosticable una decisión
 sorprendente.
 
+**Casos que la lógica de detección debe seguir cumpliendo.** Se registran aquí porque la batería
+se ejecutó fuera del repositorio y, mientras no exista como script versionado (ver más abajo), esta
+tabla es lo único que sobrevive. Quien toque esa lógica debe volver a pasarlos, con `bash` y con
+`-e` activo, que es como GitHub invoca los `run:`:
+
+| Entrada | `backend` esperado | Por qué |
+|---|---|---|
+| `backend/app/main.py` | `true` | caso normal, ruta anidada (el glob `backend/*` de `case` sí cruza `/`) |
+| `backend/café.py` | `true` | quoting de git; era falso verde |
+| `backend/mi fichero.py` | `true` | espacios en la ruta |
+| mover `backend/x.py` → `shared/x.py` | `true` | renombrado colapsado; era falso verde |
+| mover `other/x.py` → `backend/x.py` | `true` | entra en el área |
+| mover `backend/a/x.py` → `backend/b/x.py` | `true` | dentro del área |
+| borrar `backend/z.py` | `true` | deleción también es cambio |
+| `.github/workflows/backend-tests.yml` | `true` | el propio gate |
+| `README.md` | `false` | solo documentación |
+| `.github/workflows/frontend-tests.yml` | `false` | otro workflow |
+| `docs/backend-notes.md` | `false` | coincidencia parcial del nombre |
+| `frontend/backend/x.ts` | `false` | `backend/` en mitad de la ruta |
+| mover `docs/x.md` → `other/x.md` | `false` | renombrado ajeno al área |
+| fichero llamado `::notice::…` | `false` + no inyecta | nombre inyector |
+
+**Deuda reconocida, y la candidata más valiosa que deja este change**: esa batería **no está
+versionada**, así que nada impide que un cambio futuro reintroduzca cualquiera de los tres falsos
+verdes. Dos revisores distintos encontraron sendos fallos en estas quince líneas de bash, lo que
+dice bastante sobre su densidad de trampas. La forma correcta es extraer la lógica a
+`.github/scripts/detect-backend-changes.sh` con un self-test versionado —el patrón que el roadmap
+ya prevé para `.github/scripts/extract-pr.sh` en `app-version-provenance`— y que el workflow lo
+invoque. **No se hace aquí a propósito**: cambia la forma de D1/D3 a mitad de implementación y
+excede lo que las tareas describen. Queda como candidata explícita para un change propio.
+
+**Tercera corrección, del mismo bloque y encontrada por la revisión de QA: `--no-renames`.** Git
+detecta renombrados por defecto y con `--name-only` un movimiento **colapsa a una sola ruta, la
+de destino**: mover `backend/app/x.py` a `shared/x.py` aparece únicamente como `shared/x.py`. Sin
+el flag, un PR que **saca** un módulo de `backend/` se juzga «no toca el backend», se salta la
+suite y el check sale verde — con código del backend desaparecido y sin que nada lo verifique.
+Reproducido: sin el flag sale una ruta, con el flag salen las dos. El sentido del fallo importa:
+mover *hacia* `backend/` ya daba `true` por la ruta destino, así que el agujero era solo en la
+dirección de salida, que es justo la destructiva.
+
 ### D4 — La base del diff se resuelve por evento, y toda duda cae del lado de ejecutar
 
 **Chosen:** tres ramas explícitas, y `backend=true` como valor inicial de la variable, de modo
@@ -312,20 +352,35 @@ que la propuesta queda matizada aquí de forma explícita: fuera de alcance sigu
 Rejected: dejarlos intactos — diff mínimo, a cambio de dos ficheros citando una regla
 reescrita.
 
-### D9 — El camino corto se verifica con un commit de solo-docs en la propia rama
+### D9 — El camino corto se verifica con un PR sonda cuya BASE es la rama de este change
 
-**Chosen:** un commit que toque únicamente un `.md` dentro de la rama del change. El PR de este
-change toca `.github/workflows/backend-tests.yml`, que está *dentro* del área (D5), así que por
-sí solo ejercita el camino **largo** y no demuestra nada sobre el corto: sin este commit, R4.1
-se quedaría sin evidencia. Un commit de solo-docs dispara el camino corto con el evento
-`pull_request` real y la comparación contra la base, y deja la medición registrada en el propio
-PR.
+**Corregido tras la revisión de QA, que demostró que la primera versión de esta decisión era
+inservible.** Se documenta el error porque la trampa es sutil y volvería a picar a cualquiera.
 
-`/sdd:tasks` debe convertirlo en tarea explícita, con el orden importando: el commit de docs
-tiene que ser **posterior** al del workflow, o comparará contra una base que todavía no tiene
-el gate nuevo.
+La primera versión proponía añadir un commit de solo-`.md` a esta misma rama, posterior al del
+workflow, y esperar que su ejecución tomara el camino corto. **No puede funcionar**: R2.2 fija
+que en un `pull_request` la comparación es `base.sha...head.sha`, es decir el diff **acumulado**
+de la rama contra la base del PR. Como esta rama ya modifica
+`.github/workflows/backend-tests.yml` en un commit anterior, ese fichero sigue apareciendo en el
+diff acumulado de cualquier commit posterior, así que `backend=true` y la ejecución toma siempre
+el camino **largo**. Verificado reproduciendo ambos escenarios en un repositorio de usar y tirar.
 
+El riesgo no era solo "no demostrar nada": era marcar R4 como verificado sin haberlo estado.
+
+**Chosen:** un PR sonda desechable, `sdd/ci-backend-tests-conditional-gate-shortpath` →
+**base `sdd/ci-backend-tests-conditional-gate`** (no `main`), con un único commit que toque un
+`.md`. Así el `base...head` contiene exclusivamente ese `.md` —el workflow nuevo llega heredado
+de la base, no como parte del diff—, de modo que el gate se ejecuta con el código de este change
+y decide `backend=false`. Es el camino corto de verdad, con un evento `pull_request` real y la
+semántica de comparación real. Se cierra sin fusionar una vez tomada la medida.
+
+Es exactamente la alternativa que la primera versión rechazó "por ruido". El ruido de un PR
+desechable es un precio menor que un requisito marcado como verificado sin evidencia.
+
+Rejected: commit de solo-docs en esta misma rama — imposible por la semántica de `base...head`,
+según lo demostrado arriba.
 Rejected: `workflow_dispatch` comparativo — R2.3 hace que siempre ejecute la suite completa, así
 que no puede ejercitar el camino corto por diseño.
-Rejected: PR de prueba aparte y desechable — evidencia igual de válida, a cambio de un PR extra
-de ruido.
+Rejected: verificar después de fusionar, con el siguiente PR de documentación que llegue — es
+evidencia válida, pero llega tarde para el PR que introduce el gate, y R4.1 quedaría sin
+respaldo justo en la revisión que decide si entra.

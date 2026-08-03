@@ -103,10 +103,16 @@ jobs:
           # VERDE. Con el quoting desactivado las rutas llegan literales, y `-z` las
           # separa por NUL, que es lo único seguro con nombres que llevan espacios o
           # saltos de línea.
+          # `--no-renames` NO es un detalle de rendimiento. Git detecta renombrados por
+          # defecto, y con `--name-only` un movimiento COLAPSA a una sola línea con la
+          # ruta destino: mover `backend/app/x.py` a `shared/x.py` sale solo como
+          # `shared/x.py`. Sin este flag, un PR que saca un módulo DE `backend/` se
+          # juzga «no toca el backend», se salta la suite y el check sale VERDE — con
+          # código del backend desaparecido. Con el flag salen ambas rutas.
           read_diff() {
             local out rc
             out="$(mktemp)"
-            git -c core.quotePath=false diff -z --name-only "$@" >"$out" 2>/dev/null
+            git -c core.quotePath=false diff -z --no-renames --name-only "$@" >"$out" 2>/dev/null
             rc=$?
             if [ "$rc" -eq 0 ]; then
               mapfile -d '' -t files <"$out"
