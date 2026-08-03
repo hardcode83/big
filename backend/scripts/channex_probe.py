@@ -9,9 +9,11 @@ Credentials come from the environment ONLY (R4.4). A key passed as an argument w
 survive in the shell history, so this refuses to read one from `argv` — see
 `_reject_credential_arguments`.
 
-Anonymisation happens HERE, at capture time (R4.2, design D8), not in a later manual
-pass: a fixture that has to be scrubbed by hand is a fixture that gets committed with
-real data the day somebody is in a hurry.
+Anonymisation happens at capture time (R4.2, design D8), not in a later manual pass: a
+fixture that has to be scrubbed by hand is a fixture that gets committed with real data the
+day somebody is in a hurry. The **policy** moved to `anonymise.py` when `pms-beds24-spike`
+needed the same one for a second provider (its design D2); what stays here is the only part
+that is genuinely per provider, `PRESERVED_KEYS`.
 
 What it does NOT capture: the webhook payload. That one arrives at an external capturer
 configured in the Channex panel (task 2.4) — nothing in this repo receives webhooks, and
@@ -20,12 +22,18 @@ building a route to do so is the scope of `reservations-webhooks`.
 
 import json
 import os
-import re
 import sys
 from pathlib import Path
-from typing import Any
 
 import httpx
+
+# `scripts/` is not a package (design D9), so this resolves via sys.path[0] when the script is
+# run directly, and via the loader in `tests/integrations/conftest.py` under pytest.
+# SCRUBBED/SCRUBBED_KEY are re-exported rather than used here: they are the placeholders the
+# fixture assertions check for, and they stay reachable as `channex_probe.SCRUBBED`.
+from anonymise import SCRUBBED as SCRUBBED  # noqa: PLC0414
+from anonymise import SCRUBBED_KEY as SCRUBBED_KEY  # noqa: PLC0414
+from anonymise import anonymise as _anonymise_payload
 
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "tests" / "integrations" / "fixtures" / "channex"
 
@@ -53,8 +61,6 @@ CAPTURES: dict[str, str] = {
 # ADR 0006 records as paid and per-property. If it is not enabled on the staging account
 # the capture returns an error, and that outcome is itself a finding for R6 — pass the
 # path explicitly with `--capture messages=/path` once the real one is confirmed.
-
-SCRUBBED = "***scrubbed***"
 
 # Business fields the fixtures must keep verbatim. Checked FIRST, before the PII needles,
 # because some of these legitimately contain a needle: `ota_name` holds "BookingCom", not a
@@ -149,200 +155,15 @@ PRESERVED_KEYS = frozenset(
     }
 )
 
-# Shape-based preservation, deliberately narrow.
-#
-# `_at` and `_id` were here and came out. `_at` was meant for timestamps but matched
-# `contact_at: "ana@hotmail.es"`; `_id` was meant for `room_type_id` but matched
-# `national_id: "12345678Z"` and `tax_id` — an identity document waved through by a suffix
-# that looks structural. Every identifier the mapping needs is in `PRESERVED_KEYS` by exact
-# name, so the suffix bought nothing and cost that.
-#
-# No `_code` either: it would wave `postal_code` through, and an address is personal data.
-PRESERVED_SUFFIXES = ("_date", "_count", "_price", "_amount")
+def anonymise(value):
+    """Channex payload -> fixture-safe payload.
 
-# A dict KEY is structure, not data — except when a provider keys a map BY a personal datum
-# (`{"guests_by_mail": {"john.smith@gmail.com": {...}}}`), which the recursion used to copy
-# verbatim. This is one of two places that judge by shape rather than by a name we recognise,
-# because there is no name to recognise.
-#
-# Identifier-ish keys pass, which has to include UUID keys — they start with a digit half the
-# time, so requiring a leading letter (as the first attempt did) scrubbed them. What does not
-# pass: an `@`, a space, or a long run of digits that could be a document number.
-_IDENTIFIER_KEY = re.compile(r"^[A-Za-z0-9_][A-Za-z0-9_.\-]*$")
-SCRUBBED_KEY = "***scrubbed-key***"
-
-# Channex keys nightly rates BY DATE: `rooms[].days = {"2026-09-15": "120.00", ...}`. The key
-# is data-shaped, so no name-based allowlist can ever cover the value under it — the first
-# capture with real bookings came back with every nightly rate scrubbed. A date is not
-# personal data and the price under it is exactly what the mapping reads, so a date-shaped key
-# preserves its leaf.
-_DATE_KEY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
-
-# The second shape-based judgement, for numbers under a key no allowlist predicted. Zeroing
-# every one of them destroys the fixture (`adults: 2`, `nights: 3` are exactly the business
-# data the mapping needs), and keeping every one of them publishes `guest_number:
-# 34611223344`. The discriminator is magnitude: identifying numbers in this domain are long
-# — phone numbers run 9-12 digits, a DNI is 8 — while occupancy counts and money in euros
-# for a two-flat portfolio do not reach seven figures.
-IDENTIFYING_NUMBER_FLOOR = 1_000_000
-
-PII_PLACEHOLDERS: tuple[tuple[tuple[str, ...], str], ...] = (
-    # **Card data, first in the list and it has to be.** Channex returns a `guarantee` object on
-    # OTA bookings with `card_number`, `card_type`, `cvv`, `cardholder_name` and
-    # `expiration_date` — real cardholder data, from Booking.com. The needles below caught the
-    # first four, and `expiration_date` **leaked into a committed fixture** because it ends in
-    # `_date` and `_date` is a preserved suffix. Needles run before suffixes, so putting the card
-    # family here is what closes it. Nothing card-shaped is ever worth keeping in a fixture.
-    (("card", "cvv", "cvc", "expiration", "expiry", "token", "guarantee"), "***card-data***"),
-    # `mail`, not `email`: Channex names the guest address `mail` inside `customer`, and a
-    # needle of "email" misses it. Caught by the "no original value survives" assertion in
-    # `test_channex_probe.py` — which is exactly why that assertion is written over the whole
-    # serialised document instead of field by field.
-    (("mail",), "guest@example.invalid"),
-    (("phone", "mobile", "telephone"), "+34600000000"),
-    (("document", "passport", "dni", "nif", "id_card"), "X0000000X"),
-    (("birth", "dob"), "1990-01-01"),
-    (("address", "street", "city", "zip", "postal", "region", "country"), "Redacted"),
-    (("name",), "Test Guest"),
-)
-
-
-def anonymise(value: Any) -> Any:
-    """Strip every personal datum from a captured payload, preserving shape and types.
-
-    **Fail-closed** (R4.2, and the fix for both PII findings of the section-3 panel). The
-    first version was a key denylist: match a needle, replace it; pass everything else
-    through. Two ways that leaks, both demonstrated by the reviewers rather than imagined:
-
-    1. A key nobody thought of — `special_request`, `notes`, `address`, `birth_date` — goes
-       to a versioned fixture verbatim, and guests routinely type a surname or a phone
-       number into free text. A denylist can only ever know the fields somebody remembered.
-    2. `--capture=x=/some/other/endpoint` can point this at a payload whose keys were never
-       considered at all, including credential- or card-shaped ones.
-
-    So the default is inverted: a string leaf survives only if its key is recognised
-    business data (`PRESERVED_KEYS` / `PRESERVED_SUFFIXES`). Everything else becomes
-    `SCRUBBED`, and the PII needles remain as an explicit layer so the intent stays readable
-    and the placeholders keep a realistic shape.
-
-    The failure mode is now **visible instead of silent**: over-scrubbing a field the
-    mapping actually needs shows up as `***scrubbed***` in a failing mapping test, whereas
-    under-scrubbing used to show up as personal data in git history forever.
-
-    Fail-closed applies to **all three** places a value can hide, which the first attempt at
-    this got wrong and the security panel measured:
-
-    - string leaves -> `SCRUBBED`;
-    - **numeric leaves** -> zeroed, keeping the type. The earlier version argued "anything
-      personal that arrives as a number does so under a PII key" and that was simply untrue:
-      `guest_number: 34611223344` under an unfamiliar key sailed through;
-    - **dict keys** -> a non-identifier-shaped key is replaced, because a provider that keys
-      a map by guest email hides data in a position the recursion treats as structure.
-
-    `None` and booleans stay as they are: absence and flags are not personal data, and the
-    fixture has to keep exercising the same optionality the real payload has, or the `None`
-    branches R2.4 requires would never be reached.
+    The policy itself lives in `anonymise.py`, shared with the Beds24 probe (design D2 of
+    `pms-beds24-spike`). All this adds is the one thing that is genuinely per provider: the
+    business-key allowlist above. Kept as a module-level function with the original
+    one-argument signature so callers and tests do not need to know about the split.
     """
-    return _anonymise_value(None, value)
-
-
-def _anonymise_value(key: str | None, value: Any) -> Any:
-    if isinstance(value, dict):
-        return {
-            _anonymise_key(member_key): _anonymise_value(member_key, member)
-            for member_key, member in value.items()
-        }
-    if isinstance(value, list):
-        # **A scalar inside a list is treated as UNNAMED** — `key=None` — so it falls straight to
-        # the fail-closed default. Dicts and nested lists keep recursing and are judged by their
-        # own keys as usual.
-        #
-        # This is the third version of this branch and the first that closes the class rather
-        # than instances. The first returned scalars untouched. The second made them inherit the
-        # list's key, which fixed `special_requests` but left the same hole open for every key
-        # the allowlist happened to accept: with `attachments`/`taxes`/`ages` removed it still let
-        # `{"charge_amount": ["4111111111111111"]}` publish a card number verbatim, because
-        # `_amount` is a preserved *suffix* — and `{"2026-09-05": ["John Smith"]}` through the
-        # date-key branch, in a provider that keys data by date (`rooms[].days`). A test that pins
-        # five key names cannot catch the sixth; removing the name from the decision can.
-        #
-        # Nothing observed is lost: `days` is a dict, `taxes` a list of dicts, `ages` numeric —
-        # and numbers still survive on their own merit via `IDENTIFYING_NUMBER_FLOOR`.
-        return [
-            _anonymise_value(key, member) if isinstance(member, (dict, list)) else
-            _anonymise_leaf(None, member)
-            for member in value
-        ]
-    return _anonymise_leaf(key, value)
-
-
-def _anonymise_key(key: str) -> str:
-    if not isinstance(key, str) or not _IDENTIFIER_KEY.match(key):
-        return SCRUBBED_KEY
-    # A date key is structure, and it has to be checked BEFORE the digit heuristic below —
-    # `2026-09-05` stripped of separators is `20260905`, eight digits, so the phone/document check
-    # ate every nightly-rate key in `rooms[].days`. Caught by its own test and by the fixture
-    # idempotency check, which is what that check is for.
-    if _DATE_KEY.match(key):
-        return key
-    # A long run of digits used as a key: could be a document or phone number. Separators are
-    # stripped first, so `34-611-223-344` is caught as well as `34611223344`.
-    bare = re.sub(r"[-. ]", "", key)
-    if bare.isdigit() and len(bare) >= 7:
-        return SCRUBBED_KEY
-    lowered = key.lower()
-    if lowered in PRESERVED_KEYS or lowered.endswith(PRESERVED_SUFFIXES):
-        return key
-    for needles, _ in PII_PLACEHOLDERS:
-        if any(needle in lowered for needle in needles):
-            # The key names a personal datum but IS a field name, not a value — keep it, the
-            # value under it is what gets replaced.
-            return key
-    return key
-
-
-def _looks_numeric(value: Any) -> bool:
-    """A number, or a string that is only one — `"120.00"`, not `"call Ana at 611223344"`."""
-    if isinstance(value, (int, float)):
-        return True
-    if not isinstance(value, str):
-        return False
-    return re.fullmatch(r"-?\d+(\.\d+)?", value.strip()) is not None
-
-
-def _anonymise_leaf(key: str | None, value: Any) -> Any:
-    """Judge one scalar by the key it sits under — a dict entry's key, or its list's key."""
-    if value is None or isinstance(value, bool):
-        return value
-
-    lowered = key.lower() if isinstance(key, str) else ""
-    if lowered in PRESERVED_KEYS:
-        return value
-    # A date-shaped key preserves its value **only if that value is a number**. The branch exists
-    # for `rooms[].days`, whose values are decimal price strings, and it used to preserve *any*
-    # scalar — so `{"2026-09-05": "call Ana at +34611223344"}` survived verbatim. Same move as the
-    # list fix: take the position out of the decision for value types it was never meant to cover.
-    # Recommended by the feature-scale security panel as the one handover item worth closing
-    # properly rather than hardening; no fixture impact, since `days` values stay.
-    if _DATE_KEY.match(lowered) and _looks_numeric(value):
-        return value
-
-    for needles, placeholder in PII_PLACEHOLDERS:
-        if any(needle in lowered for needle in needles):
-            if isinstance(value, str):
-                return placeholder
-            return type(value)(0)
-
-    if lowered.endswith(PRESERVED_SUFFIXES):
-        return value
-    if isinstance(value, str):
-        return SCRUBBED if value else value
-    # An unrecognised numeric leaf: zeroed only if it is large enough to be identifying (see
-    # `IDENTIFYING_NUMBER_FLOOR`). Blanket zeroing was tried and reverted — it emptied
-    # `adults` and `nights`, which is the fixture's whole point.
-    if isinstance(value, (int, float)) and abs(value) >= IDENTIFYING_NUMBER_FLOOR:
-        return type(value)(0)
-    return value
+    return _anonymise_payload(value, business_keys=PRESERVED_KEYS)
 
 
 def _is_known_argument(argument: str) -> bool:

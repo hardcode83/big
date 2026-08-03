@@ -8,9 +8,9 @@ La sección 7 son las mediciones contra la cuenta real de Beds24 y depende de un
 
 Va primero porque toca código existente y probado: si rompe algo, se ve antes de construir nada encima.
 
-- [ ] 1.1 Crear `backend/scripts/anonymise.py` moviendo `anonymise`, `_anonymise_value`, `_anonymise_key`, `_anonymise_leaf` y las seis piezas de política desde `backend/scripts/channex_probe.py`. Solo `PRESERVED_KEYS` se parametriza (`business_keys: frozenset[str]`); `PRESERVED_SUFFIXES`, `PII_PLACEHOLDERS`, `_IDENTIFIER_KEY`, `_DATE_KEY` e `IDENTIFYING_NUMBER_FLOOR` quedan como constantes compartidas. **El orden se conserva**: las agujas de PII corren antes que `PRESERVED_SUFFIXES`. [R3]
-- [ ] 1.2 `backend/scripts/channex_probe.py` importa del módulo extraído y le pasa su `PRESERVED_KEYS`. Sin cambio de comportamiento. [R3]
-- [ ] 1.3 `backend/tests/integrations/test_channex_probe.py` sigue verde tal cual, incluida su parametrización sobre `sorted(FIXTURE_DIR.glob("*.json"))`. Añadir en `test_anonymise.py` un test que fije el invariante de orden: una clave `expiration_date` **no** sobrevive pese a terminar en un sufijo preservado. [R3]
+- [x] 1.1 Crear `backend/scripts/anonymise.py` moviendo `anonymise`, `_anonymise_value`, `_anonymise_key`, `_anonymise_leaf` y las seis piezas de política desde `backend/scripts/channex_probe.py`. Solo `PRESERVED_KEYS` se parametriza (`business_keys: frozenset[str]`); `PRESERVED_SUFFIXES`, `PII_PLACEHOLDERS`, `_IDENTIFIER_KEY`, `_DATE_KEY` e `IDENTIFYING_NUMBER_FLOOR` quedan como constantes compartidas. **El orden se conserva**: las agujas de PII corren antes que `PRESERVED_SUFFIXES`. [R3]
+- [x] 1.2 `backend/scripts/channex_probe.py` importa del módulo extraído y le pasa su `PRESERVED_KEYS`. Sin cambio de comportamiento. [R3]
+- [x] 1.3 `backend/tests/integrations/test_channex_probe.py` sigue verde tal cual, incluida su parametrización sobre `sorted(FIXTURE_DIR.glob("*.json"))`. Añadir en `test_anonymise.py` un test que fije el invariante de orden: una clave `expiration_date` **no** sobrevive pese a terminar en un sufijo preservado. [R3]
 
 ## 2. Transporte, credencial y frenos del sondeo
 

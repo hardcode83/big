@@ -2,31 +2,23 @@
 
 Loaded by path rather than imported: `backend/scripts/` is deliberately NOT a package
 (design D9 keeps the throwaway probe out of the deployed distribution), so there is no
-`scripts.channex_probe` to import. One `importlib` helper is the price of that decision.
+`scripts.channex_probe` to import. The `importlib` helper that was the price of that
+decision now lives in `conftest.load_script`, shared with the Beds24 probe.
+
+What this file asserts is unchanged by that move, and by the extraction of the policy into
+`scripts/anonymise.py`: `channex_probe.anonymise` still takes one argument and still applies
+the Channex business-key allowlist.
 """
 
-import importlib.util
 import json
 
 import httpx
-from pathlib import Path
 
 import pytest
 
-from tests.integrations.conftest import FIXTURE_DIR  # noqa: E402
+from tests.integrations.conftest import FIXTURE_DIR, load_script  # noqa: E402
 
-_PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "channex_probe.py"
-
-
-def _load_probe():
-    spec = importlib.util.spec_from_file_location("channex_probe", _PROBE_PATH)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-probe = _load_probe()
+probe = load_script("channex_probe")
 
 
 REAL_PAYLOAD = {
