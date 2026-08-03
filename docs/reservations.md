@@ -94,8 +94,9 @@ La respuesta es un informe, no un simple OK:
 
 Hoy el adapter del PMS es **`MockPMSAdapter`** (`EXTERNAL_DEPENDENCY`): devuelve las reservas
 del seed de PRD §27 y, a propósito, dos filas que fallan, para que el camino de error esté
-ejercitado de verdad. Cuando haya credenciales de Octorate/Smoobu/Beds24 solo cambia la
-implementación del puerto.
+ejercitado de verdad. Cuando haya credenciales de **Beds24** —el proveedor elegido en
+[ADR 0006](adr/0006-pms-channel-manager-provider.md), con Octorate como segunda opción— solo
+cambia la implementación del puerto.
 
 No hay endpoint de sincronización — el disparador natural es Celery beat, que llega con la
 entrada `celery-jobs` del roadmap. Mientras tanto se ejecuta como comando:
