@@ -282,6 +282,37 @@ apuntan aquí para que no se pierdan):
   producción**; conviene una línea que distinga el uso de su staging como entorno de
   validación desde ya, tal como prescribe ADR 0006 decisión 2.
 
+## Deuda con dueño que este change deja
+
+No son bloqueos —nada está esperándolas— pero se pierden si no constan donde alguien las lea.
+Vivían en `BLOCKED.md`, que se borró al no quedar bloqueos: ese fichero es una cola, no un
+cuaderno.
+
+1. 🔴 **`steering/security.md` necesita una regla de datos de titular de tarjeta**, y debe
+   aterrizar **antes** de que `reservations-webhooks` o `pms-beds24-adapter` lleguen a
+   `/sdd:design`, porque el hueco que cierra es una suposición de tiempo de diseño. Detalle
+   completo y las dos propiedades que la regla necesita, arriba en *Affected specs*.
+
+2. **La estabilidad de `unique_id` entre revisions sigue sin verificar** y sostiene la
+   idempotencia por `(tenant_id, external_pms_id)` de todo el sistema. Las cuatro vías cerradas
+   están en `docs/channex-staging.md`. **`pms-beds24-adapter` debe comprobarlo antes de construir
+   deduplicación encima** — una modificación real sobre una tarifa flexible, verificando que
+   `unique_id` no se mueve mientras `revision_id`/`system_id` sí.
+
+3. **El puerto no tiene canal para reportar filas que el adapter no pudo mapear.**
+   `PMSAdapter.unmappable_rows` es un stopgap declarado: lo estructuralmente correcto es ensanchar
+   el tipo de retorno como ya hace `ParseResult` en `ReservationCsvParser`. Dueño:
+   `pms-beds24-adapter`, que ya posee la reestructuración del puerto por ADR 0006 decisión 3. Que
+   esté declarado en el `Protocol` cierra el fallo silencioso, **no** el problema de diseño.
+
+4. **El fixture de webhook** (tarea 2.4) pasa a `reservations-webhooks`: exige un receptor público
+   bajo la regla 12, y el payload lleva `card_number` y `cvv`, así que un capturador de terceros no
+   es una opción. La parte de *observación* sí quedó hecha y documentada.
+
+5. **Fuera del alcance de este change**: `sdd/project.md` afirma que «`uv` no está instalado en el
+   host» y es falso (`/Users/hardcode/.local/bin/uv`). Es lo que permitió verificar la sección 3
+   con Docker parado. Corregirlo ahorra ese descubrimiento en cada run futuro.
+
 ## Preguntas abiertas para `/sdd:design`
 
 1. **Dónde vive el `ChannexAdapter`.** `app/integrations/infrastructure/` junto a
