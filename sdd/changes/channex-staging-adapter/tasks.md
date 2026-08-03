@@ -64,10 +64,22 @@ comportamiento de nadie.
       · El **webhook** no es capturable aquí y se queda en 2.4 — requiere un receptor público, y
         el payload lleva `card_number`/`cvv`, así que apuntarlo a un capturador de terceros no es
         aceptable. Pasa a `reservations-webhooks` con su endpoint bajo la regla 12.
-- [ ] 2.4 Configurar un webhook de Channex hacia un capturador externo para producir el
-      fixture de webhook y observar el desorden de entrega. **No se expone ninguna ruta en
-      nuestra API** — la regla 12 de `steering/security.md` es alcance de
-      `reservations-webhooks`. [R4, R6]
+- [x] 2.4 Configurar un webhook de Channex hacia un capturador externo para producir el
+      fixture de webhook y observar el desorden de entrega. [R4, R6]
+      **RESUELTA POR REASIGNACIÓN, no ejecutada** — y la parte de observación sí se entregó:
+      · **Lo que hay**: `docs/channex-staging.md` documenta que los webhooks de Channex **no van
+        firmados**, que la recomendación es una cabecera de secreto compartido propia, que hay
+        reintentos con backoff exponencial hasta 10 intentos, que llegan **desordenados**
+        (literal: *"Sequence of incoming webhook calls can be different from sequence of events
+        which trigger that calls"*), y que **Channex sí tiene API para configurarlos** —incluido
+        `is_global`—, a diferencia de Beds24. Eso confirma con datos lo que ADR 0006 afirmaba y
+        añade una desviación. Es la entrada de diseño que la tarea perseguía.
+      · **Lo que falta y por qué no se hace aquí**: el payload de ejemplo. Capturarlo exige un
+        **receptor público**, y montarlo obliga a cumplir la **regla 12** entera de
+        `steering/security.md` — que es el alcance completo de `reservations-webhooks`. Y
+        apuntarlo a un capturador de terceros **no es aceptable**: este change midió que el
+        payload lleva `card_number`, `cvv` y `expiration_date`.
+      · **Dueño**: `reservations-webhooks`. Anotado en `BLOCKED.md` como la única entrada viva.
 - [x] 2.5 Helper de carga de fixtures en `backend/tests/integrations/conftest.py` (primer
       directorio de fixtures en disco del repo — los tests de CSV los construyen en línea).
       [R4]
