@@ -48,11 +48,22 @@ Secciones 1-6 de `tasks.md`, todas verificadas con la suite en verde (2479 passe
 - `docs/beds24-spike.md` — runbook y hallazgos, cada medida marcada *no medido*.
 - `.env.example`, `docs/README.md` y la regla 8 de `sdd/steering/security.md`.
 
-### Una cosa que conviene decidir al mismo tiempo
+### Espera dos negativas del script en la primera ejecución, y son correctas
 
-El banco lleva tres `ASSUMPTION` sobre la API V2 que solo se confirman con la cuenta delante:
-el host (`beds24.com` vs `api.beds24.com`), los nombres de cabecera del flujo de token
-(`refreshToken` / `token`) y las claves de payload que llevan la identidad de la reserva. Están
-marcadas como tales en el código y el primer paso del runbook es confirmarlas contra la
-especificación OpenAPI publicada. Si alguna falla, el arreglo es de una línea — pero conviene
-saberlo antes de gastar créditos.
+El banco se escribió sin cuenta, así que lleva **cinco supuestos** sobre la API V2 marcados
+como `ASSUMPTION`. El paso 0 del runbook los enumera en una tabla y hay que confirmarlos contra
+la especificación OpenAPI publicada **antes** de la primera llamada autenticada. Dos de ellos
+provocan un rechazo deliberado hasta que los confirmes:
+
+1. **`provoke` exige `--confirm-writes`.** Es la única subcomanda que escribe: crea, modifica y
+   cancela una reserva.
+2. **El guardia de canales falla cerrado.** Antes de escribir lee `/properties` y, si no
+   reconoce ninguna clave de canales en la respuesta, **se niega**. No es un bug: la forma de
+   esa respuesta es un supuesto, y «no entendí la respuesta» no puede significar «la cuenta
+   está limpia» cuando al otro lado hay dos viviendas vendiendo y Beds24 no tiene staging. La
+   salida correcta es mirar la respuesta real y añadir el nombre de clave, no esquivar el
+   chequeo.
+
+Los otros tres —el host, los nombres de cabecera del flujo de token y las claves que llevan la
+identidad de la reserva— fallan de forma más silenciosa, y por eso conviene confirmarlos antes
+de gastar créditos. Si alguno falla, el arreglo es de una línea.

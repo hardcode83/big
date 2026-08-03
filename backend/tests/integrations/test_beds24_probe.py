@@ -471,10 +471,68 @@ def test_write_is_refused_when_the_account_has_ota_channels_connected():
         beds24.assert_account_has_no_ota_channels(bench)
 
 
-def test_write_proceeds_on_an_account_with_no_channels():
+def test_write_proceeds_on_an_account_with_a_recognised_empty_channel_list():
     bench = _bench(lambda request: httpx.Response(200, json=[{"id": 1, "channels": []}]))
 
     beds24.assert_account_has_no_ota_channels(bench)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        {"success": True, "data": [{"id": 1, "name": "REDES11"}]},   # the slim default shape
+        [{"id": 1, "propertyName": "REDES11"}],
+        {"data": []},
+    ],
+)
+def test_write_is_refused_when_no_channel_field_is_recognised(body):
+    """Fails CLOSED: an unrecognised shape is not evidence of a clean account.
+
+    The shape of /properties is an unverified ASSUMPTION, so the *likely* real response is one
+    with no channel field at all. Reading that as "no channels connected" would let the guard
+    wave through a write to a live listing — the exact thing it exists to stop.
+    """
+    bench = _bench(lambda request: httpx.Response(200, json=body))
+
+    with pytest.raises(SystemExit, match="Could not find a channel field"):
+        beds24.assert_account_has_no_ota_channels(bench)
+
+
+@pytest.mark.parametrize(
+    "body",
+    [
+        [{"channels": ["Airbnb"]}],
+        [{"connected_channels": ["Airbnb", "BookingCom"]}],
+        [{"channels": {"Airbnb": True}}],
+        [{"property": {"id": 1, "ota": ["Airbnb"]}}],
+    ],
+)
+def test_channels_are_detected_across_plausible_spellings(body):
+    bench = _bench(lambda request: httpx.Response(200, json=body))
+
+    with pytest.raises(SystemExit, match="REFUSING TO WRITE"):
+        beds24.assert_account_has_no_ota_channels(bench)
+
+
+def test_the_refusal_message_does_not_render_the_provider_structure():
+    """The unverified shape may nest property names or contact data; count them, do not print."""
+    bench = _bench(
+        lambda request: httpx.Response(
+            200, json=[{"channels": [{"name": "Airbnb", "contact": "ana@gmail.com"}]}]
+        )
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        beds24.assert_account_has_no_ota_channels(bench)
+
+    assert "ana@gmail.com" not in str(excinfo.value)
+
+
+def test_a_list_shaped_new_envelope_does_not_bypass_the_orphan_warning():
+    """An AttributeError here would replace the warning with a stack trace."""
+    response = httpx.Response(200, json=[{"success": True, "new": [{"id": 555}]}])
+
+    assert beds24._extract_booking_ref(response) is None
 
 
 def test_write_is_refused_when_the_precondition_cannot_be_verified():

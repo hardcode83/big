@@ -480,29 +480,69 @@ def assert_account_has_no_ota_channels(bench: Beds24Probe) -> None:
             "no-OTA-channels precondition of R6.1 could not be verified."
         ) from None
 
-    connected = _connected_channels(payload)
+    recognised, connected = _connected_channels(payload)
+
+    # **Fails CLOSED**, and that is the whole design of this guard. The first version only
+    # refused when it positively found a channel, so any response shape it did not recognise
+    # read as "clean" — and since the shape is an unverified ASSUMPTION, the most likely real
+    # case was the fail-open one. A guard protecting two selling listings cannot treat
+    # "I did not understand the answer" as "go ahead".
+    #
+    # The cost of failing closed is one refusal that the operator resolves in step 0 by
+    # confirming the real shape. The cost of failing open is a booking written to REDES11.
+    if not recognised:
+        raise SystemExit(
+            "beds24-probe: REFUSING TO WRITE. Could not find a channel field in the "
+            "/properties response, so it is impossible to confirm this account has no OTA "
+            "channels connected (R6.1).\n"
+            "  This is expected until step 0 of docs/beds24-spike.md confirms the real shape: "
+            "add the right key name to `_connected_channels` and re-run.\n"
+            "  Do NOT bypass this check — it is the only thing standing between a measurement "
+            "and a write to a live listing, and Beds24 has no staging account."
+        )
     if connected:
         raise SystemExit(
             "beds24-probe: REFUSING TO WRITE. This account has OTA channels connected "
-            f"({', '.join(sorted(connected))}). R6.1 is a hard rule: the measurement account "
-            "carries no channels, because writing to one that does can touch a live listing. "
+            f"({len(connected)} found). R6.1 is a hard rule: the measurement account carries "
+            "no channels, because writing to one that does can touch a live listing. "
             "Check which account BEDS24_REFRESH_TOKEN belongs to."
         )
 
 
-def _connected_channels(payload: Any) -> set[str]:
-    """Every channel name the account reports as connected, at any nesting depth."""
-    found: set[str] = set()
+def _connected_channels(payload: Any) -> tuple[bool, list[Any]]:
+    """`(was a channel field recognised at all, the channels found under it)`.
+
+    The first element is what lets the caller fail closed. Without it a payload carrying no
+    channel field is indistinguishable from an account with no channels — and those two need
+    opposite answers.
+
+    The channel values are returned raw rather than stringified because the caller only counts
+    them: rendering an unverified structure into an error message would print whatever the
+    provider nests there, which may include property names or contact data.
+    """
+    recognised = False
+    found: list[Any] = []
     if isinstance(payload, dict):
         for key, value in payload.items():
-            lowered = str(key).lower()
-            if lowered in ("channels", "connectedchannels", "ota") and isinstance(value, list):
-                found |= {str(member) for member in value if member}
-            found |= _connected_channels(value)
+            lowered = str(key).lower().replace("_", "")
+            if lowered in ("channels", "connectedchannels", "channel", "ota", "otas",
+                           "channelmanager"):
+                recognised = True
+                if isinstance(value, list):
+                    found.extend(member for member in value if member)
+                elif isinstance(value, dict):
+                    found.extend(k for k, v in value.items() if v)
+                elif value:
+                    found.append(value)
+            nested_recognised, nested_found = _connected_channels(value)
+            recognised = recognised or nested_recognised
+            found.extend(nested_found)
     elif isinstance(payload, list):
         for member in payload:
-            found |= _connected_channels(member)
-    return found
+            nested_recognised, nested_found = _connected_channels(member)
+            recognised = recognised or nested_recognised
+            found.extend(nested_found)
+    return recognised, found
 
 
 def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
@@ -594,8 +634,15 @@ def _extract_booking_ref(response) -> str | None:
     # An explicit failure marker disqualifies the element regardless of what else it carries.
     if payload.get("success") is False or payload.get("errors") or payload.get("error"):
         return None
+    nested = payload.get("new")
+    if not isinstance(nested, dict):
+        # `new` as a list is at least as plausible as the dict form — the envelope itself is
+        # already a list. Calling `.get` on it raised an AttributeError that escaped all the
+        # way out, so the operator got a stack trace instead of the orphan-booking warning and
+        # a confirmed booking was left on the account unflagged.
+        nested = {}
     for key in ("id", "bookingId", "bookId"):
-        value = payload.get(key) or (payload.get("new") or {}).get(key)
+        value = payload.get(key) or nested.get(key)
         if value:
             return str(value)
     return None
