@@ -9,7 +9,7 @@ independientes.
 Todo el trabajo es de CI y documentación: **ningún fichero de `backend/` se toca**, así que la
 suite no cambia de comportamiento ni de contenido.
 
-## 1. Detección de área
+## 1. Detección de área <!-- panel: PASS 2026-08-03 (3 rondas: seguridad x2, QA, arquitectura) -->
 
 Un job nuevo que todavía nadie consume: al terminar esta sección el gate se comporta
 exactamente como hoy (la suite sigue ejecutándose siempre), solo que además publica su
@@ -57,7 +57,7 @@ nada.
   `frontend/backend/x.ts` y un fichero con nombre inyector. Es la mitigación que faltaba al
   riesgo 2 del design, porque las otras tres no atrapan un bug en la ruta afirmativa. [R2, D10]
 
-## 2. El gate condicional (unidad indivisible)
+## 2. El gate condicional (unidad indivisible) <!-- panel: PASS 2026-08-03 -->
 
 - [x] 2.1 Renombrar el job actual a `backend-tests-suite` y añadirle
   `needs: backend-tests-detect` + `if: needs.backend-tests-detect.outputs.backend == 'true'`.
@@ -80,7 +80,7 @@ nada.
   `workflow_dispatch`, **sin `paths:` ni `paths-ignore:`**, y que el grupo de `concurrency` con
   `cancel-in-progress` sigue intacto. [R1.2, R3.2]
 
-## 3. Veracidad de la documentación
+## 3. Veracidad de la documentación <!-- panel: PASS 2026-08-03 -->
 
 Tres sitios afirman hoy que el workflow no filtra rutas, y dos de ellos dan la cifra "~1
 minuto". Al terminar la sección 2 las tres afirmaciones son falsas.

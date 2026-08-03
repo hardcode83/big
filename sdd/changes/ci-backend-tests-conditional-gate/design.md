@@ -165,6 +165,12 @@ desactivado para lo que viniera después; `%q` resuelve el problema de raíz sin
 Rejected: no imprimir la lista de ficheros — es lo que hace diagnosticable una decisión
 sorprendente.
 
+**Dependencia de versión de bash, señalada por la revisión de QA.** `mapfile -d ''` exige
+**bash ≥ 4.4**, y recorrer un array vacío con `set -u` solo es seguro desde esa misma versión.
+Las imágenes `ubuntu-latest` traen bash 5.1/5.2 y GitHub invoca los `run:` con bash real, así que
+la condición se cumple — pero conviene saberlo: este paso **no** funcionaría en el bash 3.2 de
+macOS, así que no es portable a un runner que no sea Linux sin revisarlo.
+
 **Casos que la lógica de detección debe seguir cumpliendo.** Se registran aquí porque la batería
 se ejecutó fuera del repositorio y, mientras no exista como script versionado (ver más abajo), esta
 tabla es lo único que sobrevive. Quien toque esa lógica debe volver a pasarlos, con `bash` y con
