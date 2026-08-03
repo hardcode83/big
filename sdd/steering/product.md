@@ -8,6 +8,8 @@ phases: [new, design]
 
 Sistema operativo de viviendas turísticas que sustituye a la gestora externa (MAGNO): atención al huésped con IA y escalado humano, coordinación de limpiezas y mantenimiento, accesos, pricing por reglas, reporting al propietario y timeline auditable. Capa encima de un PMS externo (**Beds24**, elegido en [ADR 0006](../../docs/adr/0006-pms-channel-manager-provider.md); Octorate como segunda opción, Channex en fase SaaS) — **el PMS es la fuente de verdad de reservas, calendarios y precios publicados**.
 
+> **Matiz sobre Channex, para que «fase SaaS» no se lea como «todavía no existe»**: su elección como proveedor sigue siendo de fase SaaS, pero **su entorno de staging ya se usa hoy** como banco de pruebas del backend contra un PMS real — es el único proveedor evaluado que da acceso al entorno de test de Booking.com, y ADR 0006 decisión 2 prescribe abrirlo «desde ya». Existe un `ChannexAdapter` operativo, de dev/staging y no de producción (`specs/pms-channex-staging.md`). Eso no reabre la decisión: Beds24 sigue siendo el proveedor del MVP.
+
 **No es**: un PMS, un Channel Manager, ni integra OTAs directamente.
 
 ## Para quién
