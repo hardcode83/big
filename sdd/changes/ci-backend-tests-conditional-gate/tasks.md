@@ -110,29 +110,29 @@ verificación pertinente: lo que hay que probar es el comportamiento del propio 
   ni `paths-ignore`, y los tres jobs declaran `timeout-minutes`.
   `yq '.jobs | keys' .github/workflows/backend-tests.yml` y
   `yq '.on' .github/workflows/backend-tests.yml`. [R1.1, R1.2, R3.2, D2]
-- [ ] 4.2 **Camino largo**: el PR de este change toca `.github/workflows/backend-tests.yml`, que
+- [x] 4.2 **Camino largo**: el PR de este change toca `.github/workflows/backend-tests.yml`, que
   está dentro del área, así que su propia ejecución debe recorrerlo entero. Comprobar en el run
   del PR que `backend-tests-suite` se ejecutó, que los cuatro pasos de Alembic/pytest siguen
-  presentes y verdes, y que el consolidador `backend-tests` reporta `success`. [R3.1, R1.3]
-- [ ] 4.3 **Camino corto** (D9 corregido): abrir un PR sonda desechable
+  presentes y verdes, y que el consolidador `backend-tests` reporta `success`. [R3.1, R1.3] ✅ run [30804586586] `backend=true (diff-touches-backend)`, `backend-tests-suite` **success**, check `backend-tests` **success**, 7m23s.
+- [x] 4.3 **Camino corto** (D9 corregido): abrir un PR sonda desechable
   `sdd/ci-backend-tests-conditional-gate-shortpath` con **base la rama de este change** (no
   `main`) y un único commit que toque un `.md`. Así el `base...head` contiene solo ese `.md` y el
   gate nuevo llega heredado de la base. **No sirve** un commit de solo-docs en esta misma rama: en
   un `pull_request` la comparación es el diff acumulado contra la base, que sigue conteniendo el
   workflow, así que tomaría el camino largo (lo demostró la revisión de QA). Verificar que
   `backend-tests-suite` sale `skipped` y `backend-tests` reporta `success`. Cerrar sin fusionar.
-  [R1.1, R1.3, R4.1]
-- [ ] 4.4 El resumen del camino corto dice que la suite se omitió y por qué, de modo que un
+  [R1.1, R1.3, R4.1] ✅ PR sonda #45, run [30804331386]: `backend=false (no-backend-changes)`, `backend-tests-suite` **skipped**, check **success**. PR cerrado sin fusionar.
+- [x] 4.4 El resumen del camino corto dice que la suite se omitió y por qué, de modo que un
   verde en segundos no se confunda con una suite que pasó. Comprobar el
-  `$GITHUB_STEP_SUMMARY` del run de 4.3. [R4.2]
-- [ ] 4.5 El camino corto tarda **menos de 60 segundos** de principio a fin. Medir con
+  `$GITHUB_STEP_SUMMARY` del run de 4.3. [R4.2] ✅ anotación real del run 30804331386: `el diff no toca backend/** ni este workflow, así que la suite NO se ejecutó`.
+- [x] 4.5 El camino corto tarda **menos de 60 segundos** de principio a fin. Medir con
   `gh run list --workflow=backend-tests.yml` sobre el run de 4.3 (`createdAt` → `updatedAt`);
   si no cumple, la salida descrita en D4 es el fetch acotado en lugar de `fetch-depth: 0`.
-  [R4.1]
-- [ ] 4.6 `workflow_dispatch` ejecuta la suite completa aunque el último diff no toque el
+  [R4.1] ✅ **22 segundos** (10:08:13→10:08:35). El presupuesto era 60s; no hizo falta el fetch acotado de D4.
+- [x] 4.6 `workflow_dispatch` ejecuta la suite completa aunque el último diff no toque el
   backend: lanzarlo sobre la rama con `gh workflow run backend-tests.yml --ref
   sdd/ci-backend-tests-conditional-gate` y comprobar que `backend-tests-suite` **no** sale
-  `skipped`. [R2.3]
+  `skipped`. [R2.3] ✅ run [30804344354]: `backend=true (workflow_dispatch-runs-full-suite)`, `backend-tests-suite` **success** (no skipped).
 
 ## Cobertura de requisitos
 
