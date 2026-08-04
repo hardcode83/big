@@ -794,3 +794,35 @@ def test_the_other_options_stay_strict(argument):
     """Only the secret needs spaces; elsewhere a space is a mistake."""
     with pytest.raises(SystemExit):
         beds24._reject_unknown_arguments([argument])
+
+
+@pytest.mark.parametrize(
+    "envelope,expected",
+    [
+        ([{"success": False, "errors": [{"field": "arrival", "message": "invalid"}]}],
+         "arrival: invalid"),
+        # MEASURED: a rejected enum comes back under `warnings`, not `errors`, while still
+        # reporting success=false and writing nothing.
+        ([{"success": False, "warnings": [{"field": "webhooks_additionalData",
+                                            "message": "Invalid"}]}],
+         "webhooks_additionalData: Invalid"),
+        ({"success": False, "code": 400, "error": "Request body must be an array"},
+         "Request body must be an array"),
+    ],
+)
+def test_every_measured_failure_envelope_is_recognised(envelope, expected):
+    """Beds24 answers 201 even when it refuses the write; the verdict is in the body."""
+    assert beds24._envelope_failure(httpx.Response(201, json=envelope)) == expected
+
+
+def test_a_successful_envelope_is_not_reported_as_a_failure():
+    envelope = [{"success": True, "new": {"id": 90923575}}]
+
+    assert beds24._envelope_failure(httpx.Response(201, json=envelope)) is None
+
+
+def test_the_create_id_is_read_from_the_measured_success_shape():
+    """MEASURED: the new booking id lives under `new.id`."""
+    response = httpx.Response(201, json=[{"success": True, "new": {"id": 90923575}}])
+
+    assert beds24._extract_booking_ref(response) == "90923575"

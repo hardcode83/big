@@ -747,13 +747,19 @@ def _envelope_failure(response) -> str | None:
         payload = payload[0] if len(payload) == 1 and isinstance(payload[0], dict) else None
     if not isinstance(payload, dict) or payload.get("success") is not False:
         return None
-    errors = payload.get("errors")
-    if isinstance(errors, list) and errors:
-        return "; ".join(
-            f"{e.get('field', '?')}: {e.get('message', '?')}"
-            for e in errors
-            if isinstance(e, dict)
-        )
+    # `warnings` as well as `errors`: MEASURED 2026-08-04, a rejected `additionalData` came back
+    # as `[{"success": false, "warnings": [{"field": "webhooks_additionalData",
+    # "message": "Invalid"}]}]`. The name says "warning" but `success` is false and nothing was
+    # written, so reading only `errors` would have reported "success=false without detail" and
+    # hidden the one line that says which field is wrong.
+    for key in ("errors", "warnings"):
+        detail = payload.get(key)
+        if isinstance(detail, list) and detail:
+            return "; ".join(
+                f"{d.get('field', '?')}: {d.get('message', '?')}"
+                for d in detail
+                if isinstance(d, dict)
+            )
     return str(payload.get("error") or "the provider reported success=false without detail")
 
 
