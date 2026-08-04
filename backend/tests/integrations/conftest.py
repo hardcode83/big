@@ -4,7 +4,9 @@ The property codes match `MockPMSAdapter`'s expectations (`PMS-REDES11`) so the 
 something to resolve, and the `internal_code` is the one a person would type into a CSV.
 """
 
+import importlib.util
 import json
+import sys
 import uuid
 from pathlib import Path
 
@@ -31,7 +33,42 @@ from tests.auth.conftest import (  # noqa: F401
 
 SECRET = "i" * 64
 
-FIXTURE_DIR = Path(__file__).parent / "fixtures" / "channex"
+FIXTURE_ROOT = Path(__file__).parent / "fixtures"
+FIXTURE_DIR = FIXTURE_ROOT / "channex"
+BEDS24_FIXTURE_DIR = FIXTURE_ROOT / "beds24"
+
+SCRIPTS_DIR = Path(__file__).resolve().parents[2] / "scripts"
+
+
+def load_script(name: str):
+    """Import one of the `backend/scripts/` probes by path.
+
+    `scripts/` is deliberately NOT a package (design D9 of `channex-staging-adapter`), so
+    there is no `scripts.channex_probe` to import and each test would otherwise hand-roll an
+    `importlib` dance.
+
+    The `sys.path` insert is the part that matters and the reason this became shared: since
+    `pms-beds24-spike` extracted the anonymiser into `scripts/anonymise.py`, the probes import
+    a sibling module. Running a script directly gets that for free — Python puts the script's
+    own directory on `sys.path[0]` — but `spec_from_file_location` does not, so without this
+    the probes would import fine from a shell and fail under pytest.
+    """
+    if str(SCRIPTS_DIR) not in sys.path:
+        sys.path.insert(0, str(SCRIPTS_DIR))
+    spec = importlib.util.spec_from_file_location(name, SCRIPTS_DIR / f"{name}.py")
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
+def beds24_fixture(name: str) -> dict:
+    """Load a payload captured from the real Beds24 API (`pms-beds24-spike`, task 4.4).
+
+    Same contract as `channex_fixture`: anonymised at capture time, so nothing versioned here
+    has ever contained personal data, and reading it keeps the tests offline.
+    """
+    return json.loads((BEDS24_FIXTURE_DIR / f"{name}.json").read_text(encoding="utf-8"))
 
 
 def channex_fixture(name: str) -> dict:

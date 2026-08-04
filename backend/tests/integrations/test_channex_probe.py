@@ -2,31 +2,23 @@
 
 Loaded by path rather than imported: `backend/scripts/` is deliberately NOT a package
 (design D9 keeps the throwaway probe out of the deployed distribution), so there is no
-`scripts.channex_probe` to import. One `importlib` helper is the price of that decision.
+`scripts.channex_probe` to import. The `importlib` helper that was the price of that
+decision now lives in `conftest.load_script`, shared with the Beds24 probe.
+
+What this file asserts is unchanged by that move, and by the extraction of the policy into
+`scripts/anonymise.py`: `channex_probe.anonymise` still takes one argument and still applies
+the Channex business-key allowlist.
 """
 
-import importlib.util
 import json
 
 import httpx
-from pathlib import Path
 
 import pytest
 
-from tests.integrations.conftest import FIXTURE_DIR  # noqa: E402
+from tests.integrations.conftest import FIXTURE_ROOT, load_script  # noqa: E402
 
-_PROBE_PATH = Path(__file__).resolve().parents[2] / "scripts" / "channex_probe.py"
-
-
-def _load_probe():
-    spec = importlib.util.spec_from_file_location("channex_probe", _PROBE_PATH)
-    assert spec and spec.loader
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
-
-
-probe = _load_probe()
+probe = load_script("channex_probe")
 
 
 REAL_PAYLOAD = {
@@ -376,7 +368,11 @@ def test_capture_writes_the_anonymised_body_not_the_raw_one(tmp_path, monkeypatc
     assert "BDC-1" in raw
 
 
-@pytest.mark.parametrize("fixture_path", sorted(FIXTURE_DIR.glob("*.json")), ids=lambda p: p.name)
+@pytest.mark.parametrize(
+    "fixture_path",
+    sorted(FIXTURE_ROOT.rglob("*.json")),
+    ids=lambda p: f"{p.parent.name}/{p.name}",
+)
 def test_no_committed_fixture_carries_card_data(fixture_path):
     """Guards the committed artefacts themselves, not just the function.
 
@@ -384,8 +380,23 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     `bookings.json` while `revisions.json` carries the identical `guarantee` object — so the
     guard covered one of three files, which is exactly how `expiration_date` got committed the
     first time. Globbing means a fixture added later is covered without anyone remembering to.
+
+    It walks `FIXTURE_ROOT` recursively, not the Channex subdirectory, since
+    `pms-beds24-spike` added a second provider. The narrower glob honoured the sentence above
+    only for new files of a provider that already existed: a whole new `fixtures/<provider>/`
+    would have slipped in unguarded, which is the same class of gap one directory up. Rule
+    13(c) of `steering/security.md` asks for a guard over the files on disk — all of them.
     """
     import re
+
+    # The card-family needles come from the anonymiser itself, never a second hand-kept list.
+    # The first version pinned five spellings and went blind to `stripeToken` and
+    # `pcibookingToken`, which the Beds24 payload actually carries — the anonymiser covers them
+    # via its `token` needle, so the guard meant to backstop it was the narrower of the two.
+    # That is the drift rule 13(c) records: the guard exists because the function was trusted.
+    from anonymise import PII_PLACEHOLDERS
+
+    card_needles = PII_PLACEHOLDERS[0][0]
 
     raw = fixture_path.read_text(encoding="utf-8")
     assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
@@ -401,7 +412,7 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
         if isinstance(node, dict):
             for key, value in node.items():
                 lowered = key.lower()
-                if any(n in lowered for n in ("card", "cvv", "cvc", "expiration", "expiry")):
+                if any(n in lowered for n in card_needles):
                     assert isinstance(value, (dict, list)) or value in allowed, (
                         fixture_path.name,
                         key,
@@ -465,3 +476,19 @@ def test_the_timestamps_the_mapping_needs_are_still_preserved():
         }
     }
     assert probe.anonymise(payload) == payload
+
+
+def test_the_fixture_guard_would_catch_a_payment_token():
+    """Regression for the blind spot the feature-scale panel found.
+
+    The Beds24 payload carries `stripeToken` and `pcibookingToken`. Neither matches the five
+    spellings the guard used to pin, and neither trips the PAN regex, so a live payment token
+    would have been committed with the suite green — and `pms-beds24-adapter` re-runs this
+    capture on an account that HAS payments.
+    """
+    from anonymise import PII_PLACEHOLDERS
+
+    card_needles = PII_PLACEHOLDERS[0][0]
+
+    for key in ("stripeToken", "pcibookingToken", "card_number", "cvv", "expiration_date"):
+        assert any(n in key.lower() for n in card_needles), key
