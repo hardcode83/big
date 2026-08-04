@@ -53,11 +53,11 @@ Va primero porque toca código existente y probado: si rompe algo, se ve antes d
 Requiere una cuenta de desarrollo de Beds24 y `BEDS24_REFRESH_TOKEN` exportado.
 Bloqueadas hasta entonces; ver `BLOCKED.md`.
 
-- [ ] 7.1 Correr el sondeo sobre el catálogo de 3.3 y obtener `X-RequestCost` real por endpoint y forma. Commitear el JSONL como `docs/beds24-request-cost.jsonl`. [R1.1, R1.2, R1.3, R1.4]
-- [ ] 7.2 Capturar una reserva y un mensaje reales, revisar el fichero, **ensanchar la allowlist** de claves de negocio y recapturar hasta que el fixture sea útil sin filtrar nada. Commitear en `fixtures/beds24/`. [R3.1, R3.5]
-- [ ] 7.3 Levantar el sink tras el quick tunnel, configurar el webhook en el panel y medir **al menos tres eventos**, publicando los valores individuales y no una media. Registrar si llegan desordenados. [R2.1, R2.2, R2.3, R2.4, R2.5]
-- [ ] 7.4 Generar el informe con `report`, volcarlo en `docs/beds24-spike.md` y sustituir cada *no medido* por su valor; lo que siga sin medirse se queda marcado como tal. [R4.1, R4.4, R5.1, R5.2]
-- [ ] 7.5 Contrastar lo medido con lo que afirma ADR 0006 y **señalar toda contradicción** en el documento, sin enmendar el ADR en este change. [R5.4]
+- [x] 7.1 Correr el sondeo sobre el catálogo de 3.3 y obtener `X-RequestCost` real por endpoint y forma. Commitear el JSONL como `docs/beds24-request-cost.jsonl`. [R1.1, R1.2, R1.3, R1.4]
+- [x] 7.2 (parcial: reserva sí, **mensaje no** — `/bookings/messages` llega vacío, no hay conversación sin canal) Capturar una reserva y un mensaje reales, revisar el fichero, **ensanchar la allowlist** de claves de negocio y recapturar hasta que el fixture sea útil sin filtrar nada. Commitear en `fixtures/beds24/`. [R3.1, R3.5]
+- [ ] 7.3 ⛔ **NO MEDIBLE** — banco ejecutado y verificado (sink, túnel, webhook configurado por API, camino comprobado en 246 ms), pero Beds24 **solo dispara webhooks para reservas de canal** y R6.1 prohíbe conectar canales. Tres eventos reales (crear/modificar/cancelar) → cero webhooks. Confirmado en el panel que no falta habilitar nada. Ver `docs/beds24-spike.md`. [R2.1, R2.2, R2.3, R2.4, R2.5]
+- [x] 7.4 Generar el informe con `report`, volcarlo en `docs/beds24-spike.md` y sustituir cada *no medido* por su valor; lo que siga sin medirse se queda marcado como tal. [R4.1, R4.4, R5.1, R5.2]
+- [x] 7.5 Contrastar lo medido con lo que afirma ADR 0006 y **señalar toda contradicción** en el documento, sin enmendar el ADR en este change. [R5.4]
 
 ## 8. Verification
 

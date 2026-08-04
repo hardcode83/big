@@ -1,69 +1,63 @@
 # BLOCKED — pms-beds24-spike
 
-Una entrada. El banco de medición está construido, probado y commiteado; lo que falta es la
-cuenta contra la que medir, y eso no lo puede resolver un agente.
+Una entrada. **La cuenta ya existe y la medición está hecha**, salvo un requisito que resultó
+no ser medible en las condiciones que otro requisito impone.
 
 ---
 
-## 1. Falta la cuenta de desarrollo de Beds24
+## 1. R2 (latencia y orden de los webhooks) no es medible sin canales conectados
 
-- **Fase**: run (sección 7 de `tasks.md`)
-- **Tipo**: `decision` — necesita una persona: hay que registrarse, poner una tarjeta y
-  arrancar un reloj de 14 días.
-- **Comando para retomar**: `/sdd:run pms-beds24-spike 7`
+- **Fase**: run (tarea 7.3 de `tasks.md`)
+- **Tipo**: `decision` — necesita una persona porque **es un conflicto entre dos requisitos del
+  propio proposal**, no un fallo de implementación, y resolverlo cambia el alcance.
+- **Comando para retomar**: no hay. Requiere la decisión de abajo.
 
-### Qué hay que hacer
+### Qué pasa
 
-1. Dar de alta una cuenta de desarrollo en Beds24 (trial de 14 días, ~€15,50/mes después).
-   **Sin conectar ningún canal OTA** — es la regla dura de R6.1, y con REDES11 y PAJARITOS8
-   vendiendo no es una formalidad: Airbnb admite un único channel manager por cuenta.
-2. Obtener el refresh token (código de invitación → refresh token) y exportarlo:
-   `export BEDS24_REFRESH_TOKEN=...`
-3. Tener `cloudflared` disponible para el túnel efímero de la medición de webhooks.
-4. Reservar una hora seguida: la medición de webhooks necesita provocar hechos y esperarlos.
+R2 pide medir la latencia y el orden de los webhooks. Medido el 2026-08-04: Beds24 **solo
+dispara webhooks para reservas de canal** — su documentación lo dice (*«when a booking is
+created, modified or cancelled **by a channel**»*) y la medición lo confirma.
 
-El runbook completo, paso a paso, está en [`docs/beds24-spike.md`](../../../docs/beds24-spike.md).
+**R6.1 prohíbe conectar ningún canal OTA a esta cuenta**, porque REDES11 y PAJARITOS8 están
+vendiendo y Airbnb admite un único channel manager por cuenta.
 
-### Por qué está bloqueado y no simplemente pendiente
+Medir R2 exigiría exactamente lo que R6.1 prohíbe. Los dos requisitos son correctos por separado
+y no pueden satisfacerse a la vez.
 
-Los criterios de aceptación de este change **son mediciones** (R1.1-R1.4, R2.1-R2.5, R3.1,
-R4.2, R5.1). No hay forma de satisfacerlos sin la cuenta, así que el change no puede alcanzar
-`READY_FOR_PR`: no es que falte pulir algo, es que la mitad del entregable no existe todavía.
+### Qué se descartó antes de concluirlo
 
-Esto **estaba previsto** desde el diseño (D10) y es el motivo del orden que eligió el roadmap.
-El trial de 14 días empieza a contar al registrarse, así que el banco se construye **antes** de
-abrir la cuenta para que los 14 días vayan íntegros a medir y no a escribir herramientas. Es la
-misma razón por la que esta entrada se separó de `channex-staging-adapter`.
+- El banco funciona: sink, túnel efímero, webhook configurado **por API**, camino verificado de
+  punta a punta con un `POST` manual que llegó en **246 ms**.
+- **Tres eventos reales** sobre una reserva de verdad —crear, modificar, cancelar— y **cero
+  webhooks**. El túnel seguía vivo, comprobado después.
+- **No falta habilitar nada**: la página Settings → Properties → Access muestra los mismos
+  cuatro campos que escribe la API y ningún interruptor extra.
+- `Additional Data` descartada como causa: sus valores son `None / CVC / Token / CVC and Token`
+  — controla si el payload lleva datos de tarjeta, no si se envía.
 
-### Qué está hecho y no hay que rehacer
+### La decisión
 
-Secciones 1-6 de `tasks.md`, todas verificadas con la suite en verde (2479 passed, 35 skipped):
+**Opción A (recomendada): amender R2 en `proposal.md` y cerrar el change.** R2 pasa a estar
+condicionado a la existencia de un canal conectado, y la medición se traslada a la **ventana de
+corte de `pms-beds24-adapter`**, que es cuando los canales se conectan de verdad y no cuesta ni
+una cuenta extra ni riesgo nuevo. Lo demás del spike está medido y entregado, incluido lo que
+bloqueaba a `celery-jobs`.
 
-- `backend/scripts/anonymise.py` — el anonimizador fail-closed, extraído y compartido con el
-  probe de Channex, con el invariante de orden fijado por test.
-- `backend/scripts/beds24_probe.py` — canje de token, allowlist de host, autolimitación de
-  ritmo, registro de coste por petición y subcomando `report`.
-- `backend/scripts/beds24_webhook_sink.py` — receptor sellado en UTC, anonimización antes de
-  disco, latencia por `booking_ref` y detección de desorden.
-- `docs/beds24-spike.md` — runbook y hallazgos, cada medida marcada *no medido*.
-- `.env.example`, `docs/README.md` y la regla 8 de `sdd/steering/security.md`.
+**Opción B: dejar el change abierto** hasta poder medir R2. Significa mantenerlo vivo semanas,
+con el trial caducando, para un dato que llegará igual con `pms-beds24-adapter`.
 
-### Espera dos negativas del script en la primera ejecución, y son correctas
+**Opción C: una segunda cuenta con un canal real.** Ningún proveedor evaluado salvo Channex da
+sandbox de OTA (ADR 0006), así que «canal de test» significa un anuncio real en una OTA real.
+Coste y riesgo propios, y no parece justificado por el dato que devuelve.
 
-El banco se escribió sin cuenta, así que lleva **cinco supuestos** sobre la API V2 marcados
-como `ASSUMPTION`. El paso 0 del runbook los enumera en una tabla y hay que confirmarlos contra
-la especificación OpenAPI publicada **antes** de la primera llamada autenticada. Dos de ellos
-provocan un rechazo deliberado hasta que los confirmes:
+## Lo que sí quedó medido
 
-1. **`provoke` exige `--confirm-writes`.** Es la única subcomanda que escribe: crea, modifica y
-   cancela una reserva.
-2. **El guardia de canales falla cerrado.** Antes de escribir lee `/properties` y, si no
-   reconoce ninguna clave de canales en la respuesta, **se niega**. No es un bug: la forma de
-   esa respuesta es un supuesto, y «no entendí la respuesta» no puede significar «la cuenta
-   está limpia» cuando al otro lado hay dos viviendas vendiendo y Beds24 no tiene staging. La
-   salida correcta es mirar la respuesta real y añadir el nombre de clave, no esquivar el
-   chequeo.
+Tareas 7.1, 7.2 (reserva; el mensaje no, misma causa), 7.4 y 7.5. Entre otras cosas:
 
-Los otros tres —el host, los nombres de cabecera del flujo de token y las claves que llevan la
-identidad de la reserva— fallan de forma más silenciosa, y por eso conviene confirmarlos antes
-de gastar créditos. Si alguno falla, el arreglo es de una línea.
+- **Presupuesto de créditos**: ciclo de 8 créditos, cadencia máxima sostenible de un sync cada
+  24 s por cuenta. Era la incógnita que bloqueaba `celery-jobs`.
+- **Escrituras a 1,1 créditos** — coste fraccionario confirmado.
+- **Fixture real de reserva**, 73 campos, anonimizado.
+- **Cuatro contradicciones o hallazgos con peso arquitectónico**: los webhooks sí tienen API
+  (ADR 0006 dice que no), el refresh token no rota, Beds24 responde `201` incluso cuando rechaza
+  una escritura, y **puede enviarte el CVC en el webhook** si alguien toca un desplegable.
