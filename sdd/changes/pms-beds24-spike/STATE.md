@@ -1,11 +1,11 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
+state: READY_FOR_PR
+local_review: APPROVED
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/pms-beds24-spike
+implementation_sha: dbfbc2d728c44473633b2eaca1229387bec09e49
 pr_number: 
 pr_url: 
 pr_state: 
