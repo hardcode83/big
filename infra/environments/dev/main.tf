@@ -74,8 +74,10 @@ resource "oci_core_route_table" "dev_public" {
   }
 }
 
-# Puertos de docker-compose.yml (8000 backend, 3000 frontend) + SSH (22), todos acotados
-# por CIDR de operador — una regla por (CIDR × puerto), sin ningún 0.0.0.0/0 de entrada.
+# Un único puerto de entrada: SSH (22), acotado por CIDR de operador — una regla por
+# (CIDR × puerto), sin ningún 0.0.0.0/0 de entrada. Ver `local.ingress_ports` arriba: 8000 y 3000
+# dejaron de abrirse aquí con el change `ingress-https-dev` (el acceso público llega por el túnel de
+# Cloudflare, y esos puertos solo se publican en el loopback de la VM para depuración por SSH).
 resource "oci_core_security_list" "dev_public" {
   compartment_id = var.compartment_ocid
   vcn_id         = oci_core_vcn.dev.id
@@ -197,14 +199,34 @@ resource "oci_identity_policy" "dev_runner_read_secrets" {
   compartment_id = var.compartment_ocid
   name           = "autohostai-${var.env}-runner-read-secrets"
   description    = "Permite al runner ${var.env} leer SOLO la clave de la GitHub App, los secrets de runtime y el token del túnel en el Vault (mínimo privilegio)."
+  # UN solo statement, y es deliberado (change ingress-https-hardening, design D5).
+  #
+  # Enumeración explícita de OCID, y NADA más: un secreto nuevo es INVISIBLE para el runner hasta
+  # añadirlo aquí. Es la causa de fallo más probable al sumar secretos (design D4 de app-deploy-dev)
+  # y se mantiene así a propósito, porque es el invariante que acota el acceso al CONTENIDO.
+  #
+  # OJO al ámbito antes de tocar la condición: `var.compartment_ocid` es hoy la RAÍZ de la tenancy
+  # (ver dev.tfvars y la mejora futura de `iam-policy.md`), y una concesión en la raíz la heredan
+  # todos los compartments descendientes. Por eso la condición va por OCID y no por nombre: los
+  # nombres de secreto son únicos POR VAULT, no por compartment, así que un `target.secret.name`
+  # aquí concedería lectura de contenido a cualquier secreto que se llamara igual en cualquier vault
+  # de la tenancy — y el invariante de arriba dejaría de ser cierto para ese nombre.
+  #
+  # El deploy resuelve el token del túnel POR NOMBRE (`get-secret-bundle-by-name`, design D3 de
+  # ingress-https-dev: cloud-init no puede reescribir /etc/autohostai-deploy.env en la VM viva, así
+  # que no hay dónde poner un OCID nuevo), y la condición por OCID le basta: `GetSecretBundleByName`
+  # exige SECRET_BUNDLE_READ, permiso que solo concede este statement, y el deploy lee por nombre
+  # con éxito desde el 2026-07-29 — luego OCI resuelve nombre→OCID antes de autorizar. (Ese "solo
+  # concede este statement" es una premisa sobre la tenancy que el repositorio no puede establecer,
+  # porque hay policies aplicadas a mano; queda declarada en `iam-policy.md` con el comando que la
+  # cierra. No la leas como hecho verificado.)
+  #
+  # Aquí hubo un segundo statement `read secrets in compartment` SIN condición, y se eliminó porque
+  # nunca fue necesario: `read secrets` concede SECRET_INSPECT + SECRET_READ, es decir ListSecrets y
+  # GetSecret, que el deploy no invoca en ningún momento. Tabla de permisos y razonamiento en
+  # `iam-policy.md`; referencia: docs.oracle.com/en-us/iaas/Content/Identity/Reference/keypolicyreference.htm
   statements = [
-    # Enumeración explícita de OCID: un secreto nuevo es INVISIBLE para el runner hasta añadirlo
-    # aquí. Es la causa de fallo más probable al sumar secretos (design D4).
     "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}'}",
-    # El deploy resuelve el token del túnel POR NOMBRE (design D3: cloud-init no puede reescribir
-    # /etc/autohostai-deploy.env en la VM viva, así que no hay dónde poner un OCID nuevo). Resolver
-    # por nombre necesita además leer los metadatos del secreto, no solo su bundle.
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secrets in compartment id ${var.compartment_ocid}",
   ]
 }
 

@@ -9,7 +9,7 @@
 ## Qué aprovisiona el Terraform
 
 - Red: una VCN (`10.0.0.0/16`) con una subred pública (`10.0.1.0/24`), internet gateway y route table.
-- Security list: SSH (22), 8000 (backend) y 3000 (frontend) — los puertos que `docker-compose.yml` publica — todos **acotados a los CIDRs de operadores** (`var.allowed_ssh_cidrs`, lista), sin ningún `0.0.0.0/0` de entrada.
+- Security list: **solo SSH (22)**, acotado a los CIDRs de operadores (`var.allowed_ssh_cidrs`, lista), sin ningún `0.0.0.0/0` de entrada. Los puertos 8000 (backend) y 3000 (frontend) **ya no se abren**: desde el change `ingress-https-dev` el acceso público llega por un Cloudflare Tunnel (conexión saliente) y esos puertos solo se publican en el `127.0.0.1` de la VM como puerta de depuración por reenvío SSH.
 - Una instancia `VM.Standard.A1.Flex` (2 OCPU/12 GB, cupo Always Free completo) con una imagen Ubuntu 22.04 ARM64 resuelta dinámicamente (nunca un OCID hardcodeado), con `cloud-init` que instala Docker + el plugin de Compose.
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.
