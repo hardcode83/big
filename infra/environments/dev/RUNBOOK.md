@@ -410,7 +410,8 @@ pkill -f 'ssh -fN autohostai-dev'   # para cerrarlo
 
 ```bash
 ssh ubuntu@<IP pública>
-cd /opt/autohostai        # checkout que deja el runner, con el docker-compose.deploy.yml
+cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # checkout del runner, con el docker-compose.deploy.yml
+# (localizarlo si cambia: sudo find /opt/actions-runner/_work -maxdepth 3 -name docker-compose.deploy.yml)
 C="docker compose -f docker-compose.deploy.yml"
 
 $C ps                     # estado y healthy/unhealthy de los 7 servicios
@@ -438,8 +439,7 @@ No hace falta tocar el compose. El bridge de Docker es enrutable **desde la prop
 ```bash
 # En la VM: saca la IP del contenedor de postgres (cambia cada vez que se recrea, así que
 # no la anotes en ~/.ssh/config — resuélvela en el momento).
-docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-  "$(docker compose -f docker-compose.deploy.yml ps -q postgres)"
+docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' autohostai-postgres-1
 ```
 
 ```bash
@@ -453,7 +453,7 @@ Nada publicado, nada que revertir, y el security list sigue intacto. Si prefiere
 ```bash
 ssh autohostai-dev -L 5432:"$(ssh autohostai-dev docker inspect -f \
   '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-  "$(ssh autohostai-dev docker compose -f /opt/autohostai/docker-compose.deploy.yml ps -q postgres)")":5432
+  "$(ssh autohostai-dev docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' autohostai-postgres-1)")":5432
 ```
 
 > **Norma, y aplica a cualquier servicio, no solo a Postgres:** si alguna vez publicas un puerto temporalmente en el compose, **siempre** con el prefijo `127.0.0.1:` (`"127.0.0.1:5432:5432"`, nunca `"5432:5432"`). Sin el prefijo, Docker publica en `0.0.0.0` y el servicio queda alcanzable **desde toda la VCN** — con Postgres eso significa la contraseña del superusuario expuesta a cualquier recurso de la red. Es el razonamiento de la decisión D11 del change `ingress-https-dev`, que es también por lo que `backend` y `frontend` publican en `127.0.0.1` y no a secas. Y recuerda que un puerto publicado a mano sobrevive hasta que alguien lo revierte: el reenvío de arriba no tiene ese modo de fallo, y por eso es el camino recomendado.
@@ -485,9 +485,11 @@ El compose de deploy separa dos redes a propósito. Lo que impide que una regla 
 Conviene comprobarlo tras cualquier cambio de topología, y toma medio minuto. La prueba se hace **sobre la red**, no metiéndose en el contenedor del túnel: la imagen de `cloudflared` es distroless (sin shell, `curl` ni `wget`), así que no admite `exec`; y como está atado a una sola red, una propiedad de esa red es una propiedad suya. Se usa la imagen `postgres:16` porque ya está en la VM y trae `getent` y `bash`, así que no hay que descargar nada.
 
 ```bash
-# 1. Estructural: el contenedor del túnel debe estar SOLO en `autohostai_ingress`
-docker inspect -f '{{json .NetworkSettings.Networks}}' \
-  "$(docker compose -f docker-compose.deploy.yml ps -q cloudflared)"
+# 1. Estructural: el contenedor del túnel debe estar SOLO en `autohostai_ingress`.
+#    Se usan los nombres de contenedor (`autohostai-<servicio>-1`, deterministas) en vez de
+#    `compose ps -q`: así estas comprobaciones funcionan desde CUALQUIER directorio y no dependen
+#    de encontrar el checkout del runner.
+docker inspect -f '{{json .NetworkSettings.Networks}}' autohostai-cloudflared-1
 
 # 2. Por nombre — DEBE fallar en ingress y resolver en private
 docker run --rm --network autohostai_ingress postgres:16 getent hosts postgres   # falla
@@ -498,8 +500,7 @@ docker run --rm --network autohostai_private postgres:16 getent hosts postgres  
 # 3. Por IP literal, y es la que de verdad importa: una regla de ingress puede apuntar a una IP,
 #    no solo a un nombre. Lo que lo bloquea es el aislamiento L3 entre bridges, no el DNS, y esta
 #    es la única comprobación que lo demuestra.
-PGIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' \
-        "$(docker compose -f docker-compose.deploy.yml ps -q postgres)")
+PGIP=$(docker inspect -f '{{range .NetworkSettings.Networks}}{{.IPAddress}}{{end}}' autohostai-postgres-1)
 if [ -z "$PGIP" ]; then
   echo "NO CONCLUYENTE: no se pudo obtener la IP de postgres (¿está levantado?) — no repitas la"
   echo "comprobación hasta resolverlo: un fallo de conexión aquí no probaría nada."
@@ -547,6 +548,17 @@ for p in 8000 3000; do
     && echo "ROTO: el gateway expone $p — la API/el front son publicables por el túnel" \
     || echo "OK: $p no alcanzable por el gateway"
 done
+
+# Y el 22, que SÍ está en el residual: aquí lo esperado es que CONECTE (medido el 2026-08-04).
+# Si algún día deja de conectar, es que alguien mitigó el residual — comprueba si fue a propósito.
+docker run --rm --network autohostai_ingress postgres:16 \
+  timeout 5 bash -c "</dev/tcp/$GW/22" \
+  && echo "CONFIRMADO: el gateway expone el 22 (residual conocido del ADR §1)" \
+  || echo "el 22 ya no es alcanzable — ¿se mitigó el residual?"
+
+# El mecanismo, si necesitas verlo: el ruleset acepta `tcp dpt:22` desde 0.0.0.0/0 (bridges
+# incluidos) y rechaza el resto con icmp-host-prohibited, que es el `No route to host` de arriba.
+sudo iptables -L INPUT -n --line-numbers | head
 ```
 
 > **Tras el primer deploy con las dos redes**, un `docker network ls` puede seguir mostrando la vieja `autohostai_default` huérfana: compose no siempre la elimina en un `up`. Es inocua —ya no hay contenedores en ella— pero conviene retirarla con `docker network prune` para que la topología que ves sea la que hay.
