@@ -13,7 +13,9 @@ Cola de lo que queda sin resolver. `/sdd:status` la muestra primero y `/sdd:arch
   4. **5.7** — `infra-dev` con `action: plan` (revisar por logs que el diff de la policy es **un statement menos y nada más**: la condición del statement que queda sigue siendo los cinco `target.secret.id`; si aparece un término nuevo, algo ha reintroducido la rama `target.secret.name` que el panel de §2 hizo retirar por ensanchar el acceso, y **no se aplica**), después `action: apply`.
   5. **5.8** — `deploy-dev` por `workflow_dispatch` y el paso "Render .env" pasa: es la evidencia que R2.2 exige.
   6. **5.9** — si 5.8 falla, recorrer la escalera de R2.5 y, en cualquier caso, escribir el resultado **medido** en `iam-policy.md`.
-- **comando de reanudación**: `/sdd:review ingress-https-hardening` (cubre el change a escala de feature y es lo que establece `READY_FOR_PR`). Las tareas 5.5-5.9 requieren además que el Pull Request esté mergeado.
+- **Pull Request**: https://github.com/autohostai-labs/AutoHostAI/pull/50 (abierto el 2026-08-04 sobre `main`, rama `sdd/ingress-https-hardening`, commit `28b4baf`).
+- **Por qué `STATE.md` sigue en `ACTIVE`**: los cuatro comandos de `sdd_lifecycle.py` —`mark-local-verified`, `mark-ready`, `record-pr` y la verificación de merge— exigen **a la vez** que no queden tareas sin marcar y que `BLOCKED.md` esté vacío. Con la verificación de este change estructuralmente post-merge, ninguna de las dos condiciones se puede cumplir antes del merge, y forzarlas exigiría marcar tareas no hechas o vaciar esta cola. No se hace. `STATE.md` avanzará cuando 5.4-5.9 estén ejecutadas y esta entrada se borre.
+- **comando de reanudación**: tras el merge, `/sdd:review ingress-https-hardening` para cerrar el ciclo. Las tareas 5.5-5.9 requieren que el Pull Request esté mergeado; 5.4 se comprueba en el propio PR.
 
 ## 2. Residual de radio del API token que el aislamiento no cubre — candidato a change propio
 
