@@ -442,27 +442,53 @@ menos útil, nunca una filtración. El modo de fallo es visible en vez de silenc
 catálogo existen y responden 200; lo único que la validación tuvo que corregir fue el formato de
 fechas.
 
+**Con registro commiteado** — generado por `beds24_probe.py report` desde
+[`beds24-request-cost.jsonl`](beds24-request-cost.jsonl), que es la evidencia que R1.5 exige:
+
 | Endpoint | Forma | `X-Request-Cost` |
 |---|---|---|
-| `GET /properties` | por defecto | **1** |
-| `GET /properties` | `?id=<uno>` | **1** |
 | `GET /bookings` | `limit=10` | **1** |
 | `GET /bookings` | `limit=100` | **1** |
 | `GET /bookings` | ventana 1 día | **1** |
 | `GET /bookings` | ventana 90 días | **1** |
-| `GET /bookings` | ventana 365 días, `limit=100` | **1** |
+| `GET /properties` | por defecto | **1** |
+| `GET /properties` | `?id=<uno>` | **1** |
 | `GET /inventory/rooms/calendar` | ventana 7 días | **1** |
 | `GET /inventory/rooms/calendar` | ventana 90 días | **1** |
-| `GET /bookings/messages` | por defecto | **1** |
-| `POST /properties` | escritura de webhooks | **1** |
-| `POST /bookings` | crear reserva | **1** |
-| `POST /bookings` | modificar reserva | **1,1** |
-| `POST /bookings` | cancelar reserva | **1,1** |
 
-**Las escrituras cuestan fraccionario.** `modify` y `cancel` salieron a **1,1** créditos. Es la
-confirmación de que el coste no es entero, y la razón de que el parser trate el valor como
-decimal: con `int()`, un `1.1` se habría registrado como *no medido* y el presupuesto habría
-salido optimista.
+**Observado a mano, SIN registro commiteado** — leído de las cabeceras en un terminal durante la
+exploración del paso 0, no emitido por la herramienta:
+
+| Endpoint | Forma | `X-Request-Cost` |
+|---|---|---|
+| `GET /bookings/messages` | por defecto | 1 |
+| `POST /properties` | escritura de webhooks | 1 |
+| `POST /bookings` | crear reserva | 1 |
+| `POST /bookings` | modificar reserva | 1,1 |
+| `POST /bookings` | cancelar reserva | 1,1 |
+
+> ⚠️ **Esta segunda tabla es evidencia de peor calidad, y conviene decirlo en voz alta.** D5
+> establece que *«el informe se genera desde el registro, no se transcribe a mano»* y R1.5 pide
+> un artefacto revisable precisamente para que nadie tenga que fiarse de una transcripción.
+> Estas cinco filas son una transcripción. Se publican porque son lo que se observó y omitirlas
+> sería peor, pero **no cumplen el contrato del propio change** y no deberían citarse como si lo
+> hicieran.
+>
+> **Cómo subirlas de categoría** (una tarde, ya con el banco arreglado): `capture` ahora sí
+> registra el coste de su propia petición —no lo hacía, que es por lo que la fila de
+> `/bookings/messages` no podía tener respaldo— y `provoke` ya registraba el suyo. Volver a
+> ejecutar ambos contra la cuenta y commitear el JSONL resultante convierte las cinco en
+> evidencia de primera. Lo hereda `pms-beds24-adapter` junto con la medición de webhooks.
+>
+> **Lo que esto no toca**: la cifra que de verdad importa —**8 créditos por ciclo → un sync cada
+> 24 s**— sale entera de la primera tabla, que sí tiene registro. El presupuesto que desbloquea
+> `celery-jobs` no depende de las filas transcritas.
+
+**El coste fraccionario**, en cambio, **sí depende de ellas**: el `1,1` de `modify` y `cancel` es
+la única observación de un coste no entero, y es transcrita. La decisión de tratar el coste como
+decimal en el parser se sostiene igual —`int("1.1")` lanza, así que un coste fraccionario se
+registraría como *no medido* y el presupuesto saldría optimista— pero es una decisión tomada
+sobre una observación sin respaldo, y merece confirmarse al re-ejecutar.
 
 > ⚠️ **No concluir de aquí que el coste sea plano.** Esta cuenta está **vacía**: cero reservas y
 > una propiedad. Todas las respuestas devolvieron `count` 0 o 1, así que ninguna forma movió

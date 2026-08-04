@@ -780,13 +780,17 @@ def test_an_unchanged_refresh_token_is_not_reported():
     assert bench._access_token == "acc"
 
 
-def test_a_header_shaped_secret_with_spaces_is_accepted():
-    """`customHeader` is an HTTP header line, so it contains a space by construction.
+def test_the_webhook_secret_is_not_accepted_as_an_argument():
+    """Rule 12(a) calls the static header a credential, so it comes from the environment.
 
-    The first pattern used `\\S+` and rejected every realistic value — the failure surfaced as
-    "unrecognised argument", which reads like a typo rather than an over-strict validator.
+    Taking it from `--secret=` contradicted this script's own refusal message about credentials
+    never travelling on the command line, where they stay in shell history and `ps`.
     """
-    beds24._reject_unknown_arguments(["webhook", "--secret=X-AutoHost-Probe: 1"])
+    with pytest.raises(SystemExit) as excinfo:
+        beds24._reject_unknown_arguments(["--secret=X-AutoHost-Probe: 1"])
+
+    assert "X-AutoHost-Probe" not in str(excinfo.value)
+    assert beds24.WEBHOOK_SECRET_ENV in str(excinfo.value)
 
 
 @pytest.mark.parametrize("argument", ["--room=713 992", "--out=/tmp/a b.jsonl", "--min-interval=x"])
@@ -852,3 +856,23 @@ def test_set_webhook_takes_no_additional_data_argument():
 
     assert "additionalData" not in inspect.signature(beds24.set_webhook).parameters
     assert "additional_data" not in inspect.signature(beds24.set_webhook).parameters
+
+
+def test_capture_records_the_cost_of_its_own_request(tmp_path, monkeypatch):
+    """A measurement the tool cannot emit is a measurement somebody will transcribe by hand.
+
+    `capture` used to make the only call to `/bookings/messages` without recording its cost, so
+    the row published for that endpoint had no artifact behind it — the failure D5 rules out.
+    """
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+    bench = _bench(
+        lambda request: httpx.Response(200, json={"data": []}, headers={"X-Request-Cost": "1"})
+    )
+
+    beds24.capture("messages", "/bookings/messages", bench=bench)
+
+    [record] = beds24._CAPTURE_COSTS
+    assert record["endpoint"] == "/bookings/messages"
+    assert record["shape"] == "capture-messages"
+    assert record["x_request_cost"] == 1

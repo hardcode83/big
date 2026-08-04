@@ -389,6 +389,15 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     """
     import re
 
+    # The card-family needles come from the anonymiser itself, never a second hand-kept list.
+    # The first version pinned five spellings and went blind to `stripeToken` and
+    # `pcibookingToken`, which the Beds24 payload actually carries — the anonymiser covers them
+    # via its `token` needle, so the guard meant to backstop it was the narrower of the two.
+    # That is the drift rule 13(c) records: the guard exists because the function was trusted.
+    from anonymise import PII_PLACEHOLDERS
+
+    card_needles = PII_PLACEHOLDERS[0][0]
+
     raw = fixture_path.read_text(encoding="utf-8")
     assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
     assert "12/2027" not in raw
@@ -403,7 +412,7 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
         if isinstance(node, dict):
             for key, value in node.items():
                 lowered = key.lower()
-                if any(n in lowered for n in ("card", "cvv", "cvc", "expiration", "expiry")):
+                if any(n in lowered for n in card_needles):
                     assert isinstance(value, (dict, list)) or value in allowed, (
                         fixture_path.name,
                         key,
@@ -467,3 +476,19 @@ def test_the_timestamps_the_mapping_needs_are_still_preserved():
         }
     }
     assert probe.anonymise(payload) == payload
+
+
+def test_the_fixture_guard_would_catch_a_payment_token():
+    """Regression for the blind spot the feature-scale panel found.
+
+    The Beds24 payload carries `stripeToken` and `pcibookingToken`. Neither matches the five
+    spellings the guard used to pin, and neither trips the PAN regex, so a live payment token
+    would have been committed with the suite green — and `pms-beds24-adapter` re-runs this
+    capture on an account that HAS payments.
+    """
+    from anonymise import PII_PLACEHOLDERS
+
+    card_needles = PII_PLACEHOLDERS[0][0]
+
+    for key in ("stripeToken", "pcibookingToken", "card_number", "cvv", "expiration_date"):
+        assert any(n in key.lower() for n in card_needles), key

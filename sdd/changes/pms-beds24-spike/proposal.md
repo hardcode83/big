@@ -42,7 +42,7 @@ Acceptance criteria:
 1. THE SYSTEM SHALL disponer de un receptor de webhooks que registre, por cada petición entrante, el instante UTC de recepción, el método, la ruta, las cabeceras y el cuerpo.
 2. WHEN llega un webhook, THE SYSTEM SHALL calcular su latencia como la diferencia entre el instante de recepción y el instante del hecho que lo origina, tomando ese instante del propio payload cuando lo traiga y del registro del sondeo que provocó el hecho cuando no.
 3. THE SYSTEM SHALL medir **al menos tres eventos** y publicar los valores individuales, y no SHALL presentar una medición única como una distribución.
-4. THE SYSTEM SHALL registrar si los webhooks llegan **desordenados** respecto al orden de los hechos que los originan, porque ADR 0006 afirma que el proveedor no garantiza el orden y `reservations-webhooks` depende de ello.
+4. THE SYSTEM SHALL registrar si los webhooks llegan **desordenados** respecto al orden de los hechos que los originan, porque `reservations-webhooks` depende de ello. **Corregido el 2026-08-04**: la redacción original atribuía a ADR 0006 una afirmación sobre Beds24 que ese ADR no hace — lo que documenta es que **Channex** entrega desordenado. Para Beds24 la ausencia de garantía de orden es una suposición razonable sin verificar, y es justamente lo que este criterio quería medir.
 5. THE SYSTEM SHALL registrar la cabecera estática configurada como único mecanismo de autenticación, confirmando por medición lo que ADR 0006 afirma: que no hay firma HMAC ni secreto negociado.
 
 > **ENMENDADO el 2026-08-04, después de medir.** Los criterios 1-5 se cumplen en cuanto al

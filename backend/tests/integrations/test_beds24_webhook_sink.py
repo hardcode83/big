@@ -230,7 +230,8 @@ def test_the_query_string_never_reaches_disk():
     rendered = json.dumps(record)
     assert "STATIC-AUTH-SECRET" not in rendered
     assert "ana@gmail.com" not in rendered
-    assert record["path"] == "/hook"
+    assert record["path_depth"] == 1
+    assert record["path_head"] == "hook"
     assert record["query_keys"] == ["mail", "token"]
 
 
@@ -289,3 +290,22 @@ def test_ref_matching_is_not_nearest_timestamp_matching():
     [result] = sink.compute_latencies(webhooks, probe_records)
 
     assert result["latency_seconds"] == 605.0, "proximity matching would report 1.0"
+
+
+def test_an_unguessable_route_token_is_not_persisted():
+    """Rule 12(b) puts the secret IN the path, so reducing only the query was half the job.
+
+    The product route is `/api/v1/webhooks/{provider}/{webhook_token}`; an operator imitating
+    that convention here would otherwise have written the token into the log in cleartext.
+    """
+    record = sink.build_webhook_record(
+        method="POST",
+        path="/api/v1/webhooks/beds24/9f3a2c7e1b4d8a6f0c5e",
+        headers={},
+        body=b"{}",
+    )
+
+    rendered = json.dumps(record)
+    assert "9f3a2c7e1b4d8a6f0c5e" not in rendered
+    assert record["path_depth"] == 5
+    assert record["path_head"] == "api"

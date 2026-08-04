@@ -54,3 +54,7 @@ infra/environments/dev/apply_loop.sh
 # Exports del preview de Markdown de VS Code sobre los ADR — artefacto local del visor,
 # la fuente es el .md
 docs/adr/*.html
+
+# Salida de las herramientas de medición de Beds24 (`--out=/app/...` aterriza aquí por el
+# montaje de Docker). La evidencia curada se commitea en docs/, no aquí.
+backend/beds24-*.jsonl

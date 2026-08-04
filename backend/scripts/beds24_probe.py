@@ -40,6 +40,11 @@ from anonymise import anonymise
 FIXTURE_DIR = Path(__file__).resolve().parents[1] / "tests" / "integrations" / "fixtures" / "beds24"
 
 REFRESH_TOKEN_ENV = "BEDS24_REFRESH_TOKEN"
+# The static header Beds24 offers instead of a signature. Rule 12(a) of `steering/security.md`
+# calls it a credential, so it comes from the environment like every other one — the first
+# version took it from `--secret=`, which contradicted this script's own refusal message about
+# credentials never travelling on the command line.
+WEBHOOK_SECRET_ENV = "BEDS24_WEBHOOK_SECRET"
 BASE_URL_ENV = "BEDS24_BASE_URL"
 
 # CONFIRMED 2026-08-04 against the provider's published API V2 documentation (step 0): the base
@@ -847,6 +852,10 @@ def set_webhook(bench: Beds24Probe, *, property_id: Any, url: str, secret: str) 
     )
 
 
+# Cost records produced by `capture`, drained by `main` into the same JSONL the report reads.
+_CAPTURE_COSTS: list[dict[str, Any]] = []
+
+
 def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
     """Fetch one payload and write it anonymised (R3.1, R3.2).
 
@@ -858,6 +867,19 @@ def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
     response = bench.request("GET", path)
     response.raise_for_status()
     payload = response.json()
+    # Record the cost of the capture itself. It did not before, which meant the only code path
+    # that touches `/bookings/messages` could not produce a cost record — so the row published
+    # for that endpoint had to be read off a terminal and typed in by hand, exactly what D5
+    # rules out. A measurement the tool cannot emit is a measurement that will be transcribed.
+    _CAPTURE_COSTS.append(
+        build_cost_record(
+            endpoint=path,
+            method="GET",
+            shape=f"capture-{name}",
+            status=response.status_code,
+            headers=response.headers,
+        )
+    )
     clean = anonymise(payload, business_keys=PRESERVED_KEYS)
     target = FIXTURE_DIR / f"{name}.json"
     target.parent.mkdir(parents=True, exist_ok=True)
@@ -966,12 +988,8 @@ def _is_known_argument(argument: str) -> bool:
         return True
     return bool(
         re.fullmatch(
-            # `--secret=` takes `.+`, not `\S+`: its value is an HTTP header line such as
-            # `X-AutoHost-Probe: 1`, and a header line contains a space by construction. The
-            # stricter pattern rejected every realistic value. The other options stay tight —
-            # a space in them is a mistake, not a legitimate value.
             r"--out=\S+|--min-interval=\d+(\.\d+)?|--room=[A-Za-z0-9_-]+"
-            r"|--url=\S*|--secret=.+|--clear|--confirm-writes",
+            r"|--url=\S*|--clear|--confirm-writes",
             argument,
         )
     )
@@ -990,7 +1008,8 @@ def _reject_unknown_arguments(argv: list[str]) -> None:
                 "beds24-probe: unrecognised argument (value not echoed on purpose — it may be "
                 f"a credential). Accepted: {', '.join(SUBCOMMANDS)}, capture names "
                 f"({', '.join(CAPTURES)}), --out=PATH, --room=ID, --min-interval=SECONDS, "
-                "--url=HTTPS_URL, --secret=HEADER, --clear, --confirm-writes. The refresh "
+                "--url=HTTPS_URL, --clear, --confirm-writes. The webhook's static header is read "
+                f"from {WEBHOOK_SECRET_ENV}, not from an argument. The refresh "
                 f"token is read from {REFRESH_TOKEN_ENV} and must never be passed on the "
                 "command line, where it would stay in your shell history."
             )
@@ -1063,7 +1082,7 @@ def main(argv: list[str] | None = None) -> int:
             bench,
             property_id=prop.get("id"),
             url=url,
-            secret="" if clearing else _option(args, "--secret=", ""),
+            secret="" if clearing else os.environ.get(WEBHOOK_SECRET_ENV, "").strip(),
         )
         write_records(
             (read_records(out_path) if out_path.exists() else []) + [record], out_path
@@ -1091,6 +1110,11 @@ def main(argv: list[str] | None = None) -> int:
     for name in requested:
         written = capture(name, CAPTURES[name], bench=bench)
         print(f"beds24-probe: {CAPTURES[name]} -> {written}")
+    if _CAPTURE_COSTS:
+        write_records(
+            (read_records(out_path) if out_path.exists() else []) + _CAPTURE_COSTS, out_path
+        )
+        print(f"beds24-probe: {len(_CAPTURE_COSTS)} cost records -> {out_path}")
     return 0
 
 

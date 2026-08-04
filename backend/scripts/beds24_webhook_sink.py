@@ -168,19 +168,25 @@ def build_webhook_record(
     booking_ref = _booking_ref(payload)
     event_time = _first_present(payload, EVENT_TIME_KEYS)
 
-    # Only the path, never the query string. `self.path` is the full request target, and the
-    # runbook has the operator paste a tunnel URL into the Beds24 panel — since Beds24 offers
-    # no signature, putting a shared secret in that URL is the natural thing for an operator to
-    # do. Persisting it raw would contradict this script's own reason for silencing the stdlib
-    # request log, which is that a query string can carry data.
+    # Neither the query string nor the literal path. `self.path` is the full request target,
+    # and the secret can live in EITHER half: the runbook has the operator paste a tunnel URL
+    # into the webhook config, and the product route this measurement feeds is
+    # `/api/v1/webhooks/{provider}/{webhook_token}` — rule 12(b) puts an unguessable token in
+    # the **path** by design. Reducing only the query was half the job; an operator imitating
+    # the product convention would have written the route secret into the log in cleartext.
     path_only, _, query = path.partition("?")
+    segments = [seg for seg in path_only.split("/") if seg]
 
     return {
         "received_at_utc": received_at,
         "booking_ref": str(booking_ref) if booking_ref is not None else None,
         "event_time": str(event_time) if event_time is not None else None,
         "method": method,
-        "path": path_only,
+        # Shape, not content: how many segments the route had, and the first one if it is a
+        # plain word. Enough to tell "/hook" from "/a/b/c" when debugging, useless to anyone
+        # who wants to forge a request.
+        "path_depth": len(segments),
+        "path_head": segments[0] if segments and segments[0].isalpha() else None,
         "query_keys": sorted({pair.partition("=")[0] for pair in query.split("&") if pair}),
         # Names only. One of these is the static header Beds24 offers instead of a signature,
         # and its value is a credential (R2.5).
