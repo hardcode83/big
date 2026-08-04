@@ -60,7 +60,15 @@ ACCESS_HEADER = "token"
 TOKEN_PATH = "/authentication/token"
 SETUP_PATH = "/authentication/setup"
 
-COST_HEADER = "x-requestcost"
+# MEASURED 2026-08-04 against the real API. The header is `X-Request-Cost` — **with hyphens**.
+# The guessed spelling `x-requestcost` matched nothing, so every measurement would have recorded
+# a null cost and the report would have said "cadencia no calculable" with no visible error.
+# A silent wrong answer, which is exactly what step 0 exists to catch.
+COST_HEADER = "x-request-cost"
+
+# MEASURED alongside it: `X-Five-Min-Limit-Remaining` (a DECIMAL — 96.8, so costs are
+# fractional) and `X-Five-Min-Limit-Resets-In` (seconds). Both are picked up by the shape match
+# in `_credit_headers`, which needs no change.
 
 # The credit-window model ADR 0006 records. Used to derive the sustainable cadence (R4.4), not
 # to discover the ceiling: R4.1 forbids finding the limit by hitting it.
@@ -257,19 +265,26 @@ def _credit_headers(headers: Any) -> dict[str, str]:
     return found
 
 
-def _parse_cost(headers: Any) -> int | None:
-    """`X-RequestCost`, or `None` when the provider did not send it (R1.3).
+def _parse_cost(headers: Any) -> float | int | None:
+    """`X-Request-Cost`, or `None` when the provider did not send it (R1.3).
 
     **Never zero for a missing header.** An unknown cost and a free call lead to different
     budgets, and conflating them is exactly the mistake this whole change exists to avoid.
+
+    Parsed as a **float**, not an int: `X-Five-Min-Limit-Remaining` came back as `96.8`, so the
+    provider bills fractionally. `int("0.2")` raises, which the previous version turned into
+    `None` — a fractional cost would have been recorded as "not measured" and silently dropped
+    from the budget, making the derived cadence optimistic. An integral value is returned as an
+    `int` so the report reads `1` rather than `1.0`.
     """
-    raw = headers.get(COST_HEADER) or headers.get("X-RequestCost")
+    raw = headers.get(COST_HEADER)
     if raw is None:
         return None
     try:
-        return int(str(raw).strip())
+        cost = float(str(raw).strip())
     except ValueError:
         return None
+    return int(cost) if cost.is_integer() else cost
 
 
 def build_cost_record(

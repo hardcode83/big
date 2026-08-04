@@ -199,17 +199,19 @@ def test_quota_exhaustion_stops_the_walk_instead_of_retrying():
 
 
 def test_cost_record_captures_the_header_and_the_shape():
+    """Header names are the MEASURED ones. This test used to assert the guessed spellings and
+    passed, which is precisely how the wrong constant survived into a committed script."""
     record = beds24.build_cost_record(
         endpoint="/bookings",
         method="GET",
         shape="page-100",
         status=200,
-        headers=httpx.Headers({"X-RequestCost": "7", "X-FiveMinCreditRemaining": "93"}),
+        headers=httpx.Headers({"X-Request-Cost": "7", "X-Five-Min-Limit-Remaining": "93"}),
         booking_ref="BK-1",
     )
 
     assert record["x_request_cost"] == 7
-    assert record["credit_headers"] == {"x-fivemincreditremaining": "93"}
+    assert record["credit_headers"] == {"x-five-min-limit-remaining": "93"}
     assert record["shape"] == "page-100"
     assert record["booking_ref"] == "BK-1"
 
@@ -221,6 +223,61 @@ def test_a_missing_cost_header_is_null_and_never_zero():
     )
 
     assert record["x_request_cost"] is None
+
+
+def test_the_real_header_name_is_matched():
+    """MEASURED: the header is `X-Request-Cost`, with hyphens.
+
+    The guessed `x-requestcost` matched nothing, so every measurement would have recorded a
+    null cost and the report would have said "no calculable" with no visible error.
+    """
+    record = beds24.build_cost_record(
+        endpoint="/properties",
+        method="GET",
+        shape="all",
+        status=200,
+        headers=httpx.Headers({"X-Request-Cost": "1"}),
+    )
+
+    assert record["x_request_cost"] == 1
+
+
+def test_a_fractional_cost_is_kept_and_not_dropped():
+    """`X-Five-Min-Limit-Remaining` came back as 96.8, so the provider bills fractionally.
+
+    `int("0.2")` raises, and the previous parser turned that into `None` — a fractional cost
+    recorded as "not measured" makes the derived cadence optimistic.
+    """
+    record = beds24.build_cost_record(
+        endpoint="/bookings",
+        method="GET",
+        shape="page-10",
+        status=200,
+        headers=httpx.Headers({"X-Request-Cost": "0.2"}),
+    )
+
+    assert record["x_request_cost"] == 0.2
+
+
+def test_the_measured_credit_headers_are_captured():
+    record = beds24.build_cost_record(
+        endpoint="/properties",
+        method="GET",
+        shape="all",
+        status=200,
+        headers=httpx.Headers(
+            {
+                "X-Request-Cost": "1",
+                "X-Five-Min-Limit-Remaining": "96.8",
+                "X-Five-Min-Limit-Resets-In": "215",
+            }
+        ),
+    )
+
+    assert record["credit_headers"] == {
+        "x-five-min-limit-remaining": "96.8",
+        "x-five-min-limit-resets-in": "215",
+    }
 
 
 def test_an_unparseable_cost_header_is_null_too():
