@@ -44,6 +44,7 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 ### Provider de Cloudflare (desde `ingress-https-dev`)
 
+- El **API token de Cloudflare** tiene un radio de daño que va más allá de la zona DNS: permite publicar en internet cualquier dirección alcanzable desde el contenedor del túnel, porque la configuración de ingress es remota. La enumeración canónica y actualizada vive en [ADR 0003](../../docs/adr/0003-https-ingress-dev.md) §Addendum 2026-08-04 §1, y esta spec **no la reformula** a propósito.
 - THE SYSTEM SHALL declarar el provider `cloudflare` en el **mismo root module** que `oci`, porque el `oci_vault_secret` del token del túnel depende de atributos de recursos Cloudflare y ambos deben resolverse en un solo `apply`.
 - El comportamiento de los recursos de Cloudflare (túnel, routing, CNAME, ajuste de zona) y sus variables se especifica en `ingress-https-dev`.
 - El **API token de Cloudflare** es bootstrap irreducible (se acuña en el dashboard) y **no** se copia al Vault, a diferencia de la clave de la GitHub App: su radio abarca toda la zona y es re-emitible en segundos.
@@ -64,4 +65,4 @@ Terraform real y pipeline de CI/CD para el entorno `dev` de AutoHostAI en Oracle
 
 - Infra **desplegada y operativa** (aplicada por el pipeline como `svc-terraform-dev`): instancia 4 OCPU/24 GB/200 GB en AD-3 (PAYG, $0), Docker+Compose vía repo oficial, budget €1 con alertas ACTUAL+FORECAST, Vault + key + secret SSH recuperable, versioning del state activo. Añadido por `app-deploy-dev`: runner self-hosted (cloud-init) + instance principal + secrets de runtime y clave de la App en el Vault. Añadido por `ingress-https-dev`: provider `cloudflare` con el túnel/DNS/ajuste de zona, el secreto del túnel en el Vault, y el security list reducido a **solo el 22**.
 - El **despliegue de la aplicación** ya está resuelto por el change **`app-deploy-dev`** (build → GHCR → deploy local en el runner self-hosted) y su **acceso público** por **`ingress-https-dev`** (Cloudflare Tunnel); ver sus specs. El repo vive en la org **`autohostai-labs`**.
-- **Pendiente en `ingress-https-hardening`**: acotar el statement de lectura de metadatos de secretos de la policy del runner, que quedó sin condición.
+- **Cerrado por `ingress-https-hardening`** (2026-08-04): la policy del runner queda con **un solo statement** (`read secret-bundles` condicionado por la enumeración de OCID). El `read secrets` sin condición no se acotó sino que se **eliminó**, porque nunca fue necesario: `GetSecretBundleByName` exige solo `SECRET_BUNDLE_READ`. Aplicado in situ (`0 added, 1 changed, 0 destroyed`) y verificado con un deploy real cuyo paso de lectura del Vault pasó.
