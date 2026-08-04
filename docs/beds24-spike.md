@@ -549,9 +549,8 @@ No es un fallo del banco: el receptor, el túnel, la configuración por API y la
 `booking_ref` funcionan y están probados. Lo que falta es un evento que el proveedor considere
 digno de webhook.
 
-**La única variable no probada** es `Additional Data`, que se dejó en `None`. Por su nombre y su
-posición controla **cuánto** payload se envía, no **si** se envía, pero eso es inferencia: nadie
-lo ha medido.
+`Additional Data` quedó descartada como causa al abrir su desplegable: no controla el disparo
+sino el contenido, y lo que controla merece sección propia (abajo).
 
 **Qué queda sin responder**, y hereda `reservations-webhooks`: la latencia real, el
 comportamiento ante desorden (R2.4) y si la cabecera estática llega como se configuró (R2.5).
@@ -644,6 +643,43 @@ minutos, así que el coste de agotarla es exactamente el coste de parar la sincr
 todas las propiedades a la vez.
 
 ---
+
+## ⚠️ Beds24 puede enviarte el CVC en un webhook
+
+Descubierto el 2026-08-04 al abrir el desplegable **Additional Data** de Settings → Properties →
+Access. Sus cuatro valores:
+
+```
+None  ·  CVC  ·  Token  ·  CVC and Token
+```
+
+No decide *cuándo* se envía el webhook. Decide si el cuerpo lleva el **código de seguridad de la
+tarjeta** y el token de pago.
+
+Esto engancha directo con la **regla 13** de `steering/security.md`, que es categórica porque
+**PCI DSS prohíbe retener el CVV** — cifrarlo no basta, no puede persistirse en absoluto. Y
+`reservations-webhooks` está diseñado para persistir el cuerpo crudo en `webhook_events` con
+`processed=FALSE` y procesarlo después, así que un ajuste puesto en `CVC` metería datos de
+tarjeta en una columna que la regla 11 exige limpia, **sin que nadie escriba una línea de código
+que parezca una violación**.
+
+Es el mismo patrón que ADR 0006 ya anticipó para los códigos de acceso: *«el PIN vuelve a
+nosotros en los payloads … y aterrizaría en claro en `webhook_events.payload` … saltándose las
+reglas 3 y 4 sin que nadie escriba una línea que parezca una violación»*. Aquí no es un PIN, es
+un CVC, y no hace falta elegir ninguna arquitectura de accesos para exponerse: basta con que
+alguien toque un desplegable.
+
+**Lo que este change hace al respecto**: `beds24_probe.py` escribe `additionalData: "none"` como
+**constante**, no como parámetro — no hay argumento que un llamante pueda pasar para ampliarlo, y
+hay un test que lo fija.
+
+**Lo que heredan `reservations-webhooks` y `pms-beds24-adapter`**:
+
+1. El ajuste se queda en `None`, y conviene **verificarlo por API** al arrancar en vez de confiar
+   en que nadie lo tocó — es legible en `GET /properties`, así que es una aserción barata.
+2. Si algún día se pusiera en `CVC`, el descarte tiene que ocurrir **en recepción, antes de
+   escribir `webhook_events`**. Como ya avisa ADR 0006, la arquitectura que persiste primero y
+   procesa después llega tarde: el dato ya estaría en la columna.
 
 ## Consecuencia para la infraestructura: el webhook necesita un camino desde internet
 

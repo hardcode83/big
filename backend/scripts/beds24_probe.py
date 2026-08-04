@@ -814,6 +814,13 @@ def set_webhook(bench: Beds24Probe, *, property_id: Any, url: str, secret: str) 
     `customHeader` is the static header Beds24 offers **instead of a signature** — the thing
     rule 12 of `steering/security.md` regulates. Sending it here is what lets the sink assert
     that a request really came from Beds24.
+
+    **`additionalData` is hardcoded to `"none"` and must stay that way.** MEASURED 2026-08-04:
+    its four values are `None`, `CVC`, `Token` and `CVC and Token` — it decides whether Beds24
+    puts the **card security code** and the payment token into the webhook body. Rule 13 of
+    `steering/security.md` is categorical because PCI DSS forbids retaining the CVV, so a
+    receiver that persists what it is sent must never be sent that. Not a parameter: a
+    constant, so no caller can widen it by passing a value.
     """
     body = [
         {

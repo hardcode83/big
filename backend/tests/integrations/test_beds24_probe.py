@@ -826,3 +826,29 @@ def test_the_create_id_is_read_from_the_measured_success_shape():
     response = httpx.Response(201, json=[{"success": True, "new": {"id": 90923575}}])
 
     assert beds24._extract_booking_ref(response) == "90923575"
+
+
+def test_the_webhook_never_asks_for_card_data():
+    """MEASURED: `additionalData` chooses between None / CVC / Token / CVC and Token.
+
+    It decides whether Beds24 puts the card security code into the webhook body. Rule 13 of
+    `steering/security.md` is categorical — PCI DSS forbids retaining the CVV — so the value is
+    a constant here, not a parameter a caller could widen.
+    """
+    sent = {}
+
+    def handler(request):
+        sent["body"] = json.loads(request.content)
+        return httpx.Response(201, json=[{"success": True}])
+
+    beds24.set_webhook(_bench(handler), property_id=345754, url="https://x/y", secret="")
+
+    assert sent["body"][0]["webhooks"]["additionalData"] == "none"
+
+
+def test_set_webhook_takes_no_additional_data_argument():
+    """A keyword nobody can pass is a keyword nobody can get wrong."""
+    import inspect
+
+    assert "additionalData" not in inspect.signature(beds24.set_webhook).parameters
+    assert "additional_data" not in inspect.signature(beds24.set_webhook).parameters
