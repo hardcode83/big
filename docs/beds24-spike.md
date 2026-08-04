@@ -77,13 +77,75 @@ cuesta créditos y tiempo del trial.
 
 ### Credencial
 
-Beds24 usa su **API V2** (REST, OpenAPI 3.0). El flujo es: código de invitación → refresh token
-de larga vida → access token de 24 h. **Esto también es un supuesto** tomado de ADR 0006, no
-algo verificado contra la API: forma parte del paso 0.
+Beds24 usa su **API V2** (REST, OpenAPI 3.0). El flujo, confirmado en el paso 0, tiene tres
+piezas con vidas muy distintas:
+
+| Pieza | Vida | Notas |
+|---|---|---|
+| **Invite code** | **24 h**, y se canjea **una sola vez** | Se genera en el panel. Es el único paso que no hace ningún script. |
+| **Refresh token** | Indefinida **mientras se use**; muere a los **30 días sin usar** | Credencial **de cuenta**: da escritura sobre *todas* sus propiedades. |
+| **Access token** | `expiresIn` segundos (24 h) | El sondeo lo canjea al arrancar y lo mantiene **solo en memoria**. |
+
+#### 1. Genera el invite code
+
+Panel de Beds24 → página de **API** → *generate invite code*. Marca los scopes y vuelve a
+pulsar *generate invite code*.
+
+> ⚠️ **Los scopes se fijan al crear el invite code y no se pueden cambiar después.** Si te
+> quedas corto no hay forma de ampliarlos: hay que generar otro invite code y canjearlo por un
+> refresh token nuevo. Marca de una vez lectura de **bookings**, **properties** e
+> **inventory**, y **escritura de bookings** — sin esta última `provoke` no puede causar los
+> eventos que R2.2 necesita, y lo descubrirías a mitad de la ventana de medición.
+
+#### 2. Canjéalo por el refresh token, sin que pase por el historial
+
+El invite code y el refresh token son credenciales, y una línea de comandos con la credencial
+dentro sobrevive en `~/.zsh_history`. Es exactamente el descuido que el propio script se niega
+a permitir (`_reject_unknown_arguments` rechaza un token pasado por `argv` **sin imprimirlo**),
+así que el runbook no va a pedírtelo por otra vía. Lee ambos con `read -rs`, que no hace eco ni
+deja rastro:
 
 ```bash
-export BEDS24_REFRESH_TOKEN=...   # nunca en el repo, nunca en la línea de comandos de otro
+read -rs "?Invite code: " BEDS24_INVITE_CODE
+
+RESPONSE=$(curl -sS -w '\n%{http_code}' \
+  -H "code: $BEDS24_INVITE_CODE" \
+  https://beds24.com/api/v2/authentication/setup)
+unset BEDS24_INVITE_CODE
+
+[ "$(printf '%s' "$RESPONSE" | tail -1)" = "200" ] \
+  && printf '%s' "$RESPONSE" | sed '$d' | python3 -c 'import sys,json; d=json.load(sys.stdin); print("refreshToken:", d["refreshToken"]); print("expiresIn:", d.get("expiresIn"))' \
+  || { echo "FALLÓ — invite code caducado, ya canjeado, o scopes mal:"; printf '%s' "$RESPONSE" | sed '$d'; }
 ```
+
+Guarda el `refreshToken` en tu gestor de contraseñas. Después, en cada sesión de medición:
+
+```bash
+read -rs "?BEDS24_REFRESH_TOKEN: " BEDS24_REFRESH_TOKEN && export BEDS24_REFRESH_TOKEN
+```
+
+(En bash la sintaxis del prompt es `read -rsp "BEDS24_REFRESH_TOKEN: " BEDS24_REFRESH_TOKEN`.)
+
+#### 3. Comprueba que funciona antes de seguir
+
+Una llamada barata que confirma el canje y, de paso, resuelve el supuesto de la forma de
+`/properties` del que depende el guardia de canales:
+
+```bash
+TOKEN=$(curl -sS -H "refreshToken: $BEDS24_REFRESH_TOKEN" \
+  https://beds24.com/api/v2/authentication/token \
+  | python3 -c 'import sys,json; print(json.load(sys.stdin)["token"])')
+
+curl -sS -H "token: $TOKEN" 'https://beds24.com/api/v2/properties?includeAllRooms=true' \
+  | python3 -m json.tool | head -60
+```
+
+Si `TOKEN` sale vacío, el refresh token está mal o los scopes no llegan. Si la respuesta trae
+propiedades, mira **bajo qué clave aparecen los canales**: ese nombre es lo que hay que tener
+en `_connected_channels`, y hasta que esté el guardia se negará a escribir.
+
+> El `TOKEN` de arriba caduca en 24 h y vive solo en esa shell. No lo guardes en ningún sitio:
+> el sondeo lo vuelve a canjear él solo en cada ejecución.
 
 El sondeo lo canjea al arrancar y mantiene el access token **solo en memoria** — no se cachea
 en disco, porque un fichero con una credencial viva durante 24 h es superficie que no hace
