@@ -548,6 +548,53 @@ todas las propiedades a la vez.
 
 ---
 
+## Consecuencia para la infraestructura: el webhook necesita un camino desde internet
+
+Surgido al preparar la medición (2026-08-04), y no es un detalle del spike: es una entrada de
+diseño para `reservations-webhooks` y un **segundo disparador** para una entrada aplazada.
+
+En producción, Beds24 tiene que hacer `POST` contra
+`/api/v1/webhooks/{provider}/{webhook_token}` **desde internet**. Hoy eso no es posible en el
+entorno dev de Oracle:
+
+- El túnel de Cloudflare enruta **solo** a `frontend:3000`. El backend escucha en el loopback de
+  la VM y solo se alcanza por túnel SSH.
+- `ingress-https-hardening` **R1.2** va justo en la dirección contraria a propósito: deja a
+  `cloudflared` **sin poder resolver `backend`**, para que quien controle el API token de
+  Cloudflare no pueda publicar `backend:8000` ni `postgres` reescribiendo una regla de ingress.
+
+### Por qué el análisis heredado de `api-ingress-routing` no cubre este caso
+
+Esa entrada está aplazada con una condición de disparo observable: *«se reabre cuando
+`getDashboardDataSource()` deje de devolver un mock»*. Todo su análisis razona sobre **el
+navegador** llegando a `/api`, y concluye —bien— que no hace falta exponer el backend, sino un
+camino **same-origin** bajo el hostname público del frontend, vía `rewrite` de Next.js.
+
+Un webhook no encaja en ese razonamiento. **No es el navegador y no es same-origin**: es un
+tercero entrando desde fuera. Las consecuencias que el análisis heredado no contempla:
+
+1. **El disparador se queda corto.** `reservations-webhooks` necesita el camino aunque
+   `getDashboardDataSource()` siga devolviendo un mock, así que hay un segundo disparador,
+   independiente del primero y que puede llegar antes.
+2. **La vía same-origin cambia de coste.** Enrutar las llamadas de Beds24 por el servidor de
+   Next mete un salto que no existía y convierte a Next en parte de la superficie que la
+   **regla 12** obliga a proteger: límite de tasa, tope de cuerpo, y la ruta no adivinable. Con
+   el navegador esas obligaciones vivían en el backend; con un webhook empiezan antes.
+3. **La vía «segunda regla de ingress al backend» sigue cerrada**, y ahora por partida doble: ya
+   chocaba con R1.2 de `ingress-https-hardening`, y un endpoint de escritura anónimo es
+   precisamente lo que no conviene colgar de una regla que el API token de Cloudflare puede
+   reescribir.
+
+### Qué NO decide este spike
+
+La solución. Aquí solo consta que el camino hace falta, por qué las dos vías conocidas no valen
+tal cual, y que la condición de disparo de `api-ingress-routing` debería recoger este segundo
+caso. Elegir la topología es alcance de esa entrada o de `reservations-webhooks`, con su propio
+análisis.
+
+Nota operativa: nada de esto afecta a **medir**. La medición usa un túnel efímero contra
+`localhost`, sin tocar la VM de Oracle ni su ingress.
+
 ## Contradicciones con ADR 0006
 
 Se rellenan al medir. Si una medición contradice lo que el ADR afirma, **se señala aquí y el
