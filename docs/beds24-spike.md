@@ -10,9 +10,10 @@ coste real en créditos por petición, la latencia real de los webhooks y la for
 payloads. `channex-staging-adapter` cerró la lista y dejó dicho que **no se extrapola**
 (`channex-staging.md` §«Lo que queda por medir en Beds24»). Esto la resuelve.
 
-> **Estado: el banco de medición está construido; las mediciones no se han tomado.**
-> Todo lo que aparece abajo como *no medido* lo está porque requiere una cuenta de desarrollo
-> de Beds24 que no existe todavía. Ver `sdd/changes/pms-beds24-spike/BLOCKED.md`.
+> **Estado (2026-08-04): cuenta abierta, paso 0 hecho, mediciones en curso.**
+> La cuenta de desarrollo existe (una propiedad `TEST-MEDICION`, id 345754, room 713992, sin
+> canales). El paso 0 corrigió dos supuestos y tumbó un tercero. Las mediciones de coste están
+> empezadas; lo que sigue marcado *no medido* abajo es lo que aún falta.
 
 ---
 
@@ -62,6 +63,8 @@ primera llamada autenticada, porque uno de ellos decide a qué host se manda la 
 | Host y base de la API | ✅ **`https://beds24.com/api/v2`**. No existe subdominio `api.`; era una conjetura y se ha retirado del allowlist. |
 | Flujo de token | ✅ Invite code → `GET /authentication/setup` con cabecera `code` → refresh token. Luego `GET /authentication/token` con cabecera `refreshToken` → access token de 24 h, que viaja en cabecera `token`. La respuesta trae `token`, `expiresIn` y `refreshToken`. El código ya lo hacía así. |
 | Ruta de escritura | ✅ `POST /bookings`, con sobre de respuesta que lleva `modified`, `errors`, `warnings` e `info`. |
+| Cabecera de coste | ✅ **`X-Request-Cost`, con guiones.** La conjetura era `X-RequestCost` y no casaba con nada: el sondeo habría registrado `null` en todas las mediciones y el informe habría dicho «cadencia no calculable» sin error visible. Acompañan `X-Five-Min-Limit-Remaining` (decimal) y `X-Five-Min-Limit-Resets-In` (segundos). |
+| Canales en `/properties` | ⛔ **No existen.** No hay ningún campo de canales en la respuesta, ni con `includeAllRooms=true`. El guardia anti-escritura se rediseñó por eso: ahora cuenta propiedades en vez de detectar canales. |
 
 Los que siguen abiertos exigen la cuenta delante:
 
@@ -69,7 +72,6 @@ Los que siguen abiertos exigen la cuenta delante:
 |---|---|---|
 | Rutas del catálogo | `beds24_probe.py` → `CATALOGUE` | Que `/bookings`, `/properties` y `/inventory/rooms/calendar` existan y sean las que el sync usará. |
 | Claves de identidad y de tiempo | `beds24_webhook_sink.py` → `BOOKING_REF_KEYS`, `EVENT_TIME_KEYS` | Qué clave lleva el id de reserva y cuál el instante del hecho. |
-| **Forma de `/properties`** | `beds24_probe.py` → `_connected_channels` | Bajo qué clave declara la cuenta sus canales conectados. **El guardia falla cerrado**: si no reconoce ninguna, se niega a escribir. Espera esa negativa en la primera ejecución y resuélvela añadiendo el nombre real. |
 | **Escritura de reservas** | `beds24_probe.py` → `BOOKINGS_WRITE_PATH`, los cuerpos de `provoke`, y `_extract_booking_ref` | **El más importante de la tabla**, porque es el único cuyo fallo cuesta una escritura. Confirma la ruta, la forma del cuerpo y —sobre todo— **cómo devuelve el id la respuesta de creación**: si el script no lo reconoce, aborta y te deja una reserva confirmada que hay que borrar a mano. |
 
 Si alguno falla el arreglo es de una línea, pero descubrirlo a mitad de la ventana de medición
@@ -331,7 +333,22 @@ menos útil, nunca una filtración. El modo de fallo es visible en vez de silenc
 
 ### Coste en créditos por endpoint y forma
 
-**No medido.** Requiere la cuenta. La tabla la genera `beds24_probe.py report`.
+**Parcialmente medido** (2026-08-04, dos lecturas sueltas del paso 0; falta el catálogo completo
+con sus dos formas por endpoint, que es lo que produce la tabla definitiva):
+
+| Endpoint | Forma | `X-Request-Cost` |
+|---|---|---|
+| `GET /properties` | por defecto | **1** |
+| `GET /bookings` | `limit=10`, cuenta vacía | **1** |
+
+Dos observaciones del mismo par de llamadas:
+
+- La ventana declara **100 créditos / 5 min** y el remanente llega **en decimales**
+  (`96.8`), así que **hay costes fraccionarios** aunque estos dos hayan salido enteros. El
+  parser trata el coste como decimal por eso; con `int()` un coste de `0.2` se habría
+  registrado como *no medido* y el presupuesto habría salido optimista.
+- `X-Five-Min-Limit-Resets-In` da los segundos que faltan para que la ventana se reinicie, lo
+  que permite a `celery-jobs` esperar exactamente lo necesario en vez de un backoff a ciegas.
 
 ### Cadencia máxima sostenible del sync
 
@@ -384,7 +401,29 @@ todas las propiedades a la vez.
 Se rellenan al medir. Si una medición contradice lo que el ADR afirma, **se señala aquí y el
 ADR no se enmienda en este change** — enmendarlo es una decisión con su propio alcance.
 
-**Ninguna registrada todavía** (nada medido).
+### 1. Los webhooks sí aparecen en la API, al menos para leerlos
+
+ADR 0006 afirma que Beds24 **no tiene API de suscripción** de webhooks y que «se configuran por
+propiedad desde la UI». Medido el 2026-08-04, `GET /properties` devuelve:
+
+```json
+"webhooks": { "version": "one", "url": "", "additionalData": "none", "customHeader": "" }
+```
+
+Es decir: la configuración de webhooks es **legible por API**. Falta comprobar si es
+**escribible** (un `POST`/`PATCH` sobre la propiedad). Si lo fuera, se cae el paso manual del
+runbook —repegar la URL del túnel en el panel en cada sesión— y cambia una premisa de
+`reservations-webhooks`.
+
+`customHeader` confirma, eso sí, lo que el ADR sí acertaba: el mecanismo es una **cabecera
+estática que pones tú**, no una firma. La conclusión de R5.3 no cambia.
+
+### 2. `/properties` no declara los canales conectados
+
+ADR 0006 no lo afirma, pero el diseño de este change lo asumió al escribir el guardia
+anti-escritura de R6.1 en términos de «canales conectados». No hay tal campo en la respuesta,
+ni con `includeAllRooms=true`. El guardia se rediseñó para contar propiedades, que ataca el
+mismo riesgo sin depender de un campo inexistente.
 
 ---
 
