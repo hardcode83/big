@@ -42,18 +42,23 @@ FIXTURE_DIR = Path(__file__).resolve().parents[1] / "tests" / "integrations" / "
 REFRESH_TOKEN_ENV = "BEDS24_REFRESH_TOKEN"
 BASE_URL_ENV = "BEDS24_BASE_URL"
 
-# ASSUMPTION: the API V2 base and its host, to be confirmed against the provider's published
-# OpenAPI 3.0 document on the first real run (runbook step in `docs/beds24-spike.md`). Both
-# spellings are allowed because the provider is documented under `beds24.com` while REST hosts
-# are commonly split onto an `api.` subdomain; whichever turns out to be wrong costs one line.
+# CONFIRMED 2026-08-04 against the provider's published API V2 documentation (step 0): the base
+# is `https://beds24.com/api/v2`. There is no `api.` subdomain — it was allowlisted as a guess
+# and has been removed, per D8's "deja solo ese". A narrower allowlist is the whole value of
+# this constant, so a second spelling "just in case" defeats it.
 DEFAULT_BASE_URL = "https://beds24.com/api/v2"
-ALLOWED_HOSTS = frozenset({"beds24.com", "api.beds24.com"})
+ALLOWED_HOSTS = frozenset({"beds24.com"})
 
-# ASSUMPTION: header names for the V2 token flow — a long-lived refresh token exchanged for a
-# 24 h access token (ADR 0006). Confirmed on the first real run.
+# CONFIRMED 2026-08-04 (step 0). The V2 flow is: invite code -> refresh token -> 24 h access
+# token. `GET /authentication/setup` with a `code` header performs the first exchange and is a
+# ONE-OFF the operator runs by hand — this script starts from the refresh token, so it never
+# holds the invite code. `GET /authentication/token` with a `refreshToken` header performs the
+# second, and the access token then travels in a `token` header. The response carries `token`,
+# `expiresIn` and `refreshToken`.
 REFRESH_HEADER = "refreshToken"
 ACCESS_HEADER = "token"
 TOKEN_PATH = "/authentication/token"
+SETUP_PATH = "/authentication/setup"
 
 COST_HEADER = "x-requestcost"
 
@@ -172,7 +177,13 @@ CAPTURES: dict[str, str] = {
 
 SUBCOMMANDS = ("probe", "capture", "report", "provoke")
 
-# ASSUMPTION: the write endpoint for bookings, used only by `provoke`. Confirmed in step 0.
+# CONFIRMED 2026-08-04 (step 0): `POST /bookings` is the documented write endpoint, and the
+# response envelope carries `modified`, `errors`, `warnings` and `info`. The `errors` check in
+# `_extract_booking_ref` therefore matches a real field, not a guessed one.
+#
+# STILL AN ASSUMPTION: **where the new booking's id sits in that envelope.** This is the one
+# unknown whose failure costs a write, so `_extract_booking_ref` refuses anything it does not
+# recognise and `provoke` aborts with the orphan warning rather than guessing.
 BOOKINGS_WRITE_PATH = "/bookings"
 
 # The three events `provoke` causes, in order, to give R2.3 its minimum of three measurements.
@@ -466,7 +477,11 @@ def assert_account_has_no_ota_channels(bench: Beds24Probe) -> None:
     channel manager per account. An operator with the wrong `BEDS24_REFRESH_TOKEN` exported
     would otherwise create, modify and cancel a booking on a flat that is actually selling.
     """
-    response = bench.request("GET", "/properties")
+    # `includeAllRooms=true` because the default `/properties` body is documented as slim, and a
+    # slim body is exactly the case that used to read as "no channels connected". Asking for the
+    # full shape gives the guard something to recognise; if it still finds no channel field it
+    # refuses, which is the point.
+    response = bench.request("GET", "/properties", {"includeAllRooms": "true"})
     if response.status_code != 200:
         raise SystemExit(
             "beds24-probe: refusing to write — could not read /properties to confirm the "

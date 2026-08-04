@@ -55,10 +55,18 @@ El banco se escribió sin cuenta, así que lleva **supuestos marcados como `ASSU
 código. Confírmalos contra la especificación OpenAPI 3.0 publicada de la API V2 **antes** de la
 primera llamada autenticada, porque uno de ellos decide a qué host se manda la credencial:
 
+**Tres ya están resueltos** contra la documentación pública (2026-08-04), sin gastar créditos:
+
+| Supuesto | Estado |
+|---|---|
+| Host y base de la API | ✅ **`https://beds24.com/api/v2`**. No existe subdominio `api.`; era una conjetura y se ha retirado del allowlist. |
+| Flujo de token | ✅ Invite code → `GET /authentication/setup` con cabecera `code` → refresh token. Luego `GET /authentication/token` con cabecera `refreshToken` → access token de 24 h, que viaja en cabecera `token`. La respuesta trae `token`, `expiresIn` y `refreshToken`. El código ya lo hacía así. |
+| Ruta de escritura | ✅ `POST /bookings`, con sobre de respuesta que lleva `modified`, `errors`, `warnings` e `info`. |
+
+Los que siguen abiertos exigen la cuenta delante:
+
 | Supuesto | Dónde | Qué comprobar |
 |---|---|---|
-| Host y base de la API | `beds24_probe.py` → `ALLOWED_HOSTS`, `DEFAULT_BASE_URL` | Cuál de `beds24.com` / `api.beds24.com` es el real. **Deja solo ese** en el allowlist. |
-| Cabeceras del flujo de token | `beds24_probe.py` → `REFRESH_HEADER`, `ACCESS_HEADER`, `TOKEN_PATH` | Nombres reales del canje refresh → access. |
 | Rutas del catálogo | `beds24_probe.py` → `CATALOGUE` | Que `/bookings`, `/properties` y `/inventory/rooms/calendar` existan y sean las que el sync usará. |
 | Claves de identidad y de tiempo | `beds24_webhook_sink.py` → `BOOKING_REF_KEYS`, `EVENT_TIME_KEYS` | Qué clave lleva el id de reserva y cuál el instante del hecho. |
 | **Forma de `/properties`** | `beds24_probe.py` → `_connected_channels` | Bajo qué clave declara la cuenta sus canales conectados. **El guardia falla cerrado**: si no reconoce ninguna, se niega a escribir. Espera esa negativa en la primera ejecución y resuélvela añadiendo el nombre real. |

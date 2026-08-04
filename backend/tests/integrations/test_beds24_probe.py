@@ -108,9 +108,19 @@ def test_host_allowlist_rejects_lookalikes(url):
         beds24.assert_host_allowed(url)
 
 
-@pytest.mark.parametrize("url", ["https://beds24.com/api/v2", "https://api.beds24.com/v2/x"])
-def test_host_allowlist_accepts_the_real_hosts(url):
+@pytest.mark.parametrize("url", ["https://beds24.com/api/v2", "https://beds24.com/api/v2/bookings"])
+def test_host_allowlist_accepts_the_real_host(url):
     beds24.assert_host_allowed(url)
+
+
+def test_the_guessed_api_subdomain_is_no_longer_allowed():
+    """Step 0 confirmed the base is `beds24.com`; `api.beds24.com` was a guess and is gone.
+
+    Keeping a second spelling "just in case" would defeat the point of the allowlist — the
+    narrower it is, the more it is worth.
+    """
+    with pytest.raises(SystemExit, match="refusing to talk to host"):
+        beds24.assert_host_allowed("https://api.beds24.com/v2/bookings")
 
 
 def test_base_url_from_the_environment_cannot_redirect_the_probe():
