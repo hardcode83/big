@@ -337,12 +337,21 @@ que es justo lo que abre esa superficie.
 3. **Terminal 3** — configura esa URL como webhook **por API**, sin tocar el panel (medido:
    `POST /properties` lo escribe):
 
+   La cabecera estática es la **única** autenticación que Beds24 ofrece en lugar de una firma,
+   así que la regla 12(a) la trata como credencial y viaja por el entorno, no por `argv`:
+
    ```bash
-   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend \
+   read -rs "?BEDS24_WEBHOOK_SECRET (p. ej. 'X-AutoHost-Probe: 1'): " BEDS24_WEBHOOK_SECRET
+   export BEDS24_WEBHOOK_SECRET
+
+   docker compose run --rm --no-deps \
+     -e BEDS24_REFRESH_TOKEN -e BEDS24_WEBHOOK_SECRET backend \
      uv run python scripts/beds24_probe.py webhook \
        --url=https://TU-URL.trycloudflare.com/hook \
-       --secret='X-AutoHost-Probe: 1' --confirm-writes --out=/app/beds24-cost.jsonl
+       --confirm-writes --out=/app/beds24-cost.jsonl
    ```
+
+   No hay flag `--secret=`: el script lo rechaza, y sin echo del valor.
 4. Provoca los hechos **con el sondeo**, no a mano:
 
    ```bash

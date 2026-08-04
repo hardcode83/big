@@ -186,7 +186,12 @@ def build_webhook_record(
         # plain word. Enough to tell "/hook" from "/a/b/c" when debugging, useless to anyone
         # who wants to forge a request.
         "path_depth": len(segments),
-        "path_head": segments[0] if segments and segments[0].isalpha() else None,
+        # Alphabetic AND short. `isalpha()` alone still let a word-shaped secret through — an
+        # operator who invents `/correcthorsebatterystaple` as their unguessable path would have
+        # had it logged verbatim. A real route name is a word like `hook`; a secret is long.
+        "path_head": (
+            segments[0] if segments and segments[0].isalpha() and len(segments[0]) <= 12 else None
+        ),
         "query_keys": sorted({pair.partition("=")[0] for pair in query.split("&") if pair}),
         # Names only. One of these is the static header Beds24 offers instead of a signature,
         # and its value is a credential (R2.5).

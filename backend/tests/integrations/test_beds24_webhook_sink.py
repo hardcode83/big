@@ -309,3 +309,25 @@ def test_an_unguessable_route_token_is_not_persisted():
     assert "9f3a2c7e1b4d8a6f0c5e" not in rendered
     assert record["path_depth"] == 5
     assert record["path_head"] == "api"
+
+
+@pytest.mark.parametrize(
+    "path",
+    [
+        "/correcthorsebatterystaple",   # word-shaped secret, all alphabetic
+        "/9f3a2c7e1b4d8a6f0c5e",        # hex token as the only segment
+        "/api/v1/webhooks/beds24/9f3a2c7e1b4d8a6f0c5e",
+    ],
+)
+def test_no_route_segment_long_enough_to_be_a_secret_is_persisted(path):
+    """`isalpha()` alone was not enough: a secret can be a word.
+
+    A real route name is short (`hook`, `api`); an unguessable token is not. Anything longer
+    than a route name is reduced to its depth.
+    """
+    record = sink.build_webhook_record(method="POST", path=path, headers={}, body=b"{}")
+
+    rendered = json.dumps(record)
+    for segment in path.split("/"):
+        if len(segment) > 12:
+            assert segment not in rendered
