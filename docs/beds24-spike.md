@@ -482,8 +482,30 @@ fechas.
 
 ### Cadencia máxima sostenible del sync
 
-**No medido.** Se deriva de lo anterior. Es la cifra que `celery-jobs` necesita y el motivo de
-que este change vaya antes que él.
+**Medida el 2026-08-04.** Registro crudo en
+[`beds24-request-cost.jsonl`](beds24-request-cost.jsonl); tabla generada con
+`beds24_probe.py report`.
+
+- Ciclo de sync completo (las 8 formas del catálogo): **8 créditos**
+- Ventana del proveedor: **100 créditos / 300 s**, por cuenta
+- Ciclos por ventana: **12,5**
+- **Cadencia máxima sostenible: un sync cada 24 s por cuenta**
+
+> ⚠️ **Ese número es un techo, no una recomendación, y confundirlo sería el error caro.**
+>
+> 24 s es lo que el **presupuesto de créditos** permite. Beds24 **desaconseja explícitamente el
+> uso en tiempo real y recomienda sincronización completa cada ~6 h** (ADR 0006). Las dos cosas
+> no se contradicen: el límite de créditos protege su infraestructura de picos, la recomendación
+> habla de carga sostenida y uso razonable. Sincronizar cada 24 s porque «cabe» es la clase de
+> lectura que acaba en una conversación con su soporte.
+>
+> Lo que esta medición aporta a `celery-jobs` no es «poll cada 24 s», es **holgura**: la cadencia
+> que el producto necesite —minutos, no horas, para que el dashboard responda en <10 s— cabe
+> sobradamente dentro del presupuesto, y no hace falta diseñar contra la restricción. Eso era
+> justo la incógnita que ADR 0006 dejó abierta.
+>
+> Y sigue vigente el aviso de la sección anterior: **medido sobre una cuenta vacía**. Con
+> reservas dentro el coste por ciclo puede subir, y con él baja la holgura.
 
 ### Latencia de los webhooks
 
