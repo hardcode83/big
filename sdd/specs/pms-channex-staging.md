@@ -102,6 +102,9 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
   del mapeo **sin ninguna llamada de red**, de modo que la suite de CI no dependa de la cuenta de
   staging.
 - THE SYSTEM SHALL anonimizar **en el momento de capturar**, no en una pasada manual posterior.
+- THE SYSTEM SHALL comprobar que **ningún fixture commiteado** —de este proveedor o de
+  cualquier otro bajo `fixtures/`— contiene datos con forma de tarjeta, derivando las agujas del
+  propio anonimizador en lugar de mantener una segunda lista que puede quedarse corta.
 - THE SYSTEM SHALL anonimizar con la política **fail-closed**: una hoja de texto sobrevive solo si
   su clave es dato de negocio reconocido; el resto se sustituye. Esto aplica a las tres posiciones
   donde un valor puede esconderse — hojas de texto, hojas numéricas y **claves de diccionario** — y
@@ -133,8 +136,14 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
   el mapeo por elemento.
 - `backend/app/integrations/cli/pms_sync.py` — flag `--provider` y códigos de salida.
 - `backend/app/core/config.py` — `channex_*` settings.
+- `backend/scripts/anonymise.py` — **la política fail-closed en sí**, extraída del probe por
+  `pms-beds24-spike` cuando un segundo proveedor la necesitó. Solo la allowlist de negocio es por
+  proveedor (`business_keys`); las agujas de PII, los dos juicios por forma y el suelo numérico
+  son compartidos, y el orden **agujas antes que sufijos preservados** es contrato: invertirlo
+  reabre la fuga de `expiration_date`.
 - `backend/scripts/channex_{probe,bootstrap,claim_test_hotel}.py` — sondeo, provisión y
-  adquisición de turno de hotel de test. **Fuera de `app/` y excluidos de la imagen** por
-  `backend/.dockerignore`: son herramientas de un solo uso contra un servicio externo.
+  adquisición de turno de hotel de test. El probe conserva su `PRESERVED_KEYS` y delega el resto.
+  **Fuera de `app/` y excluidos de la imagen** por `backend/.dockerignore`: son herramientas de
+  un solo uso contra un servicio externo.
 - `backend/tests/integrations/fixtures/channex/*.json` — payloads reales anonimizados.
 - `docs/channex-staging.md` — runbook y hallazgos medidos.

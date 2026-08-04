@@ -22,3 +22,4 @@
 | pms-provider-decision | new, tasks, run, review, archive | 158067 | 293291 | 72404185 | 55.4397 | 2026-08-03 | 2026-08-03 |
 | channex-staging-adapter | new, design, tasks, run, review, archive | 245654 | 558118 | 167000433 | 111.4333 | 2026-08-03 | 2026-08-03 |
 | ci-backend-tests-conditional-gate | design, tasks, archive | 221481 | 789025 | 245617591 | 161.9459 | 2026-08-03 | 2026-08-03 |
+| pms-beds24-spike | new, design, tasks, run, archive | 165383 | 425606 | 81992533 | 54.2078 | 2026-08-03 | 2026-08-04 |
