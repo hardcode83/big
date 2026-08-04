@@ -50,6 +50,11 @@ Antes de registrarte, ten listo:
 - `cloudflared` instalado, para el túnel efímero de la medición de webhooks.
 - Una hora seguida: la medición de webhooks necesita provocar hechos y esperarlos.
 
+> ⚠️ **Escribe siempre bajo `/app/`, nunca bajo `/tmp/`.** `docker compose run --rm` destruye
+> el contenedor al terminar, así que un fichero en `/tmp` del contenedor desaparece con él y el
+> `report` no encuentra nada. `./backend` está montado en `/app`, de modo que `--out=/app/x.jsonl`
+> aterriza en `backend/x.jsonl` de tu repo y sobrevive.
+
 ### Paso 0 — confirmar los supuestos antes de gastar un solo crédito
 
 El banco se escribió sin cuenta, así que lleva **supuestos marcados como `ASSUMPTION`** en el
@@ -267,8 +272,8 @@ Nada de eso dice cuánto cuesta *nuestro* ciclo de sync, y la cadencia del sched
 `celery-jobs` es una función de ese número.
 
 ```bash
-docker compose exec backend uv run python scripts/beds24_probe.py probe \
-    --out=/tmp/beds24-request-cost.jsonl
+docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_probe.py probe \
+    --out=/app/beds24-cost.jsonl
 ```
 
 El sondeo recorre un catálogo de peticiones y registra, por cada una, el `X-RequestCost` que
@@ -291,8 +296,8 @@ El JSONL crudo se commitea como `beds24-request-cost.jsonl`, al lado de este fic
 informe se deriva de datos revisables, no de una transcripción.
 
 ```bash
-docker compose exec backend uv run python scripts/beds24_probe.py report \
-    --out=/tmp/beds24-request-cost.jsonl
+docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_probe.py report \
+    --out=/app/beds24-cost.jsonl
 ```
 
 renderiza la tabla de coste y la **cadencia máxima sostenible** — el intervalo mínimo entre
@@ -319,14 +324,14 @@ superficie. Así que ambos van en el contenedor:
 1. Levanta el receptor y déjalo corriendo:
 
    ```bash
-   docker compose exec backend uv run python scripts/beds24_webhook_sink.py \
-       --out=/tmp/beds24-webhooks.jsonl
+   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_webhook_sink.py \
+       --out=/app/beds24-webhooks.jsonl
    ```
 
 2. En **otra shell del mismo contenedor**, levanta el túnel y copia la URL que imprime:
 
    ```bash
-   docker compose exec backend cloudflared tunnel --url http://127.0.0.1:8099
+   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend cloudflared tunnel --url http://127.0.0.1:8099
    ```
 
    Si `cloudflared` no está en la imagen del backend, la alternativa correcta es correr **las
@@ -336,8 +341,8 @@ superficie. Así que ambos van en el contenedor:
 4. Provoca los hechos **con el sondeo**, no a mano:
 
    ```bash
-   docker compose exec backend uv run python scripts/beds24_probe.py provoke \
-       --room=713992 --confirm-writes --out=/tmp/beds24-request-cost.jsonl
+   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_probe.py provoke \
+       --room=713992 --confirm-writes --out=/app/beds24-cost.jsonl
    ```
 
    > ⚠️ **`provoke` es la única subcomanda que escribe.** Por eso exige `--confirm-writes` y,
@@ -397,7 +402,7 @@ una de ellas es la credencial estática de autenticación.
 ## Capturar payloads reales
 
 ```bash
-docker compose exec backend uv run python scripts/beds24_probe.py capture bookings messages
+docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_probe.py capture bookings messages
 ```
 
 Los payloads se anonimizan **en el momento de capturar**, no en una pasada posterior: un
@@ -562,7 +567,22 @@ De paso, este viaje reveló el **sobre de escritura real** de la API: una lista 
 con `success` booleano y `modified`. Eso es lo que `_extract_booking_ref` tendrá que reconocer
 en la respuesta de `POST /bookings`.
 
-### 2. `/properties` no declara los canales conectados
+### 2. El refresh token NO rota al usarse
+
+Medido el 2026-08-04, y por observación en vez de por experimento: el sondeo canjea el refresh
+token en cada ejecución y avisa en mayúsculas si la respuesta trae uno distinto al enviado. Tras
+un canje completo **no apareció el aviso**, así que el proveedor devuelve el mismo.
+
+No se probó de forma destructiva a propósito: averiguarlo forzando la rotación habría invalidado
+el token guardado por el operador si la respuesta hubiera sido que sí.
+
+Para `pms-beds24-adapter` esto simplifica el diseño: basta con **persistir el refresh token una
+vez** y cachear el access token en Redis con TTL. Si rotara habría que reescribir la credencial
+cifrada en cada refresh, de forma atómica, y perder esa escritura bloquearía la cuenta a los 30
+días. La comprobación se queda en el script de todas formas: es barata y el día que el proveedor
+cambie de política, avisa.
+
+### 3. `/properties` no declara los canales conectados
 
 ADR 0006 no lo afirma, pero el diseño de este change lo asumió al escribir el guardia
 anti-escritura de R6.1 en términos de «canales conectados». No hay tal campo en la respuesta,
