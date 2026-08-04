@@ -1,0 +1,1 @@
+{"ts_utc": "2026-08-04T09:11:18.885460+00:00", "booking_ref": null, "endpoint": "/properties", "method": "POST", "shape": "webhook-set", "x_request_cost": 1, "credit_headers": {"x-five-min-limit-resets-in": "298", "x-five-min-limit-remaining": "97.4"}, "status": 201}

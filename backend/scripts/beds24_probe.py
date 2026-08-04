@@ -654,7 +654,26 @@ def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
 
     for action in PROVOKE_ACTIONS:
         if action == "create":
-            body = [{"roomId": room_id, "status": "confirmed", "numAdult": 1}]
+            # MEASURED 2026-08-04: `arrival` and `departure` are REQUIRED. Without them the
+            # provider answers `201` with `success: false` and
+            # `errors: [{"action":"new booking","field":"arrival","message":"invalid"}]` —
+            # a failure dressed as a 2xx. The first version of this body omitted them, so every
+            # run failed while looking like it had half-succeeded.
+            #
+            # Dates are 30 days out so the booking never collides with anything in the calendar,
+            # and the guest name is obviously synthetic.
+            arrival = _utc_now().date() + timedelta(days=30)
+            body = [
+                {
+                    "roomId": room_id,
+                    "status": "confirmed",
+                    "arrival": arrival.isoformat(),
+                    "departure": (arrival + timedelta(days=2)).isoformat(),
+                    "firstName": "Probe",
+                    "lastName": "Test",
+                    "numAdult": 1,
+                }
+            ]
         elif action == "modify":
             body = [{"id": booking_ref, "numAdult": 2}]
         else:
@@ -672,6 +691,17 @@ def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
                 raise SystemExit(
                     f"beds24-probe: create failed (HTTP {response.status_code}); not "
                     "attempting modify or cancel. Nothing was written."
+                )
+            failure = _envelope_failure(response)
+            if failure is not None:
+                # A create that the provider REJECTED is not an orphan booking. The first
+                # version conflated the two and raised the orphan alarm on a plain validation
+                # error, which sends the operator hunting in the panel for a booking that was
+                # never made. The provider's validation message is safe to show: it names a
+                # field, not a value.
+                raise SystemExit(
+                    f"beds24-probe: the provider rejected the booking — {failure}\n"
+                    "  Nothing was created. Fix the request body and re-run."
                 )
             booking_ref = _extract_booking_ref(response)
             if booking_ref is None:
@@ -699,6 +729,32 @@ def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
             )
         )
     return records
+
+
+def _envelope_failure(response) -> str | None:
+    """The provider's own error text when the envelope reports failure, else `None`.
+
+    MEASURED: Beds24 answers `201` even when the write is refused, putting the verdict in the
+    body. There are two shapes — a single-element list `[{"success": false, "errors": [...]}]`
+    for a rejected item, and a bare dict `{"success": false, "code": 400, "error": "..."}` for a
+    malformed request. Both mean *nothing was written*.
+    """
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if isinstance(payload, list):
+        payload = payload[0] if len(payload) == 1 and isinstance(payload[0], dict) else None
+    if not isinstance(payload, dict) or payload.get("success") is not False:
+        return None
+    errors = payload.get("errors")
+    if isinstance(errors, list) and errors:
+        return "; ".join(
+            f"{e.get('field', '?')}: {e.get('message', '?')}"
+            for e in errors
+            if isinstance(e, dict)
+        )
+    return str(payload.get("error") or "the provider reported success=false without detail")
 
 
 def _extract_booking_ref(response) -> str | None:

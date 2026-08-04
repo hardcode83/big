@@ -455,6 +455,14 @@ fechas.
 | `GET /inventory/rooms/calendar` | ventana 90 días | **1** |
 | `GET /bookings/messages` | por defecto | **1** |
 | `POST /properties` | escritura de webhooks | **1** |
+| `POST /bookings` | crear reserva | **1** |
+| `POST /bookings` | modificar reserva | **1,1** |
+| `POST /bookings` | cancelar reserva | **1,1** |
+
+**Las escrituras cuestan fraccionario.** `modify` y `cancel` salieron a **1,1** créditos. Es la
+confirmación de que el coste no es entero, y la razón de que el parser trate el valor como
+decimal: con `int()`, un `1.1` se habría registrado como *no medido* y el presupuesto habría
+salido optimista.
 
 > ⚠️ **No concluir de aquí que el coste sea plano.** Esta cuenta está **vacía**: cero reservas y
 > una propiedad. Todas las respuestas devolvieron `count` 0 o 1, así que ninguna forma movió
@@ -512,18 +520,91 @@ fechas.
 > Y sigue vigente el aviso de la sección anterior: **medido sobre una cuenta vacía**. Con
 > reservas dentro el coste por ciclo puede subir, y con él baja la holgura.
 
-### Latencia de los webhooks
+### ⛔ Latencia de los webhooks — NO MEDIBLE en una cuenta sin canales
 
-**No medido.** ADR 0006 afirma ~1 minuto de media, sin fuente propia.
+**No medido, y no por falta de tiempo: por una contradicción entre dos requisitos.**
+
+Medido el 2026-08-04: se configuró el webhook por API contra un túnel efímero (camino verificado
+de punta a punta con un `POST` manual que el receptor registró en 246 ms), se creó una reserva
+por API, y **no llegó ningún webhook**. El túnel seguía vivo — comprobado con una segunda
+petición manual después de esperar.
+
+La causa está en la documentación del proveedor: *«When a booking is created, modified or
+cancelled **by a channel**, Beds24 will send a notification push to a URL specified by you»*.
+**Los webhooks se disparan para reservas de canal.** Una reserva creada por API tiene
+`channel: "direct"` y `referer: "API"` —lo confirma el fixture capturado— y no dispara nada.
+
+Y ahí está el choque: **R6.1 prohíbe conectar ningún canal OTA a esta cuenta**, porque REDES11 y
+PAJARITOS8 están vendiendo y Airbnb admite un único channel manager por cuenta. Medir la
+latencia de los webhooks exigiría exactamente lo que la regla dura prohíbe.
+
+No es un fallo del banco: el receptor, el túnel, la configuración por API y la correlación por
+`booking_ref` funcionan y están probados. Lo que falta es un evento que el proveedor considere
+digno de webhook.
+
+**Qué queda sin responder**, y hereda `reservations-webhooks`: la latencia real, el
+comportamiento ante desorden (R2.4) y si la cabecera estática llega como se configuró (R2.5).
+
+**Vías para cerrarlo más adelante**, ninguna gratis:
+
+1. **Medir durante la ventana de corte de `pms-beds24-adapter`**, cuando los canales se conecten
+   de verdad a Beds24. Es el momento natural y no cuesta una cuenta extra, pero llega tarde para
+   diseñar `celery-jobs`.
+2. **Una segunda cuenta de Beds24 con un canal de test**. Ningún proveedor evaluado salvo Channex
+   da sandbox de OTA (ADR 0006), así que «canal de test» aquí significa un anuncio real en una
+   OTA real. Coste y riesgo propios.
+3. **Preguntar a soporte** si existe un modo de disparo para reservas de API. La documentación
+   menciona que los booking webhooks son *beta* y piden contactar; puede que haya un ajuste en
+   Settings → Properties → Access → Booking webhooks que la API no expone.
+
+**Lo que sí queda demostrado y vale para `reservations-webhooks`**: la configuración del webhook
+**se hace por API** (contradice ADR 0006, ver arriba), el `customHeader` viaja en la
+configuración, y el receptor con anonimización previa a disco funciona.
 
 ### Orden de llegada de los webhooks
 
 **No medido.** ADR 0006 afirma que el proveedor no garantiza el orden. `reservations-webhooks`
 depende de ello, así que se comprueba en vez de asumirse.
 
-### Forma real de los payloads de reserva y de mensaje
+### Forma real de los payloads de reserva
 
-**No medido.** Los fixtures vivirán en `backend/tests/integrations/fixtures/beds24/`.
+**Medida el 2026-08-04.** Fixture anonimizado en
+`backend/tests/integrations/fixtures/beds24/bookings.json`, capturado de una reserva real creada
+por API.
+
+Una reserva de Beds24 trae **73 campos**. Los que el mapeo a `ReservationDTO` necesitará:
+`id`, `status`, `roomId`, `propertyId`, `arrival`, `departure`, `numAdult`, `numChild`, `price`,
+`commission`, `channel`, `referer`, `bookingTime`, `modifiedTime`, `cancelTime`.
+
+Tres cosas que conviene saber antes de escribir ese mapeo:
+
+- **Hay diez campos `custom1`…`custom10`** de texto libre. Son el sitio donde un operador mete lo
+  que sea, así que la política fail-closed los scrubbea por defecto y eso es correcto.
+- **Hay dos campos con forma de credencial de pago**: `stripeToken` y `pcibookingToken`. En esta
+  captura llegaron `null` —cuenta sin canales, sin pagos— pero existen en el esquema, y la
+  aguja `token` del anonimizador ya los cubre. La regla 13 aplica aquí aunque hoy vengan vacíos.
+- **`channel` y `referer` distinguen el origen**: esta reserva trae `"direct"` y `"API"`, que es
+  justo lo que explica por qué no disparó webhook.
+
+**El sobre de escritura**, útil para `pms-beds24-adapter`:
+
+```json
+// éxito
+[{"success": true, "new": {"id": 90923575, ...}, "info": [{"action":"new booking","id":90923575}]}]
+// rechazo de un elemento — OJO: llega con HTTP 201
+[{"success": false, "errors": [{"action":"new booking","field":"arrival","message":"invalid"}]}]
+// petición malformada — dict, no lista
+{"success": false, "code": 400, "error": "Request body must be an array"}
+```
+
+**El proveedor responde `201` incluso cuando rechaza la escritura.** El veredicto está en el
+cuerpo, no en el estado. Un adapter que se fíe del código HTTP dará por creada una reserva que no
+existe.
+
+### Forma real de los payloads de mensaje
+
+**No medido.** `/bookings/messages` responde 200 pero llega vacío: no hay conversación sin canal.
+Mismo bloqueo que la latencia de webhooks.
 
 ### Límite de tasa
 
