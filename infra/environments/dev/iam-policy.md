@@ -72,7 +72,14 @@ oci iam policy list --compartment-id <OCID de la raíz de la tenancy> \
 
 Y si esa premisa no se sostuviera, el síntoma sería que el deploy posterior al `apply` falla en "Render .env": la salida es la escalera de abajo, no volver a la condición por nombre (que por el punto 2 sería ensanchar el acceso, no arreglarlo).
 
-Queda un desconocido más pequeño, y es de cliente, no de política: que el propio OCI CLI no haga un `GetSecret` extra al resolver por nombre. Si lo hiciera, el deploy fallaría en "Render .env" tras el `apply`, y la salida es (a) reintentar por si es propagación de la policy, que en OCI es eventual, (b) reponer `read secrets` **con** `where target.vault.id`, o (c) leer por OCID exponiéndolo como `output`. La medición está pendiente del primer deploy posterior al `apply` de este change.
+**MEDIDO el 2026-08-04, y la duda queda cerrada por comportamiento, no solo por deducción.** Tras aplicar la policy acotada (`terraform apply`: `0 added, 1 changed, 0 destroyed`, modificación **in situ** en 1 s, sin ventana sin permisos) se lanzó `deploy-dev` por `workflow_dispatch` y el paso **"Render .env" pasó**, leyendo el token del túnel **por nombre** con un único statement condicionado por OCID. Cuatro consecuencias, todas verificadas:
+
+- `GetSecretBundleByName` **no necesita** `SECRET_READ` ni `SECRET_INSPECT`: el statement eliminado era prescindible, como decía la tabla.
+- La condición `where any {target.secret.id = …}` **sí se evalúa** en un acceso por nombre, o sea que OCI resuelve nombre→OCID **antes** de autorizar.
+- El desconocido que quedaba —que el propio CLI de OCI hiciera un `GetSecret` extra al resolver por nombre, y era de **cliente**, no de política— **no ocurre**.
+- La premisa declarada arriba (que la policy versionada sea la única concesión de `SECRET_BUNDLE_READ` que alcance a ese instance principal) queda **corroborada indirectamente**: eliminado el statement sin condición, la lectura sigue funcionando, luego lo que autoriza es el que queda.
+
+No hizo falta recorrer ninguna escalera. Si esto se rompiera algún día, los peldaños siguen siendo (a) reintentar, porque las policies de OCI propagan con consistencia eventual; (b) reponer `read secrets` **con** `where target.vault.id`; (c) leer por OCID exponiéndolo como `output`. Y **nunca** volver a la condición por nombre: por el punto 2 de arriba sería ensanchar el acceso, no arreglarlo.
 
 ## Verificado
 - `terraform plan` (provider con `svc-terraform-dev`): lee/refresca compute, red, budget y vault sin errores de autorización.
