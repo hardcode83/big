@@ -333,22 +333,52 @@ menos útil, nunca una filtración. El modo de fallo es visible en vez de silenc
 
 ### Coste en créditos por endpoint y forma
 
-**Parcialmente medido** (2026-08-04, dos lecturas sueltas del paso 0; falta el catálogo completo
-con sus dos formas por endpoint, que es lo que produce la tabla definitiva):
+**Medido el 2026-08-04**, validando cada ruta y cada forma una por una. Todas las rutas del
+catálogo existen y responden 200; lo único que la validación tuvo que corregir fue el formato de
+fechas.
 
 | Endpoint | Forma | `X-Request-Cost` |
 |---|---|---|
 | `GET /properties` | por defecto | **1** |
-| `GET /bookings` | `limit=10`, cuenta vacía | **1** |
+| `GET /properties` | `?id=<uno>` | **1** |
+| `GET /bookings` | `limit=10` | **1** |
+| `GET /bookings` | `limit=100` | **1** |
+| `GET /bookings` | ventana 1 día | **1** |
+| `GET /bookings` | ventana 90 días | **1** |
+| `GET /bookings` | ventana 365 días, `limit=100` | **1** |
+| `GET /inventory/rooms/calendar` | ventana 7 días | **1** |
+| `GET /inventory/rooms/calendar` | ventana 90 días | **1** |
+| `GET /bookings/messages` | por defecto | **1** |
+| `POST /properties` | escritura de webhooks | **1** |
 
-Dos observaciones del mismo par de llamadas:
+> ⚠️ **No concluir de aquí que el coste sea plano.** Esta cuenta está **vacía**: cero reservas y
+> una propiedad. Todas las respuestas devolvieron `count` 0 o 1, así que ninguna forma movió
+> volumen de datos y el eje que se sospechaba —tamaño de página, amplitud de ventana— no llegó a
+> ejercitarse de verdad. Lo que está medido es el **coste base**: pedir 100 elementos no cuesta
+> más que pedir 10 **cuando no hay elementos que devolver**. La diferenciación real, si existe,
+> aparece con reservas dentro, y eso llega con `provoke`.
+>
+> Es el mismo tipo de cautela que `channex-staging.md` aplica a su límite de tasa: se publica lo
+> observado, no lo que apetecería concluir.
 
-- La ventana declara **100 créditos / 5 min** y el remanente llega **en decimales**
-  (`96.8`), así que **hay costes fraccionarios** aunque estos dos hayan salido enteros. El
-  parser trata el coste como decimal por eso; con `int()` un coste de `0.2` se habría
-  registrado como *no medido* y el presupuesto habría salido optimista.
-- `X-Five-Min-Limit-Resets-In` da los segundos que faltan para que la ventana se reinicie, lo
-  que permite a `celery-jobs` esperar exactamente lo necesario en vez de un backoff a ciegas.
+### Hallazgos del formato de petición
+
+- **`arrivalFrom` / `arrivalTo` exigen `YYYY-MM-DD`.** Una duración ISO-8601 (`P0D`, `P90D`) da
+  `400` con el mensaje *"Parameter arrivalFrom is in an invalid format. Expected format:
+  YYYY-MM-DD"*. El catálogo las enviaba así al principio, así que **dos de las cuatro formas de
+  `/bookings` no medían nada**: devolvían 400 y el sondeo lo habría anotado como medición
+  fallida. Ahora las fechas se calculan como desplazamiento en días desde hoy, que además evita
+  que el catálogo caduque.
+
+- **Una petición rechazada NO consume crédito.** Los dos `400` no traen `X-Request-Cost` y el
+  remanente no se movió a través de ellos (98 → 97 para las dos juntas, cuando cada llamada
+  válida resta exactamente 1). Es útil para `celery-jobs`: un error de validación no gasta
+  presupuesto, así que reintentar tras corregir los parámetros es gratis. **No extrapolar a los
+  `429`**, que son otra cosa.
+
+- **Filtrar por un id cuesta lo mismo que pedirlo todo** (`/properties` y `/properties?id=`, 1
+  crédito ambas). Con una sola propiedad no dice mucho, pero apunta a que el coste no se abarata
+  por acotar.
 
 ### Cadencia máxima sostenible del sync
 

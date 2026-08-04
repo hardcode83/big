@@ -26,7 +26,7 @@ import re
 import sys
 import time
 from dataclasses import dataclass, field
-from datetime import datetime, timezone
+from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any, Callable
 from urllib.parse import urlsplit
@@ -124,10 +124,24 @@ class RequestShape:
     Each endpoint is measured with at least two of these (R1.2). Without a second shape a
     measurement cannot tell a flat cost from one that scales — and that difference is what
     decides whether the sync may paginate or has to shard.
+
+    `date_params` maps a parameter name to an **offset in days from today**, resolved when the
+    request is built. MEASURED 2026-08-04: the API rejects ISO-8601 durations with
+    *"Parameter arrivalFrom is in an invalid format. Expected format: YYYY-MM-DD"*, so the
+    first version's `P0D`/`P90D` produced a 400 on every windowed shape. Absolute dates cannot
+    be hardcoded either — they would go stale — hence the offset.
     """
 
     label: str
     params: dict[str, Any] = field(default_factory=dict)
+    date_params: dict[str, int] = field(default_factory=dict)
+
+    def resolved_params(self, today: date | None = None) -> dict[str, Any]:
+        base = today or _utc_now().date()
+        resolved = dict(self.params)
+        for name, offset in self.date_params.items():
+            resolved[name] = (base + timedelta(days=offset)).isoformat()
+        return resolved
 
 
 @dataclass(frozen=True)
@@ -141,10 +155,9 @@ class CatalogueEntry:
 # The requests the `celery-jobs` sync is expected to make. The axis varied per endpoint is the
 # one suspected of moving the cost: page size, date-range width, number of properties.
 #
-# ASSUMPTION: these paths and their parameter names come from ADR 0006's reading of the V2 API,
-# not from a response we have seen. Same status as the header names above, and the same
-# remedy — step 0 of the runbook confirms them against the published OpenAPI document before
-# the first authenticated call.
+# VALIDATED 2026-08-04, every path and every shape, one call each: `/bookings`, `/properties`,
+# `/inventory/rooms/calendar` and `/bookings/messages` all answer 200. The only thing the
+# validation changed was the date format — see `RequestShape.date_params`.
 CATALOGUE: tuple[CatalogueEntry, ...] = (
     CatalogueEntry(
         name="bookings",
@@ -153,8 +166,8 @@ CATALOGUE: tuple[CatalogueEntry, ...] = (
         shapes=(
             RequestShape("page-10", {"limit": 10}),
             RequestShape("page-100", {"limit": 100}),
-            RequestShape("window-1d", {"limit": 10, "arrivalFrom": "P0D", "arrivalTo": "P1D"}),
-            RequestShape("window-90d", {"limit": 10, "arrivalFrom": "P0D", "arrivalTo": "P90D"}),
+            RequestShape("window-1d", {"limit": 10}, {"arrivalFrom": 0, "arrivalTo": 1}),
+            RequestShape("window-90d", {"limit": 10}, {"arrivalFrom": 0, "arrivalTo": 90}),
         ),
     ),
     CatalogueEntry(
@@ -163,7 +176,8 @@ CATALOGUE: tuple[CatalogueEntry, ...] = (
         method="GET",
         shapes=(
             RequestShape("all", {}),
-            RequestShape("single", {"id": 1}),
+            # MEASURED: filtering by a single id is the same cost as asking for all of them.
+            RequestShape("single", {"id": 345754}),
         ),
     ),
     CatalogueEntry(
@@ -171,8 +185,8 @@ CATALOGUE: tuple[CatalogueEntry, ...] = (
         path="/inventory/rooms/calendar",
         method="GET",
         shapes=(
-            RequestShape("window-7d", {"startDate": "P0D", "endDate": "P7D"}),
-            RequestShape("window-90d", {"startDate": "P0D", "endDate": "P90D"}),
+            RequestShape("window-7d", {}, {"startDate": 0, "endDate": 7}),
+            RequestShape("window-90d", {}, {"startDate": 0, "endDate": 90}),
         ),
     ),
 )
@@ -398,10 +412,27 @@ class Beds24Probe:
                 f"beds24-probe: token exchange failed with HTTP {response.status_code}. "
                 "Response body not shown — it can echo what was sent."
             )
-        token = (response.json() or {}).get("token")
+        payload = response.json() or {}
+        token = payload.get("token")
         if not token:
             raise SystemExit("beds24-probe: token exchange returned no token")
         self._access_token = token
+
+        # Does the refresh token ROTATE on use? Not tested destructively — exchanging to find
+        # out would invalidate the token the operator has stored if the answer were yes. So the
+        # script watches for it instead, because the answer is a real design constraint for
+        # `pms-beds24-adapter`: a rotating token must be persisted atomically on every refresh,
+        # and losing that write locks the account out after 30 days of the old one going unused.
+        rotated = payload.get("refreshToken")
+        if rotated and rotated != self._refresh_token:
+            print(
+                "beds24-probe: *** THE REFRESH TOKEN ROTATED. *** The provider returned a new "
+                "one and the old one may now be dead. Save the new value NOW — it is not "
+                "printed here on purpose — by re-reading it from the exchange yourself.\n"
+                "  This is a finding for pms-beds24-adapter: a rotating refresh token must be "
+                "persisted atomically on every refresh.",
+                file=sys.stderr,
+            )
 
     def _pace(self) -> None:
         """Self-imposed rate limit (R4.3)."""
@@ -458,7 +489,7 @@ def probe(
     for entry in catalogue:
         for shape in entry.shapes:
             try:
-                response = bench.request(entry.method, entry.path, shape.params)
+                response = bench.request(entry.method, entry.path, shape.resolved_params())
             except QuotaExhausted:
                 records.append(
                     {

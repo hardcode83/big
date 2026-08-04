@@ -714,3 +714,67 @@ def test_the_guard_returns_the_single_property_without_a_room_id():
     prop = beds24.assert_account_is_a_measurement_account(bench)
 
     assert prop["id"] == 345754
+
+
+# --- catalogue validated against the real API -------------------------------------------------
+
+
+def test_windowed_shapes_send_absolute_dates_not_iso_durations():
+    """MEASURED: the API answers 400 to `P0D` — *"Expected format: YYYY-MM-DD"*.
+
+    The first version sent ISO-8601 durations and every windowed shape returned 400, so two of
+    the four `/bookings` shapes measured nothing at all.
+    """
+    from datetime import date
+
+    shape = next(
+        s
+        for entry in beds24.CATALOGUE
+        if entry.name == "bookings"
+        for s in entry.shapes
+        if s.label == "window-90d"
+    )
+
+    params = shape.resolved_params(today=date(2026, 8, 4))
+
+    assert params["arrivalFrom"] == "2026-08-04"
+    assert params["arrivalTo"] == "2026-11-02"
+
+
+def test_no_catalogue_shape_sends_an_iso_duration():
+    """A guard against reintroducing the format the provider rejects."""
+    for entry in beds24.CATALOGUE:
+        for shape in entry.shapes:
+            for name, value in shape.resolved_params().items():
+                assert not (
+                    isinstance(value, str) and value.startswith("P")
+                ), f"{entry.name}/{shape.label}: {name}={value!r} looks like an ISO duration"
+
+
+def test_a_rotating_refresh_token_is_reported_loudly(capsys):
+    """Not tested against the real API on purpose: finding out destructively would invalidate
+    the operator's stored token. The script watches for it instead."""
+
+    def handler(request):
+        return httpx.Response(200, json={"token": "acc", "refreshToken": "A-DIFFERENT-ONE"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    bench = beds24.Beds24Probe(refresh_token="the-original", client=client)
+
+    bench.authenticate()
+
+    err = capsys.readouterr().err
+    assert "REFRESH TOKEN ROTATED" in err
+    assert "A-DIFFERENT-ONE" not in err, "the new token must not be echoed"
+
+
+def test_an_unchanged_refresh_token_is_not_reported():
+    def handler(request):
+        return httpx.Response(200, json={"token": "acc", "refreshToken": "the-original"})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    bench = beds24.Beds24Probe(refresh_token="the-original", client=client)
+
+    bench.authenticate()
+
+    assert bench._access_token == "acc"
