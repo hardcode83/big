@@ -538,9 +538,20 @@ Y ahí está el choque: **R6.1 prohíbe conectar ningún canal OTA a esta cuenta
 PAJARITOS8 están vendiendo y Airbnb admite un único channel manager por cuenta. Medir la
 latencia de los webhooks exigiría exactamente lo que la regla dura prohíbe.
 
+**Verificado que no falta activar nada.** La página Settings → Properties → Access muestra la
+sección *Booking Webhook* con exactamente los cuatro campos que la API escribe —Webhook Version,
+URL, Custom Header, Additional Data— y **ningún interruptor adicional ni lista de eventos**. El
+objeto que se configura por API es la configuración completa. Se comprobó porque la
+documentación menciona esa ruta y describe los booking webhooks como función *beta*, lo que hacía
+razonable sospechar de un paso de habilitación aparte; no lo hay.
+
 No es un fallo del banco: el receptor, el túnel, la configuración por API y la correlación por
 `booking_ref` funcionan y están probados. Lo que falta es un evento que el proveedor considere
 digno de webhook.
+
+**La única variable no probada** es `Additional Data`, que se dejó en `None`. Por su nombre y su
+posición controla **cuánto** payload se envía, no **si** se envía, pero eso es inferencia: nadie
+lo ha medido.
 
 **Qué queda sin responder**, y hereda `reservations-webhooks`: la latencia real, el
 comportamiento ante desorden (R2.4) y si la cabecera estática llega como se configuró (R2.5).
