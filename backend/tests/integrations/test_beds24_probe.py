@@ -499,7 +499,7 @@ def test_provoke_records_the_booking_ref_so_the_latency_join_works():
             return httpx.Response(200, json=[{"id": 777}])
         return httpx.Response(200, json=[{"id": 777}])
 
-    records = beds24.provoke(_bench(handler), property_id="R1")
+    records = beds24.provoke(_bench(handler), room_id="713992")
 
     assert [r["shape"] for r in records] == ["provoke-create", "provoke-modify", "provoke-cancel"]
     assert {r["booking_ref"] for r in records} == {"777"}
@@ -513,7 +513,7 @@ def test_provoke_refuses_the_follow_ups_when_the_create_returns_no_id():
     """
     with pytest.raises(SystemExit, match="WILL NOT BE CANCELLED"):
         beds24.provoke(
-            _bench(lambda request: httpx.Response(200, json=[{}])), property_id="R1"
+            _bench(lambda request: httpx.Response(200, json=[{}])), room_id="713992"
         )
 
 
@@ -523,83 +523,52 @@ def test_provoke_refuses_the_follow_ups_when_the_create_returns_no_id():
 def test_provoke_refuses_to_run_without_explicit_confirmation():
     """It is the only subcommand that writes, against an account with no staging twin."""
     with pytest.raises(SystemExit, match="--confirm-writes"):
-        beds24.main(["provoke", "--property=R1"])
+        beds24.main(["provoke", "--room=713992"])
 
 
-def test_write_is_refused_when_the_account_has_ota_channels_connected():
-    """R6.1 as an executable pre-flight: Beds24 has no staging to fall back on."""
-    bench = _bench(
-        lambda request: httpx.Response(
-            200, json=[{"id": 1, "channels": ["Airbnb", "BookingCom"]}]
-        )
-    )
-
-    with pytest.raises(SystemExit, match="REFUSING TO WRITE"):
-        beds24.assert_account_has_no_ota_channels(bench)
+def _properties(*props):
+    """A `/properties` body shaped like the real one, measured 2026-08-04."""
+    return {"success": True, "type": "property", "count": len(props), "data": list(props)}
 
 
-def test_write_proceeds_on_an_account_with_a_recognised_empty_channel_list():
-    bench = _bench(lambda request: httpx.Response(200, json=[{"id": 1, "channels": []}]))
-
-    beds24.assert_account_has_no_ota_channels(bench)
+def _measurement_account():
+    return _properties({"id": 345754, "name": "TEST-MEDICION", "roomTypes": [{"id": 713992}]})
 
 
-@pytest.mark.parametrize(
-    "body",
-    [
-        {"success": True, "data": [{"id": 1, "name": "REDES11"}]},   # the slim default shape
-        [{"id": 1, "propertyName": "REDES11"}],
-        {"data": []},
-    ],
-)
-def test_write_is_refused_when_no_channel_field_is_recognised(body):
-    """Fails CLOSED: an unrecognised shape is not evidence of a clean account.
+def test_write_proceeds_on_the_measurement_account():
+    bench = _bench(lambda request: httpx.Response(200, json=_measurement_account()))
 
-    The shape of /properties is an unverified ASSUMPTION, so the *likely* real response is one
-    with no channel field at all. Reading that as "no channels connected" would let the guard
-    wave through a write to a live listing — the exact thing it exists to stop.
+    beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
+
+
+def test_write_is_refused_on_an_account_holding_more_than_one_property():
+    """The measurement account holds one property; the live one holds REDES11 and PAJARITOS8.
+
+    This replaced a channel-detection check that could not work: measured against the real API,
+    `/properties` carries no channel field at all, so the original guard would have refused
+    every run. Counting properties tests the same risk more directly — the danger is pointing
+    the script at the wrong account.
     """
-    bench = _bench(lambda request: httpx.Response(200, json=body))
-
-    with pytest.raises(SystemExit, match="Could not find a channel field"):
-        beds24.assert_account_has_no_ota_channels(bench)
-
-
-@pytest.mark.parametrize(
-    "body",
-    [
-        [{"channels": ["Airbnb"]}],
-        [{"connected_channels": ["Airbnb", "BookingCom"]}],
-        [{"channels": {"Airbnb": True}}],
-        [{"property": {"id": 1, "ota": ["Airbnb"]}}],
-    ],
-)
-def test_channels_are_detected_across_plausible_spellings(body):
-    bench = _bench(lambda request: httpx.Response(200, json=body))
-
-    with pytest.raises(SystemExit, match="REFUSING TO WRITE"):
-        beds24.assert_account_has_no_ota_channels(bench)
-
-
-def test_the_refusal_message_does_not_render_the_provider_structure():
-    """The unverified shape may nest property names or contact data; count them, do not print."""
     bench = _bench(
         lambda request: httpx.Response(
-            200, json=[{"channels": [{"name": "Airbnb", "contact": "ana@gmail.com"}]}]
+            200,
+            json=_properties(
+                {"id": 1, "name": "REDES11", "roomTypes": [{"id": 713992}]},
+                {"id": 2, "name": "PAJARITOS8", "roomTypes": [{"id": 999}]},
+            ),
         )
     )
 
-    with pytest.raises(SystemExit) as excinfo:
-        beds24.assert_account_has_no_ota_channels(bench)
-
-    assert "ana@gmail.com" not in str(excinfo.value)
+    with pytest.raises(SystemExit, match="holds 2 properties"):
+        beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
 
 
-def test_a_list_shaped_new_envelope_does_not_bypass_the_orphan_warning():
-    """An AttributeError here would replace the warning with a stack trace."""
-    response = httpx.Response(200, json=[{"success": True, "new": [{"id": 555}]}])
+def test_write_is_refused_when_the_room_belongs_to_another_account():
+    """A stale room id from a different account must not slip through."""
+    bench = _bench(lambda request: httpx.Response(200, json=_measurement_account()))
 
-    assert beds24._extract_booking_ref(response) is None
+    with pytest.raises(SystemExit, match="does not belong"):
+        beds24.assert_account_is_a_measurement_account(bench, room_id="000000")
 
 
 def test_write_is_refused_when_the_precondition_cannot_be_verified():
@@ -607,7 +576,50 @@ def test_write_is_refused_when_the_precondition_cannot_be_verified():
     bench = _bench(lambda request: httpx.Response(500))
 
     with pytest.raises(SystemExit, match="could not read /properties"):
-        beds24.assert_account_has_no_ota_channels(bench)
+        beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
+
+
+def test_write_is_refused_when_the_property_list_is_unusable():
+    bench = _bench(lambda request: httpx.Response(200, json={"success": True, "data": []}))
+
+    with pytest.raises(SystemExit, match="no usable property list"):
+        beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
+
+
+def test_channels_still_refuse_if_the_provider_ever_reports_them():
+    """Secondary assertion: absence is measured, but presence must still stop the write."""
+    bench = _bench(
+        lambda request: httpx.Response(
+            200,
+            json=_properties(
+                {"id": 345754, "roomTypes": [{"id": 713992}], "channels": ["Airbnb"]}
+            ),
+        )
+    )
+
+    with pytest.raises(SystemExit, match="reports OTA channels connected"):
+        beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
+
+
+def test_the_refusal_message_does_not_render_the_provider_structure():
+    """The channel structure may nest guest or contact data; count it, do not print it."""
+    bench = _bench(
+        lambda request: httpx.Response(
+            200,
+            json=_properties(
+                {
+                    "id": 345754,
+                    "roomTypes": [{"id": 713992}],
+                    "channels": [{"name": "Airbnb", "contact": "ana@gmail.com"}],
+                }
+            ),
+        )
+    )
+
+    with pytest.raises(SystemExit) as excinfo:
+        beds24.assert_account_is_a_measurement_account(bench, room_id="713992")
+
+    assert "ana@gmail.com" not in str(excinfo.value)
 
 
 def test_a_failed_create_never_leads_to_a_modify_or_cancel():
@@ -619,7 +631,7 @@ def test_a_failed_create_never_leads_to_a_modify_or_cancel():
         return httpx.Response(400, json=[{"id": 999, "error": "bad request"}])
 
     with pytest.raises(SystemExit, match="create failed"):
-        beds24.provoke(_bench(handler), property_id="R1")
+        beds24.provoke(_bench(handler), room_id="713992")
 
     assert len(calls) == 1, "it must not issue the follow-up writes"
 
@@ -641,5 +653,5 @@ def test_an_unparseable_create_response_warns_about_the_orphan_booking():
     with pytest.raises(SystemExit, match="WILL NOT BE CANCELLED"):
         beds24.provoke(
             _bench(lambda request: httpx.Response(200, json={"unexpected": "shape"})),
-            property_id="R1",
+            room_id="713992",
         )

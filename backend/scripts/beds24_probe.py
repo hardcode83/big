@@ -480,62 +480,76 @@ def probe(
     return records
 
 
-def assert_account_has_no_ota_channels(bench: Beds24Probe) -> None:
-    """Refuse to write unless the account is the empty measurement account (R6.1).
+def assert_account_is_a_measurement_account(bench: Beds24Probe, *, room_id: str) -> None:
+    """Refuse to write unless this is the empty measurement account (R6.1).
 
     This is the pre-flight that `steering/security.md` rule 8 assigns to `CHANNEX_BASE_URL`'s
     staging default — *"ese default apuntando a staging es lo que impide que un descuido
     escriba en una cuenta viva"*. **Beds24 has no staging**, so nothing plays that role here
     and the guard has to be an explicit check instead of a safe default.
 
-    What it protects: REDES11 and PAJARITOS8 are live listings, and Airbnb allows a single
-    channel manager per account. An operator with the wrong `BEDS24_REFRESH_TOKEN` exported
-    would otherwise create, modify and cancel a booking on a flat that is actually selling.
+    **Why it counts properties instead of detecting channels.** R6.1 is written in terms of
+    connected OTA channels, and the first version checked for exactly that. Measured
+    2026-08-04 against the real API: the `/properties` response carries **no channel field at
+    all**, even with `includeAllRooms=true`. A fail-closed check on an absent field refuses
+    every run, and a fail-open one protects nothing — the check was unimplementable as
+    specified.
+
+    Counting properties tests the same risk more directly. What actually endangers REDES11 and
+    PAJARITOS8 is pointing this script at the **wrong account**, and the measurement account
+    holds exactly one property while the live one holds two. The room must also belong to that
+    property, so a stale id from another account cannot slip through.
+
+    The channel check survives as a secondary assertion in case the provider ever starts
+    exposing it, but it no longer decides the outcome on absence: absence is now a measured
+    fact, not an unknown.
     """
-    # `includeAllRooms=true` because the default `/properties` body is documented as slim, and a
-    # slim body is exactly the case that used to read as "no channels connected". Asking for the
-    # full shape gives the guard something to recognise; if it still finds no channel field it
-    # refuses, which is the point.
     response = bench.request("GET", "/properties", {"includeAllRooms": "true"})
     if response.status_code != 200:
         raise SystemExit(
-            "beds24-probe: refusing to write — could not read /properties to confirm the "
-            f"account has no OTA channels connected (HTTP {response.status_code})."
+            "beds24-probe: refusing to write — could not read /properties to verify this is "
+            f"the measurement account (HTTP {response.status_code})."
         )
     try:
         payload = response.json()
     except ValueError:
         raise SystemExit(
             "beds24-probe: refusing to write — /properties did not return JSON, so the "
-            "no-OTA-channels precondition of R6.1 could not be verified."
+            "precondition of R6.1 could not be verified."
         ) from None
 
-    recognised, connected = _connected_channels(payload)
-
-    # **Fails CLOSED**, and that is the whole design of this guard. The first version only
-    # refused when it positively found a channel, so any response shape it did not recognise
-    # read as "clean" — and since the shape is an unverified ASSUMPTION, the most likely real
-    # case was the fail-open one. A guard protecting two selling listings cannot treat
-    # "I did not understand the answer" as "go ahead".
-    #
-    # The cost of failing closed is one refusal that the operator resolves in step 0 by
-    # confirming the real shape. The cost of failing open is a booking written to REDES11.
-    if not recognised:
+    properties = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(properties, list) or not properties:
         raise SystemExit(
-            "beds24-probe: REFUSING TO WRITE. Could not find a channel field in the "
-            "/properties response, so it is impossible to confirm this account has no OTA "
-            "channels connected (R6.1).\n"
-            "  This is expected until step 0 of docs/beds24-spike.md confirms the real shape: "
-            "add the right key name to `_connected_channels` and re-run.\n"
-            "  Do NOT bypass this check — it is the only thing standing between a measurement "
-            "and a write to a live listing, and Beds24 has no staging account."
+            "beds24-probe: REFUSING TO WRITE. /properties returned no usable property list, so "
+            "there is no way to tell which account this token belongs to."
         )
+
+    if len(properties) != 1:
+        raise SystemExit(
+            f"beds24-probe: REFUSING TO WRITE. This account holds {len(properties)} properties; "
+            "the measurement account holds exactly one. This is very likely the live account — "
+            "REDES11 and PAJARITOS8 are selling, and a booking written there is a real booking. "
+            "Check which account BEDS24_REFRESH_TOKEN belongs to."
+        )
+
+    known_rooms = {
+        str(room.get("id"))
+        for room in (properties[0].get("roomTypes") or [])
+        if isinstance(room, dict)
+    }
+    if str(room_id) not in known_rooms:
+        raise SystemExit(
+            f"beds24-probe: REFUSING TO WRITE. Room {room_id!r} does not belong to the only "
+            "property in this account. Pass a room id from this account, or check the token."
+        )
+
+    _, connected = _connected_channels(payload)
     if connected:
         raise SystemExit(
-            "beds24-probe: REFUSING TO WRITE. This account has OTA channels connected "
+            "beds24-probe: REFUSING TO WRITE. This account reports OTA channels connected "
             f"({len(connected)} found). R6.1 is a hard rule: the measurement account carries "
-            "no channels, because writing to one that does can touch a live listing. "
-            "Check which account BEDS24_REFRESH_TOKEN belongs to."
+            "none, because writing to one that does can touch a live listing."
         )
 
 
@@ -575,7 +589,7 @@ def _connected_channels(payload: Any) -> tuple[bool, list[Any]]:
     return recognised, found
 
 
-def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
+def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
     """Cause three booking events and record each with its `booking_ref` (R2.2, R2.3, D11).
 
     This exists because R2.2's fallback is worded as *"el registro del sondeo **que provocó el
@@ -597,7 +611,7 @@ def provoke(bench: Beds24Probe, *, property_id: str) -> list[dict[str, Any]]:
 
     for action in PROVOKE_ACTIONS:
         if action == "create":
-            body = [{"roomId": property_id, "status": "confirmed", "numAdult": 1}]
+            body = [{"roomId": room_id, "status": "confirmed", "numAdult": 1}]
         elif action == "modify":
             body = [{"id": booking_ref, "numAdult": 2}]
         else:
@@ -797,7 +811,7 @@ def _is_known_argument(argument: str) -> bool:
         return True
     return bool(
         re.fullmatch(
-            r"--out=\S+|--min-interval=\d+(\.\d+)?|--property=[A-Za-z0-9_-]+|--confirm-writes",
+            r"--out=\S+|--min-interval=\d+(\.\d+)?|--room=[A-Za-z0-9_-]+|--confirm-writes",
             argument,
         )
     )
@@ -815,7 +829,7 @@ def _reject_unknown_arguments(argv: list[str]) -> None:
             raise SystemExit(
                 "beds24-probe: unrecognised argument (value not echoed on purpose — it may be "
                 f"a credential). Accepted: {', '.join(SUBCOMMANDS)}, capture names "
-                f"({', '.join(CAPTURES)}), --out=PATH, --min-interval=SECONDS. The refresh "
+                f"({', '.join(CAPTURES)}), --out=PATH, --room=ID, --min-interval=SECONDS. The refresh "
                 f"token is read from {REFRESH_TOKEN_ENV} and must never be passed on the "
                 "command line, where it would stay in your shell history."
             )
@@ -875,11 +889,15 @@ def main(argv: list[str] | None = None) -> int:
         return 0
 
     if subcommand == "provoke":
-        property_id = _option(args, "--property=", "")
-        if not property_id:
-            raise SystemExit("beds24-probe: provoke needs --property=<room or property id>")
-        assert_account_has_no_ota_channels(bench)
-        records = provoke(bench, property_id=property_id)
+        room_id = _option(args, "--room=", "")
+        if not room_id:
+            raise SystemExit(
+                "beds24-probe: provoke needs --room=<room id>. It is the id of a ROOM, not of a "
+                "property: Beds24 models property -> roomTypes -> units, and a booking is "
+                "written against a roomId. `GET /properties?includeAllRooms=true` lists them."
+            )
+        assert_account_is_a_measurement_account(bench, room_id=room_id)
+        records = provoke(bench, room_id=room_id)
         existing = read_records(out_path) if out_path.exists() else []
         written = write_records(existing + records, out_path)
         refs = sorted({r["booking_ref"] for r in records if r["booking_ref"]})

@@ -240,23 +240,28 @@ superficie. Así que ambos van en el contenedor:
 
    ```bash
    docker compose exec backend uv run python scripts/beds24_probe.py provoke \
-       --property=<room-id> --confirm-writes --out=/tmp/beds24-request-cost.jsonl
+       --room=713992 --confirm-writes --out=/tmp/beds24-request-cost.jsonl
    ```
 
    > ⚠️ **`provoke` es la única subcomanda que escribe.** Por eso exige `--confirm-writes` y,
-   > antes de tocar nada, lee `/properties` para comprobar que la cuenta no tiene ningún canal
-   > OTA conectado. Beds24 no tiene entorno de staging, así que ese chequeo hace aquí el papel
-   > que en Channex hacía el default apuntando a staging: lo único que separa una medición de
-   > escribir en una vivienda que está vendiendo.
+   > antes de tocar nada, lee `/properties` y verifica que **la cuenta tiene exactamente una
+   > propiedad** y que el room que le pasas pertenece a ella. Beds24 no tiene entorno de
+   > staging, así que ese chequeo hace aquí el papel que en Channex hacía el default apuntando
+   > a staging: lo único que separa una medición de escribir en una vivienda que vende.
    >
-   > **El guardia falla cerrado y lo vas a notar.** Si no reconoce ninguna clave de canales en
-   > la respuesta, se niega — porque «no entendí la respuesta» no es «la cuenta está limpia», y
-   > la forma de `/properties` es un supuesto sin verificar. La salida correcta a esa negativa
-   > es el paso 0: mirar la respuesta real y añadir el nombre de clave a `_connected_channels`.
-   > **No la esquives.**
+   > **Por qué cuenta propiedades en vez de detectar canales.** R6.1 está escrito en términos
+   > de canales OTA conectados y así se implementó primero. Medido el 2026-08-04: `/properties`
+   > **no expone ningún campo de canales**, ni con `includeAllRooms=true`. Un chequeo que falla
+   > cerrado sobre un campo ausente se niega siempre, y uno que falla abierto no protege nada.
+   > Contar propiedades ataca el mismo riesgo de forma más directa: lo que pone en peligro
+   > REDES11 y PAJARITOS8 es apuntar el script a la **cuenta equivocada**, y la de medición
+   > tiene una propiedad mientras la real tiene dos.
    >
-   > Si aborta diciendo que hay canales conectados, **no insistas**: mira a qué cuenta
-   > pertenece tu `BEDS24_REFRESH_TOKEN`.
+   > Si aborta diciendo que la cuenta tiene más de una propiedad, **no insistas**: mira a qué
+   > cuenta pertenece tu `BEDS24_REFRESH_TOKEN`.
+   >
+   > `--room=` es el id de una **habitación**, no de la propiedad: Beds24 modela
+   > propiedad → roomTypes → units, y la reserva se escribe contra un `roomId`.
 
    Crea, modifica y cancela una reserva —tres hechos, el mínimo de R2.3— y **anota el
    `booking_ref` de cada uno en el registro de coste**. Ese es el detalle que hace calculable
