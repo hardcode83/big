@@ -778,3 +778,19 @@ def test_an_unchanged_refresh_token_is_not_reported():
     bench.authenticate()
 
     assert bench._access_token == "acc"
+
+
+def test_a_header_shaped_secret_with_spaces_is_accepted():
+    """`customHeader` is an HTTP header line, so it contains a space by construction.
+
+    The first pattern used `\\S+` and rejected every realistic value — the failure surfaced as
+    "unrecognised argument", which reads like a typo rather than an over-strict validator.
+    """
+    beds24._reject_unknown_arguments(["webhook", "--secret=X-AutoHost-Probe: 1"])
+
+
+@pytest.mark.parametrize("argument", ["--room=713 992", "--out=/tmp/a b.jsonl", "--min-interval=x"])
+def test_the_other_options_stay_strict(argument):
+    """Only the secret needs spaces; elsewhere a space is a mistake."""
+    with pytest.raises(SystemExit):
+        beds24._reject_unknown_arguments([argument])

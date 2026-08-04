@@ -897,8 +897,12 @@ def _is_known_argument(argument: str) -> bool:
         return True
     return bool(
         re.fullmatch(
+            # `--secret=` takes `.+`, not `\S+`: its value is an HTTP header line such as
+            # `X-AutoHost-Probe: 1`, and a header line contains a space by construction. The
+            # stricter pattern rejected every realistic value. The other options stay tight —
+            # a space in them is a mistake, not a legitimate value.
             r"--out=\S+|--min-interval=\d+(\.\d+)?|--room=[A-Za-z0-9_-]+"
-            r"|--url=\S*|--secret=\S+|--clear|--confirm-writes",
+            r"|--url=\S*|--secret=.+|--clear|--confirm-writes",
             argument,
         )
     )
