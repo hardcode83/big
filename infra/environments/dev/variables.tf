@@ -40,7 +40,7 @@ variable "ad_number" {
 # Red
 
 variable "allowed_ssh_cidrs" {
-  description = "Lista de CIDRs IPv4 de operadores permitidos para SSH (22) y los puertos de app (8000/3000). Cada origen acotado (prefijo >= /24), nunca un rango abierto. Añadir un operador no requiere recrear la instancia."
+  description = "Lista de CIDRs IPv4 de operadores permitidos para SSH (22), el ÚNICO puerto que abre el security list. Los puertos de app 8000/3000 dejaron de abrirse con el change ingress-https-dev: el acceso público llega por el túnel de Cloudflare y esos puertos solo se publican en el loopback de la VM. Cada origen acotado (prefijo >= /24), nunca un rango abierto. Añadir un operador no requiere recrear la instancia."
   type        = list(string)
 
   validation {

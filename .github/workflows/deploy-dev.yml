@@ -211,6 +211,103 @@ jobs:
             exit 1
           fi
 
+      # `up -d --wait` NO detecta que el túnel haya perdido el origen: el healthcheck de
+      # `cloudflared` es `tunnel ready`, que solo comprueba la conexión con el EDGE, y el del
+      # frontend corre dentro de su propio contenedor contra 127.0.0.1:3000. Así que si alguien deja
+      # `frontend` fuera de la red `ingress`, el deploy pasaría en verde y la URL pública serviría
+      # 502 hasta que alguien lo notara. Esta sonda cierra ese hueco: corre DENTRO de `ingress`, que
+      # es la red desde la que `cloudflared` tiene que alcanzar el origen, y usa la imagen del
+      # frontend que el `pull` de arriba ya ha bajado, con la misma técnica que su healthcheck.
+      # [R1.6]
+      - name: Verificar que el origen es alcanzable desde la red de ingress [R1.6]
+        # Cota de la propia sonda: sin ella un origen que acepta la conexión TCP pero no responde
+        # dejaría el paso colgado hasta el `timeout-minutes: 15` del job, y como el `concurrency`
+        # de este job es `cancel-in-progress: false`, ningún deploy de arreglo podría arrancar
+        # detrás. R1.6 pide fallar ANTES de dar el despliegue por bueno, no tardar 15 minutos.
+        timeout-minutes: 2
+        run: |
+          set -euo pipefail
+          CID="$(docker compose -f docker-compose.deploy.yml ps -q cloudflared)"
+          if [ -z "${CID:-}" ]; then
+            echo "::error::no hay contenedor de cloudflared en marcha: no se puede comprobar el origen"
+            exit 1
+          fi
+          # Una red por línea y se exige exactamente una: el `range` sin separador concatenaría los
+          # nombres y dejaría un $NET inservible, con un mensaje de error que apuntaría al sitio
+          # equivocado justo cuando alguien esté depurando en caliente.
+          NETS=()
+          mapfile -t NETS < <(docker inspect \
+            -f '{{range $k, $v := .NetworkSettings.Networks}}{{$k}}{{"\n"}}{{end}}' "$CID" | sed '/^$/d')
+          if [ "${#NETS[@]}" -ne 1 ]; then
+            echo "::error::cloudflared está conectado a ${#NETS[@]} redes (${NETS[*]-ninguna}), se esperaba exactamente 1 — revisa la sección 'networks' de docker-compose.deploy.yml"
+            exit 1
+          fi
+          NET="${NETS[0]}"
+          echo "red de ingress detectada: $NET"
+          PROBE=autohostai-ingress-probe
+          # `trap EXIT` y no solo limpieza al final del script: si un comando de docker se cuelga por
+          # causas ajenas a la sonda (dockerd cargado, contención de I/O — justo lo que pasa en un
+          # incidente, que es cuando este paso importa), Actions mata el PROCESO DEL STEP al llegar a
+          # `timeout-minutes` y las líneas de limpieza de abajo no se ejecutarían nunca; el contenedor,
+          # lanzado con `-d` y gestionado por dockerd, sobreviviría pegado a la red `ingress`.
+          #
+          # La limpieza del trap va acotada, y el motivo es concreto: cuando el runner corta el step
+          # manda SIGINT (que un bash no interactivo bloqueado en un comando externo IGNORA), espera
+          # ~7,5 s, manda SIGTERM —esto sí dispara el trap— y solo concede ~2,5 s antes de hacer
+          # SIGKILL de todo el árbol. Sin cota, un `docker kill` bloqueado contra el mismo daemon
+          # colgado se comería esa ventana y el `docker rm -f` no llegaría a ejecutarse.
+          #
+          # `-k 0.2 0.8` y no `timeout 0.8` a secas: `timeout` SIN `--kill-after` solo MANDA TERM al
+          # vencer el plazo, no fuerza nada. Medido: un proceso que ignora TERM sobrevive al
+          # `timeout 1` y corre hasta el final (30 s en la prueba); con `-k 0.2` muere a ~1,2 s por
+          # SIGKILL. Así el peor caso de las dos llamadas es 2 × 1,0 s = 2,0 s, dentro de la ventana.
+          #
+          # GARANTÍA REAL, y no es incondicional: limpia salvo que dockerd esté sin responder dentro
+          # de esa ventana; en ese caso el job falla igual, pero el contenedor puede quedar hasta que
+          # lo barra el `docker rm -f` previo del siguiente deploy.
+          trap 'timeout -k 0.2 0.8 docker kill "$PROBE" >/dev/null 2>&1 || true; timeout -k 0.2 0.8 docker rm -f "$PROBE" >/dev/null 2>&1 || true' EXIT
+          docker rm -f "$PROBE" >/dev/null 2>&1 || true
+          # Se lanza en SEGUNDO PLANO y el corte se aplica con `docker kill` POR NOMBRE contra el
+          # daemon. `timeout` envolviendo un `docker run` en primer plano no sirve para esto: solo
+          # señala al cliente de la CLI, y matar el cliente NO para el contenedor —lo gestiona
+          # dockerd—, así que un proceso encallado (bucle síncrono, GC, host sin CPU) se quedaría
+          # pegado a la red `ingress`, que es precisamente la frontera que este change protege.
+          docker run -d --name "$PROBE" --network "$NET" --entrypoint node \
+            "ghcr.io/${GITHUB_REPOSITORY_OWNER}/autohostai-frontend:sha-${GITHUB_SHA}" \
+            -e "const r=require('http').get('http://frontend:3000',s=>process.exit(s.statusCode<500?0:1)); r.setTimeout(10000,()=>{console.error('timeout esperando a frontend:3000');r.destroy();process.exit(1)}); r.on('error',e=>{console.error(String(e));process.exit(1)})" >/dev/null
+          CODE=""
+          for _ in $(seq 1 20); do
+            STATE="$(docker inspect -f '{{.State.Status}}' "$PROBE" 2>/dev/null || echo ausente)"
+            # Comprobación POSITIVA del estado terminal, no `!= running`: con `!=` cualquier estado
+            # transitorio o desconocido (`created`, …) se leería como terminado y `ExitCode` vale 0
+            # por defecto, es decir verde sin que el `http.get` haya empezado. Cualquier otro estado
+            # se trata como "seguir esperando", que es el lado seguro.
+            case "$STATE" in
+              exited|dead)
+                CODE="$(docker inspect -f '{{.State.ExitCode}}' "$PROBE" 2>/dev/null || echo 1)"
+                break
+                ;;
+              ausente)
+                echo "::error::el contenedor de la sonda desapareció antes de poder leer su salida"
+                exit 1
+                ;;
+            esac
+            sleep 1
+          done
+          docker logs "$PROBE" 2>&1 | tail -20 || true
+          if [ -z "$CODE" ]; then
+            echo "::error::la sonda de origen no terminó en 20s; se mata para no dejarla pegada a la red de ingress"
+            docker kill "$PROBE" >/dev/null 2>&1 || true
+            docker rm -f "$PROBE" >/dev/null 2>&1 || true
+            exit 1
+          fi
+          docker rm -f "$PROBE" >/dev/null 2>&1 || true
+          if [ "$CODE" != "0" ]; then
+            echo "::error::el origen no es alcanzable desde la red de ingress ($NET) — el túnel serviría 502. ¿Está 'frontend' en esa red?"
+            docker compose -f docker-compose.deploy.yml logs --tail=100 frontend cloudflared
+            exit 1
+          fi
+
       - name: Logout GHCR
         if: always()
         run: docker logout ghcr.io || true

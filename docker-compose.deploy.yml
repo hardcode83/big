@@ -1,11 +1,69 @@
 # docker-compose de DEPLOY del entorno dev — lo ejecuta el runner self-hosted EN la VM.
 # A diferencia del docker-compose.yml de desarrollo: imágenes de GHCR pineadas por SHA
 # (${IMAGE_TAG}), SIN `build`, SIN bind-mounts de código. postgres/redis persisten entre
-# deploys (volúmenes nombrados). Solo se publican 8000/3000 (los puertos del security list). [R2, R5]
+# deploys (volúmenes nombrados). `backend` y `frontend` publican 8000/3000 SOLO en el loopback de la
+# VM, como puerta de depuración por túnel SSH; el security list abre únicamente el 22. [R2, R5]
+
+# --- Redes (change ingress-https-hardening) [R1] ---
+# La separación en dos redes ES un control de seguridad, no un detalle de topología. Léelo antes de
+# tocar la sección `networks` de cualquier servicio.
+#
+# EL PROBLEMA. `cloudflared` recibe su routing del edge de Cloudflare (`config_src = "cloudflare"`),
+# así que quien tenga el API token puede apuntar un hostname a cualquier dirección alcanzable desde
+# el contenedor del túnel y publicarla en internet — sin abrir un puerto, sin `apply`, y sin rastro
+# en el tfstate hasta el siguiente `plan`. Con los siete servicios en la red `default` implícita,
+# eso incluía `http://backend:8000` y `tcp://postgres:5432`.
+#
+# EL MECANISMO es el aislamiento **L3** entre bridges: Docker descarta el tráfico entre bridges
+# distintos, así que una regla de ingress no llega a `private` ni por nombre ni por IP literal. El
+# acotado del DNS es una consecuencia, no la causa.
+#
+# EL INVARIANTE, y tiene DOS mitades — hacen falta las dos, cada una tapa el agujero de la otra.
+# **Su hogar canónico es `docs/adr/0003-https-ingress-dev.md` §Addendum 2026-08-04 §2**: lo de aquí
+# es el resumen para quien edita la topología, así que si tienes que CORREGIR el invariante hazlo
+# allí y actualiza este resumen — no al revés.
+#   (a) PERTENENCIA: el alcance de `cloudflared` es la UNIÓN de sus redes, así que conectarlo a una
+#       red más le suma todo lo que haya en ella. Por eso **el aislamiento no admite una excepción
+#       por origen sin deshacerse**: meter `backend` en `ingress` "solo para el webhook" no acota
+#       nada, devuelve al API token la API entera. Cualquier origen público futuro tiene que ser un
+#       servicio de `ingress` que NO sea `backend`.
+#   (b) REENVÍO: todo origen de `ingress` extiende el radio a lo que reenvíe hacia `private`, así
+#       que (a) es necesaria pero no suficiente. Vigila la CLASE de superficie, no un campo:
+#       `rewrites`, route handlers, `middleware.ts`, server actions, `images.remotePatterns` y
+#       —la vía más probable— un `fetch` server-side desde un Server Component, un layout o
+#       `generateMetadata`, porque `frontend/lib/config/server.ts` expone
+#       `getServerConfig().backendInternalUrl` justamente para eso. Hoy `frontend` no reenvía nada y
+#       ESA AUSENCIA ES PARTE DEL CONTROL — vive en `frontend/**`, que no se ve desde aquí: míralo
+#       antes de dar el control por vigente. Lista completa en el ADR §2(b).
+#
+# QUÉ ALCANZA `cloudflared` PESE AL AISLAMIENTO. No solo el frontend: también su propio loopback
+# (métricas y `/debug/pprof`, que ninguna red puede cubrir) y el host por el gateway del bridge, y
+# por ahí el puerto 22, el servicio de metadatos de la instancia y la VCN enrutable. **La
+# enumeración completa y autoritativa vive en UN solo sitio**, y no se copia aquí a propósito:
+# `docs/adr/0003-https-ingress-dev.md` §Addendum 2026-08-04 §1. Si necesitas corregir el radio,
+# corrígelo allí. Lo que sí queda cerrado aquí, y es lo que se gana: `postgres`, `redis`, `backend`,
+# `worker` y `migrate` no son alcanzables.
+#
+# CÓMO SE RELAJA LEGÍTIMAMENTE: editando ESTE fichero (o la superficie de reenvío de un origen) y
+# desplegando, es decir con un commit revisable en un Pull Request. Esa asimetría —una regla en el
+# edge cuesta solo el API token; un origen nuevo alcanzable cuesta commit + deploy— es lo que este
+# change entrega.
+#
+# CONSUMIDOR FUTURO CONOCIDO: Beds24 tiene que hacer POST contra
+# `/api/v1/webhooks/{provider}/{webhook_token}` desde internet (`docs/beds24-spike.md`
+# §"Consecuencia para la infraestructura"). Le aplican las dos mitades del invariante. La topología
+# de ese camino se decide en la entrada `api-ingress-routing` del roadmap, NO aquí.
+#
+# `internal: true` NO se pone en `ingress`: cortaría su salida a internet y `cloudflared` no podría
+# abrir la conexión al edge, que es justo de lo que depende el ingress.
+networks:
+  ingress:
+  private:
 
 services:
   postgres:
     image: postgres:16
+    networks: [private]
     restart: unless-stopped
     environment:
       POSTGRES_DB: ${POSTGRES_DB:?Falta POSTGRES_DB}
@@ -23,6 +81,7 @@ services:
   redis:
     image: redis:7
     restart: unless-stopped
+    networks: [private]
     volumes:
       - redis_data:/data # persistente entre deploys (broker/estado Celery) — R2.1/R5.3
     healthcheck:
@@ -36,6 +95,7 @@ services:
     image: ghcr.io/${GHCR_NS:?Falta GHCR_NS}/autohostai-backend:${IMAGE_TAG:?Falta IMAGE_TAG}
     restart: "no"
     command: alembic upgrade head
+    networks: [private]
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       # alembic/env.py imports the ORM models, which reach app.core.config and build
@@ -50,6 +110,9 @@ services:
   backend:
     image: ghcr.io/${GHCR_NS}/autohostai-backend:${IMAGE_TAG}
     restart: unless-stopped
+    # Fuera de `ingress` a propósito: `cloudflared` no puede resolver `backend`, así que una regla
+    # de ingress reescrita en el edge no puede publicar la API. Ver el comentario de `networks`.
+    networks: [private]
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -78,6 +141,7 @@ services:
     image: ghcr.io/${GHCR_NS}/autohostai-backend:${IMAGE_TAG}
     restart: unless-stopped
     command: celery -A app.worker worker -l info
+    networks: [private]
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -100,6 +164,19 @@ services:
   frontend:
     image: ghcr.io/${GHCR_NS}/autohostai-frontend:${IMAGE_TAG}
     restart: unless-stopped
+    # El ÚNICO servicio en las dos redes: es el origen público (lo alcanza `cloudflared` por
+    # `ingress`) y está en `private` para que la app PUEDA consumir la API sin cambios cuando toque
+    # (`BACKEND_INTERNAL_URL` se resuelve por ahí). Ojo: hoy **ningún código lo hace** —
+    # `getServerConfig()` no se invoca desde el código de aplicación y `getDashboardDataSource()`
+    # devuelve un mock—, así que esta doble pertenencia es capacidad, no uso. Y es el único puente
+    # `ingress`→`private` de la topología, o sea el vector de crecimiento del invariante de arriba:
+    # no la des por necesaria sin comprobar antes qué reenvía el frontend de verdad.
+    # La puerta de salida por defecto NO se pinea, a propósito: el campo que la gobierna es
+    # `gw_priority` (`priority` solo ordena la conexión a las redes, no elige gateway), y hoy no
+    # hace falta ninguno de los dos — el servidor de Next no hace llamadas salientes, todo el
+    # fetching de datos vive en componentes cliente. Si algún día las hace y el gateway elegido
+    # importa, el campo es `gw_priority`.
+    networks: [private, ingress]
     environment:
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
       # Next standalone (server.js) usa $HOSTNAME como dirección de bind; Docker lo pone al
@@ -134,6 +211,11 @@ services:
     image: cloudflare/cloudflared@sha256:e39ee8da81ad5e05d77f38d2f51c60ca51bf2a8450ac3abab50c17fdb91d91bf
     restart: unless-stopped
     command: tunnel --no-autoupdate run
+    # SOLO `ingress`, y esta lista de UN elemento es el control: es lo que impide que el routing
+    # remoto del túnel publique `postgres`, `redis` o `backend`. **No añadir aquí ninguna otra red**
+    # — por la mitad (a) del invariante, sumar una red suma todo lo que haya en ella. Lo que el
+    # aislamiento NO cubre está enumerado en ADR 0003 §Addendum 2026-08-04 §1, no aquí.
+    networks: [ingress]
     environment:
       TUNNEL_TOKEN: ${TUNNEL_TOKEN:?Falta TUNNEL_TOKEN}
       # Habilita el endpoint de métricas en loopback, que es lo que consulta `tunnel ready`.

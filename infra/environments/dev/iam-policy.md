@@ -43,15 +43,36 @@ Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment 
              target.secret.id = '<jwt-secret-key>',
              target.secret.id = '<encryption-key>',
              target.secret.id = '<cloudflare-tunnel-token>'}
-Allow dynamic-group autohostai-dev-runner to read secrets in compartment id <compartment>
 ```
 
-Dos cosas a tener presentes al añadir secretos en el futuro:
+**Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Tres cosas a tener presentes al añadir secretos en el futuro:
 
-1. **La primera sentencia es una enumeración explícita de OCID.** Un secreto nuevo es **invisible** para el runner hasta que se añade a esa lista — es la causa de fallo más probable al sumar secretos, y se manifiesta como un deploy que falla en el paso "Render .env" nombrando la clave. Se mantiene así a propósito: un `read secret-bundles` sin condición daría acceso a todo secreto presente y futuro del compartment.
-2. **La segunda sentencia (`read secrets`) es nueva** del change `ingress-https-dev`. El deploy resuelve el token del túnel **por nombre** (`get-secret-bundle-by-name`) porque `cloud-init` no puede reescribir `/etc/autohostai-deploy.env` en la VM viva (`metadata` es ForceNew + `ignore_changes`), y resolver por nombre necesita además leer los metadatos del secreto, no solo su bundle. Da lectura de **metadatos** de los secretos del compartment (nombres, OCIDs, fechas), nunca de su contenido — el contenido sigue acotado por la enumeración de la primera sentencia.
+1. **Es una enumeración explícita de OCID.** Un secreto nuevo es **invisible** para el runner hasta que se añade a esa lista — es la causa de fallo más probable al sumar secretos, y se manifiesta como un deploy que falla en el paso "Render .env" nombrando la clave. Se mantiene así a propósito: un `read secret-bundles` sin condición daría acceso a todo secreto presente y futuro — y como el compartment es la **raíz de la tenancy** y la concesión se hereda, eso significa de toda la tenancy, no de un compartment acotado.
+2. **Por qué la condición NO va por nombre, aunque el deploy lea por nombre.** Es tentador añadir `target.secret.name` para cubrir el `get-secret-bundle-by-name`, y se descartó por una razón de **ámbito**: `compartment_ocid` es hoy la **raíz de la tenancy** (ver §"Mejora futura" abajo), una concesión en la raíz la heredan todos los compartments descendientes, y los nombres de secreto son únicos **por vault**, no por compartment. Una condición por nombre concedería lectura de **contenido** a cualquier secreto que se llamara igual en cualquier vault de la tenancy — es decir, rompería el invariante del punto 1 para ese nombre, reproducible sin más que recrear el vault o levantar un segundo stack con `env = "dev"`. Y además no hace falta: ver el apartado siguiente.
+3. **Aquí había una segunda sentencia `read secrets in compartment` sin condición, y se eliminó porque nunca fue necesaria.** La añadió `ingress-https-dev` suponiendo que resolver por nombre exigía leer metadatos del secreto. La [referencia de policies del servicio Vault](https://docs.oracle.com/en-us/iaas/Content/Identity/Reference/keypolicyreference.htm) dice otra cosa:
 
-> **Pendiente de verificar en el primer deploy real:** que la condición `where any {target.secret.id = ...}` se evalúe correctamente en un acceso **por nombre** (es plausible que OCI resuelva nombre→OCID antes de autorizar, pero no está comprobado). Si no lo hiciera, el plan B es exponer el OCID del secreto como `output` y leerlo con `--secret-id` como los demás, a costa de una variable de repo que alguien debe fijar tras cada `apply`.
+   | Operación de API | Permiso exigido | Quién lo concede |
+   |---|---|---|
+   | `GetSecretBundleByName` | `SECRET_BUNDLE_READ` | `read secret-bundles` — la sentencia que queda |
+   | `GetSecretBundle` | `SECRET_BUNDLE_READ` | idem |
+   | `GetSecret` | `SECRET_READ` | `read secrets` — **eliminada** |
+   | `ListSecrets` | `SECRET_INSPECT` | idem |
+
+   El deploy solo invoca `secrets secret-bundle get` y `secrets secret-bundle get-secret-bundle-by-name` (`.github/workflows/deploy-dev.yml`), nunca `GetSecret` ni `ListSecrets`, así que el permiso concedido no lo usaba nadie. La descripción del recurso y este documento afirmaban mínimo privilegio mientras la policy concedía lectura de metadatos de **todos** los secretos presentes y futuros de la tenancy entera (por la herencia desde la raíz); eliminarla hace cierta la afirmación.
+
+**Sobre la duda que este documento dejó abierta** (*"que la condición `where any {target.secret.id = ...}` se evalúe correctamente en un acceso por nombre"*): **resuelta por deducción**, y es lo que permite que la condición siga siendo solo por OCID. `GetSecretBundleByName` exige `SECRET_BUNDLE_READ`; la sentencia condicionada por OCID lo concede y la `read secrets` eliminada **no** (concedía `SECRET_INSPECT`/`SECRET_READ`); el deploy lee el token del túnel por nombre con éxito desde el 2026-07-29. Luego OCI resuelve nombre→OCID **antes** de autorizar.
+
+**Premisa de esa deducción, dicha en voz alta porque no es comprobable desde el repositorio**: que la policy versionada aquí sea la **única** concesión de `SECRET_BUNDLE_READ` (o `secret-family`) que alcance a ese instance principal — no solo la única dirigida al dynamic-group `autohostai-dev-runner`: un `any-user … where request.principal.id = <la instancia>` o un segundo dynamic-group que matchee la misma VM la romperían igual. Este documento registra que parte de las policies las aplica **un admin de la tenancy desde la consola**, fuera de `main.tf`, así que el repositorio no puede establecerlo. Si existiera una concesión a mano, lo que hoy autoriza la lectura por nombre podría ser esa y no esta, y la deducción caería. Se cierra con un comando de solo lectura cuando haya credenciales a mano:
+
+```bash
+oci iam policy list --compartment-id <OCID de la raíz de la tenancy> \
+  --all --query 'data[].{name:name,statements:statements}' \
+  | grep -i -B2 -A2 'autohostai-dev-runner\|secret'
+```
+
+Y si esa premisa no se sostuviera, el síntoma sería que el deploy posterior al `apply` falla en "Render .env": la salida es la escalera de abajo, no volver a la condición por nombre (que por el punto 2 sería ensanchar el acceso, no arreglarlo).
+
+Queda un desconocido más pequeño, y es de cliente, no de política: que el propio OCI CLI no haga un `GetSecret` extra al resolver por nombre. Si lo hiciera, el deploy fallaría en "Render .env" tras el `apply`, y la salida es (a) reintentar por si es propagación de la policy, que en OCI es eventual, (b) reponer `read secrets` **con** `where target.vault.id`, o (c) leer por OCID exponiéndolo como `output`. La medición está pendiente del primer deploy posterior al `apply` de este change.
 
 ## Verificado
 - `terraform plan` (provider con `svc-terraform-dev`): lee/refresca compute, red, budget y vault sin errores de autorización.
