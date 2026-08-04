@@ -183,7 +183,14 @@ CAPTURES: dict[str, str] = {
     "messages": "/bookings/messages",
 }
 
-SUBCOMMANDS = ("probe", "capture", "report", "provoke")
+SUBCOMMANDS = ("probe", "capture", "report", "provoke", "webhook")
+
+# The subcommands that WRITE, and what they do — used to refuse without `--confirm-writes`
+# before the credential is even read. Everything else in this script is a read.
+WRITING_SUBCOMMANDS = {
+    "provoke": "it creates, modifies and cancels a booking",
+    "webhook": "it changes where this property sends its booking data",
+}
 
 # CONFIRMED 2026-08-04 (step 0): `POST /bookings` is the documented write endpoint, and the
 # response envelope carries `modified`, `errors`, `warnings` and `info`. The `errors` check in
@@ -480,7 +487,9 @@ def probe(
     return records
 
 
-def assert_account_is_a_measurement_account(bench: Beds24Probe, *, room_id: str) -> None:
+def assert_account_is_a_measurement_account(
+    bench: Beds24Probe, *, room_id: str | None = None
+) -> dict[str, Any]:
     """Refuse to write unless this is the empty measurement account (R6.1).
 
     This is the pre-flight that `steering/security.md` rule 8 assigns to `CHANNEX_BASE_URL`'s
@@ -533,16 +542,17 @@ def assert_account_is_a_measurement_account(bench: Beds24Probe, *, room_id: str)
             "Check which account BEDS24_REFRESH_TOKEN belongs to."
         )
 
-    known_rooms = {
-        str(room.get("id"))
-        for room in (properties[0].get("roomTypes") or [])
-        if isinstance(room, dict)
-    }
-    if str(room_id) not in known_rooms:
-        raise SystemExit(
-            f"beds24-probe: REFUSING TO WRITE. Room {room_id!r} does not belong to the only "
-            "property in this account. Pass a room id from this account, or check the token."
-        )
+    if room_id is not None:
+        known_rooms = {
+            str(room.get("id"))
+            for room in (properties[0].get("roomTypes") or [])
+            if isinstance(room, dict)
+        }
+        if str(room_id) not in known_rooms:
+            raise SystemExit(
+                f"beds24-probe: REFUSING TO WRITE. Room {room_id!r} does not belong to the only "
+                "property in this account. Pass a room id from this account, or check the token."
+            )
 
     _, connected = _connected_channels(payload)
     if connected:
@@ -551,6 +561,8 @@ def assert_account_is_a_measurement_account(bench: Beds24Probe, *, room_id: str)
             f"({len(connected)} found). R6.1 is a hard rule: the measurement account carries "
             "none, because writing to one that does can touch a live listing."
         )
+
+    return properties[0]
 
 
 def _connected_channels(payload: Any) -> tuple[bool, list[Any]]:
@@ -692,6 +704,49 @@ def _extract_booking_ref(response) -> str | None:
     return None
 
 
+def set_webhook(bench: Beds24Probe, *, property_id: Any, url: str, secret: str) -> dict[str, Any]:
+    """Point the property's webhook at `url`, or clear it when `url` is empty.
+
+    MEASURED 2026-08-04, and it contradicts ADR 0006. That ADR states Beds24 has **no webhook
+    subscription API** and that webhooks "se configuran por propiedad desde la UI". They are in
+    fact both readable and writable: `POST /properties` with a `webhooks` object returns
+    `201 Created` and the value persists on read-back. Verified by a full round trip —
+    set, read, clear, read.
+
+    That matters beyond tidiness. The runbook otherwise makes the operator re-paste the quick
+    tunnel's URL into the panel every session, because the tunnel URL changes each time; now
+    the measurement can configure itself. It also removes a premise from
+    `reservations-webhooks`, which was planned around manual per-property configuration.
+
+    `customHeader` is the static header Beds24 offers **instead of a signature** — the thing
+    rule 12 of `steering/security.md` regulates. Sending it here is what lets the sink assert
+    that a request really came from Beds24.
+    """
+    body = [
+        {
+            "id": property_id,
+            "webhooks": {
+                "version": "one",
+                "url": url,
+                "additionalData": "none",
+                "customHeader": secret,
+            },
+        }
+    ]
+    response = bench.request("POST", "/properties", json_body=body)
+    if response.status_code >= 300:
+        raise SystemExit(
+            f"beds24-probe: could not set the webhook (HTTP {response.status_code})."
+        )
+    return build_cost_record(
+        endpoint="/properties",
+        method="POST",
+        shape="webhook-set" if url else "webhook-clear",
+        status=response.status_code,
+        headers=response.headers,
+    )
+
+
 def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
     """Fetch one payload and write it anonymised (R3.1, R3.2).
 
@@ -811,7 +866,8 @@ def _is_known_argument(argument: str) -> bool:
         return True
     return bool(
         re.fullmatch(
-            r"--out=\S+|--min-interval=\d+(\.\d+)?|--room=[A-Za-z0-9_-]+|--confirm-writes",
+            r"--out=\S+|--min-interval=\d+(\.\d+)?|--room=[A-Za-z0-9_-]+"
+            r"|--url=\S*|--secret=\S+|--clear|--confirm-writes",
             argument,
         )
     )
@@ -829,7 +885,8 @@ def _reject_unknown_arguments(argv: list[str]) -> None:
             raise SystemExit(
                 "beds24-probe: unrecognised argument (value not echoed on purpose — it may be "
                 f"a credential). Accepted: {', '.join(SUBCOMMANDS)}, capture names "
-                f"({', '.join(CAPTURES)}), --out=PATH, --room=ID, --min-interval=SECONDS. The refresh "
+                f"({', '.join(CAPTURES)}), --out=PATH, --room=ID, --min-interval=SECONDS, "
+                "--url=HTTPS_URL, --secret=HEADER, --clear, --confirm-writes. The refresh "
                 f"token is read from {REFRESH_TOKEN_ENV} and must never be passed on the "
                 "command line, where it would stay in your shell history."
             )
@@ -863,14 +920,13 @@ def main(argv: list[str] | None = None) -> int:
         print(report(read_records(out_path)), end="")
         return 0
 
-    # Checked before the credential is even read: the operator must be told that this
-    # subcommand writes before they are told anything else about why it will not run.
-    if subcommand == "provoke" and "--confirm-writes" not in args:
+    # Checked before the credential is even read: the operator must be told that the subcommand
+    # writes before they are told anything else about why it will not run.
+    if subcommand in WRITING_SUBCOMMANDS and "--confirm-writes" not in args:
         raise SystemExit(
-            "beds24-probe: `provoke` is the only subcommand that WRITES to the provider — it "
-            "creates, modifies and cancels a booking. Re-run with --confirm-writes once you "
-            "have checked that BEDS24_REFRESH_TOKEN belongs to the empty measurement account "
-            "and not to one with live listings (R6.1)."
+            f"beds24-probe: `{subcommand}` WRITES to the provider — {WRITING_SUBCOMMANDS[subcommand]}. "
+            "Re-run with --confirm-writes once you have checked that BEDS24_REFRESH_TOKEN "
+            "belongs to the empty measurement account and not to one with live listings (R6.1)."
         )
 
     bench = Beds24Probe(
@@ -886,6 +942,29 @@ def main(argv: list[str] | None = None) -> int:
         records = probe(bench)
         written = write_records(records, out_path)
         print(f"beds24-probe: {len(records)} measurements -> {written}")
+        return 0
+
+    if subcommand == "webhook":
+        prop = assert_account_is_a_measurement_account(bench)
+        clearing = "--clear" in args
+        url = "" if clearing else _option(args, "--url=", "")
+        if not clearing and not url:
+            raise SystemExit("beds24-probe: webhook needs --url=<https URL> or --clear")
+        if url and not url.startswith("https://"):
+            raise SystemExit(
+                "beds24-probe: refusing a non-HTTPS webhook URL — the payload carries guest "
+                "data and there is no signature to fall back on."
+            )
+        record = set_webhook(
+            bench,
+            property_id=prop.get("id"),
+            url=url,
+            secret="" if clearing else _option(args, "--secret=", ""),
+        )
+        write_records(
+            (read_records(out_path) if out_path.exists() else []) + [record], out_path
+        )
+        print(f"beds24-probe: webhook {'cleared' if clearing else 'set to ' + url}")
         return 0
 
     if subcommand == "provoke":

@@ -655,3 +655,62 @@ def test_an_unparseable_create_response_warns_about_the_orphan_booking():
             _bench(lambda request: httpx.Response(200, json={"unexpected": "shape"})),
             room_id="713992",
         )
+
+
+# --- webhook: measured to be writable, contradicting ADR 0006 --------------------------------
+
+
+def test_set_webhook_sends_the_measured_envelope():
+    """MEASURED: `POST /properties` with a `webhooks` object returns 201 and persists."""
+    sent = {}
+
+    def handler(request):
+        sent["body"] = json.loads(request.content)
+        return httpx.Response(
+            201,
+            json=[{"success": True, "modified": {"webhooks": {"url": "https://x/y"}}}],
+            headers={"X-Request-Cost": "1"},
+        )
+
+    record = beds24.set_webhook(
+        _bench(handler), property_id=345754, url="https://x/y", secret="X-Probe: 1"
+    )
+
+    assert sent["body"] == [
+        {
+            "id": 345754,
+            "webhooks": {
+                "version": "one",
+                "url": "https://x/y",
+                "additionalData": "none",
+                "customHeader": "X-Probe: 1",
+            },
+        }
+    ]
+    assert record["shape"] == "webhook-set"
+    assert record["x_request_cost"] == 1
+
+
+def test_clearing_the_webhook_is_recorded_as_such():
+    record = beds24.set_webhook(
+        _bench(lambda request: httpx.Response(201, json=[{"success": True}])),
+        property_id=345754,
+        url="",
+        secret="",
+    )
+
+    assert record["shape"] == "webhook-clear"
+
+
+def test_webhook_needs_explicit_write_confirmation():
+    with pytest.raises(SystemExit, match="--confirm-writes"):
+        beds24.main(["webhook", "--url=https://x/y"])
+
+
+def test_the_guard_returns_the_single_property_without_a_room_id():
+    """`webhook` is per property, so the guard must work without a room to check."""
+    bench = _bench(lambda request: httpx.Response(200, json=_measurement_account()))
+
+    prop = beds24.assert_account_is_a_measurement_account(bench)
+
+    assert prop["id"] == 345754

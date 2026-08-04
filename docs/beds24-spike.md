@@ -401,22 +401,41 @@ todas las propiedades a la vez.
 Se rellenan al medir. Si una medición contradice lo que el ADR afirma, **se señala aquí y el
 ADR no se enmienda en este change** — enmendarlo es una decisión con su propio alcance.
 
-### 1. Los webhooks sí aparecen en la API, al menos para leerlos
+### 1. ⚠️ Los webhooks SÍ tienen API — ADR 0006 se equivoca
 
 ADR 0006 afirma que Beds24 **no tiene API de suscripción** de webhooks y que «se configuran por
-propiedad desde la UI». Medido el 2026-08-04, `GET /properties` devuelve:
+propiedad desde la UI, sin API de suscripción». **Es falso.** Medido el 2026-08-04 con un viaje
+completo de ida y vuelta: escribir, releer, limpiar, releer.
+
+`GET /properties` los devuelve:
 
 ```json
 "webhooks": { "version": "one", "url": "", "additionalData": "none", "customHeader": "" }
 ```
 
-Es decir: la configuración de webhooks es **legible por API**. Falta comprobar si es
-**escribible** (un `POST`/`PATCH` sobre la propiedad). Si lo fuera, se cae el paso manual del
-runbook —repegar la URL del túnel en el panel en cada sesión— y cambia una premisa de
-`reservations-webhooks`.
+Y `POST /properties` los **escribe**, con coste de 1 crédito:
 
-`customHeader` confirma, eso sí, lo que el ADR sí acertaba: el mecanismo es una **cabecera
-estática que pones tú**, no una firma. La conclusión de R5.3 no cambia.
+```json
+// POST /properties  [{"id":345754,"webhooks":{"version":"one","url":"https://…","additionalData":"none","customHeader":"X-Probe: 1"}}]
+// 201 Created
+[{"success": true, "modified": {"webhooks": {"url": "https://…", "customHeader": "X-Probe: 1"}}}]
+```
+
+Verificado que persiste releyendo, y devuelto a `""` al terminar.
+
+**Dos consecuencias.** La del runbook es que el paso manual desaparece: el subcomando
+`beds24_probe.py webhook --url=… --confirm-writes` configura el destino, así que la URL
+cambiante del quick tunnel deja de obligar a volver al panel en cada sesión. La de arquitectura
+es mayor: `reservations-webhooks` estaba planificado sobre la premisa de configuración manual
+por propiedad, y esa premisa no se sostiene.
+
+**Lo que el ADR sí acertaba** y no cambia: el mecanismo de autenticación es una **cabecera
+estática que pones tú** (`customHeader`), no una firma. La conclusión de R5.3 se mantiene
+entera — todo webhook se trata como aviso no fiable y se re-lee por API.
+
+De paso, este viaje reveló el **sobre de escritura real** de la API: una lista de un elemento
+con `success` booleano y `modified`. Eso es lo que `_extract_booking_ref` tendrá que reconocer
+en la respuesta de `POST /bookings`.
 
 ### 2. `/properties` no declara los canales conectados
 
