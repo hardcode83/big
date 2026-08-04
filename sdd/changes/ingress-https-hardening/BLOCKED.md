@@ -2,22 +2,7 @@
 
 Cola de lo que queda sin resolver. `/sdd:status` la muestra primero y `/sdd:archive` se niega a cerrar el change mientras tenga entradas.
 
-## 1. Verificación post-merge del aislamiento y de la policy (tareas 5.4-5.9)
-
-- **fase**: run
-- **tipo**: `deferred` — el flujo puede reanudarlo, no hace falta ninguna decisión humana.
-- **qué y por qué**: las tareas 5.4 a 5.9 de `tasks.md` no se pueden ejecutar antes del merge, y no por comodidad: los jobs `plan` y `apply` de `infra-dev` están acotados a `main` (`specs/infra-dev-terraform.md`), decisión tomada en `ingress-https-dev` porque el job recibe un API token con control del DNS de toda la zona. Así que no existe `plan` desde una rama de feature. La secuencia es la de D9:
-  1. **5.4** — el job `check` de `infra-dev` en verde en el Pull Request (se dispara solo, por tocar `infra/environments/dev/**`).
-  2. **5.5** — tras el merge, el CD arranca solo (el filtro de rutas de `deploy-dev.yml` incluye `docker-compose.deploy.yml`) y `up -d --wait` deja los siete servicios `healthy`; **el paso nuevo "Verificar que el origen es alcanzable desde la red de ingress" debe pasar** (R1.6, decisión D10). Se espera un corte público breve: el cambio de redes obliga a recrear los siete contenedores.
-  3. **5.6** — evidencia del aislamiento en la VM ejecutando `RUNBOOK.md` §7.4.6 completo: `docker inspect`, los dos `getent hosts`, el intento **por IP literal** con su control positivo (es el que demuestra el aislamiento L3), y las dos medidas que hoy están *analizadas y no medidas* — el residual de IMDS, y que el **gateway del bridge** no dé acceso a los 8000/3000 del loopback de la VM, que es la única fila «Sí» del ADR §1 sin medir y la que sostiene el acotado del backend.
-  4. **5.7** — `infra-dev` con `action: plan` (revisar por logs que el diff de la policy es **un statement menos y nada más**: la condición del statement que queda sigue siendo los cinco `target.secret.id`; si aparece un término nuevo, algo ha reintroducido la rama `target.secret.name` que el panel de §2 hizo retirar por ensanchar el acceso, y **no se aplica**), después `action: apply`.
-  5. **5.8** — `deploy-dev` por `workflow_dispatch` y el paso "Render .env" pasa: es la evidencia que R2.2 exige.
-  6. **5.9** — si 5.8 falla, recorrer la escalera de R2.5 y, en cualquier caso, escribir el resultado **medido** en `iam-policy.md`.
-- **Pull Request**: https://github.com/autohostai-labs/AutoHostAI/pull/50 (abierto el 2026-08-04 sobre `main`, rama `sdd/ingress-https-hardening`, commit `28b4baf`).
-- **Por qué `STATE.md` sigue en `ACTIVE`**: los cuatro comandos de `sdd_lifecycle.py` —`mark-local-verified`, `mark-ready`, `record-pr` y la verificación de merge— exigen **a la vez** que no queden tareas sin marcar y que `BLOCKED.md` esté vacío. Con la verificación de este change estructuralmente post-merge, ninguna de las dos condiciones se puede cumplir antes del merge, y forzarlas exigiría marcar tareas no hechas o vaciar esta cola. No se hace. `STATE.md` avanzará cuando 5.4-5.9 estén ejecutadas y esta entrada se borre.
-- **comando de reanudación**: tras el merge, `/sdd:review ingress-https-hardening` para cerrar el ciclo. Las tareas 5.5-5.9 requieren que el Pull Request esté mergeado; 5.4 se comprueba en el propio PR.
-
-## 2. Residual de radio del API token que el aislamiento no cubre — candidato a change propio
+## 1. Residual de radio del API token que el aislamiento no cubre — candidato a change propio
 
 - **fase**: run
 - **tipo**: `decision` — necesita que una persona decida si se abre change y con qué alcance.
