@@ -314,30 +314,35 @@ Beds24 **no tiene API de configuración de webhooks**: se configuran por propied
 panel. Es un matiz frente a Channex, que sí la tiene, y que `channex-staging-adapter` dejó
 anotado. Así que el paso es manual por diseño ajeno, no por pereza nuestra.
 
-**El receptor y el túnel corren en el mismo lado de la frontera del contenedor.** El sink hace
-bind a `127.0.0.1` a propósito: mientras dura la medición es un endpoint **sin autenticar que
-escribe a disco**, y su única puerta debe ser el túnel efímero, nunca la LAN. Si lo arrancas
-dentro del contenedor con `docker compose exec`, un `cloudflared` del host no lo alcanza — y la
-salida obvia a ese problema (bindear `0.0.0.0` o publicar el puerto) es justo lo que abre esa
-superficie. Así que ambos van en el contenedor:
+**El receptor corre en el host, no en el contenedor.** `beds24_webhook_sink.py` es **solo
+biblioteca estándar**, así que arranca con el `python3` del sistema sin Docker ni `uv`. Eso
+importa: el sink hace bind a `127.0.0.1` a propósito —mientras dura la medición es un endpoint
+**sin autenticar que escribe a disco**, y su única puerta debe ser el túnel efímero— y
+`cloudflared` también corre en el host, así que ambos están en el mismo lado y el loopback
+funciona. Levantarlo dentro del contenedor obligaría a bindear `0.0.0.0` o a publicar el puerto,
+que es justo lo que abre esa superficie.
 
-1. Levanta el receptor y déjalo corriendo:
-
-   ```bash
-   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend uv run python scripts/beds24_webhook_sink.py \
-       --out=/app/beds24-webhooks.jsonl
-   ```
-
-2. En **otra shell del mismo contenedor**, levanta el túnel y copia la URL que imprime:
+1. **Terminal 1** — levanta el receptor y déjalo:
 
    ```bash
-   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend cloudflared tunnel --url http://127.0.0.1:8099
+   python3 backend/scripts/beds24_webhook_sink.py --out=/tmp/beds24-webhooks.jsonl
    ```
 
-   Si `cloudflared` no está en la imagen del backend, la alternativa correcta es correr **las
-   dos** cosas en el host (`uv run` desde `backend/`), no publicar el puerto del contenedor.
+2. **Terminal 2** — el túnel, y copia la URL `https://….trycloudflare.com` que imprime:
 
-3. Pega esa URL en el panel de Beds24, por propiedad.
+   ```bash
+   cloudflared tunnel --url http://127.0.0.1:8099
+   ```
+
+3. **Terminal 3** — configura esa URL como webhook **por API**, sin tocar el panel (medido:
+   `POST /properties` lo escribe):
+
+   ```bash
+   docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend \
+     uv run python scripts/beds24_probe.py webhook \
+       --url=https://TU-URL.trycloudflare.com/hook \
+       --secret='X-AutoHost-Probe: 1' --confirm-writes --out=/app/beds24-cost.jsonl
+   ```
 4. Provoca los hechos **con el sondeo**, no a mano:
 
    ```bash
