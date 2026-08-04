@@ -45,13 +45,36 @@ Acceptance criteria:
 4. THE SYSTEM SHALL registrar si los webhooks llegan **desordenados** respecto al orden de los hechos que los originan, porque ADR 0006 afirma que el proveedor no garantiza el orden y `reservations-webhooks` depende de ello.
 5. THE SYSTEM SHALL registrar la cabecera estática configurada como único mecanismo de autenticación, confirmando por medición lo que ADR 0006 afirma: que no hay firma HMAC ni secreto negociado.
 
+> **ENMENDADO el 2026-08-04, después de medir.** Los criterios 1-5 se cumplen en cuanto al
+> **banco**: el receptor existe, sella en UTC, anonimiza antes de disco, correlaciona por
+> `booking_ref` y detecta desorden, todo probado. Lo que **no** se cumple es obtener los
+> **valores**, y no por falta de tiempo sino porque **R2 y R6.1 no pueden satisfacerse a la
+> vez**:
+>
+> Beds24 **solo dispara webhooks para reservas de canal** — su documentación lo dice y la
+> medición lo confirma: tres eventos reales (crear, modificar, cancelar) por API produjeron
+> **cero** webhooks, con el camino verificado funcionando en 246 ms y sin ningún ajuste
+> pendiente de habilitar. **R6.1 prohíbe conectar canales OTA** a esta cuenta, porque REDES11 y
+> PAJARITOS8 están vendiendo.
+>
+> **Resolución**: los criterios 2, 3 y 4 —los que exigen valores medidos— quedan **condicionados
+> a la existencia de un canal conectado** y su medición se traslada a la **ventana de corte de
+> `pms-beds24-adapter`**, que es el momento en que los canales se conectan de verdad, sin cuenta
+> extra ni riesgo nuevo. Los criterios 1 y 5 se dan por cumplidos: el receptor existe y está
+> probado, y la cabecera estática quedó confirmada al configurarla (`customHeader`), que era lo
+> que R2.5 pedía verificar.
+>
+> El hallazgo en sí —*«no se puede validar una integración de webhooks de Beds24 sin canales
+> conectados»*— es entrada de diseño para `reservations-webhooks` y reordena su dependencia con
+> `pms-beds24-adapter`. Detalle completo en `docs/beds24-spike.md`.
+
 ### R3 — Payloads reales capturados como fixtures anonimizados
 
 **As a** implementador de `pms-beds24-adapter`, **I want** payloads de reserva y de mensaje que no hayamos fabricado nosotros, **so that** el mapeo a `ReservationDTO` se escriba contra la forma real y no contra la documentación del proveedor.
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL versionar los payloads capturados bajo `backend/tests/integrations/fixtures/beds24/`, cubriendo al menos una reserva y un mensaje.
+1. THE SYSTEM SHALL versionar los payloads capturados bajo `backend/tests/integrations/fixtures/beds24/`, cubriendo al menos una reserva y un mensaje. **Enmendado el 2026-08-04**: la reserva está capturada; el **mensaje no**, por la misma causa que R2 — `/bookings/messages` responde 200 pero llega vacío, porque no hay conversación de huésped sin un canal conectado. Se traslada con R2.
 2. THE SYSTEM SHALL anonimizar **en el momento de capturar**, no en una pasada manual posterior, con la misma política **fail-closed** que `channex-staging-adapter` estableció: una hoja de texto sobrevive solo si su clave es dato de negocio reconocido, y esto aplica a hojas de texto, hojas numéricas y **claves de diccionario**, juzgando un escalar dentro de una lista **como si no tuviera nombre**.
 3. THE SYSTEM SHALL conservar `None` y los booleanos, para que el fixture ejercite la misma opcionalidad que el payload real.
 4. IF el payload contiene datos de titular de tarjeta, THEN THE SYSTEM SHALL descartarlos en la captura y no SHALL escribirlos en el fixture, aplicando la regla 13 de `steering/security.md` — PCI DSS prohíbe retener el CVV, así que anonimizar no basta y el campo no llega a disco.
