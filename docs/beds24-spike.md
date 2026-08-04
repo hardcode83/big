@@ -128,6 +128,101 @@ read -rs "?BEDS24_REFRESH_TOKEN: " BEDS24_REFRESH_TOKEN && export BEDS24_REFRESH
 
 (En bash la sintaxis del prompt es `read -rsp "BEDS24_REFRESH_TOKEN: " BEDS24_REFRESH_TOKEN`.)
 
+#### 2 bis. Scopes: pide el mínimo, no `all:*`
+
+El primer invite code de este proyecto se generó con **todo** marcado, y `/authentication/details`
+lo delata:
+
+```
+scopes: all:bookings, all:bookings-personal, all:bookings-financial,
+        all:inventory, all:properties, all:accounts, all:channels
+```
+
+Dos de esos no deberían estar. **`all:channels` concede conectar y desconectar canales OTA** —
+justo lo que R6.1 prohíbe en esta cuenta, y el poder que convertiría un token filtrado en un
+incidente sobre REDES11 y PAJARITOS8 el día que la cuenta deje de estar vacía. `all:accounts` no
+lo usa nada de este banco.
+
+Lo que el banco necesita de verdad:
+
+| Scope | Para qué | ¿Hace falta? |
+|---|---|---|
+| bookings (lectura **y escritura**) | `/bookings`, y `provoke` para causar los eventos de R2 | **Sí** |
+| properties (lectura) | el guardia de cuenta, y la escritura del webhook | **Sí** (escritura solo si configuras webhooks por API) |
+| inventory (lectura) | `/inventory/rooms/calendar` | **Sí** |
+| bookings-personal / bookings-financial | datos de huésped e importes en el payload | Sí, si quieres fixtures representativos |
+| **channels** | conectar/desconectar OTAs | **NO. Nunca en esta cuenta.** |
+| **accounts** | administración de la cuenta | **NO** |
+
+#### 2 ter. Whitelist de IP
+
+`/authentication/details` muestra también `whiteListOnly: false` y `whiteList: [""]`. Beds24
+permite **restringir el token a una lista de IPs**, y está sin usar. Para una credencial de
+cuenta con escritura es una capa gratis: si mides siempre desde el mismo sitio, actívala.
+
+No la dejes puesta si vas a medir desde una IP cambiante (casa/oficina/VPN), porque el fallo se
+manifiesta como un 401 que se confunde con «token caducado».
+
+---
+
+## Rotar el refresh token
+
+**Un refresh token no genera otro.** Solo produce access tokens. Un refresh token nuevo nace
+únicamente de un **invite code**, y el invite code se genera en el panel: es el único paso de
+todo el flujo que exige una persona, y no hay forma de automatizarlo desde la API.
+
+Consecuencia práctica: **rotar no es un comando, es un procedimiento.** Este:
+
+1. **Genera un invite code nuevo** en Settings → Marketplace → API, con los scopes mínimos de
+   arriba (no `all:*`) y un `deviceName` que diga de qué es — el actual pone `autohostai-dev`,
+   que se lee bien en `/authentication/details`.
+2. **Canjéalo** (24 h de validez, un solo uso):
+
+   ```bash
+   read -rs "?Invite code: " C; echo
+   curl -sS -H "code: $C" https://beds24.com/api/v2/authentication/setup
+   unset C
+   ```
+
+3. **Verifica el nuevo antes de tirar el viejo**, que es el paso que la gente se salta:
+
+   ```bash
+   read -rs "?refreshToken nuevo: " R
+   T=$(curl -sS -H "refreshToken: $R" https://beds24.com/api/v2/authentication/token \
+       | python3 -c 'import sys,json;print(json.load(sys.stdin)["token"])')
+   curl -sS -H "token: $T" https://beds24.com/api/v2/authentication/details \
+       | python3 -m json.tool
+   ```
+
+   Comprueba en la salida que `validToken` es `true` y que **los scopes son los que pediste**.
+   Si te quedaste corto, no hay ampliación posible: vuelta al paso 1.
+
+4. **Guarda el nuevo** en el gestor de contraseñas y sustituye el viejo.
+5. **Revoca el viejo.** La documentación de Beds24 afirma que la API soporta revocación, pero no
+   he verificado la ruta y **no conviene adivinarla** — llamar a ciegas a algo que suene a
+   revoke puede matar el token que estás usando. Búscala en el Swagger de
+   `https://beds24.com/api/v2/`, o revócalo desde la página de API del panel si hay control para
+   ello.
+6. **Si no encuentras cómo revocar**, el viejo muere solo **a los 30 días sin usarse**. Es la
+   red de seguridad, no el plan: son 30 días de una credencial con escritura sobre la cuenta.
+
+### Cuándo rotar
+
+- **Siempre** que el valor haya aparecido en un sitio que no sea el gestor de contraseñas: un
+  historial de shell, un log, un ticket, una conversación.
+- **Antes** de que la cuenta pase a tener algo que valga — en particular, antes de conectar
+  cualquier canal OTA.
+- Cuando los scopes sean más amplios de lo que el consumidor necesita, como es el caso hoy.
+- Al cerrar el spike, si el token se creó solo para medir.
+
+### Qué NO cuenta como rotar
+
+Generar un invite code nuevo **no invalida por sí solo los refresh tokens anteriores**. No lo he
+verificado, y asumir que sí es el error que deja dos credenciales vivas donde creías tener una.
+Rotar es sustituir *y* revocar.
+
+---
+
 #### 3. Comprueba que funciona antes de seguir
 
 Una llamada barata que confirma el canje y, de paso, resuelve el supuesto de la forma de
