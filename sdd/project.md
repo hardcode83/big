@@ -24,20 +24,23 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 
 ## Worktree bootstrap
 
-Un worktree recién creado **no puede levantar su propio stack**: `docker-compose.yml` publica 5432, 6379, 8000 y 3000 en el host, así que un segundo `make up` choca de puertos con el stack del principal.
+Un worktree levanta **su propio stack**, en paralelo con el del principal y con el de cualquier otro worktree (change `worktree-parallel-stack`). No hay que apagar nada de nadie:
 
-Y **no vale reutilizar el stack del principal**: `backend` y `frontend` montan el código por bind-mount (`./backend:/app`, `./frontend:/app`), así que sus contenedores sirven siempre el árbol desde el que se levantaron. Un `docker compose exec backend uv run pytest` desde el worktree apuntando al proyecto del principal probaría el código del principal, no el del change.
+1. En el worktree de la feature: `make up`
+2. Los comandos de *Commands* funcionan igual desde ahí
+3. Al terminar, `make down` — y hazlo **antes** de borrar el worktree (ver «stacks huérfanos» abajo)
 
-Regla: **un stack a la vez**.
+Lo que lo hace posible: Compose ya aísla contenedores, red y volúmenes por nombre de proyecto —que sale del nombre del directorio, y el del worktree es distinto—, así que lo único que colisionaba era la publicación de puertos en el host. Un worktree enlazado **no publica ninguno**: `make up` lo detecta por git (`--git-dir` distinto de `--git-common-dir`) y añade `docker-compose.worktree.yml`, que los retira con `ports: !reset []`. Te lo dice al arrancar, y antes de levantar comprueba que en la configuración resuelta no queda ningún mapeo `ports` — la ausencia del mapeo, no la de un puerto de host concreto, porque hay formas de `ports:` que Docker publica en un puerto efímero sin declararlo.
 
-1. En el worktree que lo tenga levantado: `make down`
-2. En el worktree de la feature: `make up`
-3. Los comandos de *Commands* funcionan igual desde ahí
-4. Al terminar, `make down` y devuélvelo a donde toque
+Y **sigue sin valer reutilizar el stack del principal**: `backend` y `frontend` montan el código por bind-mount (`./backend:/app`, `./frontend:/app`), así que sus contenedores sirven siempre el árbol desde el que se levantaron. Un `docker compose exec backend uv run pytest` desde el worktree apuntando al proyecto del principal probaría el código del principal, no el del change. Por eso cada worktree levanta el suyo.
 
-**Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros.
+**Lo que no tendrás en un worktree: navegador.** Sin puertos publicados no hay UI ni API alcanzables desde el host — ni `localhost:3000` ni `localhost:8000` ni un cliente gráfico contra `localhost:5432`. La suite sí corre, porque va por la red de compose (`postgres:5432`, `redis:6379`), que es por donde ha ido siempre. Si algún día hace falta navegar la app desde un worktree, la salida es parametrizar los cuatro puertos con un desplazamiento (`make up PORT_OFFSET=10`); se añadirá cuando haga falta, no antes.
 
-Aviso: los volúmenes con nombre van por proyecto de compose, que sale del nombre del directorio. El stack de un worktree arranca con **base de datos vacía** y reinstala dependencias la primera vez — es lento, no está roto. Re-siembra con `make bootstrap`.
+**Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.24 (por `!reset`) y git ≥ 2.31 (por `--path-format`).
+
+Aviso de coste, que no desaparece: los volúmenes con nombre van **por proyecto de compose**. El stack de un worktree arranca con **base de datos vacía** y reinstala dependencias la primera vez — es lento, no está roto. Re-siembra con `make bootstrap`. Y ocupa sus propios gigas de disco: dos stacks a la vez son dos Postgres, dos Redis y dos juegos de dependencias.
+
+**Stacks huérfanos**: si borras un worktree sin bajar su stack, los contenedores siguen vivos y ya no queda nada que lo explique — y ojo, que `git worktree remove` **falla** si Docker dejó ficheros suyos en el árbol, así que el caso normal es «worktree desregistrado, directorio en pie». Por eso: `make down` **antes** de borrar el worktree. Para verlo a posteriori, `docker compose ls` lista los proyectos vivos con su fichero de origen. Un diagnóstico con marcas (cuál es de este repositorio, cuál es huérfano, quién retiene cada puerto) es una entrada propia del roadmap, `compose-stacks-diagnostic`: se sacó de aquí porque atribuir stacks a partir de etiquetas de contenedor —que cualquier contenedor de la máquina puede poner— resultó tener mucho más fondo del que aparenta.
 
 ## Conventions
 

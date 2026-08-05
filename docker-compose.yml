@@ -15,6 +15,11 @@ services:
       # gráficos, y la suite ejecutada en el host, que cae a localhost:5432).
       # `DATABASE_URL` no pasa por aquí: los contenedores van por `postgres:5432` a
       # través de la red de compose, que es un camino distinto y no se ve afectado.
+      #
+      # Este mapeo (y los otros tres de este fichero) lo RETIRA `docker-compose.worktree.yml`
+      # cuando el stack se levanta desde un worktree enlazado, para que dos stacks convivan sin
+      # chocar de puertos. Aquí sigue declarado a propósito: el worktree principal es el que
+      # publica, y es esta declaración la que describe la postura de red del proyecto.
       - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
@@ -92,6 +97,10 @@ services:
       # Ojo si añades otro puerto aquí: la excepción es de ESTE par servicio+puerto, no del
       # servicio entero. Cualquier otro mapeo de `backend` debería llevar el prefijo
       # `127.0.0.1:` salvo que tenga su propio motivo escrito. Lo mismo con `frontend:3000`.
+      #
+      # Y si añades un mapeo a CUALQUIER servicio, añádelo también a
+      # `docker-compose.worktree.yml`, que es el fichero que los retira en un worktree
+      # enlazado. `make up` allí lo comprueba y aborta si queda alguno publicado.
       - "8000:8000"
     depends_on:
       postgres:
