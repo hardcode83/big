@@ -67,6 +67,17 @@ class PropertyStateMachine:
     }
 
     @classmethod
+    def source_states_for(cls, trigger: PropertyStateTrigger) -> frozenset[PropertyOperationalState]:
+        """Which current states admit `trigger`, derived from the policy above.
+
+        Added by `celery-jobs` so its scheduled jobs can narrow their candidates (design
+        D3) **without writing a second copy of the matrix**. A hand-kept list would drift
+        from `_POLICY` the first time a transition is added, and it would drift silently:
+        the job would simply stop considering a state that had become legal.
+        """
+        return frozenset(state for state, candidate in cls._POLICY if candidate is trigger)
+
+    @classmethod
     def evaluate(cls, request: PropertyStateChangeRequest) -> PropertyStateChangeResult:
         cls._validate_request(request)
         current = request.property.current_operational_state

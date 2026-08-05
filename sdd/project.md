@@ -22,6 +22,23 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 
+## Worktree bootstrap
+
+Un worktree recién creado **no puede levantar su propio stack**: `docker-compose.yml` publica 5432, 6379, 8000 y 3000 en el host, así que un segundo `make up` choca de puertos con el stack del principal.
+
+Y **no vale reutilizar el stack del principal**: `backend` y `frontend` montan el código por bind-mount (`./backend:/app`, `./frontend:/app`), así que sus contenedores sirven siempre el árbol desde el que se levantaron. Un `docker compose exec backend uv run pytest` desde el worktree apuntando al proyecto del principal probaría el código del principal, no el del change.
+
+Regla: **un stack a la vez**.
+
+1. En el worktree que lo tenga levantado: `make down`
+2. En el worktree de la feature: `make up`
+3. Los comandos de *Commands* funcionan igual desde ahí
+4. Al terminar, `make down` y devuélvelo a donde toque
+
+**Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros.
+
+Aviso: los volúmenes con nombre van por proyecto de compose, que sale del nombre del directorio. El stack de un worktree arranca con **base de datos vacía** y reinstala dependencias la primera vez — es lento, no está roto. Re-siembra con `make bootstrap`.
+
 ## Conventions
 
 - Nombres canónicos exactos del PRD en código: estados operacionales (`VACANT_READY`…), enums, entidades (§7-8).

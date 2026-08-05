@@ -175,8 +175,9 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   evento `do_orm_execute` de SQLAlchemy, activo **solo** en sesiones marcadas con el tenant
   de la petición. Tiene cinco límites documentados en `app/core/db.py` y por eso no
   sustituye al parámetro explícito: cubre solo SELECT/UPDATE/DELETE del ORM; no actúa en
-  sesiones sin marcar (tareas Celery, bootstrap, el login anónimo —que lo necesita—, y
-  `POST /auth/refresh`); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
+  sesiones sin marcar (bootstrap, el login anónimo —que lo necesita— y
+  `POST /auth/refresh`; **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
+  una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
 - El escaneo de clases con `tenant_id` **no** se memoiza, y `app/core/models_registry.py`

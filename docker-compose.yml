@@ -129,6 +129,39 @@ services:
       migrate:
         condition: service_completed_successfully
 
+  beat:
+    # El scheduler de `celery-jobs`: dispara las cuatro tareas de PRD §8.3.
+    #
+    # Servicio propio y no `worker --beat`: con más de un worker el beat embebido dispararía
+    # N veces (design D13).
+    #
+    # Su fichero de estado (`backend/celerybeat-schedule`) **persiste en el host**, porque el
+    # bind mount de abajo hace que `/app` sea el árbol del repositorio. No es efímero, aunque
+    # una versión anterior de este comentario lo afirmara: por eso está en `.gitignore`. No
+    # afecta a la corrección — las tareas son idempotentes y toman un lock en Redis, así que
+    # un reinicio que vuelva a disparar antes de tiempo es inofensivo (R4.1, R4.2).
+    build:
+      context: ./backend
+      dockerfile: devops/Dockerfile
+      target: dev
+    restart: unless-stopped
+    command: uv run celery -A app.worker beat -l info
+    env_file: .env
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
+    volumes:
+      - ./backend:/app
+      - beat_venv:/app/.venv
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+
   frontend:
     build:
       context: ./frontend
@@ -168,6 +201,7 @@ volumes:
   postgres_data:
   backend_venv:
   worker_venv:
+  beat_venv:
   migrate_venv:
   frontend_node_modules:
   frontend_next:

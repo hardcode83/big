@@ -6,6 +6,7 @@ answer `404` without ever asking "does it exist somewhere else?" (R5.1, design D
 """
 
 import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass
 from datetime import date
 from typing import Protocol
@@ -66,6 +67,31 @@ class ReservationRepository(Protocol):
         self, tenant_id: uuid.UUID, filters: ReservationFilters, *, page: int, per_page: int
     ) -> Page:
         """Filtered, ordered and paginated (R1.1). The order must be stable (design D12)."""
+        ...
+
+    async def list_for_properties(
+        self,
+        tenant_id: uuid.UUID,
+        property_ids: Collection[uuid.UUID],
+        date_from: date,
+        date_to: date,
+        # `Sequence`, not `list`: this Protocol defines a method called `list`, which
+        # shadows the builtin inside the class body and makes `list[Reservation]` a
+        # `TypeError` at import time.
+    ) -> Sequence[Reservation]:
+        """Every reservation of those properties whose stay overlaps the range.
+
+        Added by `celery-jobs` (its R3): its scheduled jobs need the reservations of a
+        batch of candidate properties in one query rather than paginating per property.
+        Unpaginated on purpose — the caller bounds the result with a window of a few days
+        (design D3), not with a page size.
+
+        Same overlap criterion as `ReservationFilters` (design D12), and **no status
+        filter**: which statuses are eligible is `PropertyStateMachine`'s decision, and
+        pre-filtering here would put a second copy of that policy in SQL.
+
+        An empty `property_ids` returns an empty list without querying.
+        """
         ...
 
     async def add(self, tenant_id: uuid.UUID, reservation: Reservation) -> None:

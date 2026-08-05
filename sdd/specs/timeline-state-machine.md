@@ -15,6 +15,14 @@ regla "nunca se editan eventos pasados" expresada en una firma, y rechaza un `me
 la columna `JSONB` no pueda almacenar. Construir el evento sigue siendo exclusivamente
 competencia de la fábrica que esta capacidad define.
 
+**Quién la conduce**: desde `celery-jobs` esta política tiene ejecutor. Su
+`AdvancePropertyStatesUseCase` (`app/properties/application/use_cases.py`) es el primer y
+único escritor de `current_operational_state` y de `property_state_transitions`: pregunta a
+`PropertyStateMachine` por cada reserva candidata, y cuando acepta persiste el estado, la
+transición y el `TimelineEvent` en una sola transacción con el `correlation_id` que esta
+capacidad produce. La política sigue sin tocar reloj, base de datos ni red — lo que cambió es
+que ya no evalúa en el vacío (ver `specs/celery-jobs.md`).
+
 ## Requirements
 
 ### Estados canónicos y autoridad única

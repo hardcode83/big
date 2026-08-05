@@ -13,9 +13,13 @@ Es además el primer módulo que **persiste** `TimelineEvent`: hasta esta capaci
 `timeline-state-machine` construía eventos validados y nadie los escribía.
 
 No incluye recepción de webhooks (necesita `WebhookEvent`, de `domain-foundation-financial`,
-y su job de `celery-jobs`), ni transiciones de estado operacional dependientes del reloj
-(`celery-jobs`), ni frontend (`dashboard-web`), ni escritura de `AuditLog` (entidad de
-`domain-foundation-financial`).
+y su job de `celery-jobs`), ni frontend (`dashboard-web`), ni escritura de `AuditLog` (entidad
+de `domain-foundation-financial`).
+
+Las **transiciones de estado operacional dependientes del reloj** sí existen ya: las hace
+`celery-jobs`, que lee estas reservas para decidir cuándo una propiedad entra en ventana de
+check-in, se ocupa o queda pendiente de limpieza (ver `specs/celery-jobs.md`). Esta capacidad
+no las dispara; aporta el dato del que cuelgan.
 
 ## Requirements
 

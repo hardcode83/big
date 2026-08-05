@@ -22,8 +22,11 @@ class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, Timesta
     quietly reopen a door `AccessRecordModel` deliberately closed — it stores
     `code_masked` only, with no plaintext column at all.
 
-    Nothing writes here yet; `access-notifications` inherits the contract with its own
-    test. Do not restate rule 11 here — it lives in one place on purpose.
+    **First writer: `celery-jobs`**, whose SLA job (PRD §14) queues its escalations here.
+    It carries the contract for `subject`/`body` with its own tests — the escalation row is
+    built from ids and a fixed template, never from the breached notification's own text.
+    `last_error` still has no writer; `access-notifications` inherits that one when it adds
+    delivery. Do not restate rule 11 here — it lives in one place on purpose.
     """
 
     __tablename__ = "notification_logs"
