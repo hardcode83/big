@@ -158,10 +158,14 @@ número se conserva con una nota, y lo que protege la postura hoy es la revisió
     de `backend`/`frontend` intactos); R3.2-R3.4 en los comentarios de `docker-compose.yml` y
     la subsección del README; R4.1-R4.3 en la reescritura de la regla 8, con barrido propio y
     otro independiente del revisor de documentación confirmando que no hay una cuarta copia.
-  - **R5 ya no existe en este change**: se retiró con la guardia a `compose-ports-guard`
-    (2026-08-05), así que no hay criterio suyo que acreditar aquí.
-  - **R1 y R2 implementados, con la declaración verificada** (`host_ip=127.0.0.1` en
-    `postgres` y `redis`) pero **sin verificación de red viva**: R1.3, R1.4, R1.5 y R2.1
-    exigen el stack levantado, y las tareas 1.4/1.5 quedan en `BLOCKED.md`. R2.2 y R2.3 sí
-    están cerrados, porque son constancia escrita y no comportamiento — y su redacción se
-    corrigió en 3.5 para no dar por cerrado el residual de «mismo host, otro proceso local».
+  - **R1 y R2 completos y verificados sobre contenedores reales** (tareas 1.4 y 1.5, hechas el
+    2026-08-05 cuando se liberó la ventana de puertos): `docker compose port` y `docker inspect`
+    dan `127.0.0.1` en los datastores; desde la IP de LAN los puertos 5432 y 6379 **rechazan**
+    mientras 3000 y 8000 conectan, y por loopback los datastores **sí** conectan; los
+    contenedores siguen llegando por nombre de servicio; la suite del host conecta por
+    `localhost:5432` y la del contenedor pasa entera. R2.2 y R2.3 son constancia escrita y no
+    comportamiento, y su redacción se corrigió en 3.5 para no dar por cerrado el residual de
+    «mismo host, otro proceso local».
+  - **El quinto requisito, la guardia de regresión automática, ya no forma parte de este
+    change**: se retiró a `compose-ports-guard` el 2026-08-05 con su análisis íntegro, así que no
+    hay criterio suyo que acreditar aquí.
