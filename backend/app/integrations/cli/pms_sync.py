@@ -1,9 +1,18 @@
 """`python -m app.integrations.cli.pms_sync` — pull reservations from the PMS (R3, design D10).
 
-A console command, not an HTTP endpoint: PRD §23 defines no sync endpoint, and the natural
-trigger is Celery beat, which belongs to the `celery-jobs` roadmap entry. When that arrives it
-schedules `SyncReservationsFromPmsUseCase` directly — this command exists so the capability is
-operable (and verifiable) before then, exactly like `app/cli/bootstrap.py` does for the seed.
+A console command, not an HTTP endpoint: PRD §23 defines no sync endpoint, and the capability
+has to be operable (and verifiable) from somewhere — exactly like `app/cli/bootstrap.py` does
+for the seed.
+
+**This command is still the only way to run a sync, and that is deliberate.** An earlier
+version of this docstring promised that `celery-jobs` would schedule
+`SyncReservationsFromPmsUseCase` on Celery beat. It did not, and decided not to (its design
+D16): the cadence is a function of the provider's credit budget, that budget was measured
+against Beds24 (`specs/pms-beds24-spike.md`: 8 credits per cycle), and **the Beds24 adapter
+does not exist yet**. Scheduling a periodic sync today would either run `MockPMSAdapter` —
+verifying nothing — or drag provider configuration into the application, which `build_adapter`
+below avoids on purpose. The periodic sync arrives with `pms-beds24-adapter`, which owns the
+`PMSAdapterFactory`.
 
 Takes the tenant as an argument because a command has no token to derive it from. That is the
 one place in the system where a tenant id comes from outside a request, and it is deliberate:

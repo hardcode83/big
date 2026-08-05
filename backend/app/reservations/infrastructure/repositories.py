@@ -7,6 +7,8 @@ session listener of `app/core/db.py` covers neither INSERTs nor the identity map
 """
 
 import uuid
+from collections.abc import Collection, Sequence
+from datetime import date
 
 from sqlalchemy import Select, func, select, update
 from sqlalchemy.exc import IntegrityError
@@ -85,6 +87,29 @@ class SqlAlchemyReservationRepository:
             items=tuple(_to_reservation(model) for model in rows.scalars()),
             total=int(total or 0),
         )
+
+    async def list_for_properties(
+        self,
+        tenant_id: uuid.UUID,
+        property_ids: Collection[uuid.UUID],
+        date_from: date,
+        date_to: date,
+        # `Sequence` for the same reason as the port: `list` is a method of this class.
+    ) -> Sequence[Reservation]:
+        if not property_ids:
+            return []
+        rows = await self._session.execute(
+            _ordered(
+                select(ReservationModel).where(
+                    ReservationModel.tenant_id == tenant_id,
+                    ReservationModel.property_id.in_(list(property_ids)),
+                    # Stay overlap, the same criterion `_conditions` applies (design D12).
+                    ReservationModel.check_in_date <= date_to,
+                    ReservationModel.check_out_date >= date_from,
+                )
+            )
+        )
+        return [_to_reservation(model) for model in rows.scalars()]
 
     async def add(self, tenant_id: uuid.UUID, reservation: Reservation) -> None:
         if reservation.tenant_id != tenant_id:

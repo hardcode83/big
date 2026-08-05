@@ -197,3 +197,46 @@ def test_the_checks_actually_catch_the_escapes_they_claim_to() -> None:
 
     builtin_dynamic = ast.parse("x = __import__('sqlalchemy')")
     assert _dynamic_import_calls(builtin_dynamic) == {"__import__"}
+
+
+# --- Celery is a delivery mechanism, not a layer (`celery-jobs` R1, design D2) ---------
+
+#: The only modules allowed to import Celery. `app/worker.py` owns the app instance and
+#: `app/scheduler/` is the delivery layer — the scheduler's equivalent of `api/`. Anywhere
+#: else means a task decorator has grown inside a domain, which is how business rules end
+#: up depending on a broker.
+CELERY_IMPORTERS = {"app/worker.py"}
+CELERY_IMPORTER_PREFIX = "app/scheduler/"
+
+
+def _all_app_modules() -> list[Path]:
+    return sorted(APP_ROOT.glob("**/*.py"))
+
+
+@pytest.mark.parametrize("module_path", _all_app_modules(), ids=lambda p: str(p))
+def test_celery_is_imported_only_by_the_worker_and_the_scheduler(module_path: Path) -> None:
+    relative = module_path.relative_to(APP_ROOT.parent).as_posix()
+    tree = ast.parse(module_path.read_text())
+    if "celery" not in _imported_roots(module_path, tree):
+        return
+    assert (
+        relative in CELERY_IMPORTERS or relative.startswith(CELERY_IMPORTER_PREFIX)
+    ), f"{relative} imports celery; only app/worker.py and app/scheduler/** may"
+
+
+@pytest.mark.parametrize("module_path", _all_app_modules(), ids=lambda p: str(p))
+def test_the_scheduler_never_reaches_into_a_domains_internals(module_path: Path) -> None:
+    """`app/scheduler/` composes use cases and repositories; it must not import a
+    `domain/` module's private machinery or bypass `application/` with its own rules.
+
+    Kept deliberately narrow: importing entities, enums and ports is how it wires the use
+    cases, so what this bans is the one thing that would make it a second application
+    layer — importing another domain's `application` internals under an alias.
+    """
+    relative = module_path.relative_to(APP_ROOT.parent).as_posix()
+    if not relative.startswith(CELERY_IMPORTER_PREFIX):
+        return
+    tree = ast.parse(module_path.read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom) and node.module:
+            assert "._" not in node.module, f"{relative} imports a private module"

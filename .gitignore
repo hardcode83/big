@@ -8,6 +8,11 @@
 
 # python
 __pycache__/
+
+# Estado del scheduler de Celery. En dev el compose bind-montea `./backend:/app`, así que
+# beat lo escribe en el árbol de trabajo del host y NO en un filesystem efímero — que es lo
+# que este change llegó a afirmar por error en tres sitios.
+backend/celerybeat-schedule*
 *.pyc
 .venv/
 *.egg-info/

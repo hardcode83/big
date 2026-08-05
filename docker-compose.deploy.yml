@@ -161,6 +161,49 @@ services:
       retries: 5
       start_period: 40s
 
+  beat:
+    # El scheduler de `celery-jobs` (design D13). En `private` como el worker: no necesita
+    # entrada desde internet, solo Redis y Postgres.
+    image: ghcr.io/${GHCR_NS}/autohostai-backend:${IMAGE_TAG}
+    restart: unless-stopped
+    command: celery -A app.worker beat -l info
+    networks: [private]
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # Igual que el worker: `app.worker` importa `app.core.config` y `jwt_secret_key` es
+      # obligatorio (R1.7), así que sin esto el beat entra en crash-loop con un ValidationError.
+      JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
+    depends_on:
+      redis:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # `celery inspect ping` NO sirve aquí: ese protocolo de control lo responde un *worker* y
+    # beat no lo implementa — reutilizar el healthcheck del worker daría verde con beat muerto.
+    #
+    # Se comprueba PID 1, que es el propio proceso de beat (la imagen `prod` no declara
+    # ENTRYPOINT, así que el `command` de arriba ES PID 1). **Con Python y no con `pgrep`**:
+    # `procps` no está instalado en `python:3.12-slim` y la etapa `prod` del Dockerfile no lo
+    # añade, así que `pgrep` salía 127, el `||` disparaba siempre y beat nunca habría llegado a
+    # `healthy` — bloqueando `up -d --wait` y con él TODO el deploy, no solo este servicio.
+    # Lo cazó el revisor de cicd del panel de la sección 5-6 ejecutándolo contra la imagen.
+    #
+    # Lo que prueba y lo que no: que el proceso arrancó y sigue siendo beat, que es lo que
+    # `up --wait` necesita para fallar un deploy roto. NO prueba que esté planificando; si beat
+    # se cuelga sin morir, esto sigue en verde. Detectarlo pediría inspeccionar su fichero de
+    # planificación, y su cadencia de escritura no está garantizada por contrato.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import sys; sys.exit(0 if b'beat' in open('/proc/1/cmdline','rb').read() else 1)
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 40s
+
   frontend:
     image: ghcr.io/${GHCR_NS}/autohostai-frontend:${IMAGE_TAG}
     restart: unless-stopped

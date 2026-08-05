@@ -10,12 +10,15 @@ pass `tenant_id`, or passed the wrong one, must fail here too, otherwise these t
 """
 
 import uuid
+from collections.abc import Collection, Sequence
 from dataclasses import dataclass, field
+from datetime import date
 
 from app.core.tenancy import CrossTenantWriteError
 from app.guests.domain.entities import Guest
 from app.guests.domain.value_objects import GuestSummary, normalize_email
 from app.properties.domain.entities import Property
+from app.properties.domain.enums import PropertyOperationalState
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.exceptions import DuplicateExternalReservationError
 from app.reservations.domain.repositories import Page, ReservationFilters
@@ -49,6 +52,31 @@ class FakePropertyRepository:
             if prop.tenant_id == tenant_id and prop.pms_external_id == pms_external_id.strip():
                 return prop
         return None
+
+    async def list_by_state(
+        self, tenant_id: uuid.UUID, states: Collection[PropertyOperationalState]
+    ) -> list[Property]:
+        if not states:
+            return []
+        rows = [
+            prop
+            for prop in self.properties.values()
+            if prop.tenant_id == tenant_id and prop.current_operational_state in states
+        ]
+        return sorted(rows, key=lambda prop: str(prop.id))
+
+    async def save(self, tenant_id: uuid.UUID, prop: Property) -> None:
+        if prop.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="property",
+                entity_tenant_id=prop.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        # Mirrors the real adapter's narrowness (`celery-jobs` design D6): only the
+        # operational state is persisted, so a use case that mutated anything else on the
+        # entity must not see the change survive here either.
+        stored = self.properties[prop.id]
+        stored.current_operational_state = prop.current_operational_state
 
 
 @dataclass
@@ -126,6 +154,30 @@ class FakeReservationRepository:
         rows.reverse()
         start = (page - 1) * per_page
         return Page(items=tuple(rows[start : start + per_page]), total=len(rows))
+
+    async def list_for_properties(
+        self,
+        tenant_id: uuid.UUID,
+        property_ids: Collection[uuid.UUID],
+        date_from: date,
+        date_to: date,
+        # `Sequence`, not `list`: this class defines a method called `list`, which shadows
+        # the builtin inside the class body — the same trap the real port documents.
+    ) -> Sequence[Reservation]:
+        if not property_ids:
+            return []
+        wanted = set(property_ids)
+        rows = [
+            reservation
+            for reservation in self.reservations.values()
+            if reservation.tenant_id == tenant_id
+            and reservation.property_id in wanted
+            # Same overlap criterion as the real adapter, inclusive on both edges.
+            and reservation.check_in_date <= date_to
+            and reservation.check_out_date >= date_from
+        ]
+        rows.sort(key=lambda reservation: (reservation.check_in_date, str(reservation.id)))
+        return rows
 
     async def add(self, tenant_id: uuid.UUID, reservation: Reservation) -> None:
         if reservation.tenant_id != tenant_id:

@@ -1,4 +1,4 @@
-"""SQLAlchemy adapter for `PropertyRepository` (design D16).
+"""SQLAlchemy adapter for `PropertyRepository` (`reservations` design D16).
 
 Every query filters `tenant_id` explicitly. The session-level listener in
 `app/core/db.py` also scopes ORM SELECTs, but its own docstring lists what it does not
@@ -8,13 +8,16 @@ No method commits: the transactional boundary is the use case (design D4).
 """
 
 import uuid
+from collections.abc import Collection
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.properties.domain.entities import Property
+from app.core.tenancy import CrossTenantWriteError
+from app.properties.domain.entities import Property, PropertyStateTransition
+from app.properties.domain.enums import PropertyOperationalState
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
-from app.properties.infrastructure.models import PropertyModel
+from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
 
 
 class SqlAlchemyPropertyRepository:
@@ -74,6 +77,67 @@ class SqlAlchemyPropertyRepository:
                 pms_external_id=pms_external_id,
             )
         return _to_property(models[0]) if models else None
+
+    async def list_by_state(
+        self, tenant_id: uuid.UUID, states: Collection[PropertyOperationalState]
+    ) -> list[Property]:
+        if not states:
+            return []
+        result = await self._session.execute(
+            select(PropertyModel)
+            .where(
+                PropertyModel.tenant_id == tenant_id,
+                PropertyModel.current_operational_state.in_(list(states)),
+            )
+            # Stable order so a job processes the same properties in the same sequence on
+            # every tick, which is what makes a failure reproducible from its log.
+            .order_by(PropertyModel.id)
+        )
+        return [_to_property(model) for model in result.scalars()]
+
+    async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
+        if property.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="property",
+                entity_tenant_id=property.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        await self._session.execute(
+            update(PropertyModel)
+            .where(PropertyModel.tenant_id == tenant_id, PropertyModel.id == property.id)
+            .values(current_operational_state=property.current_operational_state)
+        )
+
+
+class SqlAlchemyPropertyStateTransitionRepository:
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, transition: PropertyStateTransition) -> None:
+        if transition.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="property state transition",
+                entity_tenant_id=transition.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            PropertyStateTransitionModel(
+                id=transition.id,
+                tenant_id=transition.tenant_id,
+                property_id=transition.property_id,
+                from_state=transition.from_state,
+                to_state=transition.to_state,
+                triggered_by=transition.triggered_by,
+                triggered_by_user_id=transition.triggered_by_user_id,
+                reason=transition.reason,
+                # `metadata` is taken by SQLAlchemy's declarative API, so the column named
+                # `metadata` in Postgres is reached through `metadata_` — the same rename
+                # `SqlAlchemyTimelineEventRepository` documents.
+                metadata_=transition.metadata or None,
+                created_at=transition.created_at,
+            )
+        )
+        await self._session.flush()
 
 
 def _to_property(model: PropertyModel) -> Property:
