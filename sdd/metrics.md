@@ -25,4 +25,4 @@
 | pms-beds24-spike | new, design, tasks, run, archive | 165383 | 425606 | 81992533 | 54.2078 | 2026-08-03 | 2026-08-04 |
 | ingress-https-hardening | new, design, tasks, run, review, archive | 508669 | 990621 | 211056062 | 139.1914 | 2026-07-29 | 2026-08-04 |
 | celery-jobs | new, design, tasks, run, review | 638353 | 1719045 | 336267464 | 247.2024 | 2026-08-04 | 2026-08-05 |
-| local-dev-network-hardening | review | 55596 | 115660 | 34130998 | 32.7866 | 2026-08-05 | — |
+| local-dev-network-hardening | review, run, archive | 56381 | 211468 | 148459332 | 121.4044 | 2026-08-05 | 2026-08-05 |

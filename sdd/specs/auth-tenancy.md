@@ -215,6 +215,13 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   cuenta.
 - THE SYSTEM SHALL mantener los contadores en Redis, el único almacén compartido entre los
   procesos `backend` y `worker`, de forma que el límite se respete con varios workers.
+- **De qué depende esta garantía, y no es del código**: los contadores viven en un Redis que
+  corre **sin `requirepass`**, así que quien alcance su puerto puede borrarlos entre intentos y
+  entonces ni el límite por IP ni el bloqueo por cuenta se disparan. En dev local lo que los
+  protege es que `docker-compose.yml` publica `redis` **solo en `127.0.0.1`** (ver spec
+  `local-environment` §Postura de red del stack local) — el bind, no la autenticación. Devolver
+  ese mapeo a `0.0.0.0` deja estos dos requisitos sin defensa efectiva, aunque el código no
+  cambie. Residual aceptado: otro proceso de la propia máquina sí puede tocarlos.
 - THE SYSTEM SHALL (re)aplicar la expiración de cada contador en **todos** los intentos
   (`EXPIRE ... NX`), no solo cuando el contador se crea: `INCR` y `EXPIRE` son dos viajes,
   y si el segundo no llega a ejecutarse la clave se queda sin TTL y esa IP queda bloqueada
