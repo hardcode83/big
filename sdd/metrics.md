@@ -24,3 +24,4 @@
 | ci-backend-tests-conditional-gate | design, tasks, archive | 221481 | 789025 | 245617591 | 161.9459 | 2026-08-03 | 2026-08-03 |
 | pms-beds24-spike | new, design, tasks, run, archive | 165383 | 425606 | 81992533 | 54.2078 | 2026-08-03 | 2026-08-04 |
 | ingress-https-hardening | new, design, tasks, run, review, archive | 508669 | 990621 | 211056062 | 139.1914 | 2026-07-29 | 2026-08-04 |
+| local-dev-network-hardening | review | 55596 | 115660 | 34130998 | 32.7866 | 2026-08-05 | — |

@@ -27,6 +27,29 @@ make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
 ```
 
+### Postura de red del stack local
+
+`docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**: no son alcanzables
+desde otros equipos de tu red, solo desde esta máquina (`localhost:5432` y `localhost:6379`
+siguen funcionando igual, incluida la suite ejecutada en el host). No es higiene: ese Redis
+guarda los contadores del límite de intentos de login, y quien pueda borrarlos entre intentos
+anula el límite de 10/min por IP y el bloqueo tras 10 fallos.
+
+`backend` (`8000`) y `frontend` (`3000`) sí publican en **todas** las interfaces, y es
+deliberado: es lo que permite abrir la app desde un móvil real por la IP de tu LAN, que es
+como se comprueba el diseño mobile-first. Así que el stack local no es "invisible desde la
+red" — la UI y la API sí lo son; el acceso directo al datastore, no.
+
+**Esta postura no tiene todavía comprobación automática**: si alguien publica un puerto sin el
+prefijo `127.0.0.1:`, hoy solo lo atrapa la revisión del diff. La guardia que lo comprobaría en
+cada PR es una entrada propia del roadmap (`compose-ports-guard`), separada de este cambio
+porque construirla bien resultó ser un problema con más fondo del que parece — ver el análisis
+heredado en esa entrada.
+
+**Ojo con el alcance, para no leerlo de más**: lo que esto protege es el acceso *desde la red*.
+Redis corre sin `requirepass`, así que otro proceso de tu propia máquina sí puede tocar esos
+contadores; se acepta porque es una máquina de desarrollo con datos de prueba.
+
 ### Levantar un solo componente
 
 `SERVICE=` es opcional en `up`/`down`/`logs`/`sh`. Compose arranca automáticamente las dependencias declaradas de ese servicio:
@@ -105,7 +128,7 @@ levantado.
 
 ## Variables de entorno
 
-Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real (Postgres solo alcanzable dentro de la red de compose). Los secretos reales futuros (credenciales de proveedores externos) nunca llevarán valor por defecto ahí — solo el nombre (`security.md` #8).
+Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real. Lo que hace aceptable ese default de Postgres es que `docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**, así que la base de datos no es alcanzable desde otros equipos de tu red. Los secretos reales futuros (credenciales de proveedores externos) nunca llevarán valor por defecto ahí — solo el nombre (`security.md` #8).
 
 ## Estructura
 
