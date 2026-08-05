@@ -329,3 +329,108 @@ class TestListing:
         second = await repository.list(tenant.id, NO_FILTERS, page=2, per_page=2)
 
         assert len({item.id for item in first.items + second.items}) == 4
+
+
+class TestListForProperties:
+    """`celery-jobs` R3: the batch read its scheduled jobs use instead of paginating."""
+
+    @pytest.mark.asyncio
+    async def test_it_returns_reservations_of_the_named_properties_only(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        other = PropertyModel(tenant_id=tenant.id, name="Second", internal_code="TenantA-2")
+        db_session.add(other)
+        await db_session.flush()
+        repository = SqlAlchemyReservationRepository(db_session)
+        mine = _reservation(tenant, prop, check_in=date(2026, 8, 1))
+        theirs = _reservation(tenant, other, check_in=date(2026, 8, 1))
+        await repository.add(tenant.id, mine)
+        await repository.add(tenant.id, theirs)
+
+        found = await repository.list_for_properties(
+            tenant.id, [prop.id], date(2026, 7, 30), date(2026, 8, 10)
+        )
+
+        assert [r.id for r in found] == [mine.id]
+
+    @pytest.mark.asyncio
+    async def test_it_matches_a_stay_that_merely_overlaps_the_window(self, db_session) -> None:
+        """A guest already in the flat when the window opens is part of the answer (D12)."""
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        straddling = _reservation(tenant, prop, check_in=date(2026, 7, 28), nights=6)
+        await repository.add(tenant.id, straddling)
+
+        found = await repository.list_for_properties(
+            tenant.id, [prop.id], date(2026, 8, 1), date(2026, 8, 2)
+        )
+
+        assert [r.id for r in found] == [straddling.id]
+
+    @pytest.mark.asyncio
+    async def test_the_window_bounds_are_inclusive(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        # Checks out exactly on the first day of the window.
+        leaving = _reservation(tenant, prop, check_in=date(2026, 7, 29), nights=3)
+        # Checks in exactly on the last day of the window.
+        arriving = _reservation(tenant, prop, check_in=date(2026, 8, 2), nights=2)
+        await repository.add(tenant.id, leaving)
+        await repository.add(tenant.id, arriving)
+
+        found = await repository.list_for_properties(
+            tenant.id, [prop.id], date(2026, 8, 1), date(2026, 8, 2)
+        )
+
+        assert {r.id for r in found} == {leaving.id, arriving.id}
+
+    @pytest.mark.asyncio
+    async def test_a_stay_outside_the_window_is_not_returned(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(tenant.id, _reservation(tenant, prop, check_in=date(2026, 9, 1)))
+
+        found = await repository.list_for_properties(
+            tenant.id, [prop.id], date(2026, 8, 1), date(2026, 8, 2)
+        )
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_filter_by_status(self, db_session) -> None:
+        """Which statuses are eligible is the state machine's call, not this query's."""
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        cancelled = _reservation(
+            tenant, prop, check_in=date(2026, 8, 1), status=ReservationStatus.CANCELLED
+        )
+        await repository.add(tenant.id, cancelled)
+
+        found = await repository.list_for_properties(
+            tenant.id, [prop.id], date(2026, 7, 30), date(2026, 8, 10)
+        )
+
+        assert [r.id for r in found] == [cancelled.id]
+
+    @pytest.mark.asyncio
+    async def test_it_does_not_reach_another_tenant(self, db_session) -> None:
+        tenant_a, prop_a = await _tenant_with_property(db_session, "TenantA")
+        tenant_b, prop_b = await _tenant_with_property(db_session, "TenantB")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(tenant_b.id, _reservation(tenant_b, prop_b, check_in=date(2026, 8, 1)))
+
+        # Even naming the neighbour's property id explicitly, the tenant filter decides.
+        found = await repository.list_for_properties(
+            tenant_a.id, [prop_a.id, prop_b.id], date(2026, 7, 30), date(2026, 8, 10)
+        )
+
+        assert found == []
+
+    @pytest.mark.asyncio
+    async def test_without_property_ids_it_returns_empty(self, db_session) -> None:
+        tenant, prop = await _tenant_with_property(db_session, "TenantA")
+        repository = SqlAlchemyReservationRepository(db_session)
+        await repository.add(tenant.id, _reservation(tenant, prop, check_in=date(2026, 8, 1)))
+
+        assert await repository.list_for_properties(
+            tenant.id, [], date(2026, 7, 30), date(2026, 8, 10)
+        ) == []

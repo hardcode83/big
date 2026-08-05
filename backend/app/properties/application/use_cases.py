@@ -1,0 +1,267 @@
+"""Clock-driven operational state transitions (`celery-jobs` R3, design D6).
+
+The first use case `properties` has ever had. Until now `PropertyStateMachine` was a pure
+decision with nobody to act on it: nothing in the system wrote `current_operational_state`
+or a row of `property_state_transitions`.
+
+One use case parameterised by trigger rather than three (design D6): the three clock
+triggers share the whole loop — candidates, evaluation, persistence, report — and differ
+only in their source states, which `PropertyStateMachine.source_states_for` derives.
+
+**The machine decides eligibility, this only asks** (design D3, D10). Every reservation in
+the window is put to `PropertyStateMachine.evaluate` and classified by its verdict; this
+module never pre-judges "not due" with comparisons of its own. That is also where the
+ambiguity of task 3.5 comes from — two accepted verdicts for one property, not a second opinion about
+which reservation counts.
+
+**The transaction is the tenant, not the property** (design D5, "cada tenant es su propia
+transacción"): one `commit` at the end, so a failure leaves the tenant untouched and the
+scheduler's runner moves to the next one (design D12). That is strictly stronger than
+R3.6, which only requires the three writes of a single transition to be all-or-nothing.
+"""
+
+import logging
+import uuid
+from collections.abc import Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
+
+from app.core.unit_of_work import UnitOfWork
+from app.properties.domain.clock_triggers import (
+    candidate_window,
+    effective_bounds,
+    opens_checkin_window,
+)
+from app.properties.domain.entities import Property
+from app.properties.domain.enums import StateTransitionTriggeredBy
+from app.properties.domain.exceptions import (
+    IncompatibleTransitionContextError,
+    NoOperationalStateChangeError,
+)
+from app.properties.domain.repositories import (
+    PropertyRepository,
+    PropertyStateTransitionRepository,
+)
+from app.properties.domain.state_machine import PropertyStateMachine
+from app.properties.domain.transition_enums import PropertyStateTrigger
+from app.properties.domain.value_objects import (
+    PropertyStateChangeRequest,
+    PropertyStateChangeResult,
+    PropertyTransitionContext,
+    TransitionActor,
+    TransitionEvidenceIds,
+)
+from app.reservations.domain.entities import Reservation
+from app.reservations.domain.repositories import ReservationRepository
+from app.tenants.domain.repositories import TenantConfigRepository
+from app.timeline.domain.repositories import TimelineEventRepository
+
+logger = logging.getLogger(__name__)
+
+
+@dataclass
+class AdvanceReport:
+    """What one run did, in terms an operator can act on.
+
+    The buckets are not decoration. `not_eligible` is the ordinary case — the hour has not
+    come — while `unresolvable_time` and `ambiguous` are properties that will **never**
+    advance on their own and need a person, so collapsing them into one count would hide
+    exactly the rows worth looking at.
+
+    Each candidate property increments exactly one bucket, by this precedence:
+    `transitioned` > `ambiguous` > `already_there` > `unresolvable_time` > `not_eligible`.
+    A reservation whose local time cannot be materialised is logged either way, so a
+    property that transitions on one booking does not bury a broken one.
+
+    **`already_there` cannot currently be non-zero, and that is a property of the policy,
+    not an accident**: every `(source state, clock trigger)` entry of
+    `PropertyStateMachine._POLICY` has a destination different from its source, so the
+    machine's `NoOperationalStateChangeError` is unreachable for these three triggers.
+    R4.1's idempotence is delivered one step earlier — a transitioned property leaves the
+    source states and stops being a candidate at all. The bucket and its handler stay
+    because the day a trigger gains a same-state destination, silently counting it as a
+    transition would be the wrong answer. `test_already_there_is_unreachable_for_the_clock_triggers`
+    pins the claim so it cannot rot into a lie.
+    """
+
+    trigger: str
+    candidates: int = 0
+    transitioned: int = 0
+    already_there: int = 0
+    not_eligible: int = 0
+    unresolvable_time: int = 0
+    ambiguous: int = 0
+
+
+class AdvancePropertyStatesUseCase:
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+        transitions: PropertyStateTransitionRepository,
+        timeline: TimelineEventRepository,
+        configs: TenantConfigRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._properties = properties
+        self._reservations = reservations
+        self._transitions = transitions
+        self._timeline = timeline
+        self._configs = configs
+        self._uow = uow
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, trigger: PropertyStateTrigger, now: datetime
+    ) -> AdvanceReport:
+        report = AdvanceReport(trigger=trigger.value)
+        candidates = await self._properties.list_by_state(
+            tenant_id, PropertyStateMachine.source_states_for(trigger)
+        )
+        if not candidates:
+            return report
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        checkin_window = timedelta(hours=config.checkin_window_hours_before)
+        by_property = await self._reservations_by_property(tenant_id, candidates, now)
+
+        for property in candidates:
+            report.candidates += 1
+            await self._advance_one(
+                tenant_id=tenant_id,
+                property=property,
+                reservations=by_property.get(property.id, ()),
+                trigger=trigger,
+                now=now,
+                checkin_window=checkin_window,
+                report=report,
+            )
+
+        await self._uow.commit()
+        return report
+
+    async def _advance_one(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        property: Property,
+        reservations: Sequence[Reservation],
+        trigger: PropertyStateTrigger,
+        now: datetime,
+        checkin_window: timedelta,
+        report: AdvanceReport,
+    ) -> None:
+        accepted: list[PropertyStateChangeResult] = []
+        unresolvable = False
+        already_there = False
+
+        for reservation in reservations:
+            try:
+                effective_bounds(property, reservation)
+            except IncompatibleTransitionContextError:
+                # R3.4. The local time does not exist, is ambiguous without a fold, or the
+                # checkout is not after the check-in. None of those fix themselves with
+                # time, which is why they are not folded into "not due yet". Logged even if
+                # a sibling reservation goes on to transition the property.
+                unresolvable = True
+                logger.warning(
+                    "scheduler.unresolvable_reservation_time",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "property_id": str(property.id),
+                        "reservation_id": str(reservation.id),
+                        "trigger": trigger.value,
+                    },
+                )
+                continue
+
+            if trigger is PropertyStateTrigger.CHECKIN_WINDOW_OPENED and not opens_checkin_window(
+                property, reservation, now, checkin_window
+            ):
+                # The only pre-judgement this module makes, and it is the operator's
+                # policy rather than the machine's (design D7).
+                continue
+
+            try:
+                accepted.append(
+                    PropertyStateMachine.evaluate(
+                        self._request_for(property, reservation, trigger, now)
+                    )
+                )
+            except NoOperationalStateChangeError:
+                already_there = True
+            except IncompatibleTransitionContextError:
+                # The machine's own precondition: wrong status, or the hour has not come.
+                continue
+            # `InvalidTransitionInputError` and `TransitionEvidenceError` are deliberately
+            # NOT caught (R3.3): they mean this use case built the request wrong, which is
+            # a bug in us and not a state of the world. Letting them escape fails the
+            # tenant loudly instead of hiding in a report bucket.
+
+        if len(accepted) > 1:
+            # Task 3.5: the machine says two bookings both justify the move, so there is no
+            # honest source entity. Picking one would anchor the transition — and the
+            # timeline event recording it — to the wrong guest.
+            report.ambiguous += 1
+            logger.warning(
+                "scheduler.ambiguous_due_reservation",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "property_id": str(property.id),
+                    "trigger": trigger.value,
+                    "accepted": len(accepted),
+                },
+            )
+            return
+        if not accepted:
+            if already_there:
+                report.already_there += 1
+            elif unresolvable:
+                report.unresolvable_time += 1
+            else:
+                report.not_eligible += 1
+            return
+
+        result = accepted[0]
+        await self._transitions.add(tenant_id, result.transition)
+        await self._timeline.add(tenant_id, result.timeline_event)
+        property.current_operational_state = result.transition.to_state
+        await self._properties.save(tenant_id, property)
+        report.transitioned += 1
+
+    @staticmethod
+    def _request_for(
+        property: Property,
+        reservation: Reservation,
+        trigger: PropertyStateTrigger,
+        now: datetime,
+    ) -> PropertyStateChangeRequest:
+        # Fresh evidence ids per attempt. The losers are discarded with their request, and
+        # that is cheaper than deferring their creation: `TransitionEvidenceIds` validates
+        # that the two ids differ, so building them late would move a guarantee out of the
+        # request's own construction.
+        return PropertyStateChangeRequest(
+            property=property,
+            trigger=trigger,
+            context=PropertyTransitionContext(reservations=(reservation,)),
+            actor=TransitionActor(triggered_by=StateTransitionTriggeredBy.SYSTEM),
+            reference_instant=now,
+            evidence_ids=TransitionEvidenceIds(
+                transition_id=uuid.uuid4(), timeline_event_id=uuid.uuid4()
+            ),
+            source_entity_id=reservation.id,
+            reservation_id=reservation.id,
+            correlation_id=str(uuid.uuid4()),
+        )
+
+    async def _reservations_by_property(
+        self, tenant_id: uuid.UUID, candidates: Sequence[Property], now: datetime
+    ) -> dict[uuid.UUID, list[Reservation]]:
+        date_from, date_to = candidate_window(now)
+        rows = await self._reservations.list_for_properties(
+            tenant_id, [property.id for property in candidates], date_from, date_to
+        )
+        grouped: dict[uuid.UUID, list[Reservation]] = {}
+        for reservation in rows:
+            grouped.setdefault(reservation.property_id, []).append(reservation)
+        return grouped
