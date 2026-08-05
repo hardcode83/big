@@ -1,8 +1,47 @@
+# Sin comillas en las recetas a propósito: vacío tiene que significar «todos los servicios», y
+# entrecomillarlo pasaría un argumento vacío. Es seguro mientras lo escriba una persona en su propia
+# terminal — `make up SERVICE='x; ...'` es auto-inyección sin ganancia de privilegio, en un shell que
+# ya podía ejecutar cualquier cosa. Lo que lo convertiría en un problema real: que lo suministre algo
+# que no sea humano (un job de CI interpolando `${{ github.* }}`, un wrapper, un agente). Si eso
+# pasa, hay que entrecomillarlo y validarlo aquí.
 SERVICE ?=
+
+# ¿Estamos en un worktree enlazado (`git worktree add`) o en el principal?
+#
+# En el principal `--git-dir` y `--git-common-dir` apuntan al mismo sitio; en un worktree enlazado
+# el primero es `<común>/.git/worktrees/<nombre>`. Se comparan en una sola invocación de shell y no
+# con `$(filter ...)`, que parte por espacios y daría un falso "principal" en una ruta que los
+# tenga. `--path-format=absolute` (git >= 2.31) es lo que hace la comparación honesta: sin él, en el
+# principal las dos salidas son relativas y en el worktree absolutas.
+#
+# Si git no contesta (no hay git, no es un repositorio, es un tarball), las dos salidas quedan
+# vacías, la desigualdad es falsa y nos comportamos como el principal: publicar. Es deliberado —
+# una colisión de puertos aborta nombrando el puerto, mientras que no publicar en silencio se
+# manifiesta como "la app no carga".
+IS_WORKTREE := $(shell test "$$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" != "$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && echo yes)
+
+# El worktree principal invoca `docker compose` desnudo, exactamente como antes de que este fichero
+# supiera de worktrees: así lo que Compose descubre por sí solo sigue siendo la postura de red real
+# del proyecto. Un worktree enlazado añade el overlay que retira la publicación de puertos.
+COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.worktree.yml,)
+COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
+
 
 .PHONY: up down logs ps sh bootstrap openapi db-clean-test
 
 up:
+	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
+		echo "error: falta docker-compose.worktree.yml, que es lo que evita que este worktree"; \
+		echo "       choque de puertos con el principal."; \
+		echo "       Esta rama es anterior al change worktree-parallel-stack: rebasa sobre main,"; \
+		echo "       o levanta el stack desde el worktree principal."; \
+		exit 1; \
+	fi
+	@if [ -n "$(IS_WORKTREE)" ]; then \
+		echo "→ worktree enlazado: stack SIN puertos publicados (no habrá UI ni API en el navegador del host)"; \
+	else \
+		echo "→ worktree principal: stack CON puertos publicados (postgres/redis en 127.0.0.1; 8000 y 3000 en todas las interfaces)"; \
+	fi
 	@umask 077; if [ ! -f .env ]; then \
 		cp .env.example .env; \
 		echo "→ .env creado desde .env.example (valores locales por defecto, edítalo si quieres otros)"; \
@@ -16,7 +55,41 @@ up:
 		chmod 600 .env; \
 		echo "→ JWT_SECRET_KEY generada en .env (local, nunca versionada)"; \
 	fi
-	docker compose up -d --build $(SERVICE)
+# Comprobar ANTES de intentar el bind, y después de crear `.env` (tres servicios declaran
+# `env_file: .env`, así que `config` no resuelve sin él). Caza dos cosas de una: un servicio con
+# `ports:` que nadie añadió al overlay, y un Docker Compose anterior a 2.24, que ignora el tag
+# `!reset` y dejaría los cuatro mapeos en pie. Sin esto el síntoma sería un "port is already
+# allocated" que se lee como otra cosa.
+#
+# El estado de salida de `config` se comprueba APARTE y el contenido con `case`, no con un pipe a
+# `grep`: en un pipe el estado de salida es el del último comando, así que un `config` que falla
+# (un `.env` a mano sin JWT_SECRET_KEY, por ejemplo) daría cero coincidencias y la comprobación
+# pasaría en verde sin haber comprobado nada. Cualquier fallo de la cadena es rojo con mensaje
+# propio; nunca se degrada a verde.
+#
+# Y se busca la clave `"ports"`, no `"published"`. Medido: hay dos formas legales de declarar un
+# mapeo que NO producen `published` ni `host_ip` —la corta con solo el puerto del contenedor
+# (`ports: ["5432"]`) y la larga sin `published` (`{target: 6379, mode: ingress}`)— y Docker las
+# publica en un puerto EFÍMERO y en todas las interfaces. Buscar `published` las dejaba pasar en
+# verde mientras el stack publicaba. Con el overlay aplicado no queda ninguna clave `ports` en la
+# configuración resuelta (medido: 4 sin overlay, 0 con él), así que ausencia de `ports` es la
+# aserción correcta y además cubre formas de mapeo que aún no existen.
+	@if [ -n "$(IS_WORKTREE)" ]; then \
+		cfg=$$($(COMPOSE) config --format json) || { \
+			echo "error: 'docker compose config' falló, así que no se ha podido comprobar que este"; \
+			echo "       worktree no publica puertos. Se aborta en rojo a propósito: sin esa"; \
+			echo "       comprobación, arrancar puede chocar con el stack del principal."; \
+			exit 1; \
+		}; \
+		case "$$cfg" in *'"ports"'*) \
+			echo "error: a este worktree le queda algún mapeo de puertos, así que publicaría en el host y"; \
+			echo "       chocaría con el principal. Causas: un servicio con 'ports:' que falta en"; \
+			echo "       docker-compose.worktree.yml, o un Docker Compose anterior a 2.24, que ignora el"; \
+			echo "       tag !reset (aquí: $$($(COMPOSE) version --short))."; \
+			exit 1;; \
+		esac; \
+	fi
+	$(COMPOSE) up -d --build $(SERVICE)
 
 # Deliberately NOT part of `up`: it needs the BOOTSTRAP_* values a person has to
 # choose, and `up` must keep starting with no manual steps (DoD §28.20).
@@ -25,7 +98,7 @@ up:
 # backend/devops/Dockerfile, while `uv` exists only in the dev stage. The same command
 # therefore works against the deployed prod image — see RUNBOOK §6.5.
 bootstrap:
-	docker compose exec backend python -m app.cli.bootstrap
+	$(COMPOSE) exec backend python -m app.cli.bootstrap
 
 # Regenera backend/openapi.json, el contrato que consume el frontend. Ejecútalo cuando
 # cambies la forma de una respuesta: el workflow api-contract lo comprueba en cada PR y
@@ -35,29 +108,29 @@ bootstrap:
 # que lo hace cierto — sin él, `depends_on` arranca postgres, redis y migrate para una
 # generación que no toca base de datos, Redis ni red (design D6).
 openapi:
-	docker compose run --rm --no-deps -T backend python -m app.cli.openapi
+	$(COMPOSE) run --rm --no-deps -T backend python -m app.cli.openapi
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, ver
 # backend/tests/db_names.py) y la borra al terminar. Una suite matada a lo bruto deja
 # la suya atrás: esto barre las huérfanas sin tocar la base de desarrollo.
 db-clean-test:
-	@docker compose exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres -tAc \
+	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres -tAc \
 		"select datname from pg_database where datname ~ '_(test|migrations)_[0-9a-z]+$$'" \
 		| while read -r db; do \
 			[ -n "$$db" ] || continue; \
 			echo "→ borrando $$db"; \
-			docker compose exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres \
+			$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres \
 				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null </dev/null; \
 		done; echo "listo"
 
 down:
-	docker compose down $(SERVICE)
+	$(COMPOSE) down $(SERVICE)
 
 logs:
-	docker compose logs -f $(SERVICE)
+	$(COMPOSE) logs -f $(SERVICE)
 
 ps:
-	docker compose ps
+	$(COMPOSE) ps
 
 sh:
-	docker compose exec $(if $(SERVICE),$(SERVICE),backend) sh
+	$(COMPOSE) exec $(if $(SERVICE),$(SERVICE),backend) sh

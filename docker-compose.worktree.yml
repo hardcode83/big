@@ -1,0 +1,36 @@
+# Overlay para worktrees enlazados: retira la publicación de puertos en el host.
+#
+# Por qué existe: `docker-compose.yml` publica 5432, 6379, 8000 y 3000 en el host, y ese bind es
+# lo ÚNICO que colisiona entre dos stacks. Compose ya aísla contenedores, red y volúmenes por
+# nombre de proyecto (que sale del nombre del directorio, y el del worktree es distinto), así que
+# sin puertos publicados dos stacks conviven y cada uno corre su suite por la red de compose
+# (`postgres:5432`, `redis:6379`) — que es como la corre `docker compose exec backend uv run pytest`.
+#
+# `!reset` y no un mapeo vacío: la fusión de Compose CONCATENA arrays, así que un override no puede
+# quitar puertos por la vía normal. `ports: !reset []` sí los elimina (Compose Spec >= 2.24).
+#
+# Quién lo usa: SOLO el `Makefile`, y solo cuando detecta un worktree enlazado (git: `--git-dir`
+# distinto de `--git-common-dir`). El worktree principal invoca `docker compose` desnudo y publica
+# exactamente lo de siempre; el CD no lo ve nunca, porque usa `-f docker-compose.deploy.yml`.
+#
+# Ojo si añades un servicio con `ports:` al fichero base: añádelo también aquí. `make up` en un
+# worktree comprueba con `docker compose config` que no queda ningún mapeo `ports` en la configuración
+# resuelta y aborta si lo hay, así que el olvido se ve al arrancar y no como una colisión difícil de
+# leer. Se comprueba la ausencia de `ports`, y no la de un puerto de host concreto: dos formas legales
+# de `ports:` no declaran puerto de host y Docker las publica en uno efímero, en todas las interfaces.
+#
+# Consecuencia asumida: en un worktree NO hay UI ni API alcanzables desde el navegador del host.
+# Si algún día hace falta, la salida es parametrizar los cuatro puertos con un desplazamiento
+# (`PORT_OFFSET`), no volver a publicarlos a pelo.
+services:
+  postgres:
+    ports: !reset []
+
+  redis:
+    ports: !reset []
+
+  backend:
+    ports: !reset []
+
+  frontend:
+    ports: !reset []

@@ -4,7 +4,9 @@ Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas t
 
 ## Arrancar en local
 
-Requisitos: Docker + Docker Compose v2, `make`.
+Requisitos: Docker + **Docker Compose ≥ 2.24**, **git ≥ 2.31**, `make`.
+
+Los dos suelos de versión son del soporte para varios stacks a la vez: Compose 2.24 introdujo el tag `!reset` que usa `docker-compose.worktree.yml`, y git 2.31 el `--path-format` con el que `make up` distingue un worktree enlazado del principal. Por debajo del suelo de git la detección falla hacia «publicar», así que un worktree chocaría de puertos en vez de arrancar sin ellos.
 
 ```bash
 make up   # levanta todo el stack: postgres, redis, backend, worker, beat, frontend
@@ -26,6 +28,11 @@ make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
 ```
+
+Las URLs de arriba son las del **worktree principal**. Un worktree enlazado de git levanta su propio
+stack en paralelo, pero **sin publicar puertos**, así que allí no hay nada que abrir en el navegador
+del host — la suite sí corre, porque va por la red de compose. `make up` te dice en qué modo arranca.
+Detalle y coste en `sdd/project.md` §«Worktree bootstrap».
 
 ### Postura de red del stack local
 
@@ -49,6 +56,37 @@ heredado en esa entrada.
 **Ojo con el alcance, para no leerlo de más**: lo que esto protege es el acceso *desde la red*.
 Redis corre sin `requirepass`, así que otro proceso de tu propia máquina sí puede tocar esos
 contadores; se acepta porque es una máquina de desarrollo con datos de prueba.
+
+**Los cuatro mapeos son del worktree principal.** Un worktree enlazado de git levanta su stack
+**sin publicar ninguno**: `make up` añade allí `docker-compose.worktree.yml`, que los retira con
+`ports: !reset []`, y comprueba antes de levantar que en la configuración resuelta no queda **ningún
+mapeo de puertos declarado** — no solo ninguno con puerto de host explícito, porque hay formas de
+`ports:` que Docker publica en un puerto efímero sin declararlo. Los mapeos siguen
+declarados en `docker-compose.yml` a propósito, y no en un fichero aparte: es esa declaración la que
+describe la postura de red del proyecto, la que ve un `docker compose config` desnudo y la que
+`compose-ports-guard` podrá comprobar.
+
+**Consecuencia práctica para los `docker compose` desnudos de este README**, y conviene ser preciso
+porque no afecta a todos igual. En el worktree principal valen todos, porque ahí `make` tampoco pasa
+`-f`. En un worktree enlazado solo importan los que **crean** contenedores, que cargarían el fichero
+base e intentarían publicar los cuatro puertos:
+
+- `docker compose up ...` (Migraciones usa `docker compose up -d postgres`) → usa `make up SERVICE=postgres`.
+- `docker compose run ...` **cuando arrastra dependencias**, y aquí está el caso que más engaña:
+  `run` no publica lo suyo, pero su `depends_on` toca `postgres`/`redis` — y **tenerlos ya levantados
+  no protege**. Compose recrea una dependencia cuyo hash de configuración no coincide con la que está
+  corriendo, y un `docker compose` desnudo en un worktree calcula la configuración del fichero base,
+  *con* los cuatro mapeos. **Medido**: con la dependencia viva y sin puertos, un `run` desnudo imprime
+  `Recreate` y la deja publicando. Así que desde un worktree la única salida es que el conjunto de
+  ficheros coincida (ve por `make`, que añade el overlay) o `--no-deps` si el comando no necesita la
+  base de datos — que es exactamente por lo que `make openapi` lo lleva.
+- `docker compose exec`, `logs`, `ps`, `down` → **no crean nada**, actúan sobre los contenedores ya
+  vivos del proyecto, y funcionan igual desde un worktree. Por eso el
+  `docker compose exec backend uv run pytest` de §Tests es correcto en los dos sitios.
+
+Si algo choca de puertos, `docker compose ls` dice qué proyectos hay vivos y desde qué fichero; el
+diagnóstico con marcas (huérfano, otro worktree, ajeno) es una entrada propia del roadmap,
+`compose-stacks-diagnostic`.
 
 ### Levantar un solo componente
 
@@ -135,6 +173,7 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 - `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 16 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `reservations`, `integrations` y `tenants` son los únicos con las cuatro, y `properties`/`notifications` ganaron `application/` con los jobs programados. El **scheduler** vive en `backend/app/scheduler/` — capa de entrega para el reloj, el equivalente de `api/` para Celery beat: las cuatro tareas de PRD §8.3, su calendario y el lock que evita solapes (ver [`docs/celery-jobs.md`](docs/celery-jobs.md)). Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda la tabla `webhook_events`; migraciones en `backend/alembic/`. **`backend/scripts/`** queda deliberadamente **fuera de `app/`**: son herramientas de un solo uso contra servicios externos (provisión y sondeo del sandbox de Channex — ver [`docs/channex-staging.md`](docs/channex-staging.md)) o de medición puntual (`measure_tenant_filter.py`) que no deben viajar en el paquete desplegado.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
+- `docker-compose.worktree.yml` — overlay que **retira la publicación de puertos** en el host. `make up` lo añade solo cuando detecta un worktree enlazado de git, para que varios stacks de desarrollo convivan sin chocar. El worktree principal no lo usa y el CD no lo ve nunca.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
 
@@ -150,9 +189,28 @@ La app desplegada se sirve en **https://autohostai.digitalsec.work**, a través 
 ## Tests
 
 ```bash
-cd backend && uv run pytest
-cd frontend && npm test
+docker compose exec backend uv run pytest      # backend, con el stack levantado
+docker compose run --rm backend uv run pytest  # backend, con el stack parado (solo en el principal)
+cd frontend && npm test                        # frontend, en el host
 ```
+
+El backend corre **en Docker** y `uv` no está instalado en el host, así que su suite se ejecuta
+dentro del contenedor (una versión anterior de este README decía `cd backend && uv run pytest`, que
+no funciona en una máquina limpia). El frontend sí se ejecuta en el host, con las dependencias que
+`npm install` deja en `frontend/node_modules`.
+
+**Desde un worktree enlazado**: la suite habla con `postgres:5432` y `redis:6379` por la red de
+compose, que es el camino que ha usado siempre — los puertos del host nunca estuvieron en esa ruta, así
+que no publicar no le afecta. La primera forma (`exec`) va siempre: no crea ni recrea nada, se engancha
+a los contenedores que ya corren.
+
+La segunda (`run --rm`) **no vale desnuda en un worktree, ni siquiera con el stack levantado**.
+Medido, porque la intuición dice lo contrario: Compose recrea una dependencia cuyo hash de
+configuración no coincide con la que está corriendo, y un `docker compose` desnudo ahí calcula la del
+fichero base —con los cuatro mapeos—, así que recrea `postgres`/`redis` **publicando**. Con el stack
+vivo y sin puertos, un `run` desnudo imprime `Recreate` y los deja publicados. Desde un worktree: o
+`make up` y `exec`, o `--no-deps` si el comando no toca base de datos, o pasa los dos `-f` a mano.
+Mismo criterio, en más detalle, en §«Postura de red del stack local».
 
 El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml`):
 migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
