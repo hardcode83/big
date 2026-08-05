@@ -22,18 +22,37 @@ número se conserva con una nota, y lo que protege la postura hoy es la revisió
   proyecto mobile-first) y qué queda expuesto con ello: la UI y la API de un stack de
   desarrollo con datos de prueba, **sin** acceso directo al datastore. Redactado sin afirmar
   que el stack local sea inalcanzable desde la red, porque con estos dos no lo es. [R3]
-- [ ] 1.4 Verificar el bind efectivo, no suponerlo — con el stack levantado, comprobar que
-  `docker compose port postgres 5432` y `docker compose port redis 6379` devuelven
-  `127.0.0.1:...`, y que `docker inspect` muestra `HostIp: "127.0.0.1"` en ambos mapeos.
-  Comprobar además desde otra máquina de la misma red (o con la IP de LAN del portátil como
-  destino) que la conexión TCP a 5432 y 6379 **falla**, y que a 3000 sigue funcionando.
-  [R1, R2, R3]
-- [ ] 1.5 Verificar que no hay regresión en los tres consumidores que sí deben seguir
-  funcionando: (a) `backend`, `worker`, `migrate` y `frontend` alcanzan Postgres y Redis por
-  nombre de servicio con el stack arriba; (b) la suite ejecutada desde el host
-  (`cd backend && uv run pytest`, que según `specs/domain-foundation-core.md:39` cae al
-  valor por defecto contra `localhost:5432`) conecta; (c) `README.md:19-20`
-  (`localhost:5432`, `localhost:6379`) sigue siendo cierto. [R1]
+- [x] 1.4 Verificar el bind efectivo, no suponerlo — **hecho el 2026-08-05** sobre el stack
+  levantado desde este worktree, con los puertos liberados tras cerrarse `celery-jobs`.
+  Resultados:
+  - `docker compose port postgres 5432` → `127.0.0.1:5432`; `redis 6379` → `127.0.0.1:6379`.
+  - `docker inspect` sobre los cuatro servicios: `HostIp` es `127.0.0.1` en `postgres` y
+    `redis`, y `0.0.0.0` **más `::`** en `backend` y `frontend`. Hallazgo colateral que no
+    estaba previsto y conviene registrar: acotar a loopback **también elimina el binding
+    IPv6**, mientras los servicios en todas las interfaces sí lo tienen.
+  - Alcanzabilidad TCP real desde la IP de LAN de la máquina (`192.168.100.67`), seis casos y
+    los seis como se esperaba: `5432` **rechaza**, `6379` **rechaza**, `3000` conecta, `8000`
+    conecta, y por loopback `127.0.0.1:5432` y `:6379` **sí** conectan. Eso demuestra a la vez
+    R1.3 y la asimetría deliberada de R3.1, y descarta que el rechazo sea un artefacto de red:
+    la misma interfaz acepta los otros dos puertos. [R1, R2, R3]
+- [x] 1.5 Verificar que no hay regresión en los consumidores legítimos — **hecho el 2026-08-05**
+  con el mismo stack de 1.4:
+  - **(a) por nombre de servicio**: `backend` y `worker` conectan a `postgres:5432` y
+    `redis:6379`; `migrate` terminó en `Exited (0)` sin errores, que es la prueba de que llegó a
+    Postgres y aplicó las migraciones. **Corrección al enunciado de esta tarea**: `frontend` no
+    habla con los datastores —no tiene `env_file` ni `DATABASE_URL` a propósito— así que pedirle
+    que los alcance era un error de la tarea; lo que sí se verificó es su dependencia real,
+    `frontend → backend:8000/health` → `200 {"status":"ok"}`.
+  - **(b) suite desde el host**: ejecutada de verdad, no razonada.
+    `uv run --directory backend pytest tests/test_db_session.py` → **3 passed**, conectando por
+    el valor por defecto contra `localhost:5432` de `specs/domain-foundation-core.md:39`.
+    Acotada a los tests que tocan la base de datos, que es donde estaba el riesgo; la suite
+    completa no aporta nada sobre el bind. **Deriva encontrada de paso**: `sdd/project.md:21`
+    afirma que «`uv` no está instalado en el host», y sí lo está
+    (`/Users/hardcode/.local/bin/uv`) — anotado abajo como candidato, fuera del alcance de este
+    change.
+  - **(c) `README.md:19-20`** (`localhost:5432`, `localhost:6379`): cierto, y ahora comprobado
+    empíricamente por las sondas de 1.4 y por (b), no por lectura. [R1]
 
 ## 2. Guardia de regresión — **RETIRADA de este change** (2026-08-05)
 
@@ -109,11 +128,17 @@ número se conserva con una nota, y lo que protege la postura hoy es la revisió
 
 ## 5. Verification
 
-- [ ] 5.1 El stack arranca limpio de cero: `make down` y `make up`, con `postgres` y `redis`
-  pasando su `healthcheck` y `migrate` terminando antes de `backend`/`worker`, tal como
-  `specs/local-environment.md:17-18,25` describe. [R1]
-- [ ] 5.2 Suite del backend en verde dentro del contenedor:
-  `docker compose exec backend uv run pytest` (comando de `sdd/project.md`). [R1]
+- [x] 5.1 El stack arranca limpio de cero — **hecho el 2026-08-05**: `make down` seguido de
+  `make up` sobre el proyecto de este worktree. `postgres` y `redis` alcanzaron `Healthy`,
+  `migrate` corrió y terminó en `Exited (0)` **antes** de que arrancaran `backend`/`worker`, y
+  los cinco servicios quedaron arriba con `backend` en `(healthy)`. Coincide con
+  `specs/local-environment.md:17-18,25`. Nota de camino: el primer intento falló con
+  `socket.gaierror` en `migrate` porque quedaban contenedores en estado `Created` de un intento
+  anterior colgados de una red ya eliminada; se resolvió con `make down` y volver a levantar, sin
+  tocar volúmenes. [R1]
+- [x] 5.2 Suite del backend en verde dentro del contenedor — **hecho el 2026-08-05**:
+  `docker compose exec backend uv run pytest` → **2540 passed, 35 skipped en 3m26s**, con los
+  datastores acotados a loopback. Es el comando que manda `sdd/project.md:21`. [R1]
 - [x] 5.3 Frontend no afectado — **la comprobación que aplica de verdad no es ejecutar la
   suite, es que no hay nada que ejecutar**: `git status --short frontend/` sale vacío, el
   change no toca ni un fichero bajo `frontend/`, y el único cambio de raíz que le podría
