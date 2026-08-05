@@ -9,7 +9,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     ports:
-      - "5432:5432"
+      # Acotado a loopback: sin el prefijo, Docker publica en 0.0.0.0 y la base de datos
+      # queda alcanzable desde cualquier host de la red a la que esté conectada esta
+      # máquina. El puerto sigue disponible para las herramientas locales (clientes
+      # gráficos, y la suite ejecutada en el host, que cae a localhost:5432).
+      # `DATABASE_URL` no pasa por aquí: los contenedores van por `postgres:5432` a
+      # través de la red de compose, que es un camino distinto y no se ve afectado.
+      - "127.0.0.1:5432:5432"
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER}"]
       interval: 5s
@@ -20,7 +26,16 @@ services:
     image: redis:7
     restart: unless-stopped
     ports:
-      - "6379:6379"
+      # Acotado a loopback, y aquí no es sólo higiene. Este Redis guarda los contadores
+      # del throttle de login (`login:ip:*`, `login:fail:*`, `login:lock:*`, ver
+      # backend/app/auth/infrastructure/throttle.py): quien lo alcance puede borrarlos
+      # entre intentos y entonces el límite de 10/min por IP y el bloqueo tras 10 fallos
+      # que exige la regla 7 de sdd/steering/security.md no se disparan nunca.
+      #
+      # La defensa es ESTE BIND, no la autenticación: el servicio corre sin `requirepass`
+      # y no hay contraseña de Redis en ninguna parte del repositorio. Por tanto, exponerlo
+      # fuera de loopback exige resolver la autenticación ANTES, no después.
+      - "127.0.0.1:6379:6379"
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 5s
@@ -61,6 +76,22 @@ services:
       - ./backend:/app
       - backend_venv:/app/.venv
     ports:
+      # Publicado en todas las interfaces A PROPÓSITO, al contrario que `postgres` y
+      # `redis`. Vale igual para el `3000` de `frontend`, y es ahí donde está el motivo:
+      # el proyecto es mobile-first, así que comprobar el diseño exige abrir la app desde
+      # un móvil real por la IP de LAN de esta máquina. Acotar el `3000` a loopback
+      # eliminaría esa vía, y acotar sólo el `8000` dejaría media app inalcanzable desde
+      # ese mismo móvil.
+      #
+      # Lo que esto expone, dicho sin adornos: la UI y la API de un stack de desarrollo con
+      # datos de prueba, a quien comparta red con esta máquina. Lo que NO expone es acceso
+      # directo al datastore — esa es la diferencia que introduce el acotado de `postgres`
+      # y `redis`, y por eso el stack local NO es "inalcanzable desde la red": estos dos
+      # puertos sí lo son.
+      #
+      # Ojo si añades otro puerto aquí: la excepción es de ESTE par servicio+puerto, no del
+      # servicio entero. Cualquier otro mapeo de `backend` debería llevar el prefijo
+      # `127.0.0.1:` salvo que tenga su propio motivo escrito. Lo mismo con `frontend:3000`.
       - "8000:8000"
     depends_on:
       postgres:
@@ -158,6 +189,9 @@ services:
       - frontend_node_modules:/app/node_modules
       - frontend_next:/app/.next
     ports:
+      # En todas las interfaces a propósito: es este puerto el que se abre desde un móvil
+      # real por la IP de LAN. Razonamiento completo (y qué queda expuesto) junto al `8000`
+      # de `backend`, para no tener dos copias que se desincronicen.
       - "3000:3000"
     depends_on:
       backend:
