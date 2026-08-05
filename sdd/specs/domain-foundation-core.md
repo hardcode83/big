@@ -36,7 +36,7 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 - Una única migración baseline (`backend/alembic/versions/`) crea las 8 tablas sobre una DB vacía, en orden de dependencia, reversible.
 - `alembic downgrade base` revierte tablas, índices **y** los tipos `ENUM` de Postgres que las tablas crearon implícitamente — Alembic autogenerate no emite `DROP TYPE` por defecto, así que la migración lo hace explícitamente para no dejar tipos huérfanos.
 - Al arrancar el stack local (`make up`), un servicio `migrate` dedicado en `docker-compose.yml` aplica `alembic upgrade head` antes de que `backend`/`worker` arranquen (`depends_on: condition: service_completed_successfully`) — sin paso manual, coherente con el DX de `local-environment`.
-- `backend/app/core/config.py` resuelve `DATABASE_URL`: fijada por `docker-compose.yml` a `postgres:5432` dentro de la red de compose; si no viene fijada (ejecución en host, p.ej. `cd backend && uv run pytest`), cae a un valor por defecto contra `localhost:5432` con las credenciales de `POSTGRES_*` de `.env` — necesario porque el hostname `postgres` no resuelve fuera de la red de Docker.
+- `backend/app/core/config.py` resuelve `DATABASE_URL`: fijada por `docker-compose.yml` a `postgres:5432` dentro de la red de compose; si no viene fijada (ejecución en host), cae a un valor por defecto contra `localhost:5432` con las credenciales de `POSTGRES_*` de `.env` — necesario porque el hostname `postgres` no resuelve fuera de la red de Docker. Ese camino solo sirve en el **worktree principal**, que es el único que publica el `5432` (ver spec `local-environment`); y en la práctica la suite se ejecuta dentro del contenedor, porque `uv` no está instalado en el host.
 
 ### Tests
 
