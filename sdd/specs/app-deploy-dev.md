@@ -24,7 +24,8 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - THE SYSTEM SHALL aplicar migraciones Alembic como paso one-shot (`migrate`, imagen `prod` del backend, `alembic upgrade head`) antes de arrancar backend/worker.
 - THE SYSTEM SHALL NOT publicar ningún puerto en una interfaz externa de la VM. `backend` y `frontend` publican **solo en `127.0.0.1`** (8000 y 3000) como puerta de depuración alcanzable por reenvío SSH; `postgres`, `redis` y `cloudflared` no publican puerto alguno. El acceso público llega exclusivamente por el túnel (ver `ingress-https-dev`).
 - THE SYSTEM SHALL fijar `HOSTNAME=0.0.0.0` en el frontend (Next standalone usa `$HOSTNAME` como dirección de bind) para que escuche en todas las interfaces.
-- THE SYSTEM SHALL declarar healthchecks para backend (`/health`), frontend (`127.0.0.1:3000`) y worker (`celery inspect ping`).
+- THE SYSTEM SHALL declarar healthchecks para backend (`/health`), frontend (`127.0.0.1:3000`), worker (`celery inspect ping`) y `beat`.
+- El healthcheck de `beat` **no** puede ser `celery inspect ping`: ese protocolo de control lo responde un *worker*, así que reutilizarlo daría verde con `beat` muerto. Comprueba en Python que PID 1 sigue siendo el proceso de beat. Tampoco puede usar `pgrep`: `procps` no está en `python:3.12-slim` ni lo instala la etapa `prod`, y un healthcheck que sale 127 en cada intento habría dejado el servicio eternamente *unhealthy*, tumbando `up -d --wait` y con él el deploy entero.
 
 ### Deploy en runner self-hosted (`deploy-dev.yml` job `deploy`)
 
