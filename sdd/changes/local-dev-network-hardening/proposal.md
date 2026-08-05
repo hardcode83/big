@@ -176,6 +176,12 @@ Acceptance criteria:
 - **`iptables` o firewall del host**, en la máquina local o en la VM. El acotado se hace
   donde corresponde, en la declaración de puertos del compose.
 
+- **Corregir `sdd/project.md:21`**, que afirma que «`uv` no está instalado en el host» cuando sí
+  lo está (`/Users/hardcode/.local/bin/uv`, comprobado el 2026-08-05 al ejecutar la suite del host
+  para la tarea 1.5). Es deriva de un documento de proyecto, no de este change, y arreglarla aquí
+  ensancharía el alcance — pero conviene hacerlo, porque ese comentario existe justo para decirle
+  a la gente que no lo intente en el host.
+
 ## Affected specs
 
 - `sdd/specs/local-environment.md` — **al archivar**: (a) gana la postura

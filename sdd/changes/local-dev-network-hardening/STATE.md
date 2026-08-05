@@ -1,7 +1,7 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
+state: LOCAL_VERIFIED
+local_review: APPROVED
 repository: 
 base_branch: 
 head_branch: 
