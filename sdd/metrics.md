@@ -24,4 +24,4 @@
 | ci-backend-tests-conditional-gate | design, tasks, archive | 221481 | 789025 | 245617591 | 161.9459 | 2026-08-03 | 2026-08-03 |
 | pms-beds24-spike | new, design, tasks, run, archive | 165383 | 425606 | 81992533 | 54.2078 | 2026-08-03 | 2026-08-04 |
 | ingress-https-hardening | new, design, tasks, run, review, archive | 508669 | 990621 | 211056062 | 139.1914 | 2026-07-29 | 2026-08-04 |
-| celery-jobs | new, design, tasks, run, review | 568703 | 1485737 | 289143320 | 213.5200 | 2026-08-04 | — |
+| celery-jobs | new, design, tasks, run, review | 638353 | 1719045 | 336267464 | 247.2024 | 2026-08-04 | 2026-08-05 |
