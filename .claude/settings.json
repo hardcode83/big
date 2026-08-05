@@ -15,7 +15,8 @@
       "source": {
         "source": "github",
         "repo": "hardcode83/sdd-toolkit"
-      }
+      },
+      "autoUpdate": true
     }
   }
 }
