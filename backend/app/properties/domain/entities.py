@@ -3,6 +3,7 @@ from dataclasses import dataclass, field
 from datetime import datetime, time
 from typing import Any
 
+from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.enums import (
     PropertyOperationalState,
     PropertyStatus,
@@ -19,6 +20,7 @@ class Property:
     created_at: datetime
     updated_at: datetime
     pms_external_id: str | None = None
+    pms_provider: PMSProvider | None = None
     address_line1: str | None = None
     address_line2: str | None = None
     city: str | None = None

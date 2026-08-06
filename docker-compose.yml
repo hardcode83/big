@@ -56,6 +56,10 @@ services:
     env_file: .env
     environment:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      # alembic/env.py imports app.core.config, which builds Settings at import time, so a
+      # missing key fails the migration rather than the first credential read. `env_file`
+      # would already carry it; the `:?` is what turns a hand-rolled .env into a loud error.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY en .env (make up la genera)}
     volumes:
       - ./backend:/app
       - migrate_venv:/app/.venv
@@ -77,6 +81,7 @@ services:
       # The `:?` makes a hand-rolled .env without it fail loudly instead of letting
       # the app boot with an empty signing key.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY en .env (make up la genera)}
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
@@ -127,6 +132,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY en .env (make up la genera)}
     volumes:
       - ./backend:/app
       - worker_venv:/app/.venv
@@ -160,6 +166,7 @@ services:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY en .env (make up la genera)}
     volumes:
       - ./backend:/app
       - beat_venv:/app/.venv

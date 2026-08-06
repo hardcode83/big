@@ -77,8 +77,8 @@ def to_reservation_dto(element: dict[str, Any]) -> ReservationDTO:
         guest_name=_guest_name(customer),
         guest_email=_text(customer.get("mail")),
         guest_phone=_text(customer.get("phone")),
-        check_in_date=_date(attributes.get("arrival_date")),
-        check_out_date=_date(attributes.get("departure_date")),
+        check_in_date=_date(attributes.get("arrival_date"), field="arrival_date"),
+        check_out_date=_date(attributes.get("departure_date"), field="departure_date"),
         # `arrival_hour`, not `check_in_time` — and it arrives `null` on every captured
         # booking, so the port's optionality is load-bearing rather than decorative.
         check_in_time=_time(attributes.get("arrival_hour")),
@@ -153,7 +153,29 @@ def _text(value: Any) -> str | None:
     return text or None
 
 
-def _date(value: Any) -> date:
+class UnmappableField(ValueError):
+    """A required field could not be parsed. Names the FIELD and never its content.
+
+    Exists because `date.fromisoformat` puts the offending value in its own message
+    (`Invalid isoformat string: '...'`), and the adapter folds the exception text into the skip
+    reason that reaches `logger.warning` and the operator's report. Measured by the security and
+    QA panels of this change: a booking with `arrival_date` set to a nested object put
+    `card_number` and `cvv` in that report, and one set to any string put its content there —
+    which rule 13(a) of `steering/security.md` forbids outright ("eliminarlos en el adapter…
+    antes de que nada pueda persistirlos, loguearlos o reenviarlos") and R6.4 restates.
+
+    So the original error's message is **discarded, not wrapped**: `raise ... from None`, because
+    chaining would carry it into any traceback that reaches a log. The field name is the part an
+    operator needs and the part that is safe — combined with the booking id, it says exactly what
+    to look at in the provider's panel.
+    """
+
+    def __init__(self, field: str) -> None:
+        self.field = field
+        super().__init__(f"could not parse required field {field!r}")
+
+
+def _date(value: Any, *, field: str) -> date:
     """Dates are required by the DTO, so a missing one is a broken row, not a `None`.
 
     Raising here is correct, but the reason this docstring used to give was **wrong** and the
@@ -165,8 +187,16 @@ def _date(value: Any) -> date:
     What makes raising safe now is that the adapter catches per element and reports the skip
     (see `adapter.list_reservations`). Do not "fix" this by returning `None`: the DTO's dates are
     not optional, and a reservation without them is not a reservation.
+
+    Raises `UnmappableField`, never the underlying `ValueError`: that one carries the offending
+    value in its message. See that class for the measurement that forced this.
     """
-    return date.fromisoformat(str(value))
+    try:
+        return date.fromisoformat(str(value))
+    except (ValueError, TypeError):
+        # `from None` on purpose: the original message holds the provider's value, and chaining
+        # would put it back in every traceback this reaches.
+        raise UnmappableField(field) from None
 
 
 def _time(value: Any) -> time | None:

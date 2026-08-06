@@ -55,6 +55,37 @@ up:
 		chmod 600 .env; \
 		echo "→ JWT_SECRET_KEY generada en .env (local, nunca versionada)"; \
 	fi
+# Una clave Fernet NO es `openssl rand -hex 32`: es base64 de 32 bytes, y `-hex 32` da 64
+# caracteres que decodifican a 48, así que el validador de `app/core/config.py` la rechaza al
+# arrancar. El `tr '+/' '-_'` produce la forma **url-safe canónica**; NO es lo que hace válida la
+# clave — medido: `urlsafe_b64decode` traduce `-_` a `+/` y luego llama al `b64decode` permisivo, y
+# `Fernet` usa ese mismo decodificador, así que también aceptaría el alfabeto estándar. Se
+# canonicaliza porque un `/` dentro de un valor de `.env` es una fuente de sorpresas gratuita.
+# El `tr -d '\n'` sí es necesario: `base64` cierra con salto de línea y una clave con `\n` dentro
+# falla de una forma que no se lee como "clave mal formada".
+# La comprobación es de longitud EXACTA (44) y no `.{44,}`: una clave truncada pasaría un mínimo y
+# reventaría después dentro de Fernet, que es justo el fallo tardío que este generador evita.
+# Y a diferencia de la clave JWT, esta NO se regenera si ya hay un valor: regenerar la clave de
+# firma solo invalida sesiones, pero regenerar la de cifrado deja **indescifrable todo el
+# ciphertext ya almacenado** (`app/core/crypto.py` lo dice: una clave distinta es un
+# `SecretDecryptionError` por fila). Así que solo se genera cuando falta o está vacía; si hay un
+# valor con forma incorrecta —un `.env` con CRLF, una clave truncada a mano— se PARA y se avisa,
+# porque sustituirlo en silencio sería destruir dato sin preguntar.
+	@current=$$(sed -n 's/^ENCRYPTION_KEY=//p' .env | head -1); \
+	if [ -z "$$current" ]; then \
+		umask 077; key=$$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'); \
+		grep -v '^ENCRYPTION_KEY=' .env > .env.tmp; \
+		printf 'ENCRYPTION_KEY=%s\n' "$$key" >> .env.tmp; \
+		mv .env.tmp .env; \
+		chmod 600 .env; \
+		echo "→ ENCRYPTION_KEY generada en .env (local, nunca versionada)"; \
+	elif [ $${#current} -ne 44 ]; then \
+		echo "ERROR: ENCRYPTION_KEY en .env tiene $${#current} caracteres y debe tener 44."; \
+		echo "       NO se sustituye sola: si ya has cifrado algo con otra clave, cambiarla lo"; \
+		echo "       deja indescifrable. Revísala a mano (¿saltos de línea CRLF? ¿copiada a medias?)."; \
+		echo "       Para empezar de cero a sabiendas: borra la línea de .env y vuelve a lanzar make up."; \
+		exit 1; \
+	fi
 # Comprobar ANTES de intentar el bind, y después de crear `.env` (tres servicios declaran
 # `env_file: .env`, así que `config` no resuelve sin él). Caza dos cosas de una: un servicio con
 # `ports:` que nadie añadió al overlay, y un Docker Compose anterior a 2.24, que ignora el tag

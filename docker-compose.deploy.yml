@@ -103,6 +103,9 @@ services:
       # the migration container exits on a ValidationError and the deploy stalls on
       # `depends_on: service_completed_successfully`.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
+      # Same reason, and it is not hypothetical: `encryption_key` is required too, so the
+      # migration container would exit before applying anything.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
     depends_on:
       postgres:
         condition: service_healthy
@@ -148,6 +151,9 @@ services:
       # app.worker imports app.core.config, and jwt_secret_key is required (R1.7):
       # without this the worker crash-loops on a ValidationError.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
+      # And the worker is where credentials get read: a job that resolves a PMS adapter per
+      # property decrypts them, so the key is not optional here either.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
     depends_on:
       redis:
         condition: service_healthy
@@ -174,6 +180,8 @@ services:
       # Igual que el worker: `app.worker` importa `app.core.config` y `jwt_secret_key` es
       # obligatorio (R1.7), así que sin esto el beat entra en crash-loop con un ValidationError.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
+      # Ídem con `encryption_key`, que también es obligatorio: el beat importa la misma config.
+      ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
     depends_on:
       redis:
         condition: service_healthy

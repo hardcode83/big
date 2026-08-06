@@ -14,6 +14,7 @@ from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
+from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import PropertyOperationalState
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
@@ -95,6 +96,16 @@ class SqlAlchemyPropertyRepository:
         )
         return [_to_property(model) for model in result.scalars()]
 
+    async def list_all(self, tenant_id: uuid.UUID) -> list[Property]:
+        result = await self._session.execute(
+            select(PropertyModel)
+            .where(PropertyModel.tenant_id == tenant_id)
+            # Deterministic order so a grouped sync processes providers the same way twice, which
+            # makes a failing run reproducible instead of order-dependent.
+            .order_by(PropertyModel.internal_code)
+        )
+        return [_to_property(model) for model in result.scalars().all()]
+
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         if property.tenant_id != tenant_id:
             raise CrossTenantWriteError(
@@ -107,6 +118,27 @@ class SqlAlchemyPropertyRepository:
             .where(PropertyModel.tenant_id == tenant_id, PropertyModel.id == property.id)
             .values(current_operational_state=property.current_operational_state)
         )
+
+
+    async def set_pms_provider(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, provider: PMSProvider | None
+    ) -> None:
+        """One column, like `save`. See the port for why this is not a widening of it."""
+        result = await self._session.execute(
+            update(PropertyModel)
+            .where(PropertyModel.tenant_id == tenant_id, PropertyModel.id == property_id)
+            .values(pms_provider=provider)
+        )
+        if result.rowcount == 0:
+            # Nothing matched, which within a tenant-filtered UPDATE means either "no such
+            # property" or "it belongs to someone else" — indistinguishable here, and that is
+            # the point: reporting which would leak a neighbour's property id (design D6 of
+            # `reservations` answers the same question with 404 for the same reason).
+            raise CrossTenantWriteError(
+                entity="property",
+                entity_tenant_id="unknown",
+                acting_tenant_id=tenant_id,
+            )
 
 
 class SqlAlchemyPropertyStateTransitionRepository:
@@ -149,6 +181,7 @@ def _to_property(model: PropertyModel) -> Property:
         created_at=model.created_at,
         updated_at=model.updated_at,
         pms_external_id=model.pms_external_id,
+        pms_provider=model.pms_provider,
         address_line1=model.address_line1,
         address_line2=model.address_line2,
         city=model.city,

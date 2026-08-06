@@ -34,17 +34,16 @@ import app.core.models_registry  # noqa: F401
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.core.config import settings
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
-from app.integrations.application.ingest import IngestReport, RowError
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.integrations.application.ingest import IngestReport
+from app.integrations.domain.enums import PMSProvider
+from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFactory
+from app.integrations.infrastructure.repositories import SqlAlchemyPmsCredentialRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
 from app.integrations.domain.errors import PmsUnavailableError
-from app.integrations.domain.ports import PMSAdapter
-from app.integrations.infrastructure.channex.adapter import ChannexAdapter
-from app.integrations.infrastructure.channex.client import ChannexClient
-from app.integrations.infrastructure.mock_pms import MockPMSAdapter
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.tenants.infrastructure.models import TenantModel
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
@@ -53,47 +52,36 @@ from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepo
 DEFAULT_WINDOW_DAYS = 30
 MOCK_PROVIDER = "mock"
 CHANNEX_PROVIDER = "channex"
-PROVIDERS = (MOCK_PROVIDER, CHANNEX_PROVIDER)
+# Derived from the enum instead of hand-listed, so the flag cannot accept a provider the factory
+# has never heard of — nor refuse one it just learned. The previous tuple was a second vocabulary
+# that could drift from the first, and `beds24` is exactly the value it would have been missing.
+PROVIDERS = tuple(member.value.lower() for member in PMSProvider)
 USAGE = (
     "usage: python -m app.integrations.cli.pms_sync <tenant-uuid> [window-days] "
     f"[--provider {{{','.join(PROVIDERS)}}}]"
 )
 
 
-def build_adapter(provider: str) -> PMSAdapter:
-    """Resolve the PMS adapter for this run (R3, design D3).
+def _forced_provider(provider: str) -> PMSProvider | None:
+    """Translate the `--provider` flag into an override, or `None` when there is none.
 
-    **A stopgap, and deliberately a small one.** [ADR 0006](../../../../docs/adr/0006-pms-channel-manager-provider.md)
-    retired PRD §22's global `PMS_PROVIDER` in favour of resolving the provider **per
-    property**, with credentials stored encrypted on `Property`. That is
-    `pms-beds24-adapter`'s job, and it replaces this function with a `PMSAdapterFactory`.
+    Replaces `build_adapter`, which its own docstring called a stopgap and handed to this change.
+    The flag no longer builds anything: it says "use this one for everything", and
+    `PMSAdapterFactory` does the building from the property.
 
-    Which is exactly why the choice lives in a command-line flag and not in `Settings`: a flag
-    on an operator's command cannot leak into the application or the test suite, and it does
-    not resurrect a configuration name that a later reader would mistake for the real
-    mechanism. `mock` stays the default, so nothing changes for anyone who does not ask.
+    `mock` is the DEFAULT of the flag, so it is deliberately NOT treated as an override — a run
+    with no flag must let each property resolve its own provider, and only a property that stores
+    none falls back to the mock. Treating the default as an override would silently pin the whole
+    portfolio to the mock and report "created 0" against a real PMS.
     """
     if provider == MOCK_PROVIDER:
-        return MockPMSAdapter()
-    if provider == CHANNEX_PROVIDER:
-        if not settings.channex_api_key.strip():
-            # Refuses to start rather than falling back to the mock (R3.2). A silent fallback
-            # would report "created 0, updated 0" — indistinguishable from a real empty sync,
-            # which is the worst possible outcome for a misconfigured credential.
-            raise PmsUnavailableError(
-                "CHANNEX_API_KEY is not set; refusing to run a Channex sync against no "
-                "credentials (set it in .env, see .env.example)"
-            )
-        return ChannexAdapter(
-            ChannexClient(
-                api_key=settings.channex_api_key,
-                base_url=settings.channex_base_url,
-                max_pages=settings.channex_max_pages,
-                page_limit=settings.channex_page_limit,
-                timeout=settings.channex_timeout_seconds,
-            )
-        )
-    raise ValueError(f"Unknown PMS provider {provider!r}")
+        return None
+    try:
+        return PMSProvider(provider.upper())
+    except ValueError:
+        # Never echo the value: `--provider=<pasted-api-key>` is a plausible fumble, and this is
+        # the same reason `_extract_provider` refuses to print it.
+        raise ValueError(f"Unknown PMS provider (expected one of {', '.join(PROVIDERS)})")
 
 
 class UnknownTenantError(RuntimeError):
@@ -127,31 +115,42 @@ async def sync_with_session(
     bind_session_to_tenant(session, tenant_id)
     if await session.scalar(select(TenantModel.id).where(TenantModel.id == tenant_id)) is None:
         raise UnknownTenantError(f"No tenant with id {tenant_id}")
-    adapter = build_adapter(provider)
+    # `--provider` is now an OVERRIDE, not the mechanism. Absent, every property resolves the
+    # provider it stores (ADR 0006 decision 7); present, it forces one for the whole run, which
+    # is what keeps local startup and the suite independent of any configuration — the property
+    # `specs/reservations.md` defends when it explains why this is a flag and not a setting.
+    forced = _forced_provider(provider)
+    if forced is not None:
+        # Loud on purpose: an override that silently outranked the stored providers would make a
+        # sync report results from a PMS nobody expected it to talk to.
+        print(
+            f"pms-sync: OVERRIDE — every property will use {forced.value}, "
+            f"ignoring the provider each one stores",
+            file=sys.stderr,
+        )
     use_case = SyncReservationsFromPmsUseCase(
-        pms=adapter,
+        factory=SqlAlchemyPMSAdapterFactory(
+            credentials=SqlAlchemyPmsCredentialRepository(session),
+            forced_provider=forced,
+        ),
         reservations=SqlAlchemyReservationRepository(session),
         properties=SqlAlchemyPropertyRepository(session),
         guests=SqlAlchemyGuestRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
+        audit=SqlAlchemyAuditLogRepository(session),
     )
     report = await use_case.execute(
         tenant_id=tenant_id,
         since=at - timedelta(days=window_days),
         now=at,
     )
-    # Rows the adapter could not even turn into a DTO fold into the report's skipped count and
-    # errors, so the command reports them like any other unusable row.
-    #
-    # Plain attribute access, not `getattr(..., [])`. The default was the bug: an adapter that
-    # simply did not define the attribute would report **zero** unmappable rows while dropping
-    # some, silently. `unmappable_rows` is now declared on `PMSAdapter` so every implementation
-    # owes it — see that docstring for why widening the return type is the real fix and why it
-    # belongs to `pms-beds24-adapter`.
-    for reason in adapter.unmappable_rows:
-        report.skipped += 1
-        report.errors.append(RowError(reason=f"provider row could not be mapped: {reason}"))
+    # The fold of unmappable provider elements USED TO BE HERE, reading an `unmappable_rows`
+    # attribute off the adapter. It now lives in `SyncReservationsFromPmsUseCase.execute`, where
+    # the CSV use case has always done the equivalent with `ParseResult.failures` (design D10).
+    # The command's output is unchanged; what changed is that a second caller of the use case —
+    # the periodic sync `celery-jobs` will add — gets the same report instead of having to
+    # reassemble it.
     return report
 
 
@@ -234,10 +233,22 @@ def main(argv: list[str] | None = None) -> int:
         f"pms-sync: created {report.created}, updated {report.updated}, "
         f"skipped {report.skipped}"
     )
+    if report.provider_failures:
+        # Exit 3, the same code a provider that could not answer has always used: "this sync did
+        # not happen" is a different fact from "the PMS had nothing", and the exit code is where
+        # a cron job or a runbook reads it. The other providers' work is already committed — the
+        # failure is isolated, not swallowed.
+        print(
+            "pms-sync: providers that could not be synced: "
+            + ", ".join(report.provider_failures),
+            file=sys.stderr,
+        )
     for error in report.errors:
         # Reported, not swallowed: a row the sync could not import is operational
         # information, and R3.4 requires it to survive the run.
         print(f"pms-sync: skipped {error.reference} — {error.reason}", file=sys.stderr)
+    if report.provider_failures:
+        return 3
     # Skipped rows are not a failure of the command: the run did what it could, which is the
     # whole point of R3.4. Only an unhandled exception makes this non-zero.
     return 0

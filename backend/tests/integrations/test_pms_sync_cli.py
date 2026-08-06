@@ -117,3 +117,67 @@ def test_main_reports_an_unknown_tenant_as_a_failure(monkeypatch, capsys) -> Non
 
     assert pms_sync.main([str(uuid.uuid4())]) == 2
     assert "No tenant with id" in capsys.readouterr().err
+
+
+@pytest.mark.asyncio
+async def test_a_provider_that_could_not_be_synced_exits_three_not_zero(
+    db_session, tenant_a, property_a
+) -> None:
+    """R2.4 / design D9, and the regression the QA panel of sections 6-8 caught.
+
+    Isolating a provider failure — so one bad provider does not cost a tenant the others — had
+    the side effect that `PmsUnavailableError` stopped reaching `main`, so the command exited
+    **0** with "created 0": indistinguishable from a PMS that had nothing, which is precisely
+    what D9 forbids. Isolation and a loud exit are not in conflict; `provider_failures` is the
+    channel that keeps both.
+    """
+    from app.integrations.domain.enums import PMSProvider
+    from app.integrations.cli import pms_sync as cli
+    from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+
+    await SqlAlchemyPropertyRepository(db_session).set_pms_provider(
+        tenant_a.id, property_a.id, PMSProvider.BEDS24
+    )
+    await db_session.flush()
+
+    report = await cli.sync_with_session(db_session, tenant_a.id)
+
+    assert report.provider_failures == ["BEDS24"], "the run must record which provider failed"
+    assert report.created == 0
+
+
+def test_main_returns_three_when_a_provider_failed(monkeypatch, capsys) -> None:
+    """The EXIT CODE itself, which the test above does not check despite its name.
+
+    The QA panel of the feature-scale review caught that: the sibling asserts
+    `provider_failures` on the report and stops, so reverting `main`'s two-line mapping to
+    `return 0` would leave it green — and that mapping is the entire contract D9 cares about,
+    because a cron job reads the code and not the report. Fifth time in this change that a test
+    of mine claimed more than its body proved, so this one drives `main` and asserts the number.
+    """
+    from app.integrations.application.ingest import IngestReport
+    from app.integrations.cli import pms_sync as cli
+
+    async def _fake_run(tenant_id, *, window_days, provider):
+        return IngestReport(provider_failures=["BEDS24"])
+
+    monkeypatch.setattr(cli, "run", _fake_run)
+
+    code = cli.main([str(uuid.uuid4())])
+
+    assert code == 3, "a provider that could not be synced is not an empty sync"
+    assert "BEDS24" in capsys.readouterr().err
+
+
+def test_main_returns_zero_when_every_provider_answered(monkeypatch, capsys) -> None:
+    """The other half, so the assertion above cannot pass by always returning 3."""
+    from app.integrations.application.ingest import IngestReport
+    from app.integrations.cli import pms_sync as cli
+
+    async def _fake_run(tenant_id, *, window_days, provider):
+        return IngestReport(created=1)
+
+    monkeypatch.setattr(cli, "run", _fake_run)
+
+    assert cli.main([str(uuid.uuid4())]) == 0
+

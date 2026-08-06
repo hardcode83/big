@@ -17,7 +17,7 @@ make every test that depends on "a reservation active today" flaky at midnight.
 from datetime import UTC, datetime, time, timedelta
 from decimal import Decimal
 
-from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.domain.dtos import PmsFetchResult, ReservationDTO
 
 SEED_PROPERTY_CODE = "PMS-REDES11"
 _LOOKUP_REFERENCE = datetime(2026, 1, 1, tzinfo=UTC)
@@ -27,21 +27,21 @@ UNKNOWN_PROPERTY_CODE = "PMS-DOES-NOT-EXIST"
 class MockPMSAdapter:
     def __init__(self, *, include_broken_rows: bool = True) -> None:
         self._include_broken_rows = include_broken_rows
-        # Part of the port's contract, not a courtesy (see `PMSAdapter.unmappable_rows`). The
-        # mock builds its own rows, so it can never fail to map one — but leaving the attribute
-        # off would be exactly the silent-zero hazard the port's docstring warns about, and it
-        # would break substitutability with the real adapter (Liskov, `backend-architecture.md`).
-        self.unmappable_rows: list[str] = []
 
     async def list_reservations(
         self, since: datetime, property_external_id: str | None = None
-    ) -> list[ReservationDTO]:
+    ) -> PmsFetchResult:
         rows = self._seed(since)
         if self._include_broken_rows:
             rows = rows + self._broken(since)
         if property_external_id is not None:
             rows = [row for row in rows if row.property_external_id == property_external_id]
-        return rows
+        # `failures` is always empty, and that is honest rather than lazy: the mock builds its own
+        # elements, so there is no provider payload it could fail to map. The rows it deliberately
+        # emits as BAD (an unknown property, a zero-night stay) are well-formed DTOs that the
+        # INGESTOR must reject — a different failure, reported by `IngestReport`, and conflating
+        # the two would make the mock exercise the wrong path.
+        return PmsFetchResult(reservations=rows, failures=[])
 
     async def get_reservation(self, external_id: str) -> ReservationDTO | None:
         """Looked up over the same feed `list_reservations` produces.
@@ -50,7 +50,7 @@ class MockPMSAdapter:
         subtracting days from it, and `datetime.min` overflows. A real adapter would query the
         provider by id and ignore time altogether.
         """
-        for row in await self.list_reservations(_LOOKUP_REFERENCE):
+        for row in (await self.list_reservations(_LOOKUP_REFERENCE)).reservations:
             if row.external_id == external_id:
                 return row
         return None

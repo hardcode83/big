@@ -13,7 +13,14 @@ from decimal import Decimal
 import httpx
 import pytest
 
-from app.integrations.infrastructure.channex.adapter import ChannexAdapter, _channex_timestamp
+from app.integrations.infrastructure.channex.adapter import (
+    MAX_REFERENCE_LENGTH,
+    NO_REFERENCE,
+    ChannexAdapter,
+    _channex_timestamp,
+    _element_reference,
+    _skip_reason,
+)
 from app.integrations.infrastructure.channex.client import ChannexClient
 from app.integrations.infrastructure.channex.mapping import to_reservation_dto
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
@@ -289,13 +296,14 @@ async def test_list_reservations_sends_the_converted_filter_and_maps_every_row()
 
     adapter = ChannexAdapter(_client(handler))
     since = datetime(2026, 8, 3, 11, 0, tzinfo=timezone(timedelta(hours=2)))
-    rows = await adapter.list_reservations(since)
+    fetched = await adapter.list_reservations(since)
 
     assert seen["filter[inserted_at][gte]"] == "2026-08-03T09:00:00"
-    assert len(rows) == len(payload["data"])
-    assert {row.external_id for row in rows} == {
+    assert len(fetched.reservations) == len(payload["data"])
+    assert {row.external_id for row in fetched.reservations} == {
         row["attributes"]["unique_id"] for row in payload["data"]
     }
+    assert fetched.failures == []
 
 
 @pytest.mark.asyncio
@@ -326,18 +334,55 @@ async def test_one_malformed_booking_does_not_take_the_whole_sync_down(broken, l
         return httpx.Response(200, json={"meta": {"total": 2, "page": 1}, "data": [good, bad]})
 
     adapter = ChannexAdapter(_client(handler))
-    rows = await adapter.list_reservations(datetime.now(UTC))
+    fetched = await adapter.list_reservations(datetime.now(UTC))
 
-    assert len(rows) == 1, label
-    assert rows[0].external_id == good["attributes"]["unique_id"]
-    assert len(adapter.unmappable_rows) == 1, label
-    assert "BROKEN-0001" in adapter.unmappable_rows[0]
+    assert len(fetched.reservations) == 1, label
+    assert fetched.reservations[0].external_id == good["attributes"]["unique_id"]
+    assert len(fetched.failures) == 1, label
+    assert fetched.failures[0].external_id == "BROKEN-0001"
 
 
+@pytest.mark.parametrize(
+    ("label", "arrival_date", "needles"),
+    [
+        # The case the previous version of this test used, kept because it is the cheap one —
+        # and NOTE it is inert: `None` puts nothing sensitive on the path to the message, so on
+        # its own it made this test pass for the wrong reason. Both the security and the QA panel
+        # of this change reproduced the leak the other cases below cover.
+        ("a null date", None, ()),
+        # The general case: any string in a date field lands in `ValueError`'s own message
+        # (`Invalid isoformat string: '…'`). Providers do put junk in fields.
+        (
+            "PII smuggled in a date field",
+            "ana.real@gmail.com wants a late check-in",
+            ("ana.real@gmail.com",),
+        ),
+        # The worst case, and the reason rule 13(a) exists: a nested object under a date key.
+        # Every OTA booking arrives with a `guarantee` block, so this is the shape that puts a
+        # PAN and a CVV in the operator's report — measured, not hypothetical.
+        (
+            "a guarantee object under a date key",
+            {
+                "card_number": "4111111111111111",
+                "cvv": "737",
+                "cardholder_name": "MARIA GARCIA LOPEZ",
+                "expiration_date": "12/2029",
+            },
+            ("4111111111111111", "737", "MARIA GARCIA LOPEZ", "12/2029"),
+        ),
+    ],
+)
 @pytest.mark.asyncio
-async def test_the_skip_reason_never_carries_the_payload():
-    """A skip reason is a log line and a CLI message — a plain-text sink. It gets the provider's
-    id and the error class, never the booking, which holds guest name, email, phone and address.
+async def test_the_skip_reason_never_carries_the_payload(label, arrival_date, needles):
+    """A skip reason is a log line and a CLI message — a plain-text sink.
+
+    It gets the provider's id and the error class, never the booking, which holds guest name,
+    email, phone and, per rule 13(a) of `steering/security.md`, cardholder data that must not be
+    logged or forwarded at all. R6.4 says the same in this change's own words.
+
+    Parametrised over the field that RAISES, which is the whole point: the failure travels
+    through the exception's message, so a case where the raising field is harmless proves
+    nothing about the mechanism.
     """
     bad = {
         "type": "booking",
@@ -345,7 +390,7 @@ async def test_the_skip_reason_never_carries_the_payload():
         "attributes": {
             **_minimal_attributes(),
             "unique_id": "BROKEN-0002",
-            "arrival_date": None,
+            "arrival_date": arrival_date,
             "customer": {"name": "Ana Real", "mail": "ana.real@gmail.com"},
         },
     }
@@ -354,17 +399,33 @@ async def test_the_skip_reason_never_carries_the_payload():
         return httpx.Response(200, json={"meta": {"total": 1, "page": 1}, "data": [bad]})
 
     adapter = ChannexAdapter(_client(handler))
-    await adapter.list_reservations(datetime.now(UTC))
+    fetched = await adapter.list_reservations(datetime.now(UTC))
 
-    reported = " ".join(adapter.unmappable_rows)
-    assert "BROKEN-0002" in reported
-    assert "Ana Real" not in reported
-    assert "ana.real@gmail.com" not in reported
+    assert len(fetched.failures) == 1, label
+    failure = fetched.failures[0]
+    # Both fields, because either one reaching a log is the leak.
+    reported = f"{failure.external_id} {failure.reason}"
+
+    assert "BROKEN-0002" in reported, label
+    assert "Ana Real" not in reported, label
+    assert "ana.real@gmail.com" not in reported, label
+    for needle in needles:
+        assert needle not in reported, f"{label}: leaked {needle!r}"
+    # And positively: the reason names the field that failed, which is what makes the report
+    # useful without carrying a single value from the element.
+    assert failure.reason == "UnmappableField: arrival_date", label
 
 
 @pytest.mark.asyncio
-async def test_unmappable_rows_resets_between_calls():
-    """Otherwise a second sync inherits the first one's failures and reports them twice."""
+async def test_failures_do_not_leak_from_one_call_into_the_next():
+    """A second sync must not inherit the first one's failures and report them twice.
+
+    This used to be a real hazard and is now structurally impossible: the failures were an
+    attribute on the adapter that `list_reservations` reset on entry, so forgetting that reset —
+    or two calls overlapping on one adapter — double-reported. They now travel in the return
+    value (design D10), so each call owns its own list. The test survives the change because the
+    property it asserts is the one that mattered; only the mechanism became sound.
+    """
     bad = {"type": "booking", "id": "b", "attributes": {"unique_id": "B-1"}}
     calls = {"n": 0}
 
@@ -374,11 +435,14 @@ async def test_unmappable_rows_resets_between_calls():
         return httpx.Response(200, json={"meta": {"total": len(data), "page": 1}, "data": data})
 
     adapter = ChannexAdapter(_client(handler))
-    await adapter.list_reservations(datetime.now(UTC))
-    assert len(adapter.unmappable_rows) == 1
+    first = await adapter.list_reservations(datetime.now(UTC))
+    assert len(first.failures) == 1
 
-    await adapter.list_reservations(datetime.now(UTC))
-    assert adapter.unmappable_rows == []
+    second = await adapter.list_reservations(datetime.now(UTC))
+    assert second.failures == []
+    # And the first result is untouched by the second call — impossible while the report lived
+    # on the adapter, which is the point of moving it.
+    assert len(first.failures) == 1
 
 
 @pytest.mark.asyncio
@@ -445,3 +509,109 @@ def _minimal_attributes() -> dict:
         "status": "new",
         "ota_name": "Offline",
     }
+
+
+# --- `_skip_reason`'s fallback branch, unit-level (R6.4) ---
+
+
+@pytest.mark.parametrize(
+    "error",
+    [
+        ValueError("Invalid isoformat string: 'ana.real@gmail.com'"),
+        KeyError("4111111111111111"),
+        TypeError("cannot parse {'cvv': '737', 'card_number': '4111111111111111'}"),
+        RuntimeError("MARIA GARCIA LOPEZ"),
+    ],
+)
+def test_the_skip_reason_discards_the_message_of_any_unrecognised_error(error):
+    """The fallback branch, exercised directly with exceptions that DO carry sensitive text.
+
+    Added after the QA panel observed that no test probed it: every element-level failure the
+    other tests produce is either our own `UnmappableField` (whose message is a source literal)
+    or an `AttributeError` whose message happens to carry nothing sensitive. So the docstring
+    claim — "any exception type this module does not recognise contributes its class name and
+    nothing more… for a provider shape nobody has seen yet" — was unverified, and it is precisely
+    the branch that has to hold for the shapes we cannot enumerate.
+
+    Unit-level on purpose: constructing a provider payload that raises each of these through the
+    real mapping would test the mapping's internals, not the guarantee.
+    """
+    reason = _skip_reason(error)
+
+    assert reason == type(error).__name__
+    for fragment in ("ana.real", "4111111111111111", "737", "MARIA", "isoformat"):
+        assert fragment not in reason
+
+
+# --- `_element_reference` bounds and sanitises the identifier (R6.4) ---
+
+
+@pytest.mark.parametrize(
+    ("label", "unique_id", "element_id", "expected"),
+    [
+        ("an ordinary id passes through untouched", "BDC-12345", "e1", "BDC-12345"),
+        ("an integer id is a scalar and is kept", 90210, "e1", "90210"),
+        # bool is a subclass of int; "True" is not an identifier.
+        ("a boolean is refused and falls back", True, "e1", "e1"),
+        # The shape that leaked: a guarantee object under the id key.
+        (
+            "a nested object falls back to the element id",
+            {"card_number": "4111111111111111", "cvv": "737"},
+            "e1",
+            "e1",
+        ),
+        ("a list falls back too", ["4111111111111111"], "e1", "e1"),
+        ("nothing usable anywhere yields the placeholder", {"cvv": "737"}, None, "<no id>"),
+        ("an empty string is not an id", "   ", "e1", "e1"),
+    ],
+)
+def test_the_element_reference_only_accepts_a_short_printable_scalar(
+    label, unique_id, element_id, expected
+):
+    """The identifier is provider-controlled text heading for a log line and the CLI.
+
+    Added because the security panel found that bounding the skip *reason* left this field
+    unbounded: `str(identifier)` on a `guarantee` object put a PAN and a CVV in the same
+    `logger.warning` and the same operator output that had just been secured. Rule 13(a) does not
+    care which field carries the card data.
+
+    This test exists so a future refactor back to a bare `str(identifier)` fails here rather than
+    in production — the hardening was verified by probe when written, and by nothing afterwards.
+    """
+    element = {"attributes": {"unique_id": unique_id}, "id": element_id}
+
+    assert _element_reference(element) == expected, label
+
+
+def test_the_element_reference_strips_control_characters_and_bounds_the_length():
+    """A newline in the identifier forged a second log line shaped like ours — measured.
+
+    Both properties in one test because they interact: stripping happens BEFORE truncating, so a
+    cut cannot leave half an escape sequence behind.
+    """
+    forged = "A" * 2000 + "\nchannex: FORGED LOG LINE cvv=737"
+    element = {"attributes": {"unique_id": forged}, "id": "e1"}
+
+    reference = _element_reference(element)
+
+    assert "\n" not in reference
+    assert len(reference) == MAX_REFERENCE_LENGTH
+    assert reference == "A" * MAX_REFERENCE_LENGTH
+
+    # A SHORT prefix, so the assertion is about the sanitiser and not about the budget. The
+    # security reviewer caught that the case above passes partly because 2000 'A's exhaust the
+    # 64 characters — true, but it would also pass with no stripping at all, so on its own it
+    # implies a guarantee it does not check. What must hold is that the newline is gone, which
+    # is what stops a second log record; the injected WORDS surviving as id content is harmless
+    # once they cannot start a line.
+    short = "BDC-1\nchannex: FORGED LOG LINE cvv=737"
+    reference = _element_reference({"attributes": {"unique_id": short}, "id": "e1"})
+
+    assert "\n" not in reference
+    assert reference.startswith("BDC-1")
+
+
+def test_a_non_dict_element_yields_the_placeholder():
+    for element in ("just a string", ["a", "list"], None, 42):
+        assert _element_reference(element) == NO_REFERENCE
+

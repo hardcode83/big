@@ -41,6 +41,11 @@ REDACTED_FIELDS = frozenset(
         "wifi_password_encrypted",
         "access_code",
         "access_code_encrypted",
+        # Provider credentials (`pms-provider-resolution`). A stolen one grants **write** access
+        # to a client's calendar, pricing and messaging, so it is the most consequential name on
+        # this list — and note the effect: `diff()` on it RAISES, which leaves `redacted()` as
+        # the only way to record a rotation. That is the intended shape, not an obstacle.
+        "secret_encrypted",
         # `access_records.code_masked` is already the masked form rule 4 allows, so it is
         # not denylisted: forcing `{"changed": true}` on it would record less than the
         # rule permits.
@@ -89,6 +94,15 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "notification_whatsapp_enabled",
         }
     ),
+    # Mandatory even though a credential read records NO diff: `ChangeSet.__init__` refuses an
+    # unknown `entity_type`, and an empty `ChangeSet` still has to be constructed for one.
+    #
+    # `secret_encrypted` is listed here AND denylisted above, which is not a contradiction: the
+    # allowlist says "this field may appear in a credential's audit row at all", the denylist says
+    # "only in its redacted form". Together they mean a rotation records `{"changed": true}` and
+    # there is no path that records the value. Removing it from here would make `redacted()` fail
+    # too, leaving rotation unrecordable.
+    "PMS_CREDENTIAL": frozenset({"secret_encrypted", "rotated_at"}),
 }
 
 _REDACTED_MARKER = {"changed": True}

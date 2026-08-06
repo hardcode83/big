@@ -27,3 +27,4 @@
 | celery-jobs | new, design, tasks, run, review | 638353 | 1719045 | 336267464 | 247.2024 | 2026-08-04 | 2026-08-05 |
 | local-dev-network-hardening | review, run, archive | 56381 | 211468 | 148459332 | 121.4044 | 2026-08-05 | 2026-08-05 |
 | worktree-parallel-stack | archive | 11 | 4807 | 4041957 | 2.2191 | 2026-08-05 | 2026-08-05 |
+| pms-provider-resolution | new, design, tasks, run, review | 521197 | 1202189 | 351117326 | 225.8096 | 2026-08-05 | — |

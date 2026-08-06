@@ -7,6 +7,8 @@ from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TenantScopedMixin, TimestampMixin, UUIDPrimaryKeyMixin
+from app.integrations.domain.enums import PMSProvider
+from app.integrations.infrastructure.models import pms_provider_enum
 from app.properties.domain.enums import (
     PropertyOperationalState,
     PropertyStatus,
@@ -29,6 +31,17 @@ class PropertyModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
     name: Mapped[str] = mapped_column(String(200))
     internal_code: Mapped[str] = mapped_column(String(50))
     pms_external_id: Mapped[str | None] = mapped_column(String(200), default=None)
+    # Which PMS this property talks to (ADR 0006 decision 7). NULL means "the bootstrap
+    # default", i.e. the mock — so every existing row keeps working with no data migration and
+    # the suite's behaviour still depends on no configuration.
+    #
+    # The credentials are NOT here: they live in `pms_credentials`, because the real credential
+    # of every provider evaluated is account-scoped and columns here would duplicate it once per
+    # property. The enum type object is imported rather than redeclared so Postgres gets one
+    # `pms_provider` type instead of two.
+    pms_provider: Mapped[PMSProvider | None] = mapped_column(
+        pms_provider_enum, nullable=True, default=None
+    )
     address_line1: Mapped[str | None] = mapped_column(String(200), default=None)
     address_line2: Mapped[str | None] = mapped_column(String(200), default=None)
     city: Mapped[str | None] = mapped_column(String(100), default=None)
