@@ -109,12 +109,13 @@ no las dispara; aporta el dato del que cuelgan.
 - THE SYSTEM SHALL declarar su dependencia del PMS como un puerto `PMSAdapter` en el
   dominio, con dos implementaciones: `MockPMSAdapter` (el defecto) y `ChannexAdapter`, que
   habla con la API real de Channex staging y se documenta en
-  `sdd/specs/pms-channex-staging.md`.
-- THE SYSTEM SHALL exponer en el puerto un `unmappable_rows: list[str]` que toda
-  implementación debe ofrecer, porque `list_reservations` devuelve DTOs y no tiene otro sitio
-  donde reportar una fila cuyo payload no pudo mapear. IF una implementación no lo define,
-  THEN el comando SHALL fallar con `AttributeError` en lugar de informar cero filas
-  descartadas mientras descarta algunas.
+  `sdd/specs/pms-channex-staging.md`. **Qué implementación se usa lo resuelve cada propiedad**,
+  a través de la `PMSAdapterFactory` de `sdd/specs/pms-provider-resolution.md`.
+- THE SYSTEM SHALL devolver de `list_reservations` un `PmsFetchResult` que lleva **juntos** los
+  DTOs y las filas que no se pudieron mapear. Sustituye al `unmappable_rows: list[str]` que el
+  puerto exponía como atributo de clase: aquel obligaba a toda implementación a ofrecerlo, era
+  estado mutable en un puerto, y `vars()` no ve una anotación desnuda, así que el test de
+  conformidad no lo comprobaba. El pliegue de esas filas al informe ocurre en el caso de uso.
 - THE SYSTEM SHALL mapear cada elemento del proveedor **por separado**, y WHEN uno resulta
   imposible de mapear THE SYSTEM SHALL saltarlo reportándolo y conservar los demás, en vez de
   abortar la sincronización completa. El mapeo ocurre en el adapter, antes de que ninguna fila
@@ -141,12 +142,16 @@ no las dispara; aporta el dato del que cuelgan.
 - THE SYSTEM SHALL tratar un email en blanco como ausencia de email: no coincide con nadie
   y no se almacena, de modo que dos filas sin email son dos personas y no una.
 - WHEN se ejecuta el comando `python -m app.integrations.cli.pms_sync <tenant> [días]
-  [--provider {mock,channex}]`, THE SYSTEM SHALL sincronizar ese tenant e imprimir el informe,
-  marcando la sesión con el tenant indicado porque un comando no atraviesa la verificación del
-  token.
-- WHEN no se pasa `--provider`, THE SYSTEM SHALL usar `MockPMSAdapter`, de modo que el
-  comportamiento del comando, de la suite y del arranque local no dependa de configuración
-  alguna.
+  [--provider {mock,channex,beds24}]`, THE SYSTEM SHALL sincronizar ese tenant e imprimir el
+  informe, marcando la sesión con el tenant indicado porque un comando no atraviesa la
+  verificación del token.
+- WHEN no se pasa `--provider`, THE SYSTEM SHALL dejar que **cada propiedad resuelva el suyo**
+  (`sdd/specs/pms-provider-resolution.md`), y una propiedad que no declara ninguno cae al
+  proveedor por defecto, `MOCK` — de modo que el comportamiento de la suite y del arranque local
+  sigue sin depender de configuración alguna.
+- WHEN se pasa `--provider`, THE SYSTEM SHALL tratarlo como **override explícito de operador**
+  sobre todas las propiedades del tenant, y SHALL anunciarlo por salida estándar diciendo que
+  ignora el proveedor que cada una guarda. Es un flag de diagnóstico, no el mecanismo.
 - IF `--provider channex` se selecciona sin `CHANNEX_API_KEY` en el entorno, THEN THE SYSTEM
   SHALL abortar nombrando la variable ausente y no SHALL caer al mock: un fallback silencioso
   informaría «created 0» y sería indistinguible de un PMS vacío.
