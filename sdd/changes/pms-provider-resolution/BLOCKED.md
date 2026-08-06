@@ -45,3 +45,60 @@ reformula** — lo intentó dos veces y las dos se quedaron obsoletas cuando la 
 Lo que sí aporta y es suyo: la medición de la que salió el debate, que un sync de N propiedades
 servidas por una credencial de cuenta la descifra N veces, y que **hoy** solo un proveedor guarda
 credencial (`BEDS24`), así que la repetición es en el tiempo y no en el portfolio.
+
+---
+
+# Abierto tras `/sdd:review` (2026-08-06)
+
+Dos hallazgos del panel de seguridad sobrevivieron a la tercera ronda de arreglo. **Se dejan
+abiertos a propósito**: el flujo permite dos rondas, se tomó una tercera porque aquellos eran
+defectos funcionales, y estos dos no lo justifican. Decide antes del PR.
+
+## 1. La línea de resumen de `_record_credential_reads` sigue enunciando el número
+
+- **Tipo**: `decision` · **Comando**: `/sdd:review pms-provider-resolution`
+- **Dónde**: `backend/app/integrations/application/use_cases.py:241`, y el caso adyacente y más
+  leve en `backend/app/integrations/domain/entities.py:73`.
+
+La primera línea del docstring dice *"One `PMS_CREDENTIAL_READ` row per DISTINCT credential this
+run decrypted"* — un número — y cuatro líneas más abajo el mismo docstring afirma que **no** dice
+nada sobre eso y que la regla 9 es donde se enuncia. Se contradice consigo mismo. Hoy el número es
+correcto, *que es exactamente como empezaron las cinco copias anteriores*.
+
+**Por qué el barrido volvió a fallar, y es lo que hay que aprender de aquí**: cambié «buscar
+frases» por «buscar más frases». `One \`PMS_CREDENTIAL_READ\` row per` no contiene la subcadena
+`one row per` — hay dos tokens en medio. Es **el mismo fallo estructural que el primer barrido, un
+nivel más arriba**: la primera vez se me escaparon las copias en inglés por buscar en español; esta
+vez se me escapó por buscar una subcadena en vez de la afirmación.
+
+Arreglo: quitar la cardinalidad de la línea de resumen (nombrar la acción, no cuántas filas) y
+reducir `entities.py:73` al mecanismo. Dos líneas.
+
+## 2. El comando de credenciales no puede reparar la fila cuyo error acaba de traducirse
+
+- **Tipo**: `decision` · **Comando**: `/sdd:run pms-provider-resolution 8`
+- **Dónde**: `backend/app/integrations/cli/pms_credentials.py:139` y `:242-247`.
+
+`store_with_session` llama a `get_for` **antes** del upsert, tanto en `set` como en `rotate`. Contra
+un valor almacenado malformado —que desde el commit `63b6cb4` lanza `SecretDecryptionError`— y como
+`main` solo captura `UsageError`, **ambos subcomandos mueren con un traceback**.
+
+Consecuencia operativa real: quien tenga que rotar una credencial **comprometida** cuya fila esté
+malformada (escrita a mano, restauración truncada) se queda **sin vía auditada**, y la única
+alternativa es SQL crudo — que se salta el cifrado, el guard cross-tenant y la fila
+`PMS_CREDENTIAL_ROTATED`, es decir justo lo que este comando existe para evitar.
+
+**No lo introdujo este change**: el hueco es previo, y lo que hizo `63b6cb4` fue cambiar el tipo de
+excepción y volverlo visible.
+
+Arreglo propuesto por el panel: capturar `SecretDecryptionError` en `main` y salir con código
+propio; permitir que `set` **sobrescriba** unas coordenadas cuyo valor no se puede leer (no hace
+falta el claro anterior para reemplazarlo), y que `rotate` siga negándose.
+
+## Nota para el archivado, no bloqueante
+
+Un `read_log` obligatorio garantiza **recolección**, no **persistencia**: las filas llegan a
+`audit_logs` porque `SyncReservationsFromPmsUseCase` empareja el log con un `audit` obligatorio y lo
+vuelca en el `finally`. Un futuro llamante iniciado por persona o API debe emparejar los dos igual.
+Hoy no existe tal llamante; merece una frase en `specs/` al archivar.
+
