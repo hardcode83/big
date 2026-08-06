@@ -35,9 +35,10 @@ aplicaría al resolver, que es una incoherencia silenciosa.
 
 ## ~~2. Dónde se escribe la fila de auditoría por ejecución~~ RESUELTO
 
-Se escribe en `SyncReservationsFromPmsUseCase.execute`, al cerrar el run, una fila
-`PMS_CREDENTIAL_READ` **por credencial distinta** descifrada — las que `CredentialReadLog`
-acumula, deduplicadas.
+Se escribe en `SyncReservationsFromPmsUseCase.execute`, al cerrar el run, con `CredentialReadLog`
+deduplicando. **Cuántas filas** lo dice la regla 9 de `steering/security.md` y solo ella: este
+fichero enunciaba el número dos líneas antes de declarar que no lo reformulaba, que es la forma en
+que empezaron las copias anteriores.
 
 **La granularidad exacta la fija la regla 9 de `steering/security.md`, y este fichero no la
 reformula** — lo intentó dos veces y las dos se quedaron obsoletas cuando la regla se corrigió.

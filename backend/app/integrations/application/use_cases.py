@@ -240,10 +240,13 @@ class SyncReservationsFromPmsUseCase:
     ) -> None:
         """One `PMS_CREDENTIAL_READ` row per DISTINCT credential this run decrypted (R4.2).
 
-        Not one per property, which is the narrowing the named exception in rule 9 of
-        `steering/security.md` authorises. The two coincide today — every evaluated provider
-        authenticates per account, so a run over any portfolio decrypts one credential — and they
-        only diverge if a provider ever needs per-property credentials.
+        The count is the narrowing that the named exception in rule 9 of
+        `steering/security.md` authorises, and **that rule is where it is stated** — this
+        docstring cites it and says nothing about it. An earlier version added its own gloss and
+        got it backwards, claiming the two granularities coincide under account scope when that is
+        the case where they diverge most (four properties, one row instead of four). It was the
+        fourth time the same claim was written wrongly in this change, and it was written **while**
+        the other three were being consolidated. Hence: no gloss.
 
         The diff is EMPTY: a read changes nothing, and an empty `ChangeSet` is falsy, so
         `AuditLogFactory` stores `changes` as SQL NULL rather than `{}`. `entity_id` names the

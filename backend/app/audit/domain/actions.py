@@ -35,9 +35,10 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 # Provider credentials (ADR 0006 obligation 4, which rule 9's enumeration did not cover — so
 # before this change, reading or rotating one was invisible).
 #
-# READ is deliberately NOT one row per decryption. **The exact granularity is stated in ONE
-# place — the named exception in rule 9 of `sdd/steering/security.md` — and this comment cites it
-# rather than paraphrasing it.** That is not fastidiousness: three consecutive reviews each found
+# How many READ rows a run writes is stated in ONE place — the named exception in rule 9 of
+# `sdd/steering/security.md`. This comment does not restate it, not even the negative half: the
+# sweep that found the previous copies found this clause too, and "everything else cites it"
+# either holds or it does not. That is not fastidiousness: three consecutive reviews each found
 # a DIFFERENT error in this statement while it lived in five artifacts, and a paraphrase here was
 # one of the survivors, still asserting an inverted granularity and the wrong unit after the rule
 # had been corrected. Approved for this change in design D6, which likewise cites rather than

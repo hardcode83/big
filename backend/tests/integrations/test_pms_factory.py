@@ -52,7 +52,7 @@ async def test_a_property_with_no_provider_uses_the_bootstrap_default(
     entity = await _entity(db_session, tenant_a, property_a)
     assert entity.pms_provider is None
 
-    adapter = await _factory(db_session).reservations_for(entity)
+    adapter = await _factory(db_session).reservations_for(entity, read_log=CredentialReadLog())
 
     assert isinstance(adapter, MockPMSAdapter)
     assert DEFAULT_PROVIDER is PMSProvider.MOCK
@@ -75,7 +75,7 @@ async def test_a_provider_needing_a_credential_fails_loudly_when_there_is_none(
     entity = await _entity(db_session, tenant_a, property_a)
 
     with pytest.raises(MissingPmsCredentialError):
-        await _factory(db_session).reservations_for(entity)
+        await _factory(db_session).reservations_for(entity, read_log=CredentialReadLog())
 
 
 @pytest.mark.asyncio
@@ -105,7 +105,7 @@ async def test_a_stored_credential_resolves_and_then_reports_the_missing_adapter
     entity = await _entity(db_session, tenant_a, property_a)
 
     with pytest.raises(PmsUnavailableError) as excinfo:
-        await _factory(db_session).reservations_for(entity)
+        await _factory(db_session).reservations_for(entity, read_log=CredentialReadLog())
 
     assert "pms-beds24-adapter" in str(excinfo.value)
     assert "a-real-looking-refresh-token" not in str(excinfo.value)
@@ -126,7 +126,7 @@ async def test_the_override_outranks_the_stored_provider(
     factory = _factory(db_session, forced=PMSProvider.MOCK)
 
     assert factory.provider_for(entity) is PMSProvider.MOCK
-    assert isinstance(await factory.reservations_for(entity), MockPMSAdapter)
+    assert isinstance(await factory.reservations_for(entity, read_log=CredentialReadLog()), MockPMSAdapter)
 
 
 # --- Messaging (R1.2) ---
@@ -175,15 +175,15 @@ def test_the_factory_holds_no_session_and_caches_no_adapter(db_session) -> None:
 
 
 @pytest.mark.asyncio
-async def test_reading_a_credential_is_recorded_once_per_run_not_once_per_property(
+async def test_the_read_log_deduplicates_by_credential_id(
     db_session, tenant_a, property_a
 ) -> None:
-    """The narrowing that rule 9's named exception authorises.
+    """The MECHANISM: four resolutions sharing one credential leave one id in the log.
 
-    Resolving four properties that share one ACCOUNT credential decrypts it four times and must
-    record ONE row. That is not a shortcut: every provider evaluated authenticates per account, so
-    without the deduplication the row count would scale with the portfolio rather than with the
-    thing actually being audited.
+    Named after what it exercises, not after the granularity it enables — the count is stated in
+    rule 9 of `steering/security.md` and nowhere else. A test name is a normative-looking sentence
+    that CI enforces, and this one used to carry the claim; the final security panel pointed out
+    that a name is exactly where a superseded version survives a correction to the rule.
     """
     bind_session_to_tenant(db_session, tenant_a.id)
     await SqlAlchemyPropertyRepository(db_session).set_pms_provider(
@@ -447,7 +447,7 @@ async def test_a_provider_with_no_known_credential_scope_never_falls_back_to_moc
     monkeypatch.setattr(pms_factory, "credential_scope_for", lambda provider: None)
 
     with pytest.raises(MissingPmsCredentialError):
-        await _factory(db_session).reservations_for(entity)
+        await _factory(db_session).reservations_for(entity, read_log=CredentialReadLog())
 
 
 @pytest.mark.asyncio
@@ -526,4 +526,77 @@ async def test_an_undecryptable_credential_fails_its_provider_without_taking_the
     # The healthy provider still ran: the mock's seed rows landed. This is the assertion that
     # distinguishes isolation from a run that simply survived.
     assert report.created > 0, "the working provider must still have synced"
+
+
+@pytest.mark.asyncio
+async def test_a_credential_that_is_not_ciphertext_at_all_also_isolates_to_its_provider(
+    db_session, tenant_a, property_a
+) -> None:
+    """The half the previous isolation test did not cover, and the one reachable today.
+
+    Its sibling corrupts the ciphertext while **preserving Fernet structure**, so it exercises the
+    path `decrypt` handles. A value that is not ciphertext at all — a plaintext credential inserted
+    with SQL by hand, or a truncated restore — is refused earlier, by `EncryptedSecret`, with a
+    plain `ValueError` that used to escape everything: not in `_sync_one_provider`'s caught tuple,
+    not in the port's declared raise set, not caught by `pms_sync.main`. One such row aborted the
+    entire tenant's sync and rolled back the audit rows of reads that had already happened.
+
+    The final security panel named it exactly: *the refused half was the unhandled half.*
+    """
+    from datetime import UTC, datetime
+
+    from sqlalchemy import text
+
+    from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+    from app.core.unit_of_work import SqlAlchemyUnitOfWork
+    from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+    from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
+    from app.properties.infrastructure.models import PropertyModel
+    from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+    from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
+
+    bind_session_to_tenant(db_session, tenant_a.id)
+    repository = SqlAlchemyPropertyRepository(db_session)
+    await repository.set_pms_provider(tenant_a.id, property_a.id, PMSProvider.BEDS24)
+    credential = PmsCredential(
+        id=uuid.uuid4(),
+        tenant_id=tenant_a.id,
+        provider=PMSProvider.BEDS24,
+        scope=PmsCredentialScope.ACCOUNT,
+        secret=encrypt("token"),
+    )
+    await SqlAlchemyPmsCredentialRepository(db_session).upsert(tenant_a.id, credential)
+
+    healthy = PropertyModel(
+        tenant_id=tenant_a.id,
+        name="Healthy",
+        internal_code="HEALTHY2",
+        pms_external_id=SEED_PROPERTY_CODE,
+        max_guests=2,
+    )
+    db_session.add(healthy)
+    await db_session.flush()
+
+    # Not ciphertext at all: exactly what a hand-written row would contain.
+    await db_session.execute(
+        text("UPDATE pms_credentials SET secret_encrypted = :plain WHERE id = :id"),
+        {"plain": "beds24-refresh-token-in-the-clear", "id": str(credential.id)},
+    )
+    await db_session.flush()
+
+    now = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
+    report = await SyncReservationsFromPmsUseCase(
+        factory=_factory(db_session),
+        reservations=SqlAlchemyReservationRepository(db_session),
+        properties=repository,
+        guests=SqlAlchemyGuestRepository(db_session),
+        timeline=SqlAlchemyTimelineEventRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+        audit=SqlAlchemyAuditLogRepository(db_session),
+    ).execute(tenant_id=tenant_a.id, since=now, now=now)
+
+    assert report.provider_failures == ["BEDS24"]
+    assert report.created > 0, "the healthy provider must still have synced"
+    # And the plaintext never reaches the operator-facing report.
+    assert all("in-the-clear" not in error.reason for error in report.errors)
 

@@ -12,6 +12,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.crypto import SecretDecryptionError
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.entities import PmsCredential
@@ -115,12 +116,39 @@ class SqlAlchemyPmsCredentialRepository:
 
 
 def _to_credential(model: PmsCredentialModel) -> PmsCredential:
+    """Row → entity, translating a malformed stored value into the port's vocabulary.
+
+    `EncryptedSecret` refuses anything that is not a Fernet token, and it does so with a plain
+    `ValueError` because it may not import `cryptography`. That `ValueError` was escaping every
+    caller: it is not in the tuple `_sync_one_provider` catches, not in the raise set
+    `PMSAdapterFactory.reservations_for` declares, and not caught by `pms_sync.main` — so one
+    hand-written row (a plaintext credential inserted with SQL, which is exactly the path the
+    credentials command exists to prevent) aborted the whole tenant's sync, killed the healthy
+    providers' sync with it, and rolled back the `PMS_CREDENTIAL_READ` rows of reads that had
+    already happened.
+
+    The final security panel put it exactly right: **the refused half was the unhandled half.**
+    The isolation test written for this only corrupted the ciphertext while preserving Fernet
+    structure, so it exercised the half that was already handled.
+
+    `SecretDecryptionError` is the right home: from the caller's side "the stored value will not
+    decrypt" and "the stored value is not ciphertext at all" demand the same response — this
+    provider cannot be used, report it and move on — and the port already declares that error.
+    """
+    try:
+        secret = EncryptedSecret(ciphertext=model.secret_encrypted)
+    except ValueError as error:
+        # The message names neither the stored value nor any fragment of it.
+        raise SecretDecryptionError(
+            f"stored credential {model.id} is not valid ciphertext"
+        ) from error
+
     return PmsCredential(
         id=model.id,
         tenant_id=model.tenant_id,
         provider=model.provider,
         scope=model.scope,
-        secret=EncryptedSecret(ciphertext=model.secret_encrypted),
+        secret=secret,
         property_id=model.property_id,
         rotated_at=model.rotated_at,
     )

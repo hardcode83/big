@@ -73,7 +73,7 @@ class SqlAlchemyPMSAdapterFactory:
         return property.pms_provider or DEFAULT_PROVIDER
 
     async def reservations_for(
-        self, property: Property, *, read_log: CredentialReadLog | None = None
+        self, property: Property, *, read_log: CredentialReadLog
     ) -> PMSAdapter:
         return await self._build(property, self.provider_for(property), read_log)
 
@@ -100,7 +100,7 @@ class SqlAlchemyPMSAdapterFactory:
         )
 
     async def _build(
-        self, property: Property, provider: PMSProvider, read_log: CredentialReadLog | None
+        self, property: Property, provider: PMSProvider, read_log: CredentialReadLog
     ) -> PMSAdapter:
         if provider is PMSProvider.MOCK:
             return MockPMSAdapter()
@@ -146,7 +146,7 @@ class SqlAlchemyPMSAdapterFactory:
         )
 
     async def _require_credential(
-        self, property: Property, provider: PMSProvider, read_log: CredentialReadLog | None
+        self, property: Property, provider: PMSProvider, read_log: CredentialReadLog
     ) -> PmsCredential:
         scope = credential_scope_for(provider)
         if scope is None:
@@ -168,6 +168,6 @@ class SqlAlchemyPMSAdapterFactory:
                 property_id=property.id, provider=provider.value, scope=scope.value
             )
 
-        if read_log is not None:
-            read_log.record(credential)
+        # Unconditional: there is no longer a shape in which a decryption goes unrecorded.
+        read_log.record(credential)
         return credential

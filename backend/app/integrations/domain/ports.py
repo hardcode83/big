@@ -152,12 +152,19 @@ class PMSAdapterFactory(Protocol):
         ...
 
     async def reservations_for(
-        self, property: "Property", *, read_log: "CredentialReadLog | None" = None
+        self, property: "Property", *, read_log: "CredentialReadLog"
     ) -> PMSAdapter:
         """The reservations adapter for this property.
 
-        `read_log` collects the credentials this call decrypted, and it is a parameter of the
-        CALL rather than configuration of the factory. It was the latter, and the security panel
+        `read_log` collects the credentials this call decrypted. **Required**, not optional, and
+        for the reason the use case already wrote down about its own `audit` argument: rule 3(b)
+        says a credential read SHALL be audited, and expressing that as a default argument makes
+        it a suggestion no test can notice being ignored. It was optional here — one layer below
+        where that argument had been applied — so a caller that omitted it decrypted a stored
+        account credential and wrote zero audit rows, silently. The final security panel caught
+        that the rule's exempt branch was enforced while its obligated branch was not.
+
+        It is a parameter of the CALL rather than configuration of the factory. It was the latter, and the security panel
         of sections 6-8 reproduced why that is wrong: a factory reused across two `execute` calls
         carried the first run's reads into the second, which wrote an audit row under one tenant
         naming another tenant's credential. A run's reads belong to the run.
