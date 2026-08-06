@@ -96,6 +96,21 @@ class Settings(BaseSettings):
     channex_page_limit: int = 100
     channex_timeout_seconds: float = 30.0
 
+    # Beds24 (change `pms-beds24-adapter`, design D2). **No credential here, deliberately.**
+    # Beds24's refresh token is an ACCOUNT credential stored encrypted in `pms_credentials` and
+    # governed by rule 3 of steering/security.md; `BEDS24_REFRESH_TOKEN` exists only for the
+    # measurement bench in `scripts/`, which rule 8 covers. Two homes for one credential is how
+    # one of them stops being rotated.
+    #
+    # No `beds24_base_url` either: the base URL and the host allowlist are constants in
+    # `infrastructure/beds24/client.py`. Channex has one because its default points at staging,
+    # which is what stops a mistake reaching a live account — Beds24 has **no staging
+    # environment**, so a configurable base would be a lever with no use case, guarding a
+    # credential that grants write access to every property of the account.
+    beds24_max_pages: int = 50
+    beds24_page_limit: int = 100
+    beds24_timeout_seconds: float = 30.0
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""
