@@ -127,14 +127,18 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
 
 ## Key files
 
-- `backend/app/integrations/domain/ports.py` — `PMSAdapter`, incluido `unmappable_rows`.
+- `backend/app/integrations/domain/ports.py` — `PMSAdapter` y la `PMSAdapterFactory` que lo
+  resuelve por propiedad. `unmappable_rows` ya no está: las filas no mapeadas viajan en el
+  `PmsFetchResult` que devuelve `list_reservations`.
 - `backend/app/integrations/domain/errors.py` — `PmsUnavailableError`.
 - `backend/app/integrations/infrastructure/channex/client.py` — transporte, paginación,
   traducción de errores y redacción de la credencial.
 - `backend/app/integrations/infrastructure/channex/mapping.py` — Channex → `ReservationDTO`.
 - `backend/app/integrations/infrastructure/channex/adapter.py` — el puerto, con el filtro UTC y
   el mapeo por elemento.
-- `backend/app/integrations/cli/pms_sync.py` — flag `--provider` y códigos de salida.
+- `backend/app/integrations/cli/pms_sync.py` — códigos de salida, y el flag `--provider` que
+  desde `pms-provider-resolution` es un **override de operador** y no el mecanismo: sin él,
+  `ChannexAdapter` lo construye la factory para las propiedades que declaran `CHANNEX`.
 - `backend/app/core/config.py` — `channex_*` settings.
 - `backend/scripts/anonymise.py` — **la política fail-closed en sí**, extraída del probe por
   `pms-beds24-spike` cuando un segundo proveedor la necesitó. Solo la allowlist de negocio es por

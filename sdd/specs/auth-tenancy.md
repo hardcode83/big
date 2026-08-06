@@ -180,6 +180,13 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
+- WHEN un comando o job resuelve credenciales de PMS propiedad a propiedad, THE SYSTEM SHALL
+  marcar la sesión con el tenant **antes** de la resolución y mantener una sesión por tenant.
+  Es el mismo patrón que `celery-jobs` (sesión marcada por tenant, enumeración de tenants desde
+  otra sin marcar), y aquí no es una precaución: sin el marcado, el filtro global no actúa y la
+  consulta de credenciales devolvería las de cualquier tenant, que en esta tabla no filtra datos
+  sino que concede escritura sobre el sistema del cliente.
+
 - El escaneo de clases con `tenant_id` **no** se memoiza, y `app/core/models_registry.py`
   importa los diez módulos de modelos en un único sitio compartido por la aplicación,
   Alembic y los tests: una caché excluiría para siempre a cualquier entidad importada

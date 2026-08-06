@@ -122,8 +122,14 @@ tiene nada que hacer en el arranque de todo el mundo.
 docker compose exec backend uv run python -m app.integrations.cli.pms_sync <tenant-uuid> --provider channex
 ```
 
-Sin `--provider` el comando sigue usando `MockPMSAdapter`, así que nada cambia para quien no lo
-pida. Con `--provider channex` y sin `CHANNEX_API_KEY` **aborta nombrando la variable** en vez
+**Desde `pms-provider-resolution`, `--provider` es un override de operador y no el mecanismo.**
+Sin el flag, cada propiedad resuelve el proveedor que declara en `properties.pms_provider`, y la
+que no declara ninguno cae a `MockPMSAdapter` — así que para quien no configure nada sigue sin
+cambiar nada, pero por una razón distinta. Con el flag, el comando anuncia por salida estándar que
+está ignorando lo que cada propiedad guarda. Para usar Channex de forma permanente, asigna el
+proveedor a la propiedad en vez de pasar el flag.
+
+Con `--provider channex` y sin `CHANNEX_API_KEY` **aborta nombrando la variable** en vez
 de caer al mock: un fallback silencioso imprimiría «created 0, updated 0», indistinguible de un
 PMS vacío, y una credencial mal puesta parecería un sync correcto para siempre.
 
