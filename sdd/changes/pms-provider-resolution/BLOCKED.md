@@ -77,11 +77,29 @@ vez se me escapó por buscar una subcadena en vez de la afirmación.
 qué da derecho eso «es asunto de la regla, no de esta clase».
 
 Y el barrido se hizo **de otra forma**, porque el problema era el método y no el texto: en vez de
-buscar frases, **enumeré los sitios**. El conjunto de ficheros que pueden enunciar esto es cerrado
-y pequeño —los que mencionan `PMS_CREDENTIAL_READ`, `CredentialReadLog`, `read_log` o
-`credential_ids`—: 32 menciones en 8 ficheros, todas leídas una por una. Ninguna enuncia ya una
-cardinalidad; la regla 9 sigue siendo el único sitio que lo hace. Una enumeración no puede fallar
-por la redacción de lo que busca, que es lo que hundió los dos barridos anteriores.
+buscar frases, **enumeré los sitios** que mencionan `PMS_CREDENTIAL_READ`, `CredentialReadLog`,
+`read_log` o `credential_ids`. Una enumeración no puede fallar por la redacción de lo que busca,
+que es lo que hundió los dos barridos anteriores.
+
+**Y a la primera lo hice mal, de una forma que importa.** Declaré «32 menciones en 8 ficheros»
+cuando sobre todo fichero versionado son **54 en 10**: había excluido los tests sin decirlo. Justo
+la clase de artefacto que ya había fallado antes —un nombre de test es una frase con pinta
+normativa que CI ejecuta, y `test_the_read_log_deduplicates_by_credential_id` hubo que renombrarlo
+por eso mismo—. Un método presentado como inmune a la redacción, acotado por un filtro tácito.
+Rehecho sin filtro: las 20 menciones que faltaban están limpias, son llamadas y nombres de
+escenario («una credencial de cuenta, un id»), ninguna enuncia una regla general.
+
+**El límite del método, que el panel encontró y yo no**: estos cuatro símbolos son un proxy de «los
+ficheros que tocan el código del read log», y la afirmación vive además en los ficheros que
+**planifican** ese código. `tasks.md` no contiene ninguno de los cuatro, y ahí seguía viva una
+reformulación — la de la tarea 6.3, que juraba no reformular la regla y la reformulaba en la frase
+siguiente, **y encima al revés**: decía «N propiedades producen una fila y no N», que bajo scope
+`PROPERTY` son N credenciales distintas y N filas, es decir exactamente el colapso que la regla 9
+prohíbe. Corregida junto con su eco en la 10.5, nombrando el escenario en vez de la regla.
+
+Así que el barrido correcto son **dos** conjuntos, no uno: la enumeración por símbolos sobre todo
+lo versionado, **más** la lectura íntegra de los cuatro artefactos del change, que hablan del
+diseño por definición y pueden no citar ningún símbolo.
 
 ## 2. El comando de credenciales no puede reparar la fila cuyo error acaba de traducirse
 
