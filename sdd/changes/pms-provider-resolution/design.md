@@ -262,6 +262,39 @@ un flag para algo que **lista** en vez de mutar, no comparte la forma posicional
 y los tests ya lo fijan así. La desviación se registra aquí porque el design decía otra cosa y un
 lector futuro merece saber cuál de las dos es la vigente.
 
+### Lo que hay que saber de la granularidad de auditoría, si se toca (2026-08-06)
+
+Rescatado de `BLOCKED.md` antes de retirarlo, porque el fichero es de trabajo y esto no.
+
+La granularidad de la auditoría de lectura se escribió **mal siete veces** a lo largo de este
+change, en cinco artefactos, y cuatro revisiones consecutivas encontraron cada una un error
+**distinto** en ella. El arreglo estructural fue hacer de la entrada nombrada de la regla 9 su
+único hogar normativo; todo lo demás la cita.
+
+**Los barridos para verificar que nadie la reformula fallaron cuatro veces, y siempre por lo
+mismo: eran temáticos.** Buscar frases falló porque «One `PMS_CREDENTIAL_READ` row per» no contiene
+la subcadena «one row per». Enumerar los símbolos del read log falló porque `tasks.md` no cita
+ninguno. Leer los artefactos del change enteros falló porque `design.md:36` enunciaba la cifra **de
+pasada, dentro de un argumento sobre otra cosa**. El mejor chequeo encontrado —barrido del campo
+semántico, auditoría ∩ credencial ∩ cuantificador, sobre todo fichero versionado— es estrictamente
+más fuerte que los tres, y **tampoco está cerrado**: es una conjunción, y la afirmación se puede
+hacer con un solo término (así sobrevivió un titular que decía «la fila de auditoría por
+ejecución»).
+
+**El tripwire preciso, que es lo más útil de todo esto**: distinguir **captura** de **emisión**.
+`pms_factory.py` registra en el `CredentialReadLog` incondicionalmente, así que «cada lectura se
+audita» es literalmente cierto y esas frases son seguras. Lo que no lo es: decir que cada lectura
+**deja** o **escribe** una fila. Captura por lectura, emisión por credencial distinta; son etapas
+distintas y por eso no se contradicen. Una frase cruza a ser cardinalidad —y falsa— exactamente en
+ese verbo.
+
+**Nota de contrato, no bloqueante**: un `read_log` obligatorio garantiza **recolección**, no
+**persistencia**. Las filas llegan a `audit_logs` porque `SyncReservationsFromPmsUseCase` empareja
+el log con un `audit` obligatorio y lo vuelca en el `finally`. Un futuro llamante iniciado por
+persona o API debe emparejar los dos igual; hoy no existe tal llamante. Merece una frase en
+`specs/` al archivar — y correr entonces el barrido semántico, porque `sdd/specs/` es el próximo
+sitio donde esta afirmación intentará vivir.
+
 ### Frontera medida en el panel de las secciones 2-3, para que se herede a sabiendas
 
 - **Un identificador escalar con forma de PAN sí llega a `external_id`.** `unique_id: "4111111111111111"` sobrevive al saneado: son 16 caracteres imprimibles y escalares, y R6.4 autoriza «el identificador». Distinguirlo de un id legítimo exigiría una comprobación de **contenido** (Luhn más longitud 13-19), que introduciría falsos positivos para cualquier proveedor futuro con ids puramente numéricos. Se acepta porque nada medido pone datos de tarjeta en `unique_id` — a diferencia de `guarantee`, que `specs/pms-channex-staging.md` midió en **toda** reserva de OTA. **Debe quedar escrito en la spec al archivar**, para que `reservations-webhooks` herede la frontera en vez de redescubrirla.
