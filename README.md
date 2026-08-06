@@ -166,7 +166,14 @@ levantado.
 
 ## Variables de entorno
 
-Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real. Lo que hace aceptable ese default de Postgres es que `docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**, así que la base de datos no es alcanzable desde otros equipos de tu red. Los secretos reales futuros (credenciales de proveedores externos) nunca llevarán valor por defecto ahí — solo el nombre (`security.md` #8).
+Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real. Lo que hace aceptable ese default de Postgres es que `docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**, así que la base de datos no es alcanzable desde otros equipos de tu red. Los secretos reales (credenciales de proveedores externos) nunca llevan valor por defecto ahí — solo el nombre (`security.md` #8).
+
+`make up` genera **dos** claves en tu `.env` local si faltan, y nunca se versionan:
+
+- `JWT_SECRET_KEY` — firma de tokens, `openssl rand -hex 32`.
+- `ENCRYPTION_KEY` — cifrado en reposo (Fernet) de las credenciales de PMS. **No tiene la misma forma que la anterior**: Fernet exige base64 de 32 bytes, así que un `rand -hex 32` lo rechaza el validador al arrancar. Se genera con `openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n'`. El `tr -d` no es opcional: `base64` cierra con salto de línea y sin él salen 45 caracteres, que el validador rechaza al arrancar.
+
+A diferencia de la de firma, la de cifrado **no se regenera sola si ya hay un valor**: cambiarla deja indescifrable todo lo ya cifrado, así que ante una clave con forma incorrecta `make up` para y avisa en lugar de sustituirla.
 
 ## Estructura
 
@@ -176,6 +183,11 @@ Ver `.env.example` — trae valores por defecto funcionales para config local si
 - `docker-compose.worktree.yml` — overlay que **retira la publicación de puertos** en el host. `make up` lo añade solo cuando detecta un worktree enlazado de git, para que varios stacks de desarrollo convivan sin chocar. El worktree principal no lo usa y el CD no lo ve nunca.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
+
+Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
+
+- `python -m app.integrations.cli.pms_sync <tenant>` — sincroniza reservas desde el PMS de cada propiedad.
+- `python -m app.integrations.cli.pms_credentials set|rotate|show-providers` — guarda y rota las credenciales de proveedor. El secreto se pasa por `PMS_CREDENTIAL_SECRET`, **nunca como argumento**: un argumento queda en el historial del shell y es visible en `ps`. Ver `docs/pms-credentials.md`.
 
 ## Despliegue a dev (CD)
 

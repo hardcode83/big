@@ -15,6 +15,7 @@ import uuid
 from collections.abc import Collection
 from typing import Protocol
 
+from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import PropertyOperationalState
 
@@ -62,6 +63,23 @@ class PropertyRepository(Protocol):
         """
         ...
 
+    async def list_all(self, tenant_id: uuid.UUID) -> list[Property]:
+        """Every property of the tenant (`pms-provider-resolution` R2.2).
+
+        Added for the PMS sync, which since ADR 0006 decision 7 has to know **which providers a
+        tenant actually uses** before it can talk to any of them — grouping the portfolio by
+        provider and making one call per provider instead of one per property. That is not a
+        micro-optimisation: a call per property scales without bound, and the measured Beds24
+        budget is 100 credits per 300 s per account, which 12 properties would exhaust in a
+        single cycle (`specs/pms-beds24-spike.md`).
+
+        **Unbounded on purpose, and worth knowing**: unlike `list_by_state` this narrows nothing.
+        A tenant's portfolio is small by construction (units someone physically manages), so the
+        risk is understood rather than overlooked — but a caller that only needs a subset should
+        add a narrower method rather than filter this one in memory.
+        """
+        ...
+
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         """Persist `current_operational_state`, and only that (`celery-jobs` R3.6).
 
@@ -72,6 +90,23 @@ class PropertyRepository(Protocol):
         outright ("no saltarse `PropertyStateMachine`").
 
         Raises `CrossTenantWriteError` when the entity belongs to another tenant.
+        """
+        ...
+
+    async def set_pms_provider(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, provider: PMSProvider | None
+    ) -> None:
+        """Persist `pms_provider`, and only that (`pms-provider-resolution` R2.1).
+
+        A second narrow writer rather than a widening of `save`, and for the reason `save`'s
+        own docstring gives: making it a general update would hand every future caller a way
+        around `PropertyStateMachine`. Two named methods that each write one column keep that
+        rule intact; one method that writes "whatever the entity holds" does not.
+
+        `None` is a legitimate value, meaning "use the bootstrap default", so this cannot be
+        expressed as "set it if given" — clearing the provider is an operation.
+
+        Raises `CrossTenantWriteError` when the property belongs to another tenant.
         """
         ...
 

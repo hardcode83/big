@@ -67,3 +67,46 @@ class ParseResult:
 
     rows: list[ParsedRow]
     failures: list[RowFailure]
+
+
+@dataclass(frozen=True)
+class PmsRowFailure:
+    """One element the PMS returned that the adapter could not turn into a `ReservationDTO`.
+
+    Deliberately NOT `RowFailure`: that one carries a mandatory `line`, which is meaningful for a
+    CSV and meaningless for an API response. What identifies the element here is the provider's
+    own id — and it is optional, because an element malformed enough to be unmappable may be
+    malformed exactly in the field that would name it.
+
+    **The two fields are separate on purpose, and both are constrained.** `reason` carries the
+    error class and, at most, the NAME of the field that failed — never the provider id (that is
+    `external_id`'s job) and never any value from the payload, which holds guest name, email,
+    phone and, per rule 13 of `steering/security.md`, cardholder data. `external_id` carries a
+    scalar identifier, bounded and stripped of control characters by the adapter.
+
+    Keeping them apart is what makes the constraint enforceable: an earlier version concatenated
+    the id into the reason, and the two could not then be bounded independently — the security
+    panel of this change reproduced card data in both fields in turn, first through `reason`,
+    then through `external_id` after only the first was fixed.
+    """
+
+    external_id: str | None
+    reason: str
+
+
+@dataclass(frozen=True)
+class PmsFetchResult:
+    """What `PMSAdapter.list_reservations` returns: what it could map, and what it could not.
+
+    Replaces the `unmappable_rows: list[str]` attribute the port used to declare (design D10).
+    That attribute was a mutable slot on the adapter, reset per call, which made the report a
+    property of the object rather than of the call — two concurrent calls on one adapter would
+    interleave their failures, and a caller that forgot to read it dropped rows in silence.
+
+    Widening the return type is the shape `ParseResult` already established for the CSV port, and
+    the asymmetry between the two was itself the argument: the same problem had two answers in one
+    module.
+    """
+
+    reservations: list[ReservationDTO]
+    failures: list[PmsRowFailure]

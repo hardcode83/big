@@ -9,6 +9,10 @@ import pytest
 from app.core.config import settings
 from app.integrations.cli import pms_sync
 from app.integrations.domain.errors import PmsUnavailableError
+from app.integrations.domain.enums import PMSProvider
+from app.integrations.domain.ports import PMSAdapter, PMSAdapterFactory, PMSMessagingPort
+from app.integrations.infrastructure.channex.client import ChannexClient
+from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFactory
 from app.integrations.infrastructure.channex.adapter import ChannexAdapter
 from app.integrations.infrastructure.mock_pms import MockPMSAdapter
 
@@ -16,94 +20,101 @@ from app.integrations.infrastructure.mock_pms import MockPMSAdapter
 # --- Default (R3.1) ---
 
 
-def test_the_default_is_the_mock_so_nothing_changes_for_anyone():
-    """R3.1 is satisfied by construction, not by configuration: no flag, no Channex."""
+_A_CLIENT = ChannexClient(
+    api_key="a-real-looking-key",
+    base_url="https://staging.channex.io/api/v1",
+    max_pages=1,
+    page_limit=1,
+)
+
+
+def test_no_flag_means_each_property_resolves_its_own_provider():
+    """R2.5. The flag's DEFAULT is `mock`, and that is deliberately NOT an override.
+
+    Treating the default as one would pin the whole portfolio to the mock and report "created 0"
+    against a real PMS — indistinguishable from an empty PMS, which is exactly the confusion
+    `specs/reservations.md` refuses elsewhere. `None` means "let each property decide".
+    """
     remaining, provider = pms_sync._extract_provider(["some-uuid", "30"])
 
     assert provider == pms_sync.MOCK_PROVIDER
-    assert remaining == ["some-uuid", "30"]
-    assert isinstance(pms_sync.build_adapter(provider), MockPMSAdapter)
-
-
-def test_positional_arguments_survive_the_flag_in_any_position():
-    for argv in (
-        ["uuid", "30", "--provider", "channex"],
-        ["--provider", "channex", "uuid", "30"],
-        ["uuid", "--provider=channex", "30"],
-    ):
-        remaining, provider = pms_sync._extract_provider(argv)
-        assert remaining == ["uuid", "30"], argv
-        assert provider == "channex", argv
-
-
-# --- Invalid values (R3.3) ---
-
-
-@pytest.mark.parametrize("argv", [["uuid", "--provider", "beds24"], ["uuid", "--provider=oops"]])
-def test_an_unknown_provider_is_refused(argv):
-    with pytest.raises(ValueError, match="unknown provider"):
-        pms_sync._extract_provider(argv)
-
-
-def test_a_dangling_provider_flag_is_refused():
-    with pytest.raises(ValueError, match="needs a value"):
-        pms_sync._extract_provider(["uuid", "--provider"])
+    assert pms_sync._forced_provider(provider) is None
 
 
 @pytest.mark.parametrize(
-    "argv",
-    [["uuid", "--provider", "beds24"], ["uuid", "--provider"], []],
+    ("flag", "expected"),
+    [("channex", PMSProvider.CHANNEX), ("beds24", PMSProvider.BEDS24)],
 )
-def test_main_exits_non_zero_on_bad_arguments(argv, capsys):
-    assert pms_sync.main(argv) == 2
-    assert "usage:" in capsys.readouterr().err
+def test_an_explicit_flag_becomes_an_override(flag, expected):
+    assert pms_sync._forced_provider(flag) is expected
 
 
-def test_usage_names_both_providers():
-    assert "mock" in pms_sync.USAGE and "channex" in pms_sync.USAGE
+def test_the_flag_vocabulary_comes_from_the_enum():
+    """One vocabulary, not two that can drift.
+
+    `PROVIDERS` used to be a hand-written tuple, which is how it ended up missing `beds24` — a
+    provider the factory knows and the flag would have refused.
+    """
+    assert set(pms_sync.PROVIDERS) == {member.value.lower() for member in PMSProvider}
 
 
-# --- Missing credentials (R3.2) ---
+def test_an_unknown_provider_is_refused_without_echoing_it():
+    """A rejected value must never be printed: `--provider=<pasted-api-key>` is a plausible
+    fumble, and the error message is a plain-text sink."""
+    secret_looking = "sk-live-9f8a7b6c5d4e3f2a1b0c"
+
+    with pytest.raises(ValueError) as excinfo:
+        pms_sync._forced_provider(secret_looking)
+
+    assert secret_looking not in str(excinfo.value)
 
 
-def test_channex_without_a_key_refuses_instead_of_falling_back_to_the_mock(monkeypatch):
-    """The failure that matters. A silent fallback would print "created 0, updated 0" — which
-    is indistinguishable from a genuinely empty PMS, so a typo'd credential would look like a
-    successful sync forever."""
-    monkeypatch.setattr(settings, "channex_api_key", "  ", raising=False)
-
-    with pytest.raises(PmsUnavailableError) as excinfo:
-        pms_sync.build_adapter(pms_sync.CHANNEX_PROVIDER)
-
-    assert "CHANNEX_API_KEY" in str(excinfo.value)
+# --- The adapters remain interchangeable (design D5, Liskov) ---
 
 
-def test_channex_with_a_key_builds_the_real_adapter(monkeypatch):
-    monkeypatch.setattr(settings, "channex_api_key", "a-real-looking-key", raising=False)
+def test_the_port_surface_is_read_from_the_port_not_hardcoded():
+    """Derive the surface from `PMSAdapter` itself, the idiom of `tests/test_unit_of_work.py`.
 
-    adapter = pms_sync.build_adapter(pms_sync.CHANNEX_PROVIDER)
+    **This idiom only became sound in this change** (design D10). `vars()` returns a class's
+    `__dict__`, which holds methods but NOT bare annotations: while the port declared
+    `unmappable_rows: list[str]`, that member lived in `__annotations__` and every `vars()`-based
+    check silently skipped it — the one member whose absence caused a silent wrong answer was the
+    one the idiom could not see.
+    """
+    port_methods = {name for name in vars(PMSAdapter) if not name.startswith("_")}
+    assert port_methods == {"list_reservations", "get_reservation"}
+    assert [
+        name for name in getattr(PMSAdapter, "__annotations__", {}) if not name.startswith("_")
+    ] == []
 
-    assert isinstance(adapter, ChannexAdapter)
+    for adapter in (MockPMSAdapter(), ChannexAdapter(_A_CLIENT)):
+        for name in port_methods:
+            assert callable(getattr(adapter, name))
 
 
-def test_the_mock_needs_no_credentials(monkeypatch):
-    monkeypatch.setattr(settings, "channex_api_key", "", raising=False)
-    assert isinstance(pms_sync.build_adapter(pms_sync.MOCK_PROVIDER), MockPMSAdapter)
+def test_neither_adapter_claims_the_messaging_port():
+    """A provider without messaging implements `PMSAdapter` and simply not `PMSMessagingPort`.
+
+    That is ADR 0006 decision 3: most evaluated providers have no messaging API, so a single
+    Protocol would force them to implement it by raising, which is the Liskov violation
+    `steering/backend-architecture.md:108` forbids. Checked structurally rather than with
+    `isinstance` — the ports are plain `Protocol`s and making one `runtime_checkable` to satisfy
+    a test would change production code to fit the test.
+    """
+    assert {name for name in vars(PMSMessagingPort) if not name.startswith("_")} == set(), (
+        "PMSMessagingPort is empty in this change on purpose; its methods arrive with "
+        "pms-beds24-adapter"
+    )
+
+    for adapter in (MockPMSAdapter(), ChannexAdapter(_A_CLIENT)):
+        for name in ("get_messages", "send_message"):
+            assert not hasattr(adapter, name)
 
 
-def test_build_adapter_rejects_a_provider_it_does_not_know():
-    with pytest.raises(ValueError, match="Unknown PMS provider"):
-        pms_sync.build_adapter("beds24")
+def test_the_factory_conforms_to_its_port():
+    """The factory is what the use cases depend on, so its surface is a contract too."""
+    port_members = {name for name in vars(PMSAdapterFactory) if not name.startswith("_")}
+    assert port_members == {"supports_messaging", "provider_for", "reservations_for", "messaging_for"}
 
-
-# --- The adapters are interchangeable (design D5, Liskov) ---
-
-
-def test_both_adapters_expose_the_same_port_surface(monkeypatch):
-    monkeypatch.setattr(settings, "channex_api_key", "a-real-looking-key", raising=False)
-    mock = pms_sync.build_adapter(pms_sync.MOCK_PROVIDER)
-    channex = pms_sync.build_adapter(pms_sync.CHANNEX_PROVIDER)
-
-    for method in ("list_reservations", "get_reservation"):
-        assert callable(getattr(mock, method))
-        assert callable(getattr(channex, method))
+    for name in port_members:
+        assert callable(getattr(SqlAlchemyPMSAdapterFactory, name))

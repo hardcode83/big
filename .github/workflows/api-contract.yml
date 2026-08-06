@@ -66,6 +66,13 @@ jobs:
         # claro, evadiendo el enmascarado. Una clave generada aquí no tiene ese riesgo.
         run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
+      - name: Generar una clave de cifrado de usar y tirar
+        # `encryption_key` es obligatoria al importar `settings`, y este workflow importa la
+        # app para volcar el OpenAPI, así que sin esto no arranca. El razonamiento sobre no
+        # usar un GitHub Secret vale igual aquí: un valor inválido acabaría en el error de
+        # Pydantic, re-codificado y por tanto sin enmascarar.
+        run: echo "ENCRYPTION_KEY=$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n')" >> "$GITHUB_ENV"
+
       - name: Instalar dependencias
         working-directory: backend
         run: uv sync --frozen

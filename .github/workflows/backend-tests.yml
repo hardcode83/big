@@ -269,6 +269,13 @@ jobs:
         # no hay ningún valor con pinta de secreto versionado (steering/security.md #8).
         run: echo "JWT_SECRET_KEY=$(openssl rand -hex 32)" >> "$GITHUB_ENV"
 
+      - name: Generar una clave de cifrado de usar y tirar
+        # Mismo criterio que la clave JWT de arriba, y por el mismo motivo: `encryption_key`
+        # es obligatoria al importar `settings`, así que sin esto fallan la suite Y las
+        # migraciones. La forma NO es la misma: Fernet exige base64url de 32 bytes, y un
+        # `rand -hex 32` lo rechaza el validador de `config.py`.
+        run: echo "ENCRYPTION_KEY=$(openssl rand 32 | base64 | tr '+/' '-_' | tr -d '\n')" >> "$GITHUB_ENV"
+
       - name: Instalar dependencias
         working-directory: backend
         run: uv sync --frozen

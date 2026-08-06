@@ -74,6 +74,17 @@ class IngestReport:
     updated: int = 0
     skipped: int = 0
     errors: list[RowError] = field(default_factory=list)
+    provider_failures: list[str] = field(default_factory=list)
+    """Providers whose sync could not run at all. Empty for the CSV path, which has no provider.
+
+    Its own field and not just an entry in `errors`, because it decides the command's EXIT CODE
+    and a stringly-typed check over `errors` would be a contract nobody could see. A per-provider
+    failure stopped aborting the run (one provider down must not cost a tenant the others), and
+    the QA panel of sections 6-8 caught what that silently broke: `PmsUnavailableError` no longer
+    reached `main`, so a property whose provider has no credential exited **0** with "created 0" —
+    the exact confusion design D9 exists to prevent. Isolation and a loud exit are not in
+    conflict; they just need separate channels.
+    """
 
     def as_dict(self) -> dict[str, object]:
         return {

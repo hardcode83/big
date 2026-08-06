@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-07-31_autohost-er-entidades.png` (el ER se regeneró en `domain-foundation-financial` al completar las 26 entidades de PRD §7; el anterior, `2026-07-30_..._-core`, se borró — el sufijo `-core` nunca describió su alcance real y le faltaban 6 tablas).
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-06_autohost-er-entidades.png` (regenerado en `pms-provider-resolution` al entrar `pms_credentials` y `properties.pms_provider`: 28 entidades, 67 relaciones. El anterior, `2026-07-31_...`, se borró; y aquel a su vez había sustituido a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
 
 ## Forma del sistema
 

@@ -17,9 +17,9 @@ import logging
 from datetime import UTC, datetime
 from typing import Any
 
-from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.domain.dtos import PmsFetchResult, PmsRowFailure, ReservationDTO
 from app.integrations.infrastructure.channex.client import ChannexClient
-from app.integrations.infrastructure.channex.mapping import to_reservation_dto
+from app.integrations.infrastructure.channex.mapping import UnmappableField, to_reservation_dto
 
 BOOKINGS_PATH = "/bookings"
 
@@ -35,11 +35,10 @@ class ChannexAdapter:
 
     def __init__(self, client: ChannexClient) -> None:
         self._client = client
-        self.unmappable_rows: list[str] = []
 
     async def list_reservations(
         self, since: datetime, property_external_id: str | None = None
-    ) -> list[ReservationDTO]:
+    ) -> PmsFetchResult:
         params: dict[str, str] = {"filter[inserted_at][gte]": _channex_timestamp(since)}
         if property_external_id is not None:
             params["filter[property_id]"] = property_external_id
@@ -54,26 +53,28 @@ class ChannexAdapter:
         # `ReservationIngestor.ingest`'s per-row `try/except`. The CSV route
         # (`infrastructure/csv_parser.py`) has always wrapped per row; this did not.
         #
-        # **Known limitation of the port, and it is design input for `pms-beds24-adapter`**:
-        # `PMSAdapter.list_reservations` returns `list[ReservationDTO]` and has nowhere to report
-        # a row it could not map — unlike `ReservationCsvParser`, whose `ParseResult` carries
-        # `failures` precisely for this. So the count is exposed on the adapter and printed by
-        # the CLI: skipped rows must not be silent, which is the same reason pagination raises
-        # instead of truncating (design D6).
-        self.unmappable_rows = []
+        # The failures travel back in the RETURN VALUE (`PmsFetchResult`, design D10). They used
+        # to be reported through an `unmappable_rows` attribute on this adapter, reset here on
+        # every call — a limitation the port itself documented and handed to a later change.
+        # Skipped rows must not be silent, which is the same reason pagination raises instead of
+        # truncating (design D6); what changed is that the report is now part of the answer
+        # rather than a slot the caller had to remember to read.
         rows: list[ReservationDTO] = []
+        failures: list[PmsRowFailure] = []
         for element in elements:
             try:
                 rows.append(to_reservation_dto(element))
             except Exception as error:  # noqa: BLE001 - any malformed shape, not a known set
                 reference = _element_reference(element)
-                self.unmappable_rows.append(f"{reference} — {type(error).__name__}: {error}")
+                failures.append(
+                    PmsRowFailure(external_id=reference, reason=_skip_reason(error))
+                )
                 # The provider's id and the error class only. NOT the payload: it carries guest
                 # name, email, phone and address, and a log line is a plain-text sink.
                 logger.warning(
                     "channex: could not map booking %s (%s)", reference, type(error).__name__
                 )
-        return rows
+        return PmsFetchResult(reservations=rows, failures=failures)
 
     async def get_reservation(self, external_id: str) -> ReservationDTO | None:
         """`None` when Channex has no such booking — never an error.
@@ -87,20 +88,74 @@ class ChannexAdapter:
         return to_reservation_dto(element)
 
 
+def _skip_reason(error: Exception) -> str:
+    """A skip reason built from a closed vocabulary this module owns. **Never `str(error)`.**
+
+    The previous shape was `f"{type(error).__name__}: {error}"`, and the security and QA panels of
+    this change both reproduced the same leak through it: an exception's own message routinely
+    embeds the value it choked on, so a booking with `arrival_date` set to a string put that
+    string in the operator's report, and one with a nested object there put `card_number` and
+    `cvv` in it. Rule 13(a) of `steering/security.md` requires cardholder data to die inside the
+    adapter — "antes de que nada pueda persistirlos, loguearlos o reenviarlos" — and R6.4 limits
+    this report to "el identificador y la clase de error".
+
+    So: the class name always, plus the FIELD name when the mapping raised its own
+    `UnmappableField`, which carries a field and no content. Nothing else. Any exception type
+    this module does not recognise contributes its class name and nothing more, which is what
+    keeps the guarantee true for a provider shape nobody has seen yet — the `except Exception`
+    upstream exists precisely because that set is open.
+    """
+    if isinstance(error, UnmappableField):
+        return f"{type(error).__name__}: {error.field}"
+    return type(error).__name__
+
+
+MAX_REFERENCE_LENGTH = 64
+NO_REFERENCE = "<no id>"
+
+
 def _element_reference(element: Any) -> str:
     """Enough to find the booking in the Channex panel, and nothing more.
 
-    `unique_id` if it is there, else the element `id`. Deliberately never the payload.
+    `unique_id` if it is there, else the element `id`. Deliberately never the payload — and that
+    claim used to be false, which is why this function now validates instead of trusting.
+
+    **Measured by the security panel of this change, after the first fix.** Bounding the skip
+    *reason* to a closed vocabulary left the identical exposure one field over: this returned
+    `str(identifier)` on whatever the provider had put under `unique_id`, so an element carrying a
+    `guarantee` object there produced a "reference" containing `card_number` and `cvv`, and that
+    string reached the same `logger.warning` and the same CLI output. Rule 13(a) of
+    `steering/security.md` does not care which field the card data travels in.
+
+    A second, separate problem the same probe demonstrated: a 2000-character value containing a
+    newline forged an extra log line shaped like ours (`channex: … cvv=737`). An identifier is
+    attacker-influenced text going into a line-oriented sink, so it is bounded and stripped of
+    control characters, not merely typed.
+
+    So an identifier survives only if it is genuinely scalar, short, and printable. Anything else
+    is `<no id>` — losing the reference is a diagnostic inconvenience; printing a PAN is not.
     """
-    if isinstance(element, dict):
-        attributes = element.get("attributes")
-        if isinstance(attributes, dict):
-            identifier = attributes.get("unique_id") or element.get("id")
-            if identifier:
-                return str(identifier)
-        if element.get("id"):
-            return str(element["id"])
-    return "<no id>"
+    if not isinstance(element, dict):
+        return NO_REFERENCE
+
+    attributes = element.get("attributes")
+    candidates = []
+    if isinstance(attributes, dict):
+        candidates.append(attributes.get("unique_id"))
+    candidates.append(element.get("id"))
+
+    for candidate in candidates:
+        # `bool` is excluded deliberately: it is a subclass of `int`, and "True" is not an id.
+        if isinstance(candidate, bool) or not isinstance(candidate, (str, int)):
+            continue
+        text = str(candidate)
+        # Control characters first, then the bound: stripping after truncating could leave a
+        # partial escape sequence at the cut.
+        text = "".join(character for character in text if character.isprintable())
+        text = text.strip()[:MAX_REFERENCE_LENGTH]
+        if text:
+            return text
+    return NO_REFERENCE
 
 
 def _channex_timestamp(moment: datetime) -> str:

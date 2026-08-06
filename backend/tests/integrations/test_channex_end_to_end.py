@@ -25,9 +25,12 @@ import pytest_asyncio
 from sqlalchemy import func, select
 
 from app.core.db import bind_session_to_tenant
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
+from app.integrations.domain.enums import PMSProvider
+from tests.integrations.test_sync import _FactoryReturning
 from app.integrations.infrastructure.channex.adapter import ChannexAdapter
 from app.integrations.infrastructure.channex.client import ChannexClient
 from app.properties.infrastructure.models import PropertyModel
@@ -87,12 +90,13 @@ def _use_case(db_session, payload: dict) -> SyncReservationsFromPmsUseCase:
         )
     )
     return SyncReservationsFromPmsUseCase(
-        pms=adapter,
+        factory=_FactoryReturning(adapter),
         reservations=SqlAlchemyReservationRepository(db_session),
         properties=SqlAlchemyPropertyRepository(db_session),
         guests=SqlAlchemyGuestRepository(db_session),
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
+        audit=SqlAlchemyAuditLogRepository(db_session),
     )
 
 
@@ -218,12 +222,17 @@ async def test_a_tenant_never_ingests_a_booking_belonging_to_another_tenants_pro
     """Rule 1 of `steering/security.md`, for this ingestion path.
 
     Only tenant B owns a property with this Channex UUID. Tenant A runs the sync against the
-    very same provider payload and must import **nothing** — `find_by_pms_external_id` is
-    scoped by tenant, so every row resolves to no property and gets reported.
+    very same provider payload and must import **nothing**.
 
-    Mirrors `test_sync.py::test_the_sync_never_touches_another_tenants_property`, which pins the
-    same invariant for `MockPMSAdapter`. It matters more here: the mock only ever serves rows we
-    wrote ourselves, while a real provider account can hold properties belonging to anyone.
+    **How that is now guaranteed changed, and earlier is better.** It used to rest on
+    `find_by_pms_external_id` being tenant-scoped: the provider was called, every row resolved to
+    no property of A, and each was reported. With per-provider grouping the portfolio is read
+    first, so tenant A — which owns no property — forms no group and the provider is never
+    called at all. The invariant is the same and the exposure is smaller: a real provider account
+    can hold properties belonging to anyone, and now none of their bookings are even fetched on
+    A's behalf.
+
+    Mirrors `test_sync.py::test_the_sync_never_touches_another_tenants_property`.
     """
     bind_session_to_tenant(db_session, tenant_a.id)
 
@@ -231,10 +240,11 @@ async def test_a_tenant_never_ingests_a_booking_belonging_to_another_tenants_pro
         tenant_id=tenant_a.id, since=SINCE, now=NOW
     )
 
-    expected = len(bookings_payload["data"])
     assert report.created == 0
-    assert report.skipped == expected
-    assert len(report.errors) == expected
+    # Zero, not "one skip per booking": nothing was fetched on A's behalf, so there was nothing
+    # to skip. See the docstring — the guarantee moved earlier, it did not weaken.
+    assert report.skipped == 0
+    assert report.errors == []
 
     # Unmarked before counting, or the tenant filter would hide rows the assertion is about.
     db_session.info.pop("tenant_id", None)
