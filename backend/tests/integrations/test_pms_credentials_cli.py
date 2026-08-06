@@ -9,7 +9,7 @@ secret may come from, what the output may contain, and what a rotation records.
 import uuid
 
 import pytest
-from sqlalchemy import func, select
+from sqlalchemy import func, select, text
 
 from app.audit.domain.actions import ENTITY_PMS_CREDENTIAL, PMS_CREDENTIAL_ROTATED
 from app.audit.infrastructure.models import AuditLogModel
@@ -248,3 +248,74 @@ def test_main_with_no_secret_names_the_variable_and_prints_no_value(
     assert code == 2
     assert pms_credentials.SECRET_ENV_VAR in captured.err
 
+
+
+# --- The malformed stored value (review finding, 2026-08-06) ---
+#
+# A row whose `secret_encrypted` is not ciphertext at all. Written by hand with SQL, which is
+# precisely the path this command exists to close, and precisely the path an operator is pushed
+# back onto if the command cannot fix its result. The corruption is PLAINTEXT and not a mangled
+# token on purpose: an earlier isolation test corrupted the ciphertext while preserving the
+# Fernet structure, so it only ever exercised the half that already worked.
+
+
+async def _corrupt(db_session, tenant) -> None:
+    await db_session.execute(
+        text(
+            "UPDATE pms_credentials SET secret_encrypted = :v WHERE tenant_id = :t"
+        ),
+        {"v": "not-ciphertext-at-all", "t": str(tenant.id)},
+    )
+
+
+@pytest.mark.asyncio
+async def test_set_replaces_a_stored_value_that_is_not_ciphertext(db_session, tenant_a) -> None:
+    """The recovery route for a credential that has leaked AND will not parse.
+
+    Before this, `set` read the old value to find the row and died on the parse, so the ONLY
+    audited way to replace it was unavailable at the one moment it matters. The command never
+    needed that value: it is about to overwrite it.
+    """
+    await _store(db_session, tenant_a)
+    await _corrupt(db_session, tenant_a)
+
+    await _store(db_session, tenant_a, secret="the-replacement-token")
+
+    found = await SqlAlchemyPmsCredentialRepository(db_session).get_for(
+        tenant_a.id, PMSProvider.BEDS24, PmsCredentialScope.ACCOUNT
+    )
+    assert decrypt(found.secret) == "the-replacement-token"
+
+
+@pytest.mark.asyncio
+async def test_rotate_over_a_malformed_value_replaces_it_and_audits_the_same_row(
+    db_session, tenant_a
+) -> None:
+    """Rotation must survive it too, and must keep pointing at the row it actually replaced.
+
+    The `entity_id` assertion is what proves the id came from the STORED row rather than a fresh
+    `uuid4()`. Had it not, the audit trail would name a credential that never existed, and the
+    trail is the only evidence the leaked secret was retired.
+    """
+    await _store(db_session, tenant_a)
+    original_id = await SqlAlchemyPmsCredentialRepository(db_session).id_at(
+        tenant_a.id, PMSProvider.BEDS24, PmsCredentialScope.ACCOUNT
+    )
+    await _corrupt(db_session, tenant_a)
+
+    await _store(db_session, tenant_a, secret="rotated-after-corruption", rotating=True)
+
+    rows = (
+        await db_session.execute(
+            select(AuditLogModel).where(AuditLogModel.action == PMS_CREDENTIAL_ROTATED)
+        )
+    ).scalars().all()
+    assert len(rows) == 1
+    assert rows[0].entity_id == original_id
+
+    count = await db_session.scalar(
+        select(func.count()).select_from(
+            select(1).select_from(text("pms_credentials")).subquery()
+        )
+    )
+    assert int(count or 0) == 1, "it must replace the malformed row, not add a second one"

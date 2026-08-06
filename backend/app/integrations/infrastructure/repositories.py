@@ -41,20 +41,32 @@ class SqlAlchemyPmsCredentialRepository:
     ) -> PmsCredential | None:
         result = await self._session.execute(
             select(PmsCredentialModel).where(
-                PmsCredentialModel.tenant_id == tenant_id,
-                PmsCredentialModel.provider == provider,
-                PmsCredentialModel.scope == scope,
-                # `is_(None)` and not `== None`: for the account and organization scopes the
-                # column IS NULL, and `= NULL` is never true in SQL.
-                PmsCredentialModel.property_id.is_(None)
-                if property_id is None
-                else PmsCredentialModel.property_id == property_id,
+                *_at(tenant_id, provider, scope, property_id)
             )
         )
         model = result.scalar_one_or_none()
         if model is None:
             return None
         return _to_credential(model)
+
+    async def id_at(
+        self,
+        tenant_id: uuid.UUID,
+        provider: PMSProvider,
+        scope: PmsCredentialScope,
+        property_id: uuid.UUID | None = None,
+    ) -> uuid.UUID | None:
+        """Selects the id COLUMN, so a malformed stored value cannot reach `EncryptedSecret`.
+
+        Not `get_for(...).id`: that is the same query plus a parse that can fail, and failing is
+        the whole problem this method exists to avoid. Selecting the column makes the guarantee
+        structural rather than a promise — there is no code path from here to a secret.
+        """
+        return await self._session.scalar(
+            select(PmsCredentialModel.id).where(
+                *_at(tenant_id, provider, scope, property_id)
+            )
+        )
 
     async def upsert(self, tenant_id: uuid.UUID, credential: PmsCredential) -> None:
         if credential.tenant_id != tenant_id:
@@ -89,12 +101,9 @@ class SqlAlchemyPmsCredentialRepository:
 
         existing = await self._session.execute(
             select(PmsCredentialModel).where(
-                PmsCredentialModel.tenant_id == tenant_id,
-                PmsCredentialModel.provider == credential.provider,
-                PmsCredentialModel.scope == credential.scope,
-                PmsCredentialModel.property_id.is_(None)
-                if credential.property_id is None
-                else PmsCredentialModel.property_id == credential.property_id,
+                *_at(
+                    tenant_id, credential.provider, credential.scope, credential.property_id
+                )
             )
         )
         model = existing.scalar_one_or_none()
@@ -113,6 +122,29 @@ class SqlAlchemyPmsCredentialRepository:
             return
         model.secret_encrypted = credential.secret.ciphertext
         model.rotated_at = credential.rotated_at
+
+
+def _at(
+    tenant_id: uuid.UUID,
+    provider: PMSProvider,
+    scope: PmsCredentialScope,
+    property_id: uuid.UUID | None,
+) -> tuple:
+    """The coordinates of one credential, as WHERE clauses.
+
+    Shared by the three queries that address a credential, so `id_at` cannot drift from `get_for`
+    and start answering about a different row than the one `upsert` is about to overwrite.
+    """
+    return (
+        PmsCredentialModel.tenant_id == tenant_id,
+        PmsCredentialModel.provider == provider,
+        PmsCredentialModel.scope == scope,
+        # `is_(None)` and not `== None`: for the account and organization scopes the column IS
+        # NULL, and `= NULL` is never true in SQL.
+        PmsCredentialModel.property_id.is_(None)
+        if property_id is None
+        else PmsCredentialModel.property_id == property_id,
+    )
 
 
 def _to_credential(model: PmsCredentialModel) -> PmsCredential:

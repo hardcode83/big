@@ -36,7 +36,7 @@ from app.audit.domain.actions import (
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
-from app.core.crypto import encrypt
+from app.core.crypto import SecretDecryptionError, encrypt
 from app.core.db import async_session_factory, bind_session_to_tenant
 from app.integrations.domain.entities import PmsCredential
 from app.integrations.domain.enums import (
@@ -136,8 +136,15 @@ async def store_with_session(
         raise UsageError(f"scope '{scope.value.lower()}' takes no property uuid")
 
     credentials = SqlAlchemyPmsCredentialRepository(session)
-    existing = await credentials.get_for(tenant_id, provider, scope, property_id=property_id)
-    if rotating and existing is None:
+    # `id_at` and NOT `get_for`: this command is about to overwrite whatever is stored, so it
+    # needs the row's identity, never its value. Reading the value made a malformed credential
+    # unfixable — `get_for` raised `SecretDecryptionError`, nothing here caught it, and the
+    # command died with a traceback on both `set` and `rotate`. The operator was then left with
+    # hand-written SQL as the only way to replace it, which is the exact path this command exists
+    # to close, on the one occasion it matters most: the credential has leaked AND will not parse.
+    # The hole predates this change; typing the error is what made it visible.
+    existing_id = await credentials.id_at(tenant_id, provider, scope, property_id=property_id)
+    if rotating and existing_id is None:
         # Rotating something that is not there is almost always a typo in the coordinates, and
         # silently creating it would hide that — the operator would believe they had replaced a
         # leaked credential while the leaked one is still live under different coordinates.
@@ -148,18 +155,18 @@ async def store_with_session(
     await credentials.upsert(
         tenant_id,
         PmsCredential(
-            id=existing.id if existing is not None else uuid.uuid4(),
+            id=existing_id if existing_id is not None else uuid.uuid4(),
             tenant_id=tenant_id,
             provider=provider,
             scope=scope,
             secret=encrypt(secret),
             property_id=property_id,
-            rotated_at=at if existing is not None else None,
+            rotated_at=at if existing_id is not None else None,
         ),
     )
     await session.flush()
 
-    if existing is not None:
+    if existing_id is not None:
         # A REPLACEMENT is a rotation and rule 9 requires the row (ADR 0006 obligation 4).
         # Recorded with `redacted()`, never `diff()`: `secret_encrypted` is on rule 11's denylist,
         # so `diff()` on it raises by construction and the only recordable form is
@@ -170,7 +177,7 @@ async def store_with_session(
                 tenant_id=tenant_id,
                 action=PMS_CREDENTIAL_ROTATED,
                 entity_type=ENTITY_PMS_CREDENTIAL,
-                entity_id=existing.id,
+                entity_id=existing_id,
                 actor_user_id=None,
                 actor_ip=None,
                 changes=ChangeSet(ENTITY_PMS_CREDENTIAL).redacted("secret_encrypted"),
@@ -245,6 +252,13 @@ def main(argv: list[str] | None = None) -> int:
         print(f"pms-credentials: {error}", file=sys.stderr)
         print(USAGE, file=sys.stderr)
         return 2
+    except SecretDecryptionError as error:
+        # No path in this command decrypts any more, so reaching here means a NEW one was added.
+        # It exits 3 with the message rather than a traceback, and does not print USAGE: this is
+        # not a malformed invocation, and telling the operator to check their arguments would
+        # send them looking in the wrong place. The message names the row id and never the value.
+        print(f"pms-credentials: {error}", file=sys.stderr)
+        return 3
 
 
 if __name__ == "__main__":  # pragma: no cover - entry point

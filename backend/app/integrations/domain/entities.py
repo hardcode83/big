@@ -69,8 +69,9 @@ class CredentialReadLog:
     different error in the same claim.
 
     Deduplicating by credential id is what makes the rule's allowance implementable: a sync over
-    N properties served by one credential decrypts it N times, and the set collapses that to the
-    one row the rule permits, without ever merging two distinct credentials.
+    N properties served by one credential decrypts it N times, and the set collapses those to one
+    entry per credential. What that entitles the caller to write is the rule's business, not this
+    class's.
     """
 
     credential_ids: set[uuid.UUID] = field(default_factory=set)

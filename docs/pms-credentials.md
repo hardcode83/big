@@ -75,6 +75,17 @@ Una rotación escribe su fila en `audit_logs` con `{"changed": true}` — nunca 
 enmascarado. Un alta por primera vez **no** escribe fila: no reemplaza nada, y registrarla como
 rotación haría creer que existe un secreto anterior en alguna parte.
 
+### Si la fila guardada está corrupta
+
+Tanto `set` como `rotate` **funcionan aunque el valor almacenado no se pueda descifrar** (una fila
+escrita a mano, una restauración truncada, una clave que cambió). El comando no lee el secreto que
+va a reemplazar: solo necesita saber si hay fila y cuál es, así que la sustituye sin más y `rotate`
+escribe su fila de auditoría contra la credencial que había de verdad.
+
+Importa en un caso concreto y malo: la credencial se ha **filtrado** *y* su fila está corrupta. Si
+el comando se cayera ahí, la única salida sería SQL a mano — sin cifrado, sin guard cross-tenant y
+sin traza de rotación, justo lo que este comando existe para evitar, el día que más falta hace.
+
 ## Ver qué proveedor usa cada propiedad
 
 ```bash

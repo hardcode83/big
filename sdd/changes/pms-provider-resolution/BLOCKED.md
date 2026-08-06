@@ -50,9 +50,10 @@ credencial (`BEDS24`), así que la repetición es en el tiempo y no en el portfo
 
 # Abierto tras `/sdd:review` (2026-08-06)
 
-Dos hallazgos del panel de seguridad sobrevivieron a la tercera ronda de arreglo. **Se dejan
-abiertos a propósito**: el flujo permite dos rondas, se tomó una tercera porque aquellos eran
-defectos funcionales, y estos dos no lo justifican. Decide antes del PR.
+Dos hallazgos del panel de seguridad sobrevivieron a la tercera ronda de arreglo. Se dejaron
+abiertos a propósito —el flujo permite dos rondas— y **Jose los devolvió resueltos a mi criterio
+(2026-08-06)**. Ambos quedan **CERRADOS** abajo; se conserva el enunciado original porque el valor
+de esta entrada está en por qué llegaron hasta aquí, no en el parche.
 
 ## 1. La línea de resumen de `_record_credential_reads` sigue enunciando el número
 
@@ -71,8 +72,16 @@ frases» por «buscar más frases». `One \`PMS_CREDENTIAL_READ\` row per` no co
 nivel más arriba**: la primera vez se me escaparon las copias en inglés por buscar en español; esta
 vez se me escapó por buscar una subcadena en vez de la afirmación.
 
-Arreglo: quitar la cardinalidad de la línea de resumen (nombrar la acción, no cuántas filas) y
-reducir `entities.py:73` al mecanismo. Dos líneas.
+**CERRADO (2026-08-06).** La línea de resumen es ahora *"Record this run's credential reads
+(R4.2)"* — la acción, sin número — y `entities.py` se reduce al mecanismo: deduplica por id, y a
+qué da derecho eso «es asunto de la regla, no de esta clase».
+
+Y el barrido se hizo **de otra forma**, porque el problema era el método y no el texto: en vez de
+buscar frases, **enumeré los sitios**. El conjunto de ficheros que pueden enunciar esto es cerrado
+y pequeño —los que mencionan `PMS_CREDENTIAL_READ`, `CredentialReadLog`, `read_log` o
+`credential_ids`—: 32 menciones en 8 ficheros, todas leídas una por una. Ninguna enuncia ya una
+cardinalidad; la regla 9 sigue siendo el único sitio que lo hace. Una enumeración no puede fallar
+por la redacción de lo que busca, que es lo que hundió los dos barridos anteriores.
 
 ## 2. El comando de credenciales no puede reparar la fila cuyo error acaba de traducirse
 
@@ -91,9 +100,30 @@ alternativa es SQL crudo — que se salta el cifrado, el guard cross-tenant y la
 **No lo introdujo este change**: el hueco es previo, y lo que hizo `63b6cb4` fue cambiar el tipo de
 excepción y volverlo visible.
 
-Arreglo propuesto por el panel: capturar `SecretDecryptionError` en `main` y salir con código
-propio; permitir que `set` **sobrescriba** unas coordenadas cuyo valor no se puede leer (no hace
-falta el claro anterior para reemplazarlo), y que `rotate` siga negándose.
+**CERRADO (2026-08-06), y por una vía distinta a la propuesta.** El panel proponía capturar la
+excepción; lo que hay debajo es que **el comando nunca necesitó leer el secreto**. Usaba `existing`
+para tres cosas —el id de la fila, si existe, y `rotated_at`— y ninguna es el valor, que además está
+a punto de sobrescribir. Así que el arreglo es un método nuevo del puerto, `id_at`, que selecciona
+la **columna** `id`: no hay camino de código desde ahí hasta un `EncryptedSecret`, con lo que la
+garantía es estructural y no una promesa. Descifrar deja de ocurrir, en vez de fallar y ser
+capturado.
+
+Divergencia deliberada respecto del panel en un punto: **`rotate` tampoco se niega ya** ante un
+valor malformado. Negarse dejaba sin vía auditada justo el caso que motiva el hallazgo. La fila
+existe, así que hay algo que rotar; el guard sigue intacto para su caso real, que es que **no haya
+fila** (una errata en las coordenadas). Y el `entity_id` de la fila `PMS_CREDENTIAL_ROTATED` sale
+del id almacenado, no de un `uuid4()` nuevo — hay test que lo fija, porque si no la traza nombraría
+una credencial que nunca existió.
+
+`main` captura `SecretDecryptionError` de todos modos y sale 3 sin traceback y sin imprimir `USAGE`
+(no es una invocación mal formada, y mandar al operador a revisar sus argumentos lo enviaría a
+mirar donde no es). Hoy es código inalcanzable: es la red por si alguien añade una ruta que sí
+descifre.
+
+Los tres tests se verificaron **contra el código viejo** —reintroduje el parse y los tres fallan con
+el `SecretDecryptionError` original— porque un test que pasa no prueba nada si también pasaba antes.
+La corrupción de las pruebas es **texto plano**, no un ciphertext estropeado: esa distinción es la
+que hizo que el test de aislamiento anterior ejercitara solo la mitad que ya funcionaba.
 
 ## Nota para el archivado, no bloqueante
 

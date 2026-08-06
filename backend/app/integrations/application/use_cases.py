@@ -238,15 +238,16 @@ class SyncReservationsFromPmsUseCase:
     async def _record_credential_reads(
         self, *, tenant_id: uuid.UUID, now: datetime, read_log: CredentialReadLog
     ) -> None:
-        """One `PMS_CREDENTIAL_READ` row per DISTINCT credential this run decrypted (R4.2).
+        """Record this run's credential reads (R4.2).
 
-        The count is the narrowing that the named exception in rule 9 of
+        **How many rows** is the narrowing that the named exception in rule 9 of
         `steering/security.md` authorises, and **that rule is where it is stated** — this
-        docstring cites it and says nothing about it. An earlier version added its own gloss and
-        got it backwards, claiming the two granularities coincide under account scope when that is
-        the case where they diverge most (four properties, one row instead of four). It was the
-        fourth time the same claim was written wrongly in this change, and it was written **while**
-        the other three were being consolidated. Hence: no gloss.
+        docstring cites it and says nothing about it — **including this summary line**, which
+        stated the count while the paragraph under it denied stating it. Two earlier versions got
+        this wrong: one added a gloss that was backwards (claiming the granularities coincide under
+        account scope, which is where they diverge most), and one kept the number in the summary
+        after the gloss was deleted. Both survived a sweep, because both sweeps matched phrases
+        instead of the claim.
 
         The diff is EMPTY: a read changes nothing, and an empty `ChangeSet` is falsy, so
         `AuditLogFactory` stores `changes` as SQL NULL rather than `{}`. `entity_id` names the

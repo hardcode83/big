@@ -11,7 +11,7 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-from app.core.crypto import decrypt, encrypt
+from app.core.crypto import SecretDecryptionError, decrypt, encrypt
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.db import tenant_scoped_classes
 from app.core.tenancy import CrossTenantWriteError
@@ -343,3 +343,29 @@ async def test_the_secret_type_refuses_plaintext(db_session, tenant_a) -> None:
     """
     with pytest.raises(ValueError):
         EncryptedSecret(ciphertext="a-plaintext-refresh-token")
+
+
+@pytest.mark.asyncio
+async def test_id_at_answers_where_get_for_raises(db_session, tenant_a) -> None:
+    """The two questions differ, and only one of them needs the stored value to be readable.
+
+    Pinned as a PAIR on the same row: asserting `id_at` alone would still pass if it quietly went
+    through `get_for`, because a row that parses makes both work. The `pytest.raises` half is
+    what proves `id_at` is not just the same query with the parse still in it — it is the reason
+    the provisioning command can now overwrite a credential nothing can decrypt.
+    """
+    repository = SqlAlchemyPmsCredentialRepository(db_session)
+    credential = _credential(tenant_a.id, PmsCredentialScope.ACCOUNT)
+    await repository.upsert(tenant_a.id, credential)
+    await db_session.flush()
+    await db_session.execute(
+        text("UPDATE pms_credentials SET secret_encrypted = :v WHERE id = :i"),
+        {"v": "plainly-not-a-fernet-token", "i": str(credential.id)},
+    )
+
+    assert (
+        await repository.id_at(tenant_a.id, PMSProvider.BEDS24, PmsCredentialScope.ACCOUNT)
+    ) == credential.id
+
+    with pytest.raises(SecretDecryptionError):
+        await repository.get_for(tenant_a.id, PMSProvider.BEDS24, PmsCredentialScope.ACCOUNT)

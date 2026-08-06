@@ -53,6 +53,29 @@ class PmsCredentialRepository(Protocol):
         """
         ...
 
+    async def id_at(
+        self,
+        tenant_id: uuid.UUID,
+        provider: PMSProvider,
+        scope: PmsCredentialScope,
+        property_id: uuid.UUID | None = None,
+    ) -> uuid.UUID | None:
+        """The id of the credential at these coordinates, or `None`. **Reads no secret.**
+
+        Exists because "is something stored here, and which row is it" is a different question
+        from "give me the credential", and only the second one needs the stored value to be
+        readable. The provisioning command asks the first: it needs the id for the audit row and
+        the presence for the rotate guard, and it is about to OVERWRITE the value, so whether the
+        old one parses is irrelevant to it.
+
+        Answering it through `get_for` made a malformed stored value unfixable by the only
+        audited route that exists — the operator could neither `set` over it nor `rotate` it, and
+        was pushed to the hand-written SQL this command exists to prevent, on the one occasion it
+        matters most: replacing a credential that has leaked. Not decrypting is also why this
+        method carries no R4.2 obligation — there is no read to audit.
+        """
+        ...
+
     async def upsert(self, tenant_id: uuid.UUID, credential: PmsCredential) -> None:
         """Store or replace the credential at its (provider, scope, property) coordinates.
 
