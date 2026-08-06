@@ -33,7 +33,7 @@ y `PMSAdapterFactory.provider_for`. El segundo es necesario porque el override `
 en la factory: agrupar por `property.pms_provider` a secas ignoraría el override al agrupar y lo
 aplicaría al resolver, que es una incoherencia silenciosa.
 
-## ~~2. Dónde se escribe la fila de auditoría por ejecución~~ RESUELTO
+## ~~2. Dónde se escribe la fila de auditoría de un run~~ RESUELTO
 
 Se escribe en `SyncReservationsFromPmsUseCase.execute`, al cerrar el run, con `CredentialReadLog`
 deduplicando. **Cuántas filas** lo dice la regla 9 de `steering/security.md` y solo ella: este
@@ -111,11 +111,23 @@ auditoría. `design.md:36` no es ninguno de los dos — enuncia la cifra **de pa
 argumento sobre otra cosa** (si `supports_messaging` puede ser impuro). Ahí es donde se esconde la
 afirmación ahora, y ahí se escondía también la de `tasks.md:48`.
 
-**El chequeo que sí cierra la clase**, porque es por propiedad y no por tema: barrido del campo
-semántico sobre los 824 ficheros versionados — términos de auditoría ∩ términos de credencial,
+**El mejor chequeo encontrado hasta ahora** —y no lo llamo cerrado, que es lo que he declarado en
+falso cuatro rondas seguidas—: barrido del campo semántico sobre los 824 ficheros versionados — términos de auditoría ∩ términos de credencial,
 filtrado por cualquier cuantificador. Da 54 líneas, todas leídas: las únicas que enuncian una cifra
 son `security.md:39` y `:43`, que es el hogar normativo. El resto son obligaciones sin número,
-mecanismo o alternativas rechazadas. Subsume los dos conjuntos anteriores.
+mecanismo o alternativas rechazadas. Subsume estrictamente los dos conjuntos anteriores, y aun así
+**tiene su propio límite, medido**: es una **conjunción**, y la afirmación se puede hacer con uno
+solo de los dos términos. Así se le escapó el titular de aquí arriba, que decía «la fila de
+auditoría por ejecución» sin ninguna palabra de credencial. Ese titular era la cuarta instancia, y
+estaba **dos líneas antes** del párrafo que declara que este fichero no reformula el número — la
+misma posición exacta que el defecto original.
+
+**El tripwire que sí es preciso**, y que vale para la clase «obligación sin número» (`crypto.py:14`,
+`design.md:55`): esas frases son seguras mientras hablen de **captura** —«auditado», «acto
+auditado»—, porque `pms_factory.py:171` registra incondicionalmente y ahí «cada lectura se audita»
+es literalmente cierto. En cuanto una diga que cada lectura **deja** o **escribe** una fila
+—emisión— es una cardinalidad, y es falsa. Captura por lectura, emisión por credencial distinta;
+son etapas distintas y no pueden contradecirse.
 
 **Aviso para el archivado**: `sdd/specs/` es el próximo sitio donde esta afirmación intentará
 vivir, porque el contenido de este design se convierte en spec. Y si R4.2 de `proposal.md:63` se
