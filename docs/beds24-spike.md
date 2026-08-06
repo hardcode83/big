@@ -465,39 +465,27 @@ fechas.
 | `GET /inventory/rooms/calendar` | ventana 7 días | **1** |
 | `GET /inventory/rooms/calendar` | ventana 90 días | **1** |
 
-**Observado a mano, SIN registro commiteado** — leído de las cabeceras en un terminal durante la
-exploración del paso 0, no emitido por la herramienta:
+**Escrituras y capturas, RESPALDADAS desde el 2026-08-06** (re-ejecutadas en
+`pms-beds24-adapter`, tarea 1.5). Estaban transcritas a mano y ahora salen del registro:
 
-| Endpoint | Forma | `X-Request-Cost` |
-|---|---|---|
-| `GET /bookings/messages` | por defecto | 1 |
-| `POST /properties` | escritura de webhooks | 1 |
-| `POST /bookings` | crear reserva | 1 |
-| `POST /bookings` | modificar reserva | 1,1 |
-| `POST /bookings` | cancelar reserva | 1,1 |
+| Endpoint | Forma | `X-Request-Cost` | Antes decía |
+|---|---|---|---|
+| `GET /bookings/messages` | captura | **1** | 1 ✔ |
+| `POST /bookings` | crear reserva | **1,1** | ~~1~~ ❌ |
+| `POST /bookings` | modificar reserva | **1,1** | 1,1 ✔ |
+| `POST /bookings` | cancelar reserva | **1,1** | 1,1 ✔ |
+| `POST /properties` | escritura de webhooks | 1 | **sigue transcrita** |
 
-> ⚠️ **Esta segunda tabla es evidencia de peor calidad, y conviene decirlo en voz alta.** D5
-> establece que *«el informe se genera desde el registro, no se transcribe a mano»* y R1.5 pide
-> un artefacto revisable precisamente para que nadie tenga que fiarse de una transcripción.
-> Estas cinco filas son una transcripción. Se publican porque son lo que se observó y omitirlas
-> sería peor, pero **no cumplen el contrato del propio change** y no deberían citarse como si lo
-> hicieran.
+> **La transcripción tenía un error, y es exactamente para lo que existía la re-medición.**
+> `POST /bookings` creando una reserva se publicó como **1** crédito y cuesta **1,1**: las tres
+> escrituras cuestan lo mismo, no dos de tres. El coste fraccionario queda **confirmado con
+> registro** en las tres, así que la decisión de parsear el coste como decimal —`int("1.1")`
+> lanza, y un coste fraccionario se registraría como *no medido*— ya no descansa sobre una
+> observación sin respaldo.
 >
-> **Cómo subirlas de categoría** (una tarde, ya con el banco arreglado): `capture` ahora sí
-> registra el coste de su propia petición —no lo hacía, que es por lo que la fila de
-> `/bookings/messages` no podía tener respaldo— y `provoke` ya registraba el suyo. Volver a
-> ejecutar ambos contra la cuenta y commitear el JSONL resultante convierte las cinco en
-> evidencia de primera. Lo hereda `pms-beds24-adapter` junto con la medición de webhooks.
->
-> **Lo que esto no toca**: la cifra que de verdad importa —**8 créditos por ciclo → un sync cada
-> 24 s**— sale entera de la primera tabla, que sí tiene registro. El presupuesto que desbloquea
-> `celery-jobs` no depende de las filas transcritas.
-
-**El coste fraccionario**, en cambio, **sí depende de ellas**: el `1,1` de `modify` y `cancel` es
-la única observación de un coste no entero, y es transcrita. La decisión de tratar el coste como
-decimal en el parser se sostiene igual —`int("1.1")` lanza, así que un coste fraccionario se
-registraría como *no medido* y el presupuesto saldría optimista— pero es una decisión tomada
-sobre una observación sin respaldo, y merece confirmarse al re-ejecutar.
+> **`POST /properties` sigue sin respaldo a propósito**: escribe la configuración de webhooks de
+> la propiedad, y eso pertenece a `beds24-webhook-cutover-measurement`. Re-medirla habría
+> cambiado el estado de la cuenta por una fila de una tabla.
 
 > ⚠️ **No concluir de aquí que el coste sea plano.** Esta cuenta está **vacía**: cero reservas y
 > una propiedad. Todas las respuestas devolvieron `count` 0 o 1, así que ninguna forma movió
@@ -508,6 +496,45 @@ sobre una observación sin respaldo, y merece confirmarse al re-ejecutar.
 >
 > Es el mismo tipo de cautela que `channex-staging.md` aplica a su límite de tasa: se publica lo
 > observado, no lo que apetecería concluir.
+
+### ⚠️ La ventana de modificación funciona, pero **oculta las cancelaciones** por defecto
+
+**Medido el 2026-08-06** (`pms-beds24-adapter`, tareas 1.2 y 1.3), y es el hallazgo que decidió
+la forma del adapter. Cuatro cosas, en orden de importancia:
+
+1. **`modifiedFrom` existe, restringe de verdad y acepta las dos ortografías** — `YYYY-MM-DD` y
+   el instante ISO con `Z`, ambas 200 y 1 crédito. Esto es lo que separa a Beds24 de Channex,
+   cuyo `/bookings` solo filtra por fecha de creación y por tanto **nunca** ve una cancelación.
+
+2. **El listado por defecto NO devuelve las canceladas.** Ciclo crear → modificar → cancelar con
+   `modifiedFrom=t0`: visible, visible, **invisible**. Un adapter que se fiara de la ventana de
+   modificación a secas daría por confirmada una estancia cancelada — el mismo fallo que
+   creíamos no heredar, alcanzado por otro camino.
+
+3. **`includeCancelled=true` se ignora en silencio.** Devuelve `200` y no cambia nada. Es la
+   misma clase de trampa que el offset horario de Channex: un parámetro que parece la solución,
+   no lo es, y no protesta.
+
+4. **Lo que sí funciona es enumerar `status`**, y solo en forma de **parámetros repetidos**
+   (`status=new&status=confirmed&…`). La forma con comas devuelve `400`. El vocabulario está
+   validado en servidor —`status=bogus` responde `400` nombrando el parámetro— y tiene seis
+   valores: `new`, `request`, `confirmed`, `cancelled`, `inquiry` y `black`.
+
+**Consecuencia para el adapter**, ya implementada: toda listado envía los cinco estados que son
+reservas. Excluir `black` de esa enumeración sale gratis y es de paso la exclusión de bloqueos de
+calendario en la consulta que el diseño prefería.
+
+**Coste de la enumeración**: es una allowlist, así que un estado que Beds24 añada en el futuro
+sería invisible hasta que alguien lo añada. Se acepta porque la alternativa es perder las
+cancelaciones hoy.
+
+### Una cancelación por API no rellena `cancelTime`
+
+**Medido el 2026-08-06.** Cancelar con `POST /bookings` + `status: cancelled` mueve `status` y
+`modifiedTime`, y deja **`cancelTime: null`**. El fixture `bookings_cancelled.json` lo recoge.
+
+No afecta al mapeo, que lee `status` y no `cancelTime`. Se documenta porque el campo existe, se
+llama exactamente como uno esperaría, y está vacío justo en el camino que usamos.
 
 ### Hallazgos del formato de petición
 
@@ -534,10 +561,21 @@ sobre una observación sin respaldo, y merece confirmarse al re-ejecutar.
 [`beds24-request-cost.jsonl`](beds24-request-cost.jsonl); tabla generada con
 `beds24_probe.py report`.
 
-- Ciclo de sync completo (las 8 formas del catálogo): **8 créditos**
+- Ciclo de sync completo (las 10 formas del catálogo): **10 créditos**
 - Ventana del proveedor: **100 créditos / 300 s**, por cuenta
-- Ciclos por ventana: **12,5**
-- **Cadencia máxima sostenible: un sync cada 24 s por cuenta**
+- Ciclos por ventana: **10**
+- **Cadencia máxima sostenible: un sync cada 30 s por cuenta**
+
+> **Corregido el 2026-08-06 (de 8 créditos / 24 s a 10 / 30 s), y no es una re-medición: es un
+> catálogo que ahora incluye la consulta que el sync hace de verdad.** El catálogo original
+> medía `/bookings` por ventana de llegada; el adapter real filtra por **fecha de modificación**,
+> dos formas que antes no existían. Las diez cuestan 1 crédito cada una, así que el coste por
+> petición no ha cambiado — lo que ha cambiado es cuántas peticiones son «un ciclo».
+>
+> **Nada de lo que dependía del número anterior se cae**, y conviene decirlo porque la cifra se
+> cita en tres sitios. El argumento de la regla 9 de `steering/security.md` —que sincronizar al
+> techo produciría del orden de miles de filas de `AuditLog` al día por credencial, saturando el
+> índice por actor— sale igual con 30 s (~2.880/día) que con 24 s (~3.600/día).
 
 > ⚠️ **Ese número es un techo, no una recomendación, y confundirlo sería el error caro.**
 >

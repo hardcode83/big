@@ -82,10 +82,19 @@ creadas, **modificadas y canceladas** desde ese instante. Es la diferencia con e
 Channex, que solo puede filtrar por fecha de creación y por tanto nunca ve una cancelación de una
 reserva anterior — útil para validar el backend, inservible como sync de producción.
 
-> ⚠️ **Sin verificar contra la cuenta real.** El parámetro `modifiedFrom` está documentado en el
-> wiki del proveedor y **no medido**: nadie ha ejecutado el sondeo con credencial. Si la medición
-> lo desmiente, el arreglo es una línea en `beds24/adapter.py`, pero la consecuencia no es
-> trivial y está escrita ahí mismo. Estado en `sdd/changes/pms-beds24-adapter/BLOCKED.md`.
+**Verificado contra la cuenta real el 2026-08-06**: ciclo crear → modificar → cancelar, con la
+reserva visible en las tres comprobaciones.
+
+> ⚠️ **Y hace falta pedir las canceladas explícitamente.** El listado por defecto **las omite**:
+> el mismo ciclo, sin enumerar `status`, deja de ver la reserva justo al cancelarla. El adapter
+> envía siempre los cinco estados que son reservas (`new`, `request`, `confirmed`, `cancelled`,
+> `inquiry`) en parámetros repetidos — la forma con comas da `400`, y `includeCancelled=true` se
+> ignora en silencio. Si alguien «simplifica» esa lista, el sync deja de enterarse de las
+> cancelaciones sin que falle nada.
+>
+> Excluir `black` de esa enumeración es lo que mantiene los bloqueos de calendario fuera de la
+> respuesta. Como es una allowlist, un estado que Beds24 añada en el futuro no llegaría hasta
+> que se añada aquí.
 
 ### Bloqueos de calendario
 

@@ -1,37 +1,9 @@
 # Blocked — pms-beds24-adapter
 
-## 1. Ejecuciones del banco de medición contra la cuenta de Beds24
+Actualizado el 2026-08-06 tras recibir la credencial y ejecutar las mediciones. Quedan **dos**
+entradas: una decisión de diseño que es de Jose, y una verificación que necesita un tenant sembrado.
 
-- **Fase**: run (tareas 1.2 y 1.5)
-- **Tipo**: `decision` — necesita un humano con la credencial
-- **Qué y por qué**: no hay `BEDS24_REFRESH_TOKEN` en el entorno de la sesión, y `beds24_probe.py` lo lee **solo** del entorno por diseño (nunca por argumento, `specs/pms-beds24-spike.md`). El código del banco está escrito y verificado offline (92 tests), pero nadie ha ejecutado nada contra el proveedor. Falta medir:
-  1. Que `modifiedFrom` existe, en qué formato lo acepta y cuánto cuesta.
-  2. Si `/bookings` devuelve las canceladas sin pedirlas, y si admite un filtro de estado que excluya los bloqueos `black`.
-  3. La ventana completa: crear → modificar → cancelar, con la reserva visible en las tres.
-  4. La re-medición que respalda las cinco filas hoy transcritas del informe.
-- **Cómo desatascarlo**: con la credencial en el entorno, desde `backend/`:
-
-  ```
-  BEDS24_REFRESH_TOKEN=... uv run python scripts/beds24_probe.py probe --out ../docs/beds24-request-cost.jsonl
-  BEDS24_REFRESH_TOKEN=... uv run python scripts/beds24_probe.py window --room=<roomId> --confirm-writes --out ../docs/beds24-request-cost.jsonl
-  BEDS24_REFRESH_TOKEN=... uv run python scripts/beds24_probe.py capture --out ../docs/beds24-request-cost.jsonl
-  uv run python scripts/beds24_probe.py report --out ../docs/beds24-request-cost.jsonl
-  ```
-
-  `window` **escribe** en la cuenta (crea, modifica y cancela una reserva directa, sin canal), aprobado en OQ3 del design. Sus guardas siguen vigentes: exige `--confirm-writes`, verifica que la cuenta tiene exactamente una propiedad y que el room le pertenece, y aborta antes de modificar si la creación devuelve una forma no reconocida.
-- **Comando de reanudación**: `/sdd:run pms-beds24-adapter 1`
-
-## 2. Decisión pendiente: el «coste de un ciclo» deja de ser 8 créditos
-
-- **Fase**: run (consecuencia de la tarea 1.1, se materializa al ejecutar 1.5)
-- **Tipo**: `decision`
-- **Qué y por qué**: las formas `modifiedFrom` entran en `CATALOGUE`, que es lo que `report()` considera «un ciclo de sync» — y con razón, porque es la consulta que el adapter real va a emitir. Pero eso cambia la cifra publicada de **8 créditos por ciclo → un sync cada 24 s**, que no es un número cualquiera: la citan `specs/pms-beds24-spike.md`, `specs/pms-provider-resolution.md`, la entrada del roadmap y la justificación de la **regla 9 de `steering/security.md`** (el volumen de filas de `AuditLog` que la excepción de granularidad existe para evitar). Hay dos salidas y no son equivalentes:
-  1. **Republicar** la cifra nueva y propagarla a los cuatro sitios que la citan (más honesto: es lo que el sync hará de verdad).
-  2. **Separar** en el informe «ciclo de validación» de «ciclo de sync real», dejando 8 como está.
-- **Cómo desatascarlo**: decidir con Jose al ver la medición real, antes de tocar `docs/beds24-spike.md`.
-- **Comando de reanudación**: `/sdd:run pms-beds24-adapter 1`
-
-## 3. Decisión de diseño: `special_requests` se persiste sin pasar por el scrubber
+## 1. Decisión de diseño: `special_requests` se persiste sin pasar por el scrubber
 
 - **Fase**: run (panel de seguridad de la sección 2, hallazgo 3)
 - **Tipo**: `decision` — amplía o acota D9, y no debe decidirse en silencio
@@ -43,17 +15,36 @@
 - **Cómo desatascarlo**: decidir con Jose. Si es la 1, es trabajo de esta sección; si es la 2, es un párrafo en `design.md` y una nota en la spec al archivar.
 - **Comando de reanudación**: `/sdd:review pms-beds24-adapter`
 
-## 4. Dónde excluir los bloqueos de calendario (D10, enmendada)
+## 2. Verificación manual end-to-end (tarea 7.3)
 
-- **Fase**: run (panel de arquitectura de las secciones 3-5)
-- **Tipo**: `deferred` — el flujo lo reanuda cuando la 1.2 mida
-- **Qué y por qué**: D10 elegía excluir los `status: black` **en la consulta** y dejaba el descarte en el adapter como plan B. Lo que se entrega es el plan B, incondicionalmente, porque la medición que decidía entre los dos está bloqueada. El design ya está enmendado para decirlo. Lo pendiente es solo la optimización: si `/bookings` admite un filtro de estado, mover la exclusión ahorra traerse filas que se tiran. Con dos propiedades no se nota; a escala SaaS sí.
-- **Cómo desatascarlo**: al ejecutar la 1.2, comprobar si el filtro existe y decidir. No bloquea el merge.
-- **Comando de reanudación**: `/sdd:run pms-beds24-adapter 1`
+- **Fase**: run
+- **Tipo**: `deferred` — necesita un tenant en la base de datos de dev, que hoy está vacía
+- **Qué y por qué**: el camino credencial-en-BD → factory → adapter → proveedor real es el último tramo sin probar en vivo. Todo lo que hay debajo sí está verificado: el transporte contra la API real (sondeo del 2026-08-06), y el encadenado adapter → ingestor → `TimelineEvent` contra Postgres real con payloads capturados.
+- **Qué falta exactamente**: `select count(*) from tenants` devuelve 0. Sembrar es `make bootstrap`, que exige las variables `BOOTSTRAP_*` en `.env` — nombres sin valor por la regla 8, así que las pone su dueño. No las invento.
+- **Cómo desatascarlo**, una vez haya tenant:
 
-## 5. Fixtures de reserva modificada y cancelada
+  ```bash
+  # 1. credencial (el secreto por entorno, nunca por argumento)
+  PMS_CREDENTIAL_SECRET="$(cat backend/.env.beds24)" \
+    docker compose exec -T -e PMS_CREDENTIAL_SECRET backend \
+    uv run python -m app.integrations.cli.pms_credentials \
+    set --tenant <uuid> --provider BEDS24 --scope ACCOUNT
 
-- **Fase**: run (tarea 1.4 producida, 4.1 consumidora)
-- **Tipo**: `deferred` — el flujo lo reanuda solo en cuanto exista la credencial
-- **Qué y por qué**: `bookings_modified.json` y `bookings_cancelled.json` los produce el subcomando `window`, que está bloqueado por lo de arriba. Sin ellos, el mapeo de `cancelTime` y de un `status` distinto de `confirmed` se prueba con **variantes derivadas del fixture real** en lugar de con capturas del proveedor, que es evidencia de peor calidad y así queda marcado en los tests. **No se inventan fixtures**: las variantes se construyen modificando explícitamente el payload real capturado y el test dice que eso es lo que son.
-- **Comando de reanudación**: `/sdd:run pms-beds24-adapter 1` y después re-verificar la sección 4.
+  # 2. una propiedad apuntando a la del banco de medición
+  #    pms_provider = BEDS24, pms_external_id = 345754
+
+  # 3. el sync de verdad
+  docker compose exec -T backend uv run python -m app.integrations.cli.pms_sync <uuid>
+  ```
+
+  Qué comprobar: que importa las reservas de prueba de la cuenta, que el `AuditLog` registra **una** fila de lectura de credencial, y que un segundo sync es idempotente.
+- **Comando de reanudación**: `/sdd:review pms-beds24-adapter`
+
+---
+
+## Resueltas el 2026-08-06
+
+- ~~**Ejecuciones del banco contra la cuenta**~~ — hechas. `modifiedFrom` existe, restringe de verdad y acepta las dos ortografías; el listado por defecto **oculta las canceladas** e `includeCancelled` se ignora en silencio; el vocabulario de `status` está validado en servidor y hay que enviarlo en parámetros repetidos.
+- ~~**El «coste de un ciclo» deja de ser 8 créditos**~~ — decidido: se republica a **10 créditos / 30 s**, porque el catálogo ahora mide la consulta que el sync hace de verdad. El argumento de la regla 9 del steering aguanta igual (~2.880 filas/día frente a ~3.600). `docs/beds24-spike.md` ya lo dice; la propagación a `specs/pms-beds24-spike.md` y a la cita de la regla 9 va al archivar.
+- ~~**Dónde excluir los bloqueos de calendario (D10)**~~ — resuelto a favor de la rama preferida del diseño: como hay que enumerar `status` de todas formas para ver las canceladas, dejar `black` fuera de esa lista sale gratis. `is_blocked_dates` se queda en el adapter como defensa en profundidad.
+- ~~**Fixtures de reserva modificada y cancelada**~~ — capturados y commiteados. Los tests ya no derivan esos estados a mano.

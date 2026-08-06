@@ -40,17 +40,23 @@ from tests.integrations.conftest import beds24_fixture
 SINCE = datetime(2026, 8, 1, 9, 0, tzinfo=UTC)
 
 
-def beds24_booking() -> dict:
-    """The one real booking element in the captured collection."""
-    return beds24_fixture("bookings")["payload"]["data"][0]
+def beds24_booking(name: str = "bookings") -> dict:
+    """One real booking element, captured from the measurement account.
+
+    Three states are available, all captured 2026-08-06 by `beds24_probe.py window`:
+    `bookings` (confirmed), `bookings_modified` (confirmed, occupancy changed) and
+    `bookings_cancelled`.
+    """
+    return beds24_fixture(name)["payload"]["data"][0]
 
 
 def _derived(**overrides) -> dict:
     """The real element with fields overridden — **weaker evidence than a capture**.
 
-    Used only for booking states the measurement account has not produced yet (modified,
-    cancelled, blocked dates). It is a derivation from a real payload, not an invention, and
-    task 1.4 replaces its users with captures of the real thing.
+    Kept only for shapes the provider will not produce on demand: a status the account cannot
+    reach (`black`, which needs a calendar block), and deliberately malformed elements. The
+    cancelled and modified states are no longer derived — they are captured
+    (`bookings_cancelled`, `bookings_modified`), which is what task 1.4 delivered.
     """
     return beds24_booking() | overrides
 
@@ -251,7 +257,10 @@ def _serving(rows, *, capture=None):
         if request.url.path.endswith("/authentication/token"):
             return httpx.Response(200, json={"token": "access", "expiresIn": 86400})
         if capture is not None:
-            capture.append(dict(request.url.params))
+            # The QueryParams multidict, NOT `dict(...)`: flattening it hides repeated
+            # parameters, and `status` has to travel repeated — the comma-separated spelling
+            # was measured to return 400.
+            capture.append(request.url.params)
         return httpx.Response(
             200,
             json={"success": True, "pages": {"nextPageExists": False}, "data": rows},
@@ -277,6 +286,61 @@ async def test_the_window_is_asked_for_by_modification_date():
 
 
 @pytest.mark.asyncio
+async def test_the_listing_asks_for_cancellations_explicitly():
+    """R2.1 — **the measurement that saved this requirement** (2026-08-06, real account).
+
+    `GET /bookings?modifiedFrom=…` with no `status` shows a booking after it is created and
+    after it is modified, and **not after it is cancelled**: the default listing omits
+    cancellations. Without this parameter the adapter would report a cancelled stay as still
+    confirmed — the very failure it exists not to inherit from Channex, reached by another road.
+
+    `includeCancelled=true` is silently ignored, which is why this is an enumeration and not a
+    flag.
+    """
+    seen = []
+
+    await _adapter(_serving([], capture=seen)).list_reservations(SINCE)
+
+    # Repeated parameters, which is the only spelling the provider accepts.
+    assert seen[0].get_list("status") == [
+        "new",
+        "request",
+        "confirmed",
+        "cancelled",
+        "inquiry",
+    ]
+
+
+@pytest.mark.asyncio
+async def test_the_listing_excludes_calendar_blocks_at_the_query():
+    """Design D10's preferred branch, available for free once the enumeration exists.
+
+    Measured: the `status` vocabulary is closed and server-validated (`status=bogus` -> 400),
+    and `black` is one of its six values. Leaving it out of the list we send is what keeps
+    calendar blocks off the wire; `is_blocked_dates` stays in the adapter as defence in depth.
+    """
+    seen = []
+
+    await _adapter(_serving([], capture=seen)).list_reservations(SINCE)
+
+    assert "black" not in seen[0].get_list("status")
+
+
+@pytest.mark.asyncio
+async def test_looking_a_reservation_up_by_id_does_not_filter_by_status():
+    """Measured: filtering by `id` returns the booking whatever its status.
+
+    Adding the enumeration here would buy nothing and would lose a booking whose status is not
+    on the list — including, one day, a status Beds24 has not invented yet.
+    """
+    seen = []
+
+    await _adapter(_serving([beds24_booking()], capture=seen)).get_reservation("90923575")
+
+    assert seen[0].get_list("status") == []
+
+
+@pytest.mark.asyncio
 async def test_a_property_filter_narrows_the_request():
     seen = []
 
@@ -287,14 +351,46 @@ async def test_a_property_filter_narrows_the_request():
 
 @pytest.mark.asyncio
 async def test_a_cancelled_reservation_comes_back_through_the_window():
-    """The behaviour R2.1 exists for, at the adapter's own level."""
-    cancelled = _derived(status="cancelled", cancelTime="2026-08-05T10:00:00Z")
+    """The behaviour R2.1 exists for, mapped from the **really captured** cancellation.
 
-    fetched = await _adapter(_serving([cancelled])).list_reservations(SINCE)
+    Verified end to end against the account on 2026-08-06: create -> modify -> cancel, with the
+    booking visible on all three checks once the status enumeration is sent.
+    """
+    fetched = await _adapter(
+        _serving([beds24_booking("bookings_cancelled")])
+    ).list_reservations(SINCE)
 
     [dto] = fetched.reservations
     assert ReservationStatus.parse_ingested(dto.status) is ReservationStatus.CANCELLED
-    assert dto.external_id == "90923575"
+    assert dto.external_id == "91047458"
+
+
+def test_a_real_cancellation_carries_no_cancel_time():
+    """MEASURED, and it contradicts what a derived fixture assumed.
+
+    Before the capture existed, the cancelled state was derived by hand with
+    `cancelTime="2026-08-05T10:00:00Z"` — a plausible invention. The real cancellation, made
+    through `POST /bookings` with `status: cancelled`, comes back with **`cancelTime: null`**
+    and only `status` and `modifiedTime` moved.
+
+    Nothing in the mapping reads `cancelTime`, so this costs nothing today. It is pinned
+    because the next person to need a cancellation timestamp will reach for that field, and it
+    is empty on the path we actually use.
+    """
+    cancelled = beds24_booking("bookings_cancelled")
+
+    assert cancelled["status"] == "cancelled"
+    assert cancelled["cancelTime"] is None
+    assert cancelled["modifiedTime"] is not None
+
+
+def test_the_modified_capture_shows_what_a_modification_moves():
+    """`modifiedTime` advances and the changed field follows; the status does not move."""
+    modified = beds24_booking("bookings_modified")
+
+    assert modified["status"] == "confirmed"
+    assert modified["numAdult"] == 2
+    assert modified["modifiedTime"] > modified["bookingTime"]
 
 
 @pytest.mark.asyncio

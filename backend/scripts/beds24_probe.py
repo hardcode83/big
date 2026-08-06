@@ -926,6 +926,12 @@ def set_webhook(bench: Beds24Probe, *, property_id: Any, url: str, secret: str) 
 # date parameter of this API (`arrivalFrom`) requires exactly that form.
 MODIFIED_FROM_FORMATS = ("date", "datetime")
 
+# Duplicated from `app/integrations/infrastructure/beds24/adapter.py` on purpose: `scripts/` is
+# standalone and excluded from the image, so it cannot import from `app/`. MEASURED 2026-08-06 —
+# the six valid values are these five plus `black`, the vocabulary is validated server-side
+# (`status=bogus` -> 400), and the default listing omits cancellations entirely.
+RESERVATION_STATUSES = ("new", "request", "confirmed", "cancelled", "inquiry")
+
 
 def _modified_from(moment: datetime, form: str) -> str:
     if form == "date":
@@ -969,7 +975,18 @@ def verify_window(
             response = bench.request(
                 "GET",
                 BOOKINGS_WRITE_PATH,
-                {"modifiedFrom": _modified_from(t0, form), "limit": 100},
+                {
+                    "modifiedFrom": _modified_from(t0, form),
+                    # **The same enumeration the production adapter sends.** MEASURED
+                    # 2026-08-06: the first run of this verification omitted `status` and
+                    # reported the booking as invisible after `cancel` — because the default
+                    # listing excludes cancellations, not because the window failed. A bench
+                    # that measures a different request from the one the product makes answers
+                    # a question nobody asked, so it now mirrors
+                    # `beds24/adapter.RESERVATION_STATUSES`.
+                    "status": list(RESERVATION_STATUSES),
+                    "limit": 100,
+                },
             )
             record = build_cost_record(
                 endpoint=BOOKINGS_WRITE_PATH,

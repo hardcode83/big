@@ -20,10 +20,12 @@ Todo lo de la sección 1 corre desde `backend/` con `BEDS24_REFRESH_TOKEN` en el
 - [x] 1.6 Tests offline de todo lo anterior en `test_beds24_probe.py` (92 pasan): las dos ortografías, el catálogo, el fallback de formato, la visibilidad `None`-vs-`False`, el observador que falla, y la captura fallida [R2, R6]
 - [x] 1.7 **(no planificada — defecto encontrado al implementar)** `report()` sumaba **todas** las líneas del JSONL como «un ciclo de sync», y `main` mete ahí los registros de `capture`, `provoke` y `webhook`. Consolidar un solo fichero —que es justo lo que pide R6— habría publicado el coste de crear una reserva como parte de un ciclo de solo lectura, derivando una cadencia más lenta y plausible. Ahora el ciclo se calcula solo con las formas del catálogo y el resto se publica en su propia tabla, fuera del total [R6]
 
-### 1b. Ejecuciones contra la cuenta — **BLOQUEADAS** (ver `BLOCKED.md`)
+### 1b. Ejecuciones contra la cuenta — **hechas el 2026-08-06**
 
-- [ ] 1.2 Ejecutar `probe` y registrar: si `modifiedFrom` existe, qué formato acepta, su coste, si `/bookings` devuelve las canceladas sin pedirlas y si admite filtro de estado que excluya `black`. **Si responde 400 o ignora el filtro, parar y traerlo a la sesión** — es lo que decide si R2.1 se cumple tal cual (design D3) [R2, R3]
-- [ ] 1.5 Ejecutar `window`, `capture` y `probe`, commitear `docs/beds24-request-cost.jsonl` y regenerar la tabla. Las cinco filas transcritas quedan respaldadas; confirmar o desmentir el `1,1` fraccionario. **Ojo**: al entrar formas nuevas en el catálogo, el «coste de un ciclo» deja de ser 8 créditos, y esa cifra es normativa en tres specs y en la regla 9 del steering — hay que decidir si se republica o se separa [R6]
+- [x] 1.2 `probe` ejecutado. **`modifiedFrom` existe, restringe de verdad y acepta las dos ortografías** (1 crédito cada una). Y el hallazgo que salvó R2.1: **el listado por defecto oculta las canceladas** —ciclo crear→modificar→cancelar: visible, visible, invisible— e **`includeCancelled=true` se ignora en silencio**. Lo que funciona es enumerar `status` en **parámetros repetidos** (la forma con comas da 400), con vocabulario validado en servidor (`status=bogus` → 400). Seis valores: los cinco de reserva más `black` [R2, R3]
+- [x] 1.5 `window` + `capture` ejecutados, `docs/beds24-request-cost.jsonl` commiteado con **27 líneas** y tabla regenerada. Cuatro de las cinco filas transcritas quedan respaldadas — y **la transcripción tenía un error**: `POST /bookings` creando reserva se publicó como 1 crédito y cuesta **1,1**, igual que modificar y cancelar. El `1,1` fraccionario queda confirmado con registro. La quinta (`POST /properties`) sigue transcrita a propósito: escribe la configuración de webhooks y eso es de `beds24-webhook-cutover-measurement` [R6]
+- [x] 1.8 **(consecuencia decidida, no planificada)** El ciclo pasa de **8 a 10 créditos** y la cadencia de 24 s a 30 s, porque el catálogo ahora mide la consulta que el sync hace de verdad. Se republica en `docs/beds24-spike.md`; el argumento de la regla 9 del steering aguanta igual (~2.880 filas/día frente a ~3.600). La propagación a `specs/` y a la cita de la regla 9 va al archivar [R6]
+- [x] 1.9 **(corrección del banco)** `verify_window` medía la consulta **por defecto**, no la del producto, y por eso el primer intento reportó la reserva como invisible tras cancelar. Un banco que mide una petición distinta de la que hace el producto responde a una pregunta que nadie hizo: ahora envía la misma enumeración de `status` [R2]
 
 ## 2. Regla 13: el scrubber, antes de que exista un segundo mapeo <!-- panel: PASS 2026-08-06 (arquitectura sin hallazgos; QA 1 y seguridad 3, todos corregidos salvo uno escalado a BLOCKED.md) -->
 
@@ -77,12 +79,12 @@ Hallazgos del panel sobre las secciones 3-5, corregidos aquí porque cruzan las 
 ## 6. Documentación
 
 - [x] 6.1 `docs/beds24-adapter.md` con el contrato de alta, el aprovisionamiento y la rotación de la credencial de cuenta, cómo leer el log de créditos y qué queda fuera del adapter. Enlazado desde `docs/README.md`, distinguiéndolo del runbook del spike: aquel mide el proveedor, este lo integra [R1, R5]
-- [ ] 6.2 **BLOQUEADA** — depende de la 1.5: no hay filas nuevas que respaldar hasta que alguien ejecute el sondeo con credencial [R6]
+- [x] 6.2 `docs/beds24-spike.md` actualizado: la tabla transcrita pasa a respaldada con la corrección del coste de `create`, la cadencia se republica a 10 créditos / 30 s con el razonamiento de por qué nada de lo que dependía de 8 se cae, y se añaden dos hallazgos normativos nuevos — la ventana que oculta cancelaciones, y que una cancelación por API no rellena `cancelTime` [R6]
 - [x] 6.3 `.env.example` con los tres ajustes y sin credencial, y corregida de paso una afirmación caducada suya. El README raíz no necesita cambio: este change no añade módulo, ni comando de Makefile, ni cambia la estructura de carpetas [R1]
 
 ## 7. Verification
 
-- [x] 7.1 Suite completa del backend: **3365 pasan, 35 skipped** (`docker compose run --rm backend uv run pytest tests/ -q`)
+- [x] 7.1 Suite completa del backend: **3381 pasan, 35 skipped** (`docker compose run --rm backend uv run pytest tests/ -q`)
 - [x] 7.2 `make openapi` **sin diff**, como debía: este change no toca `api/`
-- [ ] 7.3 **BLOQUEADA** — verificación manual contra la cuenta real (`pms_credentials set` → propiedad `BEDS24` → `pms_sync`), sin credencial disponible
-- [x] 7.4 Ningún fixture commiteado contiene datos con forma de tarjeta: el guard sobre ficheros en disco corre en la suite y pasa. **La parte del JSONL sigue bloqueada** con la 1.5
+- [ ] 7.3 **PENDIENTE** — el sync completo con la credencial en base de datos. Ya no falta la credencial: falta un **tenant sembrado** (`select count(*) from tenants` = 0), y sembrar es `make bootstrap`, que exige las `BOOTSTRAP_*` de `.env` — nombres sin valor por la regla 8, así que las pone su dueño. Todo lo que hay debajo sí está verificado en vivo: el transporte contra la API real, y adapter → ingestor → `TimelineEvent` contra Postgres real. Detalle y comandos en `BLOCKED.md`
+- [x] 7.4 Ningún fixture commiteado contiene datos con forma de tarjeta —el guard sobre ficheros en disco cubre ya los tres de Beds24, incluidos los dos nuevos— y `docs/beds24-request-cost.jsonl` está commiteado con 27 líneas

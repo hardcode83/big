@@ -7,11 +7,8 @@ unique constraint, and `TimelineEvent` persistence is the first thing a wrong ma
 The HTTP boundary is `httpx.MockTransport` over the captured fixture, so the suite stays offline
 (R2.6) even though the data behind it is real.
 
-**Where the evidence is weaker, and it is said out loud**: the captured booking is `confirmed`.
-A *cancelled* one cannot be captured until somebody runs `beds24_probe.py window` against the
-measurement account (`BLOCKED.md`, items 1 and 4), so the cancellation test derives that state
-from the real element with an explicit override. It is a derivation from a real payload, not an
-invention, and task 1.4 replaces it with the real thing.
+All three booking states are **captured from the real account** (2026-08-06, via
+`beds24_probe.py window`): confirmed, modified and cancelled. Nothing here is derived by hand.
 """
 
 from datetime import UTC, datetime
@@ -45,8 +42,8 @@ SINCE = datetime(2026, 8, 1, tzinfo=UTC)
 BEDS24_PROPERTY_ID = "345754"
 
 
-def _booking() -> dict:
-    return beds24_fixture("bookings")["payload"]["data"][0]
+def _booking(name: str = "bookings") -> dict:
+    return beds24_fixture(name)["payload"]["data"][0]
 
 
 def _payload(rows: list[dict]) -> dict:
@@ -162,15 +159,17 @@ async def test_a_cancellation_arriving_through_the_window_updates_the_existing_r
     stays `CONFIRMED` forever while the guest has cancelled. Beds24 filters by modification
     date, so the same booking returns with `status: cancelled` and the existing row moves.
 
-    The cancelled element is DERIVED from the captured one (`BLOCKED.md`, item 4) — the
-    measurement account has not produced a real cancellation yet.
+    Both elements are **captured from the real account** (2026-08-06): the same booking
+    confirmed and then cancelled, produced by `beds24_probe.py window`. And the cancellation is
+    only visible at all because the adapter sends the status enumeration — the default listing
+    omits cancellations, which is the measurement that saved this requirement.
     """
-    await _use_case(db_session, _payload([_booking()])).execute(
+    confirmed = _booking("bookings_modified")
+    await _use_case(db_session, _payload([confirmed])).execute(
         tenant_id=tenant_a.id, since=SINCE, now=NOW
     )
 
-    cancelled = _booking() | {"status": "cancelled", "cancelTime": "2026-08-06T10:00:00Z"}
-    report = await _use_case(db_session, _payload([cancelled])).execute(
+    report = await _use_case(db_session, _payload([_booking("bookings_cancelled")])).execute(
         tenant_id=tenant_a.id, since=SINCE, now=NOW
     )
 

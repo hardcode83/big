@@ -29,18 +29,42 @@ BOOKINGS_PATH = "/bookings"
 MODIFIED_FROM_PARAM = "modifiedFrom"
 """The filter that makes the full window possible.
 
-ASSUMPTION, and the only one this module makes about the provider's API: the parameter exists
-and accepts a UTC instant. It is **documented** in the provider's wiki alongside `modifiedTo`
-and **not measured** — `pms-beds24-spike` measured the arrival-window filters and never this
-one, and this project has been wrong twice by trusting provider documentation (`x-requestcost`
-guessed from docs matched nothing; four rules of the Channex mapping contradict what its docs
-implied).
+**MEASURED 2026-08-06** against the real account, and it works: the parameter exists, accepts a
+full UTC instant (`2026-08-06T13:24:00Z`) as well as a plain date, costs 1 credit, and — the
+part that matters — it genuinely **restricts** rather than being accepted and ignored. A
+booking created and then modified after `since` came back on both checks.
 
-Task 1.2 measures it, and `BLOCKED.md` records that it needs a credential nobody had when this
-was written. If the measurement says the parameter takes a plain `YYYY-MM-DD` instead, the fix
-is one line here — but note the consequence before applying it: a date-only filter re-reads
-everything modified today on every cycle, so a sync running every few minutes would page
-through the same rows all day and spend credits doing it.
+This started life as an ASSUMPTION taken from the provider's wiki, which is why the measurement
+was task 1.2 rather than an afterthought. It is now evidence.
+"""
+
+RESERVATION_STATUSES = ("new", "request", "confirmed", "cancelled", "inquiry")
+"""Every booking status that is a RESERVATION, sent explicitly on every listing.
+
+**Not an optimisation — without it the adapter silently loses every cancellation**, which is
+the one thing R2.1 exists to deliver. MEASURED 2026-08-06, and it was the measurement that
+justified the whole task order:
+
+- `GET /bookings?modifiedFrom=…` with no `status` returns the booking after it is created and
+  after it is modified, and **not after it is cancelled**. The default listing excludes
+  cancellations, so an adapter that trusted the modification window alone would report a
+  cancelled stay as still confirmed — the exact failure mode we said Beds24 would not inherit
+  from Channex, arrived at by a different route.
+- **`includeCancelled=true` is silently ignored.** It looks like the fix, changes nothing, and
+  returns `200`. Same class of trap as Channex ignoring a timezone offset, and the reason this
+  had to be measured rather than reasoned about.
+- `status` must be **repeated parameters** (`status=new&status=confirmed&…`). The
+  comma-separated spelling returns `400`.
+- The vocabulary is closed and validated server-side: `status=bogus` returns `400` naming the
+  parameter. The six valid values are these five plus `black`.
+
+**`black` is deliberately absent**, which is design D10's preferred branch — a calendar block
+is not a reservation, and excluding it at the query is free once the enumeration exists.
+`is_blocked_dates` stays in the adapter as defence in depth rather than as the mechanism.
+
+**Named residual risk**: because this is an allowlist, a status Beds24 adds in future would be
+invisible here until someone adds it. That is the cost of the enumeration, and the enumeration
+is not optional — the alternative is losing cancellations today.
 """
 
 logger = logging.getLogger(__name__)
@@ -61,7 +85,11 @@ class Beds24Adapter:
         so a provider that can only filter by creation date cannot report one — which is the
         limitation this adapter exists not to inherit.
         """
-        params: dict[str, Any] = {MODIFIED_FROM_PARAM: _beds24_instant(since)}
+        params: dict[str, Any] = {
+            MODIFIED_FROM_PARAM: _beds24_instant(since),
+            # Without this the provider omits cancellations entirely. See the constant.
+            "status": list(RESERVATION_STATUSES),
+        }
         if property_external_id is not None:
             params["propertyId"] = property_external_id
 
@@ -106,6 +134,11 @@ class Beds24Adapter:
 
         Beds24 has no per-id route for bookings — you filter the collection — so an unknown id
         comes back as an empty `data`, which `Beds24Client.get_resource` turns into `None`.
+
+        **No `status` filter here, and that is measured rather than an oversight**: filtering by
+        `id` returns the booking whatever its status, including a cancelled one. Adding the
+        enumeration `list_reservations` needs would buy nothing and would make this method lose
+        a booking whose status is not on the list.
 
         A calendar block is `None` too, for the same reason it is skipped above: asking for a
         reservation by an id that names a block should not return a fabricated stay.
