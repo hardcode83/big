@@ -97,9 +97,30 @@ siguiente, **y encima al revés**: decía «N propiedades producen una fila y no
 `PROPERTY` son N credenciales distintas y N filas, es decir exactamente el colapso que la regla 9
 prohíbe. Corregida junto con su eco en la 10.5, nombrando el escenario en vez de la regla.
 
-Así que el barrido correcto son **dos** conjuntos, no uno: la enumeración por símbolos sobre todo
-lo versionado, **más** la lectura íntegra de los cuatro artefactos del change, que hablan del
-diseño por definición y pueden no citar ningún símbolo.
+**Y ese arreglo del método tampoco bastaba.** Declaré entonces que el barrido correcto eran dos
+conjuntos —enumeración por símbolos sobre todo lo versionado, más lectura íntegra de los artefactos
+del change— y el panel lo falsó con un miembro del segundo conjunto que el segundo conjunto no
+cazó: `design.md:36` decía «una fila de auditoría por propiedad consultada», que es falso
+justamente en el caso que D4 establece como el real —credencial de cuenta, que `CredentialReadLog`
+deduplica— y lo decía **citando a D6 mientras contradecía su mecanismo**. Tercera instancia del
+mismo error que la primera glosa: aritmética por propiedad donde el scope de cuenta colapsa.
+
+Los dos conjuntos fallan por la misma razón, y es la lección de verdad: **los dos son temáticos**.
+Uno encuentra ficheros que tocan el código del read log; el otro, párrafos *sobre* granularidad de
+auditoría. `design.md:36` no es ninguno de los dos — enuncia la cifra **de pasada, dentro de un
+argumento sobre otra cosa** (si `supports_messaging` puede ser impuro). Ahí es donde se esconde la
+afirmación ahora, y ahí se escondía también la de `tasks.md:48`.
+
+**El chequeo que sí cierra la clase**, porque es por propiedad y no por tema: barrido del campo
+semántico sobre los 824 ficheros versionados — términos de auditoría ∩ términos de credencial,
+filtrado por cualquier cuantificador. Da 54 líneas, todas leídas: las únicas que enuncian una cifra
+son `security.md:39` y `:43`, que es el hogar normativo. El resto son obligaciones sin número,
+mecanismo o alternativas rechazadas. Subsume los dos conjuntos anteriores.
+
+**Aviso para el archivado**: `sdd/specs/` es el próximo sitio donde esta afirmación intentará
+vivir, porque el contenido de este design se convierte en spec. Y si R4.2 de `proposal.md:63` se
+copia literal a una spec sin el acotamiento al lado, se convierte en la copia huérfana de la que
+trata la regla 9. Correr el barrido semántico al archivar.
 
 ## 2. El comando de credenciales no puede reparar la fila cuyo error acaba de traducirse
 
