@@ -38,14 +38,25 @@ Rejected: **duplicar la lista de campos editables en el esquema y en el caso de 
 
 Rejected: **replicar el patrón de `User`** (`user-management.md:87-91`, un método por campo mutable con un test derivado de `__dataclass_fields__`) — allí protege invariantes reales (identidad de login, revocación de sesiones); aquí sería ceremonia sin invariante.
 
-### D5 — `pms_external_id` se hace único por tenant con un índice parcial
+### D5 — `pms_external_id` se hace único **por proveedor** dentro del tenant, con un índice parcial y funcional
 
-**Chosen:** una migración añade `uq_properties_tenant_id_pms_external_id` como índice **único parcial** con `postgresql_where=sa.text('pms_external_id IS NOT NULL')`, copiando el estilo y el razonamiento de `c3f81a5d7e42:88-94` (Postgres trata los NULL como distintos, así que el parcial es lo que permite varias propiedades sin PMS). La violación se traduce a `409 CONFLICT` por nombre de constraint. Sin esto, esta vía de escritura puede **crear** la ambigüedad que `reservations.md:128-130` obliga al sync a rechazar.
+> **Corregida durante la implementación (2026-08-08), y la versión original era incorrecta.** Se conserva el error registrado porque la lectura equivocada es la que parece correcta sobre el papel.
 
-Rejected: **comprobación previa en la capa de aplicación** — susceptible a carrera; `user-management.md:46-49` ya rechazó exactamente ese patrón para el email: «dos altas simultáneas pasarían las dos la comprobación y una acabaría en `500`».
-Rejected: **documentar la ambigüedad y no impedirla** — deja al sync fallando por datos que la API dejó entrar.
+**Chosen:** una migración añade `uq_properties_tenant_id_pms_external_id` como índice único **parcial** (`WHERE pms_external_id IS NOT NULL`) y **funcional**, sobre `(tenant_id, coalesce(pms_provider, 'MOCK'), pms_external_id)`. La violación se traduce a `409 CONFLICT` por nombre de constraint. Sin esto, esta vía de escritura puede **crear** la ambigüedad que `reservations.md:128-130` obliga al sync a rechazar.
 
-**Consecuencia que hay que registrar**: `AmbiguousPropertyExternalIdError` (`domain/exceptions.py:5`) pasa a ser **defensiva**, inalcanzable por esta vía. No se borra —protege contra escrituras por SQL directo y contra una futura vía sin el índice— pero su test deja de poder ejercitarla sin saltarse el índice, y eso se anota en `specs/reservations.md` al archivar.
+**Qué decía la versión original y por qué era falsa.** Proponía la clave `(tenant_id, pms_external_id)`, leyendo `reservations.md:128` como una unicidad por tenant. No lo es: los ids externos son únicos **solo dentro de un proveedor**, y un tenant a medio migrar tiene legítimamente una propiedad en Beds24 y otra en Channex con el mismo id — es el escenario para el que existe ADR 0006 decisión 7, y el sync ya lo maneja acotando el emparejamiento al grupo que sincroniza. Lo afirma un test archivado: *«External ids are unique only WITHIN a provider, and the schema does not say otherwise»* (`tests/integrations/test_sync.py`). El índice tenant-wide prohibía ese estado y **rompió tres tests**.
+
+**Por qué `coalesce` y no simplemente añadir la columna a la clave.** `pms_provider` es nullable y NULL significa «el defecto del bootstrap», que `pms_factory.DEFAULT_PROVIDER` define como `MOCK`. Postgres trata los NULL como **distintos** dentro de una clave de índice, así que `(tenant_id, pms_provider, pms_external_id)` seguiría admitiendo dos propiedades sin proveedor reclamando un mismo id — exactamente la ambigüedad que el índice existe para impedir, dejada abierta por el arreglo obvio. Plegar NULL a `MOCK` la cierra y además es lo que los valores **significan**: ambas las sirve el adapter mock, así que son un grupo.
+
+Rejected: **`CAST(pms_provider AS TEXT)`** — probado primero y Postgres lo rechaza: *«functions in index expression must be marked IMMUTABLE»*, porque el cast de enum a texto es solo `STABLE` (las etiquetas se pueden renombrar).
+Rejected: **comprobación previa en la capa de aplicación** — susceptible a carrera; `user-management.md:46-49` ya rechazó ese patrón para el email.
+Rejected: **retirar D5** — deja al sync fallando por datos que la API dejó entrar.
+
+**Tres consecuencias registradas:**
+
+1. **`AmbiguousPropertyExternalIdError` sigue siendo alcanzable**, al contrario de lo que afirmaba la versión original. `find_by_pms_external_id` consulta tenant-wide, sin proveedor, así que un par legítimo entre proveedores devuelve dos filas y debe negarse a elegir. Su test conserva cobertura real; solo hay que darle proveedores distintos.
+2. **Un estado antes construible ya no lo es, a propósito**: insertar sin proveedor y mover la fila después pasa por el estado prohibido. Quien quiera dos propiedades en proveedores distintos compartiendo id debe fijar el proveedor **en el insert**. Un test de `tests/integrations/` se ajustó por esto — es un cambio de comportamiento de la vía de escritura, no un arreglo de test.
+3. **El literal `'MOCK'` acopla el esquema a `DEFAULT_PROVIDER`**, que vive en otro módulo. Nada los ata en runtime, así que un test en `tests/properties/test_models.py` lo hace: si el defecto cambia, falla señalando la migración y el modelo.
 
 ### D6 — El alta traduce el choque de constraint, no lo anticipa
 

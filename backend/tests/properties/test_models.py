@@ -51,3 +51,22 @@ async def test_internal_code_unique_per_tenant(db_session) -> None:
     db_session.add(PropertyModel(tenant_id=tenant.id, name="REDES11 dup", internal_code="redes11"))
     with pytest.raises(IntegrityError):
         await db_session.commit()
+
+
+def test_the_external_id_index_agrees_with_the_default_provider() -> None:
+    """`uq_properties_tenant_id_pms_external_id` folds a NULL provider to `MOCK`.
+
+    That literal is only correct while `MOCK` is what a NULL `pms_provider` resolves to, and the
+    definition of that default lives in another module (`pms_factory.DEFAULT_PROVIDER`). Nothing
+    connects the two at runtime, so this test is the connection: if the default provider ever
+    changes, the index silently starts grouping rows under a provider nobody uses, and the
+    duplicate it is meant to catch slips through. Failing here points at the migration and the
+    model that have to change with it.
+    """
+    from app.integrations.domain.enums import PMSProvider
+    from app.integrations.infrastructure.pms_factory import DEFAULT_PROVIDER
+
+    assert DEFAULT_PROVIDER is PMSProvider.MOCK, (
+        "the default PMS provider changed; uq_properties_tenant_id_pms_external_id coalesces a "
+        "NULL pms_provider to 'MOCK' and must be migrated to the new default"
+    )

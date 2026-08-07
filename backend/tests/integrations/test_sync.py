@@ -406,13 +406,21 @@ async def test_a_run_with_no_failures_reports_none(db_session, tenant_a, propert
     assert report.errors == []
 
 
-async def _extra_property(db_session, tenant, *, code: str, external_id: str):
-    """One more property for this tenant, so grouping has something to group."""
+async def _extra_property(db_session, tenant, *, code: str, external_id: str, provider=None):
+    """One more property for this tenant, so grouping has something to group.
+
+    `provider` is settable at INSERT time because since `properties-crud` the partial unique
+    index `uq_properties_tenant_id_pms_external_id` keys on
+    `coalesce(pms_provider, 'MOCK')`: inserting with no provider and moving the row afterwards
+    passes through the state that index forbids, so a caller that wants two properties on
+    *different* providers sharing an external id has to say so up front.
+    """
     prop = PropertyModel(
         tenant_id=tenant.id,
         name=code.title(),
         internal_code=code,
         pms_external_id=external_id,
+        pms_provider=provider,
         max_guests=2,
     )
     db_session.add(prop)
@@ -524,12 +532,19 @@ async def test_a_reservation_cannot_attach_to_a_property_of_another_provider(
     happens to equal a Beds24 property's id would attach a guest to the wrong home, which is the
     same failure `find_by_pms_external_id` refuses to make by raising on an ambiguous id.
     """
-    repository = SqlAlchemyPropertyRepository(db_session)
     # A second property, on a DIFFERENT provider, carrying the SAME external id as the seed one.
+    # The provider is set at INSERT time rather than with a follow-up `set_pms_provider`: the
+    # partial unique index added by `properties-crud` keys on `coalesce(pms_provider, 'MOCK')`,
+    # and the seed property has no provider, so inserting this one provider-less and moving it
+    # afterwards would transiently violate the index. Setting it up front also states the
+    # scenario more directly than the two-step version did.
     collision = await _extra_property(
-        db_session, tenant_a, code="COLLIDE", external_id=SEED_PROPERTY_CODE
+        db_session,
+        tenant_a,
+        code="COLLIDE",
+        external_id=SEED_PROPERTY_CODE,
+        provider=PMSProvider.CHANNEX,
     )
-    await repository.set_pms_provider(tenant_a.id, collision.id, PMSProvider.CHANNEX)
     await db_session.flush()
 
     factory = _CountingFactory(
