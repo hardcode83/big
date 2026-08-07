@@ -26,6 +26,18 @@ class PropertyModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
         UniqueConstraint("tenant_id", "internal_code", name="uq_properties_tenant_id_internal_code"),
         Index("ix_properties_tenant_id_current_operational_state", "tenant_id", "current_operational_state"),
         Index("ix_properties_tenant_id_pms_external_id", "tenant_id", "pms_external_id"),
+        # Partial and not total: the column is nullable and most properties carry no external
+        # id, which Postgres would treat as distinct anyway — indexing those rows buys nothing.
+        # It exists because `POST`/`PATCH /api/v1/properties` can otherwise create the shared
+        # id that `specs/reservations.md` requires the sync to reject, and a pre-check in the
+        # application layer would lose the race between two concurrent writes.
+        Index(
+            "uq_properties_tenant_id_pms_external_id",
+            "tenant_id",
+            "pms_external_id",
+            unique=True,
+            postgresql_where=text("pms_external_id IS NOT NULL"),
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(200))

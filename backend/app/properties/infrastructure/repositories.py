@@ -196,7 +196,8 @@ def _to_property(model: PropertyModel) -> Property:
         default_check_in_time=model.default_check_in_time,
         default_check_out_time=model.default_check_out_time,
         wifi_name=model.wifi_name,
-        wifi_password_encrypted=model.wifi_password_encrypted,
+        # `wifi_password_encrypted` is intentionally not mapped onto the entity (design D2):
+        # nothing reads it, and leaving it off the entity keeps it off every serialisation path.
         access_notes=model.access_notes,
         cleaning_notes=model.cleaning_notes,
         emergency_notes=model.emergency_notes,

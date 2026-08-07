@@ -11,7 +11,7 @@ import uuid
 from datetime import UTC, datetime
 
 import pytest
-from sqlalchemy import select
+from sqlalchemy import select, text
 
 from app.core.tenancy import CrossTenantWriteError
 from app.properties.domain.entities import PropertyStateTransition
@@ -134,12 +134,23 @@ async def test_find_by_pms_external_id_within_the_tenant(db_session) -> None:
 async def test_an_ambiguous_pms_external_id_fails_closed(db_session) -> None:
     """Two properties, one external id: refuse rather than attach a guest to a coin flip.
 
-    `ix_properties_tenant_id_pms_external_id` is an index, not a unique constraint, so
-    this state is reachable — the repository must not silently pick one. It refuses with a
-    DOMAIN error, so the PMS sync can report the row without catching a SQLAlchemy
-    exception inside `application/` (design D16).
+    It refuses with a DOMAIN error, so the PMS sync can report the row without catching a
+    SQLAlchemy exception inside `application/` (design D16).
+
+    **The setup has to defeat an index now, and that is the point of this comment.**
+    `properties-crud` (design D5) added the partial unique index
+    `uq_properties_tenant_id_pms_external_id`, because `POST`/`PATCH /api/v1/properties` would
+    otherwise let a client create the very ambiguity `specs/reservations.md` requires the sync to
+    reject — and an application-level pre-check would lose the race between two writes. So this
+    state is no longer reachable through any supported path, and the guard below became
+    **defensive**: it still protects against a row inserted by direct SQL, by a restore, or by a
+    future writer added without the index in mind.
+    Dropping the index inside the test's transaction is what keeps that guarantee covered instead
+    of deleting the test; the rollback restores it, and `alembic check` would catch a real
+    divergence.
     """
     tenant = await _tenant(db_session, "TenantA")
+    await db_session.execute(text("DROP INDEX uq_properties_tenant_id_pms_external_id"))
     await _property(db_session, tenant, internal_code="REDES11", pms_external_id="PMS-DUP")
     await _property(db_session, tenant, internal_code="PAJARITOS8", pms_external_id="PMS-DUP")
 

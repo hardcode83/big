@@ -35,7 +35,13 @@ class Property:
     default_check_in_time: time = time(15, 0)
     default_check_out_time: time = time(11, 0)
     wifi_name: str | None = None
-    wifi_password_encrypted: str | None = None
+    # `wifi_password_encrypted` is deliberately NOT a field here (`properties-crud` design D2).
+    # The column exists and this change is its first writer, but the entity is what every read
+    # path returns and what response schemas are built from, so keeping the secret off it means
+    # no serialisation route can carry it — the accident rule 3(a) of `steering/security.md`
+    # forbids — instead of every future schema having to remember to omit it. It travels as an
+    # explicit `EncryptedSecret` parameter of the two writers that set it, and is never read
+    # back: `GET` exposes `has_wifi_password`, not the value.
     access_notes: str | None = None
     cleaning_notes: str | None = None
     emergency_notes: str | None = None

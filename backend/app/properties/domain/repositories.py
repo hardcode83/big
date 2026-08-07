@@ -3,7 +3,13 @@
 Shaped by its consumers, not by everything a property repository could eventually do
 (Interface Segregation, `steering/backend-architecture.md`). It was read-only until
 `celery-jobs`, whose scheduled jobs are the first writers of operational state: `save`
-persists that column and nothing else, and `/api/v1/properties` still does not exist.
+persists that column and nothing else.
+
+`properties-crud` added the row writers (`add`, `update_details`, `set_wifi_password`) and the
+paginated `list` behind `/api/v1/properties`. They follow the rule the two existing writers
+established rather than relaxing it: **each one names exactly what it writes**, so no signature
+here can express a change to `current_operational_state`. That column still belongs to
+`PropertyStateMachine` alone, and `save` is still its only route.
 
 Every method takes `tenant_id` explicitly and returns `None` outside it. That is what
 makes R1.4 answer `404` (design D6) instead of leaking the existence of a neighbour's
@@ -12,12 +18,71 @@ than aborting the batch.
 """
 
 import uuid
-from collections.abc import Collection
-from typing import Protocol
+from collections.abc import Collection, Mapping
+from dataclasses import dataclass
+from typing import Any, Protocol
 
+from app.core.encrypted_secret import EncryptedSecret
 from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property, PropertyStateTransition
-from app.properties.domain.enums import PropertyOperationalState
+from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
+
+
+# The fields `PATCH /api/v1/properties/{id}` may write (`properties-crud` design D3).
+#
+# This is the single home of that rule: the request schema validates against it and the use
+# case filters against it, so the two cannot drift (`user-management` recorded that "two copies
+# of one rule is how they drift"). `current_operational_state` is absent **by design and not by
+# omission** — `steering/backend.md` forbids bypassing `PropertyStateMachine`, `celery-jobs`
+# requires that column be written by no other route, and keeping it out of here means the
+# signature of `update_details` cannot express a state change at all.
+#
+# `wifi_password` is absent too: it is not a plain column write, it goes through
+# `set_wifi_password` so the value is encrypted before it reaches SQL.
+PATCHABLE_PROPERTY_FIELDS: frozenset[str] = frozenset(
+    {
+        "name",
+        "internal_code",
+        "pms_external_id",
+        "address_line1",
+        "address_line2",
+        "city",
+        "province",
+        "postal_code",
+        "country",
+        "timezone",
+        "max_guests",
+        "bedrooms",
+        "bathrooms",
+        "default_check_in_time",
+        "default_check_out_time",
+        "wifi_name",
+        "access_notes",
+        "cleaning_notes",
+        "emergency_notes",
+        "status",
+    }
+)
+
+
+@dataclass(frozen=True)
+class PropertyFilters:
+    """The AND-combined filters `GET /api/v1/properties` accepts (R1.4)."""
+
+    status: PropertyStatus | None = None
+    current_operational_state: PropertyOperationalState | None = None
+
+
+@dataclass(frozen=True)
+class Page:
+    """One page of properties plus the total the client needs for `total_pages` (PRD §23).
+
+    Declared here rather than imported: there is no shared pagination helper in this codebase
+    and `reservations`/`auth` each own theirs, so following that keeps the domains uncoupled.
+    """
+
+    items: tuple[Property, ...]
+    total: int
 
 
 class PropertyRepository(Protocol):
@@ -107,6 +172,93 @@ class PropertyRepository(Protocol):
         expressed as "set it if given" — clearing the provider is an operation.
 
         Raises `CrossTenantWriteError` when the property belongs to another tenant.
+        """
+        ...
+
+    async def add(
+        self,
+        tenant_id: uuid.UUID,
+        property: Property,
+        *,
+        wifi_secret: EncryptedSecret | None = None,
+    ) -> None:
+        """Insert one property (`properties-crud` R2.1).
+
+        **Why the secret is a parameter and not a field of `property`** (design D2): `Property`
+        is what every read path returns and what response schemas are built from, so a secret
+        living on it would be one forgetful schema away from being serialised — the accident
+        rule 3(a) of `steering/security.md` forbids outright. As a parameter typed
+        `EncryptedSecret` the guarantee is structural in both directions: it cannot reach SQL
+        as plaintext, because `EncryptedSecret.__post_init__` rejects anything that is not
+        Fernet ciphertext, and it cannot leave, because nothing reads it back.
+
+        `current_operational_state` is taken from the entity here — that is not a bypass of
+        `PropertyStateMachine`: an insert has no source state to transition *from*, and PRD
+        §3.1 attaches the `TimelineEvent` obligation to a transition. Creation is expected to
+        leave the column at its DDL default, `VACANT_READY`, and R4 forbids the API from
+        offering a way to choose otherwise.
+
+        Raises `DuplicateInternalCodeError` / `DuplicatePmsExternalIdError`, translated from
+        the named constraint violations rather than from a prior SELECT, and
+        `CrossTenantWriteError` when the entity belongs to another tenant.
+        """
+        ...
+
+    async def update_details(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, changes: Mapping[str, Any]
+    ) -> bool:
+        """Persist the descriptive columns named in `changes` (R3.1).
+
+        **The admissible key set is `PATCHABLE_PROPERTY_FIELDS`, and the caller is not trusted
+        to respect it** — the adapter rejects anything outside it. `current_operational_state`
+        is not in that set, so this method is structurally incapable of the bypass that `save`'s
+        docstring warns about; it is the third narrow writer, not a general update.
+
+        An empty `changes` is a caller bug, not a no-op to absorb: the use case decides "nothing
+        changed" before getting here, because that decision also governs whether an `AuditLog`
+        row is written.
+
+        Returns whether a row matched, so the caller can answer `404` without a prior read.
+        Raises `DuplicateInternalCodeError` / `DuplicatePmsExternalIdError` on the same two
+        constraints as `add`, since a `PATCH` can collide just as an insert can.
+        """
+        ...
+
+    async def set_wifi_password(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, secret: EncryptedSecret | None
+    ) -> bool:
+        """Persist `wifi_password_encrypted`, and only that (R5.2).
+
+        A writer of its own rather than a key of `update_details`, because the value that
+        arrives is not the value that is stored: it is encrypted on the way in, and typing the
+        parameter as `EncryptedSecret` is what makes "stored in plaintext" unrepresentable.
+
+        `None` clears the stored password and is a legitimate operation, so this cannot be
+        expressed as "set it if given" — the same reasoning `set_pms_provider` records.
+
+        There is deliberately **no reader**. Rule 3 of `steering/security.md` lists
+        `wifi_password` first among the values that are never in plaintext, and rule 11 is
+        explicit that needing to show it to a guest does not authorise a masked form either.
+        Whoever eventually has to deliver it to a guest decrypts through the one explicit call
+        in `app/core/crypto.py`, and that will be their change to justify.
+
+        Returns whether a row matched.
+        """
+        ...
+
+    async def list(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        filters: PropertyFilters,
+        page: int,
+        per_page: int,
+    ) -> Page:
+        """One page of the tenant's properties, filters AND-combined (R1.1, R1.3, R1.4).
+
+        Ordered by `name` with `id` as the tiebreaker so paging cannot show a row twice or skip
+        one — two properties may share a name, and an unstable sort makes pagination lie.
+        `total` counts the same filtered set, not the whole table.
         """
         ...
 
