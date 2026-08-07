@@ -394,9 +394,12 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     # `pcibookingToken`, which the Beds24 payload actually carries — the anonymiser covers them
     # via its `token` needle, so the guard meant to backstop it was the narrower of the two.
     # That is the drift rule 13(c) records: the guard exists because the function was trusted.
-    from anonymise import PII_PLACEHOLDERS
+    from anonymise import CARD_NEEDLES
 
-    card_needles = PII_PLACEHOLDERS[0][0]
+    # The anonymiser's NAMED export, not `PII_PLACEHOLDERS[0][0]`. The positional read
+    # depended on an ordering invariant that only a comment asserted, so prepending a
+    # family there would have pointed this guard at the wrong needles, silently.
+    card_needles = CARD_NEEDLES
 
     raw = fixture_path.read_text(encoding="utf-8")
     assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
@@ -486,9 +489,12 @@ def test_the_fixture_guard_would_catch_a_payment_token():
     would have been committed with the suite green — and `pms-beds24-adapter` re-runs this
     capture on an account that HAS payments.
     """
-    from anonymise import PII_PLACEHOLDERS
+    from anonymise import CARD_NEEDLES
 
-    card_needles = PII_PLACEHOLDERS[0][0]
+    # The anonymiser's NAMED export, not `PII_PLACEHOLDERS[0][0]`. The positional read
+    # depended on an ordering invariant that only a comment asserted, so prepending a
+    # family there would have pointed this guard at the wrong needles, silently.
+    card_needles = CARD_NEEDLES
 
     for key in ("stripeToken", "pcibookingToken", "card_number", "cvv", "expiration_date"):
         assert any(n in key.lower() for n in card_needles), key

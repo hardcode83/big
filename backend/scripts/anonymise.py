@@ -69,6 +69,30 @@ _DATE_KEY = re.compile(r"^\d{4}-\d{2}-\d{2}$")
 # for a two-flat portfolio do not reach seven figures.
 IDENTIFYING_NUMBER_FLOOR = 1_000_000
 
+CARD_NEEDLES: tuple[str, ...] = (
+    "card",
+    "cvv",
+    "cvc",
+    "expiration",
+    "expiry",
+    "token",
+    "guarantee",
+)
+"""The card family, as a NAMED export rather than a position in the tuple below.
+
+Three consumers read it — this module, the runtime scrubber
+(`app/integrations/infrastructure/card_data.py`) and the committed-fixture guard in
+`test_channex_probe.py` — and before this constant they used **two different selectors**: one
+searched for the tuple containing `cvv`, the other took `PII_PLACEHOLDERS[0][0]` positionally.
+Nothing asserted the two resolved to the same thing, so a new payment family appended below
+(`iban`, `pan`, `sepa` — plausible the day a provider carries direct payments) would teach the
+anonymiser and leave the other two blind, with the whole suite green. Found by the security
+panel of `pms-beds24-adapter` section 2.
+
+The comment below still says card data comes first, and that ordering still matters for the
+needles-before-suffixes contract — but nothing now *depends* on the position.
+"""
+
 PII_PLACEHOLDERS: tuple[tuple[tuple[str, ...], str], ...] = (
     # **Card data, first in the list and it has to be.** Channex returns a `guarantee` object on
     # OTA bookings with `card_number`, `card_type`, `cvv`, `cardholder_name` and
@@ -79,7 +103,7 @@ PII_PLACEHOLDERS: tuple[tuple[tuple[str, ...], str], ...] = (
     #
     # `steering/security.md` rule 13 makes this non-negotiable for every provider, not just the
     # one it was measured on: PCI DSS forbids retaining the CVV, so scrubbing is not a courtesy.
-    (("card", "cvv", "cvc", "expiration", "expiry", "token", "guarantee"), "***card-data***"),
+    (CARD_NEEDLES, "***card-data***"),
     # `mail`, not `email`: Channex names the guest address `mail` inside `customer`, and a
     # needle of "email" misses it. The substring also covers `email`, so this is strictly the
     # wider of the two. Caught by the "no original value survives" assertion in

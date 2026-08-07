@@ -1,0 +1,16 @@
+{
+  "_anonymised": true,
+  "_substituted": [
+    "type"
+  ],
+  "payload": {
+    "success": true,
+    "type": "***scrubbed***",
+    "count": 0,
+    "pages": {
+      "nextPageExists": false,
+      "nextPageLink": null
+    },
+    "data": []
+  }
+}

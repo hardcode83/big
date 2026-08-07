@@ -7,12 +7,14 @@ the ones its documentation implies, and a synthetic fixture would have preserved
 No network (R2.5) — the HTTP layer is driven through `httpx.MockTransport`.
 """
 
+import json
 from datetime import UTC, datetime, timedelta, timezone
 from decimal import Decimal
 
 import httpx
 import pytest
 
+from app.integrations.infrastructure.card_data import CARD_DATA_REMOVED
 from app.integrations.infrastructure.channex.adapter import (
     MAX_REFERENCE_LENGTH,
     NO_REFERENCE,
@@ -73,9 +75,44 @@ def test_property_and_dates_map_from_the_real_field_names():
     assert dto.children == 0
 
 
-def test_raw_payload_keeps_the_element_untouched():
+def test_raw_payload_keeps_the_element_except_its_card_data():
+    """Rule 13 of `steering/security.md`, applied by `pms-beds24-adapter`.
+
+    This test used to assert `raw_payload == element`, pinning the provider's element *whole* —
+    `guarantee`, `card_number`, `cvv` and all. That satisfied the field's purpose (telling a
+    provider bug from ours) and violated rule 13(a), which requires cardholder data to be
+    discarded in the adapter rather than encrypted, because PCI DSS forbids retaining the CVV.
+
+    It was harmless only by omission: nothing reads `raw_payload` and no column stores it.
+    Rule 13(b) names it as the trap for the day something does.
+    """
     element = channex_booking(ota_name=BOOKING_COM)
-    assert to_reservation_dto(element).raw_payload == element
+
+    raw = to_reservation_dto(element).raw_payload
+
+    # Everything that is not card-shaped still travels verbatim.
+    assert raw["attributes"]["unique_id"] == element["attributes"]["unique_id"]
+    assert raw["attributes"]["arrival_date"] == element["attributes"]["arrival_date"]
+    # The card data does not.
+    assert raw["attributes"]["guarantee"] == CARD_DATA_REMOVED
+    assert "cvv" not in json.dumps(raw)
+
+
+def test_the_captured_booking_still_carries_the_guarantee_field():
+    """Guards the test above from going green because the field vanished from the payload.
+
+    MEASURED: **every** OTA booking arrives with a `guarantee` object
+    (`specs/pms-channex-staging.md`). Its **value** is `null` in the committed fixture, and that
+    is rule 13(c) working as intended — the anonymiser scrubs card data at capture time, so a
+    real `card_number` never reaches git. The key survives, which is what this asserts: if the
+    provider ever stopped sending it, the assertion above would pass while proving nothing.
+
+    The scrubber's behaviour on a *populated* guarantee object is covered in
+    `test_card_data.py`, against a reconstruction of the measured shape.
+    """
+    element = channex_booking(ota_name=BOOKING_COM)
+
+    assert "guarantee" in element["attributes"]
 
 
 def test_absent_provider_fields_become_none_not_invented_values():

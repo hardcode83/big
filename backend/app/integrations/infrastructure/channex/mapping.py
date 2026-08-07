@@ -16,6 +16,7 @@ from decimal import Decimal, InvalidOperation
 from typing import Any
 
 from app.integrations.domain.dtos import ReservationDTO
+from app.integrations.infrastructure.card_data import scrub_card_data
 
 # `ota_name` values Channex reports, mapped to our vocabulary. Anything absent falls to
 # `OTHER` rather than raising: `ReservationChannel.parse` rejects unknown values and the
@@ -92,9 +93,16 @@ def to_reservation_dto(element: dict[str, Any]) -> ReservationDTO:
         currency=(attributes.get("currency") or "EUR").upper(),
         status=_status(attributes.get("status")),
         special_requests=_text(attributes.get("notes")),
-        # The element untouched, as the DTO's docstring requires: when an import produces
-        # something unexpected, this is the only way to tell a provider bug from ours.
-        raw_payload=element,
+        # The element as the DTO's docstring requires — when an import produces something
+        # unexpected, this is the only way to tell a provider bug from ours — minus its
+        # cardholder data, which rule 13 of `steering/security.md` says is DISCARDED at the
+        # boundary rather than encrypted (PCI DSS forbids retaining the CVV).
+        #
+        # This used to pass `element` whole, `guarantee` included, and a test pinned it that
+        # way. It was safe only by omission: nothing reads `raw_payload` and no column stores
+        # it. Rule 13(b) names this exact field as the trap for the day a change persists it,
+        # and `pms-beds24-adapter` is where the omission became a scrubber.
+        raw_payload=scrub_card_data(element),
     )
 
 

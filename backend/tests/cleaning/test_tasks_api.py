@@ -157,7 +157,17 @@ async def _drive_to_completable(api, task_id, cleaner_user, manager_user):
 async def test_completion_with_a_future_booking_is_ready_for_next_guest(
     api, db_session, tenant_a, property_a, users_by_role_a, cleaner_a, task_a
 ):
-    """R5.4 — the destination is contextual, not fixed."""
+    """R5.4 — the destination is contextual, not fixed.
+
+    The property's timezone is pinned to UTC, like the `AWAITING_CHECKIN` sibling below and
+    for the same reason. With the fixture's `Europe/Madrid`, `NOW + 1 día` computed on the
+    **UTC** date lands on the property's *local* today whenever the suite runs late enough in
+    the UTC evening — the local clock is already the next day — so the resolver answered
+    `AWAITING_CHECKIN` and this failed. It passed for two days and broke on the third at the
+    date boundary, which is exactly how a clock-dependent test hides.
+    """
+    property_a.timezone = "UTC"
+    db_session.add(property_a)
     db_session.add(
         ReservationModel(
             tenant_id=tenant_a.id,

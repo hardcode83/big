@@ -84,9 +84,15 @@ class SyncReservationsFromPmsUseCase:
 
         Per tenant is what this used to do, and it presupposes a single adapter per run — the
         assumption R2.2 retires. Per property would be the easy replacement and is the one that
-        cannot be afforded: the measured Beds24 budget is 100 credits per 300 s **per account**
-        and a sync cycle costs 8, so a dozen properties exhaust a five-minute window in one pass
-        (`specs/pms-beds24-spike.md`), and the provider explicitly discourages real-time polling.
+        cannot be afforded: Beds24's quota is 100 credits per 300 s **per account**, so a dozen
+        properties exhaust a five-minute window in one pass, and the provider explicitly
+        discourages real-time polling.
+
+        **The per-cycle cost is deliberately not written here.** It lives in
+        `docs/beds24-spike.md`, generated from the committed measurement record. This docstring
+        said "8" and went stale when the measurement moved to 10; it was the eighth copy of a
+        number with one home, found by the feature-scale QA panel after two sweeps had already
+        missed it. The quota above is the provider's and does not move.
 
         Grouping scales with the number of DISTINCT providers a tenant has configured — two or
         three, bounded by definition — and since every evaluated provider authenticates with an

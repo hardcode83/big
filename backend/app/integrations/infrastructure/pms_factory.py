@@ -27,6 +27,8 @@ from app.integrations.domain.errors import (
     PMSMessagingUnsupportedError,
 )
 from app.integrations.domain.ports import PMSAdapter, PMSMessagingPort
+from app.integrations.infrastructure.beds24.adapter import Beds24Adapter
+from app.integrations.infrastructure.beds24.client import Beds24Client
 from app.integrations.infrastructure.channex.adapter import ChannexAdapter
 from app.integrations.infrastructure.channex.client import ChannexClient
 from app.integrations.infrastructure.mock_pms import MockPMSAdapter
@@ -96,7 +98,7 @@ class SqlAlchemyPMSAdapterFactory:
         # not absence of the feature.
         raise PmsUnavailableError(
             f"provider {provider.value} has a messaging API but no adapter implements "
-            f"PMSMessagingPort yet (arrives with pms-beds24-adapter)"
+            f"PMSMessagingPort yet (arrives with beds24-messaging-adapter)"
         )
 
     async def _build(
@@ -128,12 +130,22 @@ class SqlAlchemyPMSAdapterFactory:
             )
 
         # Beds24 and anything else whose credential is stored. The credential is resolved and
-        # DECRYPTED before failing, deliberately: it makes the whole chain — lookup, scope,
-        # decryption, audit — real and testable now instead of arriving untested with the
-        # adapter, and it means a credential stored under a key that has since changed surfaces
-        # here rather than on the day the adapter lands.
+        # DECRYPTED here, which is the single decryption point in production — the whole chain
+        # (lookup, scope, decryption, audit) runs before an adapter exists to use it.
         credential = await self._require_credential(property, provider, read_log)
-        decrypt(credential.secret)
+        secret = decrypt(credential.secret)
+
+        if provider is PMSProvider.BEDS24:
+            from app.core.config import settings
+
+            return Beds24Adapter(
+                Beds24Client(
+                    refresh_token=secret,
+                    max_pages=settings.beds24_max_pages,
+                    page_limit=settings.beds24_page_limit,
+                    timeout=settings.beds24_timeout_seconds,
+                )
+            )
 
         # `PmsUnavailableError`, not `MissingPmsCredentialError`: nothing is missing — the
         # credential is present and valid. What does not exist yet is the adapter, and this is
@@ -141,8 +153,7 @@ class SqlAlchemyPMSAdapterFactory:
         # exit code 3. Saying "missing credential" here would send an operator hunting for a
         # credential that is sitting right there.
         raise PmsUnavailableError(
-            f"no adapter implements provider {provider.value} yet "
-            f"(arrives with pms-beds24-adapter)"
+            f"no adapter implements provider {provider.value} yet"
         )
 
     async def _require_credential(
