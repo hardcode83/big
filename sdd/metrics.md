@@ -28,3 +28,4 @@
 | local-dev-network-hardening | review, run, archive | 56381 | 211468 | 148459332 | 121.4044 | 2026-08-05 | 2026-08-05 |
 | worktree-parallel-stack | archive | 11 | 4807 | 4041957 | 2.2191 | 2026-08-05 | 2026-08-05 |
 | pms-provider-resolution | new, design, tasks, run, review, archive | 521270 | 1226222 | 357557064 | 230.0402 | 2026-08-05 | 2026-08-06 |
+| pms-beds24-adapter | new, design, tasks, run, review | 267579 | 702860 | 192585889 | 140.6359 | 2026-08-05 | — |

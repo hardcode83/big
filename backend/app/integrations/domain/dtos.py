@@ -5,9 +5,15 @@ than `external_pms_id`: this is the provider's vocabulary, and the translation t
 happens in the ingest use case. Copying the PRD's shape is what makes the eventual
 `OctorateAdapter` a drop-in — if the DTO drifted, every adapter would need its own mapping.
 
-`raw_payload` keeps the untouched provider response. It is not decoration: when an import
-produces something unexpected, the only way to tell a provider bug from ours is the
-original body.
+`raw_payload` keeps the provider response **minus its cardholder data and its opaque free-text
+branches**. It is not decoration: when an import produces something unexpected, the only way to
+tell a provider bug from ours is the original body.
+
+It used to say "untouched", and that stopped being true in `pms-beds24-adapter`: rule 13(b) of
+`steering/security.md` names this field as *the* trap, because the day a change persists it,
+card data reaches the database and no other rule prevents it. Adapters now pass the element
+through `infrastructure/card_data.scrub_card_data` first. The docstring matters more than most
+— rule 13(b) quotes it as the reason the field invites keeping the response whole.
 """
 
 from dataclasses import dataclass, field

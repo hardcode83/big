@@ -7,12 +7,16 @@ for the seed.
 **This command is still the only way to run a sync, and that is deliberate.** An earlier
 version of this docstring promised that `celery-jobs` would schedule
 `SyncReservationsFromPmsUseCase` on Celery beat. It did not, and decided not to (its design
-D16): the cadence is a function of the provider's credit budget, that budget was measured
-against Beds24 (`specs/pms-beds24-spike.md`: 8 credits per cycle), and **the Beds24 adapter
-does not exist yet**. Scheduling a periodic sync today would either run `MockPMSAdapter` —
-verifying nothing — or drag provider configuration into the application, which `build_adapter`
-below avoids on purpose. The periodic sync arrives with `pms-beds24-adapter`, which owns the
-`PMSAdapterFactory`.
+D16): the cadence is a function of the provider's credit budget, measured against Beds24 and
+published in `docs/beds24-spike.md`.
+
+**What has changed, and this paragraph used to get wrong**: it said "the Beds24 adapter does
+not exist yet" and promised the periodic sync would arrive with `pms-beds24-adapter`. That
+change has landed — `PMSAdapterFactory` resolves a real `Beds24Adapter` per property (R5.1) —
+and it did **not** bring the scheduler with it, because D16's reasoning was never about the
+adapter's absence. Whoever schedules this owns the cadence decision on its own merits; the
+budget figure is in the doc above rather than restated here, so it cannot go stale in a
+comment the way this one did.
 
 Takes the tenant as an argument because a command has no token to derive it from. That is the
 one place in the system where a tenant id comes from outside a request, and it is deliberate:

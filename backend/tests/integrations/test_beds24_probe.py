@@ -429,7 +429,8 @@ def test_report_never_sums_a_null_cost_as_zero():
     rendered = beds24.report([_record("/bookings", "page-10", 5), _record("/properties", "all", None)])
 
     assert "no medido" in rendered
-    assert "1 de 2 peticiones no devolvieron" in rendered
+    # "del ciclo" since the report grew a second table: the count names which one it refers to.
+    assert "1 de 2 peticiones del ciclo no devolvieron" in rendered
     assert "cota superior" in rendered
     assert "**5** créditos" in rendered
 
@@ -876,3 +877,248 @@ def test_capture_records_the_cost_of_its_own_request(tmp_path, monkeypatch):
     assert record["endpoint"] == "/bookings/messages"
     assert record["shape"] == "capture-messages"
     assert record["x_request_cost"] == 1
+
+
+# --- `pms-beds24-adapter` section 1: the modification window --------------------------------
+#
+# Everything below belongs to the change that consumes this bench, not to the spike that built
+# it. Its R2 needs `list_reservations(since)` to see modifications and cancellations, which
+# Channex cannot do, and the bench is where that gets measured before any mapping is written.
+
+
+def test_a_date_shape_and_a_datetime_shape_render_differently():
+    """R2 — the format `modifiedFrom` accepts is unmeasured, so both spellings get a request."""
+    base = beds24.date(2026, 8, 6)
+
+    as_date = beds24.RequestShape("d", date_params={"modifiedFrom": -30}).resolved_params(base)
+    as_datetime = beds24.RequestShape(
+        "dt", datetime_params={"modifiedFrom": -30}
+    ).resolved_params(base)
+
+    assert as_date["modifiedFrom"] == "2026-07-07"
+    assert as_datetime["modifiedFrom"] == "2026-07-07T00:00:00Z"
+
+
+def test_the_pacing_clock_still_works():
+    """Regression: `from datetime import time` would shadow the `time` module this uses.
+
+    The module does `import time` for `time.sleep`/`time.monotonic`, so pulling `datetime.time`
+    into the namespace to build a timestamp broke pacing — silently, because nothing else in the
+    file touches it. Caught by the type checker, pinned here.
+    """
+    slept = []
+    bench = beds24.Beds24Probe(
+        refresh_token="t",
+        client=httpx.Client(transport=httpx.MockTransport(lambda r: httpx.Response(200))),
+        min_interval_seconds=5.0,
+        sleep=slept.append,
+        monotonic=lambda: 0.0,
+    )
+    bench._access_token = "a"
+
+    bench.request("GET", "/bookings")
+    bench.request("GET", "/bookings")
+
+    assert slept == [5.0]
+
+
+def test_the_catalogue_measures_the_modification_window_in_both_spellings():
+    """R2 — this is the shape the production adapter will actually issue."""
+    bookings = next(e for e in beds24.CATALOGUE if e.path == "/bookings")
+
+    modified = [s for s in bookings.shapes if "modifiedFrom" in s.resolved_params()]
+
+    assert len(modified) == 2
+    rendered = {s.resolved_params()["modifiedFrom"] for s in modified}
+    assert any("T" in value for value in rendered), "one shape must send an instant"
+    assert any("T" not in value for value in rendered), "one shape must send a plain date"
+
+
+def test_the_report_excludes_writes_and_captures_from_the_cycle_total():
+    """The defect that bites the moment R6 consolidates one JSONL.
+
+    `main` appends `capture` and `provoke` records to the same file the report reads, so summing
+    every record published the cost of creating a booking as part of a read-only sync cycle —
+    and derived a slower, plausible, wrong cadence from it.
+    """
+    records = [
+        {"endpoint": "/bookings", "shape": "page-10", "x_request_cost": 1, "status": 200},
+        {"endpoint": "/properties", "shape": "all", "x_request_cost": 1, "status": 200},
+        {"endpoint": "/bookings", "shape": "provoke-create", "x_request_cost": 5, "status": 201},
+        {"endpoint": "/bookings/messages", "shape": "capture-messages",
+         "x_request_cost": 3, "status": 200},
+    ]
+
+    rendered = beds24.report(records)
+
+    assert "**2** créditos" in rendered
+    assert "Fuera del ciclo de sync" in rendered
+    # The excluded rows are still published — they are the evidence for the write endpoints.
+    assert "provoke-create" in rendered
+    assert "capture-messages" in rendered
+
+
+def test_an_observer_that_fails_does_not_leave_a_booking_uncancelled():
+    """The cycle's last action is a CANCEL, so nothing may abort the loop early."""
+    actions = []
+
+    def handler(request):
+        actions.append(json.loads(request.content)[0])
+        return httpx.Response(201, json=[{"success": True, "new": {"id": 90923575}}])
+
+    def observer(action, booking_ref):
+        raise RuntimeError("boom")
+
+    beds24.provoke(_bench(handler), room_id="713992", observer=observer)
+
+    assert [a.get("status") for a in actions][-1] == "cancelled"
+
+
+def test_the_observer_contributes_its_records_to_the_log():
+    def handler(request):
+        return httpx.Response(201, json=[{"success": True, "new": {"id": 90923575}}])
+
+    records = beds24.provoke(
+        _bench(handler),
+        room_id="713992",
+        observer=lambda action, ref: [{"shape": f"observed-{action}"}],
+    )
+
+    assert [r["shape"] for r in records if "observed" in r.get("shape", "")] == [
+        "observed-create",
+        "observed-modify",
+        "observed-cancel",
+    ]
+
+
+def _window_handler(*, reject_date_form=False, listing_ids=(90923575,), capture_fails=False):
+    def handler(request):
+        if request.method == "POST":
+            return httpx.Response(201, json=[{"success": True, "new": {"id": 90923575}}])
+        sent = request.url.params.get("modifiedFrom")
+        if sent is None:
+            # A fixture capture: narrowed by `id`, no window filter.
+            if capture_fails:
+                return httpx.Response(500)
+            return httpx.Response(200, json={"success": True, "data": []})
+        if reject_date_form and "T" not in sent:
+            return httpx.Response(400, json={"success": False, "error": "invalid format"})
+        return httpx.Response(
+            200,
+            json={"success": True, "data": [{"id": i} for i in listing_ids]},
+            headers={"X-Request-Cost": "1"},
+        )
+
+    return handler
+
+
+def test_the_window_check_records_whether_the_booking_is_visible(monkeypatch, tmp_path):
+    """R2.2 — the evidence that Beds24 does not inherit the Channex limitation."""
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+
+    records = beds24.verify_window(_bench(_window_handler()), room_id="713992")
+
+    checks = [r for r in records if "booking_visible" in r]
+    assert [r["shape"] for r in checks] == [
+        "window-after-create-date",
+        "window-after-modify-date",
+        "window-after-cancel-date",
+    ]
+    assert all(r["booking_visible"] is True for r in checks)
+
+
+def test_the_window_check_falls_back_to_the_datetime_spelling(monkeypatch, tmp_path):
+    """Retrying is free — MEASURED: a rejected request consumes no credit."""
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+
+    records = beds24.verify_window(
+        _bench(_window_handler(reject_date_form=True)), room_id="713992"
+    )
+
+    checks = [r for r in records if "booking_visible" in r]
+    # The first action pays for the rejected spelling; afterwards the accepted one is reused.
+    assert checks[0]["shape"] == "window-after-create-date"
+    assert checks[0]["status"] == 400
+    assert checks[1]["shape"] == "window-after-create-datetime"
+    assert checks[1]["modified_from_format"] == "datetime"
+    assert [r["shape"] for r in checks[2:]] == [
+        "window-after-modify-datetime",
+        "window-after-cancel-datetime",
+    ]
+
+
+def test_an_invisible_booking_is_recorded_rather_than_raised(monkeypatch, tmp_path):
+    """Absence after `cancel` is a FINDING — it means the adapter needs a status filter.
+
+    A script that raised here would destroy the measurement it exists to collect.
+    """
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+
+    records = beds24.verify_window(
+        _bench(_window_handler(listing_ids=())), room_id="713992"
+    )
+
+    assert all(r["booking_visible"] is False for r in records if "booking_visible" in r)
+
+
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(500),
+        httpx.Response(200, content=b"not json"),
+        httpx.Response(200, json={"data": "not a list"}),
+    ],
+)
+def test_an_unanswerable_visibility_question_is_none_not_false(response):
+    """"The provider said no" and "we could not tell" lead to opposite conclusions."""
+    assert beds24._contains_booking(response, "90923575") is None
+
+
+def test_the_window_run_captures_the_modified_and_cancelled_fixtures(monkeypatch, tmp_path):
+    """The mapping has no other way to see a `cancelTime` or a non-confirmed status."""
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+
+    beds24.verify_window(_bench(_window_handler()), room_id="713992")
+
+    assert (tmp_path / "bookings_modified.json").exists()
+    assert (tmp_path / "bookings_cancelled.json").exists()
+    assert not (tmp_path / "bookings_created.json").exists()
+
+
+def test_a_failed_fixture_capture_does_not_cost_the_measurement(monkeypatch, tmp_path):
+    """The visibility rows are what the run paid credits for; a fixture can be retaken.
+
+    `provoke` only logs what the observer RETURNS, so an exception thrown after the rows were
+    collected discarded a measurement that had already been made.
+    """
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+
+    records = beds24.verify_window(
+        _bench(_window_handler(capture_fails=True)), room_id="713992"
+    )
+
+    checks = [r for r in records if "booking_visible" in r]
+    assert [r["shape"] for r in checks] == [
+        "window-after-create-date",
+        "window-after-modify-date",
+        "window-after-cancel-date",
+    ]
+
+
+def test_capture_narrows_the_request_when_given_params(monkeypatch, tmp_path):
+    monkeypatch.setattr(beds24, "FIXTURE_DIR", tmp_path)
+    monkeypatch.setattr(beds24, "_CAPTURE_COSTS", [])
+    seen = {}
+
+    def handler(request):
+        seen["id"] = request.url.params.get("id")
+        return httpx.Response(200, json={"data": []})
+
+    beds24.capture("one", "/bookings", bench=_bench(handler), params={"id": "90923575"})
+
+    assert seen["id"] == "90923575"

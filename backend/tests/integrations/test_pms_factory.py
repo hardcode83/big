@@ -20,6 +20,7 @@ from app.integrations.domain.errors import (
     PmsUnavailableError,
     PMSMessagingUnsupportedError,
 )
+from app.integrations.infrastructure.beds24.adapter import Beds24Adapter
 from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE, MockPMSAdapter
 from app.integrations.infrastructure.pms_factory import (
     DEFAULT_PROVIDER,
@@ -79,14 +80,17 @@ async def test_a_provider_needing_a_credential_fails_loudly_when_there_is_none(
 
 
 @pytest.mark.asyncio
-async def test_a_stored_credential_resolves_and_then_reports_the_missing_adapter(
+async def test_a_stored_credential_resolves_to_the_real_beds24_adapter(
     db_session, tenant_a, property_a
 ) -> None:
-    """`PmsUnavailableError`, not `MissingPmsCredentialError`: nothing is missing.
+    """A stored credential now resolves to a REAL adapter (`pms-beds24-adapter` R5.1).
 
-    The credential is present and decrypts; what does not exist yet is the Beds24 adapter. Saying
-    "missing credential" would send an operator hunting for something sitting right there — the
-    same distinction the architecture panel caught in `messaging_for`.
+    This test used to assert the opposite — that the chain ran to the end and then raised
+    `PmsUnavailableError` because no adapter implemented Beds24. That hole is what this change
+    fills, so the assertion is inverted rather than deleted: what it still proves is the part
+    that matters and that no other test covers, namely that resolution goes all the way through
+    lookup, scope, decryption and audit, and that the decrypted secret does not escape into the
+    object's repr.
     """
     await SqlAlchemyPropertyRepository(db_session).set_pms_provider(
         tenant_a.id, property_a.id, PMSProvider.BEDS24
@@ -103,12 +107,15 @@ async def test_a_stored_credential_resolves_and_then_reports_the_missing_adapter
     )
     await db_session.flush()
     entity = await _entity(db_session, tenant_a, property_a)
+    read_log = CredentialReadLog()
 
-    with pytest.raises(PmsUnavailableError) as excinfo:
-        await _factory(db_session).reservations_for(entity, read_log=CredentialReadLog())
+    adapter = await _factory(db_session).reservations_for(entity, read_log=read_log)
 
-    assert "pms-beds24-adapter" in str(excinfo.value)
-    assert "a-real-looking-refresh-token" not in str(excinfo.value)
+    assert isinstance(adapter, Beds24Adapter)
+    # The decryption happened and was recorded — the audit chain rule 3(b) requires.
+    assert len(read_log.credential_ids) == 1
+    # And the decrypted secret is not one `logger.debug` away from a log file.
+    assert "a-real-looking-refresh-token" not in repr(adapter._client)
 
 
 @pytest.mark.asyncio
@@ -203,15 +210,14 @@ async def test_the_read_log_deduplicates_by_credential_id(
     read_log = CredentialReadLog()
     factory = _factory(db_session)
     for _ in range(4):
-        with pytest.raises(PmsUnavailableError):
-            await factory.reservations_for(entity, read_log=read_log)
+        await factory.reservations_for(entity, read_log=read_log)
 
     assert read_log.credential_ids == {credential.id}
 
 
 @pytest.mark.asyncio
 async def test_the_run_writes_one_audit_row_naming_the_credential(
-    db_session, tenant_a, property_a
+    db_session, tenant_a, property_a, monkeypatch
 ) -> None:
     """R4.2 on the path that actually reaches a credential — which is the one that had no row.
 
@@ -222,8 +228,30 @@ async def test_the_run_writes_one_audit_row_naming_the_credential(
 
     Nothing here pre-seeds the read log: the credential is stored, the sync resolves it for real,
     and the row must exist because the read did.
+
+    **The transport is stubbed, and that is not tidiness** (QA panel of sections 3-5). This test
+    predates `pms-beds24-adapter`: it relied on the factory raising "no adapter yet" *before* any
+    HTTP existed. R5.1 removed that guard, so the use case started building a real
+    `Beds24Client` with no transport override and **calling the production Beds24 API** — it
+    stayed green only because a `401` folds into `PmsUnavailableError`, which the assertion
+    below accepts. Coincidentally green, not deterministically green, and dependent on the
+    sandbox having internet egress. Design D12 and `steering/testing.md` both forbid it.
     """
     from datetime import UTC, datetime
+
+    import httpx
+
+    from app.integrations.infrastructure import pms_factory as pms_factory_module
+    from app.integrations.infrastructure.beds24.client import Beds24Client
+
+    def _offline_client(**kwargs) -> Beds24Client:
+        # 500 rather than an empty page, so the "reported, not raised" assertion below keeps
+        # exercising a provider failure — which is what it was written for.
+        return Beds24Client(
+            **kwargs, transport=httpx.MockTransport(lambda request: httpx.Response(500))
+        )
+
+    monkeypatch.setattr(pms_factory_module, "Beds24Client", _offline_client)
 
     from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
     from app.core.unit_of_work import SqlAlchemyUnitOfWork
@@ -395,8 +423,7 @@ async def test_one_credential_shared_by_several_properties_is_recorded_once(
     factory = _factory(db_session)
     for prop in (property_a, second):
         entity = await repository.get(tenant_a.id, prop.id)
-        with pytest.raises(PmsUnavailableError):
-            await factory.reservations_for(entity, read_log=read_log)
+        await factory.reservations_for(entity, read_log=read_log)
 
     assert read_log.credential_ids == {credential.id}, "one ACCOUNT credential, one id"
 

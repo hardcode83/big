@@ -140,12 +140,31 @@ class RequestShape:
     label: str
     params: dict[str, Any] = field(default_factory=dict)
     date_params: dict[str, int] = field(default_factory=dict)
+    datetime_params: dict[str, int] = field(default_factory=dict)
+    """Like `date_params`, but rendered as a full UTC instant (`…T00:00:00Z`).
+
+    Exists because the format `modifiedFrom` accepts is **unmeasured** (`pms-beds24-adapter`
+    R2, design D3). `arrivalFrom` was measured to require `YYYY-MM-DD` and to reject an
+    ISO-8601 duration, but a *modification* filter is a timestamp filter in most APIs, so both
+    spellings are worth one request each — which is also what R1.2 asks of every endpoint. Two
+    shapes that differ only in format is how the answer arrives as data instead of as a guess.
+    """
 
     def resolved_params(self, today: date | None = None) -> dict[str, Any]:
         base = today or _utc_now().date()
         resolved = dict(self.params)
         for name, offset in self.date_params.items():
             resolved[name] = (base + timedelta(days=offset)).isoformat()
+        for name, offset in self.datetime_params.items():
+            # Built from the date parts rather than `datetime.combine(..., time.min)`: this
+            # module already does `import time` for its pacing clock, so pulling
+            # `datetime.time` into the namespace would shadow it and break `time.sleep`.
+            moment = base + timedelta(days=offset)
+            resolved[name] = (
+                datetime(moment.year, moment.month, moment.day, tzinfo=timezone.utc)
+                .isoformat()
+                .replace("+00:00", "Z")
+            )
         return resolved
 
 
@@ -173,6 +192,26 @@ CATALOGUE: tuple[CatalogueEntry, ...] = (
             RequestShape("page-100", {"limit": 100}),
             RequestShape("window-1d", {"limit": 10}, {"arrivalFrom": 0, "arrivalTo": 1}),
             RequestShape("window-90d", {"limit": 10}, {"arrivalFrom": 0, "arrivalTo": 90}),
+            # UNMEASURED, and this is the shape `pms-beds24-adapter` actually depends on
+            # (its R2, design D3). The provider's wiki documents `modifiedFrom`/`modifiedTo`
+            # next to the arrival filters; nothing here has confirmed it, and this project
+            # does not design against provider documentation — `x-requestcost` was guessed
+            # from docs and matched nothing, and four rules of the Channex mapping contradict
+            # what its docs implied.
+            #
+            # What the answer decides: `ChannexAdapter` can only ask for reservations
+            # *created* since a moment, so it never sees a modification or a cancellation of
+            # an older one. If `modifiedFrom` works, Beds24 does not inherit that limitation
+            # and a production sync becomes possible. If it does not, R2.1 has to be
+            # renegotiated rather than quietly downgraded.
+            #
+            # Two spellings on purpose: `arrivalFrom` was MEASURED to require `YYYY-MM-DD` and
+            # to reject an ISO-8601 duration, but a modification filter is a timestamp filter
+            # in most APIs. A 400 on one and a 200 on the other IS the measurement.
+            RequestShape("modified-30d-date", {"limit": 10}, {"modifiedFrom": -30}),
+            RequestShape(
+                "modified-30d-datetime", {"limit": 10}, datetime_params={"modifiedFrom": -30}
+            ),
         ),
     ),
     CatalogueEntry(
@@ -202,13 +241,14 @@ CAPTURES: dict[str, str] = {
     "messages": "/bookings/messages",
 }
 
-SUBCOMMANDS = ("probe", "capture", "report", "provoke", "webhook")
+SUBCOMMANDS = ("probe", "capture", "report", "provoke", "webhook", "window")
 
 # The subcommands that WRITE, and what they do — used to refuse without `--confirm-writes`
 # before the credential is even read. Everything else in this script is a read.
 WRITING_SUBCOMMANDS = {
     "provoke": "it creates, modifies and cancels a booking",
     "webhook": "it changes where this property sends its booking data",
+    "window": "it creates, modifies and cancels a booking to measure the modification window",
 }
 
 # CONFIRMED 2026-08-04 (step 0): `POST /bookings` is the documented write endpoint, and the
@@ -637,7 +677,12 @@ def _connected_channels(payload: Any) -> tuple[bool, list[Any]]:
     return recognised, found
 
 
-def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
+def provoke(
+    bench: Beds24Probe,
+    *,
+    room_id: str,
+    observer: Callable[[str, str | None], list[dict[str, Any]]] | None = None,
+) -> list[dict[str, Any]]:
     """Cause three booking events and record each with its `booking_ref` (R2.2, R2.3, D11).
 
     This exists because R2.2's fallback is worded as *"el registro del sondeo **que provocó el
@@ -653,6 +698,17 @@ def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
     ASSUMPTION: the request bodies below follow ADR 0006's reading of the V2 write API and are
     confirmed in step 0 of the runbook. `provoke` is the only part of this script that WRITES;
     everything else is a read.
+
+    `observer` runs after each *successful* action, receiving the action and the booking id, and
+    contributes its own records to the log. It exists so `verify_window` can look at the
+    provider between the three writes — which is the only moment a modification and a
+    cancellation are observable — **without a second write path**. Creating bookings from two
+    places is how a run ends up leaving one behind, so there is exactly one, and callers that
+    need to watch hook into it.
+
+    **An observer that raises does not abort the cycle.** The steps after a `create` are a
+    modify and a CANCEL, so anything that stops the loop early leaves a confirmed booking on
+    the account. The observer's failure is reported and the writes continue.
     """
     records: list[dict[str, Any]] = []
     booking_ref: str | None = None
@@ -733,6 +789,19 @@ def provoke(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
                 booking_ref=booking_ref,
             )
         )
+
+        if observer is not None:
+            try:
+                records.extend(observer(action, booking_ref))
+            except Exception as error:  # noqa: BLE001 - an observer must never own the cycle
+                # The class name only. An observer failure can carry provider text, and this
+                # goes to a terminal the operator may paste somewhere.
+                print(
+                    f"beds24-probe: the observer failed after {action} "
+                    f"({type(error).__name__}); the write cycle continues so the booking still "
+                    "gets cancelled.",
+                    file=sys.stderr,
+                )
     return records
 
 
@@ -852,19 +921,157 @@ def set_webhook(bench: Beds24Probe, *, property_id: Any, url: str, secret: str) 
     )
 
 
+# The two spellings of an instant `modifiedFrom` might accept. Tried in this order, and the one
+# that answers is recorded — see `verify_window`. Ordered date-first because the only measured
+# date parameter of this API (`arrivalFrom`) requires exactly that form.
+MODIFIED_FROM_FORMATS = ("date", "datetime")
+
+# Duplicated from `app/integrations/infrastructure/beds24/adapter.py` on purpose: `scripts/` is
+# standalone and excluded from the image, so it cannot import from `app/`. MEASURED 2026-08-06 —
+# the six valid values are these five plus `black`, the vocabulary is validated server-side
+# (`status=bogus` -> 400), and the default listing omits cancellations entirely.
+RESERVATION_STATUSES = ("new", "request", "confirmed", "cancelled", "inquiry")
+
+
+def _modified_from(moment: datetime, form: str) -> str:
+    if form == "date":
+        return moment.date().isoformat()
+    return moment.isoformat().replace("+00:00", "Z")
+
+
+def verify_window(
+    bench: Beds24Probe, *, room_id: str, capture_fixtures: bool = True
+) -> list[dict[str, Any]]:
+    """Demonstrate that `modifiedFrom` sees a modification and a cancellation (R2.2).
+
+    This is the measurement that separates Beds24 from Channex. `ChannexAdapter` can only ask
+    for reservations *created* since a moment (`channex/adapter.py`), so a booking modified or
+    cancelled after that moment is invisible to it — fine for validating the backend, useless
+    as a production sync. Beds24's payload carries `modifiedTime` and `cancelTime` and its wiki
+    documents `modifiedFrom`, so the limitation should not carry over. **Should** is not
+    evidence, and this produces the evidence.
+
+    How it works: take `t0` before writing anything, then run the one write cycle this script
+    has (`provoke`: create -> modify -> cancel) and after each action ask
+    `GET /bookings?modifiedFrom=t0` whether the booking is there. Three checks, one row each.
+
+    **It records rather than asserts.** Whether a cancelled booking still appears in
+    `/bookings` at all is itself unmeasured — the provider may exclude cancellations unless
+    asked — and a script that raised on absence would destroy the finding it exists to collect.
+    An absent booking after `cancel` is a result: it means the adapter needs an explicit status
+    filter, and `pms-beds24-adapter` design D10 is where that lands.
+
+    The date format is discovered the same way: the date spelling is tried first and, if the
+    provider rejects it, the datetime spelling follows. Retrying costs nothing — MEASURED, a
+    rejected request consumes no credit — and which one answered is written into the log.
+    """
+    t0 = _utc_now()
+    accepted_format: str | None = None
+
+    def observe(action: str, booking_ref: str | None) -> list[dict[str, Any]]:
+        nonlocal accepted_format
+        rows: list[dict[str, Any]] = []
+        for form in ([accepted_format] if accepted_format else MODIFIED_FROM_FORMATS):
+            response = bench.request(
+                "GET",
+                BOOKINGS_WRITE_PATH,
+                {
+                    "modifiedFrom": _modified_from(t0, form),
+                    # **The same enumeration the production adapter sends.** MEASURED
+                    # 2026-08-06: the first run of this verification omitted `status` and
+                    # reported the booking as invisible after `cancel` — because the default
+                    # listing excludes cancellations, not because the window failed. A bench
+                    # that measures a different request from the one the product makes answers
+                    # a question nobody asked, so it now mirrors
+                    # `beds24/adapter.RESERVATION_STATUSES`.
+                    "status": list(RESERVATION_STATUSES),
+                    "limit": 100,
+                },
+            )
+            record = build_cost_record(
+                endpoint=BOOKINGS_WRITE_PATH,
+                method="GET",
+                shape=f"window-after-{action}-{form}",
+                status=response.status_code,
+                headers=response.headers,
+                booking_ref=booking_ref,
+            )
+            record["modified_from_format"] = form
+            record["booking_visible"] = _contains_booking(response, booking_ref)
+            rows.append(record)
+            if response.status_code < 300:
+                accepted_format = form
+                break
+        if capture_fixtures and action in ("modify", "cancel") and booking_ref:
+            # `bookings_modified` / `bookings_cancelled`. The mapping has no other way to see a
+            # `cancelTime` or a status other than `confirmed`, and inventing those fixtures by
+            # editing the captured one would be testing our own guess about the provider.
+            #
+            # **Guarded separately from everything above**, because the two have different
+            # worth: the visibility rows ARE the measurement this run exists for, and a fixture
+            # is a convenience that can be captured again later. Letting a capture failure
+            # propagate discarded the rows already collected in this same call — `provoke`
+            # only extends the log with what the observer RETURNS, so an exception threw away
+            # a measurement that had already been paid for in credits.
+            try:
+                capture(
+                    f"bookings_{'modified' if action == 'modify' else 'cancelled'}",
+                    BOOKINGS_WRITE_PATH,
+                    bench=bench,
+                    params={"id": booking_ref},
+                )
+            except Exception as error:  # noqa: BLE001 - the class name only, never provider text
+                print(
+                    f"beds24-probe: could not capture the {action} fixture "
+                    f"({type(error).__name__}); the window measurement is unaffected.",
+                    file=sys.stderr,
+                )
+        return rows
+
+    return provoke(bench, room_id=room_id, observer=observe)
+
+
+def _contains_booking(response, booking_ref: str | None) -> bool | None:
+    """Whether the listing carries this booking id. `None` when the question is unanswerable.
+
+    `None` rather than `False` for a non-200, an unparseable body or a missing id: "the
+    provider said no" and "we could not tell" lead to opposite conclusions about whether the
+    modification window works, and this is the whole output of the measurement.
+    """
+    if booking_ref is None or response.status_code >= 300:
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    rows = payload.get("data") if isinstance(payload, dict) else None
+    if not isinstance(rows, list):
+        return None
+    return any(
+        str(row.get("id")) == str(booking_ref) for row in rows if isinstance(row, dict)
+    )
+
+
 # Cost records produced by `capture`, drained by `main` into the same JSONL the report reads.
 _CAPTURE_COSTS: list[dict[str, Any]] = []
 
 
-def capture(name: str, path: str, *, bench: Beds24Probe) -> Path:
+def capture(
+    name: str, path: str, *, bench: Beds24Probe, params: dict[str, Any] | None = None
+) -> Path:
     """Fetch one payload and write it anonymised (R3.1, R3.2).
 
     Anonymisation happens **here, at capture time**, not in a later pass: a fixture that has to
     be scrubbed by hand is a fixture that gets committed with real data the day somebody is in
     a hurry. Card-shaped values never reach disk at all (R3.4, `steering/security.md` rule 13)
     — PCI DSS forbids retaining the CVV, so scrubbing is not a courtesy.
+
+    `params` narrows the request — `verify_window` uses it to capture one specific booking in
+    its modified and cancelled states, which are the two shapes `pms-beds24-adapter`'s mapping
+    needs and the account cannot otherwise produce. `name` names the fixture file, so the same
+    path can yield several fixtures.
     """
-    response = bench.request("GET", path)
+    response = bench.request("GET", path, params or {})
     response.raise_for_status()
     payload = response.json()
     # Record the cost of the capture itself. It did not before, which meant the only code path
@@ -933,16 +1140,45 @@ def _substituted_keys(original: Any, clean: Any, prefix: str = "") -> set[str]:
     return changed
 
 
+def _cycle_shapes(catalogue: tuple[CatalogueEntry, ...] = CATALOGUE) -> set[tuple[str, str]]:
+    """The `(endpoint, shape)` pairs that make up ONE sync cycle.
+
+    Derived from the catalogue rather than hardcoded, so adding a shape to `CATALOGUE` and
+    forgetting this set cannot happen.
+    """
+    return {(entry.path, shape.label) for entry in catalogue for shape in entry.shapes}
+
+
 def report(records: list[dict[str, Any]]) -> str:
     """Render the measurements as the table `docs/beds24-spike.md` publishes (D5, R4.4).
 
     Generated rather than transcribed, so the published number and the recorded data cannot
     drift apart. A `null` cost is reported as `no medido`, never summed as zero.
+
+    **Only catalogue shapes count toward the cycle, and that is a correction rather than a
+    refinement.** Every earlier version summed *every record in the file*, and `main` appends
+    `capture`, `provoke` and `webhook` records to the same JSONL the report reads. So the
+    moment anyone consolidated one file — which is exactly what `pms-beds24-adapter` R6 asks
+    for, to stop publishing five hand-transcribed rows — the report would have added the cost
+    of creating, modifying and cancelling a booking to the cost of a *read-only* sync cycle and
+    published the sum as "un ciclo completo", deriving a slower cadence from it. The published
+    figure would have been wrong in the direction nobody checks: too conservative, therefore
+    plausible.
+
+    It did not bite before because the committed record happens to hold one `probe` run and
+    nothing else. That is circumstance, not design.
+
+    The non-cycle rows are still printed — they are the evidence R1.5 demands for the write
+    endpoints — just under their own heading and outside the total.
     """
+    cycle_shapes = _cycle_shapes()
+    cycle = [r for r in records if (r.get("endpoint"), r.get("shape")) in cycle_shapes]
+    other = [r for r in records if (r.get("endpoint"), r.get("shape")) not in cycle_shapes]
+
     lines = ["| Endpoint | Forma | Coste | Estado |", "|---|---|---|---|"]
     total = 0
     unknown = 0
-    for record in records:
+    for record in cycle:
         cost = record.get("x_request_cost")
         if cost is None:
             unknown += 1
@@ -954,10 +1190,26 @@ def report(records: list[dict[str, Any]]) -> str:
             f"| `{record['endpoint']}` | {record['shape']} | {shown} | {record['status']} |"
         )
 
+    if other:
+        lines.append("")
+        lines.append(
+            "**Fuera del ciclo de sync** — escrituras y capturas, medidas y con registro, pero "
+            "no parte de lo que un sync periódico ejecuta, así que **no suman al total**:"
+        )
+        lines.append("")
+        lines.append("| Endpoint | Forma | Coste | Estado |")
+        lines.append("|---|---|---|---|")
+        for record in other:
+            cost = record.get("x_request_cost")
+            shown = "no medido" if cost is None else str(cost)
+            lines.append(
+                f"| `{record['endpoint']}` | {record['shape']} | {shown} | {record['status']} |"
+            )
+
     lines.append("")
     if unknown:
         lines.append(
-            f"**{unknown} de {len(records)} peticiones no devolvieron `X-RequestCost`.** "
+            f"**{unknown} de {len(cycle)} peticiones del ciclo no devolvieron `X-RequestCost`.** "
             "El coste del ciclo es un mínimo, no un total, y la cadencia derivada de él es "
             "optimista: trátala como cota superior hasta medir las que faltan."
         )
@@ -1090,20 +1342,33 @@ def main(argv: list[str] | None = None) -> int:
         print(f"beds24-probe: webhook {'cleared' if clearing else 'set to ' + url}")
         return 0
 
-    if subcommand == "provoke":
+    if subcommand in ("provoke", "window"):
         room_id = _option(args, "--room=", "")
         if not room_id:
             raise SystemExit(
-                "beds24-probe: provoke needs --room=<room id>. It is the id of a ROOM, not of a "
-                "property: Beds24 models property -> roomTypes -> units, and a booking is "
+                f"beds24-probe: {subcommand} needs --room=<room id>. It is the id of a ROOM, not "
+                "of a property: Beds24 models property -> roomTypes -> units, and a booking is "
                 "written against a roomId. `GET /properties?includeAllRooms=true` lists them."
             )
         assert_account_is_a_measurement_account(bench, room_id=room_id)
-        records = provoke(bench, room_id=room_id)
+        if subcommand == "window":
+            records = verify_window(bench, room_id=room_id)
+        else:
+            records = provoke(bench, room_id=room_id)
         existing = read_records(out_path) if out_path.exists() else []
-        written = write_records(existing + records, out_path)
+        written = write_records(existing + records + _CAPTURE_COSTS, out_path)
         refs = sorted({r["booking_ref"] for r in records if r["booking_ref"]})
         print(f"beds24-probe: {len(records)} events (booking_ref={refs or 'none'}) -> {written}")
+        if subcommand == "window":
+            for record in records:
+                if "booking_visible" in record:
+                    seen = {True: "SÍ", False: "NO", None: "no se pudo saber"}[
+                        record["booking_visible"]
+                    ]
+                    print(
+                        f"  {record['shape']}: modifiedFrom la ve -> {seen} "
+                        f"(HTTP {record['status']})"
+                    )
         return 0
 
     requested = [a for a in args if a in CAPTURES] or list(CAPTURES)

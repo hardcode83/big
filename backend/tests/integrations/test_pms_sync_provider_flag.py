@@ -11,6 +11,8 @@ from app.integrations.cli import pms_sync
 from app.integrations.domain.errors import PmsUnavailableError
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.domain.ports import PMSAdapter, PMSAdapterFactory, PMSMessagingPort
+from app.integrations.infrastructure.beds24.adapter import Beds24Adapter
+from app.integrations.infrastructure.beds24.client import Beds24Client
 from app.integrations.infrastructure.channex.client import ChannexClient
 from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFactory
 from app.integrations.infrastructure.channex.adapter import ChannexAdapter
@@ -25,6 +27,10 @@ _A_CLIENT = ChannexClient(
     base_url="https://staging.channex.io/api/v1",
     max_pages=1,
     page_limit=1,
+)
+
+_A_BEDS24_CLIENT = Beds24Client(
+    refresh_token="a-real-looking-refresh-token", max_pages=1, page_limit=1
 )
 
 
@@ -87,7 +93,11 @@ def test_the_port_surface_is_read_from_the_port_not_hardcoded():
         name for name in getattr(PMSAdapter, "__annotations__", {}) if not name.startswith("_")
     ] == []
 
-    for adapter in (MockPMSAdapter(), ChannexAdapter(_A_CLIENT)):
+    for adapter in (
+        MockPMSAdapter(),
+        ChannexAdapter(_A_CLIENT),
+        Beds24Adapter(_A_BEDS24_CLIENT),
+    ):
         for name in port_methods:
             assert callable(getattr(adapter, name))
 
@@ -102,11 +112,16 @@ def test_neither_adapter_claims_the_messaging_port():
     a test would change production code to fit the test.
     """
     assert {name for name in vars(PMSMessagingPort) if not name.startswith("_")} == set(), (
-        "PMSMessagingPort is empty in this change on purpose; its methods arrive with "
-        "pms-beds24-adapter"
+        "PMSMessagingPort is still empty on purpose; its methods arrive with "
+        "beds24-messaging-adapter, which is where a provider with a real messaging API "
+        "can be validated against one"
     )
 
-    for adapter in (MockPMSAdapter(), ChannexAdapter(_A_CLIENT)):
+    for adapter in (
+        MockPMSAdapter(),
+        ChannexAdapter(_A_CLIENT),
+        Beds24Adapter(_A_BEDS24_CLIENT),
+    ):
         for name in ("get_messages", "send_message"):
             assert not hasattr(adapter, name)
 
