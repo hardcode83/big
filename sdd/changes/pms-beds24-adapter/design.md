@@ -96,6 +96,16 @@ Esto convierte la regla 13 de «se cumple por omisión» a «se cumple por const
 
 Rejected: allowlist fail-closed sobre `raw_payload` — mata su propósito; borrar `raw_payload` del DTO — pierde el único modo de distinguir un bug del proveedor de uno nuestro, y es una decisión que pertenece a quien lo persista; dejar Channex como está — la regla 13 no es por proveedor. *(Confirmado en el gate — OQ1.)*
 
+**Frontera de la regla 13, decidida el 2026-08-06 (Jose), tras el panel de seguridad a escala de feature.** El scrubber cubre `raw_payload` y **no** el texto libre que un mapeo promueve a un campo del DTO que sí se persiste — hoy `special_requests`, que ambos mapeos llenan (`comments` en Beds24, `notes` en Channex) y que viaja a `reservations.special_requests` y a la respuesta de la API.
+
+Se declara **fuera de la frontera de la regla 13**, y el porqué importa más que la conclusión:
+
+1. **No hay ninguna observación medida** de datos de tarjeta en `comments`/`notes` en este repositorio. La regla 13 es una regla dirigida por medición —nació de un `guarantee` medido en Channex— y su único caso medido en este change fue `raw_message`, que sí está cerrado. Extenderla a texto tecleado por un huésped sería diseñar contra una hipótesis.
+2. **Detectar un PAN dentro de texto libre exige Luhn más rachas de dígitos**, con falsos positivos reales sobre una referencia de reserva de 16 dígitos — en un campo que el personal de limpieza lee para hacer su trabajo. El coste de un falso positivo lo paga la operación; el del falso negativo, hoy, es hipotético.
+3. **Queda escrito en vez de omitido**, que es exactamente la diferencia que la regla 13(b) señala: el hueco que aquella regla existe para cerrar no era un descuido de código, era una suposición de diseño que nadie había enunciado.
+
+**Lo que esta decisión NO concede, y es lo que hay que releer antes de heredarla**: se acota a un sync de **solo lectura** contra una cuenta que aprovisionamos nosotros. Se vuelve **bloqueante** en cuanto entre `reservations-webhooks` o `beds24-messaging-adapter`, porque ambos añaden una **escritura no autenticada desde internet** que alimenta la misma columna — otra clase de riesgo, y el momento de rehacer este análisis en vez de citarlo.
+
 ### D10 — Una reserva `black` no es una reserva: se excluye en la consulta
 
 **Chosen:** Beds24 usa el mismo endpoint para bloqueos de calendario (`status: black`) que para reservas. Importarlos crearía estancias fantasma con huésped inventado y movería la `PropertyStateMachine`, así que se excluyen. El *dónde* dependía de una medición.
