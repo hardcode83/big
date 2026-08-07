@@ -1,33 +1,6 @@
 # Blocked — pms-beds24-adapter
 
-Actualizado el 2026-08-06 tras la revisión a escala de feature. Queda **una** entrada, y no
-bloquea el Pull Request: es una verificación manual que necesita un tenant sembrado.
-
-## 1. Verificación manual end-to-end (tarea 7.3)
-
-- **Fase**: run
-- **Tipo**: `deferred` — necesita un tenant en la base de datos de dev, que hoy está vacía
-- **Qué y por qué**: el camino credencial-en-BD → factory → adapter → proveedor real es el último tramo sin ejercitar en vivo. Todo lo que hay debajo sí está verificado: el transporte contra la API real (sondeo del 2026-08-06, incluido el ciclo crear → modificar → cancelar), y adapter → ingestor → `TimelineEvent` contra Postgres real con payloads capturados. La matriz R# del panel de QA da los seis requisitos por cumplidos con implementación y test, así que esto **no es un hueco de requisito**: es la prueba de integración que solo puede hacerse a mano.
-- **Qué falta exactamente**: `select count(*) from tenants` devuelve 0. Sembrar es `make bootstrap`, que exige las variables `BOOTSTRAP_*` en `.env` — nombres sin valor por la regla 8, así que las pone su dueño. No las invento.
-- **Cómo desatascarlo**, una vez haya tenant:
-
-  ```bash
-  # 1. credencial — procedimiento completo en docs/pms-credentials.md.
-  #    El `-e` va **desnudo**: el valor viaja por el entorno del cliente, nunca como argumento.
-  #    `-e VAR="$(cat ...)"` lo mete en el argv de docker y lo publica en `ps` (medido).
-  PMS_CREDENTIAL_SECRET="$(cat backend/.env.beds24)" \
-    docker compose exec -T -e PMS_CREDENTIAL_SECRET backend \
-    python -m app.integrations.cli.pms_credentials set <uuid> beds24 account
-
-  # 2. una propiedad apuntando a la del banco de medición
-  #    pms_provider = BEDS24, pms_external_id = 345754
-
-  # 3. el sync de verdad
-  docker compose exec -T backend python -m app.integrations.cli.pms_sync <uuid>
-  ```
-
-  Qué comprobar: que importa las reservas de prueba de la cuenta, que el `AuditLog` registra **una** fila de lectura de credencial, y que un segundo sync es idempotente.
-- **Comando de reanudación**: `/sdd:review pms-beds24-adapter`
+**Vacío.** Todas las entradas quedaron resueltas el 2026-08-06.
 
 ---
 
@@ -39,6 +12,10 @@ bloquea el Pull Request: es una verificación manual que necesita un tenant semb
 - ~~**El «coste de un ciclo» deja de ser 8 créditos**~~ — decidido: se republica a **10 créditos / 30 s**. El argumento de la regla 9 del steering aguanta igual (~2.880 filas/día frente a ~3.600). La propagación a `specs/pms-beds24-spike.md` y a la cita de la regla 9 va al archivar.
 - ~~**Dónde excluir los bloqueos de calendario (D10)**~~ — resuelto a favor de la rama preferida: como hay que enumerar `status` de todas formas para ver las canceladas, dejar `black` fuera sale gratis.
 - ~~**Fixtures de reserva modificada y cancelada**~~ — capturados y commiteados.
+
+### El 2026-08-06, al cerrar el flujo
+
+- ~~**Verificación manual end-to-end (7.3)**~~ — hecha. La premisa de que hacía falta `make bootstrap` era falsa: `pms_sync` no toca autenticación. Sync real contra la cuenta: `created 4`, las cuatro `CANCELLED`, una fila de auditoría por ejecución, segundo sync idempotente.
 
 ### El 2026-08-06, en la revisión a escala de feature
 
