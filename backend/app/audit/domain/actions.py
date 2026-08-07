@@ -22,6 +22,13 @@ ENTITY_TENANT_CONFIG = "TENANT_CONFIG"
 # credential spread across property columns would have nothing to point at (ADR 0006, obligation
 # 4, and `pms-provider-resolution` design D4).
 ENTITY_PMS_CREDENTIAL = "PMS_CREDENTIAL"
+# A row of `properties` (`properties-crud` design D7). Rule 9's enumeration names "estados de
+# propiedad" and not the property itself, so creating one or editing its address was invisible
+# until this change. Audited anyway, on the precedent rule 9 already set for `TenantConfig`: the
+# enumeration is a floor, and a row nobody can attribute is a gap in the trail whether or not the
+# list happens to name it. The state column stays out — its trail is `property_state_transitions`,
+# and rule 9's named exception covers the `SYSTEM` actor that writes it.
+ENTITY_PROPERTY = "PROPERTY"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -46,8 +53,21 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 PMS_CREDENTIAL_READ = "PMS_CREDENTIAL_READ"
 PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 
+# There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
+# (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
+# nunca `DELETE` real"). An action for an operation the API does not offer would be the
+# speculative vocabulary this module's docstring argues against.
+PROPERTY_CREATED = "PROPERTY_CREATED"
+PROPERTY_UPDATED = "PROPERTY_UPDATED"
+
 ENTITY_TYPES = frozenset(
-    {ENTITY_USER, ENTITY_TENANT, ENTITY_TENANT_CONFIG, ENTITY_PMS_CREDENTIAL}
+    {
+        ENTITY_USER,
+        ENTITY_TENANT,
+        ENTITY_TENANT_CONFIG,
+        ENTITY_PMS_CREDENTIAL,
+        ENTITY_PROPERTY,
+    }
 )
 
 ACTIONS = frozenset(
@@ -61,5 +81,7 @@ ACTIONS = frozenset(
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,
         PMS_CREDENTIAL_ROTATED,
+        PROPERTY_CREATED,
+        PROPERTY_UPDATED,
     }
 )
