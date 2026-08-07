@@ -56,6 +56,13 @@ que ya no evalúa en el vacío (ver `specs/celery-jobs.md`).
   precedencia: incidencia activa `CRITICAL`, incidencia activa `HIGH`, limpieza
   `IN_PROGRESS`, limpieza `CREATED`/`ASSIGNED`/`ACCEPTED`, reserva activa,
   próxima reserva hoy, próxima reserva futura y, finalmente, `VACANT_READY`.
+  **Los dos escalones de limpieza se ejercitan con datos reales desde `cleaning`**
+  (2026-08-07): hasta entonces nadie escribía en `cleaning_tasks`, así que la
+  precedencia veía siempre «sin limpieza pendiente» y esas dos ramas —y con ellas
+  las cinco transiciones de limpieza de la política— nunca se recorrían fuera de
+  los tests. El conjunto de estados que cuentan como limpieza viva vive ahora en
+  un solo sitio (`LIVE_STATUSES`), y el índice parcial que lo usa se compara con
+  él en un test para que no puedan divergir.
 - WHEN no exista incidencia `CRITICAL`, THE SYSTEM SHALL producir
   `MAINTENANCE_REQUIRED` si existe una incidencia `HIGH` activa.
 - WHEN se valide un destino contextual explícito, THE SYSTEM SHALL rechazarlo si

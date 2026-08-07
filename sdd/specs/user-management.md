@@ -264,7 +264,9 @@ contraseña temporal en el primer login ni el cambio por el propio usuario
 - Dominio de usuario: `backend/app/auth/domain/` — `entities.py` (`User` con
   `create`/`update_profile`/`change_email`/`change_role`/`change_status`/`deactivate`/
   `set_password_hash`), `services.py` (regla del último propietario, pura),
-  `passwords.py` (generador de la temporal), `policy.py` (los cuatro permisos nuevos),
+  `passwords.py` (generador de la temporal), `policy.py` (los cuatro permisos que añadió este
+  change; el catálogo es común y crece con cada módulo — `cleaning` le sumó cinco y dio al
+  `CLEANER` su primer permiso más allá del autoservicio),
   `repositories.py` (`UserFilters`, `UserPage`, cotas de paginación), `ports.py`,
   `exceptions.py`, `enums.py` (`SessionRevokedReason` con las dos razones administrativas).
 - Aplicación: `backend/app/auth/application/user_admin.py` — los seis casos de uso.

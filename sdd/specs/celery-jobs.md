@@ -62,7 +62,13 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   `TenantConfig.checkin_window_hours_before`, THE SYSTEM SHALL transicionar la propiedad a
   `AWAITING_CHECKIN`.
 - WHEN se alcanza la hora de check-in, THE SYSTEM SHALL transicionar a `OCCUPIED_ESTIMATED`.
-- WHEN se ha pasado la hora de check-out, THE SYSTEM SHALL transicionar a `AWAITING_CLEANING`.
+- WHEN se ha pasado la hora de check-out, THE SYSTEM SHALL transicionar a `AWAITING_CLEANING`
+  **y crear la `CleaningTask`** en la misma transacción, honrando
+  `TenantConfig.auto_create_cleaning_task` y `Reservation.cleaning_required`.
+- IF la creación no procede —configuración desactivada, `cleaning_required` falso, ya hay una
+  tarea viva para esa reserva, o no hay plantilla de checklist resoluble—, THEN THE SYSTEM SHALL
+  transicionar igualmente y contarlo aparte en `transitioned_without_task`, sin fallar la
+  ejecución del tenant. El detalle de la creación vive en `cleaning.md`.
 - THE SYSTEM SHALL resolver toda transición a través de `PropertyStateMachine`, con un instante
   de referencia explícito y actor `SYSTEM`, y no SHALL escribir `current_operational_state` por
   ninguna otra vía.
@@ -122,9 +128,12 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 ## Estado y deuda conocida
 
-- **`process_checkouts` no crea la `CleaningTask`** que PRD §8.3 pide en el mismo job: esa
-  entidad pertenece a `cleaning`. Hasta que llegue, `AWAITING_CLEANING` es terminal en la
-  práctica y la precedencia contextual ve siempre «sin limpieza pendiente».
+- **`process_checkouts` sí crea la `CleaningTask`** que PRD §8.3 pide en el mismo job, desde
+  `cleaning` (2026-08-07). La creación entra por `CleaningProvisioningPort`, un colaborador
+  opcional que `AdvancePropertyStatesUseCase` invoca tras cada transición aceptada de
+  `CHECKOUT_TIME_REACHED` y **antes de su único `commit`**, de modo que la transición y la tarea
+  son una escritura o ninguna. Los otros dos jobs de reloj lo reciben a `None` y se comportan
+  exactamente igual que antes. `AWAITING_CLEANING` ha dejado de ser terminal en la práctica.
 - **Dos jobs de PRD §8.3 no están aquí**: `generate_price_recommendations` (→ `revenue`) y
   `send_checkin_reminders` (→ `messaging-ai` / `access-notifications`), que son mensajes al
   huésped y no estado dependiente del reloj.
