@@ -260,7 +260,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     per-method permissions are asserted in `tests/reservations/test_authorization.py` — and by
     `user-management` with three user paths (six methods) plus the tenant one (two methods),
     asserted per method and per role in `tests/auth/test_user_admin_authorization.py` and
-    `tests/tenants/test_api.py`.
+    `tests/tenants/test_api.py`. `cleaning` adds the checklist template path (two methods),
+    asserted per method and per role in `tests/cleaning/test_templates_api.py`.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -268,6 +269,16 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     assert protected == {
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
+        "/api/v1/cleaning-checklist-templates",
+        "/api/v1/cleaning-tasks",
+        "/api/v1/cleaning-tasks/{task_id}",
+        "/api/v1/cleaning-tasks/{task_id}/accept",
+        "/api/v1/cleaning-tasks/{task_id}/checklist",
+        "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
+        "/api/v1/cleaning-tasks/{task_id}/complete",
+        "/api/v1/cleaning-tasks/{task_id}/reject",
+        "/api/v1/cleaning-tasks/{task_id}/start",
+        "/api/v1/cleaning-tasks/{task_id}/validate",
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/integrations/pms/import-csv",

@@ -19,6 +19,15 @@ the limit belongs. It works in two steps, because either one alone is bypassable
 Scoped to the paths that accept uploads rather than applied globally: the rest of the API takes
 small JSON bodies, and a single global number would either be too small for a CSV or too large
 to mean anything for a login.
+
+**That "small JSON bodies" premise has an exception, and it needed its own ceiling** (change
+`cleaning`, security panel of its sections 2-3). `POST /api/v1/cleaning-checklist-templates`
+takes a **client-sized array** — `items` and `required_photos` — so its body is not a small
+fixed object. Its Pydantic caps (`MAX_ITEMS`, `max_length`) only apply once the whole body is
+in memory, which is exactly the "too late" this module exists to fix: measured, an anonymous
+`POST` of ~50 MB to that path was received in full and then answered `401`. Hence
+`JSON_BODY_MAX_BYTES` and the second mounting in `app/main.py`. Any future route with an
+array-shaped body needs the same treatment; a route taking a small fixed object does not.
 """
 
 import json
@@ -31,6 +40,25 @@ from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 
 TOO_LARGE_CODE = ErrorCode.PAYLOAD_TOO_LARGE
+
+# The ceiling for JSON routes whose body is an array the client sizes. A constant and not a
+# setting: unlike a CSV import there is no operational reason to tune it, and a new
+# environment variable would be a knob nobody turns.
+#
+# **1 MiB, and the number is measured against the schema maximum rather than guessed.** A
+# first draft said 256 KiB "two orders of magnitude above the largest legitimate template",
+# and the security panel of sections 2-3 measured that claim false: the maximal
+# schema-valid template (`MAX_ITEMS=200` entries with `MAX_LABEL_LENGTH=200` labels) is
+# 87 KB in ASCII but **338 KB** with accented labels and 640 KB with emoji, because
+# `json.dumps` escapes non-ASCII by default — and the project's own fixtures say `Baño` and
+# `Terraza`, so accented text is the norm here, not an edge case. At 256 KiB the middleware
+# and the validator disagreed about what is legal and the client got a size error instead of
+# a validation answer.
+#
+# 1 MiB clears the worst case measured with room to spare and is still ~50× below the 50 MB
+# body this exists to refuse. `tests/cleaning/test_templates_api.py` pins both ends: the
+# largest schema-valid template is accepted, an oversized one is not.
+JSON_BODY_MAX_BYTES = 1024 * 1024
 
 
 class MaxBodySizeMiddleware:

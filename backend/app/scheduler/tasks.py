@@ -14,6 +14,11 @@ from datetime import datetime, timedelta
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.cleaning.application.use_cases import ProvisionCleaningTaskUseCase
+from app.cleaning.infrastructure.repositories import (
+    SqlAlchemyCleaningChecklistTemplateRepository,
+    SqlAlchemyCleaningTaskRepository,
+)
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
@@ -39,6 +44,25 @@ from app.worker import celery_app
 logger = logging.getLogger(__name__)
 
 
+def _cleaning_provisioner(session: AsyncSession) -> ProvisionCleaningTaskUseCase:
+    """Only `process_checkouts` builds one (`cleaning` design D1).
+
+    It shares the session, and therefore the transaction, with the use case that calls it —
+    which is the whole point of R2.3: the transition and the `CleaningTask` are one write or
+    neither.
+    """
+    return ProvisionCleaningTaskUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        users=SqlAlchemyUserRepository(session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+    )
+
+
 async def _advance(session: AsyncSession, tenant_id, now: datetime, *, trigger):
     use_case = AdvancePropertyStatesUseCase(
         properties=SqlAlchemyPropertyRepository(session),
@@ -47,6 +71,11 @@ async def _advance(session: AsyncSession, tenant_id, now: datetime, *, trigger):
         timeline=SqlAlchemyTimelineEventRepository(session),
         configs=SqlAlchemyTenantConfigRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
+        provisioner=(
+            _cleaning_provisioner(session)
+            if trigger is PropertyStateTrigger.CHECKOUT_TIME_REACHED
+            else None
+        ),
     )
     return await use_case.execute(tenant_id=tenant_id, trigger=trigger, now=now)
 
@@ -103,9 +132,11 @@ def mark_occupied_estimated() -> dict:
 def process_checkouts() -> dict:
     """PRD §8.3, every 5 min: the checkout hour has passed.
 
-    PRD §8.3 also has this job create the `CleaningTask`. It does not: that entity belongs
-    to the `cleaning` roadmap entry, which records the debt and the consequence —
-    `AWAITING_CLEANING` is terminal in practice until it lands.
+    Transitions to `AWAITING_CLEANING` **and creates the `CleaningTask`**, both in one
+    transaction — the second half arrived with the `cleaning` change (its R2), which is also
+    what stopped `AWAITING_CLEANING` from being a terminal state in practice. The creation
+    honours `TenantConfig.auto_create_cleaning_task` and `Reservation.cleaning_required`, and
+    a transition without a task is counted apart in the report (`transitioned_without_task`).
     """
     return run_sync(
         _clock_task("process_checkouts", PropertyStateTrigger.CHECKOUT_TIME_REACHED)

@@ -10,9 +10,12 @@ import app.core.models_registry  # noqa: F401
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
+from app.cleaning.api.errors import register_cleaning_error_handlers
+from app.cleaning.api.tasks_router import router as cleaning_tasks_router
+from app.cleaning.api.templates_router import router as cleaning_templates_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
-from app.core.http_limits import MaxBodySizeMiddleware
+from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
@@ -48,6 +51,7 @@ def create_app() -> FastAPI:
     register_reservation_error_handlers(app)
     register_integration_error_handlers(app)
     register_tenant_error_handlers(app)
+    register_cleaning_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -56,6 +60,11 @@ def create_app() -> FastAPI:
     app.include_router(reservations_router, prefix=API_V1_PREFIX)
     app.include_router(integrations_router, prefix=API_V1_PREFIX)
     app.include_router(tenants_router, prefix=API_V1_PREFIX)
+    # `cleaning`: templates are their own router because they are their own aggregate, and
+    # because PRD §23 does not declare them — the deviation is easier to see in a file of
+    # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
+    app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
+    app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late for an upload.
@@ -63,6 +72,25 @@ def create_app() -> FastAPI:
         MaxBodySizeMiddleware,
         path_prefixes=(f"{API_V1_PREFIX}/integrations/",),
         max_bytes_provider=lambda: settings.csv_import_max_bytes,
+    )
+    # `cleaning`: the checklist template endpoint takes a client-sized array, so it is the
+    # first JSON route whose body is not a small fixed object. Its Pydantic caps run after the
+    # whole body is in memory and after `require(...)`, so without this an anonymous request
+    # can make the backend read arbitrary volumes before the 401 (measured by the security
+    # panel of sections 2-3). One prefix covers `/cleaning-checklist-templates` and
+    # `/cleaning-tasks`.
+    #
+    # **Obligation for `cleaning-photos-storage`**: `POST /cleaning-tasks/{id}/photos` starts
+    # with this prefix too, so as mounted this ceiling would refuse any photo above 1 MiB.
+    # The repair is NOT to raise `JSON_BODY_MAX_BYTES` — that would remove the JSON ceiling
+    # from every cleaning route and re-open the hole this closes. That change has to teach
+    # `MaxBodySizeMiddleware` to exclude a path, or split the prefixes so the upload path is
+    # served only by its own instance with the 10 MB of rule 6. Recorded here and in the
+    # roadmap entry.
+    app.add_middleware(
+        MaxBodySizeMiddleware,
+        path_prefixes=(f"{API_V1_PREFIX}/cleaning-",),
+        max_bytes_provider=lambda: JSON_BODY_MAX_BYTES,
     )
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck

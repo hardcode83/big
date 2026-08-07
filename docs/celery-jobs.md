@@ -10,7 +10,7 @@ es el *cómo se usa y se diagnostica*.
 |---|---|---|
 | `check_checkin_windows` | cada 5 min | Reserva confirmada que entra hoy y ya está en ventana → `AWAITING_CHECKIN` |
 | `mark_occupied_estimated` | cada 5 min | Hora de check-in alcanzada → `OCCUPIED_ESTIMATED` |
-| `process_checkouts` | cada 5 min | Hora de check-out pasada → `AWAITING_CLEANING` |
+| `process_checkouts` | cada 5 min | Hora de check-out pasada → `AWAITING_CLEANING` **+ crea la `CleaningTask`** (change `cleaning`), y la asigna si hay una sola limpiadora activa → `CLEANING_SCHEDULED` |
 | `check_sla_breaches` | cada minuto | `NotificationLog` con SLA vencido → marca + escalado en cola |
 
 Las cadencias son las de PRD §8.3 y viven en `backend/app/scheduler/schedule.py`. De esa
@@ -77,10 +77,15 @@ de la propiedad (salto de primavera) o es ambigua (salto de otoño, porque la co
 elegir por él sería normalizar en silencio. Aparece como `unresolvable_time` y necesita una
 transición manual. Se arregla en el origen del dato, no en el reloj.
 
-**`AWAITING_CLEANING` es terminal, de momento.** `process_checkouts` deja la propiedad ahí y
-nadie crea todavía la `CleaningTask` que la sacaría — PRD §8.3 lo pide en el mismo job, pero
-esa entidad pertenece a la entrada `cleaning` del roadmap. Hasta que llegue, la precedencia
-contextual verá siempre «sin limpieza pendiente».
+**`AWAITING_CLEANING` ya no es terminal** (change `cleaning`). `process_checkouts` crea también
+la `CleaningTask` que PRD §8.3 le pide, en la misma transacción que la transición, y si hay
+exactamente una limpiadora activa la asigna y mueve la propiedad a `CLEANING_SCHEDULED` en el
+mismo run. Lo que hay que mirar en el informe es el contador nuevo
+**`transitioned_without_task`**: cuenta los checkouts que transicionaron **sin** crear la tarea,
+y sus cuatro causas son configuración del tenant (`auto_create_cleaning_task` desactivado,
+`cleaning_required=false`), una tarea viva que ya existía, o **ninguna plantilla de checklist
+resoluble** — la última necesita una persona. Detalle operativo en
+[`cleaning.md`](cleaning.md).
 
 **Un checkout perdido se recupera 30 días, no más.** Los triggers de entrada están acotados
 al día local de la reserva, pero el de salida no: vence con `now >= fin` y sigue venciendo.

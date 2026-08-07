@@ -1,0 +1,363 @@
+"""R3.4-R3.7, R5.1-R5.3, R5.5 — the invariants of `CleaningTask`, in the entity.
+
+`steering/backend-architecture.md` uses `CleaningTask.complete()` as its worked example of
+"entidad con invariante real", and `steering/testing.md` requires TDD for the cleaning
+checklist. Pure Python: no repository, no session, no mocks.
+
+The status × method matrix is exhaustive on purpose — DoD §28.19 asks for the invalid
+transitions to be tested too, and this is the task-level equivalent of that rule.
+"""
+
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import pytest
+
+from app.cleaning.domain.entities import LIVE_STATUSES, CleaningTask
+from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.exceptions import (
+    TASK_NOT_FOUND_MESSAGE,
+    BlockingIncidentError,
+    ChecklistIncompleteError,
+    CleaningTaskNotFoundError,
+    InvalidCleaningTransitionError,
+)
+from app.cleaning.domain.value_objects import CleaningCompletionEvidence
+
+NOW = datetime(2026, 8, 6, 11, 0, tzinfo=UTC)
+LATER = NOW + timedelta(hours=1)
+CLEANER = uuid.uuid4()
+OTHER_CLEANER = uuid.uuid4()
+
+
+def _task(status=CleaningTaskStatus.CREATED, assigned=None):
+    return CleaningTask(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        checklist_template_id=uuid.uuid4(),
+        created_at=NOW,
+        updated_at=NOW,
+        status=status,
+        assigned_cleaner_id=assigned,
+    )
+
+
+def _evidence(required=(), completed=(), critical=False):
+    return CleaningCompletionEvidence(
+        required_item_ids=frozenset(required),
+        completed_item_ids=frozenset(completed),
+        has_unresolved_critical_incident=critical,
+    )
+
+
+# --- assign -----------------------------------------------------------------------
+
+def test_assign_from_created():
+    task = _task()
+
+    task.assign(CLEANER, LATER)
+
+    assert task.status is CleaningTaskStatus.ASSIGNED
+    assert task.assigned_cleaner_id == CLEANER
+    assert task.updated_at == LATER
+
+
+def test_reassign_before_acceptance_is_allowed():
+    task = _task(CleaningTaskStatus.ASSIGNED, assigned=CLEANER)
+
+    task.assign(OTHER_CLEANER, LATER)
+
+    assert task.assigned_cleaner_id == OTHER_CLEANER
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        CleaningTaskStatus.ACCEPTED,
+        CleaningTaskStatus.IN_PROGRESS,
+        CleaningTaskStatus.REJECTED,
+        CleaningTaskStatus.COMPLETED,
+        CleaningTaskStatus.CANCELLED,
+        CleaningTaskStatus.FAILED,
+        CleaningTaskStatus.PENDING_REVIEW,
+    ],
+)
+def test_assign_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).assign(OTHER_CLEANER, LATER)
+
+
+# --- accept / reject / start ------------------------------------------------------
+
+def test_accept_by_the_assigned_cleaner():
+    task = _task(CleaningTaskStatus.ASSIGNED, assigned=CLEANER)
+
+    task.accept(CLEANER, LATER)
+
+    assert task.status is CleaningTaskStatus.ACCEPTED
+    assert task.accepted_at == LATER
+
+
+@pytest.mark.parametrize("operation", ["accept", "reject", "start", "complete"])
+def test_an_unassigned_task_is_invisible_to_every_cleaner(operation):
+    """R7.2/R7.3 on the shape a checkout actually leaves: `assigned_cleaner_id IS NULL`.
+
+    The QA reviewer of `/sdd:review` found this path implemented and deliberate but never
+    asserted — the only place it was exercised was the authorisation matrix, which checked
+    `!= 403` and so passed on any code at all. An unassigned task belongs to nobody, so for
+    every cleaner it must be indistinguishable from one that does not exist.
+    """
+    task = _task(CleaningTaskStatus.CREATED, assigned=None)
+    args = (CLEANER, _evidence(), LATER) if operation == "complete" else (CLEANER, LATER)
+
+    with pytest.raises(CleaningTaskNotFoundError) as raised:
+        getattr(task, operation)(*args)
+
+    assert str(raised.value) == TASK_NOT_FOUND_MESSAGE
+
+
+@pytest.mark.parametrize("operation", ["accept", "reject", "start"])
+def test_someone_elses_task_is_indistinguishable_from_a_missing_one(operation):
+    """R7.2, R7.3 — 404, not 409, and the status must not leak.
+
+    Found by the security panel of section 1: the guard used to raise a transition error
+    whose message names the current status, and it ran *after* the status check, so an
+    unrelated cleaner learned both that the task exists and what it is doing.
+    """
+    task = _task(CleaningTaskStatus.ACCEPTED, assigned=CLEANER)
+
+    with pytest.raises(CleaningTaskNotFoundError) as raised:
+        getattr(task, operation)(OTHER_CLEANER, LATER)
+
+    # Byte-identical to what an unknown id produces — not merely "does not mention the
+    # status". Two 404s with different bodies are the same probe one layer down.
+    assert str(raised.value) == TASK_NOT_FOUND_MESSAGE
+    assert str(raised.value) == str(CleaningTaskNotFoundError())
+    assert str(task.id) not in str(raised.value)
+
+
+@pytest.mark.parametrize(
+    "status",
+    [s for s in CleaningTaskStatus if s is not CleaningTaskStatus.ASSIGNED],
+)
+def test_accept_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).accept(CLEANER, LATER)
+
+
+@pytest.mark.parametrize(
+    "status", [CleaningTaskStatus.ASSIGNED, CleaningTaskStatus.ACCEPTED]
+)
+def test_reject_keeps_the_rejecter_on_the_row(status):
+    """Design D3: that column IS the record of who rejected; the replacement task is
+    what frees the slot."""
+    task = _task(status, assigned=CLEANER)
+
+    task.reject(CLEANER, LATER)
+
+    assert task.status is CleaningTaskStatus.REJECTED
+    assert task.assigned_cleaner_id == CLEANER
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        s
+        for s in CleaningTaskStatus
+        if s not in (CleaningTaskStatus.ASSIGNED, CleaningTaskStatus.ACCEPTED)
+    ],
+)
+def test_reject_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).reject(CLEANER, LATER)
+
+
+@pytest.mark.parametrize(
+    "status", [s for s in CleaningTaskStatus if s is not CleaningTaskStatus.ACCEPTED]
+)
+def test_start_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).start(CLEANER, LATER)
+
+
+@pytest.mark.parametrize(
+    "status", [s for s in CleaningTaskStatus if s is not CleaningTaskStatus.COMPLETED]
+)
+def test_manual_validation_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).record_manual_validation(
+            validator_user_id=uuid.uuid4(),
+            status=CleaningValidationStatus.PASSED,
+            now=LATER,
+        )
+
+
+def test_a_rejected_task_is_terminal():
+    task = _task(CleaningTaskStatus.REJECTED, assigned=CLEANER)
+
+    for operation in (
+        lambda: task.assign(OTHER_CLEANER, LATER),
+        lambda: task.accept(CLEANER, LATER),
+        lambda: task.reject(CLEANER, LATER),
+        lambda: task.start(CLEANER, LATER),
+        lambda: task.complete(CLEANER, _evidence(), LATER),
+    ):
+        with pytest.raises(InvalidCleaningTransitionError):
+            operation()
+
+
+def test_start_from_accepted():
+    task = _task(CleaningTaskStatus.ACCEPTED, assigned=CLEANER)
+
+    task.start(CLEANER, LATER)
+
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+    assert task.started_at == LATER
+
+
+def test_start_before_accepting_is_refused():
+    """PRD §11's flow is accept → start; skipping the acceptance loses the SLA answer."""
+    task = _task(CleaningTaskStatus.ASSIGNED, assigned=CLEANER)
+
+    with pytest.raises(InvalidCleaningTransitionError):
+        task.start(CLEANER, LATER)
+
+
+def test_pending_is_not_a_verdict_from_the_only_valid_status():
+    """Pinned separately from the status matrix: `COMPLETED` is the one status where the
+    method is otherwise legal, so this is the only place the verdict check is reachable."""
+    task = _task(CleaningTaskStatus.COMPLETED, assigned=CLEANER)
+
+    with pytest.raises(InvalidCleaningTransitionError):
+        task.record_manual_validation(
+            validator_user_id=uuid.uuid4(),
+            status=CleaningValidationStatus.PENDING,
+            now=LATER,
+        )
+
+
+# --- complete: PRD §11's validation rule ------------------------------------------
+
+def test_completing_someone_elses_task_is_a_404_too():
+    """The guard `complete` was missing until the security panel of `/sdd:review`.
+
+    It was the only lifecycle method without it, which made the one operation that actually
+    closes the work the one with no second layer behind the use case's filter.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(CleaningTaskNotFoundError) as raised:
+        task.complete(OTHER_CLEANER, _evidence(), LATER)
+
+    assert str(raised.value) == TASK_NOT_FOUND_MESSAGE
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+
+
+def test_complete_with_every_required_item_done():
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.complete(CLEANER, _evidence(required={"a"}, completed={"a", "b"}), LATER)
+
+    assert task.status is CleaningTaskStatus.COMPLETED
+    assert task.completed_at == LATER
+    assert task.validation_status is CleaningValidationStatus.PASSED
+
+
+def test_complete_enumerates_the_missing_required_items():
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(ChecklistIncompleteError) as raised:
+        task.complete(CLEANER, _evidence(required={"a", "b"}, completed={"b"}), LATER)
+
+    assert raised.value.missing_item_ids == ("a",)
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+
+
+def test_optional_items_do_not_block_completion():
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.complete(CLEANER, _evidence(required=set(), completed=set()), LATER)
+
+    assert task.status is CleaningTaskStatus.COMPLETED
+
+
+def test_an_unresolved_critical_incident_blocks_completion():
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(BlockingIncidentError):
+        task.complete(CLEANER, _evidence(required={"a"}, completed={"a"}, critical=True), LATER)
+
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+
+
+def test_completion_does_not_yet_require_photos():
+    """The photo clause of PRD §11 belongs to `cleaning-photos-storage`.
+
+    Pinned so the gap is visible in the suite instead of only in the proposal: when that
+    change lands, this test is what it has to change.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.complete(CLEANER, _evidence(required={"a"}, completed={"a"}), LATER)
+
+    assert task.status is CleaningTaskStatus.COMPLETED
+
+
+@pytest.mark.parametrize(
+    "status", [s for s in CleaningTaskStatus if s is not CleaningTaskStatus.IN_PROGRESS]
+)
+def test_complete_is_refused_from_every_other_status(status):
+    with pytest.raises(InvalidCleaningTransitionError):
+        _task(status, assigned=CLEANER).complete(CLEANER, _evidence(), LATER)
+
+
+# --- manual validation ------------------------------------------------------------
+
+def test_manual_validation_records_who_and_when():
+    task = _task(CleaningTaskStatus.COMPLETED, assigned=CLEANER)
+    manager = uuid.uuid4()
+
+    task.record_manual_validation(
+        validator_user_id=manager, status=CleaningValidationStatus.WAIVED, now=LATER
+    )
+
+    assert task.validation_status is CleaningValidationStatus.WAIVED
+    assert task.validated_by_user_id == manager
+    assert task.validated_at == LATER
+
+
+# --- LIVE_STATUSES ----------------------------------------------------------------
+
+def test_live_statuses_match_what_the_resolver_treats_as_pending_cleaning():
+    """The partial index of design D2 and `ContextualStateResolver` must agree.
+
+    If someone adds a status to one and not the other, a property can end up with a task
+    the resolver counts and the index does not (or the reverse), which is how
+    `AWAITING_CLEANING` became terminal in the first place.
+
+    The resolver inlines its statuses in `_contextual_reservation_cleaning`
+    (`app/properties/domain/state_resolution.py:143-147`) rather than exposing a set, so
+    the correspondence is pinned here by enumeration.
+    """
+    assert LIVE_STATUSES == {
+        CleaningTaskStatus.CREATED,
+        CleaningTaskStatus.ASSIGNED,
+        CleaningTaskStatus.ACCEPTED,
+        CleaningTaskStatus.IN_PROGRESS,
+    }
+
+
+def test_pending_review_is_deliberately_not_live():
+    """The resolver does not count it, so neither does the index (design D2).
+
+    Nothing in this change produces `PENDING_REVIEW` — `complete()` goes straight to
+    `COMPLETED`. Whoever gives it a writer has to decide both sides at once, and this
+    assertion plus `test_live_task_index.py` is what forces that.
+    """
+    assert CleaningTaskStatus.PENDING_REVIEW not in LIVE_STATUSES
+
+
+def test_is_live_reflects_the_status():
+    assert _task(CleaningTaskStatus.ASSIGNED).is_live
+    assert not _task(CleaningTaskStatus.REJECTED).is_live

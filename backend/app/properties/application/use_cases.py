@@ -26,6 +26,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime, timedelta
 
+from app.cleaning.domain.ports import CleaningProvisioningPort
 from app.core.unit_of_work import UnitOfWork
 from app.properties.domain.clock_triggers import (
     candidate_window,
@@ -91,6 +92,14 @@ class AdvanceReport:
     not_eligible: int = 0
     unresolvable_time: int = 0
     ambiguous: int = 0
+    #: Transitioned to `AWAITING_CLEANING` but no `CleaningTask` was created (`cleaning` R2.4).
+    #: A separate bucket from `transitioned` for the same reason `ambiguous` is separate from
+    #: `not_eligible`: the ordinary causes are a tenant-level configuration choice
+    #: (`auto_create_cleaning_task` off, `cleaning_required` false) and one that needs a person
+    #: (no resolvable checklist template), and folding them into the success count hides
+    #: exactly the rows worth looking at. Always 0 for the other two clock triggers, which
+    #: are constructed without a provisioner.
+    transitioned_without_task: int = 0
 
 
 class AdvancePropertyStatesUseCase:
@@ -103,6 +112,7 @@ class AdvancePropertyStatesUseCase:
         timeline: TimelineEventRepository,
         configs: TenantConfigRepository,
         uow: UnitOfWork,
+        provisioner: CleaningProvisioningPort | None = None,
     ) -> None:
         self._properties = properties
         self._reservations = reservations
@@ -110,6 +120,11 @@ class AdvancePropertyStatesUseCase:
         self._timeline = timeline
         self._configs = configs
         self._uow = uow
+        # Optional on purpose (`cleaning` design D1): only `process_checkouts` passes one, so
+        # `check_checkin_windows` and `mark_occupied_estimated` are byte-for-byte the jobs
+        # `celery-jobs` shipped. A single collaborator rather than a hook, so the type says
+        # what it does.
+        self._provisioner = provisioner
 
     async def execute(
         self, *, tenant_id: uuid.UUID, trigger: PropertyStateTrigger, now: datetime
@@ -151,7 +166,10 @@ class AdvancePropertyStatesUseCase:
         checkin_window: timedelta,
         report: AdvanceReport,
     ) -> None:
-        accepted: list[PropertyStateChangeResult] = []
+        # Paired with the reservation that produced each verdict: the provisioner needs the
+        # *source* stay to know which booking the cleaning belongs to (`cleaning` R2.1), and
+        # `reservations[0]` is not it — a property can carry several in the window.
+        accepted: list[tuple[PropertyStateChangeResult, Reservation]] = []
         unresolvable = False
         already_there = False
 
@@ -184,8 +202,11 @@ class AdvancePropertyStatesUseCase:
 
             try:
                 accepted.append(
-                    PropertyStateMachine.evaluate(
-                        self._request_for(property, reservation, trigger, now)
+                    (
+                        PropertyStateMachine.evaluate(
+                            self._request_for(property, reservation, trigger, now)
+                        ),
+                        reservation,
                     )
                 )
             except NoOperationalStateChangeError:
@@ -222,12 +243,34 @@ class AdvancePropertyStatesUseCase:
                 report.not_eligible += 1
             return
 
-        result = accepted[0]
+        result, source_reservation = accepted[0]
         await self._transitions.add(tenant_id, result.transition)
         await self._timeline.add(tenant_id, result.timeline_event)
         property.current_operational_state = result.transition.to_state
         await self._properties.save(tenant_id, property)
         report.transitioned += 1
+
+        # `cleaning` R2.3, design D1: inside this transaction, after the state has advanced —
+        # the provisioner may perform the `CLEANER_ASSIGNED` transition on the same entity, and
+        # the machine reads the state off it — and before the single `commit` at the end of
+        # `execute`. A `None` is an ordinary outcome the report counts (R2.4), not a failure.
+        if self._provisioner is not None and trigger is PropertyStateTrigger.CHECKOUT_TIME_REACHED:
+            provisioned = await self._provisioner.provision_for_checkout(
+                tenant_id=tenant_id,
+                property=property,
+                reservation=source_reservation,
+                known_reservations=reservations,
+                now=now,
+            )
+            if provisioned is None:
+                report.transitioned_without_task += 1
+                logger.info(
+                    "scheduler.checkout_without_cleaning_task",
+                    extra={
+                        "tenant_id": str(tenant_id),
+                        "property_id": str(property.id),
+                    },
+                )
 
     @staticmethod
     def _request_for(

@@ -2,7 +2,18 @@ import uuid
 from datetime import datetime
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, String, UniqueConstraint, Uuid, func
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -15,6 +26,28 @@ class CleaningTaskModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampM
     __table_args__ = (
         Index("ix_cleaning_tasks_property_id_status", "property_id", "status"),
         Index("ix_cleaning_tasks_assigned_cleaner_id_status", "assigned_cleaner_id", "status"),
+        # One live cleaning per reservation (`cleaning` R2.5, design D2). `process_checkouts`
+        # runs every five minutes, so a read-then-write check in the use case is a race the
+        # first concurrent run wins twice; the index is what makes the invariant a property of
+        # the schema.
+        #
+        # Partial, and both halves of the predicate matter. `reservation_id IS NOT NULL`
+        # because a manual task without a booking is not constrained by anything. The status
+        # list because a REJECTED task must be able to coexist with its replacement (design
+        # D3) and a COMPLETED one with a later cleaning of the same booking. The list is the
+        # same set as `LIVE_STATUSES` in `app/cleaning/domain/entities.py`, and
+        # `tests/cleaning/test_live_task_index.py` pins the two together — they cannot be
+        # derived from each other here because a partial index predicate is SQL text.
+        Index(
+            "uq_cleaning_tasks_live_reservation",
+            "tenant_id",
+            "reservation_id",
+            unique=True,
+            postgresql_where=text(
+                "reservation_id IS NOT NULL AND status IN "
+                "('CREATED', 'ASSIGNED', 'ACCEPTED', 'IN_PROGRESS')"
+            ),
+        ),
     )
 
     property_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("properties.id", ondelete="RESTRICT"))

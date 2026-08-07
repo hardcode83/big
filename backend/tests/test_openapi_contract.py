@@ -75,6 +75,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         "reservations",
         "integrations",
         "tenants",
+        # `cleaning`: templates plus the ten task routes of PRD §23 minus the two photo ones,
+        # which belong to `cleaning-photos-storage`.
+        "cleaning-checklist-templates",
+        "cleaning-tasks",
     }
 
 
