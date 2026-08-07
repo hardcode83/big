@@ -462,10 +462,11 @@ async def test_the_sync_calls_each_provider_once_not_each_property(
     grouping is reverted. This one pins the half those do not: that adding properties does not add
     calls.
 
-    A call per property scales without bound; the measured Beds24 budget is 100 credits per 300 s
-    per account and a cycle costs 8, so a dozen properties exhaust a five-minute window in one
-    pass (`specs/pms-beds24-spike.md`). Grouping scales with the number of DISTINCT providers,
-    which is two or three.
+    A call per property scales without bound; Beds24's quota is 100 credits per 300 s per
+    account, so a dozen properties exhaust a five-minute window in one pass. The per-cycle cost
+    is not restated here — it lives in `docs/beds24-spike.md` — because this docstring carried
+    the figure and it went stale. Grouping scales with the number of DISTINCT providers, which
+    is two or three.
 
     Four properties, one provider → exactly one resolution, not four.
     """

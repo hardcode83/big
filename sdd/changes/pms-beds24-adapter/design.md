@@ -80,7 +80,9 @@ Rejected: seguir `nextPageLink` — destino elegido por el cuerpo de la respuest
 
 Ausente ≠ gratis: un coste que no viene se registra como desconocido y **nunca como `0`**.
 
-El presupuesto medido (8 créditos/ciclo, ventana de 100/300 s por cuenta) se **cita** desde `specs/pms-beds24-spike.md` como techo de cuota, y el módulo dice explícitamente que no es cadencia recomendada —el proveedor desaconseja el tiempo real y sugiere ~6 h—. La cadencia es de `celery-jobs`, no de aquí.
+El presupuesto medido se **cita** y no se reformula: vive en `docs/beds24-spike.md`, que lo genera desde el registro commiteado. El módulo sí dice explícitamente que es un techo de cuota y no una cadencia recomendada —el proveedor desaconseja el tiempo real y sugiere ~6 h—, y la cadencia es de `celery-jobs`, no de aquí.
+
+> **Corregido el 2026-08-06**: este párrafo decía «8 créditos/ciclo» mientras predicaba citar en vez de reformular, y la cifra quedó obsoleta al medir (pasó a 10 créditos / 30 s, porque el catálogo ahora incluye la consulta que el sync hace de verdad). Se quita el número en lugar de actualizarlo — era la sexta copia de un dato con una sola casa.
 
 Rejected: pacing propio en el cliente como el del banco — la cadencia la decide el planificador, y un `sleep` dentro de un adapter compartido esconde el coste donde nadie lo mide; freno proactivo por remanente — especulativo sin una medición de cómo se comporta el remanente con varias fuentes.
 
@@ -98,13 +100,15 @@ Rejected: allowlist fail-closed sobre `raw_payload` — mata su propósito; borr
 
 **Chosen:** Beds24 usa el mismo endpoint para bloqueos de calendario (`status: black`) que para reservas. Importarlos crearía estancias fantasma con huésped inventado y movería la `PropertyStateMachine`, así que se excluyen. El *dónde* dependía de una medición.
 
-> **ENMENDADA el 2026-08-06, durante `/sdd:run`** (panel de arquitectura, secciones 3-5). Esta decisión elegía excluirlos **en la consulta** —más barato en créditos y visible en la petición— con el descarte en el adapter como plan B *si* la medición demostraba que el filtro de estado no admite esa forma. **Lo que se entrega es el plan B, y de forma incondicional**, porque la medición que decidía entre los dos (tarea 1.2) está bloqueada por falta de credencial y nadie la ha ejecutado.
+> **RESUELTA el 2026-08-06 a favor de la rama preferida, tras medir.** Esta decisión elegía excluirlos **en la consulta**, con el descarte en el adapter como plan B *si* el proveedor no admitía un filtro de estado. Durante `/sdd:run` se enmendó a «se entrega el plan B» porque la medición estaba bloqueada por falta de credencial; llegó la credencial, se midió, y la respuesta fue mejor que cualquiera de las dos ramas previstas.
 >
-> Se enmienda el documento en vez de gatear el código detrás de un flag: una rama que nadie puede ejercitar hasta que exista la credencial es una rama sin test, y el propio ADR 0006 ya establece que el coste por petición de este proveedor no se deriva de la documentación. El descarte en el adapter es **correcto** en ambos mundos; lo único que cuesta es traerse filas que se van a tirar, y con una cuenta de dos propiedades ese coste no se nota.
+> **Lo que la medición encontró no era sobre bloqueos, sino sobre cancelaciones**: el listado por defecto **omite las canceladas**, así que enumerar `status` no es una optimización, es obligatorio para que R2.1 se cumpla. Y una vez que hay que enumerar, **dejar `black` fuera de esa lista sale gratis** — la exclusión en la consulta ya no cuesta una decisión, viene de regalo con el arreglo del bug.
 >
-> **Lo que queda pendiente, y su dueño**: cuando la 1.2 mida si `/bookings` admite un filtro de estado, se decide si vale la pena mover la exclusión a la consulta. Registrado en `BLOCKED.md`.
+> Así que ship la rama «Chosen»: `RESERVATION_STATUSES` en `beds24/adapter.py` enumera los cinco estados que son reservas y omite `black`. `is_blocked_dates` se queda en el adapter como **defensa en profundidad**, no como el mecanismo.
+>
+> *(Este párrafo se reescribió dos veces. La primera enmienda describía el plan B como lo entregado y sobrevivió a la medición que la invalidó — la revisión a escala de feature la marcó como DESIGN-CONFLICT. Se registra porque es el patrón, no el descuido: el mecanismo vivía en tres artefactos y solo se actualizaron dos.)*
 
-Se excluyen en el adapter **emitiendo el recuento** en el log; lo que no se hace es descartarlos en silencio.
+El descarte en el adapter, cuando actúa, **emite el recuento** en el log; lo que no se hace es descartarlos en silencio.
 
 El mapa de estados es el del spike y el de Channex: `confirmed`/`new` → `CONFIRMED`, `request`/`inquiry` → `PENDING`, `cancelled` → `CANCELLED`. Un estado desconocido se pasa **sin traducir** para que `ReservationStatus.parse_ingested` lance y el ingestor reporte la fila — la asimetría deliberada de `channex/mapping.py:127-139`: un canal desconocido cae a `OTHER` y la reserva entra, un estado desconocido no se adivina porque conduce una máquina de estados real.
 

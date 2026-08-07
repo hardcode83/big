@@ -454,8 +454,14 @@ def _log_cost(path: str, response: httpx.Response) -> None:
     """One structured line per request: what it cost and what is left (R3.1).
 
     Deliberately carries no payload and no credential — path, method, cost, remaining and
-    status only. The credit budget is measured (8 per cycle against 100 per 300 s, per
-    account) and the operator's only view of it in production is this line.
+    status only. This line is the operator's only view of the credit budget in production.
+
+    **The budget figure is deliberately NOT repeated here.** It lives in
+    `docs/beds24-spike.md`, which is where it is measured and regenerated from the committed
+    record. This docstring restated it as "8 per cycle" and the number went stale inside the
+    very change that corrected it to 10 — which is exactly what R3.4 means by "citando la spec
+    en vez de reformular la cifra". A number copied into a comment has no way of learning it
+    was superseded.
 
     Pacing is NOT done here (design D8). The cadence belongs to the scheduler
     (`celery-jobs`); a `sleep` inside a shared adapter hides the cost where nobody measures it.

@@ -51,7 +51,9 @@ Criterios de aceptación:
 1. WHEN una respuesta trae la cabecera de coste, THE SYSTEM SHALL leerla por su nombre real `x-request-cost` (con guiones) y tratarla como **decimal**; WHEN no la trae, THE SYSTEM SHALL registrar «desconocido» y **nunca `0`**.
 2. IF el proveedor señala cuota agotada, THEN THE SYSTEM SHALL detenerse y propagar `PmsUnavailableError` —que el CLI ya traduce a código de salida 3—, y no SHALL reintentar en bucle ni devolver una lista vacía indistinguible de un PMS sin datos.
 3. THE SYSTEM SHALL determinar si el proveedor aceptó una petición **por el cuerpo de la respuesta y no por el código HTTP**, cubriendo las cuatro formas medidas (éxito con `new`, rechazo por elemento con `errors` y `success: false` bajo HTTP `201`, y petición malformada devuelta como objeto en vez de lista).
-4. THE SYSTEM SHALL declarar en el código el presupuesto medido —8 créditos por ciclo, ventana de 100 créditos / 300 s por cuenta— como un **techo impuesto por la cuota y no como cadencia recomendada**, citando la spec en vez de reformular la cifra.
+4. THE SYSTEM SHALL declarar en el código el presupuesto medido como un **techo impuesto por la cuota y no como cadencia recomendada**, citando la spec en vez de reformular la cifra.
+
+   > **Nota del 2026-08-06**: este criterio llevaba la cifra escrita —«8 créditos por ciclo»— mientras exigía no reformularla, y al medirse pasó a **10 créditos / 30 s** porque el catálogo incluye ahora la consulta que el sync hace de verdad. Se retira el número del criterio, que es lo que el criterio pedía en primer lugar; la ventana de 100 créditos / 300 s por cuenta sigue siendo del proveedor y no cambia. El valor vive en `docs/beds24-spike.md`, generado desde el registro.
 
 ### R4 — Datos de tarjeta: descartados por un scrubber, no por omisión
 

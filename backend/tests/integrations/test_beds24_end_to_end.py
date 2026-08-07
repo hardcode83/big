@@ -184,6 +184,47 @@ async def test_a_cancellation_arriving_through_the_window_updates_the_existing_r
 
 
 @pytest.mark.asyncio
+async def test_one_tenants_beds24_sync_never_reaches_another_tenants_data(
+    db_session, tenant_a, tenant_b, beds24_property
+) -> None:
+    """Rule 1 of `sdd/steering/security.md`, for this module.
+
+    *"Tests automáticos que demuestran que un tenant no accede a datos de otro — **obligatorios
+    en cada módulo nuevo**."* `beds24/` is a new module and it carries a **decrypted
+    account-level credential**, which rule 3 calls the most dangerous kind precisely because a
+    scoping failure there grants write access rather than leaking a read.
+
+    The generic cross-tenant test in `test_sync.py` exercises `MockPMSAdapter`, so until this
+    one existed nothing demonstrated the property for the real adapter. Raised by the tenancy
+    reviewer at feature scale.
+
+    The trap this pins is specific and real: B owns a property whose `pms_external_id` is the
+    **same Beds24 `propertyId`** as A's — which is what a shared measurement account looks like,
+    and what would happen if two tenants were onboarded onto one Beds24 account by mistake. The
+    provider returns a booking for that id; it must land in A and nowhere else.
+    """
+    twin = PropertyModel(
+        tenant_id=tenant_b.id,
+        name="Beds24 Sandbox of another tenant",
+        internal_code="BEDS24-SANDBOX-B",
+        pms_external_id=BEDS24_PROPERTY_ID,
+        max_guests=4,
+    )
+    db_session.add(twin)
+    await db_session.flush()
+
+    report = await _use_case(db_session, _payload([_booking()])).execute(
+        tenant_id=tenant_a.id, since=SINCE, now=NOW
+    )
+
+    assert report.created == 1
+    rows = (await db_session.execute(select(ReservationModel))).scalars().all()
+    assert [row.tenant_id for row in rows] == [tenant_a.id]
+    events = (await db_session.execute(select(TimelineEventModel))).scalars().all()
+    assert {event.tenant_id for event in events} == {tenant_a.id}
+
+
+@pytest.mark.asyncio
 async def test_a_calendar_block_never_becomes_a_reservation(
     db_session, tenant_a, beds24_property
 ) -> None:

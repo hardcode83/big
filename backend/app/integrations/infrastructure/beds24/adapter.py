@@ -99,17 +99,26 @@ class Beds24Adapter:
         failures: list[PmsRowFailure] = []
         blocked = 0
         for element in elements:
-            # A calendar block is not a reservation and not a failure (design D10). Importing
-            # one would invent a guest and drive the `PropertyStateMachine` on a property nobody
-            # booked; reporting it as a failed row would fill the operator's report with noise
-            # about rows that are working exactly as intended.
-            #
-            # Counted rather than dropped in silence: "no silent truncation" is the rule the
-            # rest of this module is built on, so the count goes to the log.
-            if is_blocked_dates(element):
-                blocked += 1
-                continue
             try:
+                # A calendar block is not a reservation and not a failure (design D10).
+                # Importing one would invent a guest and drive the `PropertyStateMachine` on a
+                # property nobody booked; reporting it as a failed row would fill the operator's
+                # report with noise about rows that are working exactly as intended.
+                #
+                # Counted rather than dropped in silence: "no silent truncation" is the rule the
+                # rest of this module is built on, so the count goes to the log.
+                #
+                # **INSIDE the try, and that is not cosmetic.** It sat outside, and
+                # `is_blocked_dates` calls `.get()` unconditionally — so once the client stopped
+                # filtering non-dict rows out of `data` (a fix for the opposite bug: it was
+                # dropping them silently), a page like `[{...}, None, "not-a-booking"]` raised
+                # `AttributeError` here and took the WHOLE page with it. R2.4 forbids both
+                # halves of that: no silent drop, and no aborting the page for one bad row.
+                # Measured by the QA panel at feature scale, on a shape the client's own test
+                # already produced.
+                if is_blocked_dates(element):
+                    blocked += 1
+                    continue
                 rows.append(to_reservation_dto(element))
             except Exception as error:  # noqa: BLE001 - any malformed shape, not a known set
                 reference = _element_reference(element)

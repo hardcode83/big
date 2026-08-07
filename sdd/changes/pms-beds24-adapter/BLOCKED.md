@@ -24,17 +24,19 @@ entradas: una decisión de diseño que es de Jose, y una verificación que neces
 - **Cómo desatascarlo**, una vez haya tenant:
 
   ```bash
-  # 1. credencial (el secreto por entorno, nunca por argumento)
+  # 1. credencial — procedimiento completo en docs/pms-credentials.md.
+  #    El `-e` va **desnudo**: el valor viaja por el entorno del cliente, nunca como argumento.
+  #    `-e VAR="$(cat ...)"` lo mete en el argv de docker y lo publica en `ps` (medido).
+  #    Argumentos posicionales, no flags.
   PMS_CREDENTIAL_SECRET="$(cat backend/.env.beds24)" \
     docker compose exec -T -e PMS_CREDENTIAL_SECRET backend \
-    uv run python -m app.integrations.cli.pms_credentials \
-    set --tenant <uuid> --provider BEDS24 --scope ACCOUNT
+    python -m app.integrations.cli.pms_credentials set <uuid> beds24 account
 
   # 2. una propiedad apuntando a la del banco de medición
   #    pms_provider = BEDS24, pms_external_id = 345754
 
   # 3. el sync de verdad
-  docker compose exec -T backend uv run python -m app.integrations.cli.pms_sync <uuid>
+  docker compose exec -T backend python -m app.integrations.cli.pms_sync <uuid>
   ```
 
   Qué comprobar: que importa las reservas de prueba de la cuenta, que el `AuditLog` registra **una** fila de lectura de credencial, y que un segundo sync es idempotente.

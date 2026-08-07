@@ -408,6 +408,30 @@ async def test_one_unmappable_element_does_not_cost_the_whole_page():
 
 
 @pytest.mark.asyncio
+async def test_a_non_dict_element_is_reported_instead_of_killing_the_page():
+    """R2.4 — the crash the feature-scale QA panel reproduced.
+
+    `is_blocked_dates` calls `.get()` unconditionally and used to run OUTSIDE the per-element
+    `try`. That was harmless only while the client filtered non-dicts out of `data` — and
+    filtering them out was itself the bug fixed one layer down, because it dropped rows in
+    silence. Fixing that one exposed this one: a page carrying `None` raised `AttributeError`
+    and lost every good row alongside it.
+
+    The shape here is the one `test_beds24_client.py` already proves reaches the adapter.
+    """
+    good = beds24_booking()
+
+    fetched = await _adapter(
+        _serving([good, None, "not-a-booking", 42])
+    ).list_reservations(SINCE)
+
+    assert [dto.external_id for dto in fetched.reservations] == ["90923575"]
+    assert len(fetched.failures) == 3
+    # No identifier can be recovered from a non-dict, and inventing one would be worse.
+    assert {f.external_id for f in fetched.failures} == {NO_REFERENCE}
+
+
+@pytest.mark.asyncio
 async def test_calendar_blocks_are_excluded_and_counted(caplog):
     """Design D10 — not a reservation and not a failure, but never silent either."""
     with caplog.at_level("INFO"):

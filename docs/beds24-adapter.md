@@ -39,14 +39,20 @@ sobre todas las propiedades de esa cuenta**. Es la clase más peligrosa de crede
 menos, y vive cifrada con Fernet en `pms_credentials` bajo la regla 3 de
 `sdd/steering/security.md`.
 
+El procedimiento exacto vive en **[`pms-credentials.md`](pms-credentials.md)** y no se repite
+aquí. Lo único específico de Beds24 son las coordenadas: proveedor `beds24`, scope `account`.
+
 ```bash
-PMS_CREDENTIAL_SECRET='<refresh token>' \
-  docker compose exec backend uv run python -m app.integrations.cli.pms_credentials \
-  set --tenant <tenant-uuid> --provider BEDS24 --scope ACCOUNT
+read -rs PMS_CREDENTIAL_SECRET && export PMS_CREDENTIAL_SECRET
+docker compose exec -e PMS_CREDENTIAL_SECRET backend \
+  python -m app.integrations.cli.pms_credentials set <tenant-uuid> beds24 account
+unset PMS_CREDENTIAL_SECRET
 ```
 
-El secreto se lee **de la variable de entorno y nunca de un argumento**, que sobreviviría en el
-historial del shell y sería visible en `ps`.
+`read -rs` y **no** `PMS_CREDENTIAL_SECRET='…' docker compose …`: el segundo aterriza literal en
+`~/.zsh_history`, que es la otra mitad exacta del motivo por el que el comando no acepta el
+secreto como argumento. El `-e` es obligatorio — `docker compose exec` no reenvía el entorno del
+host sin él.
 
 **No hay ninguna variable de entorno de credencial de Beds24 en la aplicación.**
 `BEDS24_REFRESH_TOKEN` existe solo para el banco de medición de `scripts/`, y son cosas
@@ -67,7 +73,7 @@ mantiene el arranque local y la suite sin depender de configuración.
 ## Sincronizar
 
 ```bash
-docker compose exec backend uv run python -m app.integrations.cli.pms_sync <tenant-uuid>
+docker compose exec backend python -m app.integrations.cli.pms_sync <tenant-uuid>
 ```
 
 El comando agrupa las propiedades del tenant **por proveedor** y hace una llamada por proveedor
@@ -119,18 +125,23 @@ beds24: GET /bookings status=200 cost=1 remaining={'x-five-min-limit-remaining':
 - Un **429** detiene el sync con `PmsUnavailableError` y **no se reintenta**. La cuota es por
   cuenta, así que reintentar compite con el sync legítimo y con cualquier otro consumidor.
 
-Un ciclo de sync medido cuesta 8 créditos → un sync cada 24 s por cuenta. **Es un techo de cuota,
-no una cadencia recomendada**: el proveedor desaconseja el tiempo real y sugiere ~6 h. Lo que ese
-número aporta es holgura. Detalle y evidencia en [`beds24-spike.md`](beds24-spike.md).
+**La cadencia máxima sostenible está medida, y esta página no la repite**: sale de
+[`beds24-spike.md`](beds24-spike.md), que la genera desde el registro commiteado. Aquí estaba
+copiada y se quedó obsoleta dentro del mismo change que la corrigió, así que ahora se enlaza.
+
+Lo que sí conviene tener delante al leerla: **es un techo de cuota, no una cadencia
+recomendada.** El proveedor desaconseja el tiempo real y sugiere ~6 h. Lo que ese número aporta
+es holgura, no permiso.
 
 ---
 
 ## Rotar la credencial
 
 ```bash
-PMS_CREDENTIAL_SECRET='<nuevo refresh token>' \
-  docker compose exec backend uv run python -m app.integrations.cli.pms_credentials \
-  rotate --tenant <tenant-uuid> --provider BEDS24 --scope ACCOUNT
+read -rs PMS_CREDENTIAL_SECRET && export PMS_CREDENTIAL_SECRET
+docker compose exec -e PMS_CREDENTIAL_SECRET backend \
+  python -m app.integrations.cli.pms_credentials rotate <tenant-uuid> beds24 account
+unset PMS_CREDENTIAL_SECRET
 ```
 
 **Medido: el refresh token de Beds24 no rota al usarse**, así que basta guardarlo una vez.
