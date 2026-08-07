@@ -36,10 +36,11 @@ Operación y runbook: [`docs/pms-credentials.md`](../../docs/pms-credentials.md)
 - WHEN una propiedad no declara proveedor, THE SYSTEM SHALL resolverla al proveedor por defecto
   (`MOCK`), de modo que el arranque local y la suite no dependan de configuración alguna.
 - WHEN se sincroniza un tenant, THE SYSTEM SHALL agrupar sus propiedades **por proveedor** y hacer
-  una llamada por proveedor distinto, no una por propiedad. El techo medido en
-  `sdd/specs/pms-beds24-spike.md` es de 100 créditos por 300 s **por cuenta** y 8 créditos por
-  ciclo: con 12 propiedades, una llamada por propiedad consumiría el 96 % de la cuota, mientras que
-  agrupar escala con el número de proveedores distintos (2-3).
+  una llamada por proveedor distinto, no una por propiedad. La cuota de Beds24 es de 100 créditos
+  por 300 s **por cuenta**, así que con una docena de propiedades una llamada por propiedad agota
+  la ventana en una pasada, mientras que agrupar escala con el número de proveedores distintos
+  (2-3). El coste por ciclo no se reproduce aquí: vive medido en
+  `sdd/specs/pms-beds24-spike.md`.
 - THE SYSTEM SHALL restringir el emparejamiento de reservas al grupo de su proveedor, porque un
   `pms_external_id` solo es único dentro de un proveedor.
 - IF un proveedor del grupo falla, THEN THE SYSTEM SHALL registrarlo en el informe y continuar con
@@ -67,6 +68,12 @@ Operación y runbook: [`docs/pms-credentials.md`](../../docs/pms-credentials.md)
 - IF una propiedad declara un proveedor cuyas credenciales no están guardadas, THEN THE SYSTEM
   SHALL lanzar `MissingPmsCredentialError` y no SHALL caer al mock: un fallback silencioso
   informaría «created 0» y sería indistinguible de un PMS vacío.
+- WHEN la propiedad declara `BEDS24` y su credencial está guardada y descifra, THE SYSTEM SHALL
+  devolver el **adapter real** (`sdd/specs/pms-beds24-adapter.md`). Hasta que ese adapter existió,
+  esta misma rama recorría la cadena entera —búsqueda, scope, descifrado y auditoría— y terminaba
+  en `PmsUnavailableError` porque no había nada que construir; ese hueco es el que llenó
+  `pms-beds24-adapter`. El error sigue vivo para un proveedor del enum sin adapter, que es lo que
+  el propio enum advierte cuando dice que un miembro no es una promesa de implementación.
 - THE SYSTEM SHALL componer el mensaje de ese error a partir de escalares y SHALL rechazar en
   tiempo de ejecución cualquier otro tipo, porque pasar la fila de credencial donde se espera su
   `scope` renderizaría el refresh token entero.

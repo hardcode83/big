@@ -129,18 +129,33 @@ medirlo. Operación y hallazgos completos: [`docs/beds24-spike.md`](../../docs/b
 
 Medidos el 2026-08-04. Detalle y evidencia en [`docs/beds24-spike.md`](../../docs/beds24-spike.md).
 
-- **Presupuesto de créditos**: un ciclo de sync cuesta **8 créditos**, lo que permite **un sync
-  cada 24 s** por cuenta. Es un techo impuesto por la cuota, **no una recomendación**: el
+- **Presupuesto de créditos**: un ciclo de sync cuesta **10 créditos**, lo que permite **un sync
+  cada 30 s** por cuenta. Es un techo impuesto por la cuota, **no una recomendación**: el
   proveedor desaconseja el tiempo real y sugiere ~6 h. Lo que aporta a `celery-jobs` es holgura.
   Medido sobre una cuenta **vacía**; con reservas dentro el coste por ciclo puede subir.
+
+  > Corregido al archivar `pms-beds24-adapter` (2026-08-06): eran 8 créditos / 24 s cuando el
+  > catálogo medía `/bookings` por ventana de llegada. El adapter real filtra por **fecha de
+  > modificación**, así que el catálogo ganó dos formas y «un ciclo» pasó a ser diez peticiones.
+  > El coste por petición no cambió: sigue siendo 1. **La cifra viva se genera desde
+  > [`docs/beds24-request-cost.jsonl`](../../docs/beds24-request-cost.jsonl)**, y esta spec la
+  > cita en vez de ser su casa.
 - **El proveedor responde `201` aunque rechace la escritura.** El veredicto va en el cuerpo, en
   cuatro formas distintas. Un adapter que se fíe del código HTTP dará por creada una reserva que
   no existe.
 - **Los webhooks se configuran por API** (`POST /properties`), contra lo que afirma ADR 0006.
 - **Los webhooks solo se disparan para reservas de canal.** Una reserva creada por API no dispara
   ninguno, así que **una integración de webhooks de Beds24 no se puede validar sin canales
-  conectados**. Lo hereda `pms-beds24-adapter`, que medirá latencia y orden durante su ventana de
-  corte.
+  conectados**. Lo hereda `beds24-webhook-cutover-measurement`, que medirá latencia y orden
+  durante la ventana de corte.
+- **El listado de reservas oculta las cancelaciones por defecto**, y `includeCancelled=true` se
+  **ignora en silencio**. Verlas exige enumerar los estados en parámetros repetidos; la forma con
+  comas devuelve `400` y el vocabulario está validado en servidor. Medido al implementar
+  `pms-beds24-adapter`, y es lo que decide la forma de su consulta.
+- **`modifiedFrom` existe, restringe de verdad y acepta tanto fecha como instante ISO.** Es lo que
+  permite que el adapter no herede la limitación de ventana de Channex.
+- **Una cancelación por API no rellena la fecha de cancelación**: mueve el estado y la fecha de
+  modificación, y deja el campo específico vacío.
 - **El refresh token no rota** al usarse: basta persistirlo una vez y cachear el access token.
 - **Una petición rechazada no consume crédito**; corregir parámetros y reintentar es gratis.
 

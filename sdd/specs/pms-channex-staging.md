@@ -77,7 +77,9 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
   `NaN` e `Infinity`, que construyen como `Decimal` sin error.
 - THE SYSTEM SHALL dejar en `None` todo campo de PRD §16 que el proveedor no aporte, documentándolo
   en el código, y no SHALL inventar un valor — en particular no hay hora de salida.
-- THE SYSTEM SHALL conservar en `raw_payload` el elemento del proveedor sin tocar.
+- THE SYSTEM SHALL conservar en `raw_payload` el elemento del proveedor **menos sus datos de
+  titular de tarjeta y sus ramas de texto libre opaco** (ver abajo). Conservaba el elemento entero
+  hasta que `pms-beds24-adapter` construyó el descarte compartido.
 - WHEN se consulta una reserva por un id que el proveedor no conoce, THE SYSTEM SHALL devolver
   `None` y no SHALL lanzar, igual que `MockPMSAdapter`: un id ausente es una respuesta, no un
   fallo.
@@ -87,10 +89,16 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
 - THE SYSTEM SHALL asumir que **toda reserva de OTA llega con un objeto `guarantee`** que contiene
   `card_number`, `card_type`, `cvv`, `cardholder_name` y `expiration_date`, medido contra la API
   real.
-- THE SYSTEM SHALL no persistir, loguear ni reenviar ese objeto. Hoy se cumple porque
-  `raw_payload` vive solo en memoria y ninguna columna lo almacena; **cualquier change que llegue a
-  persistirlo debe descartar los datos de tarjeta en la frontera** — PCI DSS prohíbe retener el
-  CVV, así que cifrar no basta.
+- THE SYSTEM SHALL **descartar ese objeto en el mapeo**, antes de que el elemento entre en el DTO,
+  sustituyéndolo por un marcador constante. PCI DSS prohíbe retener el CVV, así que cifrar no
+  basta. Esto dejó de cumplirse «por omisión» —porque `raw_payload` viviera solo en memoria— al
+  archivar `pms-beds24-adapter`: una omisión no es una garantía, y la regla 13(b) nombra ese campo
+  como la trampa para el día en que algo lo persista.
+- THE SYSTEM SHALL descartar también, y por completo, **el mensaje original de la OTA** que la
+  reserva transporta. Es de donde el proveedor extrae los datos de tarjeta, así que el mismo
+  número viajaba en él una clave más allá de su propia redacción — invisible para un descarte que
+  solo mira nombres de clave, y verde en los tests porque el anonimizador borra ese campo al
+  capturar el fixture.
 - THE SYSTEM SHALL mantener desactivadas las opciones VCC del canal (`Allow VCC Updates`,
   `Allow VCC Balance`, `Allow VCC Fees Payout`, `Allow Payout Updates`), que solo ampliarían la
   superficie de datos de pago.
