@@ -9,7 +9,7 @@ phases: [tasks, archive]
 
 ## Qué debe mantenerse al día (genera tareas)
 
-- Endpoint nuevo/cambiado → visible en OpenAPI auto-generado (FastAPI); anotar summary/description y modelos de respuesta. **Regenerar `backend/openapi.json` con `make openapi` y commitearlo en el mismo PR** — el workflow `api-contract` lo exige.
+- Endpoint nuevo/cambiado → visible en OpenAPI auto-generado (FastAPI); anotar summary/description y modelos de respuesta. **Regenerar `backend/openapi.json` con `make openapi` y commitearlo en el mismo PR** — el workflow `api-contract` lo exige. **Y regenerar también el artefacto derivado del frontend** (`cd frontend && npm run api:generate`, que reescribe `frontend/lib/api/generated/openapi.d.ts`) y commitearlo con él: el workflow `frontend-api-contract` comprueba que no haya deriva, y ese fichero está versionado igual que el contrato. Son **las dos mitades del mismo puente** — el contrato es la frontera entre los dos CI y cada lado tiene su artefacto. Añadido el 2026-08-08 tras romper `main` con el change `cleaning`: se regeneró el lado del backend, la regla se cumplió al pie de la letra, y el panel de documentación lo dio por conforme porque esta segunda mitad no estaba escrita en ninguna parte contra la que fallar.
 - Variable de entorno nueva → `.env.example` actualizado con nombre y comentario, sin valores (PRD §25).
 - String de UI nueva → claves en `locales/es/` **y** `locales/en/`.
 - Supuesto o proveedor sin credenciales → marcar `ASSUMPTION` / `EXTERNAL_DEPENDENCY` donde corresponda.
