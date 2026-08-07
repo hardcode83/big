@@ -15,7 +15,7 @@ import enum
 import math
 import uuid
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -275,7 +275,12 @@ def _storable(field: str, value: Any) -> Any:
         return value
     if isinstance(value, (uuid.UUID, Decimal)):
         return str(value)
-    if isinstance(value, (datetime, date)):
+    # `time` alongside the other two since `properties-crud`: `properties` is the first audited
+    # entity with bare `TIME` columns (`default_check_in_time`, `default_check_out_time`), and
+    # without this a PATCH of a check-in time reached here and became a `500`. It is a scalar and
+    # JSONB stores it as the same ISO string the other two produce — the omission was that no
+    # entity had needed it, not a decision.
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, (Mapping, list, tuple, set, frozenset)):
         raise AuditContractError(

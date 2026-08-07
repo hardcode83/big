@@ -16,6 +16,8 @@ from app.core.http_limits import MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
+from app.properties.api.errors import register_property_error_handlers
+from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
 from app.tenants.api.errors import register_tenant_error_handlers
@@ -48,6 +50,7 @@ def create_app() -> FastAPI:
     register_reservation_error_handlers(app)
     register_integration_error_handlers(app)
     register_tenant_error_handlers(app)
+    register_property_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -56,6 +59,10 @@ def create_app() -> FastAPI:
     app.include_router(reservations_router, prefix=API_V1_PREFIX)
     app.include_router(integrations_router, prefix=API_V1_PREFIX)
     app.include_router(tenants_router, prefix=API_V1_PREFIX)
+    # `properties-crud`: the first `api/` layer of the `properties` domain, which until now was
+    # the only domain module without one. Its arrival is what makes `POST /reservations`
+    # reachable — it answered 404 on every request because no property could exist.
+    app.include_router(properties_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late for an upload.

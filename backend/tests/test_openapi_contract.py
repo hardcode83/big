@@ -68,13 +68,17 @@ def test_the_route_guard_actually_sees_the_api() -> None:
     """
     routes = _api_routes(create_app())
 
-    assert len(routes) >= 18
+    assert len(routes) >= 22
     assert {path.split("/")[3] for path, _ in routes} == {
         "auth",
         "users",
         "reservations",
         "integrations",
         "tenants",
+        # `properties-crud`: four routes over two paths. The floor above moved from 18 to 22 with
+        # them — it is a floor and not an equality so an added route does not fail here, but the
+        # prefix set IS exact, so a new module has to be named.
+        "properties",
     }
 
 

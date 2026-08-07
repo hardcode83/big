@@ -35,6 +35,11 @@ class Property:
     default_check_in_time: time = time(15, 0)
     default_check_out_time: time = time(11, 0)
     wifi_name: str | None = None
+    # Whether a wifi password is stored — NOT the password, and not its ciphertext either
+    # (`properties-crud` R5.2). A caller still has to tell "none stored" from "one is stored and
+    # you cannot read it", and without this flag no read path could express that difference. A
+    # boolean is not the secret, so design D2 below is untouched by it.
+    has_wifi_password: bool = False
     # `wifi_password_encrypted` is deliberately NOT a field here (`properties-crud` design D2).
     # The column exists and this change is its first writer, but the entity is what every read
     # path returns and what response schemas are built from, so keeping the secret off it means

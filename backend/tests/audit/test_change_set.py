@@ -8,7 +8,7 @@ only way to put a rule-3 value in `audit_logs.changes` has to raise.
 import enum
 import json
 import uuid
-from datetime import UTC, date, datetime
+from datetime import UTC, date, datetime, time
 from decimal import Decimal
 
 import pytest
@@ -250,6 +250,24 @@ def test_dates_and_uuids_are_recorded_in_a_json_safe_form() -> None:
     assert recorded["name"] == {"old": "2026-07-30", "new": "2026-07-31"}
     assert recorded["phone"]["new"].startswith("2026-07-31T10:30")
     assert recorded["email"]["new"] == str(identifier)
+
+
+def test_a_bare_time_is_stored_as_its_iso_string() -> None:
+    """Added by `properties-crud`, and it was a real `500` before.
+
+    `properties` is the first audited entity with bare `TIME` columns
+    (`default_check_in_time`, `default_check_out_time`). `_storable` coerced `datetime` and
+    `date` but not `time`, so patching a check-in time raised `AuditContractError` from inside
+    the audit write and surfaced as a `500`. It is a scalar like the other two and JSONB stores
+    the same ISO string.
+    """
+    recorded = (
+        ChangeSet("PROPERTY")
+        .diff("default_check_in_time", time(15, 0), time(16, 30))
+        .as_dict()
+    )
+
+    assert recorded["default_check_in_time"] == {"old": "15:00:00", "new": "16:30:00"}
 
 
 def test_an_empty_change_set_is_falsy_so_callers_can_skip_writing() -> None:
