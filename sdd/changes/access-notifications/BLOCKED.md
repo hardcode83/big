@@ -1,18 +1,18 @@
 # BLOCKED — access-notifications
 
-Preguntas abiertas del diseño. **Ninguna bloquea la implementación**: cada una lleva un default
-tomado para que `/sdd:run` pueda avanzar, y aquí queda registrado cuál, para que revertirlo sea
-barato. Se resuelven con Jose antes de `/sdd:ship`.
+Preguntas abiertas del diseño y lo que quedó sin correr en `/sdd:run`. **Nada bloquea la
+implementación**: las cuatro OQ llevan un default tomado, y aquí queda registrado cuál para que
+revertirlo sea barato. Se resuelven con Jose antes de `/sdd:ship`.
 
 ## OQ1 — ¿La API de lectura in-app entra en este change?
 
 - **phase**: design
 - **type**: decision
 - **qué y por qué**: `design.md` D5 marca `SENT` las notificaciones `IN_APP` porque «la fila es la
-  entrega». Eso solo es cierto si algo puede leerla, y hoy no existe endpoint. D6 mete
+  entrega». Eso solo es cierto si algo puede leerla, y no existía endpoint. D6 mete
   `GET /api/v1/notifications` en el alcance; el proposal no lo enumeraba.
-- **default tomado**: se implementa. Revertir = borrar `notifications/api/` y
-  `ListOwnNotificationsUseCase`.
+- **default tomado**: implementado. Revertir = borrar `backend/app/notifications/api/`,
+  `ListOwnNotificationsUseCase`, `list_for_recipient` y el permiso `READ_OWN_NOTIFICATIONS`.
 - **resume**: `/sdd:review access-notifications`
 
 ## OQ2 — «Marcar como leída» exige una columna que el PRD no declara
@@ -25,22 +25,64 @@ barato. Se resuelven con Jose antes de `/sdd:ship`.
 - **default tomado**: no se añade; no hay `POST /notifications/{id}/read`.
 - **resume**: `/sdd:review access-notifications`
 
-## OQ3 — Avalancha de escalados en el primer tick tras desplegar
+## OQ3 — Avalancha de escalados en el primer tick tras desplegar — **MEDIDO**
 
-- **phase**: design
+- **phase**: run
 - **type**: decision
 - **qué y por qué**: al marcar `SENT` por primera vez, las filas `CLEANING_TASK_ASSIGNED` cuyo
-  plazo ya venció pasan a ser candidatas y `check_sla_breaches` las escala todas de golpe. Son
-  incumplimientos reales, pero el volumen puede molestar.
-- **default tomado**: se acepta. Se mide en `/sdd:run` contra los datos de dev y se anota el número.
+  plazo ya venció pasan a ser candidatas y `check_sla_breaches` las escala todas de golpe.
+- **medición (tarea 9.6, 2026-08-08)**: reproducido en el stack del worktree con 7 filas de plazo
+  vencido. Antes del emisor: **0 candidatas**. Tras un `dispatch_notifications`: **7 entregadas y
+  7 candidatas**, y `check_sla_breaches` reportó `breached=7`. Es decir, **la relación es 1:1**:
+  se escalará exactamente una vez cada asignación pendiente con plazo vencido que exista en la
+  base de datos al desplegar.
+  - El número real de dev/producción **no se puede medir desde aquí**: el worktree arranca con
+    base vacía (`sdd/project.md`, «Worktree bootstrap»). Lo que se sabe es la fórmula, no el
+    total. Consultarlo antes de desplegar es un `SELECT count(*) FROM notification_logs WHERE
+    notification_type = 'CLEANING_TASK_ASSIGNED' AND status = 'PENDING' AND sla_deadline_at <
+    now()`.
+- **default tomado**: se acepta. Son incumplimientos reales y ocultarlos con un filtro sería
+  mentir sobre el pasado.
 - **resume**: `/sdd:review access-notifications`
 
 ## OQ4 — `EXPIRED` sin nadie que rellene `valid_to`
 
 - **phase**: design
 - **type**: decision
-- **qué y por qué**: la transición a `EXPIRED` de `AccessRecord` depende de `valid_to`, que hoy no
-  rellena nadie (lo haría un proveedor real de accesos). Implementarla deja código sin ejercitar en
-  producción; no implementarla deja un valor del enum sin camino.
-- **default tomado**: se implementa con test propio.
+- **qué y por qué**: la transición a `EXPIRED` depende de `valid_to`, que hoy no rellena nadie (lo
+  haría un proveedor real de accesos). Implementarla deja código sin ejercitar en producción; no
+  implementarla deja un valor del enum sin camino.
+- **default tomado**: implementada, con test propio y con
+  `test_expirable_finds_nothing_because_nothing_writes_valid_to` fijando la ausencia — ese test
+  empezará a fallar, útilmente, el día que un proveedor empiece a rellenar la columna.
 - **resume**: `/sdd:review access-notifications`
+
+## D1 — Re-review de QA de las secciones 1-3, interrumpida por límite de sesión
+
+- **phase**: run
+- **type**: deferred
+- **qué y por qué**: tras arreglar los tres hallazgos del panel de las secciones 1-2 se relanzaron
+  los dos revisores afectados. **Seguridad devolvió PASS** y cerró los tres explícitamente
+  (incluida la mitad de su propuesta de arreglo que se descartó razonadamente: el predicado
+  `attempts < max_attempts` en `list_pending` dejaría filas atascadas en `PENDING` para siempre en
+  vez de terminar en `FAILED`). **QA murió a mitad** con `session limit · resets 1:40pm`, después
+  de confirmar la eliminación de `provider_message_id` y antes de correr los tests de la parte A y
+  toda la parte B (sección 3).
+- **qué falta exactamente**: verificación independiente de la sección 3 (cierre del SLA) — en
+  particular tres preguntas que se le habían planteado y no llegó a responder: si anular el plazo
+  de una fila ya `sla_breached` pierde evidencia; si un fallo posterior en
+  `RejectCleaningTaskUseCase` revierte también la cancelación; y si la tarea de reemplazo debe
+  recibir un plazo nuevo.
+- **mitigación mientras tanto**: la suite completa pasa (4240 tests) y la sección 3 tiene sus
+  propios tests de aceptación, rechazo, idempotencia y no-escalado.
+- **resume**: `/sdd:review access-notifications` — el panel a escala de feature lo cubre.
+
+## D2 — Paneles no lanzados para las secciones 4-7
+
+- **phase**: run
+- **type**: deferred
+- **qué y por qué**: el protocolo de `/sdd:run` pide panel al cerrar cada sección. Se lanzó para
+  las secciones 1-3 (5 revisores + 2 de re-review). Las secciones 4-7 se implementaron y
+  verificaron con la suite, pero **sin panel**, por el límite de sesión de agentes.
+- **resume**: `/sdd:review access-notifications` — cubre el change entero a escala de feature,
+  que es exactamente el sustituto que el propio protocolo nombra para un panel interrumpido.

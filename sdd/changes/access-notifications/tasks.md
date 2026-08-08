@@ -214,29 +214,37 @@ Desviaciones de esta sección, para que se lean como decisiones:
   `backend/openapi.json` **y** `frontend/lib/api/generated/openapi.d.ts` — son las dos mitades del
   mismo puente (`steering/documentation.md`). [R3, R4, R6]
 - [x] 8.2 `.env.example`: las dos variables nuevas con comentario y sin valor. [R4]
-- [ ] 8.3 `README.md` raíz: mencionar los dos jobs nuevos del beat y los módulos que ganan API. [R1, R4]
-- [ ] 8.4 `docs/celery-jobs.md`: añadir `dispatch_notifications` y `provision_access_records` a la
+- [x] 8.3 `README.md` raíz: mencionar los dos jobs nuevos del beat y los módulos que ganan API. [R1, R4]
+- [x] 8.4 `docs/celery-jobs.md`: añadir `dispatch_notifications` y `provision_access_records` a la
   tabla de jobs con su cadencia y su propósito. [R1, R4]
-- [ ] 8.5 `docs/cleaning.md`: la página afirma que el escalado de SLA está inerte «porque nada
+- [x] 8.5 `docs/cleaning.md`: la página afirma que el escalado de SLA está inerte «porque nada
   marca las notificaciones como enviadas». Deja de ser cierto con este change — corregirlo y
   enlazar el cierre de plazo al responder. [R5]
-- [ ] 8.6 `docs/access-notifications.md` (nueva): cómo se opera la entrega de notificaciones, el
+- [x] 8.6 `docs/access-notifications.md` (nueva): cómo se opera la entrega de notificaciones, el
   registro de accesos y el registro legal — orientada a *cómo se usa*, sin duplicar las specs EARS.
   [R2, R3, R4, R6]
-- [ ] 8.7 Comprobar si los diagramas de `docs/diagrams/` quedan obsoletos: el hexagonal por
-  dominios (tres módulos ganan `application/`+`api/`) y el ER (no cambia el esquema, así que
-  probablemente no). Regenerar solo lo que de verdad cambie; los obsoletos se borran. [R1, R4]
+- [x] 8.7 Diagramas comprobados, **ninguno regenerado y ninguno obsoleto**. El ER
+  (`2026-08-06_autohost-er-entidades.png`) se genera desde la metadata de SQLAlchemy y este
+  change no añade ni una tabla ni una columna, así que saldría idéntico. El hexagonal
+  (`2026-07-13_autohost-hexagonal-dominios.png`) dibuja los **dominios**, no las capas de cada
+  uno: `access`, `guests` y `notifications` ya estaban en él y lo que cambia es que ahora tienen
+  `application/`+`api/`, que el diagrama no representa. Regenerar por regenerar habría metido un
+  fichero binario idéntico en el diff. [R1, R4]
 
 ## 9. Verification
 
-- [ ] 9.1 Suite completa del backend: `docker compose exec backend uv run pytest` (con el stack
+- [x] 9.1 Suite completa del backend: `docker compose exec backend uv run pytest` (con el stack
   del worktree levantado con `make up`; ver «Worktree bootstrap» en `sdd/project.md`).
-- [ ] 9.2 Sin migraciones pendientes: `docker compose exec backend uv run alembic check`.
-- [ ] 9.3 Contrato al día: `make openapi` y `cd frontend && npm run api:generate` no dejan diff.
-- [ ] 9.4 Frontend sin romper por el contrato nuevo: `cd frontend && npm test`.
-- [ ] 9.5 Comprobación manual del flujo extremo a extremo con el stack levantado: crear una
+- [x] 9.2 Sin migraciones pendientes: `docker compose exec backend uv run alembic check`.
+- [x] 9.3 Contrato al día: `make openapi` y `cd frontend && npm run api:generate` no dejan diff.
+- [x] 9.4 Frontend sin romper por el contrato nuevo: 328/328. Nota operativa: desde un worktree
+  hay que montar la raíz del repo (`-v $(pwd)/.github:/.github -v $(pwd)/docker-compose.yml:/docker-compose.yml`),
+  porque `build-identity-contract.test.ts` lee ficheros de la raíz y en el contenedor `..` es `/`.
+  Sin eso falla ese único test por entorno, no por código.
+- [x] 9.5 Comprobación manual del flujo extremo a extremo con el stack levantado: crear una
   notificación `PENDING`, correr `dispatch_notifications`, verificar `SENT` + `sent_at`; aceptar
   una limpieza asignada y verificar que su `sla_deadline_at` queda a `NULL` y que
   `check_sla_breaches` no la escala.
-- [ ] 9.6 **Medir OQ3**: contar cuántas filas `CLEANING_TASK_ASSIGNED` con plazo ya vencido pasan a
-  candidatas en el primer tick tras encender el emisor, y anotar el número en `BLOCKED.md`.
+- [x] 9.6 **OQ3 medido** y anotado en `BLOCKED.md`: la relación es **1:1** — de 7 filas con plazo
+  vencido, 0 candidatas antes del emisor y 7 después, con `breached=7`. El total real de dev no es
+  medible desde el worktree (base vacía); lo que queda registrado es la fórmula y la consulta.
