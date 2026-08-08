@@ -19,9 +19,16 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 - THE SYSTEM SHALL declarar el calendario de tareas periódicas en código, dentro de la imagen,
   y no en un crontab del host.
-- THE SYSTEM SHALL registrar exactamente cuatro tareas periódicas con los nombres literales de
-  PRD §8.3 y sus cadencias: `check_checkin_windows`, `process_checkouts` y
-  `mark_occupied_estimated` cada 5 minutos, y `check_sla_breaches` cada minuto.
+- THE SYSTEM SHALL registrar los cuatro nombres literales de PRD §8.3 con sus cadencias:
+  `check_checkin_windows`, `process_checkouts` y `mark_occupied_estimated` cada 5 minutos, y
+  `check_sla_breaches` cada minuto.
+- THE SYSTEM SHALL registrar además las dos tareas que PRD §8.3 no nombra y que
+  `access-notifications` añadió: `dispatch_notifications` cada minuto y
+  `provision_access_records` cada 5 minutos. El PRD dice qué debe ocurrir, no qué lo dispara, así
+  que nombrarlas fue una decisión de ese change y no una contradicción; los cuatro originales no
+  se tocaron. `dispatch_notifications` va a un minuto porque una fila solo puede incumplir su
+  plazo **después** de entregarse: un emisor más lento retrasaría cada escalado en su propia
+  cadencia.
 - THE SYSTEM SHALL derivar tanto el `beat_schedule` como el TTL del lock de cada tarea de una
   única tabla de cadencias, de modo que no puedan desincronizarse.
 - WHEN se ejecuta `make up`, THE SYSTEM SHALL arrancar un servicio `beat` junto a `worker`, con
@@ -108,7 +115,14 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   `sla_breached = FALSE`, THE SYSTEM SHALL marcarlo incumplido y crear la notificación de
   escalado que corresponda a su tipo.
 - THE SYSTEM SHALL crear el escalado en estado `PENDING` y no SHALL intentar entregarlo por
-  ningún canal: el envío pertenece a `access-notifications`.
+  ningún canal: la entrega es de `dispatch_notifications`, que drena las filas `PENDING` cada
+  minuto. La costura entre encolar y entregar es deliberada.
+- THE SYSTEM SHALL encontrar candidatos reales desde que existe ese emisor. La consulta exige
+  `status = SENT` y, hasta `access-notifications`, **nada escribía ese valor**: cada ejecución
+  encontraba cero. `check_sla_breaches` cambió de comportamiento sin cambiar de código.
+- WHEN una fila deja de tener plazo porque su destinatario ya respondió —`cancel_sla_deadline`,
+  de `cleaning`— THE SYSTEM SHALL dejar de considerarla candidata por la condición
+  `sla_deadline_at IS NOT NULL`, sin que nadie haya tocado `status` ni `sla_breached`.
 - THE SYSTEM SHALL escribir en una única transacción la marca y todas las filas de escalado de
   ese incumplimiento.
 - THE SYSTEM SHALL dirigir el escalado a cada `PROPERTY_MANAGER` activo del tenant, con una

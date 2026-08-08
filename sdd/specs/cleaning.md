@@ -126,16 +126,26 @@ hueco conocido, no un descuido.
   owner si no hay ninguno— **sin** plazo de SLA.
 - THE SYSTEM SHALL escribir `subject` y `body` conforme al contrato de la regla 11 que fijó
   `celery-jobs`: identificadores y tipo, nunca el contenido de otra fila.
-- THE SYSTEM SHALL limitarse a persistir la notificación; el envío es de `access-notifications`.
+- THE SYSTEM SHALL limitarse a persistir la notificación; la entrega la hace
+  `dispatch_notifications`, de `access-notifications`.
 - WHEN la limpiadora responde, THE SYSTEM SHALL no escribir una segunda notificación de
   asignación.
+- WHEN una limpiadora acepta o rechaza la tarea, THE SYSTEM SHALL anular el plazo de la fila
+  `CLEANING_TASK_ASSIGNED` de esa tarea —`cancel_sla_deadline`, que solo pone `sla_deadline_at`
+  a nulo— **antes de su único `commit`**, de modo que la respuesta y el plazo cerrado sean una
+  escritura o ninguna: una aceptación comiteada con el plazo vivo es exactamente el escalado que
+  esto evita.
+- THE SYSTEM SHALL conceder esa escritura únicamente a los dos casos de uso que **responden** a
+  una asignación, y no a iniciar, cerrar ni validar: para entonces el plazo ya está cerrado.
+- IF la tarea no tiene fila de asignación o su plazo ya está cerrado, THEN THE SYSTEM SHALL
+  completar la respuesta sin error y sin modificar nada: una tarea creada antes de
+  `access-notifications` no tiene plazo que anular, así que cero filas es el caso normal.
 
-**El escalado queda inerte hasta `access-notifications`.** Este es el primer escritor de
+**El escalado está vivo desde `access-notifications`.** Este es el primer escritor de
 `CLEANING_TASK_ASSIGNED`, cuyo escalado a `SLA_BREACH` para el `PROPERTY_MANAGER` está definido
-desde `celery-jobs`. Pero `check_sla_breaches` solo considera candidatos con `status = SENT` y
-**nada marca `SENT`** porque el emisor no existe todavía: el plazo se escribe y pasa sin que
-nadie escale. Cerrar el SLA al responder viaja con ese change, con la consecuencia nombrada en su
-entrada de roadmap.
+desde `celery-jobs`; `check_sla_breaches` solo considera candidatos con `status = SENT`, y el
+emisor que llegó con `access-notifications` es el primero que escribe ese valor. La cadena
+funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 
 ### Aislamiento y autorización
 

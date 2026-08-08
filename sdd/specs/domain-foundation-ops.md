@@ -9,10 +9,10 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 ### Estructura por módulo de dominio
 
 - Las 8 entidades se reparten en 4 módulos de dominio ya nombrados en `architecture.md`: `cleaning` (`CleaningTask`, `CleaningChecklistTemplate`, `CleaningChecklistCompletion`, `CleaningPhoto`), `maintenance` (`Incident`), `messaging` (`Conversation`, `Message`), `access` (`AccessRecord`).
-- Cada módulo tiene solo `domain/` (entidades Python puras + enums) e `infrastructure/` (modelos SQLAlchemy) — sin `application/` ni `api/` todavía, porque no existe ningún caso de uso ni router que los necesite (se añaden en el change que primero persista/exponga cada entidad: `cleaning`, `maintenance`, `messaging-ai`, `access-notifications`).
+- Este change aportó a cada módulo solo `domain/` (entidades Python puras + enums) e `infrastructure/` (modelos SQLAlchemy). El `application/` y el `api/` de cada uno los añade el change que primero persiste/expone la entidad: `cleaning` lo hizo para las cuatro suyas y `access-notifications` para `AccessRecord`; `maintenance` (`Incident`) y `messaging-ai` (`Conversation`, `Message`) siguen sin ellos.
 - `domain/entities.py` y `domain/enums.py` de los 4 módulos no importan `sqlalchemy`, `fastapi` ni `pydantic` (regla de dependencia de `backend-architecture.md`, verificable).
-- Ninguna de las 8 entidades tiene puertos de repositorio (`Protocol`/ABC) ni casos de uso todavía — se difieren al change que primero necesite persistir cada una.
-- Las 8 entidades se modelan como `@dataclass` simple, sin métodos de mutación custom — ninguna tiene todavía un caso de uso real que proteja una invariante (mismo criterio que las 8 entidades de `domain-foundation-core`).
+- Los puertos de repositorio (`Protocol`/ABC) y los casos de uso llegan con ese mismo change por entidad — `CleaningTask` y compañía en `cleaning`, `AccessRecord` en `access-notifications`; `Incident`, `Conversation` y `Message` todavía no los tienen.
+- Las entidades nacieron aquí como `@dataclass` simple, sin métodos de mutación custom, porque ninguna tenía aún un caso de uso que protegiera una invariante. Las que ya lo tienen los han ganado después: `AccessRecord` lleva desde `access-notifications` su máquina de estados en la propia entidad (`register_manual_code`, `mark_external_managed`, `mark_delivered`, `revoke`, `expire`). Las tres sin dueño siguen siendo dataclasses planas.
 
 ### Enums de dominio exactos del PRD
 
@@ -32,7 +32,7 @@ Entidades de dominio y esquema de base de datos para las 8 entidades del PRD (§
 - FKs nullable hacia `User` (`CleaningTask.assigned_cleaner_id`/`validated_by_user_id`, `CleaningChecklistCompletion.completed_by`, `Incident.reported_by_user_id`/`assigned_technician_id`, `Message.sender_user_id`) usan `ON DELETE SET NULL` — el resto de FKs (incluida la obligatoria `CleaningPhoto.uploaded_by`) usan `ON DELETE RESTRICT`.
 - `Message.metadata` se mapea con el atributo Python `metadata_` a la columna real `"metadata"` (`mapped_column("metadata", JSONB, ...)`) para evitar la colisión con el atributo reservado `Base.metadata` de SQLAlchemy — mismo patrón que `TimelineEventModel`.
 - Columnas `JSONB` (`CleaningChecklistTemplate.items`/`required_photos`, `CleaningTask` no tiene JSONB propio, `Incident.ai_classification`, `Message.metadata`, `CleaningPhoto.ai_validation_result`) no validan su estructura interna en este change — solo se persisten.
-- `AccessRecord.code_masked` solo almacena el valor enmascarado (`****XX`); no existe ninguna columna de código de acceso en texto plano ni cifrado en este change — el cifrado/almacenamiento real de códigos queda para `access-notifications`.
+- `AccessRecord.code_masked` solo almacena el valor enmascarado (`****XX`), y **no existe ni existirá** columna de código de acceso en texto plano ni cifrado. `access-notifications` resolvió que no hace falta ninguna: PRD §15 deja la cerradura y la entrega del código en manos del proveedor, así que nadie en el MVP necesita el valor completo y cifrarlo exigiría un consumidor que no hay. El código llega en la petición, se reduce a su máscara y se descarta (ver `access-notifications.md`).
 
 ### Migraciones Alembic
 

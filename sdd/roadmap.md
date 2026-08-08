@@ -98,7 +98,7 @@ Categorías:
 - [ ] messaging-ai — [BE] Conversation + Message + MockAIAdapter + escalación (PRD §26.12, §13).
   needs: pms-beds24-adapter
 - [x] dashboard-web-frontend — [FE] dashboard FE (property cards, detalle, timeline) adelantado contra mocks/fixtures mientras dashboard-web (backend agregado) sigue su orden natural en el roadmap … → changes/archive/2026-08-01-dashboard-web-frontend/
-- [ ] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17).
+- [x] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17). → changes/archive/2026-08-08-access-notifications/
 - [ ] guest-portal-api — [BE] API y seguridad del portal de huésped: token opaco, autorización por estancia/tenant, consulta de información, check-in, PII, auditoría e incidencias (PRD §§6, 7.6, 7.7, 17, 22, 23 …
   needs: access-notifications · size: M · kind: feature
 - [ ] guest-portal-web — [FE] página `/guest/[token]`, instrucciones, formulario de check-in, soporte, estados accesibles e i18n ES/EN (PRD §§23-24; capability original `guest-portal`)

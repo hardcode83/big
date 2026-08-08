@@ -69,7 +69,7 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 
 Seis columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
 
-**Tres ya están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción) y `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA). Las otras tres siguen sin reclamar. La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
+**Cuatro ya están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA) y `notification_logs.last_error` desde `access-notifications` (2026-08-08). Las dos de `webhook_events` siguen sin reclamar. La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
 
 **La forma estructurada es el defecto: el valor no sobrevive en absoluto**, ni siquiera enmascarado — `{"changed": true}`, o se elimina la clave.
 
@@ -78,8 +78,8 @@ Seis columnas del esquema son texto o JSON libre por el que puede colarse un val
 | `audit_logs.changes` | estructurada | **`user-management`** (escritor vivo; `ChangeSet` + `AuditLogFactory` lo hacen cumplir) y quien audite documentos de huésped |
 | `webhook_events.payload` | estructurada | `reservations-webhooks` |
 | `webhook_events.error` | estructurada | `reservations-webhooks` |
-| `notification_logs.last_error` | estructurada | `access-notifications` (aún sin escritor) |
-| `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y después `access-notifications` |
+| `notification_logs.last_error` | estructurada | **`access-notifications`** (escritor vivo; el tipo de retorno del adapter no admite texto libre, así que lo hace cumplir por construcción) |
+| `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
 
 **La excepción es una y solo una**: `subject`/`body` admiten la forma enmascarada `****XX` de un **código de acceso**, porque renderizan un mensaje que el huésped debe recibir.
 
