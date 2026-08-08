@@ -46,10 +46,18 @@ def test_only_the_known_methods_take_an_operational_state_directly() -> None:
     **What this measures, precisely.** It scans parameter annotations for the state enum, so it
     catches the realistic widening — somebody adding `set_operational_state(tenant_id, id,
     state)` — and it does NOT catch `save`/`add`, which receive the state inside a `Property`.
-    Those two are the sanctioned pair and are pinned by name in the sibling tests instead:
-    `save` writes the column after `PropertyStateMachine` approved the destination, and an
-    insert has no source state to transition *from*, so its column takes the DDL default while
-    R4 keeps the API from offering a choice.
+    Those two are covered elsewhere, and how differs:
+
+    - `save` writes the column after `PropertyStateMachine` approved the destination. Sanctioned.
+    - `add` cannot be constrained by its signature at all, so it is constrained at RUNTIME: it
+      refuses any entity not in `VACANT_READY` and omits the column from the INSERT. That guard
+      is what `test_repository_writers.py::test_add_refuses_an_entity_that_arrives_in_any_other_state`
+      pins.
+
+    An earlier version of this docstring justified the `add` exemption with "R4 keeps the API from
+    offering a choice". That was the wrong argument and the review panel said so: it leans on the
+    API layer to protect a PORT, which leaves every non-HTTP caller — a seed script, a future job —
+    free to do the thing the rule forbids.
 
     `list_by_state` is a READ that filters. Filtering is not writing, so it is allowed — but it
     is listed explicitly rather than exempted by a pattern, so the set cannot grow unnoticed.

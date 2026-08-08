@@ -6,10 +6,20 @@ Shaped by its consumers, not by everything a property repository could eventuall
 persists that column and nothing else.
 
 `properties-crud` added the row writers (`add`, `update_details`, `set_wifi_password`) and the
-paginated `list` behind `/api/v1/properties`. They follow the rule the two existing writers
-established rather than relaxing it: **each one names exactly what it writes**, so no signature
-here can express a change to `current_operational_state`. That column still belongs to
-`PropertyStateMachine` alone, and `save` is still its only route.
+paginated `list` behind `/api/v1/properties`. `current_operational_state` still belongs to
+`PropertyStateMachine` alone and `save` is still its only route — but **how that is enforced
+differs per method, and the difference matters**:
+
+- `update_details` and `set_wifi_password` name exactly what they write, so their *signatures*
+  make a state change unrepresentable. That is a structural guarantee.
+- `add` takes a whole `Property`, so it cannot have that guarantee: an entity carries a state
+  whether the caller meant it or not. It is enforced by a **runtime guard** in the adapter
+  instead, which refuses any entity not in `VACANT_READY` and omits the column from the INSERT
+  so the DDL default is the authority.
+
+An earlier version of this paragraph claimed no signature here could express such a change. It
+was false for `add`, and the review that caught it noted the real risk: the next consumer of
+this port could otherwise seed rows into arbitrary states with no transition history.
 
 Every method takes `tenant_id` explicitly and returns `None` outside it. That is what
 makes R1.4 answer `404` (design D6) instead of leaking the existence of a neighbour's
@@ -192,11 +202,17 @@ class PropertyRepository(Protocol):
         as plaintext, because `EncryptedSecret.__post_init__` rejects anything that is not
         Fernet ciphertext, and it cannot leave, because nothing reads it back.
 
-        `current_operational_state` is taken from the entity here — that is not a bypass of
-        `PropertyStateMachine`: an insert has no source state to transition *from*, and PRD
-        §3.1 attaches the `TimelineEvent` obligation to a transition. Creation is expected to
-        leave the column at its DDL default, `VACANT_READY`, and R4 forbids the API from
-        offering a way to choose otherwise.
+        **`current_operational_state` is not written from the entity, and cannot be chosen.**
+        The INSERT omits the column so its DDL default (`VACANT_READY`) applies, and an entity
+        carrying anything else is REFUSED with `PropertyValidationError` rather than quietly
+        normalised. Creation is not a transition — an insert has no source state to move *from*,
+        and PRD §3.1 attaches the `TimelineEvent` obligation to a transition — but "not a
+        transition" is precisely why no other state may be reached this way: there would be no
+        `property_state_transitions` row to record it (R4.2, and rule 9 of
+        `steering/security.md`).
+
+        This is a runtime guard and not a signature-level one, because this method takes a whole
+        entity. The sibling writers get the stronger form; this one cannot, so it is checked.
 
         Raises `DuplicateInternalCodeError` / `DuplicatePmsExternalIdError`, translated from
         the named constraint violations rather than from a prior SELECT, and

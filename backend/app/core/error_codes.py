@@ -1,8 +1,14 @@
 """The single source of truth for the `code` of the PRD §23 error envelope.
 
 Every code that can reach a client goes through here: the `code` attributes of
-`AppError` subclasses, the `_MAPPING` tables of `app/{auth,reservations,tenants}/api/
-errors.py`, the literals of `app/integrations/api/errors.py` and `_HTTP_STATUS_CODES`.
+`AppError` subclasses, the `_MAPPING` tables of `app/{auth,properties,reservations,
+tenants}/api/errors.py`, the literals of `app/integrations/api/errors.py` and
+`_HTTP_STATUS_CODES`.
+
+**A module added to that list must also be added to the guard**, which reflects over the
+mappings by import in `tests/test_openapi_contract.py`. `properties` shipped in this
+enumeration's blind spot once already: the router existed, emitted codes, and the guard
+never looked at it, so a bare literal there would have reached the contract unchallenged.
 
 It exists because `api-contract-export` publishes these values as an `enum` in the
 OpenAPI contract (design D11), and a published enum that omits a code the backend

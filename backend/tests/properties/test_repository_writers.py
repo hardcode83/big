@@ -15,6 +15,7 @@ from datetime import UTC, datetime
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from app.core.crypto import encrypt
 from app.core.tenancy import CrossTenantWriteError
@@ -87,6 +88,36 @@ async def test_add_inserts_the_property_and_leaves_the_state_at_its_default(db_s
     assert stored.wifi_password_encrypted is None
 
 
+@pytest.mark.parametrize(
+    "state",
+    [
+        PropertyOperationalState.OCCUPIED_ESTIMATED,
+        PropertyOperationalState.BLOCKED_BY_OWNER,
+        PropertyOperationalState.AWAITING_CLEANING,
+    ],
+)
+@pytest.mark.asyncio
+async def test_add_refuses_an_entity_that_arrives_in_any_other_state(db_session, state) -> None:
+    """R4.2 — and this guard is the ONLY thing enforcing it on this method.
+
+    `update_details` cannot express a state change because its allowlist forbids the key; `add`
+    has no such protection, because it takes a whole entity and an entity always carries a state.
+    So the rule is checked at runtime here. Without it the port hands any caller a way to land a
+    row directly in `OCCUPIED` or `BLOCKED` with no `property_state_transitions` row and no
+    `AuditLog` — afterwards indistinguishable from one `PropertyStateMachine` moved, which is
+    what rule 9 of `steering/security.md` exists to prevent.
+
+    Parametrised over three unrelated states so the test cannot pass by accident on one enum
+    member, and refused rather than silently normalised: a caller that asked for a state has to
+    learn it was not honoured.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    entity = _entity(tenant.id, internal_code="REDES11", state=state)
+
+    with pytest.raises(PropertyValidationError):
+        await SqlAlchemyPropertyRepository(db_session).add(tenant.id, entity)
+
+
 @pytest.mark.asyncio
 async def test_add_refuses_to_write_into_another_tenant(db_session) -> None:
     tenant_a = await _tenant(db_session, "TenantA")
@@ -95,6 +126,27 @@ async def test_add_refuses_to_write_into_another_tenant(db_session) -> None:
 
     with pytest.raises(CrossTenantWriteError):
         await SqlAlchemyPropertyRepository(db_session).add(tenant_a.id, theirs)
+
+
+@pytest.mark.asyncio
+async def test_an_integrity_error_that_is_not_one_of_the_two_duplicates_is_re_raised(
+    db_session,
+) -> None:
+    """R2.6. `_translate_duplicate` recognises two named constraints and must not guess at others.
+
+    A foreign-key violation is the honest third case: it is an `IntegrityError` like the two
+    duplicates, but answering `409 CONFLICT` for it would be, in the words of `user-management`,
+    "a lie the client cannot act on" — there is no colliding row to rename around. It has to
+    surface as the infrastructure error it is, which the router maps to a `500`.
+
+    The violation is provoked against real Postgres by pointing at a tenant that does not exist,
+    rather than by mocking the driver: a mocked `IntegrityError` would prove only that the `except`
+    branch runs, not that the real constraint name fails to match the two the adapter knows.
+    """
+    orphan = _entity(uuid.uuid4(), internal_code="NO-SUCH-TENANT")
+
+    with pytest.raises(IntegrityError):
+        await SqlAlchemyPropertyRepository(db_session).add(orphan.tenant_id, orphan)
 
 
 @pytest.mark.asyncio
@@ -405,37 +457,53 @@ async def test_list_counts_the_same_filtered_set_it_returns(db_session) -> None:
     assert len(page.items) == 2
 
 
+async def _seeded_in_state(
+    repository: SqlAlchemyPropertyRepository,
+    tenant_id: uuid.UUID,
+    *,
+    internal_code: str,
+    status: PropertyStatus,
+    state: PropertyOperationalState,
+) -> None:
+    """Insert a property and then move it, because that is the only route that exists.
+
+    `add` refuses anything but `VACANT_READY` (R4.2), so a row cannot be born in another state —
+    it has to be inserted and then transitioned, and `save` is the sanctioned writer of that
+    column. Seeding this way rather than by writing a `PropertyModel` straight into the session
+    keeps the fixture on the same path production uses.
+    """
+    entity = _entity(tenant_id, internal_code=internal_code, status=status)
+    await repository.add(tenant_id, entity)
+    if state is not PropertyOperationalState.VACANT_READY:
+        entity.current_operational_state = state
+        await repository.save(tenant_id, entity)
+
+
 @pytest.mark.asyncio
 async def test_list_combines_its_filters_with_and(db_session) -> None:
     tenant = await _tenant(db_session, "TenantA")
     repository = SqlAlchemyPropertyRepository(db_session)
-    await repository.add(
+    await _seeded_in_state(
+        repository,
         tenant.id,
-        _entity(
-            tenant.id,
-            internal_code="MATCH",
-            status=PropertyStatus.ACTIVE,
-            state=PropertyOperationalState.OCCUPIED_ESTIMATED,
-        ),
+        internal_code="MATCH",
+        status=PropertyStatus.ACTIVE,
+        state=PropertyOperationalState.OCCUPIED_ESTIMATED,
     )
     # Matches each filter separately but not both, which is what tells AND from OR.
-    await repository.add(
+    await _seeded_in_state(
+        repository,
         tenant.id,
-        _entity(
-            tenant.id,
-            internal_code="STATE_ONLY",
-            status=PropertyStatus.INACTIVE,
-            state=PropertyOperationalState.OCCUPIED_ESTIMATED,
-        ),
+        internal_code="STATE_ONLY",
+        status=PropertyStatus.INACTIVE,
+        state=PropertyOperationalState.OCCUPIED_ESTIMATED,
     )
-    await repository.add(
+    await _seeded_in_state(
+        repository,
         tenant.id,
-        _entity(
-            tenant.id,
-            internal_code="STATUS_ONLY",
-            status=PropertyStatus.ACTIVE,
-            state=PropertyOperationalState.VACANT_READY,
-        ),
+        internal_code="STATUS_ONLY",
+        status=PropertyStatus.ACTIVE,
+        state=PropertyOperationalState.VACANT_READY,
     )
 
     page = await repository.list(

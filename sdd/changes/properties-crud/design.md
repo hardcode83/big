@@ -14,6 +14,8 @@ Los patrones a replicar están todos vivos: `reservations` es el análogo más c
 
 **Chosen:** el `POST` acepta `wifi_password` en claro, el caso de uso lo cifra con `app.core.crypto.encrypt()` y lo persiste como ciphertext; **ninguna respuesta lo devuelve**, ni enmascarado — la lectura expone un booleano `has_wifi_password`. La regla 3 de `security.md:15` nombra `wifi_password` **primero** en su enumeración y dice «Nunca en texto plano», y la regla 11:86 cierra la vía de escape: «que el huésped necesite ver la contraseña WiFi no la autoriza, la regla 4 no le da forma enmascarada». No hace falta migración de datos: la tabla está vacía en todos los entornos y la columna ya es `String` nullable.
 
+**Consecuencia que R3.3 tiene que absorber, y que se pasó por alto al escribir esta decisión**: al no haber lector, un `PATCH` que envíe `wifi_password` **no puede detectar un no-op** — no hay con qué comparar, y averiguarlo exigiría descifrar, que es la operación que R5 prohíbe montar. Así que enviarlo cuenta siempre como cambio y siempre escribe su fila de auditoría, contradiciendo la letra de R3.3 («campos con el valor que ya tenían → no escribir»). R3.3 recoge ahora la excepción explícitamente. Escribir de más es el lado seguro del error: la alternativa sería no reescribir una contraseña que el llamante pidió cambiar.
+
 Rejected: **dejarla fuera del payload y diferirla** — defendible por el argumento de «sin lector es especulativo», pero deja el CRUD incapaz de configurar un campo que PRD §7.4 declara, y garantiza que alguien la añada más tarde sin pensar en el cifrado; hoy el patrón está fresco y cuesta tres líneas.
 Rejected: **enmascararla en las respuestas** — prohibido explícitamente por `security.md:86`.
 Rejected: **un `TypeDecorator` de SQLAlchemy que cifre/descifre solo** — `crypto.py:17-19` lo descartó en su día (design D3): descifra al cargar y no deja punto donde auditar.
@@ -76,7 +78,14 @@ Rejected: **acogerse a la excepción de la regla 9** — está acotada al actor 
 
 ### D8 — La API no puede tocar el estado operacional, y se prueba
 
-**Chosen:** `current_operational_state` se rechaza en el cuerpo de `POST` y de `PATCH` (por `extra="forbid"` en el primero y por ausencia de `PATCHABLE` en el segundo), el alta deja que la columna tome su defecto de DDL `VACANT_READY`, y el puerto no gana ningún método capaz de escribirla. Un test afirma que crear una propiedad **no** escribe fila en `property_state_transitions` ni `TimelineEvent`: crear no es transitar, no existe tipo `PROPERTY_CREATED` en `app/timeline/domain/enums.py:17-62`, y PRD §3.1:101 ata el evento a la *transición*.
+**Chosen:** `current_operational_state` se rechaza en el cuerpo de `POST` y de `PATCH` (por `extra="forbid"` en el primero y por ausencia de `PATCHABLE` en el segundo), y el alta deja que la columna tome su defecto de DDL `VACANT_READY`. Un test afirma que crear una propiedad **no** escribe fila en `property_state_transitions` ni `TimelineEvent`: crear no es transitar, no existe tipo `PROPERTY_CREATED` en `app/timeline/domain/enums.py:17-62`, y PRD §3.1:101 ata el evento a la *transición*.
+
+> **Corregido tras el panel de `/sdd:review` (2026-08-08).** Esta decisión afirmaba que «el puerto no gana ningún método capaz de escribirla», y **era falso**. La protección **no es uniforme y no puede serlo**:
+>
+> - `update_details` y `set_wifi_password` nombran exactamente lo que escriben, así que su **firma** hace irrepresentable un cambio de estado. Garantía estructural.
+> - `add` recibe una **entidad entera**, y una entidad lleva estado lo quiera el llamante o no. Ahí la firma no puede garantizar nada, así que se enforcea con una **guarda en tiempo de ejecución**: el adaptador rechaza con `PropertyValidationError` cualquier entidad que no venga en `VACANT_READY`, y omite la columna del INSERT para que mande el defecto de DDL.
+>
+> Lo que la redacción anterior dejaba abierto, y el panel de seguridad midió: `add()` copiaba `current_operational_state` de la entidad, de modo que lo único que mantenía el invariante era que `CreatePropertyCommand` no tuviera ese campo — una convención del caso de uso, no una garantía del puerto. El siguiente consumidor (`seed-data-demo`, que ya declara `needs: properties-crud`) habría podido sembrar filas en `OCCUPIED` o `BLOCKED` sin transición ni `AuditLog`, indistinguibles después de las que sí pasaron por la máquina.
 
 ### D9 — Rechazo de nulos explícitos, con la lista de campos nullable escrita
 

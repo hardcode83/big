@@ -46,9 +46,14 @@ Dos choques posibles, ambos `409`:
   entonces el sync no sabría a cuál atribuir una reserva, y adjudicarla a cualquiera ataría a un
   huésped a la casa equivocada.
 
-  **Consecuencia práctica**: si vas a poner una propiedad en un proveedor concreto, indícalo **en el
-  alta**. Crearla sin proveedor y cambiárselo después pasa por un estado que la base de datos
-  rechaza, y verás un `409` que parece salido de la nada.
+  **Consecuencia práctica**: el proveedor se elige **en el alta y no se cambia después**. `PATCH`
+  no acepta `pms_provider` — enviarlo da `422`, no un `200` silencioso—, así que si vas a poner una
+  propiedad en un proveedor concreto, indícalo al crearla.
+
+  Mover una vivienda de proveedor no es un cambio de columna cualquiera: el índice agrupa por
+  `coalesce(pms_provider, 'MOCK')`, de modo que trasladarla puede chocar con otra que hoy comparte
+  legítimamente su id externo. Eso necesita su propia operación con su propio manejo de conflicto,
+  y ninguna capability la pide todavía. Mientras tanto se hace por SQL o rehaciendo el alta.
 
 ## El estado operacional no se toca desde aquí
 

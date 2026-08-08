@@ -2101,16 +2101,6 @@
             ],
             "title": "Pms External Id"
           },
-          "pms_provider": {
-            "anyOf": [
-              {
-                "$ref": "#/components/schemas/PMSProvider"
-              },
-              {
-                "type": "null"
-              }
-            ]
-          },
           "postal_code": {
             "anyOf": [
               {

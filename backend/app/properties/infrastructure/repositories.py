@@ -169,6 +169,23 @@ class SqlAlchemyPropertyRepository:
                 entity_tenant_id=property.tenant_id,
                 acting_tenant_id=tenant_id,
             )
+        if property.current_operational_state is not PropertyOperationalState.VACANT_READY:
+            # A runtime guard, and it has to be one: unlike the other writers, `add` takes a whole
+            # entity, so its SIGNATURE cannot forbid a state the way `update_details`' allowlist
+            # can. Without this check the port would hand any future caller — `seed-data-demo` is
+            # the next one queued — a way to land a property directly in `OCCUPIED` or `BLOCKED`
+            # with no `property_state_transitions` row and no `AuditLog`, indistinguishable
+            # afterwards from one the machine moved. That is exactly the bypass
+            # `steering/backend.md` forbids and rule 9 of `steering/security.md` depends on.
+            #
+            # Refused rather than silently normalised, for the same reason `update_details`
+            # refuses an unknown key: a caller that asked for a state must learn it was ignored.
+            raise PropertyValidationError(
+                "A property is created in VACANT_READY and nothing else; "
+                f"{property.current_operational_state.value} was requested. Reaching any other "
+                "state is a transition, and transitions belong to PropertyStateMachine, which "
+                "records them in property_state_transitions."
+            )
         self._session.add(
             PropertyModel(
                 id=property.id,
@@ -187,7 +204,9 @@ class SqlAlchemyPropertyRepository:
                 max_guests=property.max_guests,
                 bedrooms=property.bedrooms,
                 bathrooms=property.bathrooms,
-                current_operational_state=property.current_operational_state,
+                # `current_operational_state` is deliberately NOT set: the DDL default
+                # (`VACANT_READY`) is the authority, so this INSERT has no way to express a
+                # state at all and the guard above is what keeps the entity honest.
                 default_check_in_time=property.default_check_in_time,
                 default_check_out_time=property.default_check_out_time,
                 wifi_name=property.wifi_name,

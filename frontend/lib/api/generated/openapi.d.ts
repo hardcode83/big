@@ -903,7 +903,6 @@ export interface components {
       name?: string | null;
       /** Pms External Id */
       pms_external_id?: string | null;
-      pms_provider?: components["schemas"]["PMSProvider"] | null;
       /** Postal Code */
       postal_code?: string | null;
       /** Province */

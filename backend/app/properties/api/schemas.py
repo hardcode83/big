@@ -64,10 +64,14 @@ MAX_ROOMS = 50
 # Columns a caller may legitimately clear by sending `null`. Everything absent from this set is
 # NOT NULL in the schema, so `null` for it is a `422` rather than a write — see
 # `_reject_explicit_nulls`.
+#
+# Scoped to what `UpdatePropertyRequest` actually declares: the rejection message enumerates this
+# set verbatim, so a name here that the schema does not carry would promise a caller they can
+# clear a field that does not exist. `pms_provider` was in this list while it was a patchable
+# field and left with it.
 NULLABLE_FIELDS = frozenset(
     {
         "pms_external_id",
-        "pms_provider",
         "address_line1",
         "address_line2",
         "city",
@@ -123,7 +127,17 @@ class UpdatePropertyRequest(BaseModel):
         str | None, Field(default=None, min_length=1, max_length=MAX_INTERNAL_CODE)
     ] = None
     pms_external_id: Annotated[str | None, Field(default=None, max_length=MAX_PMS_EXTERNAL_ID)] = None
-    pms_provider: PMSProvider | None = None
+    # `pms_provider` is NOT patchable, and its absence here is load-bearing rather than an
+    # oversight. It was declared once, accepted, and then dropped by `changes()` because the
+    # allowlist never contained it — a `200` for a write that never happened, which is exactly
+    # the class of silent discard the adapter refuses for every other key. Removing the field
+    # makes `extra="forbid"` answer `422` instead, so a caller learns the truth.
+    #
+    # Changing a property's provider is also not a plain column write: the partial unique index
+    # keys on `coalesce(pms_provider, 'MOCK')`, so moving a row between providers can collide
+    # with a sibling that legitimately shares its external id. That needs its own operation with
+    # its own conflict handling, which no requirement asks for yet — so the provider is chosen at
+    # creation (design D5) and stays chosen.
     address_line1: Annotated[str | None, Field(default=None, max_length=MAX_ADDRESS)] = None
     address_line2: Annotated[str | None, Field(default=None, max_length=MAX_ADDRESS)] = None
     city: Annotated[str | None, Field(default=None, max_length=MAX_CITY)] = None

@@ -18,6 +18,12 @@ from tests.properties.conftest import auth_header
 
 MANAGER = UserRole.PROPERTY_MANAGER
 
+# Written out, never derived from `ROLE_PERMISSIONS`: a table computed from the catalogue would
+# agree with any mistake in it. Same sets as `test_authorization.py`, kept as literals on purpose.
+READERS = {UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER}
+MANAGERS = {UserRole.PROPERTY_MANAGER}
+ALL_ROLES = list(UserRole)
+
 
 def _manager(api, users_by_role_a):
     return auth_header(api, users_by_role_a[MANAGER])
@@ -276,6 +282,50 @@ async def test_the_operational_state_cannot_be_patched(
 
 
 @pytest.mark.asyncio
+async def test_the_pms_provider_cannot_be_patched(api, users_by_role_a, create_payload) -> None:
+    """It answers `422` rather than a `200` that writes nothing (design D3).
+
+    The field was briefly declared on the request while the allowlist never carried it, so
+    `changes()` dropped it and the caller got a `200` for a write that never happened — the exact
+    silent discard the adapter refuses for every other key. A manager repointing a property after
+    rotating a credential would have been told it worked while the property kept syncing against
+    the old provider. The provider is chosen at creation (D5) and the schema now says so.
+    """
+    property_id = (await _create(api, users_by_role_a, create_payload)).json()["id"]
+
+    response = await api.patch(
+        f"/api/v1/properties/{property_id}",
+        json={"pms_provider": "CHANNEX"},
+        headers=_manager(api, users_by_role_a),
+    )
+
+    assert response.status_code == 422, response.text
+    # And the stored value is untouched, so the 422 is a refusal and not a rollback of a write
+    # that partly happened.
+    detail = await api.get(
+        f"/api/v1/properties/{property_id}", headers=_manager(api, users_by_role_a)
+    )
+    assert detail.json()["pms_provider"] == create_payload().get("pms_provider")
+
+
+@pytest.mark.parametrize(
+    ("field", "length"),
+    [("access_notes", 5001), ("cleaning_notes", 5001), ("wifi_password", 201)],
+)
+@pytest.mark.asyncio
+async def test_a_value_longer_than_its_declared_cap_is_a_422(
+    api, users_by_role_a, create_payload, field, length
+) -> None:
+    """R2.4. These four columns are `String()` with NO width in the DDL, so there is no database
+    limit to fall back on — the cap exists only in the schema, and without a test nothing would
+    notice if it were dropped. Unbounded, a multi-megabyte note is a successful write.
+    """
+    response = await _create(api, users_by_role_a, create_payload, **{field: "a" * length})
+
+    assert response.status_code == 422, response.text
+
+
+@pytest.mark.asyncio
 async def test_retiring_a_property_is_a_status_patch(
     api, users_by_role_a, create_payload
 ) -> None:
@@ -393,46 +443,66 @@ async def test_free_text_notes_are_audited_only_as_changed(
 # --- R1 / R7: tenant isolation ---
 
 
+@pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
 async def test_a_neighbours_property_is_a_404_indistinguishable_from_a_missing_one(
-    api, users_by_role_a, property_b
+    api, users_by_role_a, property_b, role
 ) -> None:
-    """R1.6. The neighbour's row really exists, which is what makes this test mean something."""
-    real = await api.get(
-        f"/api/v1/properties/{property_b.id}", headers=_manager(api, users_by_role_a)
-    )
-    invented = await api.get(
-        f"/api/v1/properties/{uuid.uuid4()}", headers=_manager(api, users_by_role_a)
-    )
+    """R1.6 and R7.6, for every one of the five roles rather than for the manager alone.
 
-    assert real.status_code == invented.status_code == 404
+    The neighbour's row really exists, which is what makes this mean something. Both roles that
+    hold `READ_PROPERTIES` reach the tenant-scoped lookup, so both must be shown to come back
+    empty-handed — a scoping regression that special-cased one of them would otherwise go unseen.
+    The three roles without the permission stop at `403`, before the resource is ever read, and
+    that is its own guarantee: authorisation cannot depend on whether the row exists.
+
+    Expectations are written out below, never derived from `ROLE_PERMISSIONS`.
+    """
+    expected = 404 if role in READERS else 403
+    headers = auth_header(api, users_by_role_a[role])
+
+    real = await api.get(f"/api/v1/properties/{property_b.id}", headers=headers)
+    invented = await api.get(f"/api/v1/properties/{uuid.uuid4()}", headers=headers)
+
+    assert real.status_code == invented.status_code == expected
     assert real.json() == invented.json()
 
 
+@pytest.mark.parametrize("role", sorted(READERS, key=lambda r: r.value))
 @pytest.mark.asyncio
 async def test_the_listing_shows_only_the_callers_tenant(
-    api, users_by_role_a, create_payload, property_b
+    api, users_by_role_a, create_payload, property_b, role
 ) -> None:
+    """R7.6: both readers, because both can list and both must see one row and not two."""
     assert (
         await _create(api, users_by_role_a, create_payload, internal_code="MINE")
     ).status_code == 201
 
-    listing = await api.get("/api/v1/properties", headers=_manager(api, users_by_role_a))
+    listing = await api.get(
+        "/api/v1/properties", headers=auth_header(api, users_by_role_a[role])
+    )
 
     body = listing.json()
+    # `total` is asserted as well as the page: a count computed over an unscoped statement would
+    # leak the neighbour's existence even while the page itself looked correct.
     assert body["total"] == 1
     assert [item["internal_code"] for item in body["data"]] == ["MINE"]
 
 
+@pytest.mark.parametrize("role", ALL_ROLES)
 @pytest.mark.asyncio
-async def test_patching_a_neighbours_property_is_a_404(api, users_by_role_a, property_b) -> None:
+async def test_patching_a_neighbours_property_is_a_404(
+    api, users_by_role_a, property_b, role
+) -> None:
+    """R7.6 on the write path. Only the manager may mutate, so everyone else stops at `403`."""
+    expected = 404 if role in MANAGERS else 403
     response = await api.patch(
         f"/api/v1/properties/{property_b.id}",
         json={"city": "Segovia"},
-        headers=_manager(api, users_by_role_a),
+        headers=auth_header(api, users_by_role_a[role]),
     )
 
-    assert response.status_code == 404
+    assert response.status_code == expected
 
 
 # --- R1: pagination ---
