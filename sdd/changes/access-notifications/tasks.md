@@ -127,42 +127,42 @@ Desviaciones de esta sección, para que se lean como decisiones:
 
 ## 5. Casos de uso y API de acceso
 
-- [ ] 5.1 `backend/app/audit/domain/actions.py`: `ENTITY_ACCESS_RECORD` y las acciones
+- [x] 5.1 `backend/app/audit/domain/actions.py`: `ENTITY_ACCESS_RECORD` y las acciones
   `ACCESS_CODE_REGISTERED`, `ACCESS_MARKED_EXTERNAL`, `ACCESS_DELIVERED`, `ACCESS_REVOKED`, con
   comentario citando la regla 9 (que nombra `AccessRecord` explícitamente). Añadirlas a
   `ENTITY_TYPES`/`ACTIONS`. [R2]
-- [ ] 5.2 `backend/app/access/application/use_cases.py` (nuevo):
+- [x] 5.2 `backend/app/access/application/use_cases.py` (nuevo):
   `RegisterManualAccessCodeUseCase`, `MarkAccessExternallyManagedUseCase`,
   `MarkAccessDeliveredUseCase`. Cada uno: carga dentro del tenant, muta la entidad, persiste,
   escribe `TimelineEvent` (`ACCESS_CODE_MANUAL_ADDED` / `..._CREATED_EXTERNAL` / `..._DELIVERED`)
   vía `TimelineEventFactory`, proyecta `reservations.access_status` (design D1) y escribe
   `AuditLog` con `ChangeSet` — **el código en claro nunca entra en el `ChangeSet`**. Un solo
   `commit()` por caso de uso. Tests con fakes en `backend/tests/access/test_use_cases.py`. [R2]
-- [ ] 5.3 `backend/tests/access/test_use_cases.py`: la proyección a `reservations.access_status`
+- [x] 5.3 `backend/tests/access/test_use_cases.py`: la proyección a `reservations.access_status`
   acompaña cada transición y `REVOKED` proyecta `NOT_REQUIRED` con el `ASSUMPTION` documentado
   (design D1). [R1, R2]
-- [ ] 5.4 `backend/app/access/application/use_cases.py`: `ListAccessRecordsUseCase` y
+- [x] 5.4 `backend/app/access/application/use_cases.py`: `ListAccessRecordsUseCase` y
   `GetAccessRecordUseCase`, con el envelope paginado y las mismas cotas de `page`/`per_page` que
   `reservations`. [R3]
-- [ ] 5.5 `backend/app/access/api/{__init__,router,schemas,dependencies,errors}.py` (nuevos): los
+- [x] 5.5 `backend/app/access/api/{__init__,router,schemas,dependencies,errors}.py` (nuevos): los
   cinco endpoints de la tabla del design. Los esquemas de salida exponen `code_masked` y **no**
   tienen campo para el código en claro. Registrar el router en `backend/app/main.py`. [R2, R3]
-- [ ] 5.6 `backend/tests/access/test_api.py`: RBAC por rol (lectura vs escritura, `403` para el rol
+- [x] 5.6 `backend/tests/access/test_api.py`: RBAC por rol (lectura vs escritura, `403` para el rol
   sin permiso de escritura), `404` idéntico para «no existe» y «existe en otro tenant» (R3.3),
   `409` en transición inválida (R2.5), y que ninguna respuesta contiene el código en claro
   (R2.6). [R2, R3]
 
 ## 6. Reconciliador de accesos y estado inicial de la reserva
 
-- [ ] 6.1 `backend/app/access/application/use_cases.py`: `ProvisionAccessRecordsUseCase` (design
+- [x] 6.1 `backend/app/access/application/use_cases.py`: `ProvisionAccessRecordsUseCase` (design
   D2) — por tenant: crea el `AccessRecord` `PENDING` que falte a cada reserva confirmada, escribe
   `ACCESS_CODE_PENDING` en el timeline, fija `reservations.legal_registration_status =
   PENDING_GUEST_DATA` (R6.2), revoca los de reservas canceladas y expira los de `valid_to`
   vencido. Actor `SYSTEM`; la fila de `AuditLog` va sin actor (design D2). [R1, R6]
-- [ ] 6.2 `backend/tests/access/test_provisioning.py`: crea el que falta; **no** crea un segundo si
+- [x] 6.2 `backend/tests/access/test_provisioning.py`: crea el que falta; **no** crea un segundo si
   ya existe ni escribe un segundo evento de timeline (R1.3); revoca al cancelar (R1.4); es
   idempotente en dos pasadas seguidas; no cruza tenants. [R1]
-- [ ] 6.3 `backend/app/scheduler/schedule.py` y `tasks.py`: tarea `provision_access_records` cada
+- [x] 6.3 `backend/app/scheduler/schedule.py` y `tasks.py`: tarea `provision_access_records` cada
   5 minutos, con `_guarded` + `task_lock`, y docstring que declare la divergencia con PRD §8.3.
   Test del camino `skipped_locked`. [R1]
 - [x] 6.4 Comprobar con `EXPLAIN` sobre el Postgres local si la consulta de
@@ -209,7 +209,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
 
 ## 8. Contrato de API y documentación
 
-- [ ] 8.1 Anotar `summary`/`description`/`response_model` en los routers nuevos y regenerar el
+- [x] 8.1 Anotar `summary`/`description`/`response_model` en los routers nuevos y regenerar el
   contrato: `make openapi` y `cd frontend && npm run api:generate`. Commitear
   `backend/openapi.json` **y** `frontend/lib/api/generated/openapi.d.ts` — son las dos mitades del
   mismo puente (`steering/documentation.md`). [R3, R4, R6]

@@ -7,6 +7,8 @@ from fastapi import FastAPI
 # first request, or the global tenant filter (design D16) silently covers fewer
 # tables than it should — see app/core/models_registry.py.
 import app.core.models_registry  # noqa: F401
+from app.access.api.errors import register_access_error_handlers
+from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
@@ -56,6 +58,7 @@ def create_app() -> FastAPI:
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
+    register_access_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -77,6 +80,9 @@ def create_app() -> FastAPI:
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).
     app.include_router(notifications_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: PRD §15's operator surface. The `access` domain had entities and
+    # a table since `domain-foundation-ops` and no way to reach them until now.
+    app.include_router(access_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

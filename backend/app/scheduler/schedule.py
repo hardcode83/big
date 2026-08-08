@@ -31,6 +31,9 @@ CADENCES: dict[str, timedelta] = {
     # has been delivered, so a slower dispatcher would delay every escalation by its own
     # cadence.
     "dispatch_notifications": timedelta(minutes=1),
+    # Every five minutes, like the other reservation-driven jobs. Check-in is days away from
+    # the confirmation, so the latency is irrelevant and the reconciliation is cheap.
+    "provision_access_records": timedelta(minutes=5),
 }
 
 

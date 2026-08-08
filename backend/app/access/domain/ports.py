@@ -19,6 +19,7 @@ it goes; the MVP runs on `ManualAccessAdapter`.
 provider means a network round trip and this backend is async throughout.
 """
 
+import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
@@ -68,4 +69,26 @@ class AccessProviderAdapter(Protocol):
         self, *, record: AccessRecord, notes: str | None, now: datetime
     ) -> AccessRecord:
         """Record that the provider created and owns this access."""
+        ...
+
+
+class LegalRegistrationInitialiser(Protocol):
+    """PRD §17 step 1, as a port so the access reconciler does not import the guests module.
+
+    A one-method port rather than the whole guests repository: `steering/backend-
+    architecture.md`'s I — "puertos pequeños y por rol". The reconciler needs to say "this
+    stay now needs guest data" and nothing else, and the implementation lives in `guests/`
+    where the column does.
+
+    Why the access sweep owns the call at all (design D2): PRD §17 step 1 and PRD §15's
+    `AccessRecord` are triggered by the same event — a reservation being confirmed — and both
+    have to cover the stays that were already confirmed before this change existed. One sweep
+    answering "what has this confirmed stay not been given yet?" cannot get out of step with
+    itself; two jobs over the same rows can.
+    """
+
+    async def initialise(
+        self, *, tenant_id: uuid.UUID, reservation_id: uuid.UUID, now: datetime
+    ) -> bool:
+        """Move a reservation to `PENDING_GUEST_DATA`; `True` if it actually moved."""
         ...

@@ -84,6 +84,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # which belong to `cleaning-photos-storage`.
         "cleaning-checklist-templates",
         "cleaning-tasks",
+        # `access-notifications`: the five access-record routes of PRD §15 and the in-app
+        # inbox that makes `IN_APP` delivery a fact rather than a claim (design D5/D6).
+        "access-records",
+        "notifications",
     }
 
 

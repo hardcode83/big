@@ -164,6 +164,50 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "validated_at",
         }
     ),
+    # `access-notifications`. Rule 9 of `steering/security.md` names `AccessRecord` in its
+    # enumeration, so every operator action on one writes a row.
+    #
+    # **`code_masked` is listed and NOT denylisted**, unlike every other secret-adjacent
+    # column above, and the denylist's own comment already anticipated it: what the entity
+    # stores is *already* the `****XX` form rule 4 grants, so forcing `{"changed": true}`
+    # would record less than the rule permits. There is no plaintext column to protect
+    # (design D9) — the value never reaches the entity, let alone this diff.
+    #
+    # `notes` is here because `revoke()` writes the reason into it and losing that would make
+    # a revocation unattributable. It is free text an operator types, so the use cases record
+    # it with `redacted()`, the same discipline `properties-crud` design D7 applies to its
+    # three note columns — a manager pasting a door code into "notes" is the case both guard.
+    "ACCESS_RECORD": frozenset(
+        {"status", "provider", "created_mode", "code_masked", "external_id", "notes"}
+    ),
+    # `access-notifications`. Rule 9: "acceso/modificación de documentos de Guest".
+    #
+    # `document_number_encrypted` is listed here AND denylisted above, exactly like
+    # `secret_encrypted` and `wifi_password_encrypted`: the allowlist says it may appear in a
+    # guest's audit row at all, the denylist says only as `{"changed": true}`. Removing it
+    # here would make `redacted()` fail too, and a document being replaced would leave no
+    # trace.
+    #
+    # `date_of_birth` and `nationality` are auditable as diffs and that is deliberate: rule 11
+    # governs a rule-3 *value*, and rule 3's enumeration names the document number, not the
+    # birth date. PRD §17 lists both among the eight fields SES.Hospedajes requires, so the
+    # trail has to show which of them changed; recording *which* is the point, and the use
+    # cases still record the whole document group with `redacted()` (design D11) rather than
+    # splitting hairs per field at the call site.
+    "GUEST": frozenset(
+        {
+            "nationality",
+            "date_of_birth",
+            "document_type",
+            "document_number_encrypted",
+            "document_expiry_date",
+            "document_status",
+            "legal_registration_status",
+        }
+    ),
+    # `access-notifications`. The legal registration of a stay (PRD §17) moves on the
+    # reservation, not on the guest (design D10), so its audit rows point at a reservation.
+    "RESERVATION": frozenset({"legal_registration_status", "access_status"}),
 }
 
 _REDACTED_MARKER = {"changed": True}

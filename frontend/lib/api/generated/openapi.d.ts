@@ -5,6 +5,41 @@
 
 
 export interface paths {
+  "/api/v1/access-records": {
+    /**
+     * List the tenant's access records
+     * @description Paginated with `page`/`per_page` (PRD §23). Filterable by `property_id`, `reservation_id` and `status`. Access codes appear only in their masked `****XX` form — the plaintext is never stored (PRD §15: the provider creates and delivers it).
+     */
+    get: operations["list_access_records_api_v1_access_records_get"];
+  };
+  "/api/v1/access-records/{record_id}": {
+    /**
+     * Read one access record
+     * @description Responds `404` for a record of another tenant with a body identical to the one for an id that does not exist (R3.3).
+     */
+    get: operations["get_access_record_api_v1_access_records__record_id__get"];
+  };
+  "/api/v1/access-records/{record_id}/delivered": {
+    /**
+     * Confirm the guest received the access instructions
+     * @description Responds `409` unless the record is `MANUAL_ADDED` or `CREATED_EXTERNAL`: confirming delivery of a code nobody registered would be an assertion about a guest that has no basis.
+     */
+    post: operations["mark_delivered_api_v1_access_records__record_id__delivered_post"];
+  };
+  "/api/v1/access-records/{record_id}/external": {
+    /**
+     * Declare that the provider manages this access
+     * @description PRD §15: GrinPass imports the reservation from the PMS and creates the code itself. Responds `409` if the record is not `PENDING`.
+     */
+    post: operations["mark_external_api_v1_access_records__record_id__external_post"];
+  };
+  "/api/v1/access-records/{record_id}/manual-code": {
+    /**
+     * Register an access code arranged by hand
+     * @description PRD §15's `ManualAccessAdapter`. **Only the masked form is stored**: the plaintext reaches the domain, is reduced to `****XX` and is discarded — there is no column, no response field and no log line that can hold it. Responds `409` if the record is not `PENDING`.
+     */
+    post: operations["register_manual_code_api_v1_access_records__record_id__manual_code_post"];
+  };
   "/api/v1/auth/login": {
     /**
      * Exchange email and password for a token pair
@@ -125,6 +160,13 @@ export interface paths {
      */
     post: operations["import_reservations_csv_api_v1_integrations_pms_import_csv_post"];
   };
+  "/api/v1/notifications": {
+    /**
+     * List the caller's own notifications
+     * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
+     */
+    get: operations["list_own_notifications_api_v1_notifications_get"];
+  };
   "/api/v1/properties": {
     /**
      * List the tenant's properties
@@ -236,6 +278,78 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /**
+     * AccessCreatedMode
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.created_mode) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessCreatedMode: "EXTERNAL_PMS_AUTOMATIC" | "MANUAL" | "MOCK";
+    /**
+     * AccessProvider
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.provider) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessProvider: "GRINPASS" | "MANUAL" | "MOCK" | "EXTERNAL_MANAGED";
+    /** AccessRecordPageResponse */
+    AccessRecordPageResponse: {
+      /** Data */
+      data: components["schemas"]["AccessRecordResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /** AccessRecordResponse */
+    AccessRecordResponse: {
+      /** Code Masked */
+      code_masked: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      created_mode: components["schemas"]["AccessCreatedMode"];
+      /** External Id */
+      external_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Notes */
+      notes: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      provider: components["schemas"]["AccessProvider"];
+      /** Reservation Id */
+      reservation_id: string | null;
+      status: components["schemas"]["AccessRecordStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Valid From */
+      valid_from: string | null;
+      /** Valid To */
+      valid_to: string | null;
+    };
+    /**
+     * AccessRecordStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.status) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessRecordStatus: "PENDING" | "CREATED_EXTERNAL" | "MANUAL_ADDED" | "DELIVERED" | "EXPIRED" | "REVOKED";
     /**
      * AssignCleaningTaskRequest
      * @description `PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.
@@ -722,6 +836,66 @@ export interface components {
       /** Password */
       password: string;
     };
+    /** MarkExternalRequest */
+    MarkExternalRequest: {
+      /** Notes */
+      notes?: string | null;
+    };
+    /**
+     * NotificationChannel
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (NotificationLog.channel) without a named block (§7.24). Not the same enum as
+     * ConversationChannel (§7.14): PUSH, IN_APP and CONSOLE do not exist there.
+     * @enum {string}
+     */
+    NotificationChannel: "EMAIL" | "WHATSAPP" | "PUSH" | "IN_APP" | "CONSOLE";
+    /** NotificationPageResponse */
+    NotificationPageResponse: {
+      /** Data */
+      data: components["schemas"]["NotificationResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /** NotificationResponse */
+    NotificationResponse: {
+      /** Body */
+      body: string | null;
+      channel: components["schemas"]["NotificationChannel"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Notification Type */
+      notification_type: string;
+      /** Related Id */
+      related_id: string | null;
+      /** Related Type */
+      related_type: string | null;
+      /** Sent At */
+      sent_at: string | null;
+      status: components["schemas"]["NotificationStatus"];
+      /** Subject */
+      subject: string | null;
+    };
+    /**
+     * NotificationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (NotificationLog.status) without a named block (§7.24).
+     * @enum {string}
+     */
+    NotificationStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
     /**
      * PaymentStatus
      * @enum {string}
@@ -855,6 +1029,19 @@ export interface components {
     RefreshRequest: {
       /** Refresh Token */
       refresh_token: string;
+    };
+    /**
+     * RegisterCodeRequest
+     * @description The one place a plaintext access code enters the system (R2.2).
+     *
+     * It goes no further than `AccessRecord.register_manual_code`, which masks it. No column,
+     * no response field and no log line can hold it — see design D9.
+     */
+    RegisterCodeRequest: {
+      /** Code */
+      code: string;
+      /** Notes */
+      notes?: string | null;
     };
     /** RequiredPhotoPayload */
     RequiredPhotoPayload: {
@@ -1377,6 +1564,205 @@ export type external = Record<string, never>;
 
 export interface operations {
 
+  /**
+   * List the tenant's access records
+   * @description Paginated with `page`/`per_page` (PRD §23). Filterable by `property_id`, `reservation_id` and `status`. Access codes appear only in their masked `****XX` form — the plaintext is never stored (PRD §15: the provider creates and delivers it).
+   */
+  list_access_records_api_v1_access_records_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        reservation_id?: string | null;
+        status?: components["schemas"]["AccessRecordStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one access record
+   * @description Responds `404` for a record of another tenant with a body identical to the one for an id that does not exist (R3.3).
+   */
+  get_access_record_api_v1_access_records__record_id__get: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Confirm the guest received the access instructions
+   * @description Responds `409` unless the record is `MANUAL_ADDED` or `CREATED_EXTERNAL`: confirming delivery of a code nobody registered would be an assertion about a guest that has no basis.
+   */
+  mark_delivered_api_v1_access_records__record_id__delivered_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Declare that the provider manages this access
+   * @description PRD §15: GrinPass imports the reservation from the PMS and creates the code itself. Responds `409` if the record is not `PENDING`.
+   */
+  mark_external_api_v1_access_records__record_id__external_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MarkExternalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Register an access code arranged by hand
+   * @description PRD §15's `ManualAccessAdapter`. **Only the masked form is stored**: the plaintext reaches the domain, is reduced to `****XX` and is discarded — there is no column, no response field and no log line that can hold it. Responds `409` if the record is not `PENDING`.
+   */
+  register_manual_code_api_v1_access_records__record_id__manual_code_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegisterCodeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
   /**
    * Exchange email and password for a token pair
    * @description Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.
@@ -1986,6 +2372,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ImportReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the caller's own notifications
+   * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
+   */
+  list_own_notifications_api_v1_notifications_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationPageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

@@ -25,6 +25,7 @@ PRD_8_3 = {
 #: reservation an access record — and is silent on what triggers either.
 BEYOND_PRD_8_3 = {
     "dispatch_notifications": timedelta(minutes=1),
+    "provision_access_records": timedelta(minutes=5),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3

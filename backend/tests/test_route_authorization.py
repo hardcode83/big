@@ -263,12 +263,20 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     `tests/tenants/test_api.py`; by `properties-crud` with two property paths (four
     methods), asserted per method and per role in `tests/properties/test_authorization.py`;
     and by `cleaning` with the checklist template path (two methods), asserted the same way
-    in `tests/cleaning/test_templates_api.py`.
+    in `tests/cleaning/test_templates_api.py`; and by `access-notifications` with the five
+    access-record paths and the in-app inbox, asserted per role in
+    `tests/access/test_api.py` and `tests/notifications/test_api.py`.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
 
     assert protected == {
+        "/api/v1/access-records",
+        "/api/v1/access-records/{record_id}",
+        "/api/v1/access-records/{record_id}/delivered",
+        "/api/v1/access-records/{record_id}/external",
+        "/api/v1/access-records/{record_id}/manual-code",
+        "/api/v1/notifications",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
         "/api/v1/cleaning-checklist-templates",

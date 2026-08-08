@@ -163,16 +163,21 @@ def test_each_entity_has_its_own_field_allowlist() -> None:
 
 
 def test_an_unknown_entity_type_cannot_have_a_change_set() -> None:
-    """`RESERVATION` is the example on purpose: a real table with no audit trail yet.
+    """`INCIDENT` is the example on purpose: a real table with no audit trail yet.
 
-    It used to be `PROPERTY`, which `properties-crud` registered — so the name had to move to
-    another table that rule 9 of `steering/security.md` names but nobody writes yet
-    (`specs/reservations.md` records that debt). Whoever finally audits reservations will trip on
-    this line, and that is the intended behaviour: registering an entity type is a decision, so a
-    test asserting the opposite should demand a conscious edit rather than pass silently.
+    The name has now moved twice, and each move is the test working as designed. It was
+    `PROPERTY` until `properties-crud` registered it, then `RESERVATION` until
+    `access-notifications` registered *that* — for the legal-registration and access
+    projections of PRD §17 and §15, not for the module's own mutations, which
+    `specs/reservations.md` still records as owed.
+
+    `INCIDENT` is next in rule 9's enumeration with no writer at all (`maintenance` brings
+    it). Whoever audits it will trip on this line, which is the intended behaviour:
+    registering an entity type is a decision, so a test asserting the opposite should demand
+    a conscious edit rather than pass silently.
     """
     with pytest.raises(AuditContractError):
-        ChangeSet("RESERVATION")
+        ChangeSet("INCIDENT")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])
