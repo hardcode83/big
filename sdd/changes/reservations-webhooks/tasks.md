@@ -119,16 +119,33 @@ forzado en `infrastructure/`.
 
 ## 2. Recepción autenticada
 
-- [ ] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
+- [x] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
   para fallos de autenticación, estricto), con el patrón de `RedisLoginThrottle` pero sin reutilizar su
   clase. Config nueva en `core/config.py`: `webhook_rate_limit_per_minute` (120) y
   `webhook_probe_limit_per_minute` (20). Tests de los dos límites por separado, incluido que el tráfico
   legítimo de un proveedor con muchos tenants **no** se estrangula. [R3.1, R3.3, R3.4]
-- [ ] 2.2 Tope de tamaño de cuerpo: **sin código nuevo** (D5 corregido). `MaxBodySizeMiddleware` ya cubre
+  > **La aritmética de los dos límites no es la misma, y confundirla fue el primer error**: el de
+  > entrega *es* el intento, así que se cuenta a sí mismo (`<=`, como `ip_attempt_allowed`); el de
+  > sondeo pregunta por fallos **ya cometidos**, así que es estricto (`<`) — con `<=` regalaba un
+  > intento de más. `probe_allowed` además **lee sin incrementar**: si preguntar contase, el tráfico
+  > bueno del proveedor gastaría el presupuesto de fallos y se auto-bloquearía. 10 tests, contra el
+  > Redis real del stack y sin `skip`, por el motivo que ya dejó escrito `tests/auth/test_throttle.py`.
+  > Dos de ellos fijan la **dirección** de la asimetría (el generoso es el de token) y que agotar uno
+  > no toca al otro: intercambiar los dos números deja todo lo demás en verde y reintroduce
+  > exactamente el estrangulamiento multi-tenant que D6 rechaza.
+- [x] 2.2 Tope de tamaño de cuerpo: **sin código nuevo** (D5 corregido). `MaxBodySizeMiddleware` ya cubre
   `/api/v1/` entero, antes del enrutado y por tanto antes de la autenticación, y ya trata el
   `Content-Length` ausente, negativo y no numérico. Esta tarea es sólo el test que lo demuestra **sobre
   la ruta nueva**: cuerpo por encima de `REQUEST_MAX_BYTES` → `413 PAYLOAD_TOO_LARGE` sin fila en
   `webhook_events`, y sin necesidad de token válido. Sin `webhook_max_body_bytes`. [R3.2, R1.7]
+  > **Medido, no supuesto — y D5 afirmaba de más.** El middleware tiene dos caminos: un
+  > `Content-Length` declarado por encima del tope se rechaza al instante, y uno ausente, negativo o
+  > no numérico cae al **conteo del stream**. Ese contador sólo avanza cuando algo **lee** el cuerpo, y
+  > Starlette contesta `404` a una ruta inexistente sin llegar a llamar a `receive()`. Así que hoy, sin
+  > el router de 2.5, un `Content-Length` mentiroso da `404` y no `413`. No es un agujero —un cuerpo que
+  > no se lee no se materializa, que es lo que protege R1.7— pero significa que esa mitad sólo es
+  > observable cuando hay ruta que lea: su test se escribe en 2.5. Las otras tres afirmaciones
+  > (413 con envelope, sin token válido, sin fila en `webhook_events`) sí se verifican ya. 3 tests.
 - [ ] 2.3 Caso de uso de recepción en `application/webhooks.py`: valida el provider contra `PMSProvider`,
   resuelve el tenant por `token_hash`, compara el secreto con `hmac.compare_digest`, y persiste el
   `WebhookEvent` con `processed=FALSE`. La **decisión** vive aquí, no en el router (D5). Tests sin
