@@ -397,18 +397,31 @@ Ningún secreto nuevo — los adapters son consola y mock (regla 8).
 - **Volumen de `AuditLog` del reconciliador**: una fila por acceso creado, una sola vez por
   reserva. No es el patrón repetitivo que la segunda excepción de la regla 9 acota.
 
-## Open questions
+## Open questions — **resueltas con Jose el 2026-08-08**
 
-- **OQ1 — ¿El endpoint de lectura in-app entra aquí?** D6 dice que sí porque sin él D5 marca
-  `SENT` sobre algo que nadie puede leer. Es alcance que el proposal no enumeraba explícitamente.
-  *Default tomado para no bloquear*: se implementa `GET /api/v1/notifications`. Revertirlo es
-  borrar un router y un caso de uso.
-- **OQ2 — «Marcar como leída» sin columna.** `notification_logs` no tiene `read_at` y PRD §7.24 no
-  la declara. D6 decide **no** añadirla y no ofrecer el endpoint. Alternativa: añadir la columna
-  (migración pequeña) y cerrar el ciclo in-app de verdad. *Default tomado*: no añadirla.
-- **OQ3 — Aviso de la avalancha de escalados.** ¿Se acepta que el primer tick tras el despliegue
-  escale de golpe todas las asignaciones con plazo vencido? *Default tomado*: sí, porque son
-  incumplimientos reales. Se medirá en `run`.
-- **OQ4 — `EXPIRED` sin `valid_to`.** Nadie rellena `valid_from`/`valid_to` hoy (los rellenaría un
-  proveedor real de accesos). La transición se implementa y queda sin ejercitar en producción.
-  *Default tomado*: implementarla con test propio, no dejar el valor del enum sin camino.
+Las cinco se plantearon con un default tomado e implementado; se confirmaron al cerrar
+`/sdd:review`, así que aquí quedan como decisiones y no como preguntas. `BLOCKED.md` está vacío.
+
+- **OQ1 — la API de lectura in-app entra en el alcance.** Confirmado. Sin ella, D5 marcaría `SENT`
+  filas que nadie puede leer, que es una afirmación falsa. El proposal no la enumeraba; la
+  ampliación es deliberada.
+- **OQ2 — no se añade `read_at`.** Confirmado. El ciclo in-app queda a medias a propósito —se
+  listan, no se acusan— porque PRD §7.24 no declara la columna y este proyecto trata sus nombres
+  como canónicos. Inventar esquema para cerrar el ciclo es peor que dejar el hueco nombrado.
+- **OQ3 — se acepta la avalancha del primer tick.** Confirmado, y **medido**: la relación es
+  **1:1** (7 filas de plazo vencido → 0 candidatas antes del emisor, 7 después, `breached=7`).
+  Son incumplimientos que ocurrieron de verdad; filtrarlos sería mentir sobre el pasado. El total
+  de dev no es medible desde un worktree (base vacía); antes de desplegar se sabe con
+  `SELECT count(*) FROM notification_logs WHERE notification_type = 'CLEANING_TASK_ASSIGNED'
+  AND status = 'PENDING' AND sla_deadline_at < now()`.
+- **OQ4 — `EXPIRED` se implementa aunque nadie rellene `valid_to`.** Confirmado. La alternativa
+  era dejar un valor del enum sin camino. `test_expirable_finds_nothing_because_nothing_writes_valid_to`
+  fija la ausencia y empezará a fallar, útilmente, el día que un proveedor real llene la columna.
+- **OQ5 — `access_records.notes` NO entra ahora en la tabla de sumideros de la regla 11.**
+  Confirmado: se deja para `field-apps`, que es quien ampliará la superficie de `notes` cuando la
+  limpiadora vea accesos. Lo que este change sí hace es rechazar la petición cuando el código
+  aparece en las notas —normalizando caja y separadores, tras dos rondas del panel—, que cierra el
+  caso del operador descuidado. El caso general (escribir *otro* código más tarde) no lo puede
+  cerrar ninguna comprobación dentro de la petición, y ampliar el contrato de un sumidero es una
+  decisión de steering que la propia regla 11 dice cómo se toma. Anotado en la entrada de roadmap
+  de `field-apps`.
