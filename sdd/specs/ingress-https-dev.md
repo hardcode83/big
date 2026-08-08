@@ -41,6 +41,55 @@ Vía de acceso público a la aplicación desplegada en el entorno `dev`: **https
 - **Verificado en el entorno desplegado** (2026-08-04): `cloudflared` está solo en `autohostai_ingress`; desde esa red no se resuelve `postgres` y la conexión a su IP literal falla, con el control positivo desde `autohostai_private` conectando. Procedimiento repetible en `RUNBOOK.md` §7.4.6.
 - WHERE se necesite publicar un origen público nuevo, THE SYSTEM SHALL respetar las dos mitades del invariante del aislamiento: (a) el alcance de `cloudflared` es la **unión** de sus redes, así que conectarlo a una red más le suma todo lo que haya en ella y el aislamiento **no admite excepción por origen**; y (b) todo origen de `ingress` extiende el radio a lo que **reenvíe** hacia `private`, así que "un servicio que no sea `backend`" es necesario pero no suficiente. Enumeración canónica del invariante y del radio de daño en `docs/adr/0003-https-ingress-dev.md` §Addendum 2026-08-04 §2 y §1.
 - **Residual conocido y medido, que el aislamiento no cubre**: `cloudflared` sigue alcanzando su propio loopback (endpoint de métricas con `/debug/pprof`) y el host por el gateway del bridge, y por ahí el puerto 22 y el servicio de metadatos de la instancia — ambos comprobados alcanzables el 2026-08-04. Mitigarlo es superficie de VM y tiene entrada propia en el roadmap (`tunnel-host-surface-hardening`).
+- **Enumeración vigente de lo que `frontend` reenvía hacia `private`**, que es la mitad (b) del invariante anterior: `frontend` reenvía **todo `/api/`** hacia `backend:8000` — los endpoints de `/api/v1` que `backend/openapi.json` publica, con su autorización intacta. Y nada más. `frontend` sigue siendo el único puente `ingress`→`private`.
+- **Nota para cuando `private` gane servicios**: esa red tiene IPAM fijo **sin `ip_range`**, así que un servicio nuevo creado antes que `frontend` podría en teoría tomar `10.89.0.10`, la dirección de confianza del proxy. Es fail-loud —`frontend` no podría reclamar su IP estática y `compose up --wait` fallaría el deploy—, así que no requiere acción hoy; si esa red gana servicios, la salida es declarar un `ip_range` que excluya la dirección reservada.
+
+### Camino a la API (`/api/`, desde `api-ingress-routing`)
+
+- WHEN un cliente de internet solicita una ruta bajo `/api/` en el hostname público, THE
+  SYSTEM SHALL entregarla al servicio `backend` por la red `private` y devolver su
+  respuesta al cliente sin alterar método, cuerpo, código de estado ni el sobre de error
+  `{"error": {...}}` de PRD §23.
+- THE SYSTEM SHALL implementar ese reenvío como un Route Handler de Next
+  (`frontend/app/api/[...path]/route.ts`) que resuelve el destino desde
+  `BACKEND_INTERNAL_URL` **en tiempo de ejecución**, y THE SYSTEM SHALL NOT implementarlo
+  como una `rewrite` de `next.config.ts`: los `destination` de las rewrites se serializan
+  en `routes-manifest.json` durante `next build` y producción no vuelve a invocar
+  `config.rewrites()`, así que la URL quedaría fijada al valor del job de CI — y como
+  `next dev` sí la recarga, el fallo aparecería solo en el entorno desplegado.
+- THE SYSTEM SHALL NOT añadir ninguna regla de ingress al túnel, hostname, registro DNS ni
+  puerto al security list para servir este camino, y THE SYSTEM SHALL NOT conectar
+  `cloudflared` a la red `private`.
+- THE SYSTEM SHALL enrutar **únicamente** las rutas bajo `/api/`, y THE SYSTEM SHALL NOT
+  enrutar `/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` ni `/health`. Esos
+  cuatro primeros son anónimos por allowlist (`backend/tests/test_route_authorization.py`)
+  y hasta este change estaban protegidos **solo** por que el backend escuchaba en
+  loopback; su no exposición es ahora una decisión explícita, sostenida por un test de
+  alcance (`frontend/app/proxy-scope.test.ts`) y no por convención.
+- WHEN el reenvío no puede alcanzar el backend, THE SYSTEM SHALL responder `502` con el
+  sobre de PRD §23 y `code` `INTERNAL_ERROR`, y THE SYSTEM SHALL NOT incluir en la
+  respuesta el nombre del servicio interno, la URL interna ni la causa — que van al log del
+  servidor con prefijo `[api-proxy]`. El `code` es uno ya publicado a propósito:
+  `backend/app/core/error_codes.py` es su fuente única y el contrato lo publica como
+  `enum`, así que un código propio del proxy dejaría el switch exhaustivo del frontend
+  exhaustivo sobre el conjunto equivocado.
+- THE SYSTEM SHALL NOT declarar un tope de tamaño de cuerpo en el proxy. Medido: la opción
+  `proxyClientMaxBodySize` **no existe** en Next 16.2.11, y no hace falta — el backend
+  rechaza con `413` antes de leer el cuerpo y el handler reenvía en **streaming**
+  (`duplex: "half"`), así que el rechazo llega sin que el proceso de Next acumule el
+  cuerpo. El tope conserva un solo origen, en el backend.
+- WHEN la respuesta del backend lleva un `Location` absoluto apuntando al origen interno,
+  THE SYSTEM SHALL reescribirlo a la ruta equivalente del origen público, y THE SYSTEM
+  SHALL NOT reenviar la cabecera `server` del backend. Sin esto, el `307` de
+  `redirect_slashes` de Starlette publicaba `http://backend:8000/...` a cualquier llamante
+  anónimo — el nombre y el puerto del servicio que el aislamiento mantiene fuera de
+  internet — y mandaba al navegador a un host que no resuelve.
+- THE SYSTEM SHALL rechazar, en el propio proxy, un `CF-Connecting-IP` con zone identifier
+  o más largo que 45 caracteres, además de validarlo con `isIP`. Medido: `isIP` de Node
+  **acepta** el zone identifier (`isIP("fe80::1%" + "z"*100)` devuelve `6`), así que
+  validar solo con él reenviaría un valor de 108 caracteres que el backend tiene que
+  descartar. Defensa en profundidad: el backend lo rechaza igualmente en su frontera
+  (spec `auth-tenancy` §Identificación del cliente).
 
 ### El secreto del túnel y su lectura en el deploy
 
@@ -69,7 +118,8 @@ Vía de acceso público a la aplicación desplegada en el entorno `dev`: **https
 
 - `infra/environments/dev/main.tf` — túnel, routing, CNAME, `precondition`, ajuste de zona, secreto del Vault, policy del runner, `local.ingress_ports`.
 - `infra/environments/dev/variables.tf` — variables de Cloudflare y las dos `validation` del hostname.
-- `docker-compose.deploy.yml` — servicio `cloudflared` y el binding a loopback de `backend`/`frontend`.
+- `docker-compose.deploy.yml` — servicio `cloudflared`, el binding a loopback de `backend`/`frontend`, el ancla `x-frontend-private-ip` y el `--forwarded-allow-ips` del `backend`.
+- `frontend/app/api/[...path]/route.ts` — el reenvío `/api/` → `backend:8000`; `frontend/app/proxy-scope.test.ts` — su test de alcance.
 - `.github/workflows/deploy-dev.yml` — lectura del token por nombre y renderizado del `.env`.
 - `.github/workflows/infra-dev.yml` — gating por rama de `plan` y `apply`.
 - `docs/adr/0003-https-ingress-dev.md` — decisión y alternativas descartadas.
@@ -81,5 +131,6 @@ Vía de acceso público a la aplicación desplegada en el entorno `dev`: **https
 - **Operativo y verificado en producción** (2026-07-29): HTTPS sirviendo la app con certificado válido, redirección desde HTTP, security list en `[22]`, acceso directo a la IP en 3000/8000 sin conectar, y depuración por `ssh -L` funcionando.
 - El **bootstrap irreducible** de Cloudflare —el dominio con su zona y el API token del provider— se hace a mano una vez y está documentado en `steering/infra.md`.
 - **Cerrado por `ingress-https-hardening`** (2026-08-04): `cloudflared` aislado en su propia red, la policy del runner reducida a un solo statement, y el radio de daño del API token corregido y enumerado de forma canónica en el Addendum de ADR 0003. Los tres verificados en el entorno desplegado.
+- **Ampliado por `api-ingress-routing`** (2026-08-08): la API es alcanzable desde internet por el camino same-origin `/api/`, sin regla de ingress nueva ni puerto nuevo. El túnel SSH deja de ser la única vía documentada a `/api/v1`, y sigue siendo la única a `/docs`.
 - **Sin verificar por comportamiento**: que la catch-all devuelva 404. La regla existe en el estado aplicado, pero observarla exigiría un hostname desechable apuntando al túnel.
 - **Riesgo a vigilar**: la zona la gestionan además dos instancias de `external-dns` en `policy = "sync"`. El CNAME de Terraform no lleva su TXT de propiedad, así que en teoría no lo tocan; conviene confirmar que persiste.

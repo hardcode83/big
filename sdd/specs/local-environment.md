@@ -63,6 +63,13 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
   fuera de Docker, que cae a ese valor por defecto (ver spec `domain-foundation-core`); en un worktree
   enlazado no, porque allí no se publica nada — y no hace falta, porque la suite corre dentro del
   contenedor y va por la red de compose.
+- El camino `/api/` del frontend existe en local con la **misma forma** que en el desplegado, de
+  modo que la aplicación use siempre la misma URL relativa. La **confianza en cabeceras de proxy
+  no**: el `backend` local arranca con `--forwarded-allow-ips 127.0.0.1`, y el motivo es
+  exactamente el mapeo `8000:8000` en todas las interfaces que esta misma sección justifica —
+  con el puerto abierto a la LAN, la cabecera la suministra quien llama. Consecuencia aceptada
+  en local: el límite por IP degrada a un contador único (spec `auth-tenancy`
+  §Identificación del cliente).
 - **Esta postura no tiene comprobación automática todavía.** Si alguien publica un puerto sin el
   prefijo, hoy solo lo atrapa la revisión del diff. La guardia que lo comprobaría en cada PR es la
   entrada `compose-ports-guard` del roadmap, separada del change que estableció esta postura

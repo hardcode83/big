@@ -108,7 +108,7 @@ Categorías:
   needs: api-ingress-routing · size: M · kind: feature
 - [ ] dashboard-web — [FE] dashboard API agregado + FE: property cards, detalle + timeline (PRD §26.15-17, §9, §24).
   needs: properties-crud, frontend-auth-session · size: L · kind: feature
-- [ ] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal).
+- [x] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal). → changes/archive/2026-08-08-api-ingress-routing/
   size: S · kind: infra
 - [ ] field-apps — [FE] apps mobile-first de limpiadora y técnico + bandeja de conversaciones (PRD §26.18-21, §24)
   needs: cleaning, cleaning-photos-storage, maintenance, messaging-ai, access-notifications, frontend-auth-session, api-ingress-routing

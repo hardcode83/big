@@ -243,22 +243,83 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   hasta el doble del límite seguidas. El bloqueo por cuenta cubre exactamente esa ráfaga.
 - THE SYSTEM SHALL registrar cada intento fallido y cada bloqueo en el log de la
   aplicación, en inglés y sin la contraseña presentada.
+- WHERE la API se sirve por el camino público, THE SYSTEM SHALL contabilizar el límite de
+  10 intentos/min contra la dirección real del cliente y no contra la del proxy, de modo
+  que dos clientes distintos no compartan presupuesto y ninguno pueda agotar el del otro.
+- WHERE `POST /api/v1/auth/refresh` es alcanzable desde internet, THE SYSTEM SHALL
+  aplicarle el **mismo** límite por IP que a `login`, comprobado **antes** de decodificar el
+  token presentado, respondiendo `429` con `code` `RATE_LIMITED`. El endpoint es anónimo por
+  diseño —el refresh token es la credencial— y acuña access tokens, así que publicarlo sin
+  medir dejaría una operación de credenciales con un molinillo ilimitado.
+- THE SYSTEM SHALL contabilizar `login` y `refresh` en **un solo** contador por IP
+  (`login:ip:<ip>`), y THE SYSTEM SHALL NOT darle a `refresh` un presupuesto propio:
+  partirlo permitiría gastar dos presupuestos desde una dirección. Coste aceptado: un
+  refresh legítimo puede recibir `429` si ese cliente ya gastó el presupuesto — con access
+  tokens de 15 minutos, unos pocos refresh por hora contra un techo de diez por minuto.
+- **Residual conocido**: el contador es **por IP y global**, no por tenant. Con la API
+  alcanzable desde internet, usuarios de **tenants distintos** detrás de un mismo NAT o
+  CGNAT comparten presupuesto de login, un escenario que no era alcanzable mientras el
+  backend escuchaba solo en loopback. No viola la regla 1 de `steering/security.md` (no
+  cruza dato alguno entre tenants) ni la 7 (el límite es por IP, como pide); es equidad y
+  disponibilidad. El bloqueo **por cuenta** sí está acotado por `user_id`, que es único
+  global, así que un ataque contra la cuenta de un tenant no bloquea la de otro.
 
 ### Identificación del cliente
 
-- THE SYSTEM SHALL usar la IP del peer del socket como identidad del cliente, y honrar una
-  cabecera de proxy **solo** si `TRUSTED_CLIENT_IP_HEADER` la nombra explícitamente. Viene
-  vacía por defecto.
-- WHERE esa cabecera está configurada, THE SYSTEM SHALL tomar el salto de **más a la
-  derecha** de su **última** aparición y validarlo con `ipaddress.ip_address`, cayendo a la
-  IP del socket si no parsea. El primer salto es el valor que envió el cliente cuando el
-  proxy **añade** (comportamiento de nginx y de cualquier implementación conforme), así que
-  leerlo sería leer entrada del atacante.
-- **Limitación conocida**: el código honra la cabecera venga de donde venga, sin comprobar
-  que el peer sea un proxy de confianza. Esa comprobación pertenece a
-  `api-ingress-routing`, que es donde el proxy existe de verdad. Mientras no exista, activar
-  la cabecera con la API alcanzable por otra vía permitiría a quien llegue por ahí darse un
-  presupuesto nuevo de 10/min en cada petición.
+- THE SYSTEM SHALL usar **la IP del peer del socket** como identidad del cliente, y THE
+  SYSTEM SHALL NOT leer ninguna cabecera de reenvío en código de aplicación.
+- THE SYSTEM SHALL delegar la resolución de la cabecera de proxy en
+  `ProxyHeadersMiddleware` de uvicorn, arrancado con `--proxy-headers` y con
+  `--forwarded-allow-ips` nombrando explícitamente los peers de confianza, de modo que
+  `scope["client"]` ya sea la IP real del cliente cuando —y solo cuando— la petición viene
+  de un proxy de confianza.
+- THE SYSTEM SHALL pinear `--forwarded-allow-ips` en **ambos** stages de
+  `backend/devops/Dockerfile`, porque un flag ausente no es neutro: uvicorn cae entonces a
+  la variable de entorno `FORWARDED_ALLOW_IPS` (`uvicorn/config.py:356`), que el backend
+  recibe por `env_file` junto al resto del `.env`. El flag del CLI gana sobre el entorno, y
+  el `command:` del compose de deploy es la única vía para ensanchar la lista.
+- WHERE el entorno es el desplegado, THE SYSTEM SHALL fijar esa lista a la dirección
+  estática del contenedor `frontend` en `private`, declarada **una sola vez** con un ancla
+  de YAML que alimenta tanto su `ipv4_address` como el `--forwarded-allow-ips` del
+  `backend`. Un valor malformado impide arrancar el contenedor y con él el deploy, en vez
+  de degradar el límite en silencio — uvicorn convierte cualquier entrada inválida de esa
+  lista en una comparación literal de cadena sin avisar.
+- THE SYSTEM SHALL usar un **/32** y no la subred, porque la subred contiene a los demás
+  servicios: medido en el deploy real, `private` alberga `postgres`, `redis`, `backend`,
+  `worker`, `beat`, `migrate` y `frontend`, de los cuales **uno solo** es el proxy. Confiar
+  en la subred sería autorizar a seis servicios a reportar la dirección de un cliente.
+- WHERE el entorno es el local, THE SYSTEM SHALL NOT confiar en ningún peer
+  (`--forwarded-allow-ips 127.0.0.1`), porque `docker-compose.yml` publica el 8000 en todas
+  las interfaces a propósito y con un puerto abierto a la LAN la cabecera la suministra
+  quien llama. Consecuencia aceptada: el límite por IP degrada a un contador único.
+- WHEN el valor resuelto no es una dirección IP, o es **IPv6 con zone identifier**, o
+  excede los 45 caracteres de `audit_logs.actor_ip`, THE SYSTEM SHALL usar `127.0.0.1`.
+  Delegar en uvicorn da la selección del salto correcta pero **no** la validación: devuelve
+  el primer salto no confiable literalmente. Y «parsea como IP» no basta, porque el texto
+  tras `%` de un zone identifier es casi libre: medido, un zone rotatorio daba un contador
+  de throttle nuevo por petición, un zone con CR/LF forjaba líneas en el log de login, y uno
+  largo hacía lanzar `AuditContractError`, abortando la transacción de la operación
+  auditada. Un zone identifier es ámbito link-local de una máquina y nunca describe
+  legítimamente a un cliente remoto.
+- THE SYSTEM SHALL canonicalizar la dirección y colapsar las formas IPv4-mapped sobre su
+  IPv4, de modo que `::ffff:1.2.3.4` y `1.2.3.4`, o dos grafías del mismo IPv6, sean un
+  único contador y un único `actor_ip`.
+
+### Tope de tamaño de cuerpo
+
+- THE SYSTEM SHALL aplicar un tope de tamaño de cuerpo a **todo** `/api/v1/`, antes de leer
+  el cuerpo, respondiendo `413` con `code` `PAYLOAD_TOO_LARGE`.
+- THE SYSTEM SHALL usar `CSV_IMPORT_MAX_BYTES` (10 MiB) para `/api/v1/integrations/` y
+  `REQUEST_MAX_BYTES` (1 MiB) para el resto, resolviendo el límite **por ruta** en una sola
+  instancia de middleware: dos instancias se anidan, así que la genérica rechazaría la
+  subida antes de que la específica la viera.
+- **Por qué no está acotado a las subidas**: mientras el backend escuchaba solo en
+  loopback, un cuerpo sin tope en un endpoint anónimo no costaba nada. Con `/api/v1`
+  alcanzable desde internet es un amplificador de memoria — medido, un `POST` de 400 MB a
+  `/auth/login` llevó el contenedor de 195 MiB a 1,016 GiB de RSS, y FastAPI lee el cuerpo
+  **antes** de resolver dependencias, o sea antes del throttle de 10/min. Ningún compose
+  limita la memoria de `backend`, así que el techo era el de la VM. Regla 12(c) y regla 6 de
+  `steering/security.md`.
 
 ### Contrato HTTP y patrón de capas
 

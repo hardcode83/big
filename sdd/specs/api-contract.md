@@ -152,6 +152,16 @@ Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFL
   respuestas no-OK continúan pasando por `ApiError` y `parseApiError`, sin tipos de error por
   endpoint ni wrappers de dominio.
 
+### Alcance público del documento
+
+- THE SYSTEM SHALL mantener `/openapi.json`, `/docs`, `/docs/oauth2-redirect` y `/redoc`
+  **fuera del camino público**: siguen en la allowlist anónima y siguen siendo alcanzables
+  solo desde la VM (túnel SSH), porque el proxy de `/api/` no los enruta (spec
+  `ingress-https-dev` §Camino a la API). Decisión explícita que el panel de seguridad de
+  `api-contract-export` dejó pendiente para `api-ingress-routing`; el contrato que consume
+  el frontend es `backend/openapi.json` versionado, así que exponer `/docs` no aportaría
+  nada que compense publicar la forma completa de la API.
+
 ## Estado
 
 - **El documento servido y el commiteado son el mismo**: `install_openapi()` sustituye
