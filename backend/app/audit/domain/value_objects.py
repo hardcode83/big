@@ -199,12 +199,16 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # here would make `redacted()` fail too, and a document being replaced would leave no
     # trace.
     #
-    # `date_of_birth` and `nationality` are auditable as diffs and that is deliberate: rule 11
-    # governs a rule-3 *value*, and rule 3's enumeration names the document number, not the
-    # birth date. PRD §17 lists both among the eight fields SES.Hospedajes requires, so the
-    # trail has to show which of them changed; recording *which* is the point, and the use
-    # cases still record the whole document group with `redacted()` (design D11) rather than
-    # splitting hairs per field at the call site.
+    # `date_of_birth` is listed here AND denylisted above — see the entry there for why. This
+    # comment used to argue the opposite ("auditable as a diff, and that is deliberate"), and
+    # it survived the commit that moved the field onto the denylist: the stale-copy failure
+    # rule 11's own paragraph describes, found by the panel's re-review. Nothing here restates
+    # the reasoning any more; it cites.
+    #
+    # `nationality` is the one that IS auditable as a diff, deliberately: §"Datos sensibles"
+    # names the document and the birth date and stops. The use cases record it with
+    # `redacted()` anyway (design D11) — that discipline lives in the caller, like
+    # `properties-crud` design D7 does for its note columns.
     "GUEST": frozenset(
         {
             "nationality",

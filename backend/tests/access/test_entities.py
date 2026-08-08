@@ -106,6 +106,37 @@ def test_the_code_pasted_into_the_notes_is_refused() -> None:
     assert record.notes is None
 
 
+@pytest.mark.parametrize(
+    "notes",
+    [
+        "puerta 481523, timbre 2",
+        # Both bypasses the security panel found in the first version of this check, which
+        # compared raw substrings: a different case, and the code split by a separator.
+        "el código es 481523 y el portal el 2",
+        "PUERTA 481523",
+        "código: 481 523",
+        "codigo 481-523",
+        "481.523 en el teclado",
+    ],
+)
+def test_the_code_is_recognised_however_it_is_written(notes: str) -> None:
+    record = _record()
+
+    with pytest.raises(AccessCodeInNotesError):
+        record.register_manual_code("481523", notes=notes, now=NOW)
+
+    assert record.code_masked is None
+
+
+def test_a_letter_code_is_recognised_in_any_case() -> None:
+    """`RegisterCodeRequest.code` has no charset restriction, so codes can be alphanumeric —
+    which is where a case-sensitive check let `AbC123` through as `abc123`."""
+    record = _record()
+
+    with pytest.raises(AccessCodeInNotesError):
+        record.register_manual_code("AbC123", notes="el código es abc123", now=NOW)
+
+
 def test_notes_that_do_not_contain_the_code_are_kept() -> None:
     """The check must not make `notes` useless — PRD §15 puts it on the adapter signature."""
     record = _record()

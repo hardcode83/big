@@ -26,7 +26,7 @@ from app.access.domain.exceptions import (
     AccessCodeRequiredError,
     InvalidAccessTransitionError,
 )
-from app.access.domain.masking import mask_access_code
+from app.access.domain.masking import looks_like, mask_access_code
 
 #: Which states each operation may be invoked from (design D14). The single source: the
 #: methods below read it rather than repeating their own `if`, so a new `AccessRecordStatus`
@@ -96,12 +96,15 @@ class AccessRecord:
             # ordinary-looking `"****"`, so an empty code would be stored as a mask and the
             # record would claim a code exists.
             raise AccessCodeRequiredError()
-        if notes is not None and stripped in notes:
+        if notes is not None and looks_like(code, notes):
             # The one leak the masking left open, found by the feature-scale security panel:
             # `notes` is free text on the SAME request, and it was persisted verbatim and
             # served in every listing. R2.6 says the full code is stored "en ningún punto",
             # and this is the only place in the system where both strings exist at once — so
             # it is the only place the check is decidable.
+            #
+            # `looks_like` and not `in`: the panel's re-review got past a raw substring twice,
+            # with a different case and with the code split by a space.
             raise AccessCodeInNotesError()
         self.code_masked = mask_access_code(code)
         self.provider = AccessProvider.MANUAL
