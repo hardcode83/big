@@ -1,0 +1,75 @@
+"""What a delivery attempt returns (`access-notifications` design D8, PRD §14).
+
+**The error is an enum, not a string, and that is the whole point.** `notification_logs
+.last_error` is one of the cleartext sinks of rule 11 in `sdd/steering/security.md`, whose
+contract for this column is the structured form: no rule-3 value survives in it at all.
+This change is its first writer, so the contract is inherited here.
+
+Making the code a closed enum moves that guarantee from discipline to construction: a
+provider SDK's exception routinely embeds the very message it failed to send — subject,
+body, recipient — and the natural `str(exc)` would carry it straight into the column. It
+**does not fit in the return type**, so no adapter can pass it on without changing this
+file, which is a diff a reviewer sees.
+
+Same shape as `ChangeSet` in `app/audit/domain/value_objects.py`, and for the same reason:
+rule 11 records that three consecutive reviews found a leak when the contract rested on
+every caller remembering it.
+"""
+
+import enum
+from dataclasses import dataclass
+
+
+class NotificationErrorCode(str, enum.Enum):
+    """Why a delivery attempt did not succeed.
+
+    Deliberately coarse. A finer taxonomy would be guesswork today — the only adapters are
+    a console logger and two mocks — and every value here has to be one a *future* SMTP or
+    WhatsApp adapter can map onto without inventing a category. What the operator needs to
+    tell apart is: our fault, their address, the network, and "we gave up".
+    """
+
+    #: The adapter raised or reported a failure it could not classify further.
+    ADAPTER_ERROR = "ADAPTER_ERROR"
+    #: `recipient_contact` is empty or not addressable on this channel.
+    INVALID_RECIPIENT = "INVALID_RECIPIENT"
+    #: The provider did not answer in time.
+    TIMEOUT = "TIMEOUT"
+    #: No adapter is registered for the row's channel (R4.5).
+    NO_ADAPTER_FOR_CHANNEL = "NO_ADAPTER_FOR_CHANNEL"
+    #: `notification_max_attempts` reached; the row moves to `FAILED` (R4.4).
+    MAX_ATTEMPTS_EXCEEDED = "MAX_ATTEMPTS_EXCEEDED"
+
+
+@dataclass(frozen=True)
+class NotificationResult:
+    """The outcome of one `NotificationAdapter.send`.
+
+    `provider_message_id` is the provider's own identifier when it gives one — an opaque
+    handle for support, never message content. The console and mock adapters return `None`.
+    """
+
+    delivered: bool
+    error_code: NotificationErrorCode | None = None
+    provider_message_id: str | None = None
+
+    def __post_init__(self) -> None:
+        """A result cannot be both delivered and failed, nor failed without a reason.
+
+        Checked here rather than trusted, because `record_attempt` branches on exactly
+        these two fields: a delivered result with an error code would write `SENT` **and**
+        a `last_error`, and a failure with no code would write a `last_error` of `null`
+        that tells the operator nothing.
+        """
+        if self.delivered and self.error_code is not None:
+            raise ValueError("a delivered result carries no error code")
+        if not self.delivered and self.error_code is None:
+            raise ValueError("a failed result must name its error code")
+
+    @classmethod
+    def ok(cls, provider_message_id: str | None = None) -> "NotificationResult":
+        return cls(delivered=True, provider_message_id=provider_message_id)
+
+    @classmethod
+    def failure(cls, error_code: NotificationErrorCode) -> "NotificationResult":
+        return cls(delivered=False, error_code=error_code)

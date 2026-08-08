@@ -19,8 +19,13 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningChecklistTemplateRepository,
     SqlAlchemyCleaningTaskRepository,
 )
+from app.core.config import settings
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
-from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
+from app.notifications.application.use_cases import (
+    DispatchPendingNotificationsUseCase,
+    EscalateBreachedSlasUseCase,
+)
+from app.notifications.infrastructure.adapters import adapter_registry
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.properties.application.use_cases import AdvancePropertyStatesUseCase
 from app.properties.domain.transition_enums import PropertyStateTrigger
@@ -89,6 +94,17 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
     return await use_case.execute(tenant_id=tenant_id, now=now)
 
 
+async def _dispatch(session: AsyncSession, tenant_id, now: datetime):
+    use_case = DispatchPendingNotificationsUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        adapters=adapter_registry(),
+        uow=SqlAlchemyUnitOfWork(session),
+        max_attempts=settings.notification_max_attempts,
+        batch_size=settings.notification_batch_size,
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
 async def _guarded(name: str, cadence: timedelta, work) -> dict:
     """Take the lock, run for every tenant, and always return a serialisable report.
 
@@ -145,5 +161,24 @@ def process_checkouts() -> dict:
 
 @celery_app.task(name="check_sla_breaches")
 def check_sla_breaches() -> dict:
-    """PRD §14, every minute: escalate notifications whose SLA deadline has passed."""
+    """PRD §14, every minute: escalate notifications whose SLA deadline has passed.
+
+    **Inert until `access-notifications` shipped**, and worth recording because the
+    behaviour of this task changed without its code changing: `list_sla_breach_candidates`
+    requires `status = SENT`, and until `dispatch_notifications` existed nothing ever wrote
+    that value, so every run found zero candidates.
+    """
     return run_sync(_guarded("check_sla_breaches", CADENCES["check_sla_breaches"], _escalate))
+
+
+@celery_app.task(name="dispatch_notifications")
+def dispatch_notifications() -> dict:
+    """PRD §14, every minute: deliver the notifications sitting in `PENDING`.
+
+    Not one of PRD §8.3's four — see the divergence note in `schedule.py`. The lock is the
+    same `task_lock` the others take, and it is what makes design D4's at-least-once bound
+    hold: two overlapping runs would each burn their own attempt on the same row.
+    """
+    return run_sync(
+        _guarded("dispatch_notifications", CADENCES["dispatch_notifications"], _dispatch)
+    )

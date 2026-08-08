@@ -13,13 +13,14 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationStatus
 from app.notifications.domain.exceptions import NotificationLogNotFoundError
+from app.notifications.domain.repositories import NotificationLogPage
 from app.notifications.infrastructure.models import NotificationLogModel
 
 
@@ -65,6 +66,99 @@ class SqlAlchemyNotificationLogRepository:
         # one-minute job re-escalate it for ever. See the port for the full reasoning.
         if result.rowcount == 0:
             raise NotificationLogNotFoundError(log.id)
+
+    async def list_pending(
+        self, tenant_id: uuid.UUID, limit: int
+    ) -> Sequence[NotificationLog]:
+        rows = await self._session.execute(
+            select(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.status == NotificationStatus.PENDING,
+            )
+            # Oldest first, same reasoning as the candidate query: a run cut short by the
+            # batch limit has delivered the work that had been waiting longest.
+            .order_by(NotificationLogModel.created_at, NotificationLogModel.id)
+            .limit(limit)
+        )
+        return [_to_log(model) for model in rows.scalars()]
+
+    async def list_for_recipient(
+        self, tenant_id: uuid.UUID, recipient_user_id: uuid.UUID, *, page: int, per_page: int
+    ) -> NotificationLogPage:
+        conditions = (
+            NotificationLogModel.tenant_id == tenant_id,
+            NotificationLogModel.recipient_user_id == recipient_user_id,
+        )
+        total = await self._session.scalar(
+            select(func.count()).select_from(NotificationLogModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            select(NotificationLogModel)
+            .where(*conditions)
+            # Newest first: this is an inbox, not a queue.
+            .order_by(NotificationLogModel.created_at.desc(), NotificationLogModel.id)
+            .offset((page - 1) * per_page)
+            .limit(per_page)
+        )
+        return NotificationLogPage(
+            items=tuple(_to_log(model) for model in rows.scalars()),
+            total=total or 0,
+        )
+
+    async def record_attempt(
+        self,
+        tenant_id: uuid.UUID,
+        log_id: uuid.UUID,
+        *,
+        status: NotificationStatus,
+        attempts: int,
+        sent_at: datetime | None,
+        last_error: str | None,
+    ) -> None:
+        result = await self._session.execute(
+            update(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.id == log_id,
+            )
+            .values(
+                status=status,
+                attempts=attempts,
+                sent_at=sent_at,
+                last_error=last_error,
+            )
+        )
+        # Loud for the same reason as `mark_breached`: the delivery already happened by the
+        # time this runs, so a zero-row UPDATE means the dispatcher would re-send the row on
+        # the next tick believing it never went out. That is the one failure the attempt
+        # counter exists to bound.
+        if result.rowcount == 0:
+            raise NotificationLogNotFoundError(log_id)
+
+    async def cancel_sla_deadline(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> int:
+        result = await self._session.execute(
+            update(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.related_type == related_type,
+                NotificationLogModel.related_id == related_id,
+                NotificationLogModel.notification_type == notification_type,
+                NotificationLogModel.sla_deadline_at.is_not(None),
+            )
+            .values(sla_deadline_at=None)
+        )
+        # No `NotificationLogNotFoundError` here, unlike the two writes above, and the port
+        # says why: nothing has happened yet that a missing row would contradict. Zero is a
+        # task with no assignment notification, or one whose deadline is already closed.
+        return result.rowcount
 
     async def add(self, tenant_id: uuid.UUID, log: NotificationLog) -> None:
         if log.tenant_id != tenant_id:

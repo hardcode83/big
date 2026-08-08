@@ -19,17 +19,33 @@ PRD_8_3 = {
     "mark_occupied_estimated": timedelta(minutes=5),
 }
 
+#: Jobs that are NOT in PRD §8.3, kept in their own table so the divergence is visible
+#: rather than absorbed into the transcription above (`access-notifications` design D2/D3).
+#: The PRD says *what* must happen — §14 delivers notifications, §15 gives every confirmed
+#: reservation an access record — and is silent on what triggers either.
+BEYOND_PRD_8_3 = {
+    "dispatch_notifications": timedelta(minutes=1),
+}
 
-def test_the_cadences_are_the_ones_prd_8_3_specifies() -> None:
-    assert CADENCES == PRD_8_3
+ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3
+
+
+def test_the_cadences_of_prd_8_3_are_untouched() -> None:
+    """Additions may not quietly retune a cadence the PRD specifies."""
+    for name, cadence in PRD_8_3.items():
+        assert CADENCES[name] == cadence
+
+
+def test_the_calendar_is_prd_8_3_plus_exactly_the_declared_additions() -> None:
+    assert CADENCES == ALL_CADENCES
 
 
 def test_the_beat_schedule_covers_every_cadence_and_nothing_else() -> None:
     schedule = beat_schedule()
 
-    assert {entry["task"] for entry in schedule.values()} == set(PRD_8_3)
+    assert {entry["task"] for entry in schedule.values()} == set(ALL_CADENCES)
     for entry in schedule.values():
-        assert entry["schedule"] == PRD_8_3[entry["task"]]
+        assert entry["schedule"] == ALL_CADENCES[entry["task"]]
 
 
 def test_every_scheduled_task_is_registered_with_celery() -> None:

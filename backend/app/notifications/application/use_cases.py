@@ -1,4 +1,18 @@
-"""SLA enforcement (`celery-jobs` R5, PRD §14, design D11 and D17).
+"""SLA enforcement and delivery (`celery-jobs` R5 + `access-notifications` R4, PRD §14).
+
+Two passes over the same table, and the seam between them is `NotificationStatus`:
+
+- `EscalateBreachedSlasUseCase` (`celery-jobs`) turns a breached deadline into a **queued**
+  escalation — a new row in `PENDING`.
+- `DispatchPendingNotificationsUseCase` (`access-notifications`) drains `PENDING` through a
+  channel adapter and owns `status` from there on.
+
+Until the second one existed, `list_sla_breach_candidates` could never return anything: it
+requires `status = SENT` and nothing marked it. That is the hole this module now closes.
+
+--- (original docstring of the escalation pass follows) ---
+
+SLA enforcement (`celery-jobs` R5, PRD §14, design D11 and D17).
 
 Finds the notifications whose deadline has passed, marks them breached and leaves the
 escalation written as queued work. **It sends nothing**: the `NotificationAdapter` of
@@ -15,6 +29,7 @@ evitar") — the mark would have made the breach permanently unescalatable while
 claimed it was handled. Caught by the section-4 security panel.
 """
 
+import json
 import logging
 import uuid
 from dataclasses import dataclass
@@ -28,7 +43,9 @@ from app.core.unit_of_work import UnitOfWork
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
 from app.notifications.domain.escalation import Escalation, escalation_for
+from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.repositories import NotificationLogRepository
+from app.notifications.domain.results import NotificationErrorCode
 
 logger = logging.getLogger(__name__)
 
@@ -230,3 +247,215 @@ def _escalation_row(
         related_type="notification_log",
         related_id=breached_id,
     )
+
+
+@dataclass
+class DispatchReport:
+    """What one delivery run did (R4).
+
+    `sent`, `retrying`, `failed` and `skipped` partition the rows the run looked at.
+    `retrying` is a row that failed and still has attempts left — deliberately named apart
+    from `failed`, because an operator reading "3 failed" when all three will be retried in
+    sixty seconds is being told the wrong thing.
+    """
+
+    considered: int = 0
+    sent: int = 0
+    retrying: int = 0
+    failed: int = 0
+    skipped: int = 0
+
+
+class DispatchPendingNotificationsUseCase:
+    """Drain the `PENDING` queue through the channel adapters (R4, design D3/D4/D5).
+
+    **The attempt is recorded before the send, and committed.** That is the whole ordering
+    decision of design D4, and it buys one property: a process killed between the provider
+    call and the result write has already burned an attempt, so the redelivery it causes is
+    bounded by `notification_max_attempts` instead of repeating for ever. The alternative —
+    an intermediate `SENDING` state — needs an `ALTER TYPE` and leaves rows stuck in it when
+    the process dies, which is the failure mode we would be trading *up* to.
+
+    So the semantics are **at-least-once, bounded**, and `SENT` is never written on a row
+    the adapter did not confirm (R4.6). Concurrency between runs is handled a layer up, by
+    the Redis `task_lock` the scheduler already takes for every job.
+    """
+
+    def __init__(
+        self,
+        *,
+        notifications: NotificationLogRepository,
+        adapters: dict[NotificationChannel, NotificationAdapter],
+        uow: UnitOfWork,
+        max_attempts: int,
+        batch_size: int,
+    ) -> None:
+        self._notifications = notifications
+        self._adapters = adapters
+        self._uow = uow
+        self._max_attempts = max_attempts
+        self._batch_size = batch_size
+
+    async def execute(self, *, tenant_id: uuid.UUID, now: datetime) -> DispatchReport:
+        report = DispatchReport()
+        pending = await self._notifications.list_pending(tenant_id, self._batch_size)
+        for log in pending:
+            report.considered += 1
+            adapter = self._adapters.get(log.channel)
+            if adapter is None:
+                await self._skip_unroutable(tenant_id, log)
+                report.skipped += 1
+                continue
+            await self._deliver(tenant_id, log, adapter, now, report)
+        return report
+
+    async def _skip_unroutable(
+        self, tenant_id: uuid.UUID, log: NotificationLog
+    ) -> None:
+        """R4.5 — a channel with no adapter is `SKIPPED`, not retried for ever.
+
+        No attempt is burned: nothing was attempted. `SKIPPED` takes the row out of
+        `list_pending`, which is what stops the job from picking it up every minute until
+        somebody registers an adapter for that channel.
+        """
+        await self._notifications.record_attempt(
+            tenant_id,
+            log.id,
+            status=NotificationStatus.SKIPPED,
+            attempts=log.attempts,
+            sent_at=None,
+            last_error=_encode_error(
+                NotificationErrorCode.NO_ADAPTER_FOR_CHANNEL, log.channel, log.attempts
+            ),
+        )
+        await self._uow.commit()
+        logger.warning(
+            "notifications.channel_without_adapter",
+            extra={
+                "tenant_id": str(tenant_id),
+                "notification_log_id": str(log.id),
+                "channel": log.channel.value,
+            },
+        )
+
+    async def _deliver(
+        self,
+        tenant_id: uuid.UUID,
+        log: NotificationLog,
+        adapter: NotificationAdapter,
+        now: datetime,
+        report: DispatchReport,
+    ) -> None:
+        attempt = log.attempts + 1
+        # Recorded and committed BEFORE the provider call — design D4. Everything about the
+        # duplicate bound depends on this line running first.
+        await self._notifications.record_attempt(
+            tenant_id,
+            log.id,
+            status=NotificationStatus.PENDING,
+            attempts=attempt,
+            sent_at=None,
+            last_error=log.last_error,
+        )
+        await self._uow.commit()
+
+        result = await adapter.send(
+            recipient_contact=log.recipient_contact,
+            subject=log.subject,
+            body=log.body,
+            channel=log.channel,
+        )
+
+        if result.delivered:
+            await self._notifications.record_attempt(
+                tenant_id,
+                log.id,
+                status=NotificationStatus.SENT,
+                attempts=attempt,
+                sent_at=now,
+                last_error=None,
+            )
+            await self._uow.commit()
+            report.sent += 1
+            return
+
+        exhausted = attempt >= self._max_attempts
+        # The code that goes on the row is the adapter's while retries remain, and
+        # `MAX_ATTEMPTS_EXCEEDED` once we stop: an operator looking at a `FAILED` row needs
+        # to know we gave up, and the last provider code is still one `attempts` value away
+        # in the log line below.
+        code = (
+            NotificationErrorCode.MAX_ATTEMPTS_EXCEEDED
+            if exhausted
+            else (result.error_code or NotificationErrorCode.ADAPTER_ERROR)
+        )
+        await self._notifications.record_attempt(
+            tenant_id,
+            log.id,
+            status=NotificationStatus.FAILED if exhausted else NotificationStatus.PENDING,
+            attempts=attempt,
+            sent_at=None,
+            last_error=_encode_error(code, log.channel, attempt),
+        )
+        await self._uow.commit()
+        if exhausted:
+            report.failed += 1
+        else:
+            report.retrying += 1
+        logger.warning(
+            "notifications.delivery_failed",
+            extra={
+                "tenant_id": str(tenant_id),
+                "notification_log_id": str(log.id),
+                "channel": log.channel.value,
+                "attempt": attempt,
+                "error_code": (result.error_code or NotificationErrorCode.ADAPTER_ERROR).value,
+                "exhausted": exhausted,
+            },
+        )
+
+
+def _encode_error(
+    code: NotificationErrorCode, channel: NotificationChannel, attempt: int
+) -> str:
+    """The structured form rule 11 of `sdd/steering/security.md` requires for `last_error`.
+
+    Three fields, all of them ours: a code from a closed enum, the channel, and which
+    attempt produced it. There is no path here for provider text — `NotificationAdapter`
+    cannot return any — so the guarantee is structural rather than a habit this function
+    has to keep.
+    """
+    return json.dumps({"code": code.value, "channel": channel.value, "attempt": attempt})
+
+
+@dataclass(frozen=True)
+class NotificationPage:
+    """One page of a user's own notifications (R4, design D6)."""
+
+    items: list[NotificationLog]
+    total: int
+    page: int
+    per_page: int
+
+
+class ListOwnNotificationsUseCase:
+    """The in-app channel's read side (design D6).
+
+    Without it, `InAppNotificationAdapter` marks rows `SENT` that nobody can read — which
+    would make "delivered" a claim rather than a fact. Scoped to the requesting user, not
+    just to the tenant: a manager and a cleaner in the same tenant must not see each
+    other's notifications.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository) -> None:
+        self._notifications = notifications
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, page: int, per_page: int
+    ) -> NotificationPage:
+        found = await self._notifications.list_for_recipient(
+            tenant_id, user_id, page=page, per_page=per_page
+        )
+        return NotificationPage(
+            items=list(found.items), total=found.total, page=page, per_page=per_page
+        )

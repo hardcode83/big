@@ -19,6 +19,7 @@ from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
+from app.notifications.api.router import router as notifications_router
 from app.properties.api.errors import register_property_error_handlers
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
@@ -72,6 +73,10 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
+    # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
+    # (design D5/D6).
+    app.include_router(notifications_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.
