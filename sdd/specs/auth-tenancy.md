@@ -143,9 +143,15 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   capacidad añade los que sus endpoints declaran. Además de los dos de autoservicio
   (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`), que PRD §6 concede a todo rol que puede
   autenticarse, el catálogo contiene hoy los que añadió `reservations`
-  (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`) y los cuatro de `user-management`
-  (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), todos
+  (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
+  (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
+  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`) y los cinco de `cleaning`, todos
   diferenciados por rol.
+- **`properties-crud` es el único reparto que no se puede citar de PRD §6**, y por eso su razón
+  queda registrada en lugar de referenciada: §6 no nombra capacidad de crear ni editar
+  propiedades para ningún rol. Da a `TENANT_OWNER` «ver sus propiedades y reservas» —una
+  lectura— y a `PROPERTY_MANAGER` «acceder a todos los datos operativos», así que el reparto
+  reproduce el de `reservations`: la propietaria ve el inventario y el manager lo opera.
 - WHEN un usuario autenticado invoca un endpoint que exige un permiso que su rol no tiene,
   THE SYSTEM SHALL responder `403` con `{"error": {"code": "FORBIDDEN", ...}}`.
 - THE SYSTEM SHALL declarar el permiso exigido en cada ruta mediante la dependencia

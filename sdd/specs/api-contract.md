@@ -45,10 +45,13 @@ typecheck del frontend contra los tipos derivados, que pertenece a otra capacida
 
 - THE SYSTEM SHALL definir en `app/core/error_codes.py` el `StrEnum` `ErrorCode` como
   **única fuente de verdad** de los códigos del envoltorio de PRD §23.
-- THE SYSTEM SHALL referenciar ese registro desde los siete sitios que emiten un código:
+- THE SYSTEM SHALL referenciar ese registro desde los ocho sitios que emiten un código:
   los atributos `code` de las subclases de `AppError`, el diccionario `_HTTP_STATUS_CODES`,
-  las tablas `_MAPPING` de `auth`, `reservations` y `tenants`, los literales de
+  las tablas `_MAPPING` de `auth`, `properties`, `reservations` y `tenants`, los literales de
   `integrations` y `TOO_LARGE_CODE` de `app/core/http_limits.py`.
+- THE SYSTEM SHALL incluir cada `_MAPPING` nuevo en la guarda que recorre el registro. Una
+  tabla que la guarda no importa queda fuera de la comprobación aunque exista, y el módulo
+  seguiría pudiendo emitir un literal ajeno a `ErrorCode` sin que la suite lo notara.
 - THE SYSTEM SHALL fallar la suite si alguno de esos sitios contiene un valor que no sea
   miembro de `ErrorCode`, recorriéndolos estructuralmente y descendiendo en profundidad por
   las subclases de `AppError`.
@@ -94,9 +97,11 @@ Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFL
   Filtrar `app.routes` por `isinstance(route, APIRoute)` **no** funciona: esta versión de
   FastAPI guarda cada router incluido como un único `_IncludedRouter`, así que ese filtro
   no encuentra ninguna ruta y la comprobación pasa sin inspeccionar nada.
-- THE SYSTEM SHALL comprobar que la guarda de modelos de respuesta ve al menos las 18 rutas
-  reales y los cinco prefijos, porque una guarda que reporta éxito sobre una lista vacía es
-  peor que no tenerla.
+- THE SYSTEM SHALL comprobar que la guarda de modelos de respuesta ve al menos 22 rutas
+  reales, porque una guarda que reporta éxito sobre una lista vacía es peor que no tenerla.
+  El suelo de rutas es un mínimo —añadir una no lo rompe— pero el conjunto de prefijos es
+  **exacto**, de modo que un módulo nuevo tiene que nombrarse ahí y no puede colarse sin
+  aparecer en el diff.
 - THE SYSTEM SHALL comprobar la **fidelidad** contra respuestas reales: una petición
   inválida y una ruta inexistente devuelven cuerpos que validan contra el `ErrorEnvelope`
   publicado. Sin esto, el documento solo sería coherente consigo mismo, que es exactamente

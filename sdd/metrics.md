@@ -29,4 +29,4 @@
 | worktree-parallel-stack | archive | 11 | 4807 | 4041957 | 2.2191 | 2026-08-05 | 2026-08-05 |
 | pms-provider-resolution | new, design, tasks, run, review, archive | 521270 | 1226222 | 357557064 | 230.0402 | 2026-08-05 | 2026-08-06 |
 | pms-beds24-adapter | new, design, tasks, run, review, archive | 267607 | 713296 | 203542711 | 153.3613 | 2026-08-05 | 2026-08-07 |
-| properties-crud | new, design, tasks, run, review | 239254 | 668344 | 272258572 | 181.6691 | 2026-08-07 | — |
+| properties-crud | new, design, tasks, run, review, archive | 252521 | 705045 | 321695788 | 214.1778 | 2026-08-07 | 2026-08-08 |

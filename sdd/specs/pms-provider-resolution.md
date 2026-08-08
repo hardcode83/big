@@ -35,6 +35,12 @@ Operación y runbook: [`docs/pms-credentials.md`](../../docs/pms-credentials.md)
   `ENUM` nativo de Postgres con nombre explícito, nullable.
 - WHEN una propiedad no declara proveedor, THE SYSTEM SHALL resolverla al proveedor por defecto
   (`MOCK`), de modo que el arranque local y la suite no dependan de configuración alguna.
+- THE SYSTEM SHALL mantener sincronizado ese defecto con el índice
+  `uq_properties_tenant_id_pms_external_id`, que agrupa por `coalesce(pms_provider, 'MOCK')` para
+  que dos propiedades sin proveedor no puedan compartir un id externo (spec `properties-crud`). El
+  literal está en el esquema y nada lo ata al defecto en tiempo de ejecución, así que un test lo
+  fija: cambiar el proveedor por defecto sin migrar el índice lo dejaría agrupando bajo un
+  proveedor que ya no usa nadie, y el duplicado que impide pasaría inadvertido.
 - WHEN se sincroniza un tenant, THE SYSTEM SHALL agrupar sus propiedades **por proveedor** y hacer
   una llamada por proveedor distinto, no una por propiedad. La cuota de Beds24 es de 100 créditos
   por 300 s **por cuenta**, así que con una docena de propiedades una llamada por propiedad agota

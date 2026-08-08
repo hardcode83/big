@@ -40,7 +40,11 @@ no las dispara; aporta el dato del que cuelgan.
   `children` es negativo, THEN THE SYSTEM SHALL responder `422` en el envelope de PRD §23
   sin escribir nada.
 - IF la `property_id` indicada no existe en el tenant del token, THEN THE SYSTEM SHALL
-  responder `404`.
+  responder `404`. Las propiedades se dan de alta por `POST /api/v1/properties` (spec
+  `properties-crud`), que es lo que hace alcanzable esta vía de entrada.
+- IF la propiedad indicada tiene `status = INACTIVE`, THEN THE SYSTEM SHALL responder `409`:
+  una vivienda retirada no admite reservas nuevas. Es `409` y no `404` porque el llamante ya
+  la ve y puede reactivarla, así que no hay nada que ocultarle.
 - IF el `guest_id` indicado no existe en el tenant del token, THEN THE SYSTEM SHALL
   responder `404`.
 
@@ -127,7 +131,14 @@ no las dispara; aporta el dato del que cuelgan.
   dentro del tenant.
 - IF dos propiedades del tenant comparten `pms_external_id`, THEN THE SYSTEM SHALL fallar
   con un error de dominio en lugar de elegir una: son dos viviendas distintas y adjudicar
-  la reserva a cualquiera de ellas ataría al huésped a la casa equivocada.
+  la reserva a cualquiera de ellas ataría al huésped a la casa equivocada. Compartirlo
+  **dentro de un mismo proveedor** ya no es construible: `properties-crud` lo impide con un
+  índice único parcial. Entre proveedores distintos sí es legítimo —es el caso de un tenant a
+  medio migrar—, y el emparejamiento del sync se acota al grupo que sincroniza, así que la
+  resolución tenant-wide sigue pudiendo encontrar dos filas y debe negarse a desempatar.
+- IF la propiedad resuelta tiene `status = INACTIVE`, THEN THE SYSTEM SHALL saltar esa fila
+  con un motivo propio que la distingue de «la propiedad no existe», y continuar con el resto
+  del lote: una vivienda retirada no debe costarle al tenant las demás filas.
 - WHEN se sincroniza una reserva cuyo `external_pms_id` ya existe en el tenant, THE SYSTEM
   SHALL actualizar la existente y no SHALL emitir `RESERVATION_IMPORTED`.
 - WHEN se sincroniza dos veces el mismo conjunto sin cambios externos, THE SYSTEM SHALL
@@ -179,6 +190,8 @@ no las dispara; aporta el dato del que cuelgan.
   omitidas y errores.
 - THE SYSTEM SHALL nombrar la propiedad por su `internal_code` y resolverla dentro del
   tenant, de modo que un CSV no pueda referenciar la propiedad de otro tenant.
+- IF la propiedad resuelta tiene `status = INACTIVE`, THEN THE SYSTEM SHALL saltar la fila con
+  su motivo, igual que hace el sync: las dos vías de lote comparten ese punto de decisión.
 - IF una fila es inválida —por cualquier motivo, sea de parseo o de dominio— THEN THE
   SYSTEM SHALL omitirla, continuar con el resto e incluir en el informe **su número de
   línea** y el motivo, contando la cabecera como línea 1.
