@@ -66,9 +66,15 @@
 # `compose up --wait`, o sea el deploy; y un valor válido es por construcción el mismo en las dos
 # puntas. No hay deriva posible que un test tuviera que vigilar.
 #
-# Por qué un /32 y no la subred entera: al publicar `127.0.0.1:8000`, Docker hace SNAT de la
-# conexión al **gateway del bridge**, que está dentro de la subred. Confiar en la subred haría de
-# confianza a quien llegue por `ssh -L 8000`; esta dirección concreta lo excluye.
+# Por qué un /32 y no la subred entera, y el motivo es MEDIDO (reparto de IPs del deploy real del
+# 2026-08-08): esta red alberga `postgres` (10.89.0.2), `backend` (10.89.0.5), `frontend`
+# (10.89.0.10), más `worker`, `beat` y `migrate`. Confiar en la subred autorizaría a SEIS servicios
+# a reportar la dirección de un cliente cuando solo uno es el proxy.
+#
+# Una redacción anterior lo justificaba diciendo que Docker hace SNAT de la conexión publicada al
+# gateway del bridge. Eso NO estaba medido —depende del `userland-proxy` del demonio, que este
+# repositorio no fija— y es la misma afirmación que el panel de seguridad hizo corregir en el
+# design; sobrevivió aquí porque la corrección aterrizó en un sitio y no en los tres.
 x-frontend-private-ip: &frontend_private_ip "10.89.0.10"
 
 networks:
@@ -79,14 +85,18 @@ networks:
     # (`infra/environments/dev/main.tf:53`, subred `10.0.1.0/24` en `:107`) ni con el pool por
     # defecto de Docker (172.17–172.31): por ahí no habría error, habría rutas que se pisan.
     #
-    # AVISO OPERATIVO DE UN SOLO USO, y está medido (reproducido en un stack de prueba con
-    # `docker compose` v5.1.1): esta red ya existe en la VM SIN IPAM, así que el primer deploy
-    # que traiga este cambio detecta la deriva y **recrea la red**, lo que obliga a parar y
-    # levantar TODOS los servicios conectados a ella — `postgres`, `redis`, `migrate`,
-    # `backend`, `worker`, `beat` y `frontend`—, no solo los dos que este change toca.
-    # `up -d --wait` sigue saliendo en 0 cuando los healthchecks pasan, así que el deploy no se
-    # rompe. Se anota porque quien mire los logs de ese rollout verá todo el stack parándose y
-    # eso se lee como una avería. Es esperado y no se repite.
+    # AVISO: CAMBIAR ESTA SECCIÓN ROMPE EL DEPLOY SIGUIENTE. Medido en el deploy real del
+    # 2026-08-08 (run 31250116992), que FALLÓ trayendo este IPAM. Compose borra y recrea la red,
+    # pero solo recrea los CONTENEDORES cuya definición de servicio cambió — así que `postgres`
+    # y `redis`, que no cambian, quedan adjuntos a la red borrada y el primero que intente
+    # resolverlos muere con `socket.gaierror: Temporary failure in name resolution`.
+    #
+    # Una reproducción en un stack de prueba NO lo detecta, y una redacción anterior de este
+    # comentario afirmaba por eso que `up --wait` seguía saliendo en 0: en un stack nuevo todos
+    # los contenedores nacen a la vez en la red nueva. Hace falta un stack preexistente.
+    #
+    # Recuperación y procedimiento antes de volver a tocar `networks:`, en
+    # `infra/environments/dev/RUNBOOK.md` §6.3.1.
     ipam:
       config:
         - subnet: 10.89.0.0/24

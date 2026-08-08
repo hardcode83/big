@@ -102,9 +102,10 @@ comentario de `docker-compose.deploy.yml` que decía «capacidad, no uso» ya es
   `backend`. Un valor malformado impide arrancar el contenedor y con él el deploy, en vez de
   degradar el límite en silencio — uvicorn convierte cualquier entrada inválida de esa
   lista en una comparación literal de cadena sin avisar.
-- THE SYSTEM SHALL usar un **/32** y no la subred: las conexiones que llegan por el puerto
-  publicado en loopback aparecen con la dirección del gateway del bridge, que está dentro
-  de la subred, de modo que confiar en ella haría de confianza a quien tenga SSH.
+- THE SYSTEM SHALL usar un **/32** y no la subred, porque la subred contiene a los demás
+  servicios: medido en el deploy real, `private` alberga `postgres`, `redis`, `backend`,
+  `worker`, `beat`, `migrate` y `frontend`, de los cuales **uno solo** es el proxy. Confiar
+  en la subred sería autorizar a seis servicios a reportar la dirección de un cliente.
 - WHERE el entorno es el local, THE SYSTEM SHALL NOT confiar en ningún peer
   (`--forwarded-allow-ips 127.0.0.1`), porque `docker-compose.yml` publica el 8000 en todas
   las interfaces a propósito y con un puerto abierto a la LAN la cabecera la suministra
