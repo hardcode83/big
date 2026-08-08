@@ -82,11 +82,23 @@ es el estado de la implementación, para que se pueda reanudar sin reconstruir n
 
   `tasks.md` es la verdad de lo hecho y lo pendiente. Al cerrar esta sesión:
 
-  - **Hecho y verificado**: 1.1 (entidad, puerto y primitivas de autenticación; 20 tests nuevos) y 1.2
-    (tabla `webhook_endpoints` + las dos columnas de la entrada 2; `alembic upgrade`, `alembic check` sin
-    deriva y `alembic downgrade base` comprobados los tres).
-  - **Pendiente**: 1.3 a 1.7, y las secciones 2 a 6 completas.
-  - **El panel de la sección 1 NO se ha lanzado todavía**, porque la sección no está cerrada.
+  - **Hecho y verificado, con commit propio cada tarea**: 1.1 (entidad `WebhookEndpoint`, puerto y las
+    tres primitivas de autenticación; 20 tests), 1.2 (tabla `webhook_endpoints` + las dos columnas de la
+    entrada 2; `alembic upgrade`, `alembic check` sin deriva y `alembic downgrade base`, los tres
+    comprobados), 1.3 (repositorio + test de aislamiento propio; 12 tests) y 1.4 (vocabulario de
+    auditoría + denylist de la regla 11 para los dos secretos; 10 tests).
+  - **Pendiente**: 1.5, 1.6, 1.7 y las secciones 2 a 6 completas.
+  - **El panel de la sección 1 NO se ha lanzado**, porque la sección no está cerrada. Cuando se cierre,
+    el panel obligatorio son `sdd-architect`, `sdd-security`, `sdd-qa` más los cuatro reviewers de
+    proyecto (`sdd-review-{tenancy,i18n,cicd,documentation}`), todos en **un solo mensaje**.
+  - Suite en verde en lo tocado: 1395 en `tests/integrations` + tenancy + layering, 119 en `tests/audit`.
+    La suite completa (~6m15s) no se ha corrido todavía; es la tarea 6.1.
+
+  **Un hallazgo que la sección 1 destapó y que la 4 tendrá que respetar**: no hay `WEBHOOK_ENDPOINT_READ`
+  en el vocabulario de auditoría, a propósito y con test que lo fija. El "read" equivalente ocurre en
+  **cada webhook entrante** —anónimo, desde internet, a la cadencia del proveedor—, así que auditarlo
+  dejaría que un tercero escriba filas en `audit_logs` a voluntad y ahogaría el índice que la regla 9
+  existe para mantener respondible. Lo que se audita es el acto humano de crear o rotar.
 
   Una corrección de diseño hecha sobre la marcha y ya commiteada, que reduce trabajo: **D5**. El tope de
   tamaño de cuerpo no hay que construirlo — `MaxBodySizeMiddleware`
