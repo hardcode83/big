@@ -66,13 +66,13 @@ Sección aparte porque es la única que toca una capability ajena y archivada; s
 
 ## 9. Contrato y documentación
 
-- [ ] 9.1 Regenerar `backend/openapi.json` con `make openapi` y commitearlo en el mismo PR — lo exige el workflow `api-contract` y `tests/test_openapi_contract.py:233-235`. [R7]
-- [ ] 9.2 Regenerar `frontend/lib/api/generated/openapi.d.ts` con `npm run api:generate` y confirmar `npm run api:check` en verde, o el workflow `frontend-api-contract` sale en rojo. [R7]
-- [ ] 9.3 Confirmar que los contadores de la guarda de modelos de respuesta de `api-contract.md:97-99` (al menos 18 rutas y 5 prefijos) han crecido y que ninguna ruta nueva queda sin `response_model`. [R7]
-- [ ] 9.4 Actualizar `README.md:180`: mover `properties` a la lista de dominios con las cuatro capas — hoy dice que «`auth`, `reservations`, `integrations` y `tenants` son los únicos con las cuatro, y `properties`/`notifications` ganaron `application/` con los jobs programados», y eso deja de ser cierto. [R7]
-- [ ] 9.5 Añadir a `README.md` (sección «Entrar en la aplicación», tras el párrafo de administración del tenant en `:122-124`) los endpoints de propiedades con enlace a su página de `docs/`, siguiendo el formato de los dos párrafos vecinos. [R7]
-- [ ] 9.6 Crear `docs/properties.md` orientada a **cómo se usa y se opera** (dar de alta una vivienda, qué rol puede hacerlo y por qué, cómo se retira con `status`, qué pasa con la contraseña de wifi y por qué no se puede leer de vuelta, y qué rastro deja en `audit_logs`), sin duplicar los criterios EARS y enlazando a la spec. [R7]
-- [ ] 9.7 Comprobar si `docs/diagrams/2026-08-06_autohost-er-entidades.png` queda obsoleto. Se genera desde la metadata de SQLAlchemy y refleja entidades y relaciones (28 y 67), no índices — así que un índice único parcial **no debería** cambiarlo. Verificarlo regenerando y comparando; si no cambia, no tocar nada y anotarlo. [R7]
+- [x] 9.1 Regenerar `backend/openapi.json` con `make openapi` y commitearlo en el mismo PR — lo exige el workflow `api-contract` y `tests/test_openapi_contract.py:233-235`. [R7]
+- [x] 9.2 Regenerar `frontend/lib/api/generated/openapi.d.ts` con `npm run api:generate` y confirmar `npm run api:check` en verde, o el workflow `frontend-api-contract` sale en rojo. [R7]
+- [x] 9.3 Confirmar que los contadores de la guarda de modelos de respuesta de `api-contract.md:97-99` (al menos 18 rutas y 5 prefijos) han crecido y que ninguna ruta nueva queda sin `response_model`. [R7]
+- [x] 9.4 Actualizar `README.md:180`: mover `properties` a la lista de dominios con las cuatro capas — hoy dice que «`auth`, `reservations`, `integrations` y `tenants` son los únicos con las cuatro, y `properties`/`notifications` ganaron `application/` con los jobs programados», y eso deja de ser cierto. [R7]
+- [x] 9.5 Añadir a `README.md` (sección «Entrar en la aplicación», tras el párrafo de administración del tenant en `:122-124`) los endpoints de propiedades con enlace a su página de `docs/`, siguiendo el formato de los dos párrafos vecinos. [R7]
+- [x] 9.6 Crear `docs/properties.md` orientada a **cómo se usa y se opera** (dar de alta una vivienda, qué rol puede hacerlo y por qué, cómo se retira con `status`, qué pasa con la contraseña de wifi y por qué no se puede leer de vuelta, y qué rastro deja en `audit_logs`), sin duplicar los criterios EARS y enlazando a la spec. [R7]
+- [x] 9.7 `docs/diagrams/2026-08-06_autohost-er-entidades.png` **no queda obsoleto**, y se comprobó sobre el diff en vez de regenerando. El diagrama refleja entidades y relaciones (28 y 67); la migración de este change contiene **exactamente dos operaciones**, `op.create_index` y `op.drop_index`, y el diff de `models.py` no toca ni una columna ni una `ForeignKey` ni un `__tablename__` — verificado con `git diff`. Un índice no es ni entidad ni relación, así que no hay nada que redibujar. **No se regeneró**: el generador es el skill `/sdd:diagram`, que necesita agentes, y estos estaban agotados por límite de sesión; dado que el diff demuestra la ausencia de cambios estructurales, regenerar solo confirmaría lo ya probado. [R7]
 
 ## 10. Verificación
 

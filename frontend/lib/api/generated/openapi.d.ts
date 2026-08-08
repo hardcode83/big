@@ -40,6 +40,30 @@ export interface paths {
      */
     post: operations["import_reservations_csv_api_v1_integrations_pms_import_csv_post"];
   };
+  "/api/v1/properties": {
+    /**
+     * List the tenant's properties
+     * @description Paginated with `page`/`per_page` (PRD §23). Filters combine with AND. Ordered by name with the id as tiebreaker, so paging neither repeats a row nor skips one when two properties share a name. The wifi password is never in the response — `has_wifi_password` reports whether one is stored.
+     */
+    get: operations["list_properties_api_v1_properties_get"];
+    /**
+     * Register a property
+     * @description `internal_code` must be unique within the tenant and `pms_external_id` unique within the tenant AND the provider, both answering `409` on collision. `current_operational_state` cannot be chosen: a new property starts `VACANT_READY` and only `PropertyStateMachine` moves it. A `wifi_password` is encrypted before storage and can never be read back.
+     */
+    post: operations["create_property_api_v1_properties_post"];
+  };
+  "/api/v1/properties/{property_id}": {
+    /**
+     * One property
+     * @description A property of another tenant answers `404`, with a body indistinguishable from one that does not exist. The wifi password is not returned in any form, masked included; `has_wifi_password` reports whether one is stored.
+     */
+    get: operations["get_property_api_v1_properties__property_id__get"];
+    /**
+     * Update a property partially
+     * @description Only the fields present in the body are applied. `current_operational_state` is not among them and is rejected with `422`. A body that changes nothing writes nothing and records no audit entry — except `wifi_password`, whose no-op cannot be detected because the stored value has no reader, so sending it always counts as a change. Retire a property with `{"status": "INACTIVE"}`; there is no `DELETE`.
+     */
+    patch: operations["update_property_api_v1_properties__property_id__patch"];
+  };
   "/api/v1/reservations": {
     /**
      * List the tenant's reservations
@@ -146,6 +170,75 @@ export interface components {
       /** Temporary Password */
       temporary_password: string;
       user: components["schemas"]["UserResponse"];
+    };
+    /** CreatePropertyRequest */
+    CreatePropertyRequest: {
+      /** Access Notes */
+      access_notes?: string | null;
+      /** Address Line1 */
+      address_line1?: string | null;
+      /** Address Line2 */
+      address_line2?: string | null;
+      /**
+       * Bathrooms
+       * @default 1
+       */
+      bathrooms?: number;
+      /**
+       * Bedrooms
+       * @default 1
+       */
+      bedrooms?: number;
+      /** City */
+      city?: string | null;
+      /** Cleaning Notes */
+      cleaning_notes?: string | null;
+      /**
+       * Country
+       * @default ES
+       */
+      country?: string;
+      /**
+       * Default Check In Time
+       * Format: time
+       * @default 15:00:00
+       */
+      default_check_in_time?: string;
+      /**
+       * Default Check Out Time
+       * Format: time
+       * @default 11:00:00
+       */
+      default_check_out_time?: string;
+      /** Emergency Notes */
+      emergency_notes?: string | null;
+      /** Internal Code */
+      internal_code: string;
+      /**
+       * Max Guests
+       * @default 2
+       */
+      max_guests?: number;
+      /** Name */
+      name: string;
+      /** Pms External Id */
+      pms_external_id?: string | null;
+      pms_provider?: components["schemas"]["PMSProvider"] | null;
+      /** Postal Code */
+      postal_code?: string | null;
+      /** Province */
+      province?: string | null;
+      /** @default ACTIVE */
+      status?: components["schemas"]["PropertyStatus"];
+      /**
+       * Timezone
+       * @default Europe/Madrid
+       */
+      timezone?: string;
+      /** Wifi Name */
+      wifi_name?: string | null;
+      /** Wifi Password */
+      wifi_password?: string | null;
     };
     /** CreateReservationRequest */
     CreateReservationRequest: {
@@ -342,6 +435,130 @@ export interface components {
      * @enum {string}
      */
     PaymentStatus: "PENDING" | "PAID" | "PARTIALLY_PAID" | "REFUNDED";
+    /**
+     * PMSProvider
+     * @description Which PMS a property talks to.
+     *
+     * Replaces PRD §22's single `PMS_PROVIDER` environment variable, which ADR 0006 retired
+     * before any code read it: a global selector cannot express two providers coexisting, and
+     * that happens in both futures the ADR names — the migration window to Channex, where some
+     * properties have moved and others have not, and the SaaS phase, where each client arrives
+     * with the PMS they already pay for.
+     *
+     * `MOCK` is a first-class member, not a testing hack: it is the MVP's default and what the
+     * suite and local startup run against, so a property with no provider resolves to it.
+     *
+     * Deliberately NOT the full list of the eleven providers ADR 0006 evaluated: `OCTORATE` joins
+     * the day it is worth storing a credential for one.
+     *
+     * A member is **not** a promise that an adapter exists. `BEDS24` is here before its adapter
+     * (which arrives with `pms-beds24-adapter`) precisely so its account credential can be
+     * provisioned and rotated first — the credential is the long-lived thing, the adapter is code.
+     * Resolving such a property fails with `PmsUnavailableError` naming the gap, never by silently
+     * falling back to the mock.
+     * @enum {string}
+     */
+    PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /**
+     * PropertyOperationalState
+     * @enum {string}
+     */
+    PropertyOperationalState: "VACANT_READY" | "AWAITING_CHECKIN" | "OCCUPIED_ESTIMATED" | "AWAITING_CLEANING" | "CLEANING_SCHEDULED" | "CLEANING_IN_PROGRESS" | "READY_FOR_NEXT_GUEST" | "MAINTENANCE_REQUIRED" | "CRITICAL_INCIDENT" | "BLOCKED_BY_OWNER" | "OUT_OF_SERVICE";
+    /**
+     * PropertyPageResponse
+     * @description The pagination envelope of PRD §23.
+     */
+    PropertyPageResponse: {
+      /** Data */
+      data: components["schemas"]["PropertyResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * PropertyResponse
+     * @description One property. Structurally without the wifi password, in any form (R5.2).
+     *
+     * Fields are enumerated and built by `from_domain`, never dumped with `from_attributes`: the
+     * entity gains fields owned by other modules over time and a dump would publish each new one
+     * automatically. That is the same reason `reservations` and `users` enumerate theirs.
+     */
+    PropertyResponse: {
+      /** Access Notes */
+      access_notes: string | null;
+      /** Address Line1 */
+      address_line1: string | null;
+      /** Address Line2 */
+      address_line2: string | null;
+      /** Bathrooms */
+      bathrooms: number;
+      /** Bedrooms */
+      bedrooms: number;
+      /** City */
+      city: string | null;
+      /** Cleaning Notes */
+      cleaning_notes: string | null;
+      /** Country */
+      country: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      current_operational_state: components["schemas"]["PropertyOperationalState"];
+      /**
+       * Default Check In Time
+       * Format: time
+       */
+      default_check_in_time: string;
+      /**
+       * Default Check Out Time
+       * Format: time
+       */
+      default_check_out_time: string;
+      /** Emergency Notes */
+      emergency_notes: string | null;
+      /** Has Wifi Password */
+      has_wifi_password: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Internal Code */
+      internal_code: string;
+      /** Max Guests */
+      max_guests: number;
+      /** Name */
+      name: string;
+      /** Pms External Id */
+      pms_external_id: string | null;
+      pms_provider: components["schemas"]["PMSProvider"] | null;
+      /** Postal Code */
+      postal_code: string | null;
+      /** Province */
+      province: string | null;
+      status: components["schemas"]["PropertyStatus"];
+      /** Timezone */
+      timezone: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Wifi Name */
+      wifi_name: string | null;
+    };
+    /**
+     * PropertyStatus
+     * @enum {string}
+     */
+    PropertyStatus: "ACTIVE" | "INACTIVE";
     /** RefreshRequest */
     RefreshRequest: {
       /** Refresh Token */
@@ -649,6 +866,57 @@ export interface components {
       token_type: string;
     };
     /**
+     * UpdatePropertyRequest
+     * @description Every field optional; only those present are applied (R3.1).
+     *
+     * `model_fields_set` is what distinguishes "not sent" from "sent as null", so a caller can
+     * clear `city` by sending `null` without every other unsent field being treated as a clear.
+     */
+    UpdatePropertyRequest: {
+      /** Access Notes */
+      access_notes?: string | null;
+      /** Address Line1 */
+      address_line1?: string | null;
+      /** Address Line2 */
+      address_line2?: string | null;
+      /** Bathrooms */
+      bathrooms?: number | null;
+      /** Bedrooms */
+      bedrooms?: number | null;
+      /** City */
+      city?: string | null;
+      /** Cleaning Notes */
+      cleaning_notes?: string | null;
+      /** Country */
+      country?: string | null;
+      /** Default Check In Time */
+      default_check_in_time?: string | null;
+      /** Default Check Out Time */
+      default_check_out_time?: string | null;
+      /** Emergency Notes */
+      emergency_notes?: string | null;
+      /** Internal Code */
+      internal_code?: string | null;
+      /** Max Guests */
+      max_guests?: number | null;
+      /** Name */
+      name?: string | null;
+      /** Pms External Id */
+      pms_external_id?: string | null;
+      pms_provider?: components["schemas"]["PMSProvider"] | null;
+      /** Postal Code */
+      postal_code?: string | null;
+      /** Province */
+      province?: string | null;
+      status?: components["schemas"]["PropertyStatus"] | null;
+      /** Timezone */
+      timezone?: string | null;
+      /** Wifi Name */
+      wifi_name?: string | null;
+      /** Wifi Password */
+      wifi_password?: string | null;
+    };
+    /**
      * UpdateReservationRequest
      * @description Every field optional; only those present are applied (R1.5).
      *
@@ -917,6 +1185,162 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ImportReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's properties
+   * @description Paginated with `page`/`per_page` (PRD §23). Filters combine with AND. Ordered by name with the id as tiebreaker, so paging neither repeats a row nor skips one when two properties share a name. The wifi password is never in the response — `has_wifi_password` reports whether one is stored.
+   */
+  list_properties_api_v1_properties_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        status?: components["schemas"]["PropertyStatus"] | null;
+        current_operational_state?: components["schemas"]["PropertyOperationalState"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Register a property
+   * @description `internal_code` must be unique within the tenant and `pms_external_id` unique within the tenant AND the provider, both answering `409` on collision. `current_operational_state` cannot be chosen: a new property starts `VACANT_READY` and only `PropertyStateMachine` moves it. A `wifi_password` is encrypted before storage and can never be read back.
+   */
+  create_property_api_v1_properties_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePropertyRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["PropertyResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * One property
+   * @description A property of another tenant answers `404`, with a body indistinguishable from one that does not exist. The wifi password is not returned in any form, masked included; `has_wifi_password` reports whether one is stored.
+   */
+  get_property_api_v1_properties__property_id__get: {
+    parameters: {
+      path: {
+        property_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Update a property partially
+   * @description Only the fields present in the body are applied. `current_operational_state` is not among them and is rejected with `422`. A body that changes nothing writes nothing and records no audit entry — except `wifi_password`, whose no-op cannot be detected because the stored value has no reader, so sending it always counts as a change. Retire a property with `{"status": "INACTIVE"}`; there is no `DELETE`.
+   */
+  update_property_api_v1_properties__property_id__patch: {
+    parameters: {
+      path: {
+        property_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdatePropertyRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
