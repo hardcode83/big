@@ -30,3 +30,4 @@
 | pms-provider-resolution | new, design, tasks, run, review, archive | 521270 | 1226222 | 357557064 | 230.0402 | 2026-08-05 | 2026-08-06 |
 | pms-beds24-adapter | new, design, tasks, run, review, archive | 267607 | 713296 | 203542711 | 153.3613 | 2026-08-05 | 2026-08-07 |
 | cleaning | new, design, tasks, run, review, archive | 282897 | 840173 | 353770285 | 225.3917 | 2026-08-06 | 2026-08-08 |
+| api-ingress-routing | new, design, tasks, run, review | 7137139 | 2218683 | 388515051 | 291.5234 | 2026-08-02 | — |

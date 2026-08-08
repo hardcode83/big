@@ -203,6 +203,15 @@ jobs:
       # es la red desde la que `cloudflared` tiene que alcanzar el origen, y usa la imagen del
       # frontend que el `pull` de arriba ya ha bajado, con la misma técnica que su healthcheck.
       # [R1.6]
+      # Desde `api-ingress-routing` la sonda comprueba DOS cosas, y la segunda es nueva: el
+      # camino `/api/` que el frontend reenvía al backend. El motivo es el mismo por el que
+      # existe este paso — `up -d --wait` no puede detectar el fallo. El healthcheck del
+      # contenedor y la mitad `/` de esta sonda piden la raíz, que sigue devolviendo 200
+      # aunque `BACKEND_INTERNAL_URL` no haya llegado, aunque el ancla de la IP se
+      # desincronice o aunque el Route Handler se rompa: en todos esos casos `/api/v1/...`
+      # devuelve 502 o 404 y el deploy pasaría en verde, dejando el login de los usuarios
+      # roto hasta que una persona lo probara a mano. Se exige además que el cuerpo sea el
+      # sobre de error DEL BACKEND, porque un 404 de Next también es «una respuesta».
       - name: Verificar que el origen es alcanzable desde la red de ingress [R1.6]
         # Cota de la propia sonda: sin ella un origen que acepta la conexión TCP pero no responde
         # dejaría el paso colgado hasta el `timeout-minutes: 15` del job, y como el `concurrency`
@@ -258,7 +267,7 @@ jobs:
           # pegado a la red `ingress`, que es precisamente la frontera que este change protege.
           docker run -d --name "$PROBE" --network "$NET" --entrypoint node \
             "ghcr.io/${GITHUB_REPOSITORY_OWNER}/autohostai-frontend:sha-${GITHUB_SHA}" \
-            -e "const r=require('http').get('http://frontend:3000',s=>process.exit(s.statusCode<500?0:1)); r.setTimeout(10000,()=>{console.error('timeout esperando a frontend:3000');r.destroy();process.exit(1)}); r.on('error',e=>{console.error(String(e));process.exit(1)})" >/dev/null
+            -e "const http=require('http');function probe(path,check){return new Promise((res,rej)=>{const r=http.get('http://frontend:3000'+path,s=>{let b='';s.on('data',c=>{if(b.length<2048)b+=c});s.on('end',()=>{const why=check(s.statusCode,b);why?rej(new Error(path+': '+why)):res()})});r.setTimeout(10000,()=>{r.destroy();rej(new Error(path+': timeout'))});r.on('error',e=>rej(new Error(path+': '+e)))})}Promise.all([probe('/',(c)=>c<500?null:'el origen respondió '+c),probe('/api/v1/auth/me',(c,b)=>c>=500?'el camino a la API respondió '+c:(c===404?'404: el reenvío a /api/ no está resolviendo (¿BACKEND_INTERNAL_URL?)':(b.includes('\"code\"')?null:'respondió '+c+' pero el cuerpo no es el sobre de error del backend: '+b.slice(0,200))))]).then(()=>process.exit(0)).catch(e=>{console.error(String(e.message));process.exit(1)})" >/dev/null
           CODE=""
           for _ in $(seq 1 20); do
             STATE="$(docker inspect -f '{{.State.Status}}' "$PROBE" 2>/dev/null || echo ausente)"

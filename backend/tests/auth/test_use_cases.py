@@ -62,6 +62,11 @@ def hasher() -> BcryptPasswordHasher:
     return BcryptPasswordHasher(rounds=TEST_BCRYPT_ROUNDS)
 
 
+# R8 of `api-ingress-routing`: refresh consults the per-IP budget, so it needs a client
+# address. Any address will do here — the throttle limit is set high in these tests.
+REFRESH_CLIENT_IP = "198.51.100.7"
+
+
 def _login(db_session, codec, hasher, throttle=None) -> LoginUseCase:
     return LoginUseCase(
         users=SqlAlchemyUserRepository(db_session),
@@ -79,6 +84,10 @@ def _refresh(db_session, codec) -> RefreshTokenUseCase:
         users=SqlAlchemyUserRepository(db_session),
         sessions=SqlAlchemySessionRepository(db_session),
         tokens=codec,
+        # R8 of `api-ingress-routing`: refresh now consults the same per-IP budget as
+        # login. A generous limit here so these tests keep measuring rotation semantics
+        # and not the throttle, which has its own tests.
+        throttle=InMemoryLoginThrottle(attempts_per_minute=10_000),
         uow=FlushingUnitOfWork(db_session),
     )
 
@@ -363,7 +372,7 @@ async def test_refresh_rotates_and_invalidates_the_presented_token(
     )
 
     second = await _refresh(db_session, codec).execute(
-        refresh_token=first.refresh_token, now=utc_now()
+        refresh_token=first.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
     )
 
     assert second.refresh_token != first.refresh_token
@@ -384,18 +393,18 @@ async def test_reusing_a_refresh_token_revokes_the_whole_family(
         email="owner@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
     )
     second = await _refresh(db_session, codec).execute(
-        refresh_token=first.refresh_token, now=utc_now()
+        refresh_token=first.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
     )
 
     with pytest.raises(SessionReuseDetectedError):
         await _refresh(db_session, codec).execute(
-            refresh_token=first.refresh_token, now=utc_now()
+            refresh_token=first.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
         )
 
     # The legitimate holder's current token goes down too: reuse is treated as theft.
     with pytest.raises(InvalidTokenError):
         await _refresh(db_session, codec).execute(
-            refresh_token=second.refresh_token, now=utc_now()
+            refresh_token=second.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
         )
 
 
@@ -547,7 +556,7 @@ async def test_losing_the_rotation_race_is_treated_as_reuse(
 
     with pytest.raises(SessionReuseDetectedError):
         await _refresh(db_session, codec).execute(
-            refresh_token=first.refresh_token, now=utc_now()
+            refresh_token=first.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
         )
 
 
@@ -572,14 +581,14 @@ async def test_the_loser_of_the_race_also_revokes_the_winners_child(
     stolen = first.refresh_token
 
     # The legitimate holder rotates: its child is now the live session of the family.
-    winner = await _refresh(db_session, codec).execute(refresh_token=stolen, now=utc_now())
+    winner = await _refresh(db_session, codec).execute(refresh_token=stolen, client_ip=REFRESH_CLIENT_IP, now=utc_now())
     child_id = codec.decode_refresh(winner.refresh_token).token_id
     repo = SqlAlchemySessionRepository(db_session)
     assert (await repo.get(tenant_a.id, child_id)) is not None
 
     # The thief presents the same token afterwards.
     with pytest.raises(SessionReuseDetectedError):
-        await _refresh(db_session, codec).execute(refresh_token=stolen, now=utc_now())
+        await _refresh(db_session, codec).execute(refresh_token=stolen, client_ip=REFRESH_CLIENT_IP, now=utc_now())
 
     child = await repo.get(tenant_a.id, child_id)
     assert child is not None
@@ -645,11 +654,15 @@ async def test_a_logout_racing_a_refresh_leaves_no_unrevoked_child(
         users=SqlAlchemyUserRepository(db_session),
         sessions=sessions,
         tokens=codec,
+        # R8 of `api-ingress-routing`: refresh now consults the same per-IP budget as
+        # login. A generous limit here so these tests keep measuring rotation semantics
+        # and not the throttle, which has its own tests.
+        throttle=InMemoryLoginThrottle(attempts_per_minute=10_000),
         uow=FlushingUnitOfWork(db_session),
     )
 
     with pytest.raises((SessionReuseDetectedError, InvalidTokenError)):
-        await use_case.execute(refresh_token=pair.refresh_token, now=utc_now())
+        await use_case.execute(refresh_token=pair.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now())
 
     assert sessions.logged_out, "the logout never fired — the interleaving did not happen"
     await db_session.commit()
@@ -762,7 +775,7 @@ async def test_a_rotated_session_is_not_marked_as_revoked(
     first = await _login(db_session, codec, hasher).execute(
         email="owner@example.com", password=PASSWORD, client_ip=IP, now=utc_now()
     )
-    await _refresh(db_session, codec).execute(refresh_token=first.refresh_token, now=utc_now())
+    await _refresh(db_session, codec).execute(refresh_token=first.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now())
 
     old = codec.decode_refresh(first.refresh_token)
     stored = await SqlAlchemySessionRepository(db_session).get(tenant_a.id, old.token_id)
@@ -780,7 +793,7 @@ async def test_refresh_refuses_an_access_token(db_session, tenant_a, codec, hash
     )
 
     with pytest.raises(InvalidTokenError):
-        await _refresh(db_session, codec).execute(refresh_token=pair.access_token, now=utc_now())
+        await _refresh(db_session, codec).execute(refresh_token=pair.access_token, client_ip=REFRESH_CLIENT_IP, now=utc_now())
 
 
 @pytest.mark.asyncio
@@ -797,7 +810,7 @@ async def test_refresh_refuses_a_token_whose_session_does_not_exist(
     )
 
     with pytest.raises(InvalidTokenError):
-        await _refresh(db_session, codec).execute(refresh_token=orphan, now=utc_now())
+        await _refresh(db_session, codec).execute(refresh_token=orphan, client_ip=REFRESH_CLIENT_IP, now=utc_now())
 
 
 @pytest.mark.asyncio
@@ -809,7 +822,7 @@ async def test_refresh_refuses_an_expired_session(db_session, tenant_a, codec, h
 
     with pytest.raises(InvalidTokenError):
         await _refresh(db_session, codec).execute(
-            refresh_token=pair.refresh_token, now=utc_now() + timedelta(days=8)
+            refresh_token=pair.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now() + timedelta(days=8)
         )
 
 
@@ -827,7 +840,7 @@ async def test_refresh_refuses_a_user_disabled_after_the_token_was_issued(
 
     with pytest.raises(InvalidTokenError):
         await _refresh(db_session, codec).execute(
-            refresh_token=pair.refresh_token, now=utc_now()
+            refresh_token=pair.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
         )
 
 
@@ -848,7 +861,7 @@ async def test_logout_ends_the_session_of_the_presented_access_token(
 
     with pytest.raises(InvalidTokenError):
         await _refresh(db_session, codec).execute(
-            refresh_token=pair.refresh_token, now=utc_now()
+            refresh_token=pair.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
         )
 
 
@@ -891,7 +904,7 @@ async def test_logout_cannot_close_another_tenants_session(
 
     # Tenant B's session is untouched, so its refresh still rotates.
     assert await _refresh(db_session, codec).execute(
-        refresh_token=pair.refresh_token, now=utc_now()
+        refresh_token=pair.refresh_token, client_ip=REFRESH_CLIENT_IP, now=utc_now()
     )
 
 

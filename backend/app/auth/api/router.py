@@ -66,10 +66,16 @@ async def login(
     ),
 )
 async def refresh(
+    request: Request,
     body: RefreshRequest,
     use_case: Annotated[RefreshTokenUseCase, Depends(get_refresh_use_case)],
 ) -> TokenPairResponse:
-    pair = await use_case.execute(refresh_token=body.refresh_token, now=now_utc())
+    pair = await use_case.execute(
+        refresh_token=body.refresh_token,
+        # R8 of `api-ingress-routing`: the per-IP budget needs the client, same as login.
+        client_ip=get_client_ip(request),
+        now=now_utc(),
+    )
     return TokenPairResponse(**vars(pair))
 
 

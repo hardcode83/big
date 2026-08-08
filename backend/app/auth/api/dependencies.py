@@ -42,41 +42,88 @@ bearer_scheme = HTTPBearer(auto_error=False)
 
 LOOPBACK = "127.0.0.1"
 
+# The widest address this may return. Ties to `audit_logs.actor_ip`, which is VARCHAR(45)
+# and whose factory RAISES past that length rather than truncating — so a value longer
+# than this does not produce a wrong audit row, it aborts the transaction of whatever
+# audited operation was in flight. Kept as a local constant instead of importing
+# `app.audit.domain.services.MAX_ACTOR_IP_LENGTH`, which would couple the auth API layer
+# to another domain's internals; `tests/auth/test_client_ip.py` asserts the two agree.
+MAX_CLIENT_IP_LENGTH = 45
+
 
 def now_utc() -> datetime:
     return datetime.now(UTC)
 
 
 def get_client_ip(request: Request) -> str:
-    """The client address used by the per-IP limit (R5.1, design D12).
+    """The client address used by the per-IP limit (R5.1) and by `AuditLog.actor_ip`.
 
-    The socket peer unless `TRUSTED_CLIENT_IP_HEADER` is configured, which it is not
-    by default.
+    Always the socket peer, and that is the whole implementation. Resolving a proxy's
+    forwarding header does NOT happen here: uvicorn's `ProxyHeadersMiddleware` does it
+    upstream and rewrites `scope["client"]`, but only when the peer is listed in
+    `--forwarded-allow-ips`. So by the time this runs the peer already IS the real
+    client wherever a trusted proxy fronts the API, and is the raw socket peer
+    everywhere else.
 
-    When it IS configured, the **right-most** hop is taken, and across the last
-    occurrence of the header. That is deliberate and was wrong in the first version of
-    this function: a proxy that appends (`$proxy_add_x_forwarded_for` in nginx, and any
-    conforming implementation) leaves the value the CLIENT sent at the left, so taking
-    the first hop reads attacker-controlled input and hands out a fresh 10/min budget
-    per request — the exact bypass of R5.1 that design D12 is about. The right-most hop
-    is the one the nearest proxy observed, which is also correct for a header that
-    replaces rather than appends, such as Cloudflare's `CF-Connecting-IP`.
+    Why it is not done twice (change `api-ingress-routing`, design D3): `proxy_headers`
+    defaults to **True** in uvicorn, so a second header reader here would be deciding
+    whether to trust a peer that the first one may already have rewritten from
+    attacker-controlled input — a check that validates its own input. One mechanism,
+    chosen explicitly, is the property that matters; which one it is matters less.
 
-    What is still missing, and belongs to the change that introduces the proxy
-    (`api-ingress-routing`): honouring the header only when the socket peer is a known
-    proxy. Until then a directly reachable API could still be fed a whole header — the
-    mitigation today is that the setting is empty, so nothing is trusted.
+    This is also why the resolution belongs at the ASGI boundary rather than in this
+    function: five call sites feed `AuditLog.actor_ip` through it (rule 9 of
+    steering/security.md), so a fix here would have been a fix for the throttle only.
+
+    What delegating does NOT buy, measured rather than assumed: uvicorn picks the right
+    hop but never checks it is an address. `get_trusted_client_address` returns the
+    first entry that is not in the trusted set, so `X-Forwarded-For: not-an-ip` becomes
+    `scope["client"][0]` verbatim. That value would land in the throttle key and in
+    `audit_logs.actor_ip`, which is `String(45)` with a domain guard that RAISES past
+    45 characters — turning a forged header into a failed audited write. So the parse
+    stays here, at the boundary where the value enters the application.
+
+    The fallback is `LOOPBACK` and that direction is deliberate. An unparseable value
+    can only arrive from a peer uvicorn already trusted (it does not rewrite for
+    untrusted ones), so it means our own proxy or a compromised one — and collapsing
+    every such request into ONE bucket is fail-closed: they share a single 10/min
+    budget instead of each inventing its own. Canonicalising matters for the same
+    reason: without it `2001:0db8::1` and `2001:db8::1` are two buckets for one client.
+
+    **Parsing is necessary but not sufficient, and this is the part that bites**: a
+    scoped IPv6 address like `fe80::1%eth0` parses, and the zone id after `%` is an
+    almost unconstrained string. `ipaddress.ip_address("fe80::1%" + "z" * 100)` is a
+    valid address object 108 characters long, and a zone may contain CR or LF. So
+    "parses as an IP" alone still let three things through, all measured: a rotating
+    zone id gave a fresh throttle bucket per request (defeating rule 7 of
+    steering/security.md and growing Redis keys without bound), a CR/LF zone forged
+    lines in the login log an operator reads during an incident, and a long one raised
+    `AuditContractError` — aborting the transaction of the audited operation in flight.
+    A zone identifier is link-local scoping meaningful only on one host, so it can
+    never legitimately describe a remote client: it is rejected outright.
     """
-    header_name = settings.trusted_client_ip_header
-    if header_name:
-        occurrences = request.headers.getlist(header_name)
-        if occurrences:
-            raw = occurrences[-1].split(",")[-1].strip()
-            try:
-                return str(ipaddress.ip_address(raw))
-            except ValueError:
-                pass
-    return request.client.host if request.client else LOOPBACK
+    host = request.client.host if request.client else None
+    if host is None:
+        return LOOPBACK
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return LOOPBACK
+
+    if getattr(address, "scope_id", None) is not None:
+        return LOOPBACK
+
+    # `::ffff:1.2.3.4` and `1.2.3.4` are the same client; without this they are two
+    # buckets and two distinct `actor_ip` values for one person.
+    mapped = getattr(address, "ipv4_mapped", None)
+    if mapped is not None:
+        address = mapped
+
+    canonical = str(address)
+    # Belt and braces over the column bound. Nothing reachable should exceed it once the
+    # zone is rejected, which is exactly why a cheap assertion belongs here: the next
+    # surprising-but-valid address form must fail closed rather than reach the sinks.
+    return canonical if len(canonical) <= MAX_CLIENT_IP_LENGTH else LOOPBACK
 
 
 def get_token_codec() -> JwtTokenCodec:
@@ -121,11 +168,18 @@ def get_login_use_case(
     )
 
 
-def get_refresh_use_case(session: SessionDep, codec: CodecDep) -> RefreshTokenUseCase:
+def get_refresh_use_case(
+    session: SessionDep,
+    codec: CodecDep,
+    throttle: Annotated[RedisLoginThrottle, Depends(get_login_throttle)],
+) -> RefreshTokenUseCase:
     return RefreshTokenUseCase(
         users=SqlAlchemyUserRepository(session),
         sessions=SqlAlchemySessionRepository(session),
         tokens=codec,
+        # R8 of `api-ingress-routing`: anonymous and internet-reachable, so it gets the
+        # same per-IP budget as login. See the use case for why the bucket is shared.
+        throttle=throttle,
         uow=SqlAlchemyUnitOfWork(session),
     )
 

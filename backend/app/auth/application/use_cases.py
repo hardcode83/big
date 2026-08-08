@@ -137,9 +137,28 @@ class RefreshTokenUseCase:
     users: UserRepository
     sessions: SessionRepository
     tokens: TokenCodec
+    throttle: LoginThrottle
     uow: UnitOfWork
 
-    async def execute(self, *, refresh_token: str, now: datetime) -> TokenPair:
+    async def execute(
+        self, *, refresh_token: str, client_ip: str, now: datetime
+    ) -> TokenPair:
+        # Same per-IP budget as login, and it is here because of `api-ingress-routing`
+        # (R8): this endpoint is ANONYMOUS — the refresh token is the credential — and that
+        # change makes it reachable from the internet for the first time. It mints access
+        # tokens, so leaving it unmetered gave an anonymous caller an unlimited grinder
+        # against a credential operation while the change's own documents described the
+        # public surface as bounded by "throttle + Bearer".
+        #
+        # The SAME bucket as login on purpose, not a second one: what the limit protects is
+        # the cost of anonymous credential work per client, and splitting it would let a
+        # caller spend two budgets. The overlap costs a real user nothing measurable — an
+        # access token lives 15 minutes, so a legitimate refresh is a few per hour against
+        # a budget of ten per minute.
+        if not await self.throttle.ip_attempt_allowed(client_ip):
+            logger.warning("Refresh rate limit exceeded for ip=%s", client_ip)
+            raise TooManyAttemptsError("Too many refresh attempts")
+
         claims = self.tokens.decode_refresh(refresh_token)
 
         session = await self.sessions.get(claims.tenant_id, claims.token_id)

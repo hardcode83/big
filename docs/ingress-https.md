@@ -25,7 +25,30 @@ Consecuencias prácticas:
 - **No hay certificados que renovar.** El TLS lo termina Cloudflare con el certificado de la zona.
 - **No hay puerta alternativa.** Si el edge o el túnel caen, la app no es alcanzable por HTTPS; el acceso para diagnosticar es SSH.
 - **El backend no está expuesto, y el túnel no puede exponerlo.** El compose de deploy separa dos redes: `cloudflared` solo comparte la red `ingress` con el `frontend`, así que no alcanza `backend`, `postgres`, `redis`, `worker` ni `migrate` — ni por nombre ni por IP. Eso importa porque el routing del túnel se configura en el edge de Cloudflare, no en la VM: sin esa separación, quien tuviera el API token podría publicar la base de datos sin abrir un puerto ni pasar por un `apply`. El razonamiento vive en el comentario de la sección `networks` de `docker-compose.deploy.yml`, y el radio de daño completo del token —con lo que la separación **no** cubre— en [`adr/0003-https-ingress-dev.md`](adr/0003-https-ingress-dev.md) §Addendum 2026-08-04.
-- **Que el backend no esté expuesto no significa que el navegador no le llame.** Hoy no le llama nadie (el dashboard consume un mock), pero la arquitectura comprometida en `sdd/steering/frontend.md` —TanStack Query para server state, JWT en memoria— implica fetching **desde el navegador** en cuanto haya datos reales. El renderizado es server-side; el fetching de datos, del cliente. Cuando llegue, el camino será **same-origin** bajo este mismo hostname, así que seguirá bastando un hostname sin CORS ni segundo certificado — pero no está construido: es la entrada `api-ingress-routing` del roadmap.
+- **El backend sigue sin estar expuesto, y aun así el navegador ya llega a la API.** Son cosas distintas y es la clave del diseño: el navegador llama a `/api/...` en **este mismo hostname**, y quien reenvía al backend por la red interna es el propio contenedor `frontend`. No hay hostname nuevo, ni regla de ingress nueva, ni puerto nuevo, ni CORS, ni segundo certificado. Detalle abajo.
+
+## El camino a la API
+
+El navegador llama a `https://autohostai.digitalsec.work/api/v1/...` — misma URL relativa que en local — y un Route Handler de Next (`frontend/app/api/[...path]/route.ts`) lo reenvía a `backend:8000` por la red `private`.
+
+```
+navegador  →  edge  →  túnel  →  frontend:3000  →  /api/… → backend:8000
+                                 (red ingress)   (red private)
+```
+
+**Qué viaja por ese camino, y qué no:**
+
+| Ruta | Alcanzable desde internet |
+|---|---|
+| `/api/v1/**` | **Sí** — los 18 endpoints del contrato, con su autorización intacta |
+| `/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` | **No** |
+| `/health` | **No** |
+
+Que los cuatro endpoints de documentación no viajen es una **decisión explícita**, no un efecto colateral. Son anónimos por allowlist en el backend y hasta ahora estaban protegidos únicamente por que el backend escuchaba en loopback; en el momento en que existe un camino público eso deja de protegerlos. Se decidió no exponerlos: el contrato que necesita el frontend vive versionado en `backend/openapi.json` (`make openapi`), así que `/docs` no aporta nada que compense publicar la forma entera de la API a quien encuentre el hostname. Lo fija un test (`frontend/app/proxy-scope.test.ts`), no la buena voluntad.
+
+Para leer la documentación navegable sigue haciendo falta el túnel SSH de abajo (`http://localhost:8000/docs`).
+
+**Sobre la IP del cliente**: el handler descarta cualquier cabecera de reenvío que traiga el cliente y escribe una `X-Forwarded-For` derivada del `CF-Connecting-IP` que pone el edge. El backend se la cree porque el peer es el contenedor `frontend`, la única dirección de su lista de confianza. Sin esto, el límite de 10 intentos de login por minuto contaría todo el despliegue en un solo contador. Detalle en [`auth-tenancy.md`](auth-tenancy.md) §«De quién es la IP que cuenta el límite».
 
 ## Depurar cuando algo va mal
 
@@ -45,6 +68,14 @@ Comparando lo que ves por la URL pública con lo que ves por `localhost:3000` sa
 | `530` / error 1033 | funciona | el túnel **sin conector**: `cloudflared` caído |
 | `502` | funciona | el túnel arriba, el origen no responde |
 | `404` | funciona | el hostname no casa la regla de ingress |
+
+**Si lo que falla es la API y no las páginas**, hay un cuarto caso que este cuadro no cubre, porque la API tiene un salto más:
+
+| Síntoma | Es |
+|---|---|
+| `404` en `/api/v1/...` pero las páginas cargan | el Route Handler no está resolviendo — mira si `BACKEND_INTERNAL_URL` llegó al contenedor |
+| `502` con `{"error":{"code":"INTERNAL_ERROR"}}` en `/api/...` | el salto no alcanzó el backend. El motivo real está en los logs de `frontend`, con el prefijo `[api-proxy]`; a propósito no viaja en la respuesta |
+| la API responde pero el throttle de login bloquea a todo el mundo a la vez | la IP real no está llegando: todas las peticiones caen en un contador. Comprueba qué IP registra el backend |
 
 El procedimiento completo —requisitos, alias de `~/.ssh/config`, logs, acceso a la base de datos, errores frecuentes— está en el **RUNBOOK §7.4**.
 
