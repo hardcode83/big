@@ -1,5 +1,26 @@
 # BLOCKED — api-ingress-routing
 
+> **Por qué este change va a PR en `ACTIVE` y no en `READY_FOR_PR`.** No es un olvido ni un
+> atajo: `mark-local-verified` exige `BLOCKED.md` vacío, y esta entrada no se puede resolver
+> antes del merge porque el entorno que hay que medir solo recibe código después. La regla
+> compartida 5 clasifica una «verificación omitida» exactamente como esto, así que la puerta
+> se está negando **con razón** — el change no cumple la definición de verificado-en-local
+> del propio proyecto mientras 6.2 no se haya ejecutado.
+>
+> Es una dependencia circular real del proceso para changes de infra que solo se manifiestan
+> desplegados, y se elige convivir con ella en vez de vaciar este fichero para forzar la
+> puerta: borrarlo destruiría el registro de lo que no está probado, que es precisamente lo
+> que el flujo existe para impedir.
+>
+> **Secuencia acordada**: PR y merge → deploy → `/sdd:run api-ingress-routing 6` → si 6.2
+> sale bien, se resuelve esta entrada y entonces sí `mark-local-verified` + `mark-ready`
+> antes de archivar. Si 6.2 sale mal, R3.3 manda: R1 no se da por cumplido y esto pasa a ser
+> una entrada de tipo `decision`.
+>
+> El código sí está revisado: panel de 7 revisores en PASS tras dos rondas, backend 3410
+> passed / 35 skipped, frontend 318 passed, lint y typecheck limpios, `make openapi` sin
+> diff. Lo que falta es la medición contra el entorno real, no la revisión.
+
 ## 1. La sección 6 entera necesita el entorno desplegado
 
 - **Fase**: run
