@@ -17,6 +17,7 @@ from app.reservations.domain.exceptions import (
     GuestNotFoundError,
     PropertyNotFoundError,
     ReservationDomainError,
+    InactivePropertyError,
     ReservationNotFoundError,
     ReservationValidationError,
 )
@@ -27,6 +28,7 @@ _MAPPING: tuple[tuple[type[ReservationDomainError], int, ErrorCode], ...] = (
     (PropertyNotFoundError, 404, ErrorCode.NOT_FOUND),
     (GuestNotFoundError, 404, ErrorCode.NOT_FOUND),
     (DuplicateExternalReservationError, 409, ErrorCode.CONFLICT),
+    (InactivePropertyError, 409, ErrorCode.CONFLICT),
     (ReservationValidationError, 422, ErrorCode.VALIDATION_ERROR),
 )
 

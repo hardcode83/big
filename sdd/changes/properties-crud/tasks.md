@@ -60,9 +60,9 @@ Orden pensado para que el sistema siga en verde tras cada sección: el esquema p
 
 Sección aparte porque es la única que toca una capability ajena y archivada; su alcance debe quedar visible en el diff y en la revisión.
 
-- [ ] 8.1 Añadir en `backend/app/reservations/application/use_cases.py` la guarda que rechaza crear una reserva sobre una propiedad con `status = INACTIVE`, con un error de dominio propio de `reservations` y su fila en el `_MAPPING` de ese módulo. [R3]
-- [ ] 8.2 Cubrir **las tres vías de entrada**, no solo la API: creación manual, import CSV (`app/integrations/application/use_cases.py`, resuelve por `internal_code`) y `pms_sync` (resuelve por `pms_external_id`) — ninguna de las tres mira hoy el `status`. Un test por vía. [R3]
-- [ ] 8.3 Correr la suite completa de `tests/reservations/` **sin modificarla** y confirmar que sigue en verde: la guarda es una condición añadida, no un cambio de las existentes. [R3]
+- [x] 8.1 Añadir en `backend/app/reservations/application/use_cases.py` la guarda que rechaza crear una reserva sobre una propiedad con `status = INACTIVE`, con un error de dominio propio de `reservations` y su fila en el `_MAPPING` de ese módulo. [R3]
+- [x] 8.2 Cubrir **las tres vías de entrada**, no solo la API: creación manual, import CSV (`app/integrations/application/use_cases.py`, resuelve por `internal_code`) y `pms_sync` (resuelve por `pms_external_id`) — ninguna de las tres mira hoy el `status`. Un test por vía. [R3]
+- [x] 8.3 Correr la suite completa de `tests/reservations/` **sin modificarla** y confirmar que sigue en verde: la guarda es una condición añadida, no un cambio de las existentes. [R3]
 
 ## 9. Contrato y documentación
 

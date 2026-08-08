@@ -18,11 +18,13 @@ from typing import Any
 from app.core.unit_of_work import UnitOfWork
 from app.guests.domain.repositories import GuestRepository
 from app.guests.domain.value_objects import GuestSummary
+from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.repositories import PropertyRepository
 from app.reservations.domain.entities import Reservation
 from app.reservations.domain.enums import PaymentStatus, ReservationChannel, ReservationStatus
 from app.reservations.domain.exceptions import (
     GuestNotFoundError,
+    InactivePropertyError,
     PropertyNotFoundError,
     ReservationNotFoundError,
     ReservationValidationError,
@@ -173,8 +175,14 @@ class CreateReservationUseCase:
         D6) — and the resolution is also what satisfies the precondition of D18 before an
         event is written.
         """
-        if await self._properties.get(tenant_id, command.property_id) is None:
+        property = await self._properties.get(tenant_id, command.property_id)
+        if property is None:
             raise PropertyNotFoundError("Property does not exist")
+        if property.status is PropertyStatus.INACTIVE:
+            # A retired home does not take new bookings (`properties-crud` design D11). The
+            # check is here and not in the entity because it is a fact about the PROPERTY, not
+            # an invariant of the reservation, and `Reservation.create` has no property to ask.
+            raise InactivePropertyError("Property is retired and does not accept reservations")
         if command.guest_id is not None:
             if await self._guests.get(tenant_id, command.guest_id) is None:
                 raise GuestNotFoundError("Guest does not exist")
