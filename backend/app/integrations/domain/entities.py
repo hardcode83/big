@@ -1,3 +1,4 @@
+import json
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -25,6 +26,59 @@ class WebhookEvent:
     processed: bool = False
     processed_at: datetime | None = None
     error: str | None = None
+
+
+@dataclass(frozen=True)
+class WebhookEventFailure:
+    """What may be written to `webhook_events.error` — a code and a field name, never prose.
+
+    `error` is one of the six cleartext sinks of rule 11, and the model's own docstring states the
+    trap: *"`error` must never echo the raw body back: that would reintroduce through the text
+    column what `payload` just dropped"*. A message built by interpolating whatever failed is
+    exactly that echo, and it is the natural thing to write — `f"could not map {row}"` reads like
+    good diagnostics right up until `row` holds a PAN.
+
+    So the type carries no free-text field at all. `code` comes from a closed set and `field` is a
+    key **name**, never its value. That makes the guarantee structural rather than a rule each
+    writer has to remember, the same way `ChangeSet` makes rule 11 hold for `audit_logs.changes`.
+
+    Rendered as compact JSON because the column is text: a reader gets a shape it can parse, and a
+    writer gets no room to append.
+    """
+
+    code: str
+    field: str | None = None
+
+    def __post_init__(self) -> None:
+        if self.code not in WEBHOOK_FAILURE_CODES:
+            raise ValueError(
+                f"unknown webhook failure code {self.code!r}; add it to WEBHOOK_FAILURE_CODES "
+                "rather than passing a message — rule 11 forbids free text in this column"
+            )
+
+    def render(self) -> str:
+        payload = {"code": self.code}
+        if self.field is not None:
+            payload["field"] = self.field
+        return json.dumps(payload, separators=(",", ":"), sort_keys=True)
+
+
+UNATTRIBUTED = "UNATTRIBUTED"
+"""The notice carries no tenant, so it can never become a reservation (D11, R1.8).
+
+Should not occur while the authentication of R1 stands — the token is what resolves the tenant —
+but §7.26 allows the row, so the branch stays honest rather than pretending it cannot happen.
+"""
+
+UNMAPPABLE = "UNMAPPABLE"
+"""The re-read produced something the ingest could not turn into a reservation."""
+
+PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
+"""The provider could not be re-read within the retry budget."""
+
+WEBHOOK_FAILURE_CODES = frozenset({UNATTRIBUTED, UNMAPPABLE, PROVIDER_UNAVAILABLE})
+"""Closed on purpose, like `app/audit/domain/actions.py`'s vocabulary and for the same reason:
+an open set of codes is a free-text field with extra steps."""
 
 
 @dataclass(frozen=True)
