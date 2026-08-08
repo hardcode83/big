@@ -20,7 +20,13 @@ import {
 } from "./session-store";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
-export type AuthStatus = "loading" | "authenticated" | "anonymous" | "expired" | "error";
+export type AuthStatus =
+  | "loading"
+  | "refreshing"
+  | "authenticated"
+  | "anonymous"
+  | "expired"
+  | "error";
 
 export interface AuthContextValue {
   user: CurrentUser | null;
@@ -61,6 +67,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         return headers;
       },
       onUnauthorized: async () => {
+        setStatus("refreshing");
         try {
           await refreshSession(refreshTokens);
           setStatus("authenticated");
@@ -102,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   );
 
   const refresh = useCallback(async () => {
+    setStatus("refreshing");
     try {
       await refreshSession(clients.refreshTokens);
       setStatus("authenticated");

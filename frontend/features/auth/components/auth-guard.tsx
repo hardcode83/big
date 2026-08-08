@@ -19,17 +19,29 @@ export function AuthGuard({ children }: { children: ReactNode }) {
       redirecting.current = false;
     } else if ((status === "anonymous" || status === "expired") && !redirecting.current) {
       redirecting.current = true;
-      const returnTo = pathname.startsWith("/") ? pathname : "/dashboard";
+      const returnTo = pathname.startsWith("/")
+        ? `${pathname}${window.location.search}${window.location.hash}`
+        : "/dashboard";
       router.replace(`/login?returnTo=${encodeURIComponent(returnTo)}`);
     }
   }, [pathname, router, status]);
 
-  if (status === "loading") {
+  if (status === "loading" || status === "refreshing") {
     return (
       <StatePanel
         role="status"
         aria-busy
-        title={t("checkingSession")}
+        title={t(status === "refreshing" ? "refreshing" : "checkingSession")}
+        description={t("authRequired")}
+      />
+    );
+  }
+
+  if (status === "expired") {
+    return (
+      <StatePanel
+        role="alert"
+        title={t("expired")}
         description={t("authRequired")}
       />
     );

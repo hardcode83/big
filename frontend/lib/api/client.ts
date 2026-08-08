@@ -43,7 +43,7 @@ type ResponseFor<Operation> = Operation extends { responses: infer Responses }
 
 export interface ApiClientOptions {
   baseUrl: string;
-  /** Contributes request headers (extension point for future auth). */
+  /** Contributes request headers, including the current auth session when present. */
   getHeaders?: () => HeadersInit | Promise<HeadersInit>;
   /**
    * Recovers one eligible authenticated request after a 401. Return true to

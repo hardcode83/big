@@ -75,4 +75,38 @@ describe("refresh coordinator", () => {
     expect(getSessionTokens()).toBeNull();
     expect(refresh).toHaveBeenCalledOnce();
   });
+
+  it("does not let an old refresh affect a new login", async () => {
+    setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
+    let resolveOldRefresh!: (tokens: { accessToken: string; refreshToken: string }) => void;
+    const oldRefresh = vi.fn(
+      () =>
+        new Promise<{ accessToken: string; refreshToken: string }>((resolve) => {
+          resolveOldRefresh = resolve;
+        }),
+    );
+
+    const oldPending = refreshSession(oldRefresh);
+    clearSessionTokens();
+    setSessionTokens({ accessToken: "new-access", refreshToken: "new-refresh" });
+
+    const newRefresh = vi.fn().mockResolvedValue({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+    });
+    const newPending = refreshSession(newRefresh);
+
+    resolveOldRefresh({ accessToken: "late-access", refreshToken: "late-refresh" });
+
+    await expect(oldPending).rejects.toThrow("Session was invalidated");
+    await expect(newPending).resolves.toEqual({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+    });
+    expect(newRefresh).toHaveBeenCalledWith("new-refresh");
+    expect(getSessionTokens()).toEqual({
+      accessToken: "rotated-access",
+      refreshToken: "rotated-refresh",
+    });
+  });
 });

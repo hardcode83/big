@@ -22,6 +22,7 @@ export function getSessionGeneration(): number {
 
 export function setSessionTokens(tokens: SessionTokens): void {
   currentTokens = { ...tokens };
+  sessionGeneration += 1;
 }
 
 export function clearSessionTokens(): void {

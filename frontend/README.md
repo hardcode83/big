@@ -149,7 +149,7 @@ Vitest + Testing Library + jest-dom + axe-core. Tests colocados junto al módulo
 
 La sesión frontend ya implementa login y refresh efímero, pero mantiene estos límites:
 
-- Los route groups (`(public)`, `(workspace)`, `(field)`, `(guest)`) separan las superficies que un futuro gate protegerá o seleccionará por experiencia.
+- Los route groups (`(public)`, `(workspace)`, `(field)`, `(guest)`) separan las superficies que el guard client-side protege por experiencia; la autorización efectiva sigue en el backend.
 - `AppProviders` monta `AuthProvider` entre i18n y query.
 - El cliente API expone composición de headers y recuperación elegible de `401`.
 - Cada shell filtra el registro por su perfil estático, no por permisos.

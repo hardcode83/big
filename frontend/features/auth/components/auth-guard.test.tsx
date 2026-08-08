@@ -7,7 +7,12 @@ import { AuthGuard } from "./auth-guard";
 const mocks = vi.hoisted(() => ({
   pathname: "/dashboard",
   replace: vi.fn(),
-  status: "anonymous" as "anonymous" | "authenticated" | "loading" | "expired",
+  status: "anonymous" as
+    | "anonymous"
+    | "authenticated"
+    | "loading"
+    | "refreshing"
+    | "expired",
 }));
 
 vi.mock("@/lib/auth", () => ({
@@ -34,6 +39,7 @@ describe("AuthGuard", () => {
     mocks.status = "anonymous";
     mocks.pathname = "/dashboard";
     mocks.replace.mockReset();
+    window.history.replaceState({}, "", "/dashboard");
   });
 
   it("redirects anonymous users to login with an internal return path", async () => {
@@ -63,6 +69,39 @@ describe("AuthGuard", () => {
 
     expect(screen.getByRole("status")).toHaveTextContent("Comprobando sesión…");
     expect(screen.queryByText("protected content")).not.toBeInTheDocument();
+  });
+
+  it("renders a localized refresh state while auth is refreshing", () => {
+    mocks.status = "refreshing";
+
+    renderGuard();
+
+    expect(screen.getByRole("status")).toHaveTextContent("Renovando sesión…");
+    expect(screen.queryByText("protected content")).not.toBeInTheDocument();
+  });
+
+  it("shows the localized expiration state before redirecting", async () => {
+    mocks.status = "expired";
+
+    renderGuard();
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "Tu sesión ha caducado. Inicia sesión de nuevo.",
+    );
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith(
+      "/login?returnTo=%2Fdashboard",
+    ));
+  });
+
+  it("preserves query string and fragment in a safe internal return path", async () => {
+    mocks.pathname = "/properties/42";
+    window.history.replaceState({}, "", "/properties/42?tab=timeline#details");
+
+    renderGuard();
+
+    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith(
+      "/login?returnTo=%2Fproperties%2F42%3Ftab%3Dtimeline%23details",
+    ));
   });
 
   it("redirects once when an authenticated user becomes anonymous after logout", async () => {

@@ -8,7 +8,13 @@ import {
 
 export type RefreshTokens = (refreshToken: string) => Promise<SessionTokens>;
 
-let inFlight: Promise<SessionTokens> | null = null;
+interface InFlightRefresh {
+  generation: number;
+  refreshToken: string;
+  promise: Promise<SessionTokens>;
+}
+
+let inFlight: InFlightRefresh | null = null;
 
 export class SessionInvalidatedError extends Error {
   constructor() {
@@ -22,15 +28,22 @@ export class SessionInvalidatedError extends Error {
  * share this promise but do not own its lifecycle or its cleanup semantics.
  */
 export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTokens> {
-  if (inFlight) return inFlight;
-
   const current = getSessionTokens();
   if (!current) {
     return Promise.reject(new Error("No refresh token available"));
   }
 
   const generation = getSessionGeneration();
-  inFlight = refreshTokens(current.refreshToken)
+  if (
+    inFlight &&
+    inFlight.generation === generation &&
+    inFlight.refreshToken === current.refreshToken
+  ) {
+    return inFlight.promise;
+  }
+
+  const refreshToken = current.refreshToken;
+  const promise = refreshTokens(refreshToken)
     .then((next) => {
       if (getSessionGeneration() !== generation) {
         throw new SessionInvalidatedError();
@@ -45,8 +58,11 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
       throw error;
     })
     .finally(() => {
-      inFlight = null;
+      if (inFlight?.promise === promise) {
+        inFlight = null;
+      }
     });
 
-  return inFlight;
+  inFlight = { generation, refreshToken, promise };
+  return promise;
 }
