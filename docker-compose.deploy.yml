@@ -56,9 +56,40 @@
 #
 # `internal: true` NO se pone en `ingress`: cortaría su salida a internet y `cloudflared` no podría
 # abrir la conexión al edge, que es justo de lo que depende el ingress.
+# La dirección del `frontend` en `private`, declarada UNA vez y consumida por dos sitios: su
+# `ipv4_address` más abajo, y el `--forwarded-allow-ips` del `command:` de `backend` (change
+# `api-ingress-routing`, design D3/D4). El ancla es el control, no un atajo de escritura: uvicorn
+# convierte EN SILENCIO cualquier valor malformado de esa lista en una comparación literal de
+# cadena —su propio código comenta que el usuario no puede detectarlo—, así que un typo no fallaría:
+# dejaría de confiar en nadie y el límite de 10 intentos/min contaría todo el despliegue en un solo
+# contador, sin ruido. Con un único literal, un valor malformado revienta el `ipv4_address` y con él
+# `compose up --wait`, o sea el deploy; y un valor válido es por construcción el mismo en las dos
+# puntas. No hay deriva posible que un test tuviera que vigilar.
+#
+# Por qué un /32 y no la subred entera: al publicar `127.0.0.1:8000`, Docker hace SNAT de la
+# conexión al **gateway del bridge**, que está dentro de la subred. Confiar en la subred haría de
+# confianza a quien llegue por `ssh -L 8000`; esta dirección concreta lo excluye.
+x-frontend-private-ip: &frontend_private_ip "10.89.0.10"
+
 networks:
   ingress:
   private:
+    # IPAM explícito porque Compose lo exige para admitir `ipv4_address`; las dos mitades van
+    # juntas o ninguna. La subred NO puede solaparse con la VCN `10.0.0.0/16`
+    # (`infra/environments/dev/main.tf:53`, subred `10.0.1.0/24` en `:107`) ni con el pool por
+    # defecto de Docker (172.17–172.31): por ahí no habría error, habría rutas que se pisan.
+    #
+    # AVISO OPERATIVO DE UN SOLO USO, y está medido (reproducido en un stack de prueba con
+    # `docker compose` v5.1.1): esta red ya existe en la VM SIN IPAM, así que el primer deploy
+    # que traiga este cambio detecta la deriva y **recrea la red**, lo que obliga a parar y
+    # levantar TODOS los servicios conectados a ella — `postgres`, `redis`, `migrate`,
+    # `backend`, `worker`, `beat` y `frontend`—, no solo los dos que este change toca.
+    # `up -d --wait` sigue saliendo en 0 cuando los healthchecks pasan, así que el deploy no se
+    # rompe. Se anota porque quien mire los logs de ese rollout verá todo el stack parándose y
+    # eso se lee como una avería. Es esperado y no se repite.
+    ipam:
+      config:
+        - subnet: 10.89.0.0/24
 
 services:
   postgres:
@@ -116,6 +147,28 @@ services:
     # Fuera de `ingress` a propósito: `cloudflared` no puede resolver `backend`, así que una regla
     # de ingress reescrita en el edge no puede publicar la API. Ver el comentario de `networks`.
     networks: [private]
+    # Sobreescribe el CMD de la imagen SOLO para añadir la lista de proxies de confianza (change
+    # `api-ingress-routing`, design D3). `--proxy-headers` ya viene del Dockerfile y se repite aquí
+    # porque sobreescribir `command:` reemplaza el CMD entero, no lo extiende.
+    #
+    # Esta lista es la que decide a quién se le cree un `X-Forwarded-For`, y con ello de quién
+    # cuenta el límite de 10 intentos/min (regla 7 de steering/security.md) y qué IP acaba en
+    # `audit_logs.actor_ip` (regla 9). El valor sale del ancla de arriba, así que es el mismo /32
+    # que `frontend` tiene asignado — no lo escribas a mano aquí.
+    #
+    # NUNCA `*`: sería «cree a cualquiera», y con `/api/` alcanzable desde internet eso devuelve el
+    # bypass que este change existe para cerrar. Y **solo en `backend`**: `worker` y `beat` usan
+    # esta misma imagen pero corren `celery`, sin servidor HTTP al que aplicar nada de esto.
+    command:
+      - uvicorn
+      - app.main:app
+      - --host
+      - 0.0.0.0
+      - --port
+      - "8000"
+      - --proxy-headers
+      - --forwarded-allow-ips
+      - *frontend_private_ip
     environment:
       REDIS_URL: redis://redis:6379/0
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
@@ -216,18 +269,37 @@ services:
     image: ghcr.io/${GHCR_NS}/autohostai-frontend:${IMAGE_TAG}
     restart: unless-stopped
     # El ÚNICO servicio en las dos redes: es el origen público (lo alcanza `cloudflared` por
-    # `ingress`) y está en `private` para que la app PUEDA consumir la API sin cambios cuando toque
-    # (`BACKEND_INTERNAL_URL` se resuelve por ahí). Ojo: hoy **ningún código lo hace** —
-    # `getServerConfig()` no se invoca desde el código de aplicación y `getDashboardDataSource()`
-    # devuelve un mock—, así que esta doble pertenencia es capacidad, no uso. Y es el único puente
-    # `ingress`→`private` de la topología, o sea el vector de crecimiento del invariante de arriba:
-    # no la des por necesaria sin comprobar antes qué reenvía el frontend de verdad.
+    # `ingress`) y está en `private` porque la app consume la API por `BACKEND_INTERNAL_URL`.
+    #
+    # ESTO YA NO ES «CAPACIDAD, NO USO» (change `api-ingress-routing`, R6.3). Hasta este change
+    # ningún código lo ejercitaba, y el comentario que había aquí lo decía. Ahora sí:
+    # `frontend/app/api/[...path]/route.ts` reenvía al backend, así que la enumeración exacta de lo
+    # que este origen público reenvía hacia `private` —que es lo que exige la cláusula WHERE del
+    # §Aislamiento de `sdd/specs/ingress-https-dev.md`— es:
+    #
+    #   • TODO `/api/` del hostname público → `${BACKEND_INTERNAL_URL}/api/`, cualquier método.
+    #     Es decir: los 18 endpoints de `/api/v1` que `backend/openapi.json` publica, con su
+    #     autorización intacta (`backend/tests/test_route_authorization.py` prueba ruta por ruta
+    #     que todo exige Bearer salvo login, refresh y /health).
+    #   • Y NADA MÁS. Ni `/openapi.json`, ni `/docs`, ni `/docs/oauth2-redirect`, ni `/redoc`, ni
+    #     `/health`: son anónimos por allowlist y estaban protegidos solo por el bind a loopback,
+    #     así que quedan fuera del alcance del reenvío a propósito, con test que lo fija
+    #     (`frontend/app/proxy-scope.test.ts`).
+    #
+    # Sigue siendo el único puente `ingress`→`private`, o sea el vector de crecimiento del
+    # invariante de arriba. Si añades otro reenvío, la lista de aquí arriba deja de ser verdad.
+    #
     # La puerta de salida por defecto NO se pinea, a propósito: el campo que la gobierna es
-    # `gw_priority` (`priority` solo ordena la conexión a las redes, no elige gateway), y hoy no
-    # hace falta ninguno de los dos — el servidor de Next no hace llamadas salientes, todo el
-    # fetching de datos vive en componentes cliente. Si algún día las hace y el gateway elegido
-    # importa, el campo es `gw_priority`.
-    networks: [private, ingress]
+    # `gw_priority` (`priority` solo ordena la conexión a las redes, no elige gateway). El servidor
+    # de Next SÍ hace ya llamadas salientes —el reenvío de arriba—, pero van a `backend` por nombre
+    # dentro de `private`, no a internet, así que no dependen del gateway elegido. Si algún día
+    # hiciera una llamada a internet y el gateway importara, el campo es `gw_priority`.
+    networks:
+      ingress:
+      private:
+        # Fija, y es la mitad de la lista de confianza del `backend` de arriba (design D4). Si la
+        # cambias, cambia el ancla — nunca este valor a mano.
+        ipv4_address: *frontend_private_ip
     environment:
       BACKEND_INTERNAL_URL: ${BACKEND_INTERNAL_URL:-http://backend:8000}
       # Next standalone (server.js) usa $HOSTNAME como dirección de bind; Docker lo pone al

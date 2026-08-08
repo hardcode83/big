@@ -254,8 +254,14 @@ def test_lifetimes_and_throttle_are_configurable_per_environment(
     assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
 
 
-def test_no_client_ip_header_is_trusted_by_default() -> None:
-    assert Settings(_env_file=None, **_REQUIRED).trusted_client_ip_header == ""
+def test_the_application_has_no_setting_for_a_trusted_client_ip_header() -> None:
+    """Change `api-ingress-routing`, design D3: resolving the real client address is
+    uvicorn's job, gated by `--forwarded-allow-ips`. A setting here would be a second
+    mechanism deciding whether to trust a peer the first one may already have
+    rewritten. Asserted as an absence so re-adding it fails loudly instead of
+    quietly reintroducing the overlap.
+    """
+    assert not hasattr(Settings(_env_file=None, **_REQUIRED), "trusted_client_ip_header")
 
 
 def test_bootstrap_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch) -> None:

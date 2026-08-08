@@ -67,30 +67,51 @@ def create_app() -> FastAPI:
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
-    # check is too late for an upload.
-    app.add_middleware(
-        MaxBodySizeMiddleware,
-        path_prefixes=(f"{API_V1_PREFIX}/integrations/",),
-        max_bytes_provider=lambda: settings.csv_import_max_bytes,
-    )
-    # `cleaning`: the checklist template endpoint takes a client-sized array, so it is the
-    # first JSON route whose body is not a small fixed object. Its Pydantic caps run after the
-    # whole body is in memory and after `require(...)`, so without this an anonymous request
-    # can make the backend read arbitrary volumes before the 401 (measured by the security
-    # panel of sections 2-3). One prefix covers `/cleaning-checklist-templates` and
-    # `/cleaning-tasks`.
+    # check is too late.
     #
-    # **Obligation for `cleaning-photos-storage`**: `POST /cleaning-tasks/{id}/photos` starts
-    # with this prefix too, so as mounted this ceiling would refuse any photo above 1 MiB.
-    # The repair is NOT to raise `JSON_BODY_MAX_BYTES` — that would remove the JSON ceiling
-    # from every cleaning route and re-open the hole this closes. That change has to teach
-    # `MaxBodySizeMiddleware` to exclude a path, or split the prefixes so the upload path is
-    # served only by its own instance with the 10 MB of rule 6. Recorded here and in the
-    # roadmap entry.
+    # ONE mounting covering all of `/api/v1/`, with the ceiling resolved PER PATH. It used to
+    # be two, and merging them is not tidying: `api-ingress-routing` and `cleaning` found the
+    # same hole independently — an unbounded body read in full before the `401` — and each
+    # mounted its own instance. Stacked instances nest, so the outermost decides first and a
+    # narrower inner ceiling never gets to see the request; the generic 1 MiB would have
+    # refused a 10 MB CSV before the upload instance could allow it.
+    #
+    # The three cases, and each number has its own reason:
+    #
+    # * `/integrations/` → `CSV_IMPORT_MAX_BYTES` (10 MiB). Rule 6 of steering/security.md.
+    # * `/cleaning-` → `JSON_BODY_MAX_BYTES` (1 MiB). From `cleaning`: the checklist template
+    #   endpoint takes a **client-sized array**, so its body is not a small fixed object, and
+    #   its Pydantic caps only run once the whole body is in memory. Measured there: an
+    #   anonymous ~50 MB `POST` was received in full and then answered `401`. The constant is
+    #   measured against that schema's maximum (338 KB with accented labels), NOT guessed.
+    # * everything else → `REQUEST_MAX_BYTES` (1 MiB). From `api-ingress-routing` (R7/D11):
+    #   once `/api/v1` is reachable from the internet, an unbounded body on a public anonymous
+    #   endpoint is a memory amplifier — measured, one 400 MB `POST /auth/login` took the
+    #   container from 195 MiB to 1.016 GiB of RSS, and FastAPI reads that body before
+    #   dependencies run, i.e. before the 10/min login throttle is ever consulted.
+    #
+    # `JSON_BODY_MAX_BYTES` and `REQUEST_MAX_BYTES` happen to be equal today. They stay
+    # separate on purpose: one is pinned to a schema maximum and one is an operational knob,
+    # so collapsing them would make a future tuning of the knob silently move a measured
+    # boundary.
+    #
+    # **The obligation `cleaning` recorded for `cleaning-photos-storage` is now cheap.**
+    # `POST /cleaning-tasks/{id}/photos` starts with `/cleaning-`, so the JSON ceiling would
+    # refuse any photo above 1 MiB. `cleaning` noted the repair would have to "teach
+    # `MaxBodySizeMiddleware` to exclude a path, or split the prefixes" — the per-path
+    # provider IS that capability, so the repair is one branch here, before the `/cleaning-`
+    # one. Still NOT by raising `JSON_BODY_MAX_BYTES`, which would remove the JSON ceiling
+    # from every cleaning route and re-open the hole it closes.
     app.add_middleware(
         MaxBodySizeMiddleware,
-        path_prefixes=(f"{API_V1_PREFIX}/cleaning-",),
-        max_bytes_provider=lambda: JSON_BODY_MAX_BYTES,
+        path_prefixes=(API_V1_PREFIX,),
+        max_bytes_provider=lambda path: (
+            settings.csv_import_max_bytes
+            if path.startswith(f"{API_V1_PREFIX}/integrations/")
+            else JSON_BODY_MAX_BYTES
+            if path.startswith(f"{API_V1_PREFIX}/cleaning-")
+            else settings.request_max_bytes
+        ),
     )
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck

@@ -22,6 +22,7 @@ La verificación no depende de un backend ni de datos de negocio.
 
 ```
 app/         Composición de rutas y layouts. Los page.tsx son adaptadores finos.
+app/api/     La única pieza de servidor: [...path]/route.ts reenvía /api/ al backend.
 features/    Módulos por dominio. features/shell/ es el Application Shell.
 components/  Primitivas shadcn/ui (components/ui) y estados (components/states).
 lib/         Infraestructura transversal: api, config, i18n, query, metadata.
