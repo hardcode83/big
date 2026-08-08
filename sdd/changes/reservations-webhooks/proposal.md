@@ -151,8 +151,18 @@ Criterios de aceptación:
 5. THE SYSTEM SHALL abrir **una sesión marcada por tenant**, nunca re-marcada, para el trabajo por tenant,
    y SHALL leer la cola de `webhook_events` desde una sesión **nunca marcada** — la columna `tenant_id` es
    nullable y una sesión marcada esconde las filas `NULL` sin error (ADR 0006, decisión 7, punto 5).
-6. WHEN un evento produce una transición de estado operacional, THE SYSTEM SHALL registrarla con actor
-   `WEBHOOK`, que **no está exento** de escribir su fila de `AuditLog` (regla 9).
+6. WHEN un evento produce una transición de estado operacional, THE SYSTEM SHALL hacerla pasar por
+   `PropertyStateMachine` a través del caso de uso que ya existe, persistiendo su
+   `PropertyStateTransition` **y** su `TimelineEvent` en la misma transacción; y SHALL registrar la
+   **causa** un paso antes, en el `TimelineEvent` de la ingesta, con actor `WEBHOOK`.
+
+   > **Corregido en diseño (D12).** La redacción original decía "registrarla con actor `WEBHOOK`, que no
+   > está exento de escribir su fila de `AuditLog` (regla 9)". El panel de arquitectura demostró que era
+   > un requisito equivocado: el caso de uso que ejecuta la transición fija el actor a `SYSTEM`
+   > (`app/properties/application/use_cases.py:290`), y cumplirlo al pie de la letra habría obligado a
+   > modificar un dominio ajeno para introducir un actor que la regla 9 nombra precisamente para
+   > excluirlo de la exención. El actor de una transición es quien la ejecuta, no quien cambió el dato
+   > del que se deduce. La causalidad se conserva sin inventar actores.
 7. THE SYSTEM SHALL tratar los eventos como potencialmente **desordenados** (ADR 0006: Channex documenta
    que llegan así) y no SHALL asumir que el orden de llegada es el orden de los hechos.
 
@@ -175,9 +185,18 @@ Criterios de aceptación:
 
 ## Out of scope
 
-- **Suscripción automática de webhooks en el proveedor.** ADR 0006 constata que Beds24 los configura por
-  propiedad desde su UI y no expone API de suscripción; por eso R2 entrega el material para pegarlo a
-  mano. Automatizarlo requiere un proveedor que lo permita.
+- **Suscripción automática de webhooks en el proveedor.** Y el motivo **no** es el que da ADR 0006
+  ("se configuran por propiedad desde la UI, sin API de suscripción"): `specs/pms-beds24-spike.md` lo
+  **midió y lo refutó** — en Beds24 se configuran **por API** (`POST /properties`). Queda fuera porque
+  es trabajo del adapter del proveedor y de la ventana de corte, no de la recepción: la entrada
+  `beds24-webhook-cutover-measurement` existe precisamente para eso. Consecuencia: R2 entrega el
+  material para configurarlo, sea a mano o por el adapter después. Y cuando se automatice, `additionalData`
+  va fijado a `none` **como constante y no como parámetro** — sus otros valores meten el CVV en el cuerpo
+  (spike, "Aislamiento de la cuenta").
+- **Medición de latencia y desorden de los webhooks reales.** Es de `beds24-webhook-cutover-measurement`.
+  El spike constató además que **los webhooks de Beds24 solo se disparan para reservas de canal**, así que
+  esta capacidad no se puede validar de extremo a extremo contra el proveedor sin canales conectados: se
+  verifica con fixtures y con el `MockPMSAdapter`.
 - **Validación de firma HMAC.** No se implementa la rama condicional de PRD §16: ADR 0006 demuestra que
   ninguno de los once proveedores firma. Si algún día uno lo soporta, es un change propio.
 - **Webhooks de registro policial** (Chekin, `PoliceRegistration.*`). Heredan la misma regla 12 pero
