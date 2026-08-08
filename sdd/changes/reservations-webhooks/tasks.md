@@ -231,19 +231,47 @@ forzado en `infrastructure/`.
 - [x] 2.7 Regenerar las dos mitades del contrato por el endpoint nuevo (`make openapi` +
   `npm run api:generate`) y commitearlas. [documentation.md]
 
-## 3. `special_requests`: la frontera heredada (D8 — provisional)
+## 3. `special_requests`: la frontera heredada (D8)
 
 > **D8 ratificada por Jose el 2026-08-08**, así que estas dos tareas se implementan tal como están
 > escritas: redacción de rachas de 13-19 dígitos, sólo en fuentes externas, sin Luhn. Lo que cerró la
 > ratificación fue el tamaño real del falso positivo — un código de portal español son 4-8 dígitos, un
 > móvil 9, uno internacional 11-12, y ninguno llega al umbral. Ya no depende de nada.
 
-- [ ] 3.1 `infrastructure/free_text.py`: redacción de rachas de 13-19 dígitos ignorando espacios y
+- [x] 3.1 `infrastructure/free_text.py`: redacción de rachas de 13-19 dígitos ignorando espacios y
   guiones, sin Luhn. **TDD**: el test exige primero que un PAN con y sin separadores desaparezca y que
   una referencia de reserva corta sobreviva; y documenta con un caso el falso positivo aceptado. [R4.1]
-- [ ] 3.2 Aplicarlo a `special_requests` **solo en fuentes externas** (webhook y sync de PMS) en
+  > **Ajuste al ejecutar, y es el que importa: el umbral es «13 o más», no «entre 13 y 19».** Leído
+  > como banda cerrada, D8 deja intacta una racha maximal de 20+ dígitos — y eso no es conservador,
+  > es un agujero con disparador trivial: un PAN seguido de cualquier otro número se funde en una
+  > sola racha y sobrevive entero. `4111111111111111 1225` (tarjeta y caducidad) son 20 dígitos y
+  > persistirían la tarjeta en claro. Redactar desde 13 **solo redacta más** que la forma ratificada,
+  > y sobre entradas que el propio argumento de la ratificación cubre a fortiori: si nada operativo
+  > llega a 13 dígitos, nada operativo llega a 20. La banda 13-19 se conserva como lo que era, el
+  > razonamiento de la longitud de un PAN, y queda escrita en `MIN_REDACTED_DIGITS`.
+  > **Los separadores admiten repetición** (`[ -]*`, no `[ -]?`): un espacio doble es una errata, y
+  > una regla que una errata derrota no es una regla. El coste lo acota el mismo umbral.
+  > **Marcador propio**, `***long-digit-run-removed***`, distinto del `CARD_DATA_REMOVED` de
+  > `card_data.py`: sin Luhn esto detecta una *forma*, no una tarjeta, y el marcador no debe afirmar
+  > lo que la regla no comprueba. 20 tests nuevos, incluidos los seis casos operativos medidos que
+  > cerraron la ratificación (portal 4-8, móvil 9, internacional 11-12) como aserción de que siguen
+  > sobreviviendo.
+- [x] 3.2 Aplicarlo a `special_requests` **solo en fuentes externas** (webhook y sync de PMS) en
   `infrastructure/{beds24,channex}/mapping.py`, dejando intacto el texto que una persona escribe por la
   API. Tests de los dos caminos: el externo redacta, el manual no. [R4.1]
+  > **Los dos mapeos cubren los dos caminos externos a la vez**, y por eso la tarea no nombra ningún
+  > fichero del receptor: el webhook no escribe `special_requests` desde su cuerpo — es un aviso no
+  > fiable y la reserva llega por la re-lectura de §4, que pasa por estos mismos mapeos.
+  > **Ninguno de los dos ficheros de test de mapeo aserotaba `special_requests`** antes de esto, así
+  > que el campo entraba en la DTO sin cobertura; los tests nuevos cierran también ese hueco (nota
+  > ausente → `None`, no `""`).
+  > **Referencia obsoleta corregida de paso**: el docstring de `OPAQUE_BRANCHES` en `card_data.py`
+  > remitía a «el tercer hallazgo de seguridad en `BLOCKED.md`» para esta pregunta, que ya no está
+  > abierta ni vive ahí. Ahora apunta a D8 y a `free_text.py`.
+  > **Fuera de alcance a propósito: `csv_parser.py` también llena `special_requests`.** No lo toca
+  > esta tarea porque el import de CSV es un fichero que sube un operador autenticado, no una
+  > escritura anónima desde internet, que es el disparador literal de P.8. Candidato a change futuro
+  > si alguna vez el CSV pasa a ser una exportación cruda del PMS.
 
 ## 4. Procesamiento asíncrono
 
