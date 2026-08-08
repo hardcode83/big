@@ -21,6 +21,12 @@ An earlier version of this paragraph claimed no signature here could express suc
 was false for `add`, and the review that caught it noted the real risk: the next consumer of
 this port could otherwise seed rows into arbitrary states with no transition history.
 
+**And the obligation that goes with writing that column — persisting a `property_state_transitions`
+row in the same transaction — is NOT restated here on purpose. Rule 9 of `steering/security.md`
+is its only normative home; cite it, do not paraphrase it.** `properties-crud` got that
+attribution wrong four separate times while re-narrating it in four artifacts, which is the same
+failure `security.md:41` already records for another of its rules.
+
 Every method takes `tenant_id` explicitly and returns `None` outside it. That is what
 makes R1.4 answer `404` (design D6) instead of leaking the existence of a neighbour's
 property, and what lets the ingest paths of R3.4/R4.2 report a row as an error rather

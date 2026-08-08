@@ -473,12 +473,15 @@ async def _seeded_in_state(
     exercises the real writers instead of bypassing them.
 
     **It is not the full production path, and the difference matters if you copy this helper**:
-    in production `save` is called by `PropertyStateMachine`, which persists a
-    `property_state_transitions` row in the same transaction (rule 9 of `steering/security.md`:
-    "todo escritor de `current_operational_state` persiste su fila de
-    `property_state_transitions` en la misma transacción"). This calls `save` bare, so the rows
-    it leaves have no transition history. That is fine for a filtering fixture, which is all
+    rule 9 of `steering/security.md` obliges a writer of `current_operational_state` to persist
+    its `property_state_transitions` row in the same transaction. This helper calls `save` bare,
+    so the rows it leaves have no transition history — fine for a filtering fixture, which is all
     this is, and wrong for anything asserting on that history.
+
+    Which component discharges that obligation in production is deliberately NOT restated here.
+    Read the rule. An earlier version of this paragraph named `PropertyStateMachine`, and that
+    was wrong — it is a pure evaluator with no session and no repository — and it was the fourth
+    time this change misattributed the same obligation while paraphrasing it.
     """
     entity = _entity(tenant_id, internal_code=internal_code, status=status)
     await repository.add(tenant_id, entity)

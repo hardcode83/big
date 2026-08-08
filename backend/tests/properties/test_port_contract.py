@@ -1,9 +1,14 @@
 """The property port's writers stay narrow (`properties-crud` R4.2, design D3).
 
-This is a structural test on purpose. The rule it protects — only `PropertyStateMachine` writes
-`current_operational_state` (`steering/backend.md`, and `celery-jobs` R3.6: "no SHALL escribir
-`current_operational_state` por ninguna otra vía") — is the kind that survives as long as
-somebody remembers it during review. Asserting it here means a future widening fails in the
+This is a structural test on purpose. The rule it protects — `current_operational_state` changes
+only by a destination `PropertyStateMachine` approved (`steering/backend.md`, and `celery-jobs`
+R3.6: "no SHALL escribir `current_operational_state` por ninguna otra vía") — is the kind that
+survives as long as somebody remembers it during review.
+
+"Approved", not "writes": the machine is a pure evaluator and persists nothing. Who writes, and
+the obligation to persist a `property_state_transitions` row alongside, live in rule 9 of
+`steering/security.md` — cite it there rather than restating it here, which is the mistake this
+change made four times. Asserting it here means a future widening fails in the
 suite instead of depending on a reviewer noticing, which is the same reason
 `tests/test_route_authorization.py` snapshots the protected paths.
 """
