@@ -113,3 +113,24 @@ def test_creating_the_app_installs_the_filter() -> None:
 def test_every_provider_spelling_is_covered(provider: str) -> None:
     """The route accepts the provider in any case, so the redactor cannot key on one spelling."""
     assert TOKEN not in redact_webhook_token(f"/api/v1/webhooks/{provider}/{TOKEN}")
+
+
+@pytest.mark.parametrize("prefix", ["/API/v1/webhooks", "/Api/V1/Webhooks", "/api/V1/webhooks"])
+def test_a_miscased_prefix_is_redacted_too(prefix: str) -> None:
+    """Starlette's routing is case-sensitive, so such a request 404s — and is logged anyway.
+
+    The realistic trigger is a mis-cased URL pasted into a provider's panel. Both the regex and the
+    cheap `in` pre-check have to agree about case, or the pre-check silently gates the pattern.
+    """
+    record = logging.LogRecord(
+        name="uvicorn.access",
+        level=logging.INFO,
+        pathname=__file__,
+        lineno=1,
+        msg='%s - "%s %s HTTP/%s" %d',
+        args=("127.0.0.1:1", "POST", f"{prefix}/BEDS24/{TOKEN}", "1.1", 404),
+        exc_info=None,
+    )
+
+    assert WebhookTokenRedactingFilter().filter(record) is True
+    assert TOKEN not in record.getMessage()

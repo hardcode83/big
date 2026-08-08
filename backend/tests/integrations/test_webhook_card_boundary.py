@@ -245,3 +245,22 @@ def test_a_failure_cannot_carry_free_text() -> None:
     assert not any(
         isinstance(getattr(WebhookEventFailure, name, None), str) for name in ("message", "detail")
     )
+
+
+def test_the_field_must_be_a_key_name_and_not_a_value() -> None:
+    """The hole one level down, closed after the security panel re-review.
+
+    `field` was an unvalidated string, so the closed `code` bought nothing: a writer could pass
+    `field="guest.document_number=12345678Z"` and carry a rule-3 value into the column through the
+    very type that exists to stop it. A key name is a dotted path of identifiers; a value is not.
+    """
+    assert WebhookEventFailure(code=UNMAPPABLE, field="guarantee.card_number").field
+
+    for smuggled in (
+        "guest.document_number=12345678Z",
+        "card_number: 4111111111111111",
+        "the guest's card",
+        "4111111111111111",
+    ):
+        with pytest.raises(ValueError):
+            WebhookEventFailure(code=UNMAPPABLE, field=smuggled)

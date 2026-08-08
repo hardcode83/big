@@ -53,6 +53,16 @@ secreto de cabecera como única defensa. Rejected: el token en cabecera y no en 
 12(b) están pensadas para sostenerse mutuamente, y con ambos secretos en cabeceras un solo volcado
 de cabeceras los pierde los dos.
 
+**Coste declarado de poner el token en la ruta: se registra en cada log de peticiones que haya
+delante.** Un path es lo único de una petición que todo servidor, proxy y agregador guarda por
+defecto, así que la no-adivinabilidad de 12(b) convive con que el valor quede escrito en sitios que
+no elegimos. Dentro del proceso está cerrado —`app/core/log_redaction.py` redacta el segmento en el
+log de acceso de uvicorn, y el limitador usa el hash para no convertirlo en clave de Redis—, pero
+**fuera no**: [ADR 0003](../../../docs/adr/0003-https-ingress-dev.md) pone un túnel de Cloudflare
+por delante, y Cloudflare registra el URI completo en sus propios logs. Quien tenga acceso a esa
+cuenta ve el token vivo de todos los tenants. Lo destapó el re-review de seguridad de la sección 2;
+la reparación es de configuración de borde, no de código, y está en la entrada 5 de `BLOCKED.md`.
+
 ### D2 — Tabla propia `webhook_endpoints`, no columnas en `pms_credentials`
 
 **Chosen:** tabla nueva en el módulo `integrations`, con `TenantScopedMixin` (entra en
@@ -193,7 +203,7 @@ Rejected: un solo límite por IP — penaliza al proveedor legítimo, que es el 
 > rotar y actualizar el panel del proveedor sus entregas fallan. 20 fallos en un minuto desde la
 > IP compartida del proveedor bloquean a **todos** los tenants que hay detrás — el estrangulamiento
 > multi-tenant que esta decisión dice evitar, provocado por un tenant cualquiera con configuración
-> obsoleta. Ver entrada 5 de `BLOCKED.md`: la salida naïve (no contar los fallos cuyo token sí
+> obsoleta. Ver entrada 4 de `BLOCKED.md`: la salida naïve (no contar los fallos cuyo token sí
 > resuelve) reintroduce el oráculo de D4, porque *no* ser estrangulado confirma que el token existe.
 
 ### D7 — `scrub_card_data` en la frontera, reutilizado tal cual

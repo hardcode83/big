@@ -15,6 +15,7 @@ import pytest
 from httpx import ASGITransport, AsyncClient
 from sqlalchemy import text
 
+from app.auth.api.dependencies import get_client_ip
 from app.core.crypto import encrypt
 from app.core.db import get_db_session
 from app.integrations.api.dependencies import get_webhook_throttle
@@ -371,8 +372,6 @@ async def test_the_router_drives_the_real_throttle(db_session, tenant_a) -> None
     every request. This one test runs the router against the real adapter and the real Redis of
     the compose stack, which is what turns the doubles above from a blind spot into a convenience.
     """
-    from httpx import ASGITransport, AsyncClient
-
     token = await _provision(db_session, tenant_a)
     app = create_app()
 
@@ -380,6 +379,15 @@ async def test_the_router_drives_the_real_throttle(db_session, tenant_a) -> None
         yield db_session
 
     app.dependency_overrides[get_db_session] = _session_override
+    # A UNIQUE client IP, and this is what keeps the test honest rather than merely passing.
+    # `ASGITransport` reports every request as `127.0.0.1`, so the failed call below charges the
+    # real, shared key `webhook:probe:127.0.0.1` — which never expires between runs within its
+    # 60-second window. The QA panel reproduced the consequence: run this test ~15 times in a
+    # minute and it starts failing with `429`, because it exhausts the very budget it is not
+    # trying to test. `tests/integrations/test_webhook_throttle.py` already solved this with
+    # `unique_ip`; the drift-detection value here is in the throttle's *methods* being real, not
+    # in which address they are keyed by.
+    app.dependency_overrides[get_client_ip] = lambda: f"198.51.100.{uuid.uuid4().int % 200}-{uuid.uuid4().hex[:8]}"
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
@@ -439,13 +447,20 @@ async def test_an_unknown_token_with_a_lying_content_length_is_a_404_not_a_413(
     reaches the parse at all: it gets the uniform `404` of D4, not a `413`. That is the better
     answer on both counts — no body is read (R1.7), and the size of an anonymous caller's body
     tells it nothing about whether its token was real.
+
+    The body must be **genuinely oversized**, not merely present: with a small one this test would
+    pass under the old parse-before-auth ordering too, since the byte-counting fallback only fires
+    once the ceiling is crossed. The QA panel caught exactly that — the first version used 4 KB and
+    discriminated nothing.
     """
+    from app.core.config import settings
+
     await _provision(db_session, tenant_a)
 
     async with client_factory() as client:
         response = await client.post(
             _url(generate_webhook_token()),
-            content=b"x" * 4096,
+            content=b"x" * (settings.request_max_bytes + 1),
             headers={
                 HEADER_NAME: SECRET,
                 "content-type": "application/json",

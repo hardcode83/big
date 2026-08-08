@@ -1,15 +1,16 @@
 # BLOCKED — reservations-webhooks
 
-Cinco entradas. Las cuatro primeras son **decisiones que necesitan a Jose**. Las dos primeras estaban
+Seis entradas. Las cinco primeras son **decisiones que necesitan a Jose**. Las dos primeras estaban
 previstas desde el diseño, que las tomó de forma provisional y marcada para no detener el flujo, no
-para darlas por buenas; la tercera la destapó el panel de seguridad de la sección 1 y la cuarta el de
-la sección 2. La quinta es el estado de la implementación, para que se pueda reanudar sin reconstruir
+para darlas por buenas; las tres siguientes las destaparon los paneles (la 3 en la sección 1, la 4 y
+la 5 en la 2). La sexta es el estado de la implementación, para que se pueda reanudar sin reconstruir
 nada de la conversación.
 
-Las entradas 3 y 4 tienen algo en común que conviene ver junto: las dos son **premisas del diseño que
-la implementación falsó**, no defectos de código. La 3 es una exención que se tomó en el sitio
-equivocado; la 4 es una justificación que dejó de ser cierta en cuanto el propio change entregó la
-rotación.
+Las entradas 3, 4 y 5 tienen algo en común que conviene ver junto: las tres son **premisas del diseño
+que la implementación falsó**, no defectos de código, y ninguna era visible leyendo el diseño. La 3 es
+una exención tomada en el sitio equivocado; la 4 es una justificación que dejó de ser cierta en cuanto
+el propio change entregó la rotación; la 5 es un coste de D1 que nadie declaró y que sólo aparece
+cuando existe una ruta real que un proxy pueda registrar.
 
 ---
 
@@ -166,7 +167,36 @@ rotación.
 
 ---
 
-## 5. La implementación está a medias (secciones 1 y 2 de 6)
+## 5. El token de ruta queda en los logs de Cloudflare, y eso no se arregla desde el código
+
+- **Fase**: run (re-review de seguridad de la sección 2) · afecta a D1
+- **Tipo**: `decision` — necesita un humano (y acción fuera de este repositorio)
+- **Qué y por qué**
+
+  D1 pone el `webhook_token` en la **ruta**, que es lo que le da a la regla 12(b) su no-adivinabilidad
+  por tenant. El coste que el diseño no declaró: un path es lo único de una petición que todo
+  servidor, proxy y agregador guarda por defecto.
+
+  Dentro del proceso ya está cerrado — `app/core/log_redaction.py` redacta el segmento en el log de
+  acceso de uvicorn, y el limitador de tasa usa el hash para no convertir el token en clave de Redis.
+  **Fuera del proceso no**: [ADR 0003](../../../docs/adr/0003-https-ingress-dev.md) eligió un túnel
+  de Cloudflare precisamente para no meter un proxy inverso en el stack, y Cloudflare registra el URI
+  completo en sus logs y analíticas. Quien tenga acceso a esa cuenta ve el **token vivo de todos los
+  tenants** — la mitad del par de la regla 12, recuperable desde donde se escribió sin querer, que es
+  exactamente lo que la redacción existe para impedir.
+
+  No está medido el alcance: no se ha comprobado la retención ni quién tiene acceso a esa cuenta.
+  Lo que sí es seguro es que existe.
+
+- **Cómo se resuelve**: una de tres — redactar en el borde (una Transform Rule de Cloudflare sobre
+  `/api/v1/webhooks/*`), aceptar el riesgo por escrito acotándolo con rotación más frecuente, o
+  restringir quién lee esos logs. **No** mover el token fuera de la ruta: eso devuelve el problema a
+  la regla 12(b), que es más caro que el que resuelve.
+- **Comando para reanudar**: `/sdd:review reservations-webhooks`
+
+---
+
+## 6. La implementación está a medias (secciones 1 y 2 de 6)
 
 - **Fase**: run
 - **Tipo**: `deferred` — el flujo puede reanudarlo sin decisión humana

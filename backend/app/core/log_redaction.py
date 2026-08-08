@@ -27,9 +27,16 @@ import re
 # formatted request line. Anchored on the literal prefix so it cannot touch any other path, and
 # the provider is kept: it is not a secret and it is what an operator needs in order to tell which
 # integration is delivering.
-_WEBHOOK_PATH = re.compile(r"(/api/v1/webhooks/[^/\s]+/)[^\s?]+")
+#
+# Case-insensitive: Starlette's routing IS case-sensitive, so `/API/v1/webhooks/…` never reaches
+# the endpoint — but uvicorn logs it all the same, token included. The realistic trigger is a
+# mis-cased URL pasted into a provider's panel, not an attacker (who already holds the token they
+# would be leaking). Found by the security panel of section 2 on re-review.
+_WEBHOOK_PATH = re.compile(r"(/api/v1/webhooks/[^/\s]+/)[^\s?]+", re.IGNORECASE)
 
 REDACTED = "***"
+
+_PREFIX = "/api/v1/webhooks/"
 
 
 def redact_webhook_token(message: str) -> str:
@@ -55,15 +62,24 @@ class WebhookTokenRedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
-            if "/api/v1/webhooks/" in args[2]:
+            if _mentions_webhook_path(args[2]):
                 redacted = list(args)
                 redacted[2] = redact_webhook_token(args[2])
                 record.args = tuple(redacted)
             return True
 
-        if isinstance(record.msg, str) and "/api/v1/webhooks/" in record.msg:
+        if isinstance(record.msg, str) and _mentions_webhook_path(record.msg):
             record.msg = redact_webhook_token(record.msg)
         return True
+
+
+def _mentions_webhook_path(value: str) -> bool:
+    """The cheap pre-check, and it has to agree with the regex about case.
+
+    A case-SENSITIVE `in` here would gate a case-insensitive pattern, so a mis-cased path would
+    never reach the substitution and the `re.IGNORECASE` above would be decoration.
+    """
+    return _PREFIX in value.lower()
 
 
 def install_webhook_token_redaction() -> None:

@@ -1,4 +1,5 @@
 import json
+import re
 import uuid
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -64,6 +65,19 @@ class WebhookEventFailure:
                 f"unknown webhook failure code {self.code!r}; add it to WEBHOOK_FAILURE_CODES "
                 "rather than passing a message — rule 11 forbids free text in this column"
             )
+        # `field` was a plain unvalidated string until the security panel of section 2 pointed out
+        # that the guarantee above then stopped one level short: a writer could pass
+        # `field=f"guest.document_number={value}"` and carry a rule-3 value into the column
+        # through the very type that exists to make that impossible. A dotted path of identifiers
+        # is what a key name looks like, and nothing else fits — no spaces, no `=`, no punctuation
+        # to hide a value behind. Latent when it was found (nothing writes `error` yet), and
+        # closed here rather than when the processing job makes it live.
+        if self.field is not None and not _IS_FIELD_PATH.fullmatch(self.field):
+            raise ValueError(
+                f"webhook failure field {self.field!r} is not a field NAME. Record the key that "
+                "failed, never its value (rule 11): a dotted path of identifiers, like "
+                "'guarantee.card_number'."
+            )
 
     def render(self) -> str:
         payload = {"code": self.code}
@@ -84,6 +98,9 @@ UNMAPPABLE = "UNMAPPABLE"
 
 PROVIDER_UNAVAILABLE = "PROVIDER_UNAVAILABLE"
 """The provider could not be re-read within the retry budget."""
+
+_IS_FIELD_PATH = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*")
+"""What a key NAME looks like, and nothing a value could hide behind."""
 
 WEBHOOK_FAILURE_CODES = frozenset({UNATTRIBUTED, UNMAPPABLE, PROVIDER_UNAVAILABLE})
 """Closed on purpose, like `app/audit/domain/actions.py`'s vocabulary and for the same reason:
