@@ -234,9 +234,14 @@ forzado en `infrastructure/`.
 ## 3. `special_requests`: la frontera heredada (D8)
 
 > **D8 ratificada por Jose el 2026-08-08**, así que estas dos tareas se implementan tal como están
-> escritas: redacción de rachas de 13-19 dígitos, sólo en fuentes externas, sin Luhn. Lo que cerró la
+> escritas: redacción de rachas largas de dígitos, sólo en fuentes externas, sin Luhn. Lo que cerró la
 > ratificación fue el tamaño real del falso positivo — un código de portal español son 4-8 dígitos, un
 > móvil 9, uno internacional 11-12, y ninguno llega al umbral. Ya no depende de nada.
+>
+> **Un matiz que la ejecución obligó a introducir, y que esta cabecera decía mal**: el umbral operativo
+> es **13 o más**, no la banda cerrada 13-19 que dice D8. Leída como banda, una racha maximal de 20+
+> queda intacta y un PAN pegado a otro número sobrevive entero. Está razonado en la nota de 3.1 y en
+> `MIN_REDACTED_DIGITS`; `design.md` sigue diciendo 13-19 y hay que corregirlo (pendiente de Jose).
 
 - [x] 3.1 `infrastructure/free_text.py`: redacción de rachas de 13-19 dígitos ignorando espacios y
   guiones, sin Luhn. **TDD**: el test exige primero que un PAN con y sin separadores desaparezca y que

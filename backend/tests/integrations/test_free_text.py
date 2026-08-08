@@ -14,6 +14,7 @@ import pytest
 from app.integrations.infrastructure.free_text import (
     LONG_DIGIT_RUN_REDACTED,
     MIN_REDACTED_DIGITS,
+    find_long_digit_runs,
     redact_long_digit_runs,
 )
 from app.integrations.infrastructure.beds24.mapping import (
@@ -86,6 +87,68 @@ def test_separators_do_not_save_it(written):
 
     assert LONG_DIGIT_RUN_REDACTED in redacted
     assert not any(character.isdigit() for character in redacted)
+
+
+@pytest.mark.parametrize(
+    "written",
+    [
+        "4111 1111 1111 1111",
+        "4111 1111 1111 1111",
+        "4111–1111–1111–1111",
+        "4111—1111—1111—1111",
+        "4111－1111－1111－1111",
+        "4111\n1111\n1111\n1111",
+        "4111\t1111\t1111\t1111",
+    ],
+    ids=["nbsp", "narrow-nbsp", "en-dash", "em-dash", "fullwidth-hyphen", "newline", "tab"],
+)
+def test_a_separator_that_is_not_on_a_us_keyboard_does_not_save_it(written):
+    """Found by the security panel of this section, demonstrated rather than argued.
+
+    The first version of this rule wrote the separator class as `[ -]`, which honours D8's
+    "ignoring spaces and hyphens" only for ASCII. A **non-breaking space is what you get from
+    copy-pasting a card off a web page or a PDF** — the single most likely way a real PAN reaches
+    a booking note — and it went through untouched, as did the dashes a word processor
+    substitutes for a typed hyphen.
+    """
+    assert redact_long_digit_runs(written) == LONG_DIGIT_RUN_REDACTED
+
+
+@pytest.mark.parametrize(
+    "written",
+    ["４１１１１１１１１１１１１１１１", "٤١١١١١١١١١١١١١١١", "४१११११११११११११११"],
+    ids=["fullwidth", "arabic-indic", "devanagari"],
+)
+def test_a_pan_in_another_digit_script_does_not_save_it(written):
+    """Also from the security panel, and independently from QA.
+
+    `[0-9]` does not merely mis-measure a fullwidth or Arabic-Indic run, it never enters one, so
+    the whole PAN was returned byte for byte. D8's threat model is an anonymous write from the
+    internet, which makes "nobody would type it that way" the wrong question.
+    """
+    assert redact_long_digit_runs(written) == LONG_DIGIT_RUN_REDACTED
+
+
+def test_the_matcher_and_the_counter_agree_on_what_a_digit_is():
+    """The bug underneath the two above: the pattern used `[0-9]` and the length used
+    `str.isdigit()`, which are different alphabets.
+
+    `²` is `isdigit()` but is not a decimal digit and cannot spell a card number. Pinned because
+    a matcher and a counter that disagree about what a digit is will eventually disagree about a
+    card number — the same class as the drift between this module and the fixture guard.
+    """
+    assert redact_long_digit_runs("²" * 13) == "²" * 13
+
+
+def test_a_dot_is_not_a_separator_and_that_is_deliberate():
+    """The accepted edge of the widened class, pinned so it is a decision and not an accident.
+
+    Dots join decimals, dates, versions and IP addresses, so admitting them would eat
+    `3.14159265358979` and a good deal of real operational text — and unlike a space or a dash, a
+    dot is not what D8 says to ignore. QA and security read this one differently; this is the
+    line, written down.
+    """
+    assert redact_long_digit_runs("4111.1111.1111.1111") == "4111.1111.1111.1111"
 
 
 def test_the_surrounding_text_survives():
@@ -189,6 +252,22 @@ def test_a_run_longer_than_a_pan_goes_too():
 
 
 # --- Shape ---
+
+
+def test_the_detector_and_the_redactor_are_the_same_rule():
+    """`find_long_digit_runs` exists so the on-disk fixture guard stops carrying its own scanner.
+
+    That drift was a real finding, not a hypothetical: the guard kept the closed 13-19 band after
+    this module moved to "13 or more", so a PAN merged with an expiry read as a 21-digit run and
+    the guard called the file clean. Pinning the two against each other here is what stops the
+    next one-sided edit.
+    """
+    note = f"paid with {PAN} 1225 and phone 600123456"
+
+    assert find_long_digit_runs(note) == ["41111111111111111225"]
+    assert redact_long_digit_runs(note) == (
+        f"paid with {LONG_DIGIT_RUN_REDACTED} and phone 600123456"
+    )
 
 
 def test_none_and_empty_survive_unchanged():
