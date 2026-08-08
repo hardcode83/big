@@ -117,7 +117,29 @@ forzado en `infrastructure/`.
   > `frontend`, alimentándole `backend/openapi.json` por stdin en la ruta que el script espera. Las
   > dos mitades pasan su `--check`; el diff del `.d.ts` es puramente aditivo (+131, −0).
 
-## 2. Recepción autenticada
+## 2. Recepción autenticada <!-- panel: PASS 2026-08-08 -->
+
+> **Panel de la sección 2 (siete reviewers, un solo mensaje).** `sdd-architect`,
+> `sdd-review-tenancy`, `sdd-review-cicd` y `sdd-review-i18n` sin hallazgos. Nueve hallazgos entre
+> seguridad (5), QA (2) y documentación (2); ocho arreglados, uno es decisión y está en `BLOCKED.md`.
+> Los tres que importan:
+> - **Seguridad, alto — el contador por token se cobraba antes de autenticar.** Cualquiera con sólo
+>   el token de ruta podía gastar el presupuesto de un tenant y dejar su integración en `429`. Eso
+>   invierte D6: el límite existe para contener al proveedor, no para ser un arma contra el tenant.
+>   Ahora se autentica primero y el fallo se cobra al presupuesto por IP.
+> - **Seguridad, medio — el cuerpo se leía y parseaba antes de autenticar**, que es literalmente lo
+>   contrario de R1.7 y del orden que fija D5. El caso de uso se partió en `authenticate` (ruta y
+>   cabeceras, sin tocar el cuerpo) y `record`. Un mismo cambio arregla los dos hallazgos.
+> - **QA, medio — ningún test ejercitaba el throttle real a través del router**: todos usaban dobles
+>   escritos a mano que nada obliga a coincidir con la clase real, así que renombrar un método la
+>   habría dejado en verde con el endpoint roto en producción. Añadido un test que va por el
+>   adaptador real contra el Redis del stack.
+>
+> Los otros cinco: el tipo de `error` ahora es `WebhookEventFailure` y no `str` (un tipo que nadie
+> obliga a usar no garantiza nada), el token de ruta se redacta en el log de acceso de uvicorn
+> —viaja en el path por D1, y ahí lo escribe cualquier proxy—, `.env.example` documenta las dos
+> variables nuevas, el endpoint declara sus respuestas `404`/`429`/`413`, y se añadió el hermano que
+> QA pidió del bug del `413`.
 
 - [x] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
   para fallos de autenticación, estricto), con el patrón de `RedisLoginThrottle` pero sin reutilizar su

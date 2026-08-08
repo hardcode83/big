@@ -270,6 +270,128 @@ async def test_only_a_failed_attempt_is_counted_against_the_ip(
     assert len(throttle.failures) == 1
 
 
+# --- The order of the checks IS the defence (security panel, section 2) ---
+
+
+class _CountingThrottle(_AllowAll):
+    """Records what was charged, so the ORDER of the charges can be asserted."""
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.deliveries: list[str] = []
+
+    async def delivery_allowed(self, token_hash: str) -> bool:
+        self.deliveries.append(token_hash)
+        return True
+
+
+@pytest.mark.asyncio
+async def test_an_unauthenticated_caller_cannot_spend_the_tenants_delivery_budget(
+    db_session, tenant_a, client_factory
+) -> None:
+    """**The HIGH finding of the section-2 security panel.**
+
+    The per-token counter used to be charged before authentication, so anyone holding only the
+    route token — half of the pair, and the half that travels in a URL — could burn a tenant's 120
+    deliveries a minute and keep its real integration on `429` indefinitely. That inverts D6: the
+    per-token limit exists to contain a provider's runaway traffic, not to be a weapon pointed at
+    the tenant from outside.
+
+    Three ways of failing, none of which may touch the tenant's budget.
+    """
+    token = await _provision(db_session, tenant_a)
+    counting = _CountingThrottle()
+
+    async with client_factory(counting) as client:
+        await client.post(_url(token), json=BODY, headers={HEADER_NAME: "wrong"})
+        await client.post(_url(generate_webhook_token()), json=BODY, headers={HEADER_NAME: SECRET})
+        await client.post(_url(token), json=BODY)
+
+    assert counting.deliveries == []
+    assert len(counting.failures) == 3
+
+
+@pytest.mark.asyncio
+async def test_an_authenticated_delivery_is_charged_to_the_tenant(
+    db_session, tenant_a, client_factory
+) -> None:
+    """The other half: a real delivery must still be counted, keyed by the STORED hash."""
+    token = await _provision(db_session, tenant_a)
+    counting = _CountingThrottle()
+
+    async with client_factory(counting) as client:
+        response = await client.post(_url(token), json=BODY, headers={HEADER_NAME: SECRET})
+
+    assert response.status_code == 202
+    assert counting.deliveries == [hash_webhook_token(token)]
+    assert counting.failures == []
+
+
+@pytest.mark.asyncio
+async def test_the_body_is_not_read_before_authentication(
+    db_session, tenant_a, client_factory
+) -> None:
+    """R1.7 verbatim: "rechazar la petición ANTES de leer el cuerpo completo cuando la
+    autenticación falla, de forma que un cuerpo grande de un llamante no autenticado no se
+    materialice en memoria".
+
+    Asserted by sending a body that **cannot be parsed at all** together with bad credentials: if
+    the request is refused with the ordinary `404` rather than anything the parser would produce,
+    the body was never needed. A stream that raises on read is the only way to observe "was it
+    read?" from outside, short of measuring memory.
+    """
+    await _provision(db_session, tenant_a)
+    read = False
+
+    async def exploding_body():
+        nonlocal read
+        read = True
+        yield b'{"a":'
+
+    async with client_factory() as client:
+        response = await client.post(
+            _url(generate_webhook_token()),
+            content=exploding_body(),
+            headers={HEADER_NAME: SECRET, "content-type": "application/json"},
+        )
+
+    assert response.status_code == 404
+    assert read is False, "the body was consumed before authentication decided"
+
+
+# --- The real throttle, through the real router (QA panel, section 2) ---
+
+
+@pytest.mark.asyncio
+async def test_the_router_drives_the_real_throttle(db_session, tenant_a) -> None:
+    """Every other test here overrides the throttle with a hand-written double.
+
+    Nothing forces those doubles to match `RedisWebhookThrottle`, so renaming a method on the real
+    class would leave this whole file green while the deployed endpoint raised `AttributeError` on
+    every request. This one test runs the router against the real adapter and the real Redis of
+    the compose stack, which is what turns the doubles above from a blind spot into a convenience.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    token = await _provision(db_session, tenant_a)
+    app = create_app()
+
+    async def _session_override():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = _session_override
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        accepted = await client.post(_url(token), json=BODY, headers={HEADER_NAME: SECRET})
+        refused = await client.post(
+            _url(generate_webhook_token()), json=BODY, headers={HEADER_NAME: SECRET}
+        )
+
+    assert accepted.status_code == 202
+    assert refused.status_code == 404
+
+
 # --- The body ceiling, the half that needs a route to read it (task 2.2) ---
 
 
@@ -301,6 +423,37 @@ async def test_a_lying_content_length_is_caught_by_counting_the_stream(
         )
 
     assert response.status_code == 413
+    stored = (
+        await db_session.execute(text("SELECT count(*) FROM webhook_events"))
+    ).scalar_one()
+    assert stored == 0
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_token_with_a_lying_content_length_is_a_404_not_a_413(
+    db_session, tenant_a, client_factory
+) -> None:
+    """The sibling the QA panel asked for, and the answer changed with the reordering.
+
+    Authentication now happens before the body is touched, so an unauthenticated caller never
+    reaches the parse at all: it gets the uniform `404` of D4, not a `413`. That is the better
+    answer on both counts — no body is read (R1.7), and the size of an anonymous caller's body
+    tells it nothing about whether its token was real.
+    """
+    await _provision(db_session, tenant_a)
+
+    async with client_factory() as client:
+        response = await client.post(
+            _url(generate_webhook_token()),
+            content=b"x" * 4096,
+            headers={
+                HEADER_NAME: SECRET,
+                "content-type": "application/json",
+                "content-length": "-1",
+            },
+        )
+
+    assert response.status_code == 404
     stored = (
         await db_session.execute(text("SELECT count(*) FROM webhook_events"))
     ).scalar_one()

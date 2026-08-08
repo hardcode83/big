@@ -177,6 +177,25 @@ todos los tenants a la vez.
 Rejected: una librería de rate limiting — dependencia nueva para algo que el módulo `auth` ya modela.
 Rejected: un solo límite por IP — penaliza al proveedor legítimo, que es el patrón de tráfico normal.
 
+> **Corregido en parte al implementar, y con una premisa falsada que sigue abierta** (panel de
+> seguridad de la sección 2).
+>
+> **Lo que se arregló**: el contador por token se cargaba **antes** de autenticar, así que
+> cualquiera con sólo el token de ruta —la mitad del par que viaja en una URL— podía gastar el
+> presupuesto de un tenant y dejar su integración en `429` indefinidamente. Eso invierte el
+> propósito del límite: existe para contener el tráfico desbocado de un proveedor, no para ser un
+> arma que un tercero apunta al tenant. Ahora se cobra **después** de autenticar, y el fallo se
+> cobra al presupuesto por IP.
+>
+> **Lo que NO se arregló, porque es una decisión de diseño**: esta decisión afirma que el límite
+> por IP no estrangula al proveedor legítimo porque «sólo cuenta los fallos» y un proveedor
+> legítimo no falla. **Eso es falso, y lo falsa este mismo change**: R2 entrega rotación, y entre
+> rotar y actualizar el panel del proveedor sus entregas fallan. 20 fallos en un minuto desde la
+> IP compartida del proveedor bloquean a **todos** los tenants que hay detrás — el estrangulamiento
+> multi-tenant que esta decisión dice evitar, provocado por un tenant cualquiera con configuración
+> obsoleta. Ver entrada 5 de `BLOCKED.md`: la salida naïve (no contar los fallos cuyo token sí
+> resuelve) reintroduce el oráculo de D4, porque *no* ser estrangulado confirma que el token existe.
+
 ### D7 — `scrub_card_data` en la frontera, reutilizado tal cual
 
 **Chosen:** el cuerpo parseado pasa por `scrub_card_data` **antes** de construir el `WebhookEvent`, y

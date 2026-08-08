@@ -31,10 +31,10 @@ from starlette.requests import ClientDisconnect
 from app.auth.api.dependencies import get_client_ip, now_utc
 from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
+from app.core.openapi import ErrorEnvelope
 from app.integrations.api.dependencies import get_receive_webhook_use_case, get_webhook_throttle
 from app.integrations.application.webhooks import ReceiveWebhookUseCase
 from app.integrations.domain.errors import WebhookAuthenticationError
-from app.integrations.domain.webhook_auth import hash_webhook_token
 from app.integrations.infrastructure.throttle import RedisWebhookThrottle
 
 router = APIRouter(prefix="/webhooks", tags=["webhooks"])
@@ -54,10 +54,43 @@ _RATE_LIMITED = error_envelope(ErrorCode.RATE_LIMITED, "Too many requests")
 _PAYLOAD_TOO_LARGE_STATUS = 413
 
 
+# Declared per-endpoint, which `app/core/openapi.py` explicitly allows ("An endpoint that wants to
+# declare its own says so in its `responses=`") and which is not the "plausible rather than
+# verified" catalogue its design D8 warns against: these three ARE this endpoint's contract —
+# the uniform `404` of D4, the `429` of R3.1 and the `413` of R3.2 — and each is pinned by a test.
+#
+# It matters more here than on an authenticated route. The consumer is a provider's engineer
+# configuring a panel, who cannot read this repository, and for whom a bare `404` is naturally
+# read as "wrong URL" when it in fact means "wrong credentials" — the one thing D4's uniformity
+# makes impossible to discover by experiment.
+_RECEIVER_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "Not authenticated. Returned identically for an unknown provider, an unknown route "
+            "token, a missing static header and a wrong one — the endpoint never reveals which, "
+            "so a caller cannot use it to discover whether a token exists."
+        ),
+    },
+    429: {
+        "model": ErrorEnvelope,
+        "description": (
+            "Rate limited: either this endpoint's per-minute delivery budget, or the stricter "
+            "per-IP budget that only failed authentications consume."
+        ),
+    },
+    413: {
+        "model": ErrorEnvelope,
+        "description": "The request body exceeded the ceiling applied to all of /api/v1/.",
+    },
+}
+
+
 @router.post(
     "/{provider}/{webhook_token}",
     status_code=status.HTTP_202_ACCEPTED,
     include_in_schema=True,
+    responses=_RECEIVER_RESPONSES,
     summary="Receive a PMS webhook notice",
     description=(
         "Anonymous by design: the route token is the credential (rule 12(b)), paired with the "
@@ -87,9 +120,33 @@ async def receive_webhook(
         # (R3.4), so it has to bite before the lookup a guesser is trying to provoke.
         return _refused(status.HTTP_429_TOO_MANY_REQUESTS, _RATE_LIMITED)
 
-    if not await throttle.delivery_allowed(hash_webhook_token(webhook_token)):
-        # By token hash, never the token: this value becomes a Redis key, and rule 12(b)'s worth
-        # is that the route cannot be recovered from somewhere it was incidentally written down.
+    # AUTHENTICATE BEFORE READING THE BODY, and before charging anything to the tenant. Both
+    # halves of that order were wrong in the first version and the security panel of section 2
+    # found both:
+    #
+    #   * the body was parsed first, so an anonymous caller made the process allocate and parse
+    #     up to `REQUEST_MAX_BYTES` before a single credential was checked — R1.7 says the
+    #     opposite in as many words, and D5 fixes the order as "… token → secreto → parseo";
+    #   * the per-token counter was incremented before authentication, so anyone holding only the
+    #     route token could spend a tenant's whole per-minute budget and take its integration
+    #     down. That inverts D6: the per-token limit exists to contain a provider's runaway
+    #     traffic, not to be a weapon an outsider points at the tenant.
+    try:
+        endpoint = await use_case.authenticate(
+            provider=provider, token=webhook_token, get_header=request.headers.get
+        )
+    except WebhookAuthenticationError:
+        # The ONLY place a failed authentication is counted (R3.4, D6). Counting every request
+        # would collapse the two limits into one and throttle a provider's legitimate traffic for
+        # all of its tenants at once.
+        await throttle.record_failed_attempt(client_ip)
+        return _refused(status.HTTP_404_NOT_FOUND, _NOT_FOUND)
+
+    # Charged only now, to a caller that proved it holds both secrets. Keyed by the STORED hash
+    # rather than by hashing the path segment again: the same value, one fewer place the raw token
+    # is handled, and rule 12(b)'s worth is that the route cannot be recovered from anywhere it
+    # was incidentally written down — a Redis key included.
+    if not await throttle.delivery_allowed(endpoint.token_hash):
         return _refused(status.HTTP_429_TOO_MANY_REQUESTS, _RATE_LIMITED)
 
     try:
@@ -97,7 +154,7 @@ async def receive_webhook(
     except ClientDisconnect:
         # The body was cut short — which is what `MaxBodySizeMiddleware` does to a request over
         # the ceiling: it stops feeding the parser and answers `413` itself. Returning here,
-        # BEFORE the use case, is what keeps R3.2's "sin escribir ningún `WebhookEvent`" true.
+        # BEFORE the notice is recorded, keeps R3.2's "sin escribir ningún `WebhookEvent`" true.
         #
         # Found by test, and it was not theoretical: with a blanket `except` around the parse, a
         # truncated body from an authenticated caller looked exactly like malformed JSON, so the
@@ -109,21 +166,7 @@ async def receive_webhook(
             error_envelope(ErrorCode.PAYLOAD_TOO_LARGE, "Payload too large"),
         )
 
-    try:
-        await use_case.execute(
-            provider=provider,
-            token=webhook_token,
-            get_header=request.headers.get,
-            payload=payload,
-            now=now_utc(),
-        )
-    except WebhookAuthenticationError:
-        # The ONLY place a failed authentication is counted (R3.4, D6). Counting every request
-        # would collapse the two limits into one and throttle a provider's legitimate traffic for
-        # all of its tenants at once.
-        await throttle.record_failed_attempt(client_ip)
-        return _refused(status.HTTP_404_NOT_FOUND, _NOT_FOUND)
-
+    await use_case.record(endpoint=endpoint, payload=payload, now=now_utc())
     return Response(status_code=status.HTTP_202_ACCEPTED)
 
 

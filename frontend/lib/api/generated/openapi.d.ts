@@ -2820,8 +2820,26 @@ export interface operations {
           "application/json": unknown;
         };
       };
+      /** @description Not authenticated. Returned identically for an unknown provider, an unknown route token, a missing static header and a wrong one — the endpoint never reveals which, so a caller cannot use it to discover whether a token exists. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited: either this endpoint's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
+      429: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

@@ -16,6 +16,7 @@ from app.cleaning.api.templates_router import router as cleaning_templates_route
 from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
+from app.core.log_redaction import install_webhook_token_redaction
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
@@ -49,6 +50,10 @@ def create_app() -> FastAPI:
     # `openapi.json` — and therefore its CI check — permanently out of date; the root
     # file is unreachable because containers mount only their own directory.
     app = FastAPI(title="AutoHostAI backend", version=_package_version())
+    # Before any route exists, because the leak it closes is in the access log rather than in a
+    # handler: the webhook route token travels as a path segment (design D1), and uvicorn logs
+    # paths by default. See `app/core/log_redaction.py`.
+    install_webhook_token_redaction()
     register_error_handlers(app)
     register_auth_error_handlers(app)
     register_reservation_error_handlers(app)

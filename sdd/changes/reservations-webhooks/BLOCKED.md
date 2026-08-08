@@ -1,9 +1,15 @@
 # BLOCKED — reservations-webhooks
 
-Cuatro entradas. Las tres primeras son **decisiones que necesitan a Jose**: el diseño las tomó de forma
-provisional y marcada para no detener el flujo, no para darlas por buenas. Las dos primeras estaban
-previstas desde el diseño; la tercera la destapó el panel de seguridad de la sección 1. La cuarta es el
-estado de la implementación, para que se pueda reanudar sin reconstruir nada de la conversación.
+Cinco entradas. Las cuatro primeras son **decisiones que necesitan a Jose**. Las dos primeras estaban
+previstas desde el diseño, que las tomó de forma provisional y marcada para no detener el flujo, no
+para darlas por buenas; la tercera la destapó el panel de seguridad de la sección 1 y la cuarta el de
+la sección 2. La quinta es el estado de la implementación, para que se pueda reanudar sin reconstruir
+nada de la conversación.
+
+Las entradas 3 y 4 tienen algo en común que conviene ver junto: las dos son **premisas del diseño que
+la implementación falsó**, no defectos de código. La 3 es una exención que se tomó en el sitio
+equivocado; la 4 es una justificación que dejó de ser cierta en cuanto el propio change entregó la
+rotación.
 
 ---
 
@@ -119,7 +125,48 @@ estado de la implementación, para que se pueda reanudar sin reconstruir nada de
 
 ---
 
-## 4. La implementación está a medias (sección 1 de 6)
+## 4. El límite por IP de D6 estrangula a todos los tenants de un proveedor cuando uno rota
+
+- **Fase**: run (panel de seguridad de la sección 2) · afecta a D6 y a la tarea 2.1
+- **Tipo**: `decision` — necesita un humano
+- **Qué y por qué**
+
+  D6 justifica el límite estricto por IP diciendo que no daña al proveedor legítimo porque **sólo
+  cuenta los fallos de autenticación**, y *«un proveedor legítimo, que nunca falla, nunca se
+  acerca»*. **Este change falsa esa premisa**: la sección 1 entregó la rotación de material (R2.4),
+  y D3 dice explícitamente que no hay ventana de gracia — entre rotar y actualizar el panel del
+  proveedor, sus entregas fallan. Basta un tenant con configuración obsoleta (rotación a medias, un
+  secreto mal pegado, un endpoint borrado) para que 20 fallos por minuto desde la IP compartida del
+  proveedor dejen en `429` a **todos los demás tenants servidos por esa IP**, cuyas entregas son
+  criptográficamente correctas.
+
+  Es exactamente el estrangulamiento multi-tenant que D6 dice evitar, entrando por otra puerta: D6
+  descartó «un solo límite por IP» por ese motivo, y el límite por IP que sí puso resulta alcanzable
+  por tráfico legítimo.
+
+  **Por qué no lo arreglo yo**: la salida obvia —no cobrar al presupuesto por IP los fallos cuyo
+  token **sí** resuelve— reintroduce el oráculo que D4 existe para cerrar. Un atacante con un token
+  real nunca sería estrangulado y uno con un token inventado sí, así que *no* recibir `429` confirma
+  que el token existe, que es precisamente lo que la regla 12(b) no puede permitirse. Elegir entre
+  disponibilidad y no-oráculo es una decisión de diseño, no de implementación.
+
+  **Alternativas, sin recomendación fuerte**:
+  - **Allowlist de IPs de egreso del proveedor**, exentas del presupuesto de sondeo. Cierra el caso
+    sin tocar D4; el coste es configuración operativa nueva y que las IPs de un SaaS cambian.
+  - **Presupuesto de sondeo por (IP, token)** en vez de por IP. Elimina el daño colateral, pero
+    también casi todo el valor: quien adivina usa un token distinto cada vez, así que cada intento
+    estrena presupuesto.
+  - **Aceptar y documentar**, subiendo mucho el límite por IP y confiando en que la rotación es un
+    acto humano y raro. Es lo más barato y deja el fallo latente.
+  - **Que el `429` sea indistinguible del `404`**. Cierra el oráculo por completo, pero un proveedor
+    legítimo estrangulado pierde entregas en silencio, que es peor que el problema.
+
+- **Cómo se resuelve**: elegir una, y actualizar D6 y la tarea 2.1 en consecuencia.
+- **Comando para reanudar**: `/sdd:run reservations-webhooks 2`
+
+---
+
+## 5. La implementación está a medias (secciones 1 y 2 de 6)
 
 - **Fase**: run
 - **Tipo**: `deferred` — el flujo puede reanudarlo sin decisión humana
@@ -132,14 +179,22 @@ estado de la implementación, para que se pueda reanudar sin reconstruir nada de
     de la entrada 2), 1.3 (repositorio + test de aislamiento propio), 1.4 (vocabulario de auditoría +
     denylist de la regla 11 para los dos secretos), 1.5 (casos de uso de alta y rotación), 1.6 (los dos
     endpoints con RBAC) y 1.7 (las dos mitades del contrato regeneradas).
-  - **Pendiente**: las secciones 2 a 6 completas.
+  - **Sección 2 completa y verificada** (2.1 a 2.7): los dos limitadores, la evidencia del tope de
+    cuerpo, el caso de uso de recepción, la frontera de tarjeta, el router anónimo, el guard de
+    fixtures y las dos mitades del contrato. Panel de siete reviewers lanzado y cerrado: architect,
+    tenancy, cicd, i18n sin hallazgos; seguridad (5), QA (2) y documentación (2) con hallazgos, todos
+    arreglados salvo el que es una decisión (entrada 4 de esta cola).
+  - **Pendiente**: las secciones 3 a 6 completas. **La 3 no se puede empezar**: depende de la
+    ratificación de D8 (entrada 1). La 4 sí es técnicamente ejecutable —las columnas de D9 ya
+    existen— pero hacerla antes que la 3 es saltarse el orden de `tasks.md`, que es lo que mantiene
+    el sistema en pie al cerrar cada sección.
   - **El panel de la sección 1 se lanzó y está cerrado en PASS**: los siete reviewers
     (`sdd-architect`, `sdd-security`, `sdd-qa` + `sdd-review-{tenancy,i18n,cicd,documentation}`) en un
     solo mensaje. Tres hallazgos aceptados y arreglados: la carrera check-then-act del alta (ahora la
     refuta el índice, no la lectura previa), la cobertura del guard de `_to_endpoint`, y el canal de la
     exención de auditoría (entrada 3 de esta cola). Ningún hallazgo quedó abierto.
-  - **Suite completa en verde**: 3969 pasan, 35 se saltan (los `skip` son placeholders preexistentes de
-    `tests/properties/test_state_machine.py`, ajenos a este change). `alembic upgrade head`,
+  - **Suite completa en verde**: 4061 pasan, 35 se saltan (los `skip` son placeholders preexistentes
+    de `tests/properties/test_state_machine.py`, ajenos a este change). `alembic upgrade head`,
     `alembic check` y `alembic downgrade base` limpios; las dos mitades del contrato sin deriva.
     La tarea 6.1 vuelve a correrla al cerrar el change.
 

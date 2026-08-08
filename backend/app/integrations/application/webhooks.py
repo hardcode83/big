@@ -24,7 +24,7 @@ from typing import Any
 
 from app.core.crypto import SecretDecryptionError, decrypt
 from app.core.unit_of_work import UnitOfWork
-from app.integrations.domain.entities import WebhookEvent
+from app.integrations.domain.entities import WebhookEndpoint, WebhookEvent
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.domain.errors import WebhookAuthenticationError
 from app.integrations.domain.repositories import (
@@ -89,16 +89,20 @@ class ReceiveWebhookUseCase:
         self._scrub = scrub
         self._uow = uow
 
-    async def execute(
+    async def authenticate(
         self,
         *,
         provider: str,
         token: str,
         get_header: Callable[[str], str | None],
-        payload: dict[str, Any],
-        now: datetime,
-    ) -> uuid.UUID:
-        """The id of the queued event, or `WebhookAuthenticationError`.
+    ) -> WebhookEndpoint:
+        """The endpoint this request proved it holds, or `WebhookAuthenticationError`.
+
+        **Separate from `record` because the body must not be touched to answer this** (R1.7:
+        "rechazar la petición ANTES de leer el cuerpo completo cuando la autenticación falla"), and
+        because the delivery counter must only be charged to a caller that authenticated — see the
+        router. The security panel of section 2 found both: the body was parsed first, and anyone
+        holding only the route token could spend a tenant's whole per-minute budget.
 
         `get_header` rather than a headers mapping: the endpoint stores the header's *name*, so
         this needs to look up one it only learns at runtime, and a callable keeps the lookup
@@ -107,7 +111,7 @@ class ReceiveWebhookUseCase:
         The order is the one D5 fixes — provider, token, secret — and it is not arbitrary. Each
         step is cheaper than the next: parsing an enum costs nothing, the token lookup is one
         indexed hit, and only then is a Fernet decryption spent. A caller that fails the first
-        never reaches the third.
+        never reaches the third. Everything here reads the route and the headers only.
         """
         endpoint = await self._resolve(provider, token)
 
@@ -124,6 +128,21 @@ class ReceiveWebhookUseCase:
             # `None` as a failure rather than raising, so both arrive here as the same `False`.
             raise WebhookAuthenticationError
 
+        return endpoint
+
+    async def record(
+        self,
+        *,
+        endpoint: WebhookEndpoint,
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> uuid.UUID:
+        """Queue an ALREADY AUTHENTICATED notice, and return its id.
+
+        Takes the endpoint rather than the token: by the time this runs the caller has proved it
+        holds both secrets, and re-resolving would be a second lookup answering a question already
+        answered. It also makes it impossible to record against an endpoint nobody authenticated.
+        """
         event = WebhookEvent(
             id=uuid.uuid4(),
             tenant_id=endpoint.tenant_id,
@@ -140,6 +159,28 @@ class ReceiveWebhookUseCase:
         await self._events.add(event)
         await self._uow.commit()
         return event.id
+
+    async def execute(
+        self,
+        *,
+        provider: str,
+        token: str,
+        get_header: Callable[[str], str | None],
+        payload: dict[str, Any],
+        now: datetime,
+    ) -> uuid.UUID:
+        """Authenticate and queue, in one call.
+
+        The whole operation, for callers that have the body in hand already — which is every test
+        of R1 and would be the router too, were it not for the two things that have to happen
+        *between* the halves: charging the delivery counter only to an authenticated caller, and
+        not reading the body until then. Kept so the receiving rule can be exercised end to end
+        without reproducing the router's ordering in every test.
+        """
+        endpoint = await self.authenticate(
+            provider=provider, token=token, get_header=get_header
+        )
+        return await self.record(endpoint=endpoint, payload=payload, now=now)
 
     async def _resolve(self, provider: str, token: str):
         """Route token → endpoint, or the one indistinguishable failure (R1.2, R1.6, D4)."""

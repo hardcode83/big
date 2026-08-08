@@ -51,7 +51,10 @@ class SqlAlchemyWebhookEventRepository:
                 payload=event.payload,
                 processed=event.processed,
                 processed_at=event.processed_at,
-                error=event.error,
+                # `.render()` is the ONLY way a value reaches this column, which is what makes
+                # rule 11's structured form a property of the type rather than of each caller
+                # remembering. The column is `Text`; the entity is not.
+                error=None if event.error is None else event.error.render(),
                 received_at=event.received_at,
             )
         )

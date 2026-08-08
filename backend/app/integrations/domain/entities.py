@@ -25,7 +25,16 @@ class WebhookEvent:
     tenant_id: uuid.UUID | None = None
     processed: bool = False
     processed_at: datetime | None = None
-    error: str | None = None
+    # `WebhookEventFailure`, never `str`, and the type IS the guarantee (R4.3, rule 11). Typed
+    # `str | None` this field made `WebhookEventFailure` advice rather than a contract: the next
+    # writer — the processing job of D11 — could have written `error=f"could not map {payload}"`
+    # and reintroduced through the text column exactly what `payload` had just dropped. The
+    # security panel of section 2 pointed out that a class nothing forces you to use guarantees
+    # nothing. The adapter renders it on the way to the column.
+    # Quoted because `WebhookEventFailure` is declared below: the alternative is reordering this
+    # module so a value object precedes the entity that uses it, which reads worse than one pair
+    # of quotes. Dataclasses store annotations without evaluating them.
+    error: "WebhookEventFailure | None" = None
 
 
 @dataclass(frozen=True)
