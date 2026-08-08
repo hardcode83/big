@@ -138,13 +138,45 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 1. GitHub App + variables/secret creados (6.1); Terraform aplicado (§5.3, crea la IAM + los secrets del Vault); runner provisionado (6.2) y online.
 2. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job lee los secrets del Vault → `.env`, hace `docker login ghcr.io` con el `GITHUB_TOKEN` del job, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
 
-### 6.3.1 Un solo deploy raro, esperado: el que trae `api-ingress-routing`
+### 6.3.1 Cambiar la definición de una red del compose ROMPE el deploy siguiente
 
-El deploy que introduce el change `api-ingress-routing` **para y levanta todos los servicios de la red `private`** —`postgres`, `redis`, `migrate`, `backend`, `worker`, `beat` y `frontend`—, no solo los dos que el change toca. **Es esperado, es de un solo uso y el deploy sale en verde.**
+**Medido en el deploy real del 2026-08-08** (change `api-ingress-routing`, run 31250116992), y la primera redacción de esta sección lo decía más suave de lo que es. Decía «todo rebota pero `up --wait` sigue saliendo en 0», extrapolando de una reproducción en un stack de prueba. **Es falso en la VM**, y el motivo es exactamente por qué un stack de prueba no sirve para medirlo.
 
-El motivo: ese change añade IPAM explícito a la red `private` (una subred fija, para poder asignar al `frontend` una IP estática que el backend reconoce como su proxy de confianza). La red ya existe en la VM sin IPAM, así que Compose detecta la deriva y **recrea la red**, lo que obliga a reconectar todo lo que estaba enganchado a ella. Reproducido en un stack de prueba con `docker compose` v5.1.1: `up -d --wait` sigue terminando con éxito una vez los healthchecks pasan.
+Lo que pasa, con el log delante:
 
-Se anota aquí porque quien vigile los logs de ese rollout verá el stack entero parándose y eso se lee como una avería. Si ocurre en **cualquier otro** deploy, no es esto: mira si alguien ha vuelto a tocar la sección `networks` de `docker-compose.deploy.yml`.
+```
+Network autohostai_private Removed
+Network autohostai_private Created          ← subred nueva
+Container migrate-1  Recreate/Recreated     ← su definición cambió
+Container backend-1  Recreate/Recreated     ← idem (command, imagen)
+Container frontend-1 Recreate/Recreated     ← idem (ipv4_address, imagen)
+Container postgres-1 Starting               ← SOLO start, nunca Recreate
+Container redis-1    Starting               ← SOLO start, nunca Recreate
+```
+
+Compose recrea los contenedores **cuya definición de servicio cambió**. `postgres` y `redis` no cambiaron, así que los arranca sin recrearlos — y quedan adjuntos a la red que Compose acaba de **borrar**. El primer contenedor que intente resolverlos revienta:
+
+```
+migrate-1 | socket.gaierror: [Errno -3] Temporary failure in name resolution
+```
+
+En un stack recién creado esto no aparece: todos los contenedores nacen a la vez en la red nueva. Hace falta un stack **preexistente** para verlo, es decir la VM.
+
+#### Recuperación
+
+1. **Primero, lo barato**: re-lanzar el deploy (`gh run rerun <id> --failed`). Con la red vieja ya borrada, la referencia de esos dos contenedores está rota, así que Compose suele recrearlos en el segundo paso.
+2. **Si no**, por SSH en la VM, que es determinista:
+
+```bash
+cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI   # el checkout del runner (§7.4)
+docker compose -f docker-compose.deploy.yml down
+```
+
+   y volver a lanzar el deploy. `down` **no borra los volúmenes con nombre**, así que la base de datos de dev sobrevive.
+
+#### Antes de tocar `networks:` en el compose
+
+Súbelo con la recuperación planeada, no con la esperanza de que salga verde. El arreglo automático —`--force-recreate` en el paso de deploy, que elimina la clase de fallo a cambio de reiniciar Postgres y Redis en **todos** los despliegues— tiene entrada propia y no se metió aquí para no cambiar la semántica del deploy en caliente.
 
 ### 6.4 Rollback (manual, por SHA)
 
