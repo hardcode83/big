@@ -146,12 +146,27 @@ forzado en `infrastructure/`.
   > no se lee no se materializa, que es lo que protege R1.7— pero significa que esa mitad sólo es
   > observable cuando hay ruta que lea: su test se escribe en 2.5. Las otras tres afirmaciones
   > (413 con envelope, sin token válido, sin fila en `webhook_events`) sí se verifican ya. 3 tests.
-- [ ] 2.3 Caso de uso de recepción en `application/webhooks.py`: valida el provider contra `PMSProvider`,
+- [x] 2.3 Caso de uso de recepción en `application/webhooks.py`: valida el provider contra `PMSProvider`,
   resuelve el tenant por `token_hash`, compara el secreto con `hmac.compare_digest`, y persiste el
   `WebhookEvent` con `processed=FALSE`. La **decisión** vive aquí, no en el router (D5). Tests sin
   FastAPI de por medio: token desconocido, provider desconocido, cabecera ausente y cabecera incorrecta
   producen el **mismo** resultado indistinguible; y un test que fija que la comparación es de tiempo
   constante (que no usa `==`). [R1.1, R1.2, R1.3, R1.4, R1.5, R1.6]
+  > **Un agujero que sólo apareció al probarlo, y era el oráculo de D4 por otra puerta.** Una fila
+  > dañada no falla en el `decrypt` del caso de uso: falla antes, en `_to_endpoint`, dentro de
+  > `find_by_token_hash`. Sin capturar `SecretDecryptionError` **también ahí**, un `500` le decía a un
+  > llamante anónimo «esta ruta existe y su material está roto». Capturado en `_resolve`.
+  > **`scrub_card_data` se inyecta, no se importa** (ajuste a D7). D7 dice que el caso de uso
+  > descarta los datos de tarjeta antes de construir el `WebhookEvent` reutilizando esa función,
+  > pero vive en `infrastructure/` y
+  > `test_application_modules_reach_infrastructure_only_through_ports` prohíbe a esta capa importar
+  > un adaptador concreto. Se pasa por constructor, **obligatorio y sin default**: un default
+  > "no hacer nada" convertiría la obligación PCI de la regla 13(a) en opt-in. Mover `card_data.py`
+  > a `domain/` sería lo ortodoxo pero toca módulos de otros dos changes sin necesidad.
+  > Se adelanta aquí el descarte de tarjeta (2.4 lo prueba con fixtures reales) para que **no exista
+  > en ningún momento** un camino de escritura sin depurar. `event_type` se trunca a 200 y cae a
+  > `"unknown"`: lo llena un anónimo y la columna es `NOT NULL` `String(200)`, así que sin acotarlo
+  > una etiqueta de 10 KB aborta la transacción que estaba registrando el aviso. 12 tests nuevos.
 - [ ] 2.4 `scrub_card_data` en la frontera, antes de construir el `WebhookEvent`, y `error` en forma
   estructurada (código + campo, nunca texto del cuerpo). Tests que pasan los **fixtures reales
   anonimizados** de Beds24 y Channex por el receptor completo y comprueban que `payload` no contiene

@@ -16,8 +16,32 @@ and not port ownership across domains.
 import uuid
 from typing import Protocol
 
-from app.integrations.domain.entities import PmsCredential, WebhookEndpoint
+from app.integrations.domain.entities import PmsCredential, WebhookEndpoint, WebhookEvent
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
+
+
+class WebhookEventRepository(Protocol):
+    """The queue of received notices (PRD §7.26).
+
+    `add` takes `tenant_id` **on the entity and not as a separate argument**, unlike every other
+    port in this module, and the asymmetry is forced by the table: `webhook_events.tenant_id` is
+    the one nullable tenant column in the schema, because §7.26 requires a notice that cannot be
+    attributed to be recorded rather than dropped (R1.8). A `tenant_id` parameter would have to
+    accept `None`, which is exactly the signature that invites a caller to pass it by accident.
+
+    The reading half of this port — selecting a batch, counting attempts, marking processed —
+    belongs to the processing job and arrives with it. What the receiving path needs is one write.
+    """
+
+    async def add(self, event: WebhookEvent) -> None:
+        """Persist one notice with `processed=False`.
+
+        No tenant scoping and no `bind_session_to_tenant`: the caller is an anonymous request that
+        has just resolved a tenant from a route token, and marking the session mid-request is the
+        half-marked state `app/core/db.py` guards against (design D1). The `tenant_id` written is
+        the one the token resolved, never anything the caller supplied.
+        """
+        ...
 
 
 class WebhookEndpointRepository(Protocol):

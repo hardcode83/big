@@ -16,13 +16,45 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import SecretDecryptionError
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
-from app.integrations.domain.entities import PmsCredential, WebhookEndpoint
+from app.integrations.domain.entities import PmsCredential, WebhookEndpoint, WebhookEvent
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
 from app.integrations.domain.errors import WebhookEndpointAlreadyExistsError
-from app.integrations.infrastructure.models import PmsCredentialModel, WebhookEndpointModel
+from app.integrations.infrastructure.models import (
+    PmsCredentialModel,
+    WebhookEndpointModel,
+    WebhookEventModel,
+)
 from app.properties.infrastructure.models import PropertyModel
 
 WEBHOOK_ENDPOINT_CONSTRAINT = "uq_webhook_endpoints_tenant_provider"
+
+
+class SqlAlchemyWebhookEventRepository:
+    """Adapter for `WebhookEventRepository`. Writes the queue; the job reads it.
+
+    Runs on an **unmarked** session by construction, because its only caller today is the
+    anonymous receiving path. That matters for the read side more than the write side — a marked
+    session hides `tenant_id IS NULL` rows without erroring — and the boundary is pinned by
+    `tests/test_tenant_filter.py`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, event: WebhookEvent) -> None:
+        self._session.add(
+            WebhookEventModel(
+                id=event.id,
+                tenant_id=event.tenant_id,
+                provider=event.provider,
+                event_type=event.event_type,
+                payload=event.payload,
+                processed=event.processed,
+                processed_at=event.processed_at,
+                error=event.error,
+                received_at=event.received_at,
+            )
+        )
 
 
 class SqlAlchemyWebhookEndpointRepository:
