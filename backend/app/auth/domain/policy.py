@@ -40,6 +40,21 @@ class Permission(str, enum.Enum):
     READ_PROPERTIES = "READ_PROPERTIES"
     MANAGE_PROPERTIES = "MANAGE_PROPERTIES"
 
+    # Added by `cleaning` (design D7). Five and not two, because three different
+    # capabilities meet on these tables and PRD §6 gives them to different people:
+    # reading the work, administering it (assigning, creating, validating), and *doing* it.
+    #
+    # `EXECUTE_CLEANING_TASKS` is the cleaner's alone — not the manager's. R3.4/R3.5/R3.6 say
+    # "la limpiadora asignada" without exception, and the entity answers 404 to anyone who is
+    # not the assignee (R7.2), so a manager holding it would see a task in the listing and get
+    # a 404 acting on it. What the manager needs — reassign, create, validate — is
+    # `MANAGE_CLEANING_TASKS`.
+    READ_CLEANING_TASKS = "READ_CLEANING_TASKS"
+    MANAGE_CLEANING_TASKS = "MANAGE_CLEANING_TASKS"
+    EXECUTE_CLEANING_TASKS = "EXECUTE_CLEANING_TASKS"
+    READ_CLEANING_TEMPLATES = "READ_CLEANING_TEMPLATES"
+    MANAGE_CLEANING_TEMPLATES = "MANAGE_CLEANING_TEMPLATES"
+
 
 _SELF_SERVICE = frozenset({Permission.READ_OWN_PROFILE, Permission.MANAGE_OWN_SESSION})
 _RESERVATION_READ = frozenset({Permission.READ_RESERVATIONS})
@@ -52,6 +67,17 @@ _TENANT_SETTINGS_MANAGE = frozenset(
 )
 _PROPERTY_READ = frozenset({Permission.READ_PROPERTIES})
 _PROPERTY_MANAGE = frozenset({Permission.READ_PROPERTIES, Permission.MANAGE_PROPERTIES})
+
+_CLEANING_TEMPLATE_MANAGE = frozenset(
+    {Permission.READ_CLEANING_TEMPLATES, Permission.MANAGE_CLEANING_TEMPLATES}
+)
+_CLEANING_READ = frozenset({Permission.READ_CLEANING_TASKS})
+_CLEANING_MANAGE = frozenset(
+    {Permission.READ_CLEANING_TASKS, Permission.MANAGE_CLEANING_TASKS}
+)
+_CLEANING_EXECUTE = frozenset(
+    {Permission.READ_CLEANING_TASKS, Permission.EXECUTE_CLEANING_TASKS}
+)
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -76,6 +102,9 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         | _PROPERTY_READ
         | _USER_MANAGE
         | _TENANT_SETTINGS_MANAGE
+        # Reads the work and owns the standard the tenant cleans to; does not operate it.
+        | _CLEANING_READ
+        | _CLEANING_TEMPLATE_MANAGE
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -83,8 +112,16 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         | _PROPERTY_MANAGE
         | _USER_READ
         | _TENANT_SETTINGS_READ
+        | _CLEANING_MANAGE
+        # R1.1 names `PROPERTY_MANAGER` **and** `TENANT_OWNER` as creators of a template, and
+        # PRD §6 puts the manager in charge of cleaning ("gestionar limpiezas: asignar,
+        # reasignar, validar"). A first draft gave the manager read-only here and the security
+        # panel of sections 2-3 caught the divergence from R1.1 and from design D7: in a tenant
+        # whose owner never logs in, `process_checkouts` would have nothing to resolve, because
+        # `checklist_template_id` is NOT NULL.
+        | _CLEANING_TEMPLATE_MANAGE
     ),
-    UserRole.CLEANER: _SELF_SERVICE,
+    UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     UserRole.TECHNICIAN: _SELF_SERVICE,
 }
 

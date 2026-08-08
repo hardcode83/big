@@ -1,0 +1,3 @@
+# celery-jobs
+
+[BE] scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14). **Coste del filtro global a tener delante**: `domain-foundation-financial` llevó `tenant_scoped_classes()` de ~13 a **22 clases**, y `_scope_statement_to_tenant` adjunta un `with_loader_criteria` por clase y por sentencia ORM, sin memoizar a propósito (memoizarlo congelaría la lista y excluiría tablas importadas tarde). Este change es el primer consumidor con volumen —lee `notification_logs` cada minuto—, así que es aquí donde conviene medirlo (anotado al archivar `domain-foundation-financial`)

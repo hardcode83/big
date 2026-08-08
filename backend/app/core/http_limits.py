@@ -16,9 +16,36 @@ the limit belongs. It works in two steps, because either one alone is bypassable
 2. The streamed body is counted as it arrives and aborted the moment it exceeds the limit,
    which covers a lying or absent `Content-Length` (chunked uploads).
 
-Scoped to the paths that accept uploads rather than applied globally: the rest of the API takes
-small JSON bodies, and a single global number would either be too small for a CSV or too large
-to mean anything for a login.
+**It covers the whole API, with a different number per prefix.** It did not start that way, and
+the history is worth keeping because two separate changes walked into the same hole from
+different sides.
+
+It began scoped to the upload paths alone, arguing that "a single global number would either be
+too small for a CSV or too large to mean anything for a login". Then:
+
+1. **`cleaning`** found the first exception to the "everything else is a small JSON body"
+   premise (security panel of its sections 2-3). `POST /api/v1/cleaning-checklist-templates`
+   takes a **client-sized array** — `items` and `required_photos` — so its body is not a small
+   fixed object, and its Pydantic caps (`MAX_ITEMS`, `max_length`) only apply once the whole
+   body is in memory, which is exactly the "too late" this module exists to fix. Measured: an
+   anonymous ~50 MB `POST` to that path was received in full and then answered `401`. Hence
+   `JSON_BODY_MAX_BYTES`.
+2. **`api-ingress-routing`** found that the premise was not merely incomplete but that the
+   conclusion never followed from it: what a login needs is not *no* ceiling, it is a *small*
+   one. While the backend listened only on loopback the gap cost nothing; once `/api/v1` became
+   reachable from the internet it was an anonymous memory amplifier. Measured by its security
+   review: one 400 MB `POST /api/v1/auth/login` through the public path took the container from
+   195 MiB to 1.016 GiB of RSS in 2.3 s, before the 10/min login throttle is ever consulted. No
+   compose sets a memory limit on `backend`, so the ceiling was the VM's.
+
+Two changes independently reaching for this module is the signal worth reading: **a body ceiling
+is a property of every anonymous endpoint, not of the endpoints someone remembered.** So the
+mounting covers `API_V1_PREFIX` and the provider takes the path, which is why its signature is
+`Callable[[str], int]` and not `Callable[[], int]` — the per-prefix numbers live at the single
+mounting in `app/main.py`, where they can be read side by side. Stacking one instance per prefix
+was the shape both changes first reached for and it does not work: instances nest, so the
+outermost ceiling decides first and a narrower inner one never sees the request.
+
 """
 
 import json
@@ -31,6 +58,25 @@ from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
 
 TOO_LARGE_CODE = ErrorCode.PAYLOAD_TOO_LARGE
+
+# The ceiling for JSON routes whose body is an array the client sizes. A constant and not a
+# setting: unlike a CSV import there is no operational reason to tune it, and a new
+# environment variable would be a knob nobody turns.
+#
+# **1 MiB, and the number is measured against the schema maximum rather than guessed.** A
+# first draft said 256 KiB "two orders of magnitude above the largest legitimate template",
+# and the security panel of sections 2-3 measured that claim false: the maximal
+# schema-valid template (`MAX_ITEMS=200` entries with `MAX_LABEL_LENGTH=200` labels) is
+# 87 KB in ASCII but **338 KB** with accented labels and 640 KB with emoji, because
+# `json.dumps` escapes non-ASCII by default — and the project's own fixtures say `Baño` and
+# `Terraza`, so accented text is the norm here, not an edge case. At 256 KiB the middleware
+# and the validator disagreed about what is legal and the client got a size error instead of
+# a validation answer.
+#
+# 1 MiB clears the worst case measured with room to spare and is still ~50× below the 50 MB
+# body this exists to refuse. `tests/cleaning/test_templates_api.py` pins both ends: the
+# largest schema-valid template is accepted, an oversized one is not.
+JSON_BODY_MAX_BYTES = 1024 * 1024
 
 
 class MaxBodySizeMiddleware:
@@ -45,20 +91,23 @@ class MaxBodySizeMiddleware:
         app: ASGIApp,
         *,
         path_prefixes: Iterable[str],
-        max_bytes_provider: Callable[[], int],
+        max_bytes_provider: Callable[[str], int],
     ) -> None:
         self._app = app
         self._prefixes = tuple(path_prefixes)
         # A callable, not a value: the limit is read per request so a test (or an operator
-        # changing configuration) does not have to rebuild the application to change it.
+        # changing configuration) does not have to rebuild the application to change it. It
+        # takes the request path because one ceiling does not fit the whole API — see the
+        # module docstring.
         self._max_bytes_provider = max_bytes_provider
 
     async def __call__(self, scope: Scope, receive: Receive, send: Send) -> None:
-        if scope["type"] != "http" or not scope.get("path", "").startswith(self._prefixes):
+        path = scope.get("path", "")
+        if scope["type"] != "http" or not path.startswith(self._prefixes):
             await self._app(scope, receive, send)
             return
 
-        limit = self._max_bytes_provider()
+        limit = self._max_bytes_provider(path)
         declared = Headers(scope=scope).get("content-length")
         if declared is not None and declared.isdigit() and int(declared) > limit:
             await _refuse(send, limit)

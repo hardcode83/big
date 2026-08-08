@@ -66,10 +66,13 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 10
     login_lockout_minutes: int = 15
 
-    # Name of the header carrying the real client IP, honoured only when set
-    # (design D12). Empty means "trust nothing but the socket peer": no proxy
-    # currently fronts the API, so an X-Forwarded-For would be caller-supplied.
-    trusted_client_ip_header: str = ""
+    # No setting for the real-client-IP header, deliberately (change
+    # `api-ingress-routing`, design D3). Resolving it is uvicorn's job:
+    # `ProxyHeadersMiddleware` rewrites `scope["client"]` from `X-Forwarded-For`, but
+    # only for peers listed in `--forwarded-allow-ips`, which the deploy compose sets
+    # to the frontend container's static address. A second reader in the application
+    # would have to decide whether to trust a peer the first one may already have
+    # rewritten — a check validating its own input.
 
     # Limits of the CSV reservation import (R4.3, design D11). Both are checked BEFORE
     # parsing: a 200 MB upload must be refused, not streamed into memory first. The byte
@@ -77,6 +80,15 @@ class Settings(BaseSettings):
     # the row ceiling is this change's, because a small file can still hold a million rows.
     csv_import_max_bytes: int = 10 * 1024 * 1024
     csv_import_max_rows: int = 1000
+
+    # The ceiling for every OTHER body under `/api/v1/` (change `api-ingress-routing`). It is
+    # deliberately separate from `csv_import_max_bytes` and two orders of magnitude smaller:
+    # these are JSON payloads, and the largest legitimate one in the contract is a reservation.
+    # It exists because `/api/v1` is now reachable from the internet, where an unbounded body on
+    # an anonymous endpoint is a memory amplifier — measured at 1 GiB of RSS from a single 400 MB
+    # POST to `/auth/login`, read by FastAPI before the login throttle runs. 1 MiB leaves roughly
+    # three orders of magnitude of headroom over a real request.
+    request_max_bytes: int = 1024 * 1024
 
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.

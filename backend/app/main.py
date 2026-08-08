@@ -10,9 +10,12 @@ import app.core.models_registry  # noqa: F401
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
+from app.cleaning.api.errors import register_cleaning_error_handlers
+from app.cleaning.api.tasks_router import router as cleaning_tasks_router
+from app.cleaning.api.templates_router import router as cleaning_templates_router
 from app.core.config import settings
 from app.core.errors import register_error_handlers
-from app.core.http_limits import MaxBodySizeMiddleware
+from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
@@ -51,6 +54,7 @@ def create_app() -> FastAPI:
     register_integration_error_handlers(app)
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
+    register_cleaning_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -63,13 +67,58 @@ def create_app() -> FastAPI:
     # the only domain module without one. Its arrival is what makes `POST /reservations`
     # reachable — it answered 404 on every request because no property could exist.
     app.include_router(properties_router, prefix=API_V1_PREFIX)
+    # `cleaning`: templates are their own router because they are their own aggregate, and
+    # because PRD §23 does not declare them — the deviation is easier to see in a file of
+    # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
+    app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
+    app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
-    # check is too late for an upload.
+    # check is too late.
+    #
+    # ONE mounting covering all of `/api/v1/`, with the ceiling resolved PER PATH. It used to
+    # be two, and merging them is not tidying: `api-ingress-routing` and `cleaning` found the
+    # same hole independently — an unbounded body read in full before the `401` — and each
+    # mounted its own instance. Stacked instances nest, so the outermost decides first and a
+    # narrower inner ceiling never gets to see the request; the generic 1 MiB would have
+    # refused a 10 MB CSV before the upload instance could allow it.
+    #
+    # The three cases, and each number has its own reason:
+    #
+    # * `/integrations/` → `CSV_IMPORT_MAX_BYTES` (10 MiB). Rule 6 of steering/security.md.
+    # * `/cleaning-` → `JSON_BODY_MAX_BYTES` (1 MiB). From `cleaning`: the checklist template
+    #   endpoint takes a **client-sized array**, so its body is not a small fixed object, and
+    #   its Pydantic caps only run once the whole body is in memory. Measured there: an
+    #   anonymous ~50 MB `POST` was received in full and then answered `401`. The constant is
+    #   measured against that schema's maximum (338 KB with accented labels), NOT guessed.
+    # * everything else → `REQUEST_MAX_BYTES` (1 MiB). From `api-ingress-routing` (R7/D11):
+    #   once `/api/v1` is reachable from the internet, an unbounded body on a public anonymous
+    #   endpoint is a memory amplifier — measured, one 400 MB `POST /auth/login` took the
+    #   container from 195 MiB to 1.016 GiB of RSS, and FastAPI reads that body before
+    #   dependencies run, i.e. before the 10/min login throttle is ever consulted.
+    #
+    # `JSON_BODY_MAX_BYTES` and `REQUEST_MAX_BYTES` happen to be equal today. They stay
+    # separate on purpose: one is pinned to a schema maximum and one is an operational knob,
+    # so collapsing them would make a future tuning of the knob silently move a measured
+    # boundary.
+    #
+    # **The obligation `cleaning` recorded for `cleaning-photos-storage` is now cheap.**
+    # `POST /cleaning-tasks/{id}/photos` starts with `/cleaning-`, so the JSON ceiling would
+    # refuse any photo above 1 MiB. `cleaning` noted the repair would have to "teach
+    # `MaxBodySizeMiddleware` to exclude a path, or split the prefixes" — the per-path
+    # provider IS that capability, so the repair is one branch here, before the `/cleaning-`
+    # one. Still NOT by raising `JSON_BODY_MAX_BYTES`, which would remove the JSON ceiling
+    # from every cleaning route and re-open the hole it closes.
     app.add_middleware(
         MaxBodySizeMiddleware,
-        path_prefixes=(f"{API_V1_PREFIX}/integrations/",),
-        max_bytes_provider=lambda: settings.csv_import_max_bytes,
+        path_prefixes=(API_V1_PREFIX,),
+        max_bytes_provider=lambda path: (
+            settings.csv_import_max_bytes
+            if path.startswith(f"{API_V1_PREFIX}/integrations/")
+            else JSON_BODY_MAX_BYTES
+            if path.startswith(f"{API_V1_PREFIX}/cleaning-")
+            else settings.request_max_bytes
+        ),
     )
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck

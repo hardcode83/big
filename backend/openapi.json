@@ -1,6 +1,22 @@
 {
   "components": {
     "schemas": {
+      "AssignCleaningTaskRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.\n\nNot a general-purpose patch: `status` moves only through the lifecycle endpoints (so\n`PropertyStateMachine` is never bypassed), and `notes` is out of this change's writable\nsurface entirely (design D13).",
+        "properties": {
+          "assigned_cleaner_id": {
+            "format": "uuid",
+            "title": "Assigned Cleaner Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "assigned_cleaner_id"
+        ],
+        "title": "AssignCleaningTaskRequest",
+        "type": "object"
+      },
       "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post": {
         "properties": {
           "file": {
@@ -14,6 +30,533 @@
           "file"
         ],
         "title": "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post",
+        "type": "object"
+      },
+      "ChecklistItemPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "item_id": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Item Id",
+            "type": "string"
+          },
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item_id",
+          "label"
+        ],
+        "title": "ChecklistItemPayload",
+        "type": "object"
+      },
+      "ChecklistItemStateResponse": {
+        "properties": {
+          "completed": {
+            "title": "Completed",
+            "type": "boolean"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "completed_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed By"
+          },
+          "item_id": {
+            "title": "Item Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "item_id",
+          "label",
+          "required",
+          "completed",
+          "completed_at",
+          "completed_by"
+        ],
+        "title": "ChecklistItemStateResponse",
+        "type": "object"
+      },
+      "ChecklistResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItemStateResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "ChecklistResponse",
+        "type": "object"
+      },
+      "ChecklistTemplatePageResponse": {
+        "description": "The envelope of PRD §23.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistTemplateResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "ChecklistTemplatePageResponse",
+        "type": "object"
+      },
+      "ChecklistTemplateResponse": {
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "items": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "required_photos": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Required Photos",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "property_id",
+          "active",
+          "items",
+          "required_photos",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ChecklistTemplateResponse",
+        "type": "object"
+      },
+      "CleaningTaskPageResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CleaningTaskResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "CleaningTaskPageResponse",
+        "type": "object"
+      },
+      "CleaningTaskResponse": {
+        "description": "Enumerated, never dumped from the entity — `notes` must not leak in (design D13).",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "assigned_cleaner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Cleaner Id"
+          },
+          "checklist_template_id": {
+            "format": "uuid",
+            "title": "Checklist Template Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "scheduled_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled End"
+          },
+          "scheduled_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CleaningTaskStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "validated_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated By User Id"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/CleaningValidationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "checklist_template_id",
+          "assigned_cleaner_id",
+          "status",
+          "scheduled_start",
+          "scheduled_end",
+          "accepted_at",
+          "started_at",
+          "completed_at",
+          "validation_status",
+          "validated_by_user_id",
+          "validated_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "CleaningTaskResponse",
+        "type": "object"
+      },
+      "CleaningTaskStatus": {
+        "enum": [
+          "CREATED",
+          "ASSIGNED",
+          "ACCEPTED",
+          "REJECTED",
+          "IN_PROGRESS",
+          "PENDING_REVIEW",
+          "COMPLETED",
+          "FAILED",
+          "CANCELLED"
+        ],
+        "title": "CleaningTaskStatus",
+        "type": "string"
+      },
+      "CleaningValidationStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(CleaningTask.validation_status) without a named block (§7.9).",
+        "enum": [
+          "PENDING",
+          "PASSED",
+          "FAILED",
+          "WAIVED"
+        ],
+        "title": "CleaningValidationStatus",
+        "type": "string"
+      },
+      "CreateChecklistTemplateRequest": {
+        "additionalProperties": false,
+        "description": "The shape check. The **content** rules stay in the domain.\n\nPydantic bounds the list sizes so an oversized body is refused before anything parses\nit, but the charset of `item_id`, its uniqueness and the `String(100)` ceiling are\n`parse_template_content`'s (R1.2) — those must hold for every path into a template, not\nonly for HTTP.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ChecklistItemPayload"
+            },
+            "maxItems": 200,
+            "minItems": 1,
+            "title": "Items",
+            "type": "array"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "required_photos": {
+            "default": [],
+            "items": {
+              "$ref": "#/components/schemas/RequiredPhotoPayload"
+            },
+            "maxItems": 50,
+            "title": "Required Photos",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "items"
+        ],
+        "title": "CreateChecklistTemplateRequest",
+        "type": "object"
+      },
+      "CreateCleaningTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "scheduled_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled End"
+          },
+          "scheduled_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start"
+          }
+        },
+        "required": [
+          "property_id"
+        ],
+        "title": "CreateCleaningTaskRequest",
         "type": "object"
       },
       "CreatePropertyRequest": {
@@ -1021,6 +1564,34 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "RequiredPhotoPayload": {
+        "additionalProperties": false,
+        "properties": {
+          "label": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Label",
+            "type": "string"
+          },
+          "photo_type": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Photo Type",
+            "type": "string"
+          },
+          "required": {
+            "default": false,
+            "title": "Required",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "photo_type",
+          "label"
+        ],
+        "title": "RequiredPhotoPayload",
         "type": "object"
       },
       "ReservationAccessStatus": {
@@ -2676,6 +3247,19 @@
         ],
         "title": "UserStatus",
         "type": "string"
+      },
+      "ValidateCleaningTaskRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "validation_status": {
+            "$ref": "#/components/schemas/CleaningValidationStatus"
+          }
+        },
+        "required": [
+          "validation_status"
+        ],
+        "title": "ValidateCleaningTaskRequest",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -2859,6 +3443,976 @@
         "summary": "Rotate a refresh token",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/cleaning-checklist-templates": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.",
+        "operationId": "list_templates_api_v1_cleaning_checklist_templates_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistTemplatePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's checklist templates",
+        "tags": [
+          "cleaning"
+        ]
+      },
+      "post": {
+        "description": "`items[].item_id` becomes the key a checklist is completed by and travels as a URL path segment, so it is restricted to letters, digits, `.`, `_` and `-`, capped at 100 characters and unique within the template.",
+        "operationId": "create_template_api_v1_cleaning_checklist_templates_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateChecklistTemplateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistTemplateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a checklist template",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.",
+        "operationId": "list_cleaning_tasks_api_v1_cleaning_tasks_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/CleaningTaskStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's cleaning tasks",
+        "tags": [
+          "cleaning"
+        ]
+      },
+      "post": {
+        "description": "The automatic path is `process_checkouts` (PRD §8.3). This one exists for a cleaning nobody's checkout implied. The checklist template is resolved for the property; a reservation that already has a live task is refused with `409`.",
+        "operationId": "create_cleaning_task_api_v1_cleaning_tasks_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateCleaningTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a cleaning task by hand",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}": {
+      "get": {
+        "description": "`404` when the task belongs to another tenant, and also when it belongs to another cleaner and the caller is a `CLEANER` — both are indistinguishable from a task that does not exist.",
+        "operationId": "get_cleaning_task_api_v1_cleaning_tasks__task_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read one cleaning task",
+        "tags": [
+          "cleaning"
+        ]
+      },
+      "patch": {
+        "description": "Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.",
+        "operationId": "assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignCleaningTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign or reassign a cleaning task",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/accept": {
+      "post": {
+        "description": "Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.",
+        "operationId": "accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Accept an assigned cleaning task",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/checklist": {
+      "get": {
+        "description": "Driven by the task's template: an item nobody has touched still appears, and a completion for an item the template no longer declares does not.",
+        "operationId": "get_checklist_api_v1_cleaning_tasks__task_id__checklist_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ChecklistResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read a cleaning task's checklist",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete": {
+      "post": {
+        "description": "Idempotent: ticking twice is not an error. `404` when the item does not belong to the task's template, `409` when the task is not in progress.",
+        "operationId": "complete_checklist_item_api_v1_cleaning_tasks__task_id__checklist__item_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "item_id",
+            "required": true,
+            "schema": {
+              "title": "Item Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tick one checklist item",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/complete": {
+      "post": {
+        "description": "Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.",
+        "operationId": "complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Finish a cleaning",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/reject": {
+      "post": {
+        "description": "The declined task is terminal and keeps its assignee as the record of who declined; the response is the **replacement** task, created unassigned in the same transaction so the property is never left in `AWAITING_CLEANING` with nothing pending.",
+        "operationId": "reject_cleaning_task_api_v1_cleaning_tasks__task_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Decline an assigned cleaning task",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/start": {
+      "post": {
+        "description": "Only the assigned cleaner, and only after accepting — PRD §11's flow is accept then start, so starting from `ASSIGNED` is a `409`. Moves the property to `CLEANING_IN_PROGRESS`, which is also what opens the checklist for writing.",
+        "operationId": "start_cleaning_task_api_v1_cleaning_tasks__task_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Start a cleaning",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/validate": {
+      "post": {
+        "description": "Not in PRD §23's list, which stops at `complete`: R5.5 asks for the manual validation of PRD §11 and there is no endpoint for it, so this is the same kind of gap as the checklist templates. Automatic validation with `MockAIAdapter` belongs to `messaging-ai`.",
+        "operationId": "validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateCleaningTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Record a manager's verdict on a finished cleaning",
+        "tags": [
+          "cleaning"
         ]
       }
     },

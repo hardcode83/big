@@ -59,7 +59,7 @@ async def _ok_app(scope, receive, send) -> None:
 
 def _middleware(app) -> MaxBodySizeMiddleware:
     return MaxBodySizeMiddleware(
-        app, path_prefixes=(PREFIX,), max_bytes_provider=lambda: LIMIT
+        app, path_prefixes=(PREFIX,), max_bytes_provider=lambda _path: LIMIT
     )
 
 
@@ -167,3 +167,31 @@ async def test_a_parser_error_caused_by_the_truncated_body_becomes_the_413() -> 
     await _middleware(_chokes_on_truncated_body)(_scope(), _chunks(b"x" * 200), recorder)
 
     assert recorder.starts == [413]
+
+
+@pytest.mark.asyncio
+async def test_the_limit_can_differ_per_path() -> None:
+    """The whole of `/api/v1/` is covered, with uploads on their own, larger ceiling.
+
+    Change `api-ingress-routing`: while the backend listened only on loopback, leaving
+    every non-upload path unbounded cost nothing. With `/api/v1` reachable from the
+    internet it was an anonymous memory amplifier — measured at 1.016 GiB of RSS from one
+    400 MB `POST /api/v1/auth/login`, read by FastAPI **before** the login throttle runs.
+    """
+
+    def by_path(path: str) -> int:
+        return 10_000 if path.startswith(f"{PREFIX}uploads/") else 100
+
+    middleware = MaxBodySizeMiddleware(
+        _ok_app, path_prefixes=(PREFIX,), max_bytes_provider=by_path
+    )
+
+    small = _Recorder()
+    await middleware(_scope(path=f"{PREFIX}login", content_length="500"), _chunks(b""), small)
+    assert small.starts == [413], "a non-upload path takes the small ceiling"
+
+    large = _Recorder()
+    await middleware(
+        _scope(path=f"{PREFIX}uploads/csv", content_length="500"), _chunks(b"x" * 500), large
+    )
+    assert large.starts == [200], "an upload path keeps its own, larger ceiling"

@@ -116,6 +116,8 @@ describe("public runtime config (D15)", () => {
     ["a month that does not exist", "0.1.0+2026-13-01.5872022"],
     ["a day that does not exist", "0.1.0+2026-07-32.5872022"],
     ["a zero month", "0.1.0+2026-00-15.5872022"],
+    ["a day that does not exist in February", "0.1.0+2026-02-29.5872022"],
+    ["a day that does not exist in April", "0.1.0+2026-04-31.5872022"],
   ])("drops %s instead of letting it into the snapshot", (_why, widened) => {
     // This is the layer that matters, and the reason it is here and not in `VersionBadge`:
     // React serializes this object as a prop into the RSC payload of the root layout, so
@@ -158,6 +160,13 @@ describe("public runtime config (D15)", () => {
     expect(buildPublicRuntimeConfig()).toMatchObject({
       appVersion: "0.1.0+2026-07-31.5872022",
       buildCommitShort: "5872022",
+    });
+
+    process.env.NEXT_PUBLIC_APP_VERSION = "0.1.0";
+    process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT = "";
+    expect(buildPublicRuntimeConfig()).toMatchObject({
+      appVersion: "0.1.0",
+      buildCommitShort: "",
     });
 
     process.env.NEXT_PUBLIC_APP_VERSION = "local";

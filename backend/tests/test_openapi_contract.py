@@ -80,6 +80,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # them — it is a floor and not an equality so an added route does not fail here, but the
         # prefix set IS exact, so a new module has to be named.
         "properties",
+        # `cleaning`: templates plus the ten task routes of PRD §23 minus the two photo ones,
+        # which belong to `cleaning-photos-storage`.
+        "cleaning-checklist-templates",
+        "cleaning-tasks",
     }
 
 

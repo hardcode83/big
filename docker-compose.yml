@@ -106,6 +106,23 @@ services:
       # Y si añades un mapeo a CUALQUIER servicio, añádelo también a
       # `docker-compose.worktree.yml`, que es el fichero que los retira en un worktree
       # enlazado. `make up` allí lo comprueba y aborta si queda alguno publicado.
+      #
+      # Y ESTE MAPEO ES LA RAZÓN POR LA QUE EN LOCAL NO SE CONFÍA EN NINGUNA CABECERA DE
+      # PROXY (change `api-ingress-routing`, design D7). El camino `/api/` del frontend
+      # existe igual aquí que en el despliegue —misma URL relativa, mismo handler—, pero
+      # `--forwarded-allow-ips` NO se configura en este fichero, a diferencia de
+      # `docker-compose.deploy.yml`. El motivo es exactamente el párrafo de arriba: con
+      # `8000` publicado a la LAN, la cabecera la pone quien llama, así que confiar en
+      # ella le daría a cualquiera que comparta red con esta máquina un presupuesto nuevo
+      # de 10 intentos/min en cada petición. Aquí manda el peer del socket: el throttle
+      # degrada a "un contador para todo el stack", que es el precio correcto en un
+      # entorno sin datos reales.
+      #
+      # El flag va pineado a `127.0.0.1` en el Dockerfile, y no simplemente omitido, por
+      # una razón concreta: uvicorn cae a la variable de entorno `FORWARDED_ALLOW_IPS`
+      # cuando el flag falta (`uvicorn/config.py:356`). Y este servicio recibe el `.env`
+      # entero por `env_file`, así que un `FORWARDED_ALLOW_IPS=*` añadido ahí mientras se
+      # depura algo abriría exactamente el bypass de arriba. El flag del CLI gana.
       - "8000:8000"
     depends_on:
       postgres:

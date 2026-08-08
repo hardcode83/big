@@ -105,7 +105,11 @@ curl -s localhost:8000/api/v1/auth/me -H "Authorization: Bearer $TOKEN"
 | `LOGIN_RATE_LIMIT_PER_MINUTE` | 10 | Intentos por IP y minuto |
 | `LOGIN_MAX_FAILED_ATTEMPTS` | 10 | Fallos consecutivos antes de bloquear la cuenta |
 | `LOGIN_LOCKOUT_MINUTES` | 15 | Duración del bloqueo |
-| `TRUSTED_CLIENT_IP_HEADER` | vacía | Ver el aviso de abajo |
+
+> **`TRUSTED_CLIENT_IP_HEADER` ya no existe.** La retiró el change
+> `api-ingress-routing`: la identificación del cliente pasó a uvicorn y se configura por
+> línea de arranque, no por variable de entorno. Si te la encuentras en un `.env` viejo,
+> bórrala — no hace nada. Detalle en la sección siguiente.
 
 **Sobre el nombre `JWT_SECRET_KEY`** *(decisión cerrada por Jose el 2026-07-30, antes del
 merge del PR #25: se mantiene este nombre y no se renombra al del PRD)*. El PRD §25 la
@@ -118,43 +122,74 @@ adivinar. Es una desviación deliberada del PRD, no un despiste, y no se renombr
 revés porque la variable ya vive en OCI Vault y en el `.env` de la VM: cambiarla es un
 paso operativo sobre el entorno desplegado, no una edición de código.
 
-## ⚠️ Aviso: hoy la IP de cliente no es fiable
+## De quién es la IP que cuenta el límite
 
-`TRUSTED_CLIENT_IP_HEADER` viene **vacía**, y eso es correcto ahora mismo: en el dev
-desplegado el túnel de Cloudflare enruta solo a `frontend:3000` y el backend se publica
-únicamente en `127.0.0.1:8000` de la VM, así que ninguna petición al backend llega con
-una IP de cliente real. Confiar en `X-Forwarded-For` por defecto sería confiar en una
-cabecera que cualquiera puede falsificar para saltarse el límite por IP.
+La identidad del cliente es **la IP del peer del socket**, y punto: `get_client_ip()`
+(`backend/app/auth/api/dependencies.py`) no lee ninguna cabecera. Quien resuelve la
+cabecera de proxy es **uvicorn**, con su `ProxyHeadersMiddleware`, aguas arriba de la
+aplicación — y solo para los peers que `--forwarded-allow-ips` nombra explícitamente.
 
-**El día que la API se enrute por el túnel** (entrada `api-ingress-routing` del roadmap)
-habrá que activar `TRUSTED_CLIENT_IP_HEADER=CF-Connecting-IP`. Si no, el límite de 10
-intentos por minuto contará **todas** las peticiones del despliegue en un único contador
-—porque todas llegarán con la IP del contenedor del frontend— y bastará un atacante para
-dejar sin login a todo el mundo.
+Por qué en un solo sitio y no en dos: `proxy_headers` viene a `True` **por defecto** en
+uvicorn, así que un lector de cabeceras en la aplicación sería un segundo mecanismo
+decidiendo si confiar en un peer que el primero pudo haber reescrito ya desde entrada del
+atacante — una comprobación que valida su propio insumo. Y la IP no alimenta solo al
+throttle: es el `actor_ip` de `AuditLog` en cinco endpoints, así que resolverla en la
+frontera ASGI la arregla para todos los consumidores a la vez.
 
-⚠️ **Pero no la actives sola.** El código honra la cabecera venga de donde venga: no
-comprueba que el peer del socket sea un proxy de confianza, y esa comprobación es parte de
-`api-ingress-routing`, no de este change. Si activas la cabecera mientras la API sigue
-siendo alcanzable por cualquier otra vía —tráfico entre contenedores, un puerto
-reenviado por SSH, una segunda regla de ingress— quien llegue por ahí envía la cabecera
-él mismo y se da un presupuesto nuevo de 10/min en cada petición. Actívala **junto con** la
-lista de proxies de confianza, y solo cuando la API no sea alcanzable salvo por el proxy.
+### Cómo está configurado, por entorno
 
-Mientras eso no exista, la defensa que sí funciona es el **bloqueo por cuenta**: 10
-fallos consecutivos y la cuenta queda bloqueada 15 minutos. Tiene un coste conocido:
-quien conozca un email puede mantener esa cuenta bloqueada en bucle. Es inherente a lo
-que pide PRD §22; el bloqueo temporal en vez de permanente acota el daño.
+| Entorno | `--forwarded-allow-ips` | Efecto |
+|---|---|---|
+| Local (`docker-compose.yml`) | `127.0.0.1`, pineado en el Dockerfile | No se cree a nadie. El throttle degrada a **un contador para todo el stack** |
+| Dev desplegado (`docker-compose.deploy.yml`) | la IP fija del contenedor `frontend` | Solo el proxy puede reportar una IP de cliente |
 
-Cuando la activéis, la cabecera se lee tomando el salto de **más a la derecha** de la
-**última** aparición de la cabecera, y validándolo con `ipaddress.ip_address`; si no
-parsea, se cae a la IP del socket.
+En local es deliberado y no una omisión: `docker-compose.yml` publica el 8000 **en todas
+las interfaces** a propósito, para poder probar desde un móvil real por la IP de LAN. Con
+un puerto abierto a la LAN, la cabecera la pone quien llama, así que confiar en ella daría
+a cualquiera de tu red un presupuesto nuevo de 10 intentos/min por petición. Un contador
+global en un entorno sin datos reales es el precio correcto.
 
-Por qué el de más a la derecha y no el primero: un proxy que **añade** —el
-`$proxy_add_x_forwarded_for` de nginx, y cualquier implementación conforme— deja a la
-izquierda el valor que envió **el cliente**, así que leer el primero es leer entrada del
-atacante. El de más a la derecha es el que observó el proxy más cercano, y también es el
-correcto para una cabecera que **reemplaza** en vez de añadir, como `CF-Connecting-IP`,
-donde hay un solo salto.
+> ⚠️ **No añadas `FORWARDED_ALLOW_IPS` a tu `.env`, y menos `FORWARDED_ALLOW_IPS=*`.**
+> uvicorn cae a esa variable cuando el flag falta (`uvicorn/config.py:356`), y el backend
+> recibe el `.env` entero por `env_file`. El flag está pineado en
+> `backend/devops/Dockerfile` justo para que la variable no pueda surtir efecto.
+
+### En el dev desplegado
+
+El navegador llega a la API por `https://<hostname>/api/...` en el **mismo origen** que
+sirve la app: un Route Handler de Next (`frontend/app/api/[...path]/route.ts`) reenvía a
+`backend:8000` por la red interna. Ese handler descarta toda cabecera de reenvío que
+pudiera haber puesto el cliente y escribe **una** `X-Forwarded-For` derivada del
+`CF-Connecting-IP` que escribió el edge de Cloudflare. El backend se la cree porque el
+peer es el contenedor `frontend`, que es la única dirección de la lista.
+
+Residual aceptado por escrito: una petición que entre por `127.0.0.1:3000` de la VM (la
+publicación que existe para depurar con `ssh -L`) no viene del edge, así que su
+`CF-Connecting-IP` es el que envíe quien llama. Requiere SSH en la VM — posición desde la
+que ya se llega directamente a `127.0.0.1:8000`.
+
+### Qué se rechaza, y por qué no basta con «parsea como IP»
+
+`get_client_ip()` valida y canonicaliza antes de devolver: rechaza lo que no sea una IP,
+rechaza **IPv6 con zone identifier** (`fe80::1%eth0`), colapsa las formas IPv4-mapped
+sobre su IPv4, y acota la longitud a los 45 caracteres de la columna `actor_ip`. En todos
+esos casos cae a `127.0.0.1`, que es fail-closed: comparten un contador en vez de
+inventarse uno cada uno.
+
+El caso del zone identifier merece el detalle porque **sí parsea**: el texto tras `%` es
+casi libre, así que `fe80::1%<100 caracteres>` es una dirección válida de 108 caracteres, y
+un zone puede llevar CR o LF. Medido, dejarlo pasar daba tres cosas: un contador nuevo por
+cada zone distinto (adiós al límite por IP), líneas forjadas en el log de login que lee
+quien investiga un incidente, y un `AuditContractError` que **aborta la transacción** de la
+operación auditada. Un zone identifier es ámbito link-local de una sola máquina, así que
+nunca puede describir legítimamente a un cliente remoto.
+
+### La otra defensa, que no depende de nada de esto
+
+El **bloqueo por cuenta**: 10 fallos consecutivos y la cuenta queda bloqueada 15 minutos.
+Tiene un coste conocido —quien conozca un email puede mantener esa cuenta bloqueada en
+bucle—, inherente a lo que pide PRD §22; el bloqueo temporal en vez de permanente acota el
+daño.
 
 ## Cosas que sorprenden y conviene saber
 

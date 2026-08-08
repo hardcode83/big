@@ -33,6 +33,91 @@ export interface paths {
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
   };
+  "/api/v1/cleaning-checklist-templates": {
+    /**
+     * List the tenant's checklist templates
+     * @description Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.
+     */
+    get: operations["list_templates_api_v1_cleaning_checklist_templates_get"];
+    /**
+     * Create a checklist template
+     * @description `items[].item_id` becomes the key a checklist is completed by and travels as a URL path segment, so it is restricted to letters, digits, `.`, `_` and `-`, capped at 100 characters and unique within the template.
+     */
+    post: operations["create_template_api_v1_cleaning_checklist_templates_post"];
+  };
+  "/api/v1/cleaning-tasks": {
+    /**
+     * List the tenant's cleaning tasks
+     * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+     */
+    get: operations["list_cleaning_tasks_api_v1_cleaning_tasks_get"];
+    /**
+     * Create a cleaning task by hand
+     * @description The automatic path is `process_checkouts` (PRD §8.3). This one exists for a cleaning nobody's checkout implied. The checklist template is resolved for the property; a reservation that already has a live task is refused with `409`.
+     */
+    post: operations["create_cleaning_task_api_v1_cleaning_tasks_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}": {
+    /**
+     * Read one cleaning task
+     * @description `404` when the task belongs to another tenant, and also when it belongs to another cleaner and the caller is a `CLEANER` — both are indistinguishable from a task that does not exist.
+     */
+    get: operations["get_cleaning_task_api_v1_cleaning_tasks__task_id__get"];
+    /**
+     * Assign or reassign a cleaning task
+     * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+     */
+    patch: operations["assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/accept": {
+    /**
+     * Accept an assigned cleaning task
+     * @description Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.
+     */
+    post: operations["accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/checklist": {
+    /**
+     * Read a cleaning task's checklist
+     * @description Driven by the task's template: an item nobody has touched still appears, and a completion for an item the template no longer declares does not.
+     */
+    get: operations["get_checklist_api_v1_cleaning_tasks__task_id__checklist_get"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete": {
+    /**
+     * Tick one checklist item
+     * @description Idempotent: ticking twice is not an error. `404` when the item does not belong to the task's template, `409` when the task is not in progress.
+     */
+    post: operations["complete_checklist_item_api_v1_cleaning_tasks__task_id__checklist__item_id__complete_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/complete": {
+    /**
+     * Finish a cleaning
+     * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+     */
+    post: operations["complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/reject": {
+    /**
+     * Decline an assigned cleaning task
+     * @description The declined task is terminal and keeps its assignee as the record of who declined; the response is the **replacement** task, created unassigned in the same transaction so the property is never left in `AWAITING_CLEANING` with nothing pending.
+     */
+    post: operations["reject_cleaning_task_api_v1_cleaning_tasks__task_id__reject_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/start": {
+    /**
+     * Start a cleaning
+     * @description Only the assigned cleaner, and only after accepting — PRD §11's flow is accept then start, so starting from `ASSIGNED` is a `409`. Moves the property to `CLEANING_IN_PROGRESS`, which is also what opens the checklist for writing.
+     */
+    post: operations["start_cleaning_task_api_v1_cleaning_tasks__task_id__start_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/validate": {
+    /**
+     * Record a manager's verdict on a finished cleaning
+     * @description Not in PRD §23's list, which stops at `complete`: R5.5 asks for the manual validation of PRD §11 and there is no endpoint for it, so this is the same kind of gap as the checklist templates. Automatic validation with `MockAIAdapter` belongs to `messaging-ai`.
+     */
+    post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
+  };
   "/api/v1/integrations/pms/import-csv": {
     /**
      * Import reservations from a CSV file
@@ -151,6 +236,21 @@ export type webhooks = Record<string, never>;
 
 export interface components {
   schemas: {
+    /**
+     * AssignCleaningTaskRequest
+     * @description `PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.
+     *
+     * Not a general-purpose patch: `status` moves only through the lifecycle endpoints (so
+     * `PropertyStateMachine` is never bypassed), and `notes` is out of this change's writable
+     * surface entirely (design D13).
+     */
+    AssignCleaningTaskRequest: {
+      /**
+       * Assigned Cleaner Id
+       * Format: uuid
+       */
+      assigned_cleaner_id: string;
+    };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
       /**
@@ -158,6 +258,198 @@ export interface components {
        * @description UTF-8 CSV with the documented columns
        */
       file: string;
+    };
+    /** ChecklistItemPayload */
+    ChecklistItemPayload: {
+      /** Item Id */
+      item_id: string;
+      /** Label */
+      label: string;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
+    };
+    /** ChecklistItemStateResponse */
+    ChecklistItemStateResponse: {
+      /** Completed */
+      completed: boolean;
+      /** Completed At */
+      completed_at: string | null;
+      /** Completed By */
+      completed_by: string | null;
+      /** Item Id */
+      item_id: string;
+      /** Label */
+      label: string;
+      /** Required */
+      required: boolean;
+    };
+    /** ChecklistResponse */
+    ChecklistResponse: {
+      /** Data */
+      data: components["schemas"]["ChecklistItemStateResponse"][];
+    };
+    /**
+     * ChecklistTemplatePageResponse
+     * @description The envelope of PRD §23.
+     */
+    ChecklistTemplatePageResponse: {
+      /** Data */
+      data: components["schemas"]["ChecklistTemplateResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /** ChecklistTemplateResponse */
+    ChecklistTemplateResponse: {
+      /** Active */
+      active: boolean;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Items */
+      items: {
+          [key: string]: unknown;
+        }[];
+      /** Name */
+      name: string;
+      /** Property Id */
+      property_id: string | null;
+      /** Required Photos */
+      required_photos: {
+          [key: string]: unknown;
+        }[];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /** CleaningTaskPageResponse */
+    CleaningTaskPageResponse: {
+      /** Data */
+      data: components["schemas"]["CleaningTaskResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * CleaningTaskResponse
+     * @description Enumerated, never dumped from the entity — `notes` must not leak in (design D13).
+     */
+    CleaningTaskResponse: {
+      /** Accepted At */
+      accepted_at: string | null;
+      /** Assigned Cleaner Id */
+      assigned_cleaner_id: string | null;
+      /**
+       * Checklist Template Id
+       * Format: uuid
+       */
+      checklist_template_id: string;
+      /** Completed At */
+      completed_at: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Scheduled End */
+      scheduled_end: string | null;
+      /** Scheduled Start */
+      scheduled_start: string | null;
+      /** Started At */
+      started_at: string | null;
+      status: components["schemas"]["CleaningTaskStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Validated At */
+      validated_at: string | null;
+      /** Validated By User Id */
+      validated_by_user_id: string | null;
+      validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
+    /**
+     * CleaningTaskStatus
+     * @enum {string}
+     */
+    CleaningTaskStatus: "CREATED" | "ASSIGNED" | "ACCEPTED" | "REJECTED" | "IN_PROGRESS" | "PENDING_REVIEW" | "COMPLETED" | "FAILED" | "CANCELLED";
+    /**
+     * CleaningValidationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (CleaningTask.validation_status) without a named block (§7.9).
+     * @enum {string}
+     */
+    CleaningValidationStatus: "PENDING" | "PASSED" | "FAILED" | "WAIVED";
+    /**
+     * CreateChecklistTemplateRequest
+     * @description The shape check. The **content** rules stay in the domain.
+     *
+     * Pydantic bounds the list sizes so an oversized body is refused before anything parses
+     * it, but the charset of `item_id`, its uniqueness and the `String(100)` ceiling are
+     * `parse_template_content`'s (R1.2) — those must hold for every path into a template, not
+     * only for HTTP.
+     */
+    CreateChecklistTemplateRequest: {
+      /** Items */
+      items: components["schemas"]["ChecklistItemPayload"][];
+      /** Name */
+      name: string;
+      /** Property Id */
+      property_id?: string | null;
+      /**
+       * Required Photos
+       * @default []
+       */
+      required_photos?: components["schemas"]["RequiredPhotoPayload"][];
+    };
+    /** CreateCleaningTaskRequest */
+    CreateCleaningTaskRequest: {
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id?: string | null;
+      /** Scheduled End */
+      scheduled_end?: string | null;
+      /** Scheduled Start */
+      scheduled_start?: string | null;
     };
     /**
      * CreatedUserResponse
@@ -563,6 +855,18 @@ export interface components {
     RefreshRequest: {
       /** Refresh Token */
       refresh_token: string;
+    };
+    /** RequiredPhotoPayload */
+    RequiredPhotoPayload: {
+      /** Label */
+      label: string;
+      /** Photo Type */
+      photo_type: string;
+      /**
+       * Required
+       * @default false
+       */
+      required?: boolean;
     };
     /**
      * ReservationAccessStatus
@@ -1055,6 +1359,10 @@ export interface components {
      * @enum {string}
      */
     UserStatus: "ACTIVE" | "INACTIVE" | "SUSPENDED";
+    /** ValidateCleaningTaskRequest */
+    ValidateCleaningTaskRequest: {
+      validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
   };
   responses: never;
   parameters: never;
@@ -1159,6 +1467,500 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TokenPairResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's checklist templates
+   * @description Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.
+   */
+  list_templates_api_v1_cleaning_checklist_templates_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ChecklistTemplatePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a checklist template
+   * @description `items[].item_id` becomes the key a checklist is completed by and travels as a URL path segment, so it is restricted to letters, digits, `.`, `_` and `-`, capped at 100 characters and unique within the template.
+   */
+  create_template_api_v1_cleaning_checklist_templates_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateChecklistTemplateRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ChecklistTemplateResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's cleaning tasks
+   * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+   */
+  list_cleaning_tasks_api_v1_cleaning_tasks_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        status?: components["schemas"]["CleaningTaskStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a cleaning task by hand
+   * @description The automatic path is `process_checkouts` (PRD §8.3). This one exists for a cleaning nobody's checkout implied. The checklist template is resolved for the property; a reservation that already has a live task is refused with `409`.
+   */
+  create_cleaning_task_api_v1_cleaning_tasks_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one cleaning task
+   * @description `404` when the task belongs to another tenant, and also when it belongs to another cleaner and the caller is a `CLEANER` — both are indistinguishable from a task that does not exist.
+   */
+  get_cleaning_task_api_v1_cleaning_tasks__task_id__get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Assign or reassign a cleaning task
+   * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+   */
+  assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssignCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Accept an assigned cleaning task
+   * @description Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.
+   */
+  accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read a cleaning task's checklist
+   * @description Driven by the task's template: an item nobody has touched still appears, and a completion for an item the template no longer declares does not.
+   */
+  get_checklist_api_v1_cleaning_tasks__task_id__checklist_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ChecklistResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Tick one checklist item
+   * @description Idempotent: ticking twice is not an error. `404` when the item does not belong to the task's template, `409` when the task is not in progress.
+   */
+  complete_checklist_item_api_v1_cleaning_tasks__task_id__checklist__item_id__complete_post: {
+    parameters: {
+      path: {
+        task_id: string;
+        item_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Finish a cleaning
+   * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+   */
+  complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Decline an assigned cleaning task
+   * @description The declined task is terminal and keeps its assignee as the record of who declined; the response is the **replacement** task, created unassigned in the same transaction so the property is never left in `AWAITING_CLEANING` with nothing pending.
+   */
+  reject_cleaning_task_api_v1_cleaning_tasks__task_id__reject_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Start a cleaning
+   * @description Only the assigned cleaner, and only after accepting — PRD §11's flow is accept then start, so starting from `ASSIGNED` is a `409`. Moves the property to `CLEANING_IN_PROGRESS`, which is also what opens the checklist for writing.
+   */
+  start_cleaning_task_api_v1_cleaning_tasks__task_id__start_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Record a manager's verdict on a finished cleaning
+   * @description Not in PRD §23's list, which stops at `complete`: R5.5 asks for the manual validation of PRD §11 and there is no endpoint for it, so this is the same kind of gap as the checklist templates. Automatic validation with `MockAIAdapter` belongs to `messaging-ai`.
+   */
+  validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ValidateCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
       /** @description Validation Error */

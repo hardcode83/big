@@ -37,7 +37,7 @@ pinta en el portal de huésped: la versión no le dice nada a un huésped.
 docker inspect ghcr.io/autohostai-labs/autohostai-backend:sha-<commit> \
   --format '{{json .Config.Labels}}'
 # org.opencontainers.image.version  → 0.1.0+2026-07-30.a2f3c1d  (lo mismo que el badge)
-# org.opencontainers.image.revision → el SHA completo
+# org.opencontainers.image.revision → el SHA completo (solo en el label OCI, no en el snapshot frontend)
 # org.opencontainers.image.created  → cuándo se construyó, con hora
 ```
 
@@ -104,7 +104,8 @@ deja de tener forma `X.Y.Z`.
 Para separarlas, mira el label de la imagen: si `org.opencontainers.image.version` está
 **vacío** es el primer caso; si lleva una cadena y el badge sigue diciendo "desconocida" es el
 segundo, y hay que alinear el patrón de `frontend/lib/config/public.ts` con lo que el CD
-compone —en el mismo commit, porque hoy **nada detecta esa deriva**—.
+compone —en el mismo Pull Request, porque el check `frontend-tests` ejecuta la verificación
+de congruencia—.
 
 ## Cómo se mantiene la versión base
 

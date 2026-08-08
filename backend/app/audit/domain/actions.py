@@ -30,6 +30,14 @@ ENTITY_PMS_CREDENTIAL = "PMS_CREDENTIAL"
 # and rule 9's named exception covers the `SYSTEM` actor that writes it.
 ENTITY_PROPERTY = "PROPERTY"
 
+# A row of `cleaning_tasks`. Added by `cleaning`: rule 9 of `sdd/steering/security.md` exempts
+# a property state transition from `AuditLog` **only when the actor is `SYSTEM`**, and says so
+# explicitly — "una transición con cualquier otro actor —`USER`, `WEBHOOK` o `SCHEDULER`— NO
+# está exenta". Accepting, rejecting, starting and completing a cleaning are all done by a
+# person, so each writes its row. The task created by `process_checkouts` is `SYSTEM` and is
+# covered by that exemption.
+ENTITY_CLEANING_TASK = "CLEANING_TASK"
+
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
 USER_UPDATED = "USER_UPDATED"
@@ -60,6 +68,19 @@ PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 PROPERTY_CREATED = "PROPERTY_CREATED"
 PROPERTY_UPDATED = "PROPERTY_UPDATED"
 
+# Cleaning tasks (`cleaning`). One action per operation rather than a single
+# `CLEANING_TASK_UPDATED`, because rule 9 is only auditable if the operation is findable by
+# `action` — the same reasoning that made `USER_ROLE_CHANGED` its own action instead of a JSONB
+# query over `changes`. `CLEANING_TASK_ASSIGNED` covers both the manager's `PATCH` and a
+# re-assignment; the automatic one at checkout is `SYSTEM` and writes nothing.
+CLEANING_TASK_ASSIGNED = "CLEANING_TASK_ASSIGNED"
+CLEANING_TASK_ACCEPTED = "CLEANING_TASK_ACCEPTED"
+CLEANING_TASK_REJECTED = "CLEANING_TASK_REJECTED"
+CLEANING_TASK_STARTED = "CLEANING_TASK_STARTED"
+CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
+CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
+CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -67,6 +88,8 @@ ENTITY_TYPES = frozenset(
         ENTITY_TENANT_CONFIG,
         ENTITY_PMS_CREDENTIAL,
         ENTITY_PROPERTY,
+
+        ENTITY_CLEANING_TASK,
     }
 )
 
@@ -83,5 +106,13 @@ ACTIONS = frozenset(
         PMS_CREDENTIAL_ROTATED,
         PROPERTY_CREATED,
         PROPERTY_UPDATED,
+
+        CLEANING_TASK_CREATED,
+        CLEANING_TASK_ASSIGNED,
+        CLEANING_TASK_ACCEPTED,
+        CLEANING_TASK_REJECTED,
+        CLEANING_TASK_STARTED,
+        CLEANING_TASK_COMPLETED,
+        CLEANING_TASK_VALIDATED,
     }
 )

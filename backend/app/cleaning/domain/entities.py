@@ -1,9 +1,53 @@
+"""Cleaning aggregates (PRD §7.9-7.12, §11).
+
+`CleaningTask` is the entity `steering/backend-architecture.md` uses **literally** as its
+example of "entidad con invariante real", and this change is where that stops being an
+illustration: PRD §11's validation rule ("no completar con checklist a medias") lives in
+`complete()` and nowhere else, so no router and no use case can bypass it.
+
+Born in `domain-foundation-ops` as plain dataclasses with no behaviour, which was correct
+while nothing wrote these tables. The fields keep their names and types — `PropertyStateMachine`
+and `ContextualStateResolver` read `.status`, `.tenant_id` and `.property_id` and are not
+touched by this change.
+"""
+
 import uuid
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
 
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.exceptions import (
+    BlockingIncidentError,
+    ChecklistIncompleteError,
+    CleaningTaskNotFoundError,
+    InvalidCleaningTransitionError,
+)
+from app.cleaning.domain.value_objects import CleaningCompletionEvidence
+
+# A task that still counts as "this reservation is being taken care of".
+#
+# **Exactly** the statuses `ContextualStateResolver` treats as pending cleaning
+# (`app/properties/domain/state_resolution.py:143-147`), and exactly the set the partial
+# index `uq_cleaning_tasks_live_reservation` is built on (design D2).
+#
+# `PENDING_REVIEW` is deliberately **out**, and an earlier draft had it in. The resolver
+# does not count it, so including it here would mean a task that blocks the creation of a
+# new one while the property reports "no pending cleaning" — the same class of split-brain
+# that made `AWAITING_CLEANING` terminal. Nothing in this change produces `PENDING_REVIEW`
+# (`complete()` goes straight to `COMPLETED`); whoever gives it a writer updates both
+# places, and `tests/cleaning/test_live_task_index.py` fails until they do.
+#
+# The correspondence with the index is a real cross-check, not a claim: that test parses
+# the predicate out of the model and compares it to this set.
+LIVE_STATUSES = frozenset(
+    {
+        CleaningTaskStatus.CREATED,
+        CleaningTaskStatus.ASSIGNED,
+        CleaningTaskStatus.ACCEPTED,
+        CleaningTaskStatus.IN_PROGRESS,
+    }
+)
 
 
 @dataclass
@@ -26,6 +70,135 @@ class CleaningTask:
     validation_status: CleaningValidationStatus = CleaningValidationStatus.PENDING
     validated_by_user_id: uuid.UUID | None = None
     validated_at: datetime | None = None
+
+    @property
+    def is_live(self) -> bool:
+        return self.status in LIVE_STATUSES
+
+    def assign(self, cleaner_id: uuid.UUID, now: datetime) -> None:
+        """Hand the task to a cleaner (R3.1, R3.3).
+
+        Legal from `CREATED` and from `ASSIGNED` — a manager reassigning a task the
+        cleaner has not answered yet is the ordinary case. NOT legal from `ACCEPTED`:
+        someone has already committed to it, and moving it under them silently is a
+        different operation than the one this method names.
+        """
+        self._require_status(
+            {CleaningTaskStatus.CREATED, CleaningTaskStatus.ASSIGNED}, "assign"
+        )
+        self.assigned_cleaner_id = cleaner_id
+        self.status = CleaningTaskStatus.ASSIGNED
+        self.accepted_at = None
+        self.updated_at = now
+
+    def accept(self, cleaner_id: uuid.UUID, now: datetime) -> None:
+        """The assigned cleaner takes it (R3.4)."""
+        self._require_assignee(cleaner_id)
+        self._require_status({CleaningTaskStatus.ASSIGNED}, "accept")
+        self.status = CleaningTaskStatus.ACCEPTED
+        self.accepted_at = now
+        self.updated_at = now
+
+    def reject(self, cleaner_id: uuid.UUID, now: datetime) -> None:
+        """The assigned cleaner declines it (R3.5, design D3).
+
+        **Terminal, and `assigned_cleaner_id` stays put**: that column is the record of
+        *who* rejected, which is half the value of a rejection. The freeing of the slot
+        happens in the replacement task the use case creates — born in `CREATED` with no
+        assignee — not by erasing the evidence here.
+
+        The status must be `REJECTED` at the moment `PropertyStateMachine.evaluate` runs
+        (`app/properties/domain/state_machine.py:232`), which is why this cannot instead
+        return the task to `CREATED`.
+        """
+        self._require_assignee(cleaner_id)
+        self._require_status(
+            {CleaningTaskStatus.ASSIGNED, CleaningTaskStatus.ACCEPTED}, "reject"
+        )
+        self.status = CleaningTaskStatus.REJECTED
+        self.updated_at = now
+
+    def start(self, cleaner_id: uuid.UUID, now: datetime) -> None:
+        """The cleaner begins (R3.6). Only after accepting — PRD §11's flow is explicit."""
+        self._require_assignee(cleaner_id)
+        self._require_status({CleaningTaskStatus.ACCEPTED}, "start")
+        self.status = CleaningTaskStatus.IN_PROGRESS
+        self.started_at = now
+        self.updated_at = now
+
+    def complete(
+        self, cleaner_id: uuid.UUID, evidence: CleaningCompletionEvidence, now: datetime
+    ) -> None:
+        """PRD §11's validation rule, and the only place it exists (R5.1, R5.2, design D4).
+
+        Two of its three clauses. The third — "todas las fotos `required: true` subidas" —
+        belongs to `cleaning-photos-storage`, which owns the upload path; until it lands a
+        task can be closed without them, and that gap is recorded in the proposal's
+        §Out of scope rather than half-enforced here.
+
+        **Takes `cleaner_id` like the other three.** It did not, and the security reviewer of
+        `/sdd:review` was right that it was the only lifecycle method missing the guard: the
+        second layer this module documents for itself at `_require_assignee` existed for
+        `accept`, `reject` and `start` and not for the one operation that actually closes the
+        work. Not reachable today — the route is `CLEANER`-only and the use case filters — but
+        "not reachable today" is exactly the premise a defence in depth is not allowed to rest
+        on.
+        """
+        self._require_assignee(cleaner_id)
+        self._require_status({CleaningTaskStatus.IN_PROGRESS}, "complete")
+        missing = evidence.missing_required_item_ids()
+        if missing:
+            raise ChecklistIncompleteError(missing)
+        if evidence.has_unresolved_critical_incident:
+            raise BlockingIncidentError(
+                "An unresolved CRITICAL incident blocks completing this cleaning"
+            )
+        self.status = CleaningTaskStatus.COMPLETED
+        self.completed_at = now
+        self.validation_status = CleaningValidationStatus.PASSED
+        self.updated_at = now
+
+    def record_manual_validation(
+        self, *, validator_user_id: uuid.UUID, status: CleaningValidationStatus, now: datetime
+    ) -> None:
+        """A manager's verdict on a finished cleaning (R5.5).
+
+        `PENDING` is not a verdict, so it cannot be recorded as one; `PASSED`, `FAILED`
+        and `WAIVED` are.
+        """
+        self._require_status({CleaningTaskStatus.COMPLETED}, "validate")
+        if status is CleaningValidationStatus.PENDING:
+            raise InvalidCleaningTransitionError("PENDING is not a validation verdict")
+        self.validation_status = status
+        self.validated_by_user_id = validator_user_id
+        self.validated_at = now
+        self.updated_at = now
+
+    def _require_status(self, allowed: set[CleaningTaskStatus], operation: str) -> None:
+        if self.status not in allowed:
+            raise InvalidCleaningTransitionError(
+                f"Cannot {operation} a cleaning task in status {self.status.value}"
+            )
+
+    def _require_assignee(self, cleaner_id: uuid.UUID) -> None:
+        """Not yours → it does not exist (R7.2, R7.3).
+
+        **Raises `CleaningTaskNotFoundError`, not a transition error, and runs before
+        `_require_status`.** Both halves matter and the security panel of section 1 found
+        them: a 409 saying "cannot accept a task in status ACCEPTED" tells an unrelated
+        cleaner that the task exists *and* what it is doing, which is precisely the probe
+        R7.3 closes by answering 404 instead of 403. Checking the status first leaked it
+        even when the assignee check would have refused.
+
+        The use case resolves tasks with `restrict_to_cleaner_id` (design D7), so in
+        practice this fires only if that filter is ever dropped — which is exactly why it
+        must fail the same way the filter does, and not more loudly.
+        """
+        if self.assigned_cleaner_id != cleaner_id:
+            # No argument: the message is the same constant an unknown id produces. A body
+            # saying "not assigned to you" would confirm the task exists and belongs to
+            # someone else — the probe R7.3 closes, one layer below the status code.
+            raise CleaningTaskNotFoundError()
 
 
 @dataclass

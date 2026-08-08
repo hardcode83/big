@@ -147,6 +147,23 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "status",
         }
     ),
+    # `cleaning`. Only the columns a person's action moves, and none of them is sensitive:
+    # a status, an assignee, a verdict and the four timestamps. Deliberately **without
+    # `notes`** — design D13 keeps that column out of this change's writable surface because
+    # rule 11's table does not enumerate it, and an audited diff would carry its content into
+    # `audit_logs.changes`, which is a rule-11 sink itself.
+    "CLEANING_TASK": frozenset(
+        {
+            "status",
+            "assigned_cleaner_id",
+            "validation_status",
+            "validated_by_user_id",
+            "accepted_at",
+            "started_at",
+            "completed_at",
+            "validated_at",
+        }
+    ),
 }
 
 _REDACTED_MARKER = {"changed": True}

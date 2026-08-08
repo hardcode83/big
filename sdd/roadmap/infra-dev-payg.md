@@ -1,0 +1,3 @@
+# infra-dev-payg
+
+[INFRA] reconciliación del entorno dev con el pivote a Oracle Pay-As-You-Go (ADR 0001, criterio de revisión #5): la A1 Always Free daba "Out of host capacity" persistente incluso en Frankfurt; reabierto el debate de proveedor con precios verificados 2026 (Hetzner ya ~€9 CX33, Lightsail ~$44, Contabo/Netcup nuevos), se mantiene Oracle vía PAYG (único $0 con cero reescritura, prioridad de capacidad); tenancy PAYG conservando la capa gratuita a $0, resize in-place a 4 OCPU/24 GB/200 GB en AD-3, GitHub Actions como único gestor de infra, higiene de repo/secretos (no está en el plan original, añadido tras `infra-dev-terraform`)

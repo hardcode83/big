@@ -1,0 +1,3 @@
+# ingress-https-hardening
+
+[INFRA] cierra los 3 hallazgos **bloqueantes** que el panel de `/sdd:review` encontró en `ingress-https-dev`: aislar `cloudflared` en una red de compose dedicada (hoy comparte la `default` con `postgres`/`redis`/`backend`, así que el routing remoto del túnel permite publicarlos sin abrir puertos ni pasar por `apply`), acotar el statement `read secrets in compartment` de la policy del runner que quedó sin condición, y corregir la instrucción del RUNBOOK que enseña a publicar Postgres en `0.0.0.0`. Incluye corregir el radio de daño documentado del API token (no está en el plan original, añadido tras `ingress-https-dev`)

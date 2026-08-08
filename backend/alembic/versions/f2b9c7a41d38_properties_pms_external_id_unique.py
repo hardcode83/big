@@ -68,7 +68,13 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'f2b9c7a41d38'
-down_revision: Union[str, Sequence[str], None] = 'c3f81a5d7e42'
+# Re-pointed from `c3f81a5d7e42` to `cleaning`'s revision when this branch was merged with
+# `main`. Both had been written against the same parent, so the files merged without a textual
+# conflict while leaving Alembic with TWO heads — which `alembic upgrade head` refuses, and CI
+# runs exactly that. This repository keeps a strictly linear chain and has no merge revisions, so
+# the fix is to linearise rather than to add one. Safe to re-point: this migration only creates an
+# index and had not been applied anywhere but a development database.
+down_revision: Union[str, Sequence[str], None] = 'd4b0c7a91f38'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

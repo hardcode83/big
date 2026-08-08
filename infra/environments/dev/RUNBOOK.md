@@ -138,6 +138,14 @@ Verificar: **Settings → Actions → Runners** muestra `autohostai-dev-vm` **Id
 1. GitHub App + variables/secret creados (6.1); Terraform aplicado (§5.3, crea la IAM + los secrets del Vault); runner provisionado (6.2) y online.
 2. Lanzar el deploy (push a `main` o `workflow_dispatch`). El job lee los secrets del Vault → `.env`, hace `docker login ghcr.io` con el `GITHUB_TOKEN` del job, `pull`, corre `migrate` (Alembic) y arranca la app; `up --wait` falla si algo no queda `healthy`.
 
+### 6.3.1 Un solo deploy raro, esperado: el que trae `api-ingress-routing`
+
+El deploy que introduce el change `api-ingress-routing` **para y levanta todos los servicios de la red `private`** —`postgres`, `redis`, `migrate`, `backend`, `worker`, `beat` y `frontend`—, no solo los dos que el change toca. **Es esperado, es de un solo uso y el deploy sale en verde.**
+
+El motivo: ese change añade IPAM explícito a la red `private` (una subred fija, para poder asignar al `frontend` una IP estática que el backend reconoce como su proxy de confianza). La red ya existe en la VM sin IPAM, así que Compose detecta la deriva y **recrea la red**, lo que obliga a reconectar todo lo que estaba enganchado a ella. Reproducido en un stack de prueba con `docker compose` v5.1.1: `up -d --wait` sigue terminando con éxito una vez los healthchecks pasan.
+
+Se anota aquí porque quien vigile los logs de ese rollout verá el stack entero parándose y eso se lee como una avería. Si ocurre en **cualquier otro** deploy, no es esto: mira si alguien ha vuelto a tocar la sección `networks` de `docker-compose.deploy.yml`.
+
 ### 6.4 Rollback (manual, por SHA)
 
 El deploy pinea la imagen al `sha-<commit>`. Para volver a una versión previa, re-lanzar el deploy de ese commit anterior: en **Actions → deploy-dev**, usa el `workflow_dispatch` desde el commit deseado (o `git revert` + push a `main`). No hay rollback automático — es una decisión de diseño (dev, corte breve aceptable).
@@ -294,7 +302,7 @@ Cómo mirar la app y diagnosticar cuando algo va mal, sabiendo que **no hay ning
 
 #### El modelo mental en tres frases
 
-1. **Desde internet** solo hay un camino a la app: `https://autohostai.digitalsec.work` → edge de Cloudflare → túnel → contenedor. No hay ningún puerto HTTP abierto en la VM.
+1. **Desde internet** solo hay un camino a la app: `https://autohostai.digitalsec.work` → edge de Cloudflare → túnel → contenedor. No hay ningún puerto HTTP abierto en la VM. Desde el change `api-ingress-routing`, ese mismo camino sirve también **la API**: `/api/v1/...` en el hostname público lo reenvía el contenedor `frontend` a `backend:8000` por la red interna. Lo que sigue **sin** viajar por ahí, a propósito: `/openapi.json`, `/docs`, `/docs/oauth2-redirect`, `/redoc` y `/health` — para esos, el túnel SSH de abajo sigue siendo la única vía.
 2. **Desde la VM**, `backend` y `frontend` sí escuchan en `127.0.0.1` (puertos 8000 y 3000). No son alcanzables desde fuera —`127.0.0.1` no es enrutable— pero sí desde la propia máquina.
 3. **Tú entras por SSH** (puerto 22, acotado a los CIDRs de operador) y, si quieres, te traes esos puertos a tu portátil por el propio SSH. Eso te da la app en tu navegador **sin pasar por Cloudflare**, que es como se distingue un fallo de la app de un fallo del edge.
 
@@ -360,6 +368,33 @@ Comprueba que el túnel está vivo sin salir de tu máquina:
 curl -sSI http://localhost:3000 | head -1     # debería responder algo, no "connection refused"
 curl -sS  http://localhost:8000/health
 ```
+
+#### Comprobar el camino a la API, y la IP que el backend observa
+
+El túnel SSH ya no es la única forma de alcanzar `/api/v1`: desde el change `api-ingress-routing` la API responde también por el hostname público. Sigue siendo la única forma de alcanzar `/docs`.
+
+```bash
+# Por el hostname público: debe responder el sobre de error DEL BACKEND, no un 404 de Next
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST \
+  -H 'Content-Type: application/json' -d '{"email":"x@y.z","password":"x"}' \
+  https://autohostai.digitalsec.work/api/v1/auth/login          # 401 (o 429 si ya te pasaste)
+
+# Y estas cuatro NO deben ser alcanzables por ahí (404 de la app Next, sin tocar el backend)
+for p in /openapi.json /docs /docs/oauth2-redirect /redoc; do
+  printf '%s -> ' "$p"
+  curl -sS -o /dev/null -w '%{http_code}\n' "https://autohostai.digitalsec.work$p"
+done
+```
+
+**El diagnóstico que no es obvio: qué IP está viendo el backend.** Si la propagación se rompe, la API funciona igual pero el límite de 10 intentos/min cuenta *todo el despliegue* en un solo contador —y `audit_logs.actor_ip` registra la IP del contenedor en vez de la de la persona—. Nada falla ruidosamente, así que hay que mirarlo:
+
+```bash
+# En la VM: provoca un fallo de login por el hostname público desde tu móvil o tu portátil,
+# y mira con qué IP lo registró el backend
+docker compose -f docker-compose.deploy.yml logs backend --tail 50 | grep -i "ip="
+```
+
+Debe aparecer **tu IP pública**, no `10.89.0.10` (la del contenedor `frontend`). Si aparece la del contenedor, el `--forwarded-allow-ips` del `command:` de `backend` y el `ipv4_address` del `frontend` se han desincronizado — los dos salen del mismo ancla YAML, así que revisa que nadie haya escrito uno a mano.
 
 #### Cerrarlo
 

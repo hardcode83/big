@@ -1,0 +1,3 @@
+# infra-dev-hardening
+
+[INFRA] endurecimiento de la infra dev antes de cerrarla, a partir de la revisión de Marta: apply acotado a `main` + concurrency/timeout + actions por SHA (el **GitHub Environment con aprobación se descartó** — revisado 2026-07-29: con dos owners y `apply` solo por `workflow_dispatch` manual desde `main` se considera control suficiente; nunca llegó a existir `environment:` en los workflows); cloud-init corregido (Docker/Compose real en Ubuntu 22.04 ARM64 — bug: `docker-compose-plugin` no está en repos por defecto); backend de state con IAM mínimo/versioning/recuperación; runbook operativo (no está en el plan original, añadido tras `infra-dev-payg`)
