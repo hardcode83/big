@@ -91,7 +91,9 @@ def test_it_rejects_an_action_outside_the_vocabulary(action: str) -> None:
         )
 
 
-@pytest.mark.parametrize("entity_type", ["User", "users", "PROPERTY", ""])
+# `RESERVATION` stands for "a real table that is not in the vocabulary yet"; it replaced
+# `PROPERTY`, which `properties-crud` registered. See the twin note in `test_change_set.py`.
+@pytest.mark.parametrize("entity_type", ["User", "users", "RESERVATION", ""])
 def test_it_rejects_an_entity_type_outside_the_vocabulary(entity_type: str) -> None:
     with pytest.raises(AuditContractError):
         AuditLogFactory.build(

@@ -2,7 +2,19 @@ import uuid
 from datetime import datetime, time
 from typing import Any
 
-from sqlalchemy import DateTime, Enum, ForeignKey, Index, String, Time, UniqueConstraint, Uuid, func, text
+from sqlalchemy import (
+    DateTime,
+    Enum,
+    ForeignKey,
+    Index,
+    String,
+    Time,
+    UniqueConstraint,
+    Uuid,
+    column,
+    func,
+    text,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -26,6 +38,45 @@ class PropertyModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
         UniqueConstraint("tenant_id", "internal_code", name="uq_properties_tenant_id_internal_code"),
         Index("ix_properties_tenant_id_current_operational_state", "tenant_id", "current_operational_state"),
         Index("ix_properties_tenant_id_pms_external_id", "tenant_id", "pms_external_id"),
+        # Uniqueness of `pms_external_id` is scoped PER PROVIDER, not per tenant. It exists
+        # because `POST`/`PATCH /api/v1/properties` can otherwise create the shared id that
+        # `specs/reservations.md` requires the sync to reject, and an application-level
+        # pre-check would lose the race between two concurrent writes.
+        #
+        # **Why per provider and not per tenant** (`properties-crud` design D5, corrected
+        # during implementation): external ids are unique only WITHIN a provider. A tenant
+        # mid-migration legitimately has one property on Beds24 and another on Channex that
+        # happen to share an id — the scenario ADR 0006 decision 7 exists for, pinned by
+        # `tests/integrations/test_sync.py::test_a_reservation_cannot_attach_to_a_property_of_another_provider`.
+        # A tenant-wide unique index forbids that state, and the first version of this index
+        # did exactly that and broke three tests.
+        #
+        # **Why `COALESCE` and not just the column in the key**: `pms_provider` is nullable and
+        # NULL means "the bootstrap default", which `pms_factory.DEFAULT_PROVIDER` defines as
+        # `MOCK`. Postgres treats NULLs as DISTINCT inside an index key, so a plain
+        # `(tenant_id, pms_provider, pms_external_id)` would still let two provider-less
+        # properties claim one id — precisely the ambiguity this index exists to prevent, left
+        # open by the obvious fix. Folding NULL to `MOCK` closes it AND is what the values mean:
+        # a NULL-provider property and an explicitly-MOCK one are served by the same adapter, so
+        # they are the same group and sharing an id between them *is* the ambiguity.
+        #
+        # The literal is the enum member rather than the string so a rename travels; the coupling
+        # to `DEFAULT_PROVIDER` living in another module is guarded by
+        # `tests/properties/test_models.py`, which fails if the default stops being `MOCK`.
+        # `CAST(... AS TEXT)` was tried first and Postgres rejects it: an enum-to-text cast is
+        # STABLE, not IMMUTABLE, because enum labels can be renamed, and index expressions must
+        # be immutable.
+        #
+        # Partial because most properties carry no external id at all, and rows the invariant
+        # says nothing about do not belong in the index.
+        Index(
+            "uq_properties_tenant_id_pms_external_id",
+            "tenant_id",
+            func.coalesce(column("pms_provider"), text(f"'{PMSProvider.MOCK.value}'")),
+            "pms_external_id",
+            unique=True,
+            postgresql_where=text("pms_external_id IS NOT NULL"),
+        ),
     )
 
     name: Mapped[str] = mapped_column(String(200))

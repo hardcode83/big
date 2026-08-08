@@ -8,17 +8,33 @@ No method commits: the transactional boundary is the use case (design D4).
 """
 
 import uuid
-from collections.abc import Collection
+from collections.abc import Collection, Mapping
+from typing import Any
 
-from sqlalchemy import select, update
+from sqlalchemy import Select, func, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import PropertyOperationalState
-from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
+from app.properties.domain.exceptions import (
+    AmbiguousPropertyExternalIdError,
+    DuplicateInternalCodeError,
+    DuplicatePmsExternalIdError,
+    PropertyValidationError,
+)
+from app.properties.domain.repositories import (
+    PATCHABLE_PROPERTY_FIELDS,
+    Page,
+    PropertyFilters,
+)
 from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
+
+INTERNAL_CODE_CONSTRAINT = "uq_properties_tenant_id_internal_code"
+PMS_EXTERNAL_ID_CONSTRAINT = "uq_properties_tenant_id_pms_external_id"
 
 
 class SqlAlchemyPropertyRepository:
@@ -140,6 +156,148 @@ class SqlAlchemyPropertyRepository:
                 acting_tenant_id=tenant_id,
             )
 
+    async def add(
+        self,
+        tenant_id: uuid.UUID,
+        property: Property,
+        *,
+        wifi_secret: EncryptedSecret | None = None,
+    ) -> None:
+        if property.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="property",
+                entity_tenant_id=property.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        if property.current_operational_state is not PropertyOperationalState.VACANT_READY:
+            # A runtime guard, and it has to be one: unlike the other writers, `add` takes a whole
+            # entity, so its SIGNATURE cannot forbid a state the way `update_details`' allowlist
+            # can. Without this check the port would hand any future caller — `seed-data-demo` is
+            # the next one queued — a way to land a property directly in `OCCUPIED` or `BLOCKED`
+            # with no `property_state_transitions` row and no `AuditLog`, indistinguishable
+            # afterwards from one the machine moved. That is exactly the bypass
+            # `steering/backend.md` forbids and rule 9 of `steering/security.md` depends on.
+            #
+            # Refused rather than silently normalised, for the same reason `update_details`
+            # refuses an unknown key: a caller that asked for a state must learn it was ignored.
+            raise PropertyValidationError(
+                "A property is created in VACANT_READY and nothing else; "
+                f"{property.current_operational_state.value} was requested. Reaching any other "
+                "state is a transition, and transitions belong to PropertyStateMachine, which "
+                "records them in property_state_transitions."
+            )
+        self._session.add(
+            PropertyModel(
+                id=property.id,
+                tenant_id=property.tenant_id,
+                name=property.name,
+                internal_code=property.internal_code,
+                pms_external_id=property.pms_external_id,
+                pms_provider=property.pms_provider,
+                address_line1=property.address_line1,
+                address_line2=property.address_line2,
+                city=property.city,
+                province=property.province,
+                postal_code=property.postal_code,
+                country=property.country,
+                timezone=property.timezone,
+                max_guests=property.max_guests,
+                bedrooms=property.bedrooms,
+                bathrooms=property.bathrooms,
+                # `current_operational_state` is deliberately NOT set, so this INSERT has no way
+                # to express a state at all and the guard above is what keeps the entity honest.
+                #
+                # Precise about the mechanism, because "the DDL default decides" is only half
+                # true: the model also carries a Python-side `default=`, so SQLAlchemy fills the
+                # column client-side here. Both values are `VACANT_READY`, and the DDL
+                # `server_default` is what covers an INSERT that does not go through the ORM —
+                # so the guarantee holds by either route, which is the point of having both.
+                default_check_in_time=property.default_check_in_time,
+                default_check_out_time=property.default_check_out_time,
+                wifi_name=property.wifi_name,
+                # The only route by which this column is written, and it can only carry
+                # ciphertext: the entity has no such field (design D2) and `EncryptedSecret`
+                # refuses to hold anything that is not a Fernet token.
+                wifi_password_encrypted=wifi_secret.ciphertext if wifi_secret else None,
+                access_notes=property.access_notes,
+                cleaning_notes=property.cleaning_notes,
+                emergency_notes=property.emergency_notes,
+                status=property.status,
+            )
+        )
+        try:
+            await self._session.flush()
+        except IntegrityError as error:
+            _translate_duplicate(error)
+            raise
+
+    async def update_details(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, changes: Mapping[str, Any]
+    ) -> bool:
+        if not changes:
+            raise PropertyValidationError(
+                "update_details was called with no changes; deciding that nothing changed is "
+                "the use case's job, because the same decision governs whether an AuditLog row "
+                "is written."
+            )
+        rejected = sorted(set(changes) - PATCHABLE_PROPERTY_FIELDS)
+        if rejected:
+            # Refused rather than filtered out. Silently dropping an unknown key would let a
+            # caller believe it wrote `current_operational_state`, and the whole point of the
+            # allowlist is that a route around `PropertyStateMachine` is impossible, not merely
+            # ineffective. A rejected key is a programming error, so it surfaces as one.
+            raise PropertyValidationError(
+                f"Fields {rejected} are not patchable on a property. Only "
+                "PATCHABLE_PROPERTY_FIELDS may be written here; current_operational_state in "
+                "particular belongs to PropertyStateMachine alone."
+            )
+        try:
+            result = await self._session.execute(
+                update(PropertyModel)
+                .where(PropertyModel.tenant_id == tenant_id, PropertyModel.id == property_id)
+                .values(**dict(changes))
+            )
+        except IntegrityError as error:
+            # A PATCH collides on the same two constraints an insert does: renaming a property's
+            # `internal_code` to one already taken, or claiming a neighbouring row's external id.
+            _translate_duplicate(error)
+            raise
+        return result.rowcount > 0
+
+    async def set_wifi_password(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID, secret: EncryptedSecret | None
+    ) -> bool:
+        result = await self._session.execute(
+            update(PropertyModel)
+            .where(PropertyModel.tenant_id == tenant_id, PropertyModel.id == property_id)
+            .values(wifi_password_encrypted=secret.ciphertext if secret else None)
+        )
+        return result.rowcount > 0
+
+    async def list(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        filters: PropertyFilters,
+        page: int,
+        per_page: int,
+    ) -> Page:
+        """The count runs over the same filtered statement, so `total_pages` cannot describe a
+        different result set than `data`."""
+        conditions = _conditions(tenant_id, filters)
+        total = await self._session.scalar(
+            select(func.count()).select_from(PropertyModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            _ordered(select(PropertyModel).where(*conditions))
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        return Page(
+            items=tuple(_to_property(model) for model in rows.scalars()),
+            total=int(total or 0),
+        )
+
 
 class SqlAlchemyPropertyStateTransitionRepository:
     def __init__(self, session: AsyncSession) -> None:
@@ -172,6 +330,48 @@ class SqlAlchemyPropertyStateTransitionRepository:
         await self._session.flush()
 
 
+def _translate_duplicate(error: IntegrityError) -> None:
+    """Raise the domain error for a known constraint, or return so the caller re-raises.
+
+    The named constraint is the authority on duplicates, never a prior read: two concurrent
+    creations of the same `internal_code` both pass a lookup and only one can pass the index, so
+    translating here is what makes the `409` race-free (`user-management` recorded the same
+    reasoning for `uq_users_lower_email`).
+
+    Returning on anything else is deliberate — a `409` blamed on a foreign key the client cannot
+    see would be a lie it has no way to act on.
+    """
+    message = str(error.orig)
+    if INTERNAL_CODE_CONSTRAINT in message:
+        raise DuplicateInternalCodeError(
+            "A property with that internal_code already exists for this tenant"
+        ) from error
+    if PMS_EXTERNAL_ID_CONSTRAINT in message:
+        raise DuplicatePmsExternalIdError(
+            "Another property of this tenant already claims that pms_external_id"
+        ) from error
+
+
+def _conditions(tenant_id: uuid.UUID, filters: PropertyFilters) -> list:
+    conditions = [PropertyModel.tenant_id == tenant_id]
+    if filters.status is not None:
+        conditions.append(PropertyModel.status == filters.status)
+    if filters.current_operational_state is not None:
+        conditions.append(
+            PropertyModel.current_operational_state == filters.current_operational_state
+        )
+    return conditions
+
+
+def _ordered(statement: Select) -> Select:
+    """By name, `id` as the tie-break.
+
+    Without the second key two properties sharing a name could swap places between pages, and a
+    client paging through would see one twice and miss the other.
+    """
+    return statement.order_by(PropertyModel.name, PropertyModel.id)
+
+
 def _to_property(model: PropertyModel) -> Property:
     return Property(
         id=model.id,
@@ -196,7 +396,10 @@ def _to_property(model: PropertyModel) -> Property:
         default_check_in_time=model.default_check_in_time,
         default_check_out_time=model.default_check_out_time,
         wifi_name=model.wifi_name,
-        wifi_password_encrypted=model.wifi_password_encrypted,
+        # The PRESENCE of the secret, never the secret (R5.2). `wifi_password_encrypted` itself is
+        # intentionally not mapped onto the entity (design D2): nothing reads it, and leaving it
+        # off keeps it off every serialisation path.
+        has_wifi_password=model.wifi_password_encrypted is not None,
         access_notes=model.access_notes,
         cleaning_notes=model.cleaning_notes,
         emergency_notes=model.emergency_notes,

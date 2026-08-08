@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy import select
 
 from app.core.tenancy import CrossTenantWriteError
+from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import PropertyStateTransition
 from app.properties.domain.enums import (
     PropertyOperationalState,
@@ -43,12 +44,14 @@ async def _property(
     internal_code: str,
     pms_external_id: str | None = None,
     state: PropertyOperationalState = PropertyOperationalState.VACANT_READY,
+    pms_provider: PMSProvider | None = None,
 ) -> PropertyModel:
     model = PropertyModel(
         tenant_id=tenant.id,
         name=internal_code,
         internal_code=internal_code,
         pms_external_id=pms_external_id,
+        pms_provider=pms_provider,
         current_operational_state=state,
     )
     db_session.add(model)
@@ -134,14 +137,36 @@ async def test_find_by_pms_external_id_within_the_tenant(db_session) -> None:
 async def test_an_ambiguous_pms_external_id_fails_closed(db_session) -> None:
     """Two properties, one external id: refuse rather than attach a guest to a coin flip.
 
-    `ix_properties_tenant_id_pms_external_id` is an index, not a unique constraint, so
-    this state is reachable — the repository must not silently pick one. It refuses with a
-    DOMAIN error, so the PMS sync can report the row without catching a SQLAlchemy
-    exception inside `application/` (design D16).
+    It refuses with a DOMAIN error, so the PMS sync can report the row without catching a
+    SQLAlchemy exception inside `application/` (design D16).
+
+    **The two properties are on different providers, and that is load-bearing.**
+    `properties-crud` (design D5) added the partial unique index
+    `uq_properties_tenant_id_pms_external_id`, keyed on `coalesce(pms_provider, 'MOCK')` — so
+    within one provider this ambiguity can no longer be created, which is the point: the new
+    write path could otherwise produce it one request at a time. Across providers it stays legal,
+    because external ids are unique only WITHIN a provider and a tenant mid-migration
+    legitimately has the same id on two of them (ADR 0006 decision 7).
+
+    That is exactly why this guard is still reachable rather than dead: `find_by_pms_external_id`
+    looks up tenant-wide, without a provider, so a legitimate cross-provider pair returns two rows
+    and it must refuse instead of picking one.
     """
     tenant = await _tenant(db_session, "TenantA")
-    await _property(db_session, tenant, internal_code="REDES11", pms_external_id="PMS-DUP")
-    await _property(db_session, tenant, internal_code="PAJARITOS8", pms_external_id="PMS-DUP")
+    await _property(
+        db_session,
+        tenant,
+        internal_code="REDES11",
+        pms_external_id="PMS-DUP",
+        pms_provider=PMSProvider.BEDS24,
+    )
+    await _property(
+        db_session,
+        tenant,
+        internal_code="PAJARITOS8",
+        pms_external_id="PMS-DUP",
+        pms_provider=PMSProvider.CHANNEX,
+    )
 
     with pytest.raises(AmbiguousPropertyExternalIdError):
         await SqlAlchemyPropertyRepository(db_session).find_by_pms_external_id(

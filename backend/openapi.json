@@ -559,6 +559,223 @@
         "title": "CreateCleaningTaskRequest",
         "type": "object"
       },
+      "CreatePropertyRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "access_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "bathrooms": {
+            "default": 1,
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Bathrooms",
+            "type": "integer"
+          },
+          "bedrooms": {
+            "default": 1,
+            "maximum": 50.0,
+            "minimum": 0.0,
+            "title": "Bedrooms",
+            "type": "integer"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "cleaning_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Notes"
+          },
+          "country": {
+            "default": "ES",
+            "maxLength": 2,
+            "minLength": 2,
+            "pattern": "^[A-Z]{2}$",
+            "title": "Country",
+            "type": "string"
+          },
+          "default_check_in_time": {
+            "default": "15:00:00",
+            "format": "time",
+            "title": "Default Check In Time",
+            "type": "string"
+          },
+          "default_check_out_time": {
+            "default": "11:00:00",
+            "format": "time",
+            "title": "Default Check Out Time",
+            "type": "string"
+          },
+          "emergency_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Notes"
+          },
+          "internal_code": {
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Internal Code",
+            "type": "string"
+          },
+          "max_guests": {
+            "default": 2,
+            "maximum": 50.0,
+            "minimum": 1.0,
+            "title": "Max Guests",
+            "type": "integer"
+          },
+          "name": {
+            "maxLength": 200,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          },
+          "pms_external_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pms External Id"
+          },
+          "pms_provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PMSProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PropertyStatus",
+            "default": "ACTIVE"
+          },
+          "timezone": {
+            "default": "Europe/Madrid",
+            "maxLength": 50,
+            "minLength": 1,
+            "title": "Timezone",
+            "type": "string"
+          },
+          "wifi_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Name"
+          },
+          "wifi_password": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Password"
+          }
+        },
+        "required": [
+          "name",
+          "internal_code"
+        ],
+        "title": "CreatePropertyRequest",
+        "type": "object"
+      },
       "CreateReservationRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1034,6 +1251,16 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "PMSProvider": {
+        "description": "Which PMS a property talks to.\n\nReplaces PRD §22's single `PMS_PROVIDER` environment variable, which ADR 0006 retired\nbefore any code read it: a global selector cannot express two providers coexisting, and\nthat happens in both futures the ADR names — the migration window to Channex, where some\nproperties have moved and others have not, and the SaaS phase, where each client arrives\nwith the PMS they already pay for.\n\n`MOCK` is a first-class member, not a testing hack: it is the MVP's default and what the\nsuite and local startup run against, so a property with no provider resolves to it.\n\nDeliberately NOT the full list of the eleven providers ADR 0006 evaluated: `OCTORATE` joins\nthe day it is worth storing a credential for one.\n\nA member is **not** a promise that an adapter exists. `BEDS24` is here before its adapter\n(which arrives with `pms-beds24-adapter`) precisely so its account credential can be\nprovisioned and rotated first — the credential is the long-lived thing, the adapter is code.\nResolving such a property fails with `PmsUnavailableError` naming the gap, never by silently\nfalling back to the mock.",
+        "enum": [
+          "MOCK",
+          "CHANNEX",
+          "BEDS24"
+        ],
+        "title": "PMSProvider",
+        "type": "string"
+      },
       "PaymentStatus": {
         "enum": [
           "PENDING",
@@ -1042,6 +1269,286 @@
           "REFUNDED"
         ],
         "title": "PaymentStatus",
+        "type": "string"
+      },
+      "PropertyOperationalState": {
+        "enum": [
+          "VACANT_READY",
+          "AWAITING_CHECKIN",
+          "OCCUPIED_ESTIMATED",
+          "AWAITING_CLEANING",
+          "CLEANING_SCHEDULED",
+          "CLEANING_IN_PROGRESS",
+          "READY_FOR_NEXT_GUEST",
+          "MAINTENANCE_REQUIRED",
+          "CRITICAL_INCIDENT",
+          "BLOCKED_BY_OWNER",
+          "OUT_OF_SERVICE"
+        ],
+        "title": "PropertyOperationalState",
+        "type": "string"
+      },
+      "PropertyPageResponse": {
+        "description": "The pagination envelope of PRD §23.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PropertyResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "PropertyPageResponse",
+        "type": "object"
+      },
+      "PropertyResponse": {
+        "description": "One property. Structurally without the wifi password, in any form (R5.2).\n\nFields are enumerated and built by `from_domain`, never dumped with `from_attributes`: the\nentity gains fields owned by other modules over time and a dump would publish each new one\nautomatically. That is the same reason `reservations` and `users` enumerate theirs.",
+        "properties": {
+          "access_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "bathrooms": {
+            "title": "Bathrooms",
+            "type": "integer"
+          },
+          "bedrooms": {
+            "title": "Bedrooms",
+            "type": "integer"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "cleaning_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Notes"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_operational_state": {
+            "$ref": "#/components/schemas/PropertyOperationalState"
+          },
+          "default_check_in_time": {
+            "format": "time",
+            "title": "Default Check In Time",
+            "type": "string"
+          },
+          "default_check_out_time": {
+            "format": "time",
+            "title": "Default Check Out Time",
+            "type": "string"
+          },
+          "emergency_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Notes"
+          },
+          "has_wifi_password": {
+            "title": "Has Wifi Password",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "internal_code": {
+            "title": "Internal Code",
+            "type": "string"
+          },
+          "max_guests": {
+            "title": "Max Guests",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pms_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pms External Id"
+          },
+          "pms_provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PMSProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PropertyStatus"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "wifi_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Name"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "internal_code",
+          "pms_external_id",
+          "pms_provider",
+          "address_line1",
+          "address_line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "timezone",
+          "max_guests",
+          "bedrooms",
+          "bathrooms",
+          "current_operational_state",
+          "default_check_in_time",
+          "default_check_out_time",
+          "wifi_name",
+          "has_wifi_password",
+          "access_notes",
+          "cleaning_notes",
+          "emergency_notes",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PropertyResponse",
+        "type": "object"
+      },
+      "PropertyStatus": {
+        "enum": [
+          "ACTIVE",
+          "INACTIVE"
+        ],
+        "title": "PropertyStatus",
         "type": "string"
       },
       "RefreshRequest": {
@@ -1972,6 +2479,272 @@
           "expires_in"
         ],
         "title": "TokenPairResponse",
+        "type": "object"
+      },
+      "UpdatePropertyRequest": {
+        "additionalProperties": false,
+        "description": "Every field optional; only those present are applied (R3.1).\n\n`model_fields_set` is what distinguishes \"not sent\" from \"sent as null\", so a caller can\nclear `city` by sending `null` without every other unsent field being treated as a clear.",
+        "properties": {
+          "access_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "bathrooms": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bathrooms"
+          },
+          "bedrooms": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Bedrooms"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "cleaning_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Notes"
+          },
+          "country": {
+            "anyOf": [
+              {
+                "maxLength": 2,
+                "minLength": 2,
+                "pattern": "^[A-Z]{2}$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Country"
+          },
+          "default_check_in_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Check In Time"
+          },
+          "default_check_out_time": {
+            "anyOf": [
+              {
+                "format": "time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Check Out Time"
+          },
+          "emergency_notes": {
+            "anyOf": [
+              {
+                "maxLength": 5000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Emergency Notes"
+          },
+          "internal_code": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Internal Code"
+          },
+          "max_guests": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Guests"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "pms_external_id": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pms External Id"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "maxLength": 20,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "maxLength": 100,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "status": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PropertyStatus"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "timezone": {
+            "anyOf": [
+              {
+                "maxLength": 50,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Timezone"
+          },
+          "wifi_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Name"
+          },
+          "wifi_password": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Password"
+          }
+        },
+        "title": "UpdatePropertyRequest",
         "type": "object"
       },
       "UpdateReservationRequest": {
@@ -3707,6 +4480,332 @@
         "summary": "Import reservations from a CSV file",
         "tags": [
           "integrations"
+        ]
+      }
+    },
+    "/api/v1/properties": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). Filters combine with AND. Ordered by name with the id as tiebreaker, so paging neither repeats a row nor skips one when two properties share a name. The wifi password is never in the response — `has_wifi_password` reports whether one is stored.",
+        "operationId": "list_properties_api_v1_properties_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PropertyStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "current_operational_state",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PropertyOperationalState"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Current Operational State"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's properties",
+        "tags": [
+          "properties"
+        ]
+      },
+      "post": {
+        "description": "`internal_code` must be unique within the tenant and `pms_external_id` unique within the tenant AND the provider, both answering `409` on collision. `current_operational_state` cannot be chosen: a new property starts `VACANT_READY` and only `PropertyStateMachine` moves it. A `wifi_password` is encrypted before storage and can never be read back.",
+        "operationId": "create_property_api_v1_properties_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePropertyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register a property",
+        "tags": [
+          "properties"
+        ]
+      }
+    },
+    "/api/v1/properties/{property_id}": {
+      "get": {
+        "description": "A property of another tenant answers `404`, with a body indistinguishable from one that does not exist. The wifi password is not returned in any form, masked included; `has_wifi_password` reports whether one is stored.",
+        "operationId": "get_property_api_v1_properties__property_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "One property",
+        "tags": [
+          "properties"
+        ]
+      },
+      "patch": {
+        "description": "Only the fields present in the body are applied. `current_operational_state` is not among them and is rejected with `422`. A body that changes nothing writes nothing and records no audit entry — except `wifi_password`, whose no-op cannot be detected because the stored value has no reader, so sending it always counts as a change. Retire a property with `{\"status\": \"INACTIVE\"}`; there is no `DELETE`.",
+        "operationId": "update_property_api_v1_properties__property_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePropertyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Update a property partially",
+        "tags": [
+          "properties"
         ]
       }
     },

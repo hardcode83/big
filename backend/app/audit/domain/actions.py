@@ -22,6 +22,14 @@ ENTITY_TENANT_CONFIG = "TENANT_CONFIG"
 # credential spread across property columns would have nothing to point at (ADR 0006, obligation
 # 4, and `pms-provider-resolution` design D4).
 ENTITY_PMS_CREDENTIAL = "PMS_CREDENTIAL"
+# A row of `properties` (`properties-crud` design D7). Rule 9's enumeration names "estados de
+# propiedad" and not the property itself, so creating one or editing its address was invisible
+# until this change. Audited anyway, on the precedent rule 9 already set for `TenantConfig`: the
+# enumeration is a floor, and a row nobody can attribute is a gap in the trail whether or not the
+# list happens to name it. The state column stays out — its trail is `property_state_transitions`,
+# and rule 9's named exception covers the `SYSTEM` actor that writes it.
+ENTITY_PROPERTY = "PROPERTY"
+
 # A row of `cleaning_tasks`. Added by `cleaning`: rule 9 of `sdd/steering/security.md` exempts
 # a property state transition from `AuditLog` **only when the actor is `SYSTEM`**, and says so
 # explicitly — "una transición con cualquier otro actor —`USER`, `WEBHOOK` o `SCHEDULER`— NO
@@ -53,6 +61,13 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 PMS_CREDENTIAL_READ = "PMS_CREDENTIAL_READ"
 PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 
+# There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
+# (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
+# nunca `DELETE` real"). An action for an operation the API does not offer would be the
+# speculative vocabulary this module's docstring argues against.
+PROPERTY_CREATED = "PROPERTY_CREATED"
+PROPERTY_UPDATED = "PROPERTY_UPDATED"
+
 # Cleaning tasks (`cleaning`). One action per operation rather than a single
 # `CLEANING_TASK_UPDATED`, because rule 9 is only auditable if the operation is findable by
 # `action` — the same reasoning that made `USER_ROLE_CHANGED` its own action instead of a JSONB
@@ -72,6 +87,8 @@ ENTITY_TYPES = frozenset(
         ENTITY_TENANT,
         ENTITY_TENANT_CONFIG,
         ENTITY_PMS_CREDENTIAL,
+        ENTITY_PROPERTY,
+
         ENTITY_CLEANING_TASK,
     }
 )
@@ -87,6 +104,9 @@ ACTIONS = frozenset(
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,
         PMS_CREDENTIAL_ROTATED,
+        PROPERTY_CREATED,
+        PROPERTY_UPDATED,
+
         CLEANING_TASK_CREATED,
         CLEANING_TASK_ASSIGNED,
         CLEANING_TASK_ACCEPTED,

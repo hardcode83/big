@@ -50,3 +50,19 @@ class DuplicateExternalReservationError(ReservationDomainError):
     (design D9), so the constraint stays the authority and a concurrent insert cannot
     slip past a read-then-write check.
     """
+
+
+class InactivePropertyError(ReservationDomainError):
+    """The property exists in this tenant but has been retired — answered 409.
+
+    Added by `properties-crud` (design D11), and the question it answers **did not exist
+    before that change**: nothing could write `properties.status`, so no property could
+    reach `INACTIVE`. Its `PATCH` endpoint creates that state, so what a retired home does
+    with new bookings stops being hypothetical.
+
+    `409` and not `404`: unlike `PropertyNotFoundError` this one is not protecting
+    anything, because the caller has already been told the property exists — it reads it,
+    lists it and can un-retire it. Answering `404` would hide an actionable conflict
+    behind an error that says "look elsewhere", and there is no isolation argument for it
+    since the property is inside the acting tenant.
+    """

@@ -15,7 +15,7 @@ import enum
 import math
 import uuid
 from collections.abc import Mapping
-from datetime import date, datetime
+from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
 
@@ -103,6 +103,50 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # there is no path that records the value. Removing it from here would make `redacted()` fail
     # too, leaving rotation unrecordable.
     "PMS_CREDENTIAL": frozenset({"secret_encrypted", "rotated_at"}),
+    # `properties-crud`. Mirrors `PATCHABLE_PROPERTY_FIELDS` plus the two things a PATCH cannot
+    # write: `wifi_password_encrypted` (its own writer encrypts it) and nothing else.
+    #
+    # `current_operational_state` is absent, and that is the same boundary the port draws: its
+    # trail is `property_state_transitions`, which records more than a generic row could
+    # (`from_state`, `triggered_by`, `reason`), and rule 9 of `steering/security.md` carries the
+    # named exception for the `SYSTEM` actor that writes it. Listing it here would invite a second
+    # source of truth for one fact.
+    #
+    # `wifi_password_encrypted` is listed here AND denylisted above, for the same reason
+    # `secret_encrypted` is: the allowlist says it may appear in a property's audit row at all,
+    # the denylist says only as `{"changed": true}`. Removing it here would make `redacted()`
+    # fail too, and a WiFi password changing would leave no trace whatsoever.
+    #
+    # The three free-text notes are auditable but **not** denylisted, so `diff()` on them is
+    # technically legal. Design D7 records them as `redacted()` regardless — they are the kind of
+    # field where an operator pastes a door code — and that discipline lives in the use case, not
+    # here. Stated rather than left implicit, because the asymmetry with the WiFi password above
+    # is deliberate: rule 11 governs a rule-3 *value*, and a cleaning note is not one.
+    "PROPERTY": frozenset(
+        {
+            "name",
+            "internal_code",
+            "pms_external_id",
+            "address_line1",
+            "address_line2",
+            "city",
+            "province",
+            "postal_code",
+            "country",
+            "timezone",
+            "max_guests",
+            "bedrooms",
+            "bathrooms",
+            "default_check_in_time",
+            "default_check_out_time",
+            "wifi_name",
+            "wifi_password_encrypted",
+            "access_notes",
+            "cleaning_notes",
+            "emergency_notes",
+            "status",
+        }
+    ),
     # `cleaning`. Only the columns a person's action moves, and none of them is sensitive:
     # a status, an assignee, a verdict and the four timestamps. Deliberately **without
     # `notes`** — design D13 keeps that column out of this change's writable surface because
@@ -248,7 +292,12 @@ def _storable(field: str, value: Any) -> Any:
         return value
     if isinstance(value, (uuid.UUID, Decimal)):
         return str(value)
-    if isinstance(value, (datetime, date)):
+    # `time` alongside the other two since `properties-crud`: `properties` is the first audited
+    # entity with bare `TIME` columns (`default_check_in_time`, `default_check_out_time`), and
+    # without this a PATCH of a check-in time reached here and became a `500`. It is a scalar and
+    # JSONB stores it as the same ISO string the other two produce — the omission was that no
+    # entity had needed it, not a decision.
+    if isinstance(value, (datetime, date, time)):
         return value.isoformat()
     if isinstance(value, (Mapping, list, tuple, set, frozenset)):
         raise AuditContractError(

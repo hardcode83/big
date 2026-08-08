@@ -19,6 +19,7 @@ from app.guests.domain.entities import Guest
 from app.guests.domain.repositories import GuestRepository
 from app.integrations.domain.dtos import ReservationDTO
 from app.properties.domain.entities import Property
+from app.properties.domain.enums import PropertyStatus
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
 from app.reservations.domain.entities import (
     INGEST_OWNED_FIELDS,
@@ -178,6 +179,29 @@ class ReservationIngestor:
             report.errors.append(
                 RowError(
                     reason=f"Unknown property {row.property_external_id!r} for this tenant",
+                    reference=row.external_id or None,
+                    line=line,
+                )
+            )
+            return
+        if prop.status is PropertyStatus.INACTIVE:
+            # A retired home does not take new bookings (`properties-crud` design D11). Both
+            # batch paths — the CSV import and the PMS sync — reach this one branch, so the
+            # rule lives here once instead of in each resolver.
+            #
+            # It is a SKIPPED ROW and not a raise: aborting the batch over one retired property
+            # would cost a tenant every other row, which is the same reasoning R3.4 gives for
+            # reporting an unresolvable property instead of failing the run. And it is its own
+            # branch rather than making the resolver return `None`, because "you retired this
+            # one" and "no such property" are different answers and a person reading the report
+            # has to be able to act on the difference.
+            report.skipped += 1
+            report.errors.append(
+                RowError(
+                    reason=(
+                        f"Property {row.property_external_id!r} is retired and does not "
+                        "accept reservations"
+                    ),
                     reference=row.external_id or None,
                     line=line,
                 )

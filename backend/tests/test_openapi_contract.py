@@ -26,6 +26,7 @@ from app.core.errors import _HTTP_STATUS_CODES, AppError
 from app.core.http_limits import TOO_LARGE_CODE
 from app.core.openapi import ENVELOPE_SCHEMA_NAME, ErrorEnvelope, build_openapi
 from app.main import create_app
+from app.properties.api.errors import _MAPPING as PROPERTY_MAPPING
 from app.reservations.api.errors import _MAPPING as RESERVATION_MAPPING
 from app.tenants.api.errors import _MAPPING as TENANT_MAPPING
 from tests.route_walk import flatten_routes
@@ -68,13 +69,17 @@ def test_the_route_guard_actually_sees_the_api() -> None:
     """
     routes = _api_routes(create_app())
 
-    assert len(routes) >= 18
+    assert len(routes) >= 22
     assert {path.split("/")[3] for path, _ in routes} == {
         "auth",
         "users",
         "reservations",
         "integrations",
         "tenants",
+        # `properties-crud`: four routes over two paths. The floor above moved from 18 to 22 with
+        # them — it is a floor and not an equality so an added route does not fail here, but the
+        # prefix set IS exact, so a new module has to be named.
+        "properties",
         # `cleaning`: templates plus the ten task routes of PRD §23 minus the two photo ones,
         # which belong to `cleaning-photos-storage`.
         "cleaning-checklist-templates",
@@ -142,7 +147,11 @@ def test_no_error_code_lives_outside_the_registry() -> None:
     without `CONFLICT` (409) and `PAYLOAD_TOO_LARGE` (413), both returned today.
     """
     declared: list[object] = [TOO_LARGE_CODE, *_HTTP_STATUS_CODES.values()]
-    for mapping in (AUTH_MAPPING, RESERVATION_MAPPING, TENANT_MAPPING):
+    # Every module with a `_MAPPING` belongs here. `properties` was missing for the whole of
+    # `properties-crud` and the review panel demonstrated the gap by injecting a bare string into
+    # its mapping and watching this test still pass — the guard was blind to a module it was
+    # supposed to cover, which is worse than not having it.
+    for mapping in (AUTH_MAPPING, PROPERTY_MAPPING, RESERVATION_MAPPING, TENANT_MAPPING):
         declared += [code for _, _, code in mapping]
     declared += [subclass.code for subclass in _every_subclass(AppError)]
 

@@ -19,6 +19,8 @@ from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
+from app.properties.api.errors import register_property_error_handlers
+from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
 from app.tenants.api.errors import register_tenant_error_handlers
@@ -51,6 +53,7 @@ def create_app() -> FastAPI:
     register_reservation_error_handlers(app)
     register_integration_error_handlers(app)
     register_tenant_error_handlers(app)
+    register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
@@ -60,6 +63,10 @@ def create_app() -> FastAPI:
     app.include_router(reservations_router, prefix=API_V1_PREFIX)
     app.include_router(integrations_router, prefix=API_V1_PREFIX)
     app.include_router(tenants_router, prefix=API_V1_PREFIX)
+    # `properties-crud`: the first `api/` layer of the `properties` domain, which until now was
+    # the only domain module without one. Its arrival is what makes `POST /reservations`
+    # reachable — it answered 404 on every request because no property could exist.
+    app.include_router(properties_router, prefix=API_V1_PREFIX)
     # `cleaning`: templates are their own router because they are their own aggregate, and
     # because PRD §23 does not declare them — the deviation is easier to see in a file of
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).

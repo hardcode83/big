@@ -31,6 +31,15 @@ class Permission(str, enum.Enum):
     MANAGE_USERS = "MANAGE_USERS"
     READ_TENANT_SETTINGS = "READ_TENANT_SETTINGS"
     MANAGE_TENANT_SETTINGS = "MANAGE_TENANT_SETTINGS"
+    # Added by `properties-crud` (design D12). Unlike every entry above, this split could NOT be
+    # cited from PRD §6: that section names no create-or-edit-property capability for any role at
+    # all, so the reasoning is recorded rather than referenced. §6 gives `TENANT_OWNER` "ver sus
+    # propiedades y reservas" — a read — and `PROPERTY_MANAGER` "acceder a todos los datos
+    # operativos", so the split mirrors `reservations` exactly: the owner sees the portfolio, the
+    # manager operates it.
+    READ_PROPERTIES = "READ_PROPERTIES"
+    MANAGE_PROPERTIES = "MANAGE_PROPERTIES"
+
     # Added by `cleaning` (design D7). Five and not two, because three different
     # capabilities meet on these tables and PRD §6 gives them to different people:
     # reading the work, administering it (assigning, creating, validating), and *doing* it.
@@ -56,6 +65,9 @@ _TENANT_SETTINGS_READ = frozenset({Permission.READ_TENANT_SETTINGS})
 _TENANT_SETTINGS_MANAGE = frozenset(
     {Permission.READ_TENANT_SETTINGS, Permission.MANAGE_TENANT_SETTINGS}
 )
+_PROPERTY_READ = frozenset({Permission.READ_PROPERTIES})
+_PROPERTY_MANAGE = frozenset({Permission.READ_PROPERTIES, Permission.MANAGE_PROPERTIES})
+
 _CLEANING_TEMPLATE_MANAGE = frozenset(
     {Permission.READ_CLEANING_TEMPLATES, Permission.MANAGE_CLEANING_TEMPLATES}
 )
@@ -76,11 +88,18 @@ _CLEANING_EXECUTE = frozenset(
 # one tenant, and cross-tenant visibility is explicitly deferred to the `saas-cross-tenant`
 # roadmap entry. Granting it here would pre-empt that decision. `CLEANER` and `TECHNICIAN`
 # see only their own tasks and tickets, never the booking ledger.
+#
+# **Consequence of `_PROPERTY_READ` for the owner, assumed and not accidental** (design D12):
+# the owner cannot register her own flat — the manager does. `app/cli/bootstrap.py` creates both
+# accounts, so a fresh environment can still reach the API; and this is the one place where
+# product intuition ("she owns the homes") and PRD §6 ("ver sus propiedades") diverge, resolved
+# in favour of the PRD and of symmetry with reservations.
 ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
     UserRole.SUPER_ADMIN: _SELF_SERVICE,
     UserRole.TENANT_OWNER: (
         _SELF_SERVICE
         | _RESERVATION_READ
+        | _PROPERTY_READ
         | _USER_MANAGE
         | _TENANT_SETTINGS_MANAGE
         # Reads the work and owns the standard the tenant cleans to; does not operate it.
@@ -90,6 +109,7 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
         | _RESERVATION_MANAGE
+        | _PROPERTY_MANAGE
         | _USER_READ
         | _TENANT_SETTINGS_READ
         | _CLEANING_MANAGE
