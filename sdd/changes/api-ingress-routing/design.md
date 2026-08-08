@@ -163,6 +163,16 @@ Solución: el middleware pasa a cubrir `API_V1_PREFIX` completo, y su `max_bytes
 
 Medido después: 12 MB a `/auth/login` → `413` en 242 ms (antes `422` tras leerse el cuerpo entero), login normal → `401`, 12 MB a `import-csv` → `413` por su propio techo.
 
+**Fusión con `cleaning` al rebasar sobre `main`** (2026-08-08). `cleaning` se mergeó mientras este change estaba en revisión y **encontró el mismo agujero de forma independiente**: `POST /api/v1/cleaning-checklist-templates` toma un array de tamaño-cliente, así que su cuerpo no es un objeto pequeño y sus topes de Pydantic corren cuando ya está entero en memoria — medido allí, un `POST` anónimo de ~50 MB se recibía completo y luego devolvía `401`. Su arreglo fue un `JSON_BODY_MAX_BYTES` de 1 MiB (medido contra el máximo de su esquema, 338 KB con acentos) y un **segundo montaje** del middleware.
+
+Git fusionó `main.py` **sin marcar conflicto** y el resultado estaba roto de dos formas: los dos montajes de `cleaning` usaban el provider de cero argumentos que este change cambia a `Callable[[str], int]` (`TypeError` en la primera petición), y tres instancias anidadas contradicen el razonamiento de esta decisión — se anidan, así que la más externa decide primero y un techo interno más estrecho nunca ve la petición: el 1 MiB genérico habría rechazado un CSV de 10 MB antes de que la instancia de subidas pudiera permitirlo.
+
+Resolución: **un solo montaje** sobre `API_V1_PREFIX` con el provider resolviendo tres casos —`/integrations/` → `CSV_IMPORT_MAX_BYTES`, `/cleaning-` → `JSON_BODY_MAX_BYTES`, resto → `REQUEST_MAX_BYTES`—, con los dos primeros números conservados tal cual porque cada uno está medido contra algo distinto. `JSON_BODY_MAX_BYTES` y `REQUEST_MAX_BYTES` coinciden hoy en 1 MiB y **se mantienen separados a propósito**: uno está atado a un máximo de esquema y el otro es una palanca operativa, así que fundirlos haría que ajustar la palanca moviera en silencio una frontera medida.
+
+**Y resuelve gratis una obligación que `cleaning` dejó anotada**: `POST /cleaning-tasks/{id}/photos` empieza por `/cleaning-`, así que el techo JSON rechazaría cualquier foto de más de 1 MiB; `cleaning` anotó que el arreglo tendría que «enseñar al middleware a excluir una ruta, o partir los prefijos». El provider por ruta **es** esa capacidad: la reparación pasa a ser una rama más, antes de la de `/cleaning-`.
+
+**Lectura que va más allá de este rebase**: dos changes independientes alcanzando el mismo módulo por el mismo motivo no es mala suerte de merge. Un tope de cuerpo es propiedad de **todo** endpoint anónimo, no de los que alguien recordó — y eso quiere ser una regla de `steering/security.md`, no un descubrimiento por change. Queda dicho aquí para que el tercero no lo redescubra.
+
 Rejected: dejar el hueco y confiar en el throttle — se lee el cuerpo antes que el throttle, así que no llega a tiempo. Un solo número global — o rompe el CSV o no significa nada para un login, que es el razonamiento original y sigue siendo cierto.
 
 ### D9 — No se añade `PORT_OFFSET`; la verificación local se hizo desde este worktree
