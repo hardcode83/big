@@ -208,9 +208,14 @@ Desviaciones de esta sección, para que se lean como decisiones:
 - [x] 7.8 `backend/app/guests/api/{__init__,router,schemas,dependencies,errors}.py` (nuevos) y
   el endpoint de submit en el router de reservas o uno propio: los tres endpoints de la tabla del
   design. Registrar en `backend/app/main.py`. [R6, R7]
-- [x] 7.9 `backend/tests/guests/test_api.py`: solo `SUPER_ADMIN`/`TENANT_OWNER`/`PROPERTY_MANAGER`
-  ven el documento completo (R7.2); ningún listado devuelve el número (R7.1); `404` idéntico
-  cross-tenant; y toda lectura del documento deja su fila de `AuditLog` (R7.3). [R7]
+- [x] 7.9 `backend/tests/guests/test_api.py`: solo `TENANT_OWNER` y `PROPERTY_MANAGER` ven el
+  documento completo; **`SUPER_ADMIN` recibe `403`** junto a `CLEANER` y `TECHNICIAN`
+  (`test_a_role_without_the_permission_never_sees_a_document`). R7.2 es una **prohibición** —
+  «no devolver a quien no sea…»— y retirar es más estrecho que su techo, así que no se
+  incumple; el porqué está en D13 y en `policy.py`. Además: ningún listado devuelve el número
+  (R7.1); `404` idéntico cross-tenant; y toda lectura del documento deja su fila de `AuditLog`
+  (R7.3). Corregido en la segunda ronda del panel de feature — era la **cuarta** copia de la
+  redacción superada, y sobrevivió a la ronda que arregló las otras tres. [R7]
 - [x] 7.10 Tenant isolation del módulo `guests`, obligatorio por DoD §28.18. **No en un fichero
   propio** (`test_isolation.py` no existe): vive en `backend/tests/guests/test_api.py`
   —`test_a_neighbours_guest_is_the_same_404_as_a_missing_one`,
