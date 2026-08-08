@@ -119,12 +119,31 @@ Rejected: `401` con `WWW-Authenticate` — correcto en HTTP y un oráculo en la 
 
 ### D5 — El orden de las comprobaciones es la defensa: cabeceras antes que cuerpo
 
-**Chosen:** provider → límite de tasa por IP → token → secreto de cabecera → tope de cuerpo → parseo.
-La autenticación de R1 vive **entera en la ruta y las cabeceras**, así que se resuelve sin haber leído
-un solo byte del cuerpo (R1.7). El tope se aplica primero por `Content-Length` y, cuando falta
-(transferencia troceada), leyendo el stream con un contador y abortando al superarlo — un
-`Content-Length` ausente no puede ser una vía para saltarse el tope, y uno negativo o no numérico se
-rechaza, igual que ya hace el receptor del spike.
+> **Corregido al implementar (tarea 1.2→2.2).** La primera redacción ponía el tope de cuerpo *dentro*
+> del orden del endpoint, después de la autenticación, y describía un mecanismo a construir
+> (`Content-Length` primero, contador sobre el stream si falta). Las dos cosas estaban equivocadas: ese
+> mecanismo **ya existe** —`MaxBodySizeMiddleware` en `app/core/http_limits.py:82`, del change
+> `api-ingress-routing` (D11)— y no está después de la autenticación sino **antes del enrutado**, que es
+> estrictamente mejor. Hace ya exactamente lo que este diseño pedía: comprueba `Content-Length` con
+> `.isdigit()` (así un valor negativo o no numérico no es una vía de escape, cae al conteo), cuenta los
+> bytes del stream cuando no viene declarado, y es ASGI puro para no materializar el cuerpo. Y ya cubre
+> `/api/v1/` **entero**, con un test de regresión que falla si alguien estrecha los prefijos
+> (`tests/test_request_body_ceiling.py`).
+
+**Chosen:** el tope de cuerpo **no es una decisión de este change**. `/api/v1/webhooks/…` cae por
+construcción en la rama `else settings.request_max_bytes` (1 MiB) del proveedor por path de
+`app/main.py:115-121`, y el rechazo ocurre antes de que exista una ruta, un dependency o una sesión. Así
+que R3.2 y R1.7 se cumplen **por reutilización**, y lo único que aporta este change es el test que lo
+demuestra sobre la ruta nueva.
+
+**Y no se añade `WEBHOOK_MAX_BODY_BYTES`.** 1 MiB es holgado para un aviso de reserva, y una tercera
+perilla junto a `REQUEST_MAX_BYTES` y `CSV_IMPORT_MAX_BYTES` sería una que nadie ajusta y un segundo
+sitio donde vive el mismo hecho. Si algún proveedor resulta mandar cuerpos mayores, la reparación es una
+rama más en ese proveedor por path — que es la capacidad que `cleaning` ya dejó pagada.
+
+Lo que sí ordena este change, entonces, es sólo la parte que le pertenece: provider → límite de tasa por
+IP → token → secreto de cabecera → parseo. La autenticación de R1 vive **entera en la ruta y las
+cabeceras**, así que se resuelve sin tocar el cuerpo.
 
 **Quién decide qué, porque "entera en la ruta y las cabeceras" describe de dónde salen los datos, no qué
 capa manda** (aclarado tras el panel: `backend.md` línea 17 y la regla de dependencia de
@@ -364,9 +383,9 @@ DEFAULT 0`, `next_attempt_at TIMESTAMPTZ NULL`. El índice existente
 - `POST /api/v1/integrations/webhook-endpoints/{id}/rotate` — RBAC. Igual, y `AuditLog`.
 - Ninguna respuesta de lectura devuelve el token ni el secreto, ni enmascarados (regla 3(a)).
 
-**Config nueva:** `WEBHOOK_RATE_LIMIT_PER_MINUTE` (120), `WEBHOOK_PROBE_LIMIT_PER_MINUTE` (20),
-`WEBHOOK_MAX_BODY_BYTES` (1 MiB). Sólo nombres en `.env.example` si fueran secretos; no lo son, así que
-llevan default (regla 8).
+**Config nueva:** `WEBHOOK_RATE_LIMIT_PER_MINUTE` (120) y `WEBHOOK_PROBE_LIMIT_PER_MINUTE` (20). No son
+secretos, así que llevan default (regla 8). **Sin `WEBHOOK_MAX_BODY_BYTES`**: el tope ya lo pone
+`REQUEST_MAX_BYTES` a través del middleware existente (D5).
 
 **Job:** `process_webhook_events` en `CADENCES` con `timedelta(seconds=60)`; el `beat_schedule` y el TTL
 del lock se derivan de ahí sin tocar nada más.

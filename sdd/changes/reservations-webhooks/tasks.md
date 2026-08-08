@@ -56,14 +56,14 @@ forzado en `infrastructure/`.
 
 - [ ] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
   para fallos de autenticación, estricto), con el patrón de `RedisLoginThrottle` pero sin reutilizar su
-  clase. Config nueva en `core/config.py`: `webhook_rate_limit_per_minute` (120),
-  `webhook_probe_limit_per_minute` (20), `webhook_max_body_bytes` (1 MiB). Tests de los dos límites por
-  separado, incluido que el tráfico legítimo de un proveedor con muchos tenants **no** se estrangula.
-  [R3.1, R3.3, R3.4]
-- [ ] 2.2 Tope de tamaño de cuerpo: primero por `Content-Length`, y cuando falta, leyendo el stream con
-  contador y abortando al superarlo. Rechazar `Content-Length` negativo o no numérico. Tests con las
-  tres formas (declarado, troceado, malformado) — un `Content-Length` ausente no puede ser una vía para
-  saltarse el tope. [R3.2, R1.7]
+  clase. Config nueva en `core/config.py`: `webhook_rate_limit_per_minute` (120) y
+  `webhook_probe_limit_per_minute` (20). Tests de los dos límites por separado, incluido que el tráfico
+  legítimo de un proveedor con muchos tenants **no** se estrangula. [R3.1, R3.3, R3.4]
+- [ ] 2.2 Tope de tamaño de cuerpo: **sin código nuevo** (D5 corregido). `MaxBodySizeMiddleware` ya cubre
+  `/api/v1/` entero, antes del enrutado y por tanto antes de la autenticación, y ya trata el
+  `Content-Length` ausente, negativo y no numérico. Esta tarea es sólo el test que lo demuestra **sobre
+  la ruta nueva**: cuerpo por encima de `REQUEST_MAX_BYTES` → `413 PAYLOAD_TOO_LARGE` sin fila en
+  `webhook_events`, y sin necesidad de token válido. Sin `webhook_max_body_bytes`. [R3.2, R1.7]
 - [ ] 2.3 Caso de uso de recepción en `application/webhooks.py`: valida el provider contra `PMSProvider`,
   resuelve el tenant por `token_hash`, compara el secreto con `hmac.compare_digest`, y persiste el
   `WebhookEvent` con `processed=FALSE`. La **decisión** vive aquí, no en el router (D5). Tests sin
