@@ -1,5 +1,10 @@
 # BLOCKED — api-ingress-routing
 
+> **PR abierto: https://github.com/autohostai-labs/AutoHostAI/pull/68** (rama
+> `sdd/api-ingress-routing`, rebasada sobre `main`). No está en `STATE.md` porque
+> `record-pr` —igual que `mark-local-verified` y `mark-ready`— exige este fichero vacío, así
+> que el dato vive aquí para no vivir solo en una conversación.
+>
 > **Por qué este change va a PR en `ACTIVE` y no en `READY_FOR_PR`.** No es un olvido ni un
 > atajo: `mark-local-verified` exige `BLOCKED.md` vacío, y esta entrada no se puede resolver
 > antes del merge porque el entorno que hay que medir solo recibe código después. La regla
