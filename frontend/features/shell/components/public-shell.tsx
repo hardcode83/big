@@ -10,8 +10,8 @@ import { Topbar } from "./topbar";
 /**
  * Public Application Shell (design D3): minimal chrome for `/login` and
  * `/forgot-password`. A Server Component with no private/module navigation and
- * no session simulation; authentication is not implemented in this change. Only
- * the locale switcher is a client island.
+ * no private navigation and no auth guard; `/login` is the public entry point.
+ * Only the locale switcher is a client island.
  */
 export async function PublicShell({ children }: { children: ReactNode }) {
   const t = await getServerT();

@@ -45,10 +45,21 @@ export interface ApiClientOptions {
   baseUrl: string;
   /** Contributes request headers (extension point for future auth). */
   getHeaders?: () => HeadersInit | Promise<HeadersInit>;
-  /** Invoked on a 401 response (extension point for future token refresh). */
-  onUnauthorized?: (response: Response) => void | Promise<void>;
+  /**
+   * Recovers one eligible authenticated request after a 401. Return true to
+   * retry the original request once; return false/undefined to surface the 401.
+   */
+  onUnauthorized?: (context: UnauthorizedContext) => boolean | void | Promise<boolean | void>;
   /** Injectable fetch, primarily for testing. Defaults to global fetch. */
   fetchImpl?: typeof fetch;
+}
+
+export interface UnauthorizedContext {
+  response: Response;
+  path: keyof paths;
+  method: Uppercase<MethodForPath<keyof paths>>;
+  hadAccessToken: boolean;
+  retryCount: number;
 }
 
 export interface RequestOptions<Body, Method extends string> {
@@ -96,38 +107,67 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     ...requestArguments: RequestArguments<Path, Method>
   ): Promise<ResponseFor<OperationFor<Path, Method>>> {
     const { method, body, headers, signal } = requestArguments[0] ?? {};
-    const finalHeaders = new Headers(headers);
+    let retryCount = 0;
 
-    if (options.getHeaders) {
-      const extra = new Headers(await options.getHeaders());
-      extra.forEach((value, key) => finalHeaders.set(key, value));
+    while (true) {
+      const finalHeaders = new Headers(headers);
+
+      if (options.getHeaders) {
+        const extra = new Headers(await options.getHeaders());
+        extra.forEach((value, key) => finalHeaders.set(key, value));
+      }
+
+      const hasBody = body !== undefined;
+      if (hasBody && !finalHeaders.has("Content-Type")) {
+        finalHeaders.set("Content-Type", "application/json");
+      }
+
+      const response = await doFetch(joinUrl(options.baseUrl, String(path)), {
+        method: method ?? "GET",
+        headers: finalHeaders,
+        body: hasBody ? JSON.stringify(body) : undefined,
+        signal,
+      });
+
+      const hadAccessToken = /^Bearer\s+\S+$/i.test(
+        finalHeaders.get("Authorization") ?? "",
+      );
+      const authEndpoint = new Set([
+        "/api/v1/auth/login",
+        "/api/v1/auth/refresh",
+        "/api/v1/auth/logout",
+      ]).has(String(path));
+
+      if (
+        response.status === 401 &&
+        options.onUnauthorized &&
+        hadAccessToken &&
+        !authEndpoint &&
+        retryCount === 0
+      ) {
+        const recovered = await options.onUnauthorized({
+          response,
+          path,
+          method: (method ?? "GET") as UnauthorizedContext["method"],
+          hadAccessToken,
+          retryCount,
+        });
+        if (recovered) {
+          retryCount += 1;
+          continue;
+        }
+      }
+
+      if (!response.ok) {
+        throw await parseApiError(response);
+      }
+
+      if (response.status === 204) {
+        return undefined as ResponseFor<OperationFor<Path, Method>>;
+      }
+
+      return (await response.json()) as ResponseFor<OperationFor<Path, Method>>;
     }
-
-    const hasBody = body !== undefined;
-    if (hasBody && !finalHeaders.has("Content-Type")) {
-      finalHeaders.set("Content-Type", "application/json");
-    }
-
-    const response = await doFetch(joinUrl(options.baseUrl, String(path)), {
-      method: method ?? "GET",
-      headers: finalHeaders,
-      body: hasBody ? JSON.stringify(body) : undefined,
-      signal,
-    });
-
-    if (response.status === 401 && options.onUnauthorized) {
-      await options.onUnauthorized(response);
-    }
-
-    if (!response.ok) {
-      throw await parseApiError(response);
-    }
-
-    if (response.status === 204) {
-      return undefined as ResponseFor<OperationFor<Path, Method>>;
-    }
-
-    return (await response.json()) as ResponseFor<OperationFor<Path, Method>>;
   }
 
   return { request };

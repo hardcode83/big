@@ -9,6 +9,8 @@ import identityContract from "./build-identity-contract.json";
  * `BACKEND_INTERNAL_URL`) and secrets out of the client bundle.
  */
 export interface PublicRuntimeConfig {
+  /** Same-origin API base; the route handler forwards `/api/` server-side. */
+  apiBaseUrl: string;
   /** Deployment environment label (from NEXT_PUBLIC_APP_ENV). Non-sensitive. */
   appEnv: string;
   /** Product default locale. */
@@ -135,6 +137,7 @@ function allowlistedShape(raw: string | undefined, shape: RegExp): string {
 
 export function buildPublicRuntimeConfig(): PublicRuntimeConfig {
   return {
+    apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? "",
     appEnv: process.env.NEXT_PUBLIC_APP_ENV ?? "development",
     defaultLocale: DEFAULT_LOCALE,
     featureFlags: Object.freeze({}),
