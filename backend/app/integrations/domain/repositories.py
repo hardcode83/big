@@ -54,6 +54,18 @@ class WebhookEndpointRepository(Protocol):
         """The endpoint by id, within the tenant. Used by rotation."""
         ...
 
+    async def find_for(
+        self, tenant_id: uuid.UUID, provider: PMSProvider
+    ) -> WebhookEndpoint | None:
+        """The endpoint at the `UNIQUE(tenant_id, provider)` coordinates, or `None`.
+
+        Exists so creation can **refuse** rather than overwrite: `upsert` expresses "this is the
+        material now", which is the right shape for rotation and the wrong one for a `POST` that
+        would otherwise invalidate a live integration without saying so
+        (`WebhookEndpointAlreadyExistsError`).
+        """
+        ...
+
     async def upsert(self, tenant_id: uuid.UUID, endpoint: WebhookEndpoint) -> None:
         """Store or replace the endpoint at its `(tenant, provider)` coordinates.
 

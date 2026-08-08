@@ -46,6 +46,22 @@ def generate_webhook_token() -> str:
     return secrets.token_urlsafe(TOKEN_ENTROPY_BYTES)
 
 
+def generate_header_secret() -> str:
+    """The value an operator pastes into the provider's panel (rule 12(a), R2.1).
+
+    Same generator as the route token, and that is a decision rather than laziness: rule 12(a)
+    requires the header value to be **distinct per tenant and never a global constant**, which is
+    exactly the property `secrets.token_urlsafe` gives. URL-safe is not needed here — this one
+    travels in a header — but an alphabet that survives being pasted into a web form, a `.env`
+    file and a shell is worth more than the two characters it gives up.
+
+    A separate function from `generate_webhook_token` even though the bodies match, because the
+    two secrets are separate defences (see the module docstring) and one name for both is how a
+    later change would end up deriving one from the other.
+    """
+    return secrets.token_urlsafe(TOKEN_ENTROPY_BYTES)
+
+
 def hash_webhook_token(token: str) -> str:
     """The value stored in `webhook_endpoints.token_hash`: SHA-256 hex, 64 characters.
 

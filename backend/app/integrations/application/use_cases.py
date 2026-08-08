@@ -1,14 +1,18 @@
-"""Ingest use cases: PMS sync and CSV import (R3, R4, design D9, D10, D11).
+"""Ingest use cases: PMS sync and CSV import (R3, R4, design D9, D10, D11), plus the
+provisioning and rotation of webhook endpoints (`reservations-webhooks` R2).
 
-Both are one business operation and one transaction: they build the rows, hand them to
-`ReservationIngestor`, and commit once at the end (design D4). A per-row commit would leave a
+Both ingest paths are one business operation and one transaction: they build the rows, hand them
+to `ReservationIngestor`, and commit once at the end (design D4). A per-row commit would leave a
 half-imported file behind on the first infrastructure failure, and the report would then
 describe a state nobody can reconstruct.
 """
 
+import dataclasses
 import uuid
+from dataclasses import dataclass
 from datetime import datetime
 
+from app.core import crypto
 from app.core.crypto import SecretDecryptionError
 from app.core.unit_of_work import UnitOfWork
 from app.guests.domain.repositories import GuestRepository
@@ -19,18 +23,35 @@ from app.integrations.application.ingest import (
     RowError,
 )
 from app.integrations.domain.dtos import ReservationDTO
-from app.audit.domain.actions import ENTITY_PMS_CREDENTIAL, PMS_CREDENTIAL_READ
+from app.audit.domain.actions import (
+    ENTITY_PMS_CREDENTIAL,
+    ENTITY_WEBHOOK_ENDPOINT,
+    PMS_CREDENTIAL_READ,
+    WEBHOOK_ENDPOINT_CREATED,
+    WEBHOOK_ENDPOINT_ROTATED,
+)
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
-from app.integrations.domain.entities import CredentialReadLog
-from app.integrations.domain.errors import MissingPmsCredentialError, PmsUnavailableError
+from app.integrations.domain.entities import CredentialReadLog, WebhookEndpoint
+from app.integrations.domain.errors import (
+    MissingPmsCredentialError,
+    PmsUnavailableError,
+    WebhookEndpointAlreadyExistsError,
+    WebhookEndpointNotFoundError,
+)
 from app.integrations.domain.enums import (
     PMSProvider,
     PmsCredentialScope,
     credential_scope_for,
 )
 from app.integrations.domain.ports import PMSAdapterFactory, ReservationCsvParser
+from app.integrations.domain.repositories import WebhookEndpointRepository
+from app.integrations.domain.webhook_auth import (
+    generate_header_secret,
+    generate_webhook_token,
+    hash_webhook_token,
+)
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
 from app.properties.domain.entities import Property
 from app.properties.domain.repositories import PropertyRepository
@@ -325,6 +346,231 @@ def _merge(target: IngestReport, addition: IngestReport) -> None:
     target.updated += addition.updated
     target.skipped += addition.skipped
     target.errors.extend(addition.errors)
+
+
+@dataclass(frozen=True)
+class WebhookEndpointMaterial:
+    """The two cleartext secrets, handed back **exactly once** (R2.3, rule 3(a)'s exception).
+
+    This is the only type in the system that carries either value in cleartext, and it exists
+    only between the use case and the HTTP response of the call that generated it. Nothing
+    persists it: the token is stored as a digest and the header secret as Fernet ciphertext, so
+    after this object is discarded there is no path back to either — which is what makes "losing
+    the URL is repaired by rotating, not by asking" a property of the system and not a policy
+    somebody has to enforce (design D3).
+
+    It carries no `__repr__` guard, unlike `EncryptedSecret`, and that is deliberate rather than
+    an omission: redacting the repr of the object whose entire purpose is to be rendered into a
+    response would be theatre. The protection here is the object's *lifetime*, not its printing.
+    """
+
+    endpoint_id: uuid.UUID
+    provider: PMSProvider
+    header_name: str
+    webhook_token: str
+    header_secret: str
+
+
+class _WebhookEndpointAuditWriter:
+    """Builds the audit row for the two endpoint operations, so neither builds one by hand.
+
+    Same shape as `properties/application/property_admin.py`'s writer and, like it, private to
+    this module rather than hoisted: `AuditLogFactory` is already the shared piece.
+    """
+
+    def __init__(self, audit: AuditLogRepository) -> None:
+        self._audit = audit
+
+    async def record(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        action: str,
+        endpoint: WebhookEndpoint,
+        actor_user_id: uuid.UUID,
+        actor_ip: str | None,
+        changes: ChangeSet,
+        now: datetime,
+    ) -> None:
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=action,
+                entity_type=ENTITY_WEBHOOK_ENDPOINT,
+                entity_id=endpoint.id,
+                actor_user_id=actor_user_id,
+                actor_ip=actor_ip,
+                changes=changes,
+                now=now,
+            ),
+        )
+
+
+def _material_changes(header_name: str | None) -> ChangeSet:
+    """What an endpoint's audit row records: that both secrets moved, and nothing of either.
+
+    `redacted()` and never `diff()` — and here that is enforced rather than remembered:
+    `token_hash` and `header_secret_encrypted` are both on `REDACTED_FIELDS`, so `diff()` on
+    either raises `AuditContractError`. Recording that they changed is all rule 11 permits and
+    all a rotation needs.
+
+    `header_name` is the exception and is diffed with its value, because it is not a secret: it
+    is the name of the provider's own header, and an operator changing it is an operational fact
+    worth being able to read out of `audit_logs`. `None` means this operation did not touch it,
+    which is the rotation case.
+    """
+    changes = (
+        ChangeSet(ENTITY_WEBHOOK_ENDPOINT)
+        .redacted("token_hash")
+        .redacted("header_secret_encrypted")
+    )
+    if header_name is None:
+        return changes
+    return changes.diff("header_name", None, header_name)
+
+
+class CreateWebhookEndpointUseCase:
+    """Mint this tenant's webhook authentication material for one provider (R2.1-R2.5).
+
+    Both secrets are generated here — never derived from the tenant, never a constant shared
+    across tenants (R2.1, rule 12(a)/(b)) — and both leave in `WebhookEndpointMaterial` and in
+    the stored row, in incomparable forms: a SHA-256 digest and Fernet ciphertext.
+
+    Refuses when the tenant already has an endpoint for this provider. See
+    `WebhookEndpointAlreadyExistsError` for why that is not merely tidier than overwriting.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoints: WebhookEndpointRepository,
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._endpoints = endpoints
+        self._audit = _WebhookEndpointAuditWriter(audit)
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        actor_ip: str | None,
+        provider: PMSProvider,
+        header_name: str,
+        now: datetime,
+    ) -> WebhookEndpointMaterial:
+        if await self._endpoints.find_for(tenant_id, provider) is not None:
+            raise WebhookEndpointAlreadyExistsError(
+                f"tenant already has a webhook endpoint for {provider.value}; "
+                f"rotate it instead of creating a second one"
+            )
+
+        token = generate_webhook_token()
+        secret = generate_header_secret()
+        endpoint = WebhookEndpoint(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            provider=provider,
+            token_hash=hash_webhook_token(token),
+            header_name=header_name.strip(),
+            header_secret=crypto.encrypt(secret),
+        )
+
+        await self._endpoints.upsert(tenant_id, endpoint)
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=WEBHOOK_ENDPOINT_CREATED,
+            endpoint=endpoint,
+            actor_user_id=actor_user_id,
+            actor_ip=actor_ip,
+            changes=_material_changes(endpoint.header_name),
+            now=now,
+        )
+        await self._uow.commit()
+
+        return WebhookEndpointMaterial(
+            endpoint_id=endpoint.id,
+            provider=endpoint.provider,
+            header_name=endpoint.header_name,
+            webhook_token=token,
+            header_secret=secret,
+        )
+
+
+class RotateWebhookEndpointUseCase:
+    """Replace both secrets of an existing endpoint, in one transaction (R2.4, design D3).
+
+    No grace window and no second valid value: `upsert` overwrites the single row, so the old
+    token and the old header secret stop authenticating the moment this commits. That has a real
+    operational cost — the provider keeps posting to the dead route until somebody updates its
+    panel, and those notices are lost — which is why this is a deliberate act by a person with
+    RBAC and never automatic, and why the recovery is the `pms_sync` poll that still exists.
+
+    `header_name` is deliberately NOT rotatable here: it is the provider's own header name, not
+    material, and changing it is a different operation from replacing a leaked secret. Bundling
+    them would mean a rotation could silently break authentication in a way that looks like a
+    successful rotation.
+    """
+
+    def __init__(
+        self,
+        *,
+        endpoints: WebhookEndpointRepository,
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._endpoints = endpoints
+        self._audit = _WebhookEndpointAuditWriter(audit)
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        actor_user_id: uuid.UUID,
+        actor_ip: str | None,
+        endpoint_id: uuid.UUID,
+        now: datetime,
+    ) -> WebhookEndpointMaterial:
+        existing = await self._endpoints.get(tenant_id, endpoint_id)
+        if existing is None:
+            # Also the answer for an endpoint of another tenant: `get` is scoped, so both arrive
+            # here as `None` and leave as one indistinguishable 404.
+            raise WebhookEndpointNotFoundError(f"no webhook endpoint {endpoint_id}")
+
+        token = generate_webhook_token()
+        secret = generate_header_secret()
+        # `replace` rather than mutation: the entity is frozen precisely so that no half-rotated
+        # aggregate — new token, old secret — can exist for anything to observe (design D3).
+        rotated = dataclasses.replace(
+            existing,
+            token_hash=hash_webhook_token(token),
+            header_secret=crypto.encrypt(secret),
+            rotated_at=now,
+        )
+
+        await self._endpoints.upsert(tenant_id, rotated)
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=WEBHOOK_ENDPOINT_ROTATED,
+            endpoint=rotated,
+            actor_user_id=actor_user_id,
+            actor_ip=actor_ip,
+            changes=_material_changes(None).diff("rotated_at", existing.rotated_at, now),
+            now=now,
+        )
+        await self._uow.commit()
+
+        return WebhookEndpointMaterial(
+            endpoint_id=rotated.id,
+            provider=rotated.provider,
+            header_name=rotated.header_name,
+            webhook_token=token,
+            header_secret=secret,
+        )
 
 
 class ImportReservationsFromCsvUseCase:

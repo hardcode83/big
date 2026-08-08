@@ -64,6 +64,18 @@ class SqlAlchemyWebhookEndpointRepository:
         model = result.scalar_one_or_none()
         return None if model is None else _to_endpoint(model)
 
+    async def find_for(
+        self, tenant_id: uuid.UUID, provider: PMSProvider
+    ) -> WebhookEndpoint | None:
+        result = await self._session.execute(
+            select(WebhookEndpointModel).where(
+                WebhookEndpointModel.tenant_id == tenant_id,
+                WebhookEndpointModel.provider == provider,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_endpoint(model)
+
     async def upsert(self, tenant_id: uuid.UUID, endpoint: WebhookEndpoint) -> None:
         if endpoint.tenant_id != tenant_id:
             raise CrossTenantWriteError(

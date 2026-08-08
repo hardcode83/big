@@ -53,11 +53,23 @@ forzado en `infrastructure/`.
   > permanente de todas las rutas que el tenant ha tenido, contra el que un token robado se confirma
   > offline. `header_name` sí se diffea: no es secreto y su cambio es un hecho operativo. 10 tests
   > nuevos, 119 en verde en `tests/audit`.
-- [ ] 1.5 Casos de uso de alta y rotación en `application/use_cases.py`: generar `webhook_token` con
+- [x] 1.5 Casos de uso de alta y rotación en `application/use_cases.py`: generar `webhook_token` con
   `secrets.token_urlsafe(32)`, guardar su SHA-256, cifrar el secreto de cabecera con `EncryptedSecret`,
   escribir el `AuditLog` de la rotación, y devolver los dos valores en claro **una sola vez**. La
   rotación sobrescribe ambos en una transacción, sin ventana de gracia (D3). Tests: el valor viejo deja
   de autenticar; ninguna lectura posterior devuelve el secreto ni enmascarado. [R2.1, R2.2, R2.3, R2.4]
+  > **Dos añadidos que la tarea no anticipaba y que el alta necesita**. (1) El **alta se niega** si el
+  > tenant ya tiene endpoint para ese proveedor (`WebhookEndpointAlreadyExistsError`), en vez de
+  > sobrescribir: `upsert` es la forma correcta para la rotación y la equivocada para un `POST`, que
+  > invalidaría material vivo sin decirlo — el proveedor seguiría enviando a la ruta muerta, todo
+  > `404` por D4, y el operador leería «creado». Para poder negarse hace falta un método de puerto
+  > nuevo, `find_for(tenant_id, provider)`, porque `get` es por id. (2) El secreto de cabecera lo
+  > **generamos nosotros** (R2.1 dice generar los dos), con una primitiva propia
+  > `generate_header_secret()` junto a las tres de 1.1 — misma entropía que el token y función
+  > separada a propósito: son dos defensas que deben poder fallar por separado.
+  > El `AuditLog` se escribe también en el **alta** (`WEBHOOK_ENDPOINT_CREATED`), no sólo en la
+  > rotación: la acción ya existía en el vocabulario desde 1.4 y una creación sin rastro deja el
+  > `WEBHOOK_ENDPOINT_ROTATED` posterior sin origen. 12 tests nuevos; 1523 en verde.
 - [ ] 1.6 Endpoints `POST /api/v1/integrations/webhook-endpoints` y `.../{id}/rotate` en
   `api/router.py` + `schemas.py` + `dependencies.py`, con RBAC. Tests de endpoint incluyendo el rechazo
   sin autenticación y con rol insuficiente, y que la respuesta de lectura **no** contiene el material.

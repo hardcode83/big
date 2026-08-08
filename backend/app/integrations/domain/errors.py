@@ -91,6 +91,30 @@ class WebhookRateLimitedError(RuntimeError):
     """
 
 
+class WebhookEndpointAlreadyExistsError(RuntimeError):
+    """This tenant already has an endpoint for this provider (`UNIQUE(tenant_id, provider)`).
+
+    Creation **refuses** instead of overwriting, and that is the point of having a separate
+    rotation operation at all. The repository's `upsert` would happily replace the row, which
+    means a second `POST` to the creation endpoint would silently invalidate live material — the
+    provider keeps sending to the old route, every webhook `404`s (design D4), and nothing says
+    why. The operator would read "created" and believe they had provisioned a second integration.
+
+    Rotation is meant to be a deliberate act (design D3), so the only way to replace material is
+    the endpoint that says so and writes `WEBHOOK_ENDPOINT_ROTATED`.
+    """
+
+
+class WebhookEndpointNotFoundError(RuntimeError):
+    """No endpoint with that id **in this tenant**.
+
+    One error for "no such id" and for "belongs to another tenant", exactly as
+    `PropertyNotFoundError` is used: the repository's scoped `get` returns `None` for both, so the
+    API answers one indistinguishable `404` rather than confirming a neighbour's endpoint exists
+    (rule 1 of `steering/security.md`).
+    """
+
+
 class MissingPmsCredentialError(RuntimeError):
     """A property names a provider whose credentials are not stored.
 
