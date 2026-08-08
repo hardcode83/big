@@ -41,10 +41,18 @@ forzado en `infrastructure/`.
   > la aserción explícita de esa premisa (`WebhookEndpointModel in tenant_scoped_classes()`), que es
   > lo que evita que los tests de aislamiento pasen en silencio contra una tabla que el filtro dejó de
   > cubrir. 12 tests nuevos; 1395 en verde en `tests/integrations` + tenancy + layering.
-- [ ] 1.4 Ampliar el vocabulario cerrado de `backend/app/audit/domain/actions.py` con la entidad y las
+- [x] 1.4 Ampliar el vocabulario cerrado de `backend/app/audit/domain/actions.py` con la entidad y las
   acciones de este change (creación y rotación del endpoint), y añadirlas a los `frozenset`. Test que
   falla si `AuditLogFactory.build` las rechaza — un vocabulario incompleto lanza `AuditContractError` y
   **aborta la transacción de la operación auditada**. [R2.4]
+  > **Más de lo previsto, y era necesario**: el vocabulario cerrado no basta, `ChangeSet` exige además
+  > una entrada en `AUDITABLE_FIELDS` (`value_objects.py`). Añadida, y **los dos** secretos van al
+  > denylist `REDACTED_FIELDS`: el obvio es `header_secret_encrypted`; el que importa señalar es
+  > `token_hash`, que por ser ya un digest parece inocuo pero es la clave de búsqueda de la ruta cuya
+  > no-adivinabilidad *es* la regla 12(b) — un par `old`/`new` de digests en `audit_logs` deja registro
+  > permanente de todas las rutas que el tenant ha tenido, contra el que un token robado se confirma
+  > offline. `header_name` sí se diffea: no es secreto y su cambio es un hecho operativo. 10 tests
+  > nuevos, 119 en verde en `tests/audit`.
 - [ ] 1.5 Casos de uso de alta y rotación en `application/use_cases.py`: generar `webhook_token` con
   `secrets.token_urlsafe(32)`, guardar su SHA-256, cifrar el secreto de cabecera con `EncryptedSecret`,
   escribir el `AuditLog` de la rotación, y devolver los dos valores en claro **una sola vez**. La

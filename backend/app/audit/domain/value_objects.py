@@ -46,6 +46,14 @@ REDACTED_FIELDS = frozenset(
         # this list — and note the effect: `diff()` on it RAISES, which leaves `redacted()` as
         # the only way to record a rotation. That is the intended shape, not an obstacle.
         "secret_encrypted",
+        # The webhook endpoint's two halves (`reservations-webhooks` D3). `header_secret_encrypted`
+        # is the obvious one. `token_hash` is here for a less obvious reason worth stating: it is
+        # already a digest, so it looks harmless — but it is the **lookup key** for a route whose
+        # non-guessability IS the defence of rule 12(b), and an `old`/`new` pair of digests in
+        # `audit_logs` hands an insider a permanent record of every route the tenant has ever had,
+        # against which a stolen token can be confirmed offline.
+        "token_hash",
+        "header_secret_encrypted",
         # `access_records.code_masked` is already the masked form rule 4 allows, so it is
         # not denylisted: forcing `{"changed": true}` on it would record less than the
         # rule permits.
@@ -103,6 +111,13 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # there is no path that records the value. Removing it from here would make `redacted()` fail
     # too, leaving rotation unrecordable.
     "PMS_CREDENTIAL": frozenset({"secret_encrypted", "rotated_at"}),
+    # `reservations-webhooks`. Both secrets are on the denylist below, so the only reachable form
+    # for either is `{"changed": true}` — which is all a rotation needs to record and is exactly
+    # what rule 11 demands ("el valor no sobrevive en absoluto"). `header_name` is NOT a secret:
+    # it is the provider's own header name, an operational fact worth seeing change.
+    "WEBHOOK_ENDPOINT": frozenset(
+        {"token_hash", "header_secret_encrypted", "header_name", "rotated_at"}
+    ),
     # `properties-crud`. Mirrors `PATCHABLE_PROPERTY_FIELDS` plus the two things a PATCH cannot
     # write: `wifi_password_encrypted` (its own writer encrypts it) and nothing else.
     #
