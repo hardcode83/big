@@ -11,6 +11,7 @@ on:
     paths:
       - "backend/**"
       - "frontend/**"
+      - "VERSION"
       - "docker-compose.deploy.yml"
       - ".github/workflows/deploy-dev.yml"
   workflow_dispatch: {}
@@ -33,26 +34,9 @@ jobs:
 
       - name: Componer la identidad de build
         id: compose
-        run: |
-          set -euo pipefail
-          if [ ! -f VERSION ]; then
-            echo "::error::no existe el fichero VERSION en la raíz del repo" >&2; exit 1
-          fi
-          base="$(tr -d '[:space:]' < VERSION)"
-          if [ -z "$base" ]; then echo "::error::VERSION está vacío" >&2; exit 1; fi
-          if ! printf '%s' "$base" | grep -qE '^[0-9]+\.[0-9]+\.[0-9]+$'; then
-            echo "::error::VERSION no tiene forma X.Y.Z (leído: '$base')" >&2; exit 1
-          fi
-          # UNA sola lectura del reloj: con dos invocaciones de `date`, un build que
-          # cruzase la medianoche UTC dejaría la fecha de la versión un día por delante
-          # del label `.created`.
-          built_at="$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          {
-            echo "version=${base}+${built_at%%T*}.${GITHUB_SHA:0:7}"
-            echo "commit_short=${GITHUB_SHA:0:7}"
-            echo "built_at=${built_at}"
-            echo "repo_url=${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
-          } >> "$GITHUB_OUTPUT"
+        # La composición y validación viven en el productor versionado y se escriben
+        # en GITHUB_OUTPUT solo después de validar todos los campos [R1].
+        run: node frontend/scripts/build-identity.mjs
 
   # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
   build-backend:

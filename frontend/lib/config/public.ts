@@ -1,4 +1,5 @@
 import { DEFAULT_LOCALE, type Locale } from "./constants";
+import identityContract from "./build-identity-contract.json";
 
 /**
  * The public runtime configuration is the ONLY configuration object allowed to
@@ -26,12 +27,12 @@ export interface PublicRuntimeConfig {
   /**
    * Short commit SHA baked at build time, or `""`.
    *
-   * These two are the ONLY build identity this change carries. The full SHA, the Pull
-   * Request number, the Actions run id and the repository URL are **not baked anywhere**
-   * — they were removed with the provenance scope and live in the `app-version-provenance`
-   * roadmap entry, which is blocked until the frontend has authentication. Do not read
-   * this as "they exist server-side and are blessed": they do not exist. This snapshot
-   * reaches the browser on EVERY surface, including `/login` and the guest portal
+   * These two are the ONLY build identity this snapshot carries. The full SHA, the Pull
+   * Request number, the Actions run id and the repository URL do not enter the frontend
+   * snapshot or bundle — the full SHA remains available only in the OCI revision label, while
+   * the other provenance fields live in the `app-version-provenance` roadmap entry, blocked
+   * until the frontend has authentication. This snapshot reaches the browser on EVERY surface,
+   * including `/login` and the guest portal
    * (app-version-visibility D3, R2.4).
    */
   buildCommitShort: string;
@@ -67,23 +68,65 @@ export interface PublicRuntimeConfig {
  * - The commit is exactly 7 hex characters, which is what the CD composes
  *   (`${GITHUB_SHA:0:7}`). Deliberately NOT a range: decimal digits are a subset of hex, so a
  *   lenient `{7,12}` accepts an Actions `run_id` — 11 decimal digits — as if it were a commit.
- * - The date's month and day are bounded to real calendar ranges, not just to two digits each.
+ * - The date's month and day are bounded to real calendar dates, not just to two digits each.
  *   A bare `\d{4}-\d{2}-\d{2}` is eight FREE decimal digits, and `0.1.0+3061-83-52.9680000`
  *   sailed through it — the same mistake as the base, one slot further along. The pipeline
  *   guarantees `date -u`, which means a real date, so that is what gets required.
  *
  * If either shape ever changes upstream, change it here in the same commit, on purpose. The
- * badge degrades to "unknown" rather than showing something unvetted, and nothing detects that
- * drift today — see section 5 of `sdd/changes/app-version-badge-date/tasks.md`.
+ * badge degrades to "unknown" rather than showing something unvetted, and the
+ * `frontend-tests` Pull Request check verifies that the CD producer and this boundary stay
+ * congruent.
  *
  * All of this came out of the security and architecture panels of the `app-version-badge-date`
  * change, across three iterations: the first put the check in the badge (wrong layer — the
  * value reaches the page source regardless), the second bounded the commit too loosely, and
  * the third left the base unpinned.
  */
-const BAKED_VERSION =
-  /^(?:\d+\.\d+\.\d+(?:\+\d{4}-(?:0[1-9]|1[0-2])-(?:0[1-9]|[12]\d|3[01])\.[0-9a-f]{7})?|local)$/;
-const BAKED_COMMIT_SHORT = /^[0-9a-f]{7}$/;
+const BAKED_VERSION = new RegExp(
+  `^(?:${identityContract.basePattern}(?:\\+${identityContract.datePattern}\\.${identityContract.commitShortPattern})?|${identityContract.localVersion})$`,
+);
+const BAKED_COMMIT_SHORT = new RegExp(
+  `^${identityContract.commitShortPattern}$`,
+);
+const BAKED_DATE = new RegExp(
+  `\\+(${identityContract.datePattern})\\.${identityContract.commitShortPattern}$`,
+);
+
+function isRealCalendarDate(yearText: string, monthText: string, dayText: string): boolean {
+  const year = Number(yearText);
+  const month = Number(monthText);
+  const day = Number(dayText);
+  if (!Number.isSafeInteger(year)) return false;
+
+  const daysInMonth = [
+    31,
+    year % 4 === 0 && (year % 100 !== 0 || year % 400 === 0) ? 29 : 28,
+    31,
+    30,
+    31,
+    30,
+    31,
+    31,
+    30,
+    31,
+    30,
+    31,
+  ][month - 1];
+  return day <= daysInMonth;
+}
+
+function allowlistedVersion(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!BAKED_VERSION.test(value)) return "";
+
+  const dateMatch = value.match(BAKED_DATE);
+  if (!dateMatch) return value;
+
+  const [, date] = dateMatch;
+  const [year, month, day] = date.split("-");
+  return isRealCalendarDate(year, month, day) ? value : "";
+}
 
 function allowlistedShape(raw: string | undefined, shape: RegExp): string {
   const value = (raw ?? "").trim();
@@ -99,10 +142,7 @@ export function buildPublicRuntimeConfig(): PublicRuntimeConfig {
     // from the same allowlisted boundary as every other public value. Baked at image
     // build time, which is what makes them unable to lie about which image is running
     // — a value injected by Compose at runtime reports what Compose believes instead.
-    appVersion: allowlistedShape(
-      process.env.NEXT_PUBLIC_APP_VERSION,
-      BAKED_VERSION,
-    ),
+    appVersion: allowlistedVersion(process.env.NEXT_PUBLIC_APP_VERSION),
     buildCommitShort: allowlistedShape(
       process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT,
       BAKED_COMMIT_SHORT,
