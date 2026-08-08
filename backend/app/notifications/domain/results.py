@@ -45,13 +45,18 @@ class NotificationErrorCode(str, enum.Enum):
 class NotificationResult:
     """The outcome of one `NotificationAdapter.send`.
 
-    `provider_message_id` is the provider's own identifier when it gives one — an opaque
-    handle for support, never message content. The console and mock adapters return `None`.
+    **There is no string field at all**, and that is a decision, not an omission. An earlier
+    version carried `provider_message_id: str | None` — an opaque handle for support, said
+    the docstring — and the security panel of sections 1-2 named it for what it was: an
+    unconstrained `str` in the one return type D8 exists to keep text out of, guarded by
+    prose rather than by the type. Nothing consumed it: `record_attempt` does not accept it
+    and no caller logged it. So it went, and the guarantee is now total — a future adapter
+    that wants to bring the provider's response back has to change this file, which is a
+    diff a reviewer sees.
     """
 
     delivered: bool
     error_code: NotificationErrorCode | None = None
-    provider_message_id: str | None = None
 
     def __post_init__(self) -> None:
         """A result cannot be both delivered and failed, nor failed without a reason.
@@ -67,8 +72,8 @@ class NotificationResult:
             raise ValueError("a failed result must name its error code")
 
     @classmethod
-    def ok(cls, provider_message_id: str | None = None) -> "NotificationResult":
-        return cls(delivered=True, provider_message_id=provider_message_id)
+    def ok(cls) -> "NotificationResult":
+        return cls(delivered=True)
 
     @classmethod
     def failure(cls, error_code: NotificationErrorCode) -> "NotificationResult":

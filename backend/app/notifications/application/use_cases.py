@@ -45,7 +45,7 @@ from app.notifications.domain.enums import NotificationChannel, NotificationStat
 from app.notifications.domain.escalation import Escalation, escalation_for
 from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.repositories import NotificationLogRepository
-from app.notifications.domain.results import NotificationErrorCode
+from app.notifications.domain.results import NotificationErrorCode, NotificationResult
 
 logger = logging.getLogger(__name__)
 
@@ -359,12 +359,46 @@ class DispatchPendingNotificationsUseCase:
         )
         await self._uow.commit()
 
-        result = await adapter.send(
-            recipient_contact=log.recipient_contact,
-            subject=log.subject,
-            body=log.body,
-            channel=log.channel,
-        )
+        try:
+            result = await adapter.send(
+                recipient_contact=log.recipient_contact,
+                subject=log.subject,
+                body=log.body,
+                channel=log.channel,
+            )
+        except Exception as exc:
+            # `NotificationAdapter.send` documents that it never raises for a delivery
+            # failure — but that is prose, and the next adapter to land is a real SMTP one
+            # whose library exceptions carry the recipient and the server's response text.
+            # Without this catch, two things went wrong at once, and the security panel of
+            # sections 1-2 found both:
+            #
+            #   1. the traceback reached `scheduler/runner.py`'s `logger.exception`, putting
+            #      the provider's message — routinely the very content that failed to send —
+            #      into an application log with no retention policy and no tenant scoping.
+            #      That is precisely the sink `infrastructure/adapters.py` refuses for
+            #      `subject`/`body`;
+            #   2. the row never reached the `FAILED` branch below, so R4.4's terminal state
+            #      was unreachable and `list_pending` re-picked it every minute for ever —
+            #      the "at-least-once, **bounded**" claim of design D4 quietly became
+            #      unbounded.
+            #
+            # The exception's **class name** is logged and its message is not, and neither
+            # is `exc_info`: the type tells an operator which failure mode they are looking
+            # at (`TimeoutError` vs `SMTPRecipientsRefused`) and carries none of the payload.
+            # That is the same length-not-content discipline `infrastructure/adapters.py`
+            # applies to `subject`/`body`.
+            logger.error(
+                "notifications.adapter_raised",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "notification_log_id": str(log.id),
+                    "channel": log.channel.value,
+                    "attempt": attempt,
+                    "exception_type": type(exc).__name__,
+                },
+            )
+            result = NotificationResult.failure(NotificationErrorCode.ADAPTER_ERROR)
 
         if result.delivered:
             await self._notifications.record_attempt(
@@ -377,6 +411,18 @@ class DispatchPendingNotificationsUseCase:
             )
             await self._uow.commit()
             report.sent += 1
+            # The adapters log the shape of what they sent and no identifier; this is the
+            # layer that knows which row and which tenant, so the two halves join here.
+            # Neither half carries an address or the message.
+            logger.info(
+                "notifications.delivered",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "notification_log_id": str(log.id),
+                    "channel": log.channel.value,
+                    "attempt": attempt,
+                },
+            )
             return
 
         exhausted = attempt >= self._max_attempts

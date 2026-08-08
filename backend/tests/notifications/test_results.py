@@ -18,12 +18,13 @@ def _accepts_str(hint: object) -> bool:
     return hint is str or str in typing.get_args(hint)
 
 
-def test_result_has_no_free_text_error_field() -> None:
+def test_result_has_no_string_field_at_all() -> None:
     """The structural guarantee, asserted rather than assumed.
 
-    If somebody adds a `str`-typed error field to carry "just the provider's message", this
-    fails — which is the whole reason the test exists. `provider_message_id` is the one
-    string allowed through, and it is an opaque handle, not content.
+    If somebody adds a `str`-typed field to carry "just the provider's message" — or an
+    opaque handle that a later change then logs — this fails, which is the whole reason the
+    test exists. An earlier draft did carry `provider_message_id: str | None`; the security
+    panel of sections 1-2 named it as the one hole left in D8's construction, and it went.
 
     `NotificationErrorCode` subclasses `str` for the usual SQLAlchemy reasons, so the check
     reads the **annotations**, not the runtime MRO: `error_code` is typed as the enum, and
@@ -35,7 +36,7 @@ def test_result_has_no_free_text_error_field() -> None:
         for field in dataclasses.fields(NotificationResult)
         if _accepts_str(hints[field.name])
     }
-    assert string_fields == {"provider_message_id"}
+    assert string_fields == set()
 
 
 def test_error_code_is_a_closed_enum() -> None:
@@ -50,10 +51,9 @@ def test_error_code_is_a_closed_enum() -> None:
 
 
 def test_ok_is_delivered_without_error() -> None:
-    result = NotificationResult.ok(provider_message_id="abc-123")
+    result = NotificationResult.ok()
     assert result.delivered is True
     assert result.error_code is None
-    assert result.provider_message_id == "abc-123"
 
 
 def test_failure_carries_its_code() -> None:

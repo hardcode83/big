@@ -8,11 +8,21 @@
 | `IN_APP` | `InAppNotificationAdapter` | no-op: the row **is** the delivery |
 | `PUSH` | — | deliberately unregistered; R4.5 sends it to `SKIPPED` |
 
-**Nothing here logs `subject` or `body`.** They are the one carrier rule 11 of
-`sdd/steering/security.md` lets an access code through in masked form, and an application
-log is not a sink that contract covers — it has no retention policy, no tenant scoping and
-no audit. The console adapter logs *that* a message went to a recipient on a channel, with
-its length, which is what an operator debugging delivery actually needs.
+**Nothing here logs `subject`, `body` or `recipient_contact`.** The first two are the one
+carrier rule 11 of `sdd/steering/security.md` lets an access code through in masked form,
+and an application log is not a sink that contract covers — it has no retention policy, no
+tenant scoping and no audit.
+
+The **address** went the same way, and it is worth saying why, because an earlier version
+logged it and the security panel of sections 1-2 had to point it out: every argument the
+paragraph above makes against logging the body applies unchanged to the recipient. Today
+that field holds a staff email; from R2 onwards it holds the **guest's**, because the access
+instructions of PRD §15 go out on these channels. A log line per delivery is then a
+per-tenant directory of guest contact details, assembled by the one component that had just
+finished refusing to log the message itself.
+
+What is left is what an operator debugging delivery actually needs: which row, which channel,
+and how big the message was.
 """
 
 import logging
@@ -45,9 +55,10 @@ class ConsoleEmailAdapter:
         logger.info(
             "notifications.console_email_delivered",
             extra={
-                "recipient_contact": recipient_contact,
                 "channel": channel.value,
-                # Lengths, not content — see the module docstring.
+                # Lengths, not content, and no address — see the module docstring. The row
+                # this belongs to is logged by the dispatcher, which is the layer that knows
+                # its id and its tenant.
                 "subject_length": len(subject or ""),
                 "body_length": len(body or ""),
             },
@@ -78,11 +89,7 @@ class MockWhatsAppAdapter:
             return NotificationResult.failure(NotificationErrorCode.INVALID_RECIPIENT)
         logger.info(
             "notifications.mock_whatsapp_delivered",
-            extra={
-                "recipient_contact": recipient_contact,
-                "channel": channel.value,
-                "body_length": len(body or ""),
-            },
+            extra={"channel": channel.value, "body_length": len(body or "")},
         )
         return NotificationResult.ok()
 

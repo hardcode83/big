@@ -268,6 +268,94 @@ async def test_sent_is_never_written_without_the_adapters_confirmation() -> None
         ), code
 
 
+class RaisingAdapter:
+    """An adapter that breaks its own contract, which is the case worth testing.
+
+    `NotificationAdapter.send` documents that it never raises for a delivery failure — but a
+    docstring is not a type, and the next adapter to land is a real SMTP one whose library
+    raises freely.
+    """
+
+    def __init__(self, exception: Exception) -> None:
+        self._exception = exception
+        self.calls = 0
+
+    async def send(self, *, recipient_contact, subject, body, channel):
+        self.calls += 1
+        raise self._exception
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_that_raises_is_a_failed_attempt_not_a_crash() -> None:
+    """Found by the security panel of sections 1-2, and it was two bugs in one.
+
+    Unguarded, the exception escaped to the scheduler's `logger.exception`, printing a
+    traceback that a real SMTP library fills with the recipient and the server's response —
+    the very content `adapters.py` refuses to log. And the row never reached the `FAILED`
+    branch, so R4.4's terminal state was unreachable and `list_pending` re-picked it every
+    minute for ever: design D4's "at-least-once, **bounded**" quietly became unbounded.
+    """
+    log = _log()
+    repository = FakeNotificationLogRepository([log])
+    adapter = RaisingAdapter(RuntimeError("smtp: 550 no such user guest@example.com"))
+
+    report = await _use_case(
+        repository, {NotificationChannel.EMAIL: adapter}, FakeUnitOfWork()
+    ).execute(tenant_id=TENANT, now=NOW)
+
+    assert adapter.calls == 1
+    assert report.retrying == 1
+    final = repository.writes[-1]
+    assert final["status"] is NotificationStatus.PENDING
+    assert json.loads(final["last_error"])["code"] == "ADAPTER_ERROR"
+    # And the exception's own text is nowhere near the column.
+    assert "550" not in final["last_error"]
+    assert "guest@example.com" not in final["last_error"]
+
+
+@pytest.mark.asyncio
+async def test_a_permanently_raising_adapter_still_terminates_at_the_ceiling() -> None:
+    """The bound, asserted directly: retries end, they do not go on for ever."""
+    log = _log(attempts=2)
+    repository = FakeNotificationLogRepository([log])
+    adapter = RaisingAdapter(TimeoutError())
+
+    report = await _use_case(
+        repository, {NotificationChannel.EMAIL: adapter}, FakeUnitOfWork(), max_attempts=3
+    ).execute(tenant_id=TENANT, now=NOW)
+
+    assert report.failed == 1
+    final = repository.writes[-1]
+    assert final["status"] is NotificationStatus.FAILED
+    assert json.loads(final["last_error"])["code"] == "MAX_ATTEMPTS_EXCEEDED"
+
+
+@pytest.mark.asyncio
+async def test_an_adapter_exception_never_reaches_the_log_verbatim(caplog) -> None:
+    """The exception's class name is useful; its message is the payload we are containing."""
+    import logging
+
+    repository = FakeNotificationLogRepository([_log()])
+    secret = "smtp: 550 mailbox unavailable for guest-7f3a@example.com"
+    adapter = RaisingAdapter(RuntimeError(secret))
+
+    with caplog.at_level(logging.DEBUG):
+        await _use_case(
+            repository, {NotificationChannel.EMAIL: adapter}, FakeUnitOfWork()
+        ).execute(tenant_id=TENANT, now=NOW)
+
+    emitted = "\n".join(
+        record.getMessage()
+        + " "
+        + " ".join(str(value) for value in record.__dict__.values())
+        for record in caplog.records
+    )
+    assert secret not in emitted
+    assert "guest-7f3a@example.com" not in emitted
+    # The type still comes through, so an operator can tell failure modes apart.
+    assert "RuntimeError" in emitted
+
+
 @pytest.mark.asyncio
 async def test_the_batch_size_bounds_one_run() -> None:
     repository = FakeNotificationLogRepository([_log() for _ in range(5)])

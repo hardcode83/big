@@ -8,7 +8,7 @@ Convenciones vinculantes: `steering/backend-architecture.md` (regla de dependenc
 transiciones inválidas testeadas), `steering/security.md` (reglas 1, 2, 3, 4, 9, 11),
 `steering/documentation.md` (OpenAPI + `.env.example`).
 
-## 1. Puerto de envío y adapters de canal
+## 1. Puerto de envío y adapters de canal <!-- panel: PASS 2026-08-08 (con la 2) -->
 
 - [x] 1.1 `backend/app/notifications/domain/results.py` (nuevo): `NotificationErrorCode` (enum
   cerrado: `ADAPTER_ERROR`, `INVALID_RECIPIENT`, `TIMEOUT`, `NO_ADAPTER_FOR_CHANNEL`,
@@ -33,7 +33,7 @@ transiciones inválidas testeadas), `steering/security.md` (reglas 1, 2, 3, 4, 9
   `CrossTenantWriteError` en la escritura, igual que `mark_breached`. Tests en
   `backend/tests/notifications/test_repositories.py` incluyendo el caso cross-tenant. [R4]
 
-## 2. El emisor: caso de uso, job y lectura in-app
+## 2. El emisor: caso de uso, job y lectura in-app <!-- panel: PASS 2026-08-08 -->
 
 - [x] 2.1 `backend/app/core/config.py`: `notification_max_attempts: int = 3` y
   `notification_batch_size: int = 100`, con comentario explicando por qué no hay backoff (design
@@ -62,7 +62,20 @@ transiciones inválidas testeadas), `steering/security.md` (reglas 1, 2, 3, 4, 9
   `backend/tests/notifications/test_api.py`: paginación, que un usuario no ve las de otro usuario
   del mismo tenant, y que no ve las de otro tenant. [R4]
 
-## 3. Cierre del SLA de asignación (deuda heredada de `cleaning` R6.4)
+## 3. Cierre del SLA de asignación (deuda heredada de `cleaning` R6.4) <!-- panel: PASS 2026-08-08 -->
+
+<!--
+Desviaciones de esta sección, para que se lean como decisiones:
+- 1.4 pedía `CrossTenantWriteError` en las escrituras nuevas. `record_attempt` y
+  `cancel_sla_deadline` toman un **id**, no una entidad, así que no hay tenant de entidad con el
+  que comparar: su aislamiento es el predicado `tenant_id` del UPDATE más la comprobación de
+  rowcount. El revisor de tenancy lo juzgó equivalente y no un hueco.
+- 3.4 pedía el test extremo a extremo en `tests/notifications/test_escalate_slas.py`. Vive en
+  `tests/cleaning/test_assignment_notifications.py` porque necesita la API de limpieza para
+  producir la fila de asignación; ponerlo en el otro fichero habría exigido fabricarla a mano,
+  que es justo lo que el test quiere no dar por supuesto.
+-->
+
 
 - [x] 3.1 `backend/app/notifications/domain/repositories.py` +
   `infrastructure/repositories.py`: `cancel_sla_deadline(tenant_id, *, related_type, related_id,
@@ -71,15 +84,15 @@ transiciones inválidas testeadas), `steering/security.md` (reglas 1, 2, 3, 4, 9
   normal, no un error — al contrario que `mark_breached`. Tests en
   `backend/tests/notifications/test_repositories.py`: anula la fila correcta, es idempotente, no
   cruza tenants y no altera ninguna otra columna. [R5]
-- [ ] 3.2 `backend/app/cleaning/application/use_cases.py`: `AcceptCleaningTaskUseCase` y
+- [x] 3.2 `backend/app/cleaning/application/use_cases.py`: `AcceptCleaningTaskUseCase` y
   `RejectCleaningTaskUseCase` reciben `notifications: NotificationLogRepository` y llaman
   `cancel_sla_deadline` con `related_type=RELATED_TYPE_CLEANING_TASK`, `related_id=task.id`,
   `notification_type=CLEANING_TASK_ASSIGNED`, **antes del commit** que ya hacen. Actualizar
   `backend/app/cleaning/api/dependencies.py`. [R5]
-- [ ] 3.3 `backend/tests/cleaning/test_assignment_notifications.py`: aceptar cierra el plazo;
+- [x] 3.3 `backend/tests/cleaning/test_assignment_notifications.py`: aceptar cierra el plazo;
   rechazar cierra el plazo; una tarea sin fila de asignación responde sin error; una tarea cuyo
   plazo ya está cerrado no cambia nada (R5.3). [R5]
-- [ ] 3.4 `backend/tests/notifications/test_escalate_slas.py`: test de extremo a extremo del hueco
+- [x] 3.4 `backend/tests/notifications/test_escalate_slas.py`: test de extremo a extremo del hueco
   que este change cierra — fila `SENT` con plazo vencido **sí** escala; la misma fila tras
   `cancel_sla_deadline` **no** produce ningún `SLA_BREACH` en ejecuciones posteriores (R5.4). [R5]
 
@@ -202,6 +215,17 @@ transiciones inválidas testeadas), `steering/security.md` (reglas 1, 2, 3, 4, 9
   mismo puente (`steering/documentation.md`). [R3, R4, R6]
 - [ ] 8.2 `.env.example`: las dos variables nuevas con comentario y sin valor. [R4]
 - [ ] 8.3 `README.md` raíz: mencionar los dos jobs nuevos del beat y los módulos que ganan API. [R1, R4]
+- [ ] 8.4 `docs/celery-jobs.md`: añadir `dispatch_notifications` y `provision_access_records` a la
+  tabla de jobs con su cadencia y su propósito. [R1, R4]
+- [ ] 8.5 `docs/cleaning.md`: la página afirma que el escalado de SLA está inerte «porque nada
+  marca las notificaciones como enviadas». Deja de ser cierto con este change — corregirlo y
+  enlazar el cierre de plazo al responder. [R5]
+- [ ] 8.6 `docs/access-notifications.md` (nueva): cómo se opera la entrega de notificaciones, el
+  registro de accesos y el registro legal — orientada a *cómo se usa*, sin duplicar las specs EARS.
+  [R2, R3, R4, R6]
+- [ ] 8.7 Comprobar si los diagramas de `docs/diagrams/` quedan obsoletos: el hexagonal por
+  dominios (tres módulos ganan `application/`+`api/`) y el ER (no cambia el esquema, así que
+  probablemente no). Regenerar solo lo que de verdad cambie; los obsoletos se borran. [R1, R4]
 
 ## 9. Verification
 

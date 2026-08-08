@@ -104,3 +104,29 @@ async def test_adapter_never_logs_subject_or_body(adapter, caplog) -> None:
     assert secret_subject not in emitted
     assert secret_body not in emitted
     assert "****23" not in emitted
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("adapter", ADAPTERS)
+async def test_adapter_never_logs_the_recipient_address(adapter, caplog) -> None:
+    """Found by the security panel of sections 1-2, and it is the same rule as above.
+
+    Every argument against logging the body applies to the address: no retention policy, no
+    tenant scoping, no audit. Today it is a staff email; from R2 onwards these channels carry
+    the guest's access instructions, so it is the guest's. A line per delivery would be a
+    per-tenant contact directory written by the component that had just refused to log the
+    message.
+    """
+    address = "guest-7f3a@example.com"
+    with caplog.at_level(logging.DEBUG):
+        await adapter.send(
+            recipient_contact=address,
+            subject="Your access code",
+            body="Your door code is ****23.",
+            channel=NotificationChannel.EMAIL,
+        )
+    emitted = "\n".join(
+        record.getMessage() + " " + " ".join(str(value) for value in record.__dict__.values())
+        for record in caplog.records
+    )
+    assert address not in emitted

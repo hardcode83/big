@@ -1,11 +1,17 @@
 """R6 — the notification an assignment produces, and the SLA chain it feeds.
 
-The chain has a measured gap and this file is where it is visible rather than assumed:
-`list_sla_breach_candidates` requires `status = SENT`
-(`app/notifications/infrastructure/repositories.py:37`) and nothing in the codebase sets
-`SENT`, because the sender belongs to `access-notifications`. So the escalation is exercised
-by marking the row `SENT` **in the test**, which is what that sender will do, and the change's
-`BLOCKED.md` (OQ1) records that in production the escalation stays inert until then.
+**The gap this file used to document is closed.** It said the chain was inert because
+`list_sla_breach_candidates` requires `status = SENT` and nothing in the codebase set it, so
+the escalation could only be exercised by marking the row `SENT` in the test. The sender
+arrived with `access-notifications`, and `dispatch_notifications` now writes that value in
+production — which is also why answering an assignment has to **close** the deadline
+(`access-notifications` R5, its design D7), a thing `cleaning` recorded as owed and could not
+build.
+
+The tests below still set `SENT` by hand rather than running the dispatcher: what they are
+about is the escalation policy, and going through a channel adapter to get there would couple
+them to `access-notifications`' delivery semantics. The end-to-end path is
+`tests/notifications/test_escalate_slas.py`.
 """
 
 import uuid
@@ -18,6 +24,7 @@ from sqlalchemy import select
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.notifications import RELATED_TYPE_CLEANING_TASK
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
@@ -200,13 +207,7 @@ async def test_no_cleaner_alerts_the_manager_without_a_deadline(
 async def test_answering_writes_no_second_assignment_notification(
     api, db_session, tenant_a, users_by_role_a, task_a, answer
 ):
-    """R6.4, recorded honestly (design D9).
-
-    What this change can do is **not write another row**. It cannot cancel the pending SLA:
-    `NotificationLogRepository` exposes only `mark_breached`, deliberately narrow, and there is
-    no candidate to cancel anyway while nothing marks a row `SENT`. Closing the deadline on an
-    answer is `access-notifications`' work, and `BLOCKED.md` OQ1 says so.
-    """
+    """R6.4, first half: answering does not produce another assignment row."""
     cleaner = await _insert_cleaner(db_session, tenant_a)
     await api.patch(
         f"{TASKS}/{task_a.id}",
@@ -219,6 +220,123 @@ async def test_answering_writes_no_second_assignment_notification(
     assert response.status_code == 200
 
     assert len(await _logs_of(db_session, tenant_a.id)) == before
+
+
+# --- access-notifications R5: answering CLOSES the deadline -----------------------
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("answer", ["accept", "reject"])
+async def test_answering_closes_the_assignment_deadline(
+    api, db_session, tenant_a, users_by_role_a, task_a, answer
+):
+    """R5.1 — the second half of `cleaning`'s R6.4, paid by `access-notifications`.
+
+    `cleaning` could only promise not to write a second row; cancelling the deadline needed a
+    port method that did not exist and a `SENT` writer that did not exist either. Both landed
+    with the sender, so the promise is now testable: after an answer the row has no deadline
+    at all.
+    """
+    cleaner = await _insert_cleaner(db_session, tenant_a)
+    await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+    assignment = (await _logs_of(db_session, tenant_a.id))[0]
+    assert assignment.sla_deadline_at is not None
+
+    response = await api.post(f"{TASKS}/{task_a.id}/{answer}", headers=auth_header(api, cleaner))
+    assert response.status_code == 200
+
+    await db_session.refresh(assignment)
+    assert assignment.sla_deadline_at is None
+    # And nothing else moved: design D7 keeps the port narrow precisely so an answer cannot
+    # claim a breach (`sla_breached`) or deny a delivery (`status`).
+    assert assignment.sla_breached is False
+    assert assignment.notification_type == NotificationType.CLEANING_TASK_ASSIGNED.value
+
+
+@pytest.mark.asyncio
+async def test_a_task_with_no_assignment_row_is_answered_without_error(
+    api, db_session, tenant_a, users_by_role_a, task_a
+):
+    """R5.3 — zero rows cleared is the normal case, not a failure.
+
+    A task assigned before this change exists in production with no deadline to cancel, and a
+    cleaner accepting it must get a 200, not a 500.
+    """
+    cleaner = await _insert_cleaner(db_session, tenant_a)
+    task_a.assigned_cleaner_id = cleaner.id
+    task_a.status = CleaningTaskStatus.ASSIGNED
+    await db_session.flush()
+    assert await _logs_of(db_session, tenant_a.id) == []
+
+    response = await api.post(f"{TASKS}/{task_a.id}/accept", headers=auth_header(api, cleaner))
+
+    assert response.status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_deadline_already_closed_is_left_alone(
+    api, db_session, tenant_a, users_by_role_a, task_a
+):
+    """R5.3, the idempotent half: answering twice changes nothing the second time."""
+    cleaner = await _insert_cleaner(db_session, tenant_a)
+    await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+    assignment = (await _logs_of(db_session, tenant_a.id))[0]
+    await api.post(f"{TASKS}/{task_a.id}/accept", headers=auth_header(api, cleaner))
+    await db_session.refresh(assignment)
+    assert assignment.sla_deadline_at is None
+    before = len(await _logs_of(db_session, tenant_a.id))
+
+    # A second acceptance is refused by the task's own state machine, so the path that
+    # matters is the reject that follows — either way nothing about the closed row changes.
+    await api.post(f"{TASKS}/{task_a.id}/reject", headers=auth_header(api, cleaner))
+
+    await db_session.refresh(assignment)
+    assert assignment.sla_deadline_at is None
+    assert assignment.sla_breached is False
+    assert len(await _logs_of(db_session, tenant_a.id)) == before
+
+
+@pytest.mark.asyncio
+async def test_an_answered_assignment_never_escalates(
+    api, db_session, tenant_a, users_by_role_a, task_a
+):
+    """R5.4, and the whole reason this change inherited the debt.
+
+    The row is marked `SENT` — which the dispatcher now really does in production — so it
+    *would* be a breach candidate. Answering removes it, and the job finds nothing however
+    long after the original deadline it runs.
+    """
+    cleaner = await _insert_cleaner(db_session, tenant_a)
+    await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+    assignment = (await _logs_of(db_session, tenant_a.id))[0]
+    deadline = assignment.sla_deadline_at
+    assignment.status = NotificationStatus.SENT
+    await db_session.flush()
+
+    await api.post(f"{TASKS}/{task_a.id}/accept", headers=auth_header(api, cleaner))
+
+    report = await EscalateBreachedSlasUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(db_session),
+        users=SqlAlchemyUserRepository(db_session),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(tenant_id=tenant_a.id, now=deadline + timedelta(days=7))
+
+    assert report.breached == 0
+    assert report.escalated == 0
+    logs = await _logs_of(db_session, tenant_a.id)
+    assert [log for log in logs if log.notification_type == NotificationType.SLA_BREACH.value] == []
 
 
 # --- R6.5: the escalation chain ---------------------------------------------------
@@ -274,11 +392,13 @@ async def test_an_unanswered_assignment_escalates_to_the_manager(
 async def test_a_pending_assignment_is_not_a_breach_candidate(
     api, db_session, tenant_a, users_by_role_a, task_a
 ):
-    """The measured gap of design D9, pinned so it cannot be forgotten.
+    """`PENDING` is queued work, not a missed deadline — pinned so it stays that way.
 
-    Without the `SENT` of the previous test the job finds nothing, however long ago the
-    deadline passed. That is not a bug in this change — it is `access-notifications`' half of
-    the chain, and `BLOCKED.md` OQ1 carries the decision.
+    This used to document a gap: nothing wrote `SENT`, so the job found nothing however long
+    ago the deadline passed. `access-notifications` closed it, and the invariant that
+    survives is narrower and permanent: a notification **nobody has been sent yet** cannot
+    have been ignored, so it is never a breach candidate. The clock on a cleaner's answer
+    starts when they are told, which is what `dispatch_notifications` records.
     """
     cleaner = await _insert_cleaner(db_session, tenant_a)
     await api.patch(
