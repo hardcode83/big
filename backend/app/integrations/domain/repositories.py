@@ -16,8 +16,55 @@ and not port ownership across domains.
 import uuid
 from typing import Protocol
 
-from app.integrations.domain.entities import PmsCredential
+from app.integrations.domain.entities import PmsCredential, WebhookEndpoint
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
+
+
+class WebhookEndpointRepository(Protocol):
+    """The per-tenant webhook authentication material (rule 12(a)/(b), design D2).
+
+    **`find_by_token_hash` is the only read that runs without a tenant**, and that is not an
+    oversight in the tenancy model — it is the inversion the rule requires. An incoming webhook
+    carries no JWT, so there is nothing to scope the session by *until this lookup answers*: the
+    token is what resolves the tenant. Its implementation therefore runs on a session that was
+    never marked and filters by nothing but the hash, which is only safe because the hash is a
+    256-bit random value and the method returns exactly one row (`UNIQUE`).
+
+    Every other method takes `tenant_id` explicitly, like the rest of this module's ports.
+    """
+
+    async def find_by_token_hash(
+        self, provider: PMSProvider, token_hash: str
+    ) -> WebhookEndpoint | None:
+        """The endpoint that owns this route token, or `None`.
+
+        `provider` is part of the query and not merely of the route: a token minted for one
+        provider must not authenticate a webhook claiming to be from another, or the `provider`
+        column of `webhook_events` becomes attacker-controlled.
+
+        `None` rather than raising, for the same reason `PmsCredentialRepository.get_for` returns
+        it: absence is an answer. The caller — the receiving use case — turns every negative into
+        the one indistinguishable failure of design D4, which is where that decision belongs.
+        """
+        ...
+
+    async def get(
+        self, tenant_id: uuid.UUID, endpoint_id: uuid.UUID
+    ) -> WebhookEndpoint | None:
+        """The endpoint by id, within the tenant. Used by rotation."""
+        ...
+
+    async def upsert(self, tenant_id: uuid.UUID, endpoint: WebhookEndpoint) -> None:
+        """Store or replace the endpoint at its `(tenant, provider)` coordinates.
+
+        Upsert for the same reason `PmsCredentialRepository.upsert` is one: the caller's intent is
+        always "this is the material now", and a separate add would invite a read-then-write race
+        on rotation. Rotation overwrites `token_hash` and `header_secret` together, in one
+        transaction, so no half-rotated row is ever visible (design D3).
+
+        Raises `CrossTenantWriteError` when the endpoint belongs to another tenant.
+        """
+        ...
 
 
 class PmsCredentialRepository(Protocol):

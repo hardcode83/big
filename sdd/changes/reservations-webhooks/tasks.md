@@ -11,11 +11,19 @@ forzado en `infrastructure/`.
 
 ## 1. Endpoint de webhook: entidad, esquema y administración
 
-- [ ] 1.1 Entidad `WebhookEndpoint` y su puerto de repositorio en
+- [x] 1.1 Entidad `WebhookEndpoint` y su puerto de repositorio en
   `backend/app/integrations/domain/{entities.py,repositories.py}`, más los errores propios en
   `errors.py`. Python puro, sin SQLAlchemy ni Pydantic (regla de dependencia). **TDD**: el test exige
   primero que la entidad no admita un token ni un secreto vacíos y que exponga la comparación en tiempo
   constante como método propio, no como detalle del caso de uso. [R2.1]
+  > **Ajuste al ejecutar**: la comparación en tiempo constante **no** quedó como método de la entidad,
+  > sino como función pura en `domain/webhook_auth.py`. Motivo: `EncryptedSecret` no sabe descifrarse
+  > —eso es deliberado, es el chokepoint de la regla 3(a)— así que un método de la entidad tendría que
+  > recibir el texto en claro de su propio secreto como parámetro, que es una firma que invita a
+  > malinterpretar quién custodia qué. Las tres primitivas (`generate_webhook_token`,
+  > `hash_webhook_token`, `secrets_match`) son stdlib puro y viven en `domain/` igual.
+  > 20 tests nuevos; la entidad rechaza además un `token_hash` que sea el **token** en vez de su hash,
+  > que es el único accidente capaz de anular D3 y que ninguna constraint de columna vería.
 - [ ] 1.2 `WebhookEndpointModel` en `backend/app/integrations/infrastructure/models.py` con
   `TenantScopedMixin`, `UNIQUE(tenant_id, provider)`, `token_hash` `String(64)` `UNIQUE` y
   `header_secret_encrypted` `Text`; **y** las dos columnas de D9 en `WebhookEventModel`
