@@ -13,7 +13,7 @@ import uuid
 from collections.abc import Sequence
 from datetime import datetime
 
-from sqlalchemy import func, select, update
+from sqlalchemy import and_, func, or_, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.access.domain.entities import AccessRecord
@@ -180,7 +180,31 @@ class SqlAlchemyAccessRecordRepository:
     async def list_reservations_missing_records(
         self, tenant_id: uuid.UUID, *, limit: int
     ) -> Sequence[ReservationNeedingAccess]:
-        existing = select(AccessRecordModel.reservation_id).where(
+        """Stays that need a record made, and the two halves are NOT symmetric.
+
+        The asymmetry is what makes the sweep converge, and getting it wrong in either
+        direction produces a job that never settles. It was wrong in one direction until the
+        feature-scale QA panel found it (see below).
+
+        * A **live** stay needs a record that is still live. Having *any* record is not
+          enough: a booking that was cancelled and then re-confirmed —
+          `Reservation.UPDATABLE_FIELDS` allows `CANCELLED → CONFIRMED` and no state machine
+          forbids it — owns a `REVOKED` record, which is history and cannot come back
+          (`revoke()` is terminal by design D14). Excluding it on the strength of that record
+          left an active booking with `access_status = NOT_REQUIRED` **for ever**. So the
+          subquery here counts only NON-terminal records, and a re-confirmed stay gets a
+          fresh `PENDING` one while the revoked row stays as the account of what happened.
+        * A **cancelled** stay needs a record, full stop — one, in `REVOKED`. Skipping them
+          entirely would mean every run re-found them and made a `PENDING` access for a
+          booking that is off. But here *any* record excludes it: applying the live rule
+          would make the job mint a new `REVOKED` row every five minutes.
+        """
+        live_record = select(AccessRecordModel.reservation_id).where(
+            AccessRecordModel.tenant_id == tenant_id,
+            AccessRecordModel.reservation_id.is_not(None),
+            AccessRecordModel.status.not_in(_TERMINAL),
+        )
+        any_record = select(AccessRecordModel.reservation_id).where(
             AccessRecordModel.tenant_id == tenant_id,
             AccessRecordModel.reservation_id.is_not(None),
         )
@@ -193,12 +217,18 @@ class SqlAlchemyAccessRecordRepository:
             .where(
                 ReservationModel.tenant_id == tenant_id,
                 # `PENDING` is excluded: a booking nobody has agreed to yet has no access to
-                # arrange. Everything else — including `CANCELLED` — gets a record, because a
-                # stay cancelled before this job first ran still needs one, in `REVOKED`.
-                # Without that, the next run would keep finding it and creating a `PENDING`
-                # access for a booking that is off.
+                # arrange.
                 ReservationModel.status != ReservationStatus.PENDING,
-                ReservationModel.id.not_in(existing),
+                or_(
+                    and_(
+                        ReservationModel.status != ReservationStatus.CANCELLED,
+                        ReservationModel.id.not_in(live_record),
+                    ),
+                    and_(
+                        ReservationModel.status == ReservationStatus.CANCELLED,
+                        ReservationModel.id.not_in(any_record),
+                    ),
+                ),
             )
             # `ix_reservations_tenant_id_status` covers the tenant+status half of this.
             .order_by(ReservationModel.created_at, ReservationModel.id)

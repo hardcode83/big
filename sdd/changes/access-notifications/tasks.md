@@ -131,16 +131,20 @@ Desviaciones de esta sección, para que se lean como decisiones:
   `ACCESS_CODE_REGISTERED`, `ACCESS_MARKED_EXTERNAL`, `ACCESS_DELIVERED`, `ACCESS_REVOKED`, con
   comentario citando la regla 9 (que nombra `AccessRecord` explícitamente). Añadirlas a
   `ENTITY_TYPES`/`ACTIONS`. [R2]
-- [x] 5.2 `backend/app/access/application/use_cases.py` (nuevo):
+- [x] 5.2 (**Corregido tras el panel de feature**: los tests de los casos de uso NO viven en
+  `backend/tests/access/test_use_cases.py`, que no existe. La proyección se prueba contra base
+  real en `test_repositories.py` y las transiciones extremo a extremo en `test_api.py` — con
+  fakes se habría probado el filtro del fake.)
+  `backend/app/access/application/use_cases.py` (nuevo):
   `RegisterManualAccessCodeUseCase`, `MarkAccessExternallyManagedUseCase`,
   `MarkAccessDeliveredUseCase`. Cada uno: carga dentro del tenant, muta la entidad, persiste,
   escribe `TimelineEvent` (`ACCESS_CODE_MANUAL_ADDED` / `..._CREATED_EXTERNAL` / `..._DELIVERED`)
   vía `TimelineEventFactory`, proyecta `reservations.access_status` (design D1) y escribe
   `AuditLog` con `ChangeSet` — **el código en claro nunca entra en el `ChangeSet`**. Un solo
   `commit()` por caso de uso. Tests con fakes en `backend/tests/access/test_use_cases.py`. [R2]
-- [x] 5.3 `backend/tests/access/test_use_cases.py`: la proyección a `reservations.access_status`
+- [x] 5.3 `backend/tests/access/test_repositories.py`: la proyección a `reservations.access_status`
   acompaña cada transición y `REVOKED` proyecta `NOT_REQUIRED` con el `ASSUMPTION` documentado
-  (design D1). [R1, R2]
+  (design D1). Un caso por cada valor del enum. [R1, R2]
 - [x] 5.4 `backend/app/access/application/use_cases.py`: `ListAccessRecordsUseCase` y
   `GetAccessRecordUseCase`, con el envelope paginado y las mismas cotas de `page`/`per_page` que
   `reservations`. [R3]
@@ -194,7 +198,10 @@ Desviaciones de esta sección, para que se lean como decisiones:
   (descifra y audita el acceso, regla 9). Tests en
   `backend/tests/guests/test_use_cases.py` que verifican que el `ChangeSet` no contiene el número
   ni la fecha de nacimiento (R7.4). [R6, R7]
-- [x] 7.7 `backend/app/guests/application/use_cases.py`: `SubmitLegalRegistrationUseCase` — `409`
+- [x] 7.7 (**Los «tres caminos» solo eran dos hasta el panel de feature**: nadie construía
+  `MockSESHospedajesAdapter(fail=True)`, así que la rama de fallo funcionaba y no la guardaba
+  ningún test. Cubierta ahora en `test_a_rejected_submission_fails_the_stay_and_alerts_the_managers`.)
+  `backend/app/guests/application/use_cases.py`: `SubmitLegalRegistrationUseCase` — `409`
   si la reserva no está en `READY_TO_SUBMIT` (R6.6, sin invocar el adapter); al éxito
   `SUBMITTED` + `TimelineEvent` `LEGAL_REGISTRATION_SUBMITTED`; al fallo `FAILED` + notificación
   `PENDING` al manager y **sin** evento de submission (R6.5). Tests de los tres caminos. [R6]
@@ -204,8 +211,13 @@ Desviaciones de esta sección, para que se lean como decisiones:
 - [x] 7.9 `backend/tests/guests/test_api.py`: solo `SUPER_ADMIN`/`TENANT_OWNER`/`PROPERTY_MANAGER`
   ven el documento completo (R7.2); ningún listado devuelve el número (R7.1); `404` idéntico
   cross-tenant; y toda lectura del documento deja su fila de `AuditLog` (R7.3). [R7]
-- [x] 7.10 `backend/tests/guests/test_isolation.py`: test de tenant isolation del módulo `guests`,
-  obligatorio por DoD §28.18. [R6, R7]
+- [x] 7.10 Tenant isolation del módulo `guests`, obligatorio por DoD §28.18. **No en un fichero
+  propio** (`test_isolation.py` no existe): vive en `backend/tests/guests/test_api.py`
+  —`test_a_neighbours_guest_is_the_same_404_as_a_missing_one`,
+  `test_a_write_to_a_neighbours_guest_is_also_a_404`,
+  `test_a_neighbours_reservation_cannot_be_submitted`— porque lo que hay que demostrar aquí es el
+  `404` **idéntico** al inexistente, y eso solo se puede afirmar comparando dos respuestas HTTP.
+  Corregido tras el panel de feature, que encontró la tarea citando un fichero inexistente. [R6, R7]
 
 ## 8. Contrato de API y documentación
 

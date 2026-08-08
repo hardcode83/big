@@ -231,11 +231,38 @@ Rejected: todo en `integrations/` — un adapter «manual» no integra con nada.
 ### D13 — RBAC y aislamiento con los patrones que ya existen
 
 **Chosen:** el rol se deriva del token dentro del caso de uso, nunca de la petición — patrón
-`CleaningActor.restrict_to_cleaner_id` (`cleaning/application/use_cases.py:442-450`). Escritura de
-accesos y submission legal: `SUPER_ADMIN`, `TENANT_OWNER`, `PROPERTY_MANAGER`. Lectura de accesos:
-además `CLEANER`/`TECHNICIAN` **no** — no necesitan el acceso del huésped. Lectura del documento
-completo: solo los tres primeros (regla 4 y PRD §17). Referencia cruzada de tenant → `404`
-idéntico al inexistente, como en `cleaning` R7.3.
+`CleaningActor.restrict_to_cleaner_id` (`cleaning/application/use_cases.py:442-450`). Referencia
+cruzada de tenant → `404` idéntico al inexistente, como en `cleaning` R7.3.
+
+Reparto efectivo de los cinco permisos nuevos (`backend/app/auth/domain/policy.py`):
+
+| Permiso | `TENANT_OWNER` | `PROPERTY_MANAGER` | `CLEANER` / `TECHNICIAN` | `SUPER_ADMIN` |
+|---|---|---|---|---|
+| `READ_OWN_NOTIFICATIONS` | ✔ | ✔ | ✔ | ✔ |
+| `READ_ACCESS_RECORDS` | ✔ | ✔ | — | — |
+| `MANAGE_ACCESS_RECORDS` | — | ✔ | — | — |
+| `READ_GUEST_DOCUMENTS` | ✔ | ✔ | — | — |
+| `MANAGE_GUEST_DOCUMENTS` · `SUBMIT_LEGAL_REGISTRATION` | — | ✔ | — | — |
+
+**Dos correcciones sobre la primera redacción de esta decisión**, hechas al implementar y
+recogidas aquí porque el arquitecto las encontró en el panel de feature: decía «escritura de
+accesos y submission legal: `SUPER_ADMIN`, `TENANT_OWNER`, `PROPERTY_MANAGER`», y no es lo que se
+construyó.
+
+1. **El owner lee y no opera.** PRD §6 le da «ver sus propiedades y reservas» y al manager «acceder
+   a todos los datos operativos»; el mismo corte que `reservations` y `properties-crud` ya
+   hicieron. Registrar el código y presentar a SES.Hospedajes son operación.
+2. **`SUPER_ADMIN` no recibe ninguno**, ni siquiera `READ_GUEST_DOCUMENTS`, que PRD §17 sí le
+   nombra. Esa frase del PRD es un **techo** —dice quién *puede* ver un documento— y esta tabla
+   sigue decidiendo quién lo hace. `SUPER_ADMIN` no tiene rol operativo dentro de un tenant en
+   ninguna parte del sistema: sus poderes de PRD §6 son globales y la visibilidad cross-tenant está
+   explícitamente aplazada a `saas-cross-tenant`. Conceder aquí sería pre-decidir esa entrada, y
+   los documentos de identidad son el peor sitio posible para hacerlo. **No se incumple §17**:
+   ningún rol fuera de sus tres ve un documento, y retirar es más estrecho que el techo.
+
+Rejected: seguir la enumeración de §17 al pie de la letra y dar `READ_GUEST_DOCUMENTS` a
+`SUPER_ADMIN` — abriría la puerta cross-tenant que `saas-cross-tenant` existe para decidir, sobre
+el dato más sensible del sistema.
 
 ### D14 — Máquina de estados de `AccessRecord`
 
@@ -323,19 +350,22 @@ semántica.
 
 **API nueva** (`/api/v1`, convenciones de PRD §23):
 
-| Método | Ruta | Rol mínimo |
-|---|---|---|
-| GET | `/access-records` (filtros `reservation_id`, `property_id`, `status`) | `PROPERTY_MANAGER` |
-| GET | `/access-records/{id}` | `PROPERTY_MANAGER` |
-| POST | `/access-records/{id}/manual-code` | `PROPERTY_MANAGER` |
-| POST | `/access-records/{id}/external` | `PROPERTY_MANAGER` |
-| POST | `/access-records/{id}/delivered` | `PROPERTY_MANAGER` |
-| GET | `/notifications` (las del usuario del token) | cualquier rol autenticado |
-| PATCH | `/guests/{id}/document` | `PROPERTY_MANAGER` |
-| GET | `/guests/{id}/document` | `PROPERTY_MANAGER` |
-| POST | `/reservations/{id}/legal-registration/submit` | `PROPERTY_MANAGER` |
+| Método | Ruta | Permiso | Quién lo tiene |
+|---|---|---|---|
+| GET | `/access-records` (filtros `reservation_id`, `property_id`, `status`) | `READ_ACCESS_RECORDS` | owner, manager |
+| GET | `/access-records/{id}` | `READ_ACCESS_RECORDS` | owner, manager |
+| POST | `/access-records/{id}/manual-code` | `MANAGE_ACCESS_RECORDS` | manager |
+| POST | `/access-records/{id}/external` | `MANAGE_ACCESS_RECORDS` | manager |
+| POST | `/access-records/{id}/delivered` | `MANAGE_ACCESS_RECORDS` | manager |
+| GET | `/notifications` (las del usuario del token) | `READ_OWN_NOTIFICATIONS` | cualquier rol autenticado |
+| PATCH | `/guests/{id}/document` | `MANAGE_GUEST_DOCUMENTS` | manager |
+| GET | `/guests/{id}/document` | `READ_GUEST_DOCUMENTS` | owner, manager |
+| POST | `/reservations/{id}/legal-registration/submit` | `SUBMIT_LEGAL_REGISTRATION` | manager |
 
-`SUPER_ADMIN` y `TENANT_OWNER` incluidos en todas por jerarquía.
+**No hay herencia por jerarquía.** La tabla de D13 es el reparto completo: `SUPER_ADMIN` no
+aparece en ninguna de estas rutas, y el owner lee sin operar. Una redacción anterior de esta
+sección decía «`SUPER_ADMIN` y `TENANT_OWNER` incluidos en todas por jerarquía», que nunca fue
+cierto en este proyecto — `ROLE_PERMISSIONS` es un mapa explícito por rol, no una cadena.
 
 **Config**: `NOTIFICATION_MAX_ATTEMPTS` (3) y `NOTIFICATION_BATCH_SIZE` (100) en `.env.example`.
 Ningún secreto nuevo — los adapters son consola y mock (regla 8).

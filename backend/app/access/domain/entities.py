@@ -22,6 +22,7 @@ from datetime import datetime
 
 from app.access.domain.enums import AccessCreatedMode, AccessProvider, AccessRecordStatus
 from app.access.domain.exceptions import (
+    AccessCodeInNotesError,
     AccessCodeRequiredError,
     InvalidAccessTransitionError,
 )
@@ -89,11 +90,19 @@ class AccessRecord:
         or in the repository can hold it. That is what makes design D9 structural.
         """
         self._require(AccessRecordStatus.MANUAL_ADDED)
-        if not code.strip():
+        stripped = code.strip()
+        if not stripped:
             # Not a generic validation error: `mask_access_code("")` returns a perfectly
             # ordinary-looking `"****"`, so an empty code would be stored as a mask and the
             # record would claim a code exists.
             raise AccessCodeRequiredError()
+        if notes is not None and stripped in notes:
+            # The one leak the masking left open, found by the feature-scale security panel:
+            # `notes` is free text on the SAME request, and it was persisted verbatim and
+            # served in every listing. R2.6 says the full code is stored "en ningún punto",
+            # and this is the only place in the system where both strings exist at once — so
+            # it is the only place the check is decidable.
+            raise AccessCodeInNotesError()
         self.code_masked = mask_access_code(code)
         self.provider = AccessProvider.MANUAL
         self.created_mode = AccessCreatedMode.MANUAL

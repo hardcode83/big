@@ -37,6 +37,17 @@ REDACTED_FIELDS = frozenset(
         # listed. An exact-name denylist that does not carry the exact names is decoration.
         "document_number",
         "document_number_encrypted",
+        # Added by `access-notifications` after its feature-scale security panel. The number
+        # was already here and the birth date was not, so `redacted()` was the only form for
+        # one and mere convention for the other — the module claims its guarantee holds "by
+        # construction", and for `date_of_birth` it did not.
+        #
+        # It belongs here on the steering's own words: §"Datos sensibles" reads "PII de
+        # huéspedes (documento de identidad, **fecha de nacimiento** — requeridos por
+        # SES.Hospedajes)". `nationality` is deliberately NOT added: the same sentence does
+        # not name it, and a denylist that quietly grows past what the rule says is one
+        # nobody can reason about — the exact failure this list's own comment warns against.
+        "date_of_birth",
         "wifi_password",
         "wifi_password_encrypted",
         "access_code",

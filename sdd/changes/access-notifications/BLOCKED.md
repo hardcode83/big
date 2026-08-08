@@ -57,6 +57,26 @@ revertirlo sea barato. Se resuelven con Jose antes de `/sdd:ship`.
   empezará a fallar, útilmente, el día que un proveedor empiece a rellenar la columna.
 - **resume**: `/sdd:review access-notifications`
 
+## OQ5 — ¿`access_records.notes` entra en la tabla de sumideros de la regla 11?
+
+- **phase**: review
+- **type**: decision (requiere tocar `sdd/steering/security.md`, así que es de Jose)
+- **qué y por qué**: el panel de seguridad a escala de feature encontró que `notes` es texto
+  libre que viaja **en el mismo formulario** que el código de acceso, se persistía verbatim y se
+  devolvía en cada listado a todo el que tenga `READ_ACCESS_RECORDS`. La capa de auditoría ya lo
+  trataba como peligroso (`redacted()`), pero la columna y la respuesta no.
+- **arreglado en este change, y hasta dónde llega**: `AccessRecord.register_manual_code` ahora
+  rechaza la petición si `notes` contiene el código que se está registrando — es el único punto
+  del sistema donde ambas cadenas coexisten, así que es el único donde la comprobación es
+  decidible. Cierra el escenario concreto («puerta 481523, timbre 2»). **No cierra el caso
+  general**: nada impide escribir *otro* código en `notes` más tarde.
+- **la decisión que queda**: la tabla de la regla 11 enumera seis columnas y `access_records.notes`
+  no es una de ellas. Meterla es ampliar el contrato de un sumidero, y la propia regla dice cómo:
+  «con una entrada nueva y nombrada aquí, aprobada en el design del change que la pida». Este
+  change no la pide porque no la necesita para cumplir R2.6; el siguiente que amplíe la superficie
+  de `notes` —`field-apps`, cuando la limpiadora vea accesos— sí debería.
+- **resume**: decidir con Jose; si es que sí, sale como entrada propia de roadmap.
+
 ## D1 — Re-review de QA de las secciones 1-3, interrumpida por límite de sesión
 
 - **phase**: run

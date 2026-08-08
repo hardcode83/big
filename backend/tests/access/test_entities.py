@@ -26,6 +26,7 @@ import pytest
 from app.access.domain.entities import AccessRecord
 from app.access.domain.enums import AccessCreatedMode, AccessProvider, AccessRecordStatus
 from app.access.domain.exceptions import (
+    AccessCodeInNotesError,
     AccessCodeRequiredError,
     InvalidAccessTransitionError,
 )
@@ -80,6 +81,38 @@ def test_an_empty_code_is_refused_rather_than_masked_into_nothing() -> None:
 
     assert record.status is AccessRecordStatus.PENDING
     assert record.code_masked is None
+
+
+def test_the_code_pasted_into_the_notes_is_refused() -> None:
+    """The leak the masking left open, found by the feature-scale security panel.
+
+    `notes` travels on the SAME request as `code`, is persisted verbatim in
+    `access_records.notes` and is served in every listing to every holder of
+    `READ_ACCESS_RECORDS`. So the one request that exists in order **not** to store a code
+    stored it, one field over — and R2.6 says "en ningún punto".
+
+    This is the only place in the system where both strings are in hand, which is why the
+    check is here.
+    """
+    record = _record()
+
+    with pytest.raises(AccessCodeInNotesError):
+        record.register_manual_code(
+            "481523", notes="puerta 481523, timbre 2", now=NOW
+        )
+
+    assert record.status is AccessRecordStatus.PENDING
+    assert record.code_masked is None
+    assert record.notes is None
+
+
+def test_notes_that_do_not_contain_the_code_are_kept() -> None:
+    """The check must not make `notes` useless — PRD §15 puts it on the adapter signature."""
+    record = _record()
+
+    record.register_manual_code("481523", notes="la llave está con el vecino", now=NOW)
+
+    assert record.notes == "la llave está con el vecino"
 
 
 def test_marking_external_records_that_the_provider_manages_it() -> None:

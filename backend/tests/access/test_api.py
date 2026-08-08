@@ -6,9 +6,12 @@ to the one for an id that does not exist (R3.3).
 """
 
 import pytest
+from sqlalchemy import select
 
 from app.access.domain.enums import AccessRecordStatus
+from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import UserRole
+from app.timeline.infrastructure.models import TimelineEventModel
 from tests.access.conftest import (
     auth_header,
     insert_access_record,
@@ -91,6 +94,49 @@ async def test_an_invalid_transition_is_a_409(
 
     assert response.status_code == 409
     assert response.json()["error"]["code"] == "CONFLICT"
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("path", "payload", "origin"),
+    [
+        ("manual-code", {"code": CODE}, AccessRecordStatus.DELIVERED),
+        ("external", {}, AccessRecordStatus.MANUAL_ADDED),
+        ("delivered", None, AccessRecordStatus.PENDING),
+    ],
+)
+async def test_a_409_leaves_no_trace_in_the_database(
+    api, db_session, tenant_a, property_a, users_by_role_a, path, payload, origin
+) -> None:
+    """R2.5: "rechazarla con `409` **y no escribir ningún evento**".
+
+    Until the feature-scale QA panel said so, that clause was proven only by reading the
+    control flow — the entity raises before `_persist` is reached — and no test looked at the
+    database afterwards. A refactor that called a base-class `_persist` speculatively would
+    have shipped. One case per transition endpoint, since only one of the three had a 409
+    test at all.
+    """
+    record = await insert_access_record(db_session, tenant_a, property_a, status=origin)
+    header = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    url = f"{RECORDS}/{record.id}/{path}"
+
+    response = (
+        await api.post(url, headers=header)
+        if payload is None
+        else await api.post(url, json=payload, headers=header)
+    )
+
+    assert response.status_code == 409
+    await db_session.refresh(record)
+    assert record.status is origin
+    events = await db_session.execute(
+        select(TimelineEventModel).where(TimelineEventModel.tenant_id == tenant_a.id)
+    )
+    audit = await db_session.execute(
+        select(AuditLogModel).where(AuditLogModel.tenant_id == tenant_a.id)
+    )
+    assert list(events.scalars()) == []
+    assert list(audit.scalars()) == []
 
 
 @pytest.mark.asyncio

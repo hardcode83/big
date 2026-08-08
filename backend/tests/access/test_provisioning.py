@@ -216,6 +216,89 @@ async def test_a_stay_cancelled_before_the_job_ever_ran_gets_a_revoked_record(
 
 
 @pytest.mark.asyncio
+async def test_a_re_confirmed_stay_gets_a_new_live_record(
+    db_session, tenant_a, property_a
+) -> None:
+    """Found by the feature-scale QA panel: the sweep did **not** converge for this input.
+
+    `Reservation.UPDATABLE_FIELDS` allows `status` and no state machine forbids
+    `CANCELLED → CONFIRMED`, so a booking really can come back. The work queue used to
+    exclude any reservation that had *any* record, and `revoke()` is terminal — so a
+    re-confirmed stay kept its `REVOKED` record and sat at `access_status = NOT_REQUIRED`
+    for ever, with an active guest and no access to arrange.
+
+    The revoked row is not resurrected: it is the account of what happened. A new one is
+    created beside it.
+    """
+    reservation = await insert_reservation(db_session, tenant_a, property_a)
+    use_case = _use_case(db_session)
+
+    await use_case.execute(tenant_id=tenant_a.id, now=NOW)
+    reservation.status = ReservationStatus.CANCELLED
+    await db_session.flush()
+    await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=5))
+    reservation.status = ReservationStatus.CONFIRMED
+    await db_session.flush()
+
+    report = await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=10))
+
+    assert report.created == 1
+    records = await _records_of(db_session, tenant_a.id)
+    assert len(records) == 2
+    assert sorted(r.status.value for r in records) == ["PENDING", "REVOKED"]
+    await db_session.refresh(reservation)
+    assert reservation.access_status is ReservationAccessStatus.PENDING
+
+
+@pytest.mark.asyncio
+async def test_the_re_confirmed_stay_then_settles(
+    db_session, tenant_a, property_a
+) -> None:
+    """The other half of convergence: having fixed it, it must not now loop.
+
+    A live stay with a live record is excluded again, so the run after the repair writes
+    nothing — otherwise the fix would trade a stuck reservation for a job minting a record
+    every five minutes.
+    """
+    reservation = await insert_reservation(db_session, tenant_a, property_a)
+    use_case = _use_case(db_session)
+    await use_case.execute(tenant_id=tenant_a.id, now=NOW)
+    reservation.status = ReservationStatus.CANCELLED
+    await db_session.flush()
+    await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=5))
+    reservation.status = ReservationStatus.CONFIRMED
+    await db_session.flush()
+    await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=10))
+
+    report = await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=15))
+
+    assert report == type(report)()
+    assert len(await _records_of(db_session, tenant_a.id)) == 2
+
+
+@pytest.mark.asyncio
+async def test_a_cancelled_stay_never_accumulates_revoked_records(
+    db_session, tenant_a, property_a
+) -> None:
+    """The asymmetry that makes the two halves of the work queue different.
+
+    A cancelled stay is excluded by having **any** record; a live one by having a
+    non-terminal one. Applying the live rule to a cancelled stay would mint a fresh
+    `REVOKED` row on every tick, which is the failure the previous shape avoided and this
+    fix must not reintroduce.
+    """
+    await insert_reservation(
+        db_session, tenant_a, property_a, status=ReservationStatus.CANCELLED
+    )
+    use_case = _use_case(db_session)
+
+    for minute in (0, 5, 10):
+        await use_case.execute(tenant_id=tenant_a.id, now=NOW + timedelta(minutes=minute))
+
+    assert len(await _records_of(db_session, tenant_a.id)) == 1
+
+
+@pytest.mark.asyncio
 async def test_an_already_revoked_record_is_not_revoked_again(
     db_session, tenant_a, property_a
 ) -> None:

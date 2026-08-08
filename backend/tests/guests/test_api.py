@@ -14,19 +14,30 @@ from httpx import ASGITransport, AsyncClient
 from sqlalchemy import select
 
 from app.audit.infrastructure.models import AuditLogModel
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.api.dependencies import get_password_hasher, get_token_codec
 from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
+from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.auth.infrastructure.token_codec import JwtTokenCodec
 from app.core.db import get_db_session
+from app.guests.api.dependencies import get_submit_legal_registration_use_case
+from app.guests.application.use_cases import SubmitLegalRegistrationUseCase
 from app.guests.domain.enums import GuestDocumentStatus, LegalRegistrationStatus
+from app.guests.infrastructure.adapters import MockSESHospedajesAdapter
+from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationStayStore
+from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.guests.infrastructure.models import GuestModel
 from app.main import create_app
 from app.notifications.infrastructure.models import NotificationLogModel
+from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
+from app.timeline.domain.enums import TimelineEventType
+from app.timeline.infrastructure.models import TimelineEventModel
+from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 from tests.auth.conftest import (  # noqa: F401
     TEST_BCRYPT_ROUNDS,
     tenant_a,
@@ -384,31 +395,126 @@ async def test_a_ready_stay_whose_guest_lost_a_field_is_refused_with_the_reason(
     assert NUMBER not in response.text
 
 
-@pytest.mark.asyncio
-async def test_no_notification_carries_the_document(
-    api, db_session, tenant_a, users_by_role_a
-) -> None:
-    """Rule 11 over `notification_logs.subject`/`body`: its one exception is a masked access
-    code, and a document number is not one."""
-    guest = await _guest(db_session, tenant_a)
-    reservation = await _stay(db_session, tenant_a, guest)
-    manager = users_by_role_a[UserRole.PROPERTY_MANAGER]
+async def _submit_with_a_failing_provider(api, db_session, tenant, manager, reservation, guest):
+    """Drive R6.5 by swapping in `MockSESHospedajesAdapter(fail=True)`.
+
+    The mock's failure path is triggered by an explicit constructor flag and not by a magic
+    value in the data — a magic document number would be a rule somebody hits by accident in
+    seed data — so reaching it from an endpoint test means overriding the dependency.
+    """
     await api.patch(
         f"/api/v1/guests/{guest.id}/document",
         json=DOCUMENT | {"reservation_id": str(reservation.id)},
         headers=auth_header(api, manager),
     )
-    await api.post(
+
+    def _failing_use_case():
+        return SubmitLegalRegistrationUseCase(
+            guests=SqlAlchemyGuestRepository(db_session),
+            stays=SqlAlchemyLegalRegistrationStayStore(db_session),
+            provider=MockSESHospedajesAdapter(fail=True),
+            users=SqlAlchemyUserRepository(db_session),
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            notifications=SqlAlchemyNotificationLogRepository(db_session),
+            audit=SqlAlchemyAuditLogRepository(db_session),
+            uow=_FlushOnlyUow(db_session),
+        )
+
+    api._transport.app.dependency_overrides[  # type: ignore[attr-defined]
+        get_submit_legal_registration_use_case
+    ] = _failing_use_case
+    return await api.post(
         f"/api/v1/reservations/{reservation.id}/legal-registration/submit",
         headers=auth_header(api, manager),
+    )
+
+
+class _FlushOnlyUow:
+    """The test fixture owns the outer transaction; committing here would end it."""
+
+    def __init__(self, session) -> None:
+        self._session = session
+
+    async def commit(self) -> None:
+        await self._session.flush()
+
+
+@pytest.mark.asyncio
+async def test_a_rejected_submission_fails_the_stay_and_alerts_the_managers(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """R6.5, which had **no test at all** until the feature-scale QA panel said so.
+
+    Task 7.7 claimed "tests de los tres caminos" and only two existed: success and the 409.
+    `MockSESHospedajesAdapter(fail=True)` was never constructed anywhere, so the whole
+    failure branch — status, notification, and the absence of the timeline event — was
+    unguarded: a regression writing `LEGAL_REGISTRATION_SUBMITTED` on a failed filing would
+    have shipped silently.
+    """
+    guest = await _guest(db_session, tenant_a)
+    reservation = await _stay(db_session, tenant_a, guest)
+    manager = users_by_role_a[UserRole.PROPERTY_MANAGER]
+
+    response = await _submit_with_a_failing_provider(
+        api, db_session, tenant_a, manager, reservation, guest
+    )
+
+    assert response.status_code == 200
+    assert response.json()["legal_registration_status"] == "FAILED"
+    await db_session.refresh(reservation)
+    assert reservation.legal_registration_status is LegalRegistrationStatus.FAILED
+
+    # The manager is told — R6.5 says "al manager", not "to whoever pressed the button".
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(NotificationLogModel.tenant_id == tenant_a.id)
+    )
+    notifications = list(rows.scalars())
+    assert len(notifications) == 1
+    assert notifications[0].recipient_user_id == manager.id
+    assert notifications[0].notification_type == "LEGAL_REGISTRATION_FAILED"
+
+    # And **no** submission event: the timeline is append-only, so an event here would be a
+    # permanent claim that a filing with the police happened.
+    events = await db_session.execute(
+        select(TimelineEventModel).where(
+            TimelineEventModel.tenant_id == tenant_a.id,
+            TimelineEventModel.event_type == TimelineEventType.LEGAL_REGISTRATION_SUBMITTED,
+        )
+    )
+    assert list(events.scalars()) == []
+
+
+@pytest.mark.asyncio
+async def test_no_notification_carries_the_document(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """Rule 11 over `notification_logs.subject`/`body`: its one exception is a masked access
+    code, and a document number is not one.
+
+    **This test used to be vacuous** and the QA panel proved it: it drove only the success
+    path, which queues no notification at all, so the loop below iterated over zero rows and
+    could never fail. It now drives the failure path, which is the only one that writes a
+    notification — so there is something to assert about.
+    """
+    guest = await _guest(db_session, tenant_a)
+    reservation = await _stay(db_session, tenant_a, guest)
+    manager = users_by_role_a[UserRole.PROPERTY_MANAGER]
+
+    await _submit_with_a_failing_provider(
+        api, db_session, tenant_a, manager, reservation, guest
     )
 
     rows = await db_session.execute(
         select(NotificationLogModel).where(NotificationLogModel.tenant_id == tenant_a.id)
     )
-    for row in rows.scalars():
+    notifications = list(rows.scalars())
+    # The assertion that stops this being vacuous again.
+    assert notifications, "the failure path must queue a notification to assert about"
+    for row in notifications:
         assert NUMBER not in (row.subject or "")
         assert NUMBER not in (row.body or "")
+        assert "1990-05-04" not in (row.body or "")
+        assert NUMBER not in (row.last_error or "")
 
 
 @pytest.mark.asyncio

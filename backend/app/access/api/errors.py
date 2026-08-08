@@ -12,6 +12,7 @@ from fastapi import FastAPI, Request
 from fastapi.responses import JSONResponse
 
 from app.access.domain.exceptions import (
+    AccessCodeInNotesError,
     AccessCodeRequiredError,
     AccessDomainError,
     AccessRecordNotFoundError,
@@ -25,6 +26,7 @@ _MAPPING: tuple[tuple[type[AccessDomainError], int, ErrorCode], ...] = (
     (AccessRecordNotFoundError, 404, ErrorCode.NOT_FOUND),
     (InvalidAccessTransitionError, 409, ErrorCode.CONFLICT),
     (AccessCodeRequiredError, 422, ErrorCode.VALIDATION_ERROR),
+    (AccessCodeInNotesError, 422, ErrorCode.VALIDATION_ERROR),
 )
 
 

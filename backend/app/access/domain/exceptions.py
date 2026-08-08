@@ -33,6 +33,28 @@ class InvalidAccessTransitionError(AccessDomainError):
         self.requested = requested
 
 
+class AccessCodeInNotesError(AccessDomainError):
+    """The operator pasted the access code into the free-text `notes` of the same request.
+
+    Found by the security panel at feature scale, and the gap it names is exact: `code` is
+    masked and discarded, but `notes` was persisted verbatim in `access_records.notes` and
+    served in every listing to every holder of `READ_ACCESS_RECORDS` — so the one request
+    that exists to *not* store a code stored it, one field over. R2.6 says "en ningún punto".
+
+    This is the only place in the system where both strings are in hand at once, which is why
+    the check lives here and not in a validator: it is decidable exactly here and nowhere
+    else. It does not — and cannot — stop somebody writing a *different* code into `notes`;
+    whether `access_records.notes` should join rule 11's table of cleartext sinks is a
+    steering decision, recorded in this change's `BLOCKED.md`.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "The notes must not contain the access code. Only its masked form is stored, "
+            "and free text is not."
+        )
+
+
 class AccessCodeRequiredError(AccessDomainError):
     """An empty or whitespace-only access code.
 
