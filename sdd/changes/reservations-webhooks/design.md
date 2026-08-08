@@ -60,8 +60,15 @@ no elegimos. Dentro del proceso está cerrado —`app/core/log_redaction.py` red
 log de acceso de uvicorn, y el limitador usa el hash para no convertirlo en clave de Redis—, pero
 **fuera no**: [ADR 0003](../../../docs/adr/0003-https-ingress-dev.md) pone un túnel de Cloudflare
 por delante, y Cloudflare registra el URI completo en sus propios logs. Quien tenga acceso a esa
-cuenta ve el token vivo de todos los tenants. Lo destapó el re-review de seguridad de la sección 2;
-la reparación es de configuración de borde, no de código, y está en la entrada 5 de `BLOCKED.md`.
+cuenta ve el token vivo de todos los tenants. Lo destapó el re-review de seguridad de la sección 2.
+
+**Resuelto por Jose el 2026-08-08: aceptado en dev, con condición para prod.** Hoy el entorno es de
+una sola persona y los datos son suyos, así que la exposición es a su propia cuenta de Cloudflare;
+y el material es rotable, que es la mitigación que ya existe. **La Transform Rule que redacte
+`/api/v1/webhooks/*` en los logs del borde es requisito antes de que entre el primer tenant real**,
+no una tarea opcional: en cuanto haya un segundo cliente, «visible para quien administra el túnel»
+deja de significar «visible para su dueño». No se mueve el token fuera de la ruta — eso devuelve el
+problema a la regla 12(b), que es más caro que el que resuelve.
 
 ### D2 — Tabla propia `webhook_endpoints`, no columnas en `pms_credentials`
 
@@ -203,8 +210,22 @@ Rejected: un solo límite por IP — penaliza al proveedor legítimo, que es el 
 > rotar y actualizar el panel del proveedor sus entregas fallan. 20 fallos en un minuto desde la
 > IP compartida del proveedor bloquean a **todos** los tenants que hay detrás — el estrangulamiento
 > multi-tenant que esta decisión dice evitar, provocado por un tenant cualquiera con configuración
-> obsoleta. Ver entrada 4 de `BLOCKED.md`: la salida naïve (no contar los fallos cuyo token sí
-> resuelve) reintroduce el oráculo de D4, porque *no* ser estrangulado confirma que el token existe.
+> obsoleta. La salida naïve —no contar los fallos cuyo token sí resuelve— reintroduce el oráculo de
+> D4, porque *no* ser estrangulado confirma que el token existe.
+>
+> **Resuelto por Jose el 2026-08-08: se acepta y se documenta, con disparador.** El límite se queda
+> como está. Con la cartera actual no se alcanzan 20 fallos por minuto ni de lejos: los webhooks se
+> disparan por evento de reserva, y hacen falta 20 entregas fallidas **en el mismo minuto y desde la
+> misma IP** para que muerda. Es un problema de escala, no de corrección.
+>
+> **La reparación cuando muerda es la allowlist de IPs de egreso del proveedor**, exentas del
+> presupuesto de sondeo: cierra el caso sin tocar D4, y su coste es configuración operativa que hoy
+> no se rentabiliza. **Disparador acordado**, para que esto no sea un «algún día»: el corte de 25-50
+> unidades que [ADR 0006](../../../docs/adr/0006-pms-channel-manager-provider.md) ya tiene marcado
+> para la migración a Channex, o antes si una rotación llega a provocar un `429` cruzado — lo que
+> ocurra primero. Descartadas: el presupuesto por `(IP, token)`, que se lo regala a quien adivina
+> porque cada intento estrena presupuesto; y hacer el `429` indistinguible del `404`, que cierra el
+> oráculo pero hace que un proveedor legítimo estrangulado pierda entregas en silencio.
 
 ### D7 — `scrub_card_data` en la frontera, reutilizado tal cual
 
@@ -229,10 +250,17 @@ vuelve exigible en cuanto exista una escritura no autenticada desde internet sob
 que es lo que traen `reservations-webhooks` y `beds24-messaging-adapter`"*. Este change es esa
 escritura. La condición se ha cumplido.
 
-**Chosen (PROVISIONAL — `ASSUMPTION`, pendiente de ratificación de Jose; ver Open questions):** redactar
-**rachas largas de dígitos** (13-19 dígitos ignorando espacios y guiones) en `special_requests`
-**solo cuando la reserva viene de una fuente externa** (webhook o sync de PMS), dejando intacto lo que
-una persona escribe por la API. Sin comprobación de Luhn.
+**Chosen (RATIFICADA por Jose el 2026-08-08):** redactar **rachas largas de dígitos** (13-19 dígitos
+ignorando espacios y guiones) en `special_requests` **solo cuando la reserva viene de una fuente
+externa** (webhook o sync de PMS), dejando intacto lo que una persona escribe por la API. Sin
+comprobación de Luhn.
+
+**Lo que cerró la ratificación**, porque el compromiso que había que aceptar era el falso positivo
+sobre una nota que lee el personal de limpieza: los casos operativos reales caen **por debajo** del
+umbral. Un código de portal español son 4-8 dígitos, un móvil español 9, uno internacional con
+prefijo 11-12 — ninguno llega a 13. Jose confirmó además que en sus notas no es habitual nada de 13
+dígitos o más. La ventana de falso positivo queda acotada a alguna referencia larga de OTA, que es
+un dato reconstruible desde `external_pms_id`, no un dato que se pierda.
 
 Por qué esta forma: el disparador de P.8 es "escritura no autenticada desde internet", así que el
 riesgo está acotado al texto de origen externo, y ahí es donde se paga el coste. Lo que se pierde con
@@ -246,7 +274,8 @@ Rejected: no hacer nada y volver a diferirlo — P.8 dice "bloqueante", no "dife
 
 ### D9 — La cola es durable: `attempts` y `next_attempt_at` en `webhook_events`
 
-**Chosen (PROVISIONAL — desviación de PRD §7.26; ver Open questions):** dos columnas nuevas por
+**Chosen (RATIFICADA por Jose el 2026-08-08, registrada en
+[ADR 0007](../../../docs/adr/0007-webhook-event-retry-columns.md)):** dos columnas nuevas por
 migración, `attempts SMALLINT NOT NULL DEFAULT 0` y `next_attempt_at TIMESTAMPTZ NULL`. El job
 selecciona `processed = FALSE AND attempts < 3 AND (next_attempt_at IS NULL OR next_attempt_at <= now)`;
 al fallar incrementa `attempts` y fija `next_attempt_at = now + backoff(attempts)`. Eso son los "3
@@ -370,8 +399,9 @@ lectura de toda credencial de proveedor, y la regla 9 dice cómo se exceptúa: *
 nueva y nombrada aquí, aprobada en el design del change que la pida. El razonamiento de arriba **no
 es un criterio reutilizable**"*. Sin esta entrada, el change se estaba auto-concediendo la exención.
 
-**Chosen (PROVISIONAL — `ASSUMPTION`, pendiente de ratificación de Jose; ver Open questions):** la
-lectura del material de webhook **en la ruta de recepción anónima** no escribe `AuditLog`.
+**Chosen (RATIFICADA por Jose el 2026-08-08; la entrada nombrada ya está escrita como tercera
+excepción de la regla 9 de `sdd/steering/security.md`):** la lectura del material de webhook **en la
+ruta de recepción anónima** no escribe `AuditLog`.
 
 Por qué: aquí la "lectura" equivalente a `PMS_CREDENTIAL_READ` ocurre en **cada webhook entrante**
 —anónimo, desde internet, a la cadencia del proveedor—. Auditarla deja que un tercero escriba filas
@@ -484,21 +514,17 @@ del lock se derivan de ahí sin tocar nada más.
 
 ## Open questions
 
-Tres decisiones tomadas **provisionalmente** para no detener el flujo, todas marcadas como tal en el
-diseño y ninguna de ellas cerrable desde el código. Se dejan en `BLOCKED.md` para ratificación.
+**Ninguna abierta.** Las cinco decisiones que este diseño no podía cerrar por sí solo las resolvió
+Jose el **2026-08-08**, y cada una queda escrita en su sitio, no aquí:
 
-1. **D8 — la forma de la redacción de `special_requests`.** `pms-beds24-adapter` P.8 la declara
-   *bloqueante* en este change y la decidió Jose una vez ya. La propuesta es redacción de rachas de
-   13-19 dígitos, sólo en fuentes externas, sin Luhn. Lo que hay que ratificar es el compromiso: un
-   falso positivo borra dígitos de una nota que lee el personal de limpieza. Alternativas en D8.
-2. **D9 — añadir `attempts` y `next_attempt_at` a `webhook_events`.** PRD §7.26 es un documento cerrado
-   y esto es una **quinta desviación** de las que este proyecto registra en ADR. Es aditiva y de
-   contabilidad interna (no cambia la semántica de §7.26), pero la decisión de desviarse del PRD no es
-   del diseño. Si se rechaza, la alternativa menos mala es la subtarea Celery con `autoretry_for`, con
-   la pérdida de durabilidad que D9 describe.
-3. **D15 — no auditar la lectura del material de webhook en la recepción anónima.** Es una exención de
-   la regla 3(b), y la regla 9 exige que una exención sea **una entrada nueva y nombrada en
-   `sdd/steering/security.md`**, no un comentario de código. Editar steering es cambiar ley del
-   proyecto que sobrevive a este change, así que la enmienda **no se ha escrito**: se propone aquí y
-   se decide fuera. El argumento es de cadencia y es fuerte (auditar dejaría a un anónimo escribir en
-   `audit_logs` a voluntad); lo que hay que ratificar es concederla y con qué alcance.
+| | Decisión | Resultado | Dónde vive ahora |
+|---|---|---|---|
+| **D8** | Forma de la redacción de `special_requests` | Ratificada la provisional | D8, con el motivo por el que el falso positivo es acotado |
+| **D9** | `attempts`/`next_attempt_at` (5ª desviación del PRD) | Ratificada | D9 + [ADR 0007](../../../docs/adr/0007-webhook-event-retry-columns.md) |
+| **D15** | No auditar la lectura en la ruta anónima | Ratificada | Tercera excepción nombrada de la regla 9 de `steering/security.md` |
+| **D6** | Presupuesto por IP vs. rotación | Aceptado con disparador (25-50 uds o primer `429` cruzado) | Nota de corrección en D6 |
+| **D1** | El token en el path acaba en los logs del borde | Aceptado en dev; Transform Rule antes del primer tenant real | Nota de coste declarado en D1 |
+
+Las tres últimas comparten una propiedad que conviene no perder: **no eran errores de código sino
+premisas del diseño que la implementación falsó**, y ninguna era visible leyendo el diseño. Aparecieron
+porque los paneles corrieron contra código que ya existía.

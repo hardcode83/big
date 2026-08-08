@@ -76,8 +76,10 @@ PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 # **This comment is not where that exemption is granted, and it cannot be.** Rule 3(b) of
 # `steering/security.md` requires the read of a provider credential to be audited, and rule 9 says
 # an exception to it arrives "con una entrada nueva y nombrada aquí, aprobada en el design del
-# change que la pida" — steering, not a comment. Recorded as design D15, PROVISIONAL, and queued in
-# `BLOCKED.md` for Jose; the security panel of section 1 caught that the route had been skipped.
+# change que la pida" — steering, not a comment. It went through that route: design D15, approved by
+# Jose on 2026-08-08, and written as the **third named exception of rule 9**, which is where it
+# lives. This comment cites it. The security panel of section 1 caught that the route had been
+# skipped, which is the only reason it exists at all.
 #
 # Its scope is narrow and stays narrow: it covers the **anonymous receiving path only**. Rule 9 is
 # explicit that it "no exime la lectura con actor humano", so a support command or operator tool

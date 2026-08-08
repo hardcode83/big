@@ -26,9 +26,11 @@ forzado en `infrastructure/`.
 > - **QA, bajo — cobertura del guard de `_to_endpoint`.** Sólo se probaba la rama del ciphertext
 >   malformado, no las de `token_hash` que no es digest ni `header_name` en blanco, que ninguna
 >   constraint de columna impide. Test parametrizado para las dos.
-> - **Seguridad, medio — el canal de la exención de auditoría.** Ver entrada 3 de `BLOCKED.md` y D15:
->   la decisión es buena, el sitio donde estaba tomada no. Queda propuesta para Jose; el test que fijaba
->   la ausencia como política permanente se acotó a su premisa.
+> - **Seguridad, medio — el canal de la exención de auditoría.** La decisión era buena, el sitio donde
+>   estaba tomada no: vivía en un comentario de código y la regla 9 exige entrada nombrada en steering.
+>   Propuesta como D15 y **ratificada por Jose el 2026-08-08**; hoy es la tercera excepción nombrada de
+>   la regla 9 de `sdd/steering/security.md`. El test que fijaba la ausencia como política permanente
+>   se acotó a su premisa.
 
 - [x] 1.1 Entidad `WebhookEndpoint` y su puerto de repositorio en
   `backend/app/integrations/domain/{entities.py,repositories.py}`, más los errores propios en
@@ -121,7 +123,8 @@ forzado en `infrastructure/`.
 
 > **Panel de la sección 2 (siete reviewers, un solo mensaje).** `sdd-architect`,
 > `sdd-review-tenancy`, `sdd-review-cicd` y `sdd-review-i18n` sin hallazgos. Nueve hallazgos entre
-> seguridad (5), QA (2) y documentación (2); ocho arreglados, uno es decisión y está en `BLOCKED.md`.
+> seguridad (5), QA (2) y documentación (2); ocho arreglados y uno elevado a decisión (D6, resuelto
+> por Jose el 2026-08-08: se acepta con disparador).
 > Los tres que importan:
 > - **Seguridad, alto — el contador por token se cobraba antes de autenticar.** Cualquiera con sólo
 >   el token de ruta podía gastar el presupuesto de un tenant y dejar su integración en `429`. Eso
@@ -148,11 +151,13 @@ forzado en `infrastructure/`.
 > ~15ª ejecución en un minuto; y el hermano del `413` usaba un cuerpo de 4 KB, por debajo del tope,
 > así que habría pasado igual con el orden anterior. Arreglados los dos, más tres residuales de
 > seguridad: `WebhookEventFailure.field` sin validar (el agujero un nivel más abajo), el prefijo del
-> filtro de log sensible a mayúsculas, y la fuga que el filtro **no** puede cerrar (entrada 5 de
-> `BLOCKED.md`). Suite completa: 4065 pasan, 35 se saltan.
+> filtro de log sensible a mayúsculas, y la fuga que el filtro **no** puede cerrar — el túnel de
+> Cloudflare registra el URI completo (D1). Suite completa: 4065 pasan, 35 se saltan.
 >
-> **Dos rondas es el máximo del panel, y se han usado.** Lo que queda abierto no es código: son las
-> entradas 4 y 5 de `BLOCKED.md`, las dos decisiones de diseño.
+> **Dos rondas es el máximo del panel, y se han usado.** Lo que quedó abierto no era código sino dos
+> decisiones de diseño (D6 y el coste declarado de D1), **las dos resueltas por Jose el 2026-08-08**
+> y con su disparador escrito: la allowlist de IPs a las 25-50 unidades, la Transform Rule de
+> Cloudflare antes del primer tenant real.
 
 - [x] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
   para fallos de autenticación, estricto), con el patrón de `RedisLoginThrottle` pero sin reutilizar su
@@ -228,8 +233,10 @@ forzado en `infrastructure/`.
 
 ## 3. `special_requests`: la frontera heredada (D8 — provisional)
 
-> Depende de la ratificación de D8 en `BLOCKED.md`. Si Jose elige otra de las alternativas de D8, estas
-> dos tareas se reescriben; el resto del change no se ve afectado.
+> **D8 ratificada por Jose el 2026-08-08**, así que estas dos tareas se implementan tal como están
+> escritas: redacción de rachas de 13-19 dígitos, sólo en fuentes externas, sin Luhn. Lo que cerró la
+> ratificación fue el tamaño real del falso positivo — un código de portal español son 4-8 dígitos, un
+> móvil 9, uno internacional 11-12, y ninguno llega al umbral. Ya no depende de nada.
 
 - [ ] 3.1 `infrastructure/free_text.py`: redacción de rachas de 13-19 dígitos ignorando espacios y
   guiones, sin Luhn. **TDD**: el test exige primero que un PAN con y sin separadores desaparezca y que

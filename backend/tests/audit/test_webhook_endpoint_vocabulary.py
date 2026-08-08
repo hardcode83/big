@@ -135,10 +135,11 @@ def test_there_is_no_read_action_while_the_only_reader_is_anonymous() -> None:
     own `WEBHOOK_ENDPOINT_READ` and this test changes with it. Pinning the absence as permanent
     policy would have made that change look like a regression.
 
-    The exemption itself is **not settled here**: rule 9 says an exception arrives "con una
-    entrada nueva y nombrada" in `steering/security.md`, approved in the design of the change that
-    asks for it. That is design D15, provisional and queued in `BLOCKED.md` for Jose — a code
-    comment is not the channel rule 9 names. Flagged by the security panel of section 1.
+    The exemption itself is **not settled here, and never was**: rule 9 says an exception arrives
+    "con una entrada nueva y nombrada" in `steering/security.md`, approved in the design of the
+    change that asks for it. It went through that route — design D15, approved 2026-08-08, written
+    as the third named exception of rule 9. A code comment was not the channel, which is what the
+    security panel of section 1 flagged.
     """
     assert not any(
         action.startswith("WEBHOOK_ENDPOINT") and action.endswith("_READ")
