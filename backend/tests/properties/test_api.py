@@ -310,7 +310,15 @@ async def test_the_pms_provider_cannot_be_patched(api, users_by_role_a, create_p
 
 @pytest.mark.parametrize(
     ("field", "length"),
-    [("access_notes", 5001), ("cleaning_notes", 5001), ("wifi_password", 201)],
+    # All FOUR columns R2.4 names as having no width in the DDL, not three: `emergency_notes`
+    # shares `MAX_NOTES` with the other two notes, and leaving it out meant a regression that
+    # dropped the cap on that one column alone would have gone unnoticed.
+    [
+        ("access_notes", 5001),
+        ("cleaning_notes", 5001),
+        ("emergency_notes", 5001),
+        ("wifi_password", 201),
+    ],
 )
 @pytest.mark.asyncio
 async def test_a_value_longer_than_its_declared_cap_is_a_422(

@@ -204,9 +204,14 @@ class SqlAlchemyPropertyRepository:
                 max_guests=property.max_guests,
                 bedrooms=property.bedrooms,
                 bathrooms=property.bathrooms,
-                # `current_operational_state` is deliberately NOT set: the DDL default
-                # (`VACANT_READY`) is the authority, so this INSERT has no way to express a
-                # state at all and the guard above is what keeps the entity honest.
+                # `current_operational_state` is deliberately NOT set, so this INSERT has no way
+                # to express a state at all and the guard above is what keeps the entity honest.
+                #
+                # Precise about the mechanism, because "the DDL default decides" is only half
+                # true: the model also carries a Python-side `default=`, so SQLAlchemy fills the
+                # column client-side here. Both values are `VACANT_READY`, and the DDL
+                # `server_default` is what covers an INSERT that does not go through the ORM —
+                # so the guarantee holds by either route, which is the point of having both.
                 default_check_in_time=property.default_check_in_time,
                 default_check_out_time=property.default_check_out_time,
                 wifi_name=property.wifi_name,

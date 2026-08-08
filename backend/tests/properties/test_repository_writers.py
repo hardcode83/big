@@ -470,7 +470,15 @@ async def _seeded_in_state(
     `add` refuses anything but `VACANT_READY` (R4.2), so a row cannot be born in another state —
     it has to be inserted and then transitioned, and `save` is the sanctioned writer of that
     column. Seeding this way rather than by writing a `PropertyModel` straight into the session
-    keeps the fixture on the same path production uses.
+    exercises the real writers instead of bypassing them.
+
+    **It is not the full production path, and the difference matters if you copy this helper**:
+    in production `save` is called by `PropertyStateMachine`, which persists a
+    `property_state_transitions` row in the same transaction (rule 9 of `steering/security.md`:
+    "todo escritor de `current_operational_state` persiste su fila de
+    `property_state_transitions` en la misma transacción"). This calls `save` bare, so the rows
+    it leaves have no transition history. That is fine for a filtering fixture, which is all
+    this is, and wrong for anything asserting on that history.
     """
     entity = _entity(tenant_id, internal_code=internal_code, status=status)
     await repository.add(tenant_id, entity)
