@@ -15,9 +15,14 @@ enforces that for this layer by AST.
   request, is handed straight to `crypto.encrypt`, and reaches the port only as an
   `EncryptedSecret` (design D1, D2). Nothing reads it back; `has_wifi_password` is derived from
   the column being non-null, which is why the port exposes no getter.
-* **`current_operational_state` is untouchable from here** (design D3, R4). The port has no
-  method that could write it and `PATCHABLE_PROPERTY_FIELDS` excludes it, so this module does not
-  need a guard of its own — the absence of a route is the guard.
+* **`current_operational_state` is untouchable from here** (design D3, R4), but **not because the
+  port cannot express it** — an earlier version of this paragraph said so and was wrong, the same
+  way D8 and two docstrings were. `PATCHABLE_PROPERTY_FIELDS` excludes it, so `update_details`
+  cannot carry it; `add` takes a whole entity and therefore *can*, and is stopped by a runtime
+  guard in the adapter rather than by its signature. This module needs no guard of its own
+  because neither route it uses can reach the column, which is a different statement.
+  The obligation that accompanies writing that column lives in rule 9 of `steering/security.md`;
+  cite it there rather than restating it here.
 """
 
 import uuid
