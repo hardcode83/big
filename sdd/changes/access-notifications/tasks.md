@@ -96,7 +96,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
   que este change cierra — fila `SENT` con plazo vencido **sí** escala; la misma fila tras
   `cancel_sla_deadline` **no** produce ningún `SLA_BREACH` en ejecuciones posteriores (R5.4). [R5]
 
-## 4. Dominio de acceso: invariantes, puertos y repositorio
+## 4. Dominio de acceso: invariantes, puertos y repositorio <!-- panel: PASS 2026-08-08 (feature) -->
 
 - [x] 4.1 (TDD) `backend/tests/access/test_entities.py` primero, luego
   `backend/app/access/domain/entities.py`: métodos `register_manual_code`, `mark_external_managed`,
@@ -125,7 +125,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
   excepciones, misma forma de retorno) y que **ninguno devuelve ni registra el código en claro**
   (design D9). [R2]
 
-## 5. Casos de uso y API de acceso
+## 5. Casos de uso y API de acceso <!-- panel: PASS 2026-08-08 (feature) -->
 
 - [x] 5.1 `backend/app/audit/domain/actions.py`: `ENTITY_ACCESS_RECORD` y las acciones
   `ACCESS_CODE_REGISTERED`, `ACCESS_MARKED_EXTERNAL`, `ACCESS_DELIVERED`, `ACCESS_REVOKED`, con
@@ -156,7 +156,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
   `409` en transición inválida (R2.5), y que ninguna respuesta contiene el código en claro
   (R2.6). [R2, R3]
 
-## 6. Reconciliador de accesos y estado inicial de la reserva
+## 6. Reconciliador de accesos y estado inicial de la reserva <!-- panel: PASS 2026-08-08 (feature) -->
 
 - [x] 6.1 `backend/app/access/application/use_cases.py`: `ProvisionAccessRecordsUseCase` (design
   D2) — por tenant: crea el `AccessRecord` `PENDING` que falte a cada reserva confirmada, escribe
@@ -173,7 +173,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
   `list_reservations_missing_records` usa índice por `(tenant_id, status)`; si no, migración
   Alembic que lo añada. Si sí lo usa, dejar constancia en el design de que no hizo falta. [R1]
 
-## 7. SES.Hospedajes: documento del huésped y registro legal
+## 7. SES.Hospedajes: documento del huésped y registro legal <!-- panel: PASS 2026-08-08 (feature) -->
 
 - [x] 7.1 (TDD) `backend/tests/guests/test_legal_registration.py` primero, luego
   `backend/app/guests/domain/legal_registration.py`: servicio puro que decide `READY_TO_SUBMIT`
