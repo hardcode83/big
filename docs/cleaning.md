@@ -85,13 +85,17 @@ subidas»— llega con la entrada de roadmap `cleaning-photos-storage`, que trae
 `StorageAdapter`, la subida y las signed URL. **Hasta entonces una limpieza puede cerrarse sin
 las fotos**, y eso es un hueco conocido, no un descuido.
 
-**El escalado por SLA está escrito pero inerte.** Al asignar se escribe una fila de
-`notification_logs` con `sla_deadline_at = ahora + TenantConfig.sla_medium_minutes` (240 min por
-defecto), y la política que la convierte en un aviso al manager existe desde `celery-jobs`. Pero
-`check_sla_breaches` solo considera notificaciones con `status = SENT`, y **nada las marca como
-enviadas**: el emisor es de `access-notifications`. Así que hoy la fila se escribe y el plazo
-pasa sin que nadie escale. La decisión está registrada en el `BLOCKED.md` del change (OQ1) con
-sus tres salidas.
+**El escalado por SLA ya funciona** (desde `access-notifications`). Al asignar se escribe una
+fila de `notification_logs` con `sla_deadline_at = ahora + TenantConfig.sla_medium_minutes` (240
+min por defecto). `dispatch_notifications` la entrega y la marca `SENT`, que es la condición que
+`check_sla_breaches` exige para considerarla candidata; si el plazo vence sin respuesta, el
+manager recibe un `SLA_BREACH`.
+
+**Y responder cierra el plazo.** Aceptar o rechazar la tarea anula el `sla_deadline_at` de esa
+fila —sin tocar `status` ni `sla_breached`, así que ni se afirma un incumplimiento que no hubo ni
+se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta en diez segundos no
+genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
+`/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
 **Y las incidencias tampoco se pueden crear todavía.** La precondición de cierre consulta la
 tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que en la
@@ -141,7 +145,7 @@ existen aún, para no buscarlas en el código:
 
 | En el diagrama | Hoy |
 |---|---|
-| `NotificationAdapter` → «WhatsApp / email (mock)» | Solo se **escribe** la fila de `notification_logs`. El envío es de `access-notifications`. |
+| `NotificationAdapter` → «WhatsApp / email (mock)» | Este módulo solo **escribe** la fila de `notification_logs`, en `PENDING`. El envío lo hace `dispatch_notifications` (change `access-notifications`), que es lo que la marca `SENT`. |
 | «subir fotos requeridas» y `AIAdapter.validate_cleaning_photo()` | Nada de eso existe: fotos y `StorageAdapter` son de `cleaning-photos-storage`, la validación con IA de `messaging-ai`. |
 | `PropertyStateMachine` «crear CleaningTask» | La crea `ProvisionCleaningTaskUseCase`, invocado **dentro** de la transacción del caso de uso que mueve el estado (design D1). La máquina sigue decidiendo la transición y nada más — crear entidades no es su trabajo. |
 
@@ -149,6 +153,6 @@ existen aún, para no buscarlas en el código:
 
 - `cleaning-photos-storage` — fotos, `StorageAdapter`, signed URL, y la tercera cláusula de la
   regla de validación.
-- `access-notifications` — el emisor que marca `SENT` y cierra la cadena del SLA.
+- `access-notifications` — **entregado**: trajo el emisor que marca `SENT` y el cierre del plazo al responder.
 - `maintenance` — creación de incidencias, incluida la que bloquea el cierre.
 - `field-apps` — la app mobile-first de la limpiadora que consume todo esto.

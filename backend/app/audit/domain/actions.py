@@ -38,6 +38,20 @@ ENTITY_PROPERTY = "PROPERTY"
 # covered by that exemption.
 ENTITY_CLEANING_TASK = "CLEANING_TASK"
 
+# A row of `access_records` (`access-notifications`). Rule 9 of `sdd/steering/security.md`
+# names `AccessRecord` in its enumeration explicitly — unlike `PROPERTY`, which had to be
+# argued for — so no reasoning is needed here beyond the citation.
+ENTITY_ACCESS_RECORD = "ACCESS_RECORD"
+# A row of `guests` (`access-notifications`). Rule 9: "acceso/modificación de documentos de
+# Guest". Note **acceso**: a read writes a row too, which is unusual in this vocabulary and
+# is why `GUEST_DOCUMENT_READ` exists alongside the update.
+ENTITY_GUEST = "GUEST"
+# A row of `reservations` (`access-notifications`). Only for the legal-registration
+# submission of PRD §17: `specs/reservations.md` records that the module's own mutations
+# still owe their `AuditLog`, and this change does not pay that debt — it audits the one
+# operation it introduces.
+ENTITY_RESERVATION = "RESERVATION"
+
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
 USER_UPDATED = "USER_UPDATED"
@@ -81,6 +95,32 @@ CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
 CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
 CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
 
+# Access records (`access-notifications`). One action per operation, same reasoning as the
+# cleaning ones: rule 9 is only auditable if the operation is findable by `action` rather than
+# by a JSONB query over `changes`.
+#
+# `ACCESS_RECORD_CREATED` and `ACCESS_RECORD_REVOKED` are written by the reconciler of design
+# D2, whose actor is automatic, so their rows carry `actor_user_id = NULL`. That is NOT the
+# named `SYSTEM` exception of rule 9 — that one is about property state transitions and does
+# not extend here. The row is written; it just has no person to name, exactly like the
+# credential-resolution rows of `pms-provider-resolution`.
+ACCESS_RECORD_CREATED = "ACCESS_RECORD_CREATED"
+ACCESS_CODE_REGISTERED = "ACCESS_CODE_REGISTERED"
+ACCESS_MARKED_EXTERNAL = "ACCESS_MARKED_EXTERNAL"
+ACCESS_DELIVERED = "ACCESS_DELIVERED"
+ACCESS_REVOKED = "ACCESS_REVOKED"
+ACCESS_EXPIRED = "ACCESS_EXPIRED"
+
+# Guest documents and the legal registration (`access-notifications`, PRD §17).
+#
+# `GUEST_DOCUMENT_READ` is the odd one in this file: every other action records a *mutation*.
+# Rule 9 asks for "acceso/modificación", and for an identity document the access is the part
+# that matters — a leak is somebody reading, not somebody writing.
+GUEST_DOCUMENT_UPDATED = "GUEST_DOCUMENT_UPDATED"
+GUEST_DOCUMENT_READ = "GUEST_DOCUMENT_READ"
+LEGAL_REGISTRATION_SUBMITTED = "LEGAL_REGISTRATION_SUBMITTED"
+LEGAL_REGISTRATION_FAILED = "LEGAL_REGISTRATION_FAILED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -90,6 +130,9 @@ ENTITY_TYPES = frozenset(
         ENTITY_PROPERTY,
 
         ENTITY_CLEANING_TASK,
+        ENTITY_ACCESS_RECORD,
+        ENTITY_GUEST,
+        ENTITY_RESERVATION,
     }
 )
 
@@ -114,5 +157,15 @@ ACTIONS = frozenset(
         CLEANING_TASK_STARTED,
         CLEANING_TASK_COMPLETED,
         CLEANING_TASK_VALIDATED,
+        ACCESS_RECORD_CREATED,
+        ACCESS_CODE_REGISTERED,
+        ACCESS_MARKED_EXTERNAL,
+        ACCESS_DELIVERED,
+        ACCESS_REVOKED,
+        ACCESS_EXPIRED,
+        GUEST_DOCUMENT_UPDATED,
+        GUEST_DOCUMENT_READ,
+        LEGAL_REGISTRATION_SUBMITTED,
+        LEGAL_REGISTRATION_FAILED,
     }
 )

@@ -93,7 +93,9 @@ def test_it_rejects_an_action_outside_the_vocabulary(action: str) -> None:
 
 # `RESERVATION` stands for "a real table that is not in the vocabulary yet"; it replaced
 # `PROPERTY`, which `properties-crud` registered. See the twin note in `test_change_set.py`.
-@pytest.mark.parametrize("entity_type", ["User", "users", "RESERVATION", ""])
+# `INCIDENT` replaced `RESERVATION` when `access-notifications` registered the latter
+# (PRD §17/§15 projections). It is the next name rule 9 enumerates with no writer at all.
+@pytest.mark.parametrize("entity_type", ["User", "users", "INCIDENT", ""])
 def test_it_rejects_an_entity_type_outside_the_vocabulary(entity_type: str) -> None:
     with pytest.raises(AuditContractError):
         AuditLogFactory.build(
