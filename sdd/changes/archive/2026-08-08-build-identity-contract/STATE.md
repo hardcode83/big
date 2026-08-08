@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: ARCHIVED
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
@@ -9,8 +9,8 @@ implementation_sha: cdeb3860b2a0fe1479c3e2045775d7786e359d00
 pr_number: 
 pr_url: 
 pr_state: 
-merge_evidence: 
-merge_sha: 
+merge_evidence: ancestor
+merge_sha: 21e3edb6341520803adda6f29c6c07220ef3ff9e
 ---
 
 # Change lifecycle

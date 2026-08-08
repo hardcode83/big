@@ -91,9 +91,12 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
   caracteres que `git rev-parse` resuelve a un commit). Un tope de longitud limita cuánto de un
   valor se filtra; no impide que se filtre.
 - WHERE el CD deje de emitir esas formas, THE SYSTEM SHALL degradar a "versión desconocida" en
-  vez de mostrar algo no vetado — falla cerrado. THE SYSTEM SHALL NOT depender de ninguna
-  comprobación automática de esa congruencia: **no existe**, y la entrada de roadmap
-  `build-identity-contract` la cubre.
+  vez de mostrar algo no vetado — falla cerrado.
+- WHEN la forma producida por el CD deje de ser aceptada por el contrato público vigente del
+  frontend, THE SYSTEM SHALL hacer fallar la verificación de congruencia.
+- WHEN un Pull Request incluya cambios que afecten al productor CD o al consumidor público de
+  identidad, THE SYSTEM SHALL incluir una verificación obligatoria de congruencia entre los
+  checks de CI aplicables al Pull Request.
 - THE SYSTEM SHALL declarar toda string visible del badge en `locales/es/` y `locales/en/`,
   resuelta en servidor y entregada como props — el badge es síncrono, porque un componente
   async anidado en el frame suspende el árbol entero del shell.
@@ -159,6 +162,12 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
 - `frontend/lib/config/public.ts` — `appVersion` y `buildCommitShort` en la allowlist pública,
   y los patrones `BAKED_VERSION`/`BAKED_COMMIT_SHORT` que vetan la forma antes de que el valor
   entre en el snapshot. Es la frontera de divulgación; el badge no decide nada de esto.
+- `frontend/lib/config/build-identity-contract.json` — patrones y literales compartidos por el
+  productor CD y la frontera pública.
+- `frontend/scripts/build-identity.mjs` — composición, validación y publicación de outputs del
+  job `provenance`.
+- `.github/workflows/frontend-tests.yml` — check de Pull Request que ejecuta la prueba de
+  congruencia junto con la suite frontend.
 - `frontend/features/shell/components/version-badge.tsx` — `formatBuildVersion` y el badge:
   solo composición y presentación.
 - `frontend/features/shell/components/shell-footer.tsx`, `shell-frame.tsx` — pie y slot `footer`.
@@ -185,13 +194,6 @@ valores. Los valores son idénticos por construcción (un único job `provenance
 builds), pero que aterrizaran en las imágenes publicadas no se ha verificado — el token de `gh`
 disponible no tiene `read:packages` y el package es privado.
 
-**Dos huecos conocidos, con entrada de roadmap cada uno.** Ninguno es un defecto de esta
-capacidad; los dos son cosas que hoy nadie comprueba:
-
-- `build-identity-contract` — nada ata los patrones de `frontend/lib/config/public.ts` a lo que
-  el job `provenance` emite de verdad. Ensanchar `${GITHUB_SHA:0:7}`, cambiar el formato de la
-  fecha o subir `VERSION` a algo que no sea `X.Y.Z` deja el badge en "versión desconocida" sin
-  que falle ningún test ni ningún check. Degrada cerrado, no filtra, y por eso no bloqueó.
-- `frontend-ci` — **ningún workflow ejecuta la suite del frontend**, así que los tests que
-  respaldan el badge y el límite solo se verifican en la máquina de quien los corre. En
-  `app-version-badge-date` esto ya costó 27 tests rotos en `main` que nada habría delatado.
+La congruencia entre el productor CD y esta frontera pública se verifica en la prueba de
+contrato ejecutada por el check `frontend-tests` en los Pull Requests. La verificación falla si
+la forma producida deja de ser aceptada por el contrato vigente.
