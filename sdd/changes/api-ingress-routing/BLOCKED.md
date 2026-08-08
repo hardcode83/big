@@ -37,4 +37,17 @@
   `frontend`), no solo los dos que este change toca. `up -d --wait` sigue saliendo en 0. Es
   esperado, es de un solo uso, y está anotado junto al `ipam:` del compose.
 
-- **Comando de reanudación**: `/sdd:run api-ingress-routing 6`
+- **Las seis comprobaciones, íntegras.** Vivían como casillas en `tasks.md` y se han
+  movido aquí, que es su única casa: no son verificación local, son post-merge, y tenerlas
+  en las dos partes atascaba `mark-local-verified` (se niega, correctamente, con tareas sin
+  cerrar) además de duplicar estado derivado, que es lo que la regla compartida 1 prohíbe.
+
+  - [ ] 6.1 Tras el deploy, comprobar que `https://<hostname público>/api/v1/auth/login` responde el sobre del backend y que `/openapi.json`, `/docs`, `/docs/oauth2-redirect` y `/redoc` **no** son alcanzables por ese hostname [R1.1, R2.1, R2.2]
+  - [ ] 6.2 **La medición que decide el change** (R3.2): comprobar **por observación** que la IP que el backend registra es la IP pública real del cliente, no la del contenedor `frontend`. Control positivo barato: dos clientes con IP pública distinta —portátil por WiFi y móvil por datos— deben caer en contadores `login:ip:*` distintos, y 10 intentos de uno no deben agotar el presupuesto del otro. Si la propagación no funciona, **no dar R1 por cumplido**: entrada en `BLOCKED.md` de tipo `decision` con el hallazgo, según obliga R3.3 [R3.1, R3.2, R3.3, R5.1, R5.2, R5.3]
+  - [ ] 6.3 Comprobar que el residual que D2 acepta por escrito sigue siendo el que se describió y no otro: por `ssh -L 3000:localhost:3000` el `CF-Connecting-IP` es el que envía quien llama, porque esa petición no viene del edge. Se documenta, no se mitiga — requiere SSH en la VM, posición desde la que ya se llega a `127.0.0.1:8000` [R3.1]
+  - [ ] 6.4 Comprobar que el aislamiento que R1.3 protege sigue intacto **en el entorno vivo**, con el procedimiento repetible que `RUNBOOK.md` §7.4.6 ya documenta: desde la red `ingress`, `cloudflared` no resuelve `backend` ni `postgres` [R1.2, R1.3]
+  - [ ] 6.6 **Medir la postura local que D7 justifica**, porque su primera redacción se apoyaba en un comportamiento de SNAT no medido (hallazgo 5 del panel de seguridad, y la regla 8 de `steering/security.md` tiene precedente exacto de justificaciones que describen una postura que el compose no implementa): desde otra máquina de la LAN, llamar a `<ip-del-host>:8000` y comprobar **qué IP observa el backend** — la del cliente o la del gateway del bridge. La decisión (confianza desactivada en local) no cambia con el resultado; lo que se corrige es lo que el comentario del compose y el doc afirman [R4.1, R6.1]
+  - [ ] 6.5 Comprobar que la importación CSV sigue funcionando por el camino público con el tope de 2.6, o registrar el tope efectivo si la medición de 2.6 salió distinta [R1.1]
+
+- **Comando de reanudación**: `/sdd:run api-ingress-routing 6` — reabre la sección desde
+  aquí; quien la ejecute vuelve a escribirla en `tasks.md` si prefiere llevar las casillas.

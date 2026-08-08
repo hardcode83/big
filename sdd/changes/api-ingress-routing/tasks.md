@@ -50,14 +50,13 @@ Orden elegido para que el sistema quede en pie tras cada sección: primero el ba
 - [x] 5.3 **Desde este worktree, sondeando dentro de la red de compose** (premisa de D9 corregida al medirla): comprobar por navegador o `curl` que `http://localhost:3000/api/v1/auth/login` alcanza el backend —un `POST` sin credenciales debe devolver el sobre `{"error":...}` del backend, no un 404 de Next— y que `http://localhost:3000/openapi.json`, `/docs`, `/docs/oauth2-redirect` y `/redoc` devuelven el 404 de la aplicación Next sin tocar el backend [R2.2, R6.1]
 - [x] 5.4 Comprobar la paridad de forma que R6.1 promete: la misma URL relativa `/api/v1/...` funciona en local, y el binding local `8000:8000` sigue publicado como estaba (R6.2 en su mitad local) [R6.1, R6.2]
 
-## 6. Verificación en el entorno desplegado
+## 6. Verificación en el entorno desplegado — **fuera de esta lista, a propósito**
 
-- [ ] 6.1 Tras el deploy, comprobar que `https://<hostname público>/api/v1/auth/login` responde el sobre del backend y que `/openapi.json`, `/docs`, `/docs/oauth2-redirect` y `/redoc` **no** son alcanzables por ese hostname [R1.1, R2.1, R2.2]
-- [ ] 6.2 **La medición que decide el change** (R3.2): comprobar **por observación** que la IP que el backend registra es la IP pública real del cliente, no la del contenedor `frontend`. Control positivo barato: dos clientes con IP pública distinta —portátil por WiFi y móvil por datos— deben caer en contadores `login:ip:*` distintos, y 10 intentos de uno no deben agotar el presupuesto del otro. Si la propagación no funciona, **no dar R1 por cumplido**: entrada en `BLOCKED.md` de tipo `decision` con el hallazgo, según obliga R3.3 [R3.1, R3.2, R3.3, R5.1, R5.2, R5.3]
-- [ ] 6.3 Comprobar que el residual que D2 acepta por escrito sigue siendo el que se describió y no otro: por `ssh -L 3000:localhost:3000` el `CF-Connecting-IP` es el que envía quien llama, porque esa petición no viene del edge. Se documenta, no se mitiga — requiere SSH en la VM, posición desde la que ya se llega a `127.0.0.1:8000` [R3.1]
-- [ ] 6.4 Comprobar que el aislamiento que R1.3 protege sigue intacto **en el entorno vivo**, con el procedimiento repetible que `RUNBOOK.md` §7.4.6 ya documenta: desde la red `ingress`, `cloudflared` no resuelve `backend` ni `postgres` [R1.2, R1.3]
-- [ ] 6.6 **Medir la postura local que D7 justifica**, porque su primera redacción se apoyaba en un comportamiento de SNAT no medido (hallazgo 5 del panel de seguridad, y la regla 8 de `steering/security.md` tiene precedente exacto de justificaciones que describen una postura que el compose no implementa): desde otra máquina de la LAN, llamar a `<ip-del-host>:8000` y comprobar **qué IP observa el backend** — la del cliente o la del gateway del bridge. La decisión (confianza desactivada en local) no cambia con el resultado; lo que se corrige es lo que el comentario del compose y el doc afirman [R4.1, R6.1]
-- [ ] 6.5 Comprobar que la importación CSV sigue funcionando por el camino público con el tope de 2.6, o registrar el tope efectivo si la medición de 2.6 salió distinta [R1.1]
+Las seis comprobaciones contra `https://autohostai.digitalsec.work` **no son trabajo local**: ese entorno solo recibe código después del merge. Viven íntegras en [`BLOCKED.md`](BLOCKED.md), que es la cola que `/sdd:status` saca primero y que `/sdd:archive` se niega a cerrar sin resolver.
+
+No están aquí como casillas por dos razones, y la segunda la descubrí al intentar marcar el change: duplicar estado derivado en dos ficheros es lo que la regla compartida 1 prohíbe, y unas casillas permanentemente sin cerrar hacen que `mark-local-verified` se niegue para siempre — con razón, porque su contrato es «no hay tareas pendientes».
+
+**La que decide sigue siendo 6.2**: si la IP real del cliente no se propaga, R3.3 obliga a **no dar R1 por cumplido**.
 
 ## Cobertura de requisitos
 
