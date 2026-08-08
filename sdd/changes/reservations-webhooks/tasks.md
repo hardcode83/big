@@ -31,10 +31,16 @@ forzado en `infrastructure/`.
   en `backend/alembic/versions/`. Verificación: `uv run alembic upgrade head`, `uv run alembic check`
   (sin deriva modelo↔migración) y `uv run alembic downgrade base` limpio, que es lo que corre el CI.
   [R2.1, R5.3]
-- [ ] 1.3 `SqlAlchemyWebhookEndpointRepository` en `infrastructure/repositories.py`, con búsqueda por
+- [x] 1.3 `SqlAlchemyWebhookEndpointRepository` en `infrastructure/repositories.py`, con búsqueda por
   `token_hash`. **Test de aislamiento propio** de `webhook_endpoints` (no el genérico del módulo): un
   fallo de scoping aquí no filtra datos, concede control. Añadir su caso al test parametrizado de
   aislamiento. [R2.6]
+  > **Ajuste al ejecutar**: no hay ningún test parametrizado que enumere tablas al que añadir un caso —
+  > `tenant_scoped_classes()` selecciona **por presencia de columna**, así que la tabla entra en el
+  > filtro global sola. Lo que sí se añade, siguiendo la forma que ya usa `test_pms_credentials.py`, es
+  > la aserción explícita de esa premisa (`WebhookEndpointModel in tenant_scoped_classes()`), que es
+  > lo que evita que los tests de aislamiento pasen en silencio contra una tabla que el filtro dejó de
+  > cubrir. 12 tests nuevos; 1395 en verde en `tests/integrations` + tenancy + layering.
 - [ ] 1.4 Ampliar el vocabulario cerrado de `backend/app/audit/domain/actions.py` con la entidad y las
   acciones de este change (creación y rotación del endpoint), y añadirlas a los `frozenset`. Test que
   falla si `AuditLogFactory.build` las rechaza — un vocabulario incompleto lanza `AuditContractError` y

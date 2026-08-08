@@ -15,10 +15,91 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.core.crypto import SecretDecryptionError
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
-from app.integrations.domain.entities import PmsCredential
+from app.integrations.domain.entities import PmsCredential, WebhookEndpoint
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
-from app.integrations.infrastructure.models import PmsCredentialModel
+from app.integrations.infrastructure.models import PmsCredentialModel, WebhookEndpointModel
 from app.properties.infrastructure.models import PropertyModel
+
+
+class SqlAlchemyWebhookEndpointRepository:
+    """Adapter for `WebhookEndpointRepository`. Stores ciphertext; never decrypts.
+
+    Same contract as its sibling below: `app.core.crypto.decrypt` is the chokepoint, so a
+    repository that decrypted on read would spread rule 3(a)'s obligation over every call site.
+
+    **`find_by_token_hash` runs with no tenant, and that is the design and not a hole** (D1). It is
+    the query that *resolves* the tenant, so there is nothing to scope it by yet: an incoming
+    webhook carries no JWT. What makes it safe is not a filter, it is the shape of the key — 256
+    bits of CSPRNG output behind a `UNIQUE` index, so the query addresses at most one row and
+    guessing it is the thing rule 12(b) is betting against. Every other method takes `tenant_id`.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def find_by_token_hash(
+        self, provider: PMSProvider, token_hash: str
+    ) -> WebhookEndpoint | None:
+        result = await self._session.execute(
+            select(WebhookEndpointModel).where(
+                WebhookEndpointModel.token_hash == token_hash,
+                # `provider` is part of the WHERE and not merely of the route: a token minted for
+                # one provider must not authenticate a webhook claiming to be another, or
+                # `webhook_events.provider` becomes a column the caller chooses.
+                WebhookEndpointModel.provider == provider,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_endpoint(model)
+
+    async def get(
+        self, tenant_id: uuid.UUID, endpoint_id: uuid.UUID
+    ) -> WebhookEndpoint | None:
+        result = await self._session.execute(
+            select(WebhookEndpointModel).where(
+                WebhookEndpointModel.tenant_id == tenant_id,
+                WebhookEndpointModel.id == endpoint_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return None if model is None else _to_endpoint(model)
+
+    async def upsert(self, tenant_id: uuid.UUID, endpoint: WebhookEndpoint) -> None:
+        if endpoint.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="webhook endpoint",
+                entity_tenant_id=endpoint.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+
+        existing = await self._session.execute(
+            select(WebhookEndpointModel).where(
+                WebhookEndpointModel.tenant_id == tenant_id,
+                WebhookEndpointModel.provider == endpoint.provider,
+            )
+        )
+        model = existing.scalar_one_or_none()
+        if model is None:
+            self._session.add(
+                WebhookEndpointModel(
+                    id=endpoint.id,
+                    tenant_id=endpoint.tenant_id,
+                    provider=endpoint.provider,
+                    token_hash=endpoint.token_hash,
+                    header_name=endpoint.header_name,
+                    header_secret_encrypted=endpoint.header_secret.ciphertext,
+                    rotated_at=endpoint.rotated_at,
+                )
+            )
+            return
+
+        # Rotation: both secrets move together, in this one transaction, so nothing ever observes
+        # a row whose token is new and whose header secret is old (design D3). No grace window —
+        # the old material stops authenticating the moment this commits.
+        model.token_hash = endpoint.token_hash
+        model.header_name = endpoint.header_name
+        model.header_secret_encrypted = endpoint.header_secret.ciphertext
+        model.rotated_at = endpoint.rotated_at
 
 
 class SqlAlchemyPmsCredentialRepository:
@@ -184,3 +265,35 @@ def _to_credential(model: PmsCredentialModel) -> PmsCredential:
         property_id=model.property_id,
         rotated_at=model.rotated_at,
     )
+
+
+def _to_endpoint(model: WebhookEndpointModel) -> WebhookEndpoint:
+    """Row → entity, with the same translation of a malformed stored value as `_to_credential`.
+
+    The `ValueError` that `EncryptedSecret` raises for a non-Fernet value must not escape as
+    itself: the receiving path catches the domain's vocabulary, and an unhandled `ValueError`
+    there would surface as a `500` on a public, unauthenticated endpoint — telling an anonymous
+    caller that this particular route token exists and that its row is broken, which is exactly
+    the oracle design D4 closes.
+
+    `WebhookEndpoint.__post_init__` can also raise `ValueError`, for a `token_hash` that is not a
+    digest or a blank `header_name`. Same treatment and the same reason: a row that cannot become
+    an entity is a row that cannot authenticate anybody, which from the caller's side is
+    indistinguishable from a token that does not exist — and that is precisely how it must look.
+    """
+    try:
+        secret = EncryptedSecret(ciphertext=model.header_secret_encrypted)
+        return WebhookEndpoint(
+            id=model.id,
+            tenant_id=model.tenant_id,
+            provider=model.provider,
+            token_hash=model.token_hash,
+            header_name=model.header_name,
+            header_secret=secret,
+            rotated_at=model.rotated_at,
+        )
+    except ValueError as error:
+        # Names the row, never the stored value or any fragment of it.
+        raise SecretDecryptionError(
+            f"stored webhook endpoint {model.id} is not usable"
+        ) from error
