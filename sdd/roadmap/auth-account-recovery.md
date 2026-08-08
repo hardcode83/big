@@ -1,0 +1,3 @@
+# auth-account-recovery
+
+[BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario. Depende de `NotificationAdapter`, que llega en `access-notifications`, y del hash bcrypt y la invalidación de sesiones de `auth-tenancy`. El PRD lo marca como opcional, así que no entra en el DoD de §28. **Prioridad acotada en la revisión del PR #25 de `auth-tenancy`**: estar registrada aquí no le da prioridad — no desplaza las prioridades operacionales de PRD §30 (PRD §24, §22) (marcado opcional en PRD §24 y ausente de §26, añadido al acotar `auth-tenancy`)
