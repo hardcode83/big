@@ -12,6 +12,7 @@ describe("public runtime config (D15)", () => {
 
   beforeEach(() => {
     delete process.env.NEXT_PUBLIC_APP_ENV;
+    delete process.env.NEXT_PUBLIC_API_BASE_URL;
     delete process.env.BACKEND_INTERNAL_URL;
     delete process.env.NEXT_PUBLIC_APP_VERSION;
     delete process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT;
@@ -27,6 +28,7 @@ describe("public runtime config (D15)", () => {
     process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT = "a2f3c1d";
     const config = buildPublicRuntimeConfig();
     expect(config).toEqual({
+      apiBaseUrl: "",
       appEnv: "staging",
       defaultLocale: "es",
       featureFlags: {},
@@ -38,6 +40,16 @@ describe("public runtime config (D15)", () => {
   it("boots without a backend or NEXT_PUBLIC_APP_ENV set", () => {
     expect(() => buildPublicRuntimeConfig()).not.toThrow();
     expect(buildPublicRuntimeConfig().appEnv).toBe("development");
+  });
+
+  it("allows an explicit public API origin without exposing server config", () => {
+    process.env.NEXT_PUBLIC_API_BASE_URL = "https://api.example.com";
+    process.env.BACKEND_INTERNAL_URL = "http://backend:8000";
+
+    const config = buildPublicRuntimeConfig();
+
+    expect(config.apiBaseUrl).toBe("https://api.example.com");
+    expect(JSON.stringify(config)).not.toContain("backend:8000");
   });
 
   it("renders empty build identity when nothing was baked, without throwing", () => {
@@ -59,6 +71,7 @@ describe("public runtime config (D15)", () => {
     expect(serialized).not.toContain("super-secret-value");
     expect(serialized).not.toContain("should-not-appear");
     expect(Object.keys(buildPublicRuntimeConfig())).toEqual([
+      "apiBaseUrl",
       "appEnv",
       "defaultLocale",
       "featureFlags",
@@ -193,6 +206,7 @@ describe("RuntimeConfigProvider", () => {
     render(
       <RuntimeConfigProvider
         config={{
+          apiBaseUrl: "",
           appEnv: "test",
           defaultLocale: "es",
           featureFlags: {},

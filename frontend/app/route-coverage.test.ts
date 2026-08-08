@@ -24,6 +24,7 @@ function findPageFiles(dir: string): string[] {
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/dashboard/page.tsx": "dashboard",
   "(workspace)/properties/[id]/page.tsx": "property-detail",
+  "(public)/login/page.tsx": "login",
 };
 
 function routeIdOf(file: string): string | undefined {
