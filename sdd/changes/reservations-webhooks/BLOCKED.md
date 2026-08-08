@@ -223,7 +223,7 @@ cuando existe una ruta real que un proxy pueda registrar.
     solo mensaje. Tres hallazgos aceptados y arreglados: la carrera check-then-act del alta (ahora la
     refuta el índice, no la lectura previa), la cobertura del guard de `_to_endpoint`, y el canal de la
     exención de auditoría (entrada 3 de esta cola). Ningún hallazgo quedó abierto.
-  - **Suite completa en verde**: 4061 pasan, 35 se saltan (los `skip` son placeholders preexistentes
+  - **Suite completa en verde**: 4065 pasan, 35 se saltan (los `skip` son placeholders preexistentes
     de `tests/properties/test_state_machine.py`, ajenos a este change). `alembic upgrade head`,
     `alembic check` y `alembic downgrade base` limpios; las dos mitades del contrato sin deriva.
     La tarea 6.1 vuelve a correrla al cerrar el change.

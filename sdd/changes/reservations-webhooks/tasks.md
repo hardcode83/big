@@ -140,6 +140,19 @@ forzado en `infrastructure/`.
 > —viaja en el path por D1, y ahí lo escribe cualquier proxy—, `.env.example` documenta las dos
 > variables nuevas, el endpoint declara sus respuestas `404`/`429`/`413`, y se añadió el hermano que
 > QA pidió del bug del `413`.
+>
+> **Segunda ronda (re-review de los tres reviewers con hallazgos): documentación PASS, seguridad
+> PASS, QA FAIL con dos hallazgos — los dos contra tests que yo acababa de escribir, y los dos
+> demostrados en vez de argumentados.** El test del throttle real gastaba el presupuesto por IP
+> compartido (`ASGITransport` reporta siempre `127.0.0.1`) y empezaba a fallar solo a la
+> ~15ª ejecución en un minuto; y el hermano del `413` usaba un cuerpo de 4 KB, por debajo del tope,
+> así que habría pasado igual con el orden anterior. Arreglados los dos, más tres residuales de
+> seguridad: `WebhookEventFailure.field` sin validar (el agujero un nivel más abajo), el prefijo del
+> filtro de log sensible a mayúsculas, y la fuga que el filtro **no** puede cerrar (entrada 5 de
+> `BLOCKED.md`). Suite completa: 4065 pasan, 35 se saltan.
+>
+> **Dos rondas es el máximo del panel, y se han usado.** Lo que queda abierto no es código: son las
+> entradas 4 y 5 de `BLOCKED.md`, las dos decisiones de diseño.
 
 - [x] 2.1 Los dos limitadores de D6 en `infrastructure/throttle.py` (por token, generoso; por IP y solo
   para fallos de autenticación, estricto), con el patrón de `RedisLoginThrottle` pero sin reutilizar su
