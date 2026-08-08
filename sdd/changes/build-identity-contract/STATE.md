@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/build-identity-contract
-implementation_sha: d9e4629abfd520c872c61e7694beba0810d0ac55
+implementation_sha: cdeb3860b2a0fe1479c3e2045775d7786e359d00
 pr_number: 
 pr_url: 
 pr_state: 
