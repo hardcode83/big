@@ -98,28 +98,28 @@ Desviaciones de esta sección, para que se lean como decisiones:
 
 ## 4. Dominio de acceso: invariantes, puertos y repositorio
 
-- [ ] 4.1 (TDD) `backend/tests/access/test_entities.py` primero, luego
+- [x] 4.1 (TDD) `backend/tests/access/test_entities.py` primero, luego
   `backend/app/access/domain/entities.py`: métodos `register_manual_code`, `mark_external_managed`,
   `mark_delivered`, `revoke`, `expire` que protegen la máquina de estados de design D14. **Todas
   las transiciones, incluidas las inválidas** (DoD §28.19): las inválidas levantan
   `InvalidAccessTransitionError`. [R2]
-- [ ] 4.2 `backend/app/access/domain/masking.py` (nuevo): `mask_access_code(code) -> str` con la
+- [x] 4.2 `backend/app/access/domain/masking.py` (nuevo): `mask_access_code(code) -> str` con la
   forma `****XX` de la regla 4. Test que cubre códigos cortos, largos, vacíos y con espacios, y que
   demuestra que el valor original **no** aparece en la salida. [R2]
-- [ ] 4.3 `backend/app/access/domain/exceptions.py` (nuevo): `AccessRecordNotFoundError`,
+- [x] 4.3 `backend/app/access/domain/exceptions.py` (nuevo): `AccessRecordNotFoundError`,
   `InvalidAccessTransitionError`. [R2, R3]
-- [ ] 4.4 `backend/app/access/domain/repositories.py` (nuevo): puerto `AccessRecordRepository`
+- [x] 4.4 `backend/app/access/domain/repositories.py` (nuevo): puerto `AccessRecordRepository`
   (`get`, `list` con filtros y paginación, `get_by_reservation`, `add`, `save`,
   `list_reservations_missing_records`), `tenant_id` en cada método como en
   `app/auth/domain/ports.py`. [R1, R3]
-- [ ] 4.5 `backend/app/access/domain/ports.py` (nuevo): `AccessProviderAdapter` con las tres
+- [x] 4.5 `backend/app/access/domain/ports.py` (nuevo): `AccessProviderAdapter` con las tres
   operaciones de PRD §15 (design D12). [R2]
-- [ ] 4.6 `backend/app/access/infrastructure/repositories.py` (nuevo):
+- [x] 4.6 `backend/app/access/infrastructure/repositories.py` (nuevo):
   `SqlAlchemyAccessRecordRepository`, con `tenant_id` explícito en toda sentencia y
   `CrossTenantWriteError` en las escrituras. Tests de integración en
   `backend/tests/access/test_repositories.py`, incluido el de tenant isolation obligatorio por
   DoD §28.18. [R1, R3]
-- [ ] 4.7 `backend/app/access/infrastructure/adapters.py` (nuevo): `ManualAccessAdapter` y
+- [x] 4.7 `backend/app/access/infrastructure/adapters.py` (nuevo): `ManualAccessAdapter` y
   `MockAccessAdapter` (código demo `****23`). Tests en
   `backend/tests/access/test_adapters.py` que verifican la sustituibilidad (Liskov: mismas
   excepciones, misma forma de retorno) y que **ninguno devuelve ni registra el código en claro**
@@ -165,7 +165,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
 - [ ] 6.3 `backend/app/scheduler/schedule.py` y `tasks.py`: tarea `provision_access_records` cada
   5 minutos, con `_guarded` + `task_lock`, y docstring que declare la divergencia con PRD §8.3.
   Test del camino `skipped_locked`. [R1]
-- [ ] 6.4 Comprobar con `EXPLAIN` sobre el Postgres local si la consulta de
+- [x] 6.4 Comprobar con `EXPLAIN` sobre el Postgres local si la consulta de
   `list_reservations_missing_records` usa índice por `(tenant_id, status)`; si no, migración
   Alembic que lo añada. Si sí lo usa, dejar constancia en el design de que no hizo falta. [R1]
 
