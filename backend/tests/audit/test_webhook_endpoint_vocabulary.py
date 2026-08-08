@@ -119,15 +119,26 @@ def test_the_header_name_is_not_a_secret_and_records_its_change() -> None:
     assert changes.as_dict() == {"header_name": {"old": "X-Old", "new": "X-New"}}
 
 
-def test_there_is_no_read_action_for_a_webhook_endpoint() -> None:
-    """The deliberate asymmetry with `PMS_CREDENTIAL_READ`, pinned so it is not "fixed" later.
+def test_there_is_no_read_action_while_the_only_reader_is_anonymous() -> None:
+    """The asymmetry with `PMS_CREDENTIAL_READ`, pinned **to its premise** and not beyond it.
 
-    The equivalent "read" here happens on **every incoming webhook** — anonymous, from the
-    internet, at provider cadence. An audit row per read would let an outsider write to
+    The premise: today the only thing that reads this material is the receiving path — anonymous,
+    from the internet, at provider cadence. An audit row per read would let an outsider write to
     `audit_logs` at will, which is a denial-of-service dressed as diligence, and would drown the
     very index (`ix_audit_logs_tenant_id_actor_user_id_created_at`) that rule 9 exists to keep
-    answerable. Rule 9 enumerates what it wants audited and a webhook endpoint is not on it; what
-    is audited is the human act of creating or rotating the material.
+    answerable.
+
+    **What this test does NOT assert, and an earlier version did**: that a webhook endpoint may
+    never have a read action. That over-claimed, and in the one direction rule 9 refuses to
+    concede — "Lo que esta excepción NO concede: […] no exime la lectura con actor humano". The
+    day a human- or API-initiated read exists (a support command, an operator tool), it brings its
+    own `WEBHOOK_ENDPOINT_READ` and this test changes with it. Pinning the absence as permanent
+    policy would have made that change look like a regression.
+
+    The exemption itself is **not settled here**: rule 9 says an exception arrives "con una
+    entrada nueva y nombrada" in `steering/security.md`, approved in the design of the change that
+    asks for it. That is design D15, provisional and queued in `BLOCKED.md` for Jose — a code
+    comment is not the channel rule 9 names. Flagged by the security panel of section 1.
     """
     assert not any(
         action.startswith("WEBHOOK_ENDPOINT") and action.endswith("_READ")

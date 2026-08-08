@@ -1,8 +1,9 @@
 # BLOCKED — reservations-webhooks
 
-Tres entradas. Las dos primeras son **decisiones que necesitan a Jose** y estaban previstas: el diseño
-las tomó de forma provisional y marcada para no detener el flujo, no para darlas por buenas. La tercera
-es el estado de la implementación, para que se pueda reanudar sin reconstruir nada de la conversación.
+Cuatro entradas. Las tres primeras son **decisiones que necesitan a Jose**: el diseño las tomó de forma
+provisional y marcada para no detener el flujo, no para darlas por buenas. Las dos primeras estaban
+previstas desde el diseño; la tercera la destapó el panel de seguridad de la sección 1. La cuarta es el
+estado de la implementación, para que se pueda reanudar sin reconstruir nada de la conversación.
 
 ---
 
@@ -74,7 +75,45 @@ es el estado de la implementación, para que se pueda reanudar sin reconstruir n
 
 ---
 
-## 3. La implementación está a medias (sección 1 de 6)
+## 3. La exención de auditoría de la regla 3(b) necesita entrada propia en steering (D15)
+
+- **Fase**: run (panel de seguridad de la sección 1) · **ya implementado** de facto en la tarea 1.4
+- **Tipo**: `decision` — necesita un humano
+- **Qué y por qué**
+
+  La regla 3(b) de `sdd/steering/security.md` obliga a auditar **la lectura** de toda credencial de
+  proveedor. Este change no la audita: no existe `WEBHOOK_ENDPOINT_READ`, y hay un test que fija la
+  ausencia. El motivo es bueno y el panel lo dio por bueno: la "lectura" equivalente ocurre en **cada
+  webhook entrante** —anónimo, desde internet, a la cadencia del proveedor—, así que auditarla deja
+  que un tercero escriba filas en `audit_logs` a voluntad y ahoga el índice
+  `ix_audit_logs_tenant_id_actor_user_id_created_at` que la regla 9 existe para mantener respondible.
+
+  **Lo que el panel marcó no es la decisión, es el canal.** La regla 9 dice cómo se exceptúa algo:
+  *"con una entrada nueva y nombrada aquí, aprobada en el design del change que la pida. El
+  razonamiento de arriba **no es un criterio reutilizable**"*. La exención estaba viviendo en un
+  comentario de `actions.py`. Un change que se auto-concede una exención de una regla de seguridad en
+  un comentario es exactamente lo que esa cláusula existe para impedir.
+
+  **Qué se ha hecho mientras tanto** (y qué no): se ha escrito D15 en `design.md` marcada
+  `PROVISIONAL`, se ha reescrito el comentario de `actions.py` para que **cite** en vez de conceder, y
+  se ha acotado el test —que fijaba la ausencia como política **permanente**— a su premisa real, en la
+  dirección que la regla 9 se niega a ceder: *"no exime la lectura con actor humano"*. **No se ha
+  tocado `sdd/steering/security.md`**: es ley del proyecto que sobrevive a este change, y la regla 9
+  pide aprobación humana, no la mía.
+
+  Alcance que se propone, deliberadamente estrecho: **solo la ruta de recepción anónima**. Una lectura
+  iniciada por una persona o una API (un comando de soporte, una herramienta de operador) sigue
+  debiendo su fila, y traerá su `WEBHOOK_ENDPOINT_READ` el día que exista.
+
+- **Cómo se resuelve**: ratificar la exención y añadir la entrada nombrada a la regla 9 de
+  `sdd/steering/security.md` con ese alcance — o rechazarla, y entonces hay que rediseñar la
+  recepción para que la auditoría no sea un amplificador (la única salida que se ve es agregar, no
+  auditar por evento).
+- **Comando para reanudar**: `/sdd:review reservations-webhooks`
+
+---
+
+## 4. La implementación está a medias (sección 1 de 6)
 
 - **Fase**: run
 - **Tipo**: `deferred` — el flujo puede reanudarlo sin decisión humana
@@ -82,17 +121,21 @@ es el estado de la implementación, para que se pueda reanudar sin reconstruir n
 
   `tasks.md` es la verdad de lo hecho y lo pendiente. Al cerrar esta sesión:
 
-  - **Hecho y verificado, con commit propio cada tarea**: 1.1 (entidad `WebhookEndpoint`, puerto y las
-    tres primitivas de autenticación; 20 tests), 1.2 (tabla `webhook_endpoints` + las dos columnas de la
-    entrada 2; `alembic upgrade`, `alembic check` sin deriva y `alembic downgrade base`, los tres
-    comprobados), 1.3 (repositorio + test de aislamiento propio; 12 tests) y 1.4 (vocabulario de
-    auditoría + denylist de la regla 11 para los dos secretos; 10 tests).
-  - **Pendiente**: 1.5, 1.6, 1.7 y las secciones 2 a 6 completas.
-  - **El panel de la sección 1 NO se ha lanzado**, porque la sección no está cerrada. Cuando se cierre,
-    el panel obligatorio son `sdd-architect`, `sdd-security`, `sdd-qa` más los cuatro reviewers de
-    proyecto (`sdd-review-{tenancy,i18n,cicd,documentation}`), todos en **un solo mensaje**.
-  - Suite en verde en lo tocado: 1395 en `tests/integrations` + tenancy + layering, 119 en `tests/audit`.
-    La suite completa (~6m15s) no se ha corrido todavía; es la tarea 6.1.
+  - **Sección 1 completa y verificada, con commit propio cada tarea**: 1.1 (entidad `WebhookEndpoint`,
+    puerto y las tres primitivas de autenticación), 1.2 (tabla `webhook_endpoints` + las dos columnas
+    de la entrada 2), 1.3 (repositorio + test de aislamiento propio), 1.4 (vocabulario de auditoría +
+    denylist de la regla 11 para los dos secretos), 1.5 (casos de uso de alta y rotación), 1.6 (los dos
+    endpoints con RBAC) y 1.7 (las dos mitades del contrato regeneradas).
+  - **Pendiente**: las secciones 2 a 6 completas.
+  - **El panel de la sección 1 se lanzó y está cerrado en PASS**: los siete reviewers
+    (`sdd-architect`, `sdd-security`, `sdd-qa` + `sdd-review-{tenancy,i18n,cicd,documentation}`) en un
+    solo mensaje. Tres hallazgos aceptados y arreglados: la carrera check-then-act del alta (ahora la
+    refuta el índice, no la lectura previa), la cobertura del guard de `_to_endpoint`, y el canal de la
+    exención de auditoría (entrada 3 de esta cola). Ningún hallazgo quedó abierto.
+  - **Suite completa en verde**: 3969 pasan, 35 se saltan (los `skip` son placeholders preexistentes de
+    `tests/properties/test_state_machine.py`, ajenos a este change). `alembic upgrade head`,
+    `alembic check` y `alembic downgrade base` limpios; las dos mitades del contrato sin deriva.
+    La tarea 6.1 vuelve a correrla al cerrar el change.
 
   **Un hallazgo que la sección 1 destapó y que la 4 tendrá que respetar**: no hay `WEBHOOK_ENDPOINT_READ`
   en el vocabulario de auditoría, a propósito y con test que lo fija. El "read" equivalente ocurre en

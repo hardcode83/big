@@ -9,7 +9,26 @@ una rotura.
 Cada tarea incluye su test. TDD obligatorio en `domain/` con invariante real (`steering/testing.md`), no
 forzado en `infrastructure/`.
 
-## 1. Endpoint de webhook: entidad, esquema y administración
+## 1. Endpoint de webhook: entidad, esquema y administración <!-- panel: PASS 2026-08-08 -->
+
+> **Panel de la sección 1 (siete reviewers, un solo mensaje): PASS.** `sdd-architect`, `sdd-review-tenancy`,
+> `sdd-review-cicd`, `sdd-review-documentation` y `sdd-review-i18n` sin hallazgos. Tres aceptados y
+> arreglados antes de cerrar:
+> - **QA, medio — carrera check-then-act en el alta.** `find_for` + `upsert` sin bloqueo entre medias: dos
+>   altas concurrentes para el mismo `(tenant, provider)` pasaban las dos la lectura, y la perdedora
+>   moría con `IntegrityError` sin manejador — un `500` donde la operación promete `409`. Reproducida por
+>   el panel con dos sesiones. Arreglado donde tenía que estarlo: **el índice es la autoridad sobre el
+>   duplicado, no la lectura previa** — `upsert` hace `flush` y traduce la violación de
+>   `uq_webhook_endpoints_tenant_provider` a `WebhookEndpointAlreadyExistsError`, con el mismo patrón que
+>   `SqlAlchemyPropertyRepository.add` ya usa. El `flush` además pone el fallo **antes** de construir la
+>   fila de auditoría, así que un alta rechazada no deja rastro de algo que no ocurrió. Test con
+>   concurrencia real (`asyncio.gather` sobre dos sesiones); nada más débil lo reproduce.
+> - **QA, bajo — cobertura del guard de `_to_endpoint`.** Sólo se probaba la rama del ciphertext
+>   malformado, no las de `token_hash` que no es digest ni `header_name` en blanco, que ninguna
+>   constraint de columna impide. Test parametrizado para las dos.
+> - **Seguridad, medio — el canal de la exención de auditoría.** Ver entrada 3 de `BLOCKED.md` y D15:
+>   la decisión es buena, el sitio donde estaba tomada no. Queda propuesta para Jose; el test que fijaba
+>   la ausencia como política permanente se acotó a su premisa.
 
 - [x] 1.1 Entidad `WebhookEndpoint` y su puerto de repositorio en
   `backend/app/integrations/domain/{entities.py,repositories.py}`, más los errores propios en

@@ -10,6 +10,7 @@ No method commits: the transactional boundary is the use case, as everywhere els
 import uuid
 
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import SecretDecryptionError
@@ -17,8 +18,11 @@ from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.entities import PmsCredential, WebhookEndpoint
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
+from app.integrations.domain.errors import WebhookEndpointAlreadyExistsError
 from app.integrations.infrastructure.models import PmsCredentialModel, WebhookEndpointModel
 from app.properties.infrastructure.models import PropertyModel
+
+WEBHOOK_ENDPOINT_CONSTRAINT = "uq_webhook_endpoints_tenant_provider"
 
 
 class SqlAlchemyWebhookEndpointRepository:
@@ -103,6 +107,27 @@ class SqlAlchemyWebhookEndpointRepository:
                     rotated_at=endpoint.rotated_at,
                 )
             )
+            # FLUSHES, and the flush is the point (the same shape `SqlAlchemyPropertyRepository.add`
+            # uses for `uq_properties_tenant_id_internal_code`). **The constraint is the authority
+            # on the duplicate, never the caller's prior read**: two concurrent creations for one
+            # (tenant, provider) both pass `find_for`, and only one can pass the index. Without
+            # this, the loser surfaced as an `IntegrityError` nobody handled — an unhandled `500`
+            # instead of the `409` the operation promises, found by the QA panel of section 1,
+            # which reproduced it with two concurrent sessions.
+            #
+            # Flushing here also puts the failure BEFORE the audit row is built, so a refused
+            # creation leaves no `WEBHOOK_ENDPOINT_CREATED` trace of something that did not happen.
+            try:
+                await self._session.flush()
+            except IntegrityError as error:
+                if WEBHOOK_ENDPOINT_CONSTRAINT in str(error.orig):
+                    raise WebhookEndpointAlreadyExistsError(
+                        "tenant already has a webhook endpoint for that provider; "
+                        "rotate it instead of creating a second one"
+                    ) from error
+                # Anything else is re-raised untranslated: a 409 blamed on a constraint the
+                # client cannot see would be a lie it has no way to act on.
+                raise
             return
 
         # Rotation: both secrets move together, in this one transaction, so nothing ever observes

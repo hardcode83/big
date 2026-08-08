@@ -74,7 +74,12 @@ class WebhookEndpointRepository(Protocol):
         on rotation. Rotation overwrites `token_hash` and `header_secret` together, in one
         transaction, so no half-rotated row is ever visible (design D3).
 
-        Raises `CrossTenantWriteError` when the endpoint belongs to another tenant.
+        Raises `CrossTenantWriteError` when the endpoint belongs to another tenant, and
+        `WebhookEndpointAlreadyExistsError` when an insert collides with the
+        `(tenant_id, provider)` uniqueness. The second one is raised by the **constraint**, not by
+        a prior read: `find_for` narrows the common case to a clean refusal, but two concurrent
+        creations both pass it and only one can pass the index, so the adapter is where the
+        refusal becomes race-free.
         """
         ...
 

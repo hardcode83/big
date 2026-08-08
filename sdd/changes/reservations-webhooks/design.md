@@ -332,6 +332,39 @@ sin necesidad de números de secuencia, que el proveedor no da.
 Rejected: aplicar el cuerpo del webhook directamente — Channex documenta que llegan desordenados, así
 que el último cuerpo recibido no es el último hecho.
 
+### D15 — La lectura del material de webhook no se audita, y eso es una exención de la regla 3(b)
+
+**Añadida tras el panel de seguridad de la sección 1.** La implementación ya había tomado esta
+decisión —no existe `WEBHOOK_ENDPOINT_READ` en el vocabulario, con test que lo fija— pero la había
+tomado **en un comentario de código**, y ese no es el canal. La regla 3(b) obliga a auditar la
+lectura de toda credencial de proveedor, y la regla 9 dice cómo se exceptúa: *"con una entrada
+nueva y nombrada aquí, aprobada en el design del change que la pida. El razonamiento de arriba **no
+es un criterio reutilizable**"*. Sin esta entrada, el change se estaba auto-concediendo la exención.
+
+**Chosen (PROVISIONAL — `ASSUMPTION`, pendiente de ratificación de Jose; ver Open questions):** la
+lectura del material de webhook **en la ruta de recepción anónima** no escribe `AuditLog`.
+
+Por qué: aquí la "lectura" equivalente a `PMS_CREDENTIAL_READ` ocurre en **cada webhook entrante**
+—anónimo, desde internet, a la cadencia del proveedor—. Auditarla deja que un tercero escriba filas
+en `audit_logs` a voluntad: es una denegación de servicio disfrazada de diligencia, y ahoga
+precisamente el índice `ix_audit_logs_tenant_id_actor_user_id_created_at` que la segunda excepción
+nombrada de la regla 9 existe para mantener respondible. Es el mismo argumento de cadencia que ya
+justificó esa segunda excepción, aplicado a un caso peor: allí el actor es automático, aquí es
+**hostil y no autenticado**.
+
+**Lo que esta exención NO concede, y hay que decirlo porque la regla 9 lo dice de la suya:** no
+exime la lectura con **actor humano**. Un comando de soporte o una herramienta de operador que lea
+este material trae su propio `WEBHOOK_ENDPOINT_READ` el día que exista. No se añade ahora porque una
+acción para una operación que nadie ejecuta es el vocabulario especulativo contra el que argumenta
+el docstring de `actions.py` — el mismo razonamiento que la regla 9 aplica a `SCHEDULER`. Lo que sí
+se corrigió al detectarlo: el test que fijaba la ausencia la fijaba **como política permanente**, y
+ahora la fija atada a su premisa (*"while the only reader is anonymous"*).
+
+Rejected: auditar cada recepción — la denegación de servicio descrita arriba. Rejected: auditar solo
+las recepciones que fallan — es peor, porque son exactamente las que un atacante controla. Rejected:
+dejarlo en el comentario de código y no tocar steering — es lo que el panel marcó: la regla 9 nombra
+el canal, y un comentario no lo es.
+
 ## Changes by area
 
 | Area | Files | Change |
@@ -422,7 +455,7 @@ del lock se derivan de ahí sin tocar nada más.
 
 ## Open questions
 
-Dos decisiones tomadas **provisionalmente** para no detener el flujo, ambas marcadas como tal en el
+Tres decisiones tomadas **provisionalmente** para no detener el flujo, todas marcadas como tal en el
 diseño y ninguna de ellas cerrable desde el código. Se dejan en `BLOCKED.md` para ratificación.
 
 1. **D8 — la forma de la redacción de `special_requests`.** `pms-beds24-adapter` P.8 la declara
@@ -434,3 +467,9 @@ diseño y ninguna de ellas cerrable desde el código. Se dejan en `BLOCKED.md` p
    contabilidad interna (no cambia la semántica de §7.26), pero la decisión de desviarse del PRD no es
    del diseño. Si se rechaza, la alternativa menos mala es la subtarea Celery con `autoretry_for`, con
    la pérdida de durabilidad que D9 describe.
+3. **D15 — no auditar la lectura del material de webhook en la recepción anónima.** Es una exención de
+   la regla 3(b), y la regla 9 exige que una exención sea **una entrada nueva y nombrada en
+   `sdd/steering/security.md`**, no un comentario de código. Editar steering es cambiar ley del
+   proyecto que sobrevive a este change, así que la enmienda **no se ha escrito**: se propone aquí y
+   se decide fuera. El argumento es de cadencia y es fuerte (auditar dejaría a un anónimo escribir en
+   `audit_logs` a voluntad); lo que hay que ratificar es concederla y con qué alcance.

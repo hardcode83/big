@@ -12,16 +12,19 @@ all** (design D1), because the token is what resolves the tenant. A test suite t
 scoped reads would never touch the method whose whole job is to be unscoped.
 """
 
+import asyncio
 import uuid
 
 import pytest
 from sqlalchemy import text
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import SecretDecryptionError, decrypt, encrypt
 from app.core.db import tenant_scoped_classes
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.entities import WebhookEndpoint
 from app.integrations.domain.enums import PMSProvider
+from app.integrations.domain.errors import WebhookEndpointAlreadyExistsError
 from app.integrations.domain.webhook_auth import (
     generate_webhook_token,
     hash_webhook_token,
@@ -268,6 +271,50 @@ async def test_two_tenants_can_each_have_an_endpoint_for_the_same_provider(
     assert count == 2
 
 
+# --- The constraint, not the caller's read, is what refuses a duplicate ---
+
+
+@pytest.mark.asyncio
+async def test_an_insert_that_loses_the_unique_race_is_a_domain_refusal(
+    test_engine, db_session, tenant_a
+) -> None:
+    """The check-then-act window `find_for` cannot close (QA panel of section 1).
+
+    Two genuinely concurrent creations, because nothing weaker reproduces it: sequentially, the
+    second caller's own `SELECT` sees the first row and takes the update branch, so the insert
+    path is never entered. Only overlapping transactions put a caller in the losing state — its
+    `SELECT` found nothing, and by the time it flushes the index is taken.
+
+    What must come back is the domain's refusal, not `IntegrityError`: unhandled, the loser
+    reaches the client as a `500` where the operation promises a `409`.
+    """
+    # The tenant has to be visible to the other two connections, and `db_session` only flushed it.
+    await db_session.commit()
+
+    async def create(session: AsyncSession) -> None:
+        await SqlAlchemyWebhookEndpointRepository(session).upsert(
+            tenant_a.id, _endpoint(tenant_a.id)
+        )
+        await session.commit()
+
+    async with AsyncSession(test_engine) as first, AsyncSession(test_engine) as second:
+        outcomes = await asyncio.gather(
+            create(first), create(second), return_exceptions=True
+        )
+
+    failures = [outcome for outcome in outcomes if isinstance(outcome, BaseException)]
+    assert len(failures) == 1, "exactly one of the two creations must win the index"
+    assert isinstance(failures[0], WebhookEndpointAlreadyExistsError)
+
+    surviving = (
+        await db_session.execute(
+            text("SELECT count(*) FROM webhook_endpoints WHERE tenant_id = :t"),
+            {"t": str(tenant_a.id)},
+        )
+    ).scalar_one()
+    assert surviving == 1
+
+
 # --- A stored row that cannot become an entity (D4's indistinguishability) ---
 
 
@@ -302,3 +349,47 @@ async def test_a_plaintext_secret_in_the_column_is_refused_on_read(
     repository = SqlAlchemyWebhookEndpointRepository(db_session)
     with pytest.raises(SecretDecryptionError):
         await repository.find_by_token_hash(PMSProvider.BEDS24, hash_webhook_token(token))
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("column", "value"),
+    [
+        # Neither is prevented by a column definition: `token_hash` is a `String(64)`, so a
+        # 64-character non-digest fits, and `header_name` has no non-blank constraint. The entity
+        # is where both are refused, and this is what proves the repository does not route around
+        # it — the entity's guards are only worth having if every path into it applies them.
+        ("token_hash", "z" * 64),
+        ("header_name", "   "),
+    ],
+)
+async def test_a_row_the_entity_refuses_is_reported_as_a_broken_row(
+    db_session, tenant_a, column, value
+) -> None:
+    """`_to_endpoint` translates `WebhookEndpoint.__post_init__` too, not only `EncryptedSecret`.
+
+    Both causes must arrive as `SecretDecryptionError`, for the reason the sibling test above
+    gives: on the anonymous receiving path an unhandled `ValueError` is a `500`, and a `500` tells
+    the caller that this route token exists and its row is broken — the oracle design D4 closes.
+    """
+    # A digest we can still search by, so the lookup reaches the row even in the token_hash case.
+    stored_hash = value if column == "token_hash" else hash_webhook_token(generate_webhook_token())
+    await db_session.execute(
+        text(
+            "INSERT INTO webhook_endpoints "
+            "(id, tenant_id, provider, token_hash, header_name, header_secret_encrypted) "
+            "VALUES (:id, :t, 'BEDS24', :h, :n, :s)"
+        ),
+        {
+            "id": str(uuid.uuid4()),
+            "t": str(tenant_a.id),
+            "h": stored_hash,
+            "n": value if column == "header_name" else HEADER_NAME,
+            "s": encrypt("fine").ciphertext,
+        },
+    )
+    await db_session.flush()
+
+    repository = SqlAlchemyWebhookEndpointRepository(db_session)
+    with pytest.raises(SecretDecryptionError):
+        await repository.find_by_token_hash(PMSProvider.BEDS24, stored_hash)

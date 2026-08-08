@@ -67,13 +67,23 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 PMS_CREDENTIAL_READ = "PMS_CREDENTIAL_READ"
 PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 
-# No `WEBHOOK_ENDPOINT_READ` counterpart to `PMS_CREDENTIAL_READ`, and the asymmetry is the point.
-# The credential read is audited because ADR 0006 obligation 4 requires it and because each read
-# decrypts. Here the equivalent "read" happens on **every incoming webhook** — an anonymous,
-# internet-facing request at provider cadence — so auditing it would let an outsider write rows to
-# `audit_logs` at will, which is a denial-of-service dressed as diligence. Rule 9 lists the
-# entities it wants audited and this is not one of them; what is audited is the human's act of
-# creating or rotating the material.
+# No `WEBHOOK_ENDPOINT_READ` counterpart to `PMS_CREDENTIAL_READ` **today**, and the asymmetry is
+# the point. The credential read is audited because ADR 0006 obligation 4 requires it and because
+# each read decrypts. Here the equivalent "read" happens on **every incoming webhook** — an
+# anonymous, internet-facing request at provider cadence — so auditing it would let an outsider
+# write rows to `audit_logs` at will, which is a denial-of-service dressed as diligence.
+#
+# **This comment is not where that exemption is granted, and it cannot be.** Rule 3(b) of
+# `steering/security.md` requires the read of a provider credential to be audited, and rule 9 says
+# an exception to it arrives "con una entrada nueva y nombrada aquí, aprobada en el design del
+# change que la pida" — steering, not a comment. Recorded as design D15, PROVISIONAL, and queued in
+# `BLOCKED.md` for Jose; the security panel of section 1 caught that the route had been skipped.
+#
+# Its scope is narrow and stays narrow: it covers the **anonymous receiving path only**. Rule 9 is
+# explicit that it "no exime la lectura con actor humano", so a support command or operator tool
+# that reads this material brings its own `WEBHOOK_ENDPOINT_READ` when it lands. Not added now,
+# because an action for an operation nothing performs is the speculative vocabulary this module's
+# docstring argues against — the same reasoning rule 9 applies to `SCHEDULER`.
 WEBHOOK_ENDPOINT_CREATED = "WEBHOOK_ENDPOINT_CREATED"
 WEBHOOK_ENDPOINT_ROTATED = "WEBHOOK_ENDPOINT_ROTATED"
 
