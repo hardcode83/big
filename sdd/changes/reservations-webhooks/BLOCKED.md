@@ -105,6 +105,12 @@ estado de la implementación, para que se pueda reanudar sin reconstruir nada de
   iniciada por una persona o una API (un comando de soporte, una herramienta de operador) sigue
   debiendo su fila, y traerá su `WEBHOOK_ENDPOINT_READ` el día que exista.
 
+  **Esto es una puerta de merge, no un hallazgo de código abierto** (lo afinó el re-review de
+  seguridad). La regla 9 pide **las dos mitades**: la entrada nombrada en `security.md` *y* la
+  aprobación en el design del change. Hoy sólo existe la segunda, y marcada `PROVISIONAL`. Mergear
+  con esta entrada sin ratificar publica código que se desvía de la regla 3(b) sin ninguna entrada en
+  steering que lo ampare — que es exactamente el estado que el hallazgo describía, sólo que aplazado.
+
 - **Cómo se resuelve**: ratificar la exención y añadir la entrada nombrada a la regla 9 de
   `sdd/steering/security.md` con ese alcance — o rechazarla, y entonces hay que rediseñar la
   recepción para que la auditoría no sea un amplificador (la única salida que se ve es agregar, no
