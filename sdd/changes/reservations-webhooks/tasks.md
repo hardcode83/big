@@ -167,18 +167,28 @@ forzado en `infrastructure/`.
   > en ningún momento** un camino de escritura sin depurar. `event_type` se trunca a 200 y cae a
   > `"unknown"`: lo llena un anónimo y la columna es `NOT NULL` `String(200)`, así que sin acotarlo
   > una etiqueta de 10 KB aborta la transacción que estaba registrando el aviso. 12 tests nuevos.
-- [ ] 2.4 `scrub_card_data` en la frontera, antes de construir el `WebhookEvent`, y `error` en forma
+- [x] 2.4 `scrub_card_data` en la frontera, antes de construir el `WebhookEvent`, y `error` en forma
   estructurada (código + campo, nunca texto del cuerpo). Tests que pasan los **fixtures reales
   anonimizados** de Beds24 y Channex por el receptor completo y comprueban que `payload` no contiene
   ninguna aguja de tarjeta ni rama opaca. [R4.1, R4.2, R4.3, R4.5]
-- [ ] 2.5 Router fino `api/webhooks_router.py` registrado en `main.py`: solo dependencias de transporte
+  > **Mi primer borrador afirmaba lo que no dice la regla y fallaba contra código correcto**:
+  > `scrub_card_data` sustituye el **valor** por un marcador y conserva la clave. Eso es justo la
+  > forma estructurada que pide la regla 11 («el valor no sobrevive»), y además distingue «el
+  > proveedor no mandó esto» de «se lo quitamos nosotros». Los tests aserotan sobre valores.
+  > `error` no se resuelve con una convención sino con un tipo: `WebhookEventFailure` lleva un
+  > `code` de vocabulario cerrado y un **nombre** de campo, y **no tiene ningún campo de texto
+  > libre**, así que el mensaje de diagnóstico natural —interpolar lo que falló— es imposible de
+  > escribir. Es lo que impide que un PAN retirado de `payload` vuelva por la columna de al lado.
+  > 11 tests nuevos, incluido uno que planta la forma exacta que midió `channex-staging-adapter`
+  > anidada dentro de una lista, que es donde un scrubber no recursivo aprueba sus propios tests.
+- [x] 2.5 Router fino `api/webhooks_router.py` registrado en `main.py`: solo dependencias de transporte
   (límite de tasa, tope de cuerpo) y traducción a `404`/`429`/`413`. Tests de endpoint que fijan el
   `404` uniforme de D4 y que un `202` no lleva cuerpo de negocio. [R1.1, R1.7, R3.1, R3.2]
-- [ ] 2.6 Guard automático que **lee los ficheros de fixtures en disco** (no la función que los produce)
+- [x] 2.6 Guard automático que **lee los ficheros de fixtures en disco** (no la función que los produce)
   y falla si alguno contiene datos con forma de tarjeta, derivando las agujas del propio anonimizador.
   Cubre **todos** los fixtures, no uno: así es como se filtró un `expiration_date` en
   `channex-staging-adapter`. [R4.4]
-- [ ] 2.7 Regenerar las dos mitades del contrato por el endpoint nuevo (`make openapi` +
+- [x] 2.7 Regenerar las dos mitades del contrato por el endpoint nuevo (`make openapi` +
   `npm run api:generate`) y commitearlas. [documentation.md]
 
 ## 3. `special_requests`: la frontera heredada (D8 — provisional)

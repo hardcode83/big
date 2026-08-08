@@ -84,23 +84,58 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # which belong to `cleaning-photos-storage`.
         "cleaning-checklist-templates",
         "cleaning-tasks",
+        # `reservations-webhooks`: the anonymous receiver. A module prefix of its own rather than
+        # a route under `integrations`, because rule 12(b) of `steering/security.md` makes the
+        # route token the credential and mixing it into the authenticated router would hide that.
+        "webhooks",
     }
+
+
+# Routes whose success answer carries no body at all, so there is no shape to declare. Listed by
+# path rather than exempting their status code wholesale: a `202` that later grew a body would be
+# a contract that says nothing, and blanket-exempting `202` is what would let it through.
+#
+# `reservations-webhooks` R1.1 requires this one to answer "sin cuerpo de negocio" — anything
+# echoed to an anonymous caller is a signal, and the only caller entitled to detail here is one
+# that already holds both secrets.
+BODILESS_SUCCESS_PATHS = frozenset({"/api/v1/webhooks/{provider}/{webhook_token}"})
 
 
 def test_every_api_route_declares_a_response_model() -> None:
     """R3.2 — a success response with no declared shape is a contract that says nothing.
 
-    `204 No Content` is the one legitimate exemption: there is no body to describe.
-    Today that is exactly `POST /auth/logout`, `DELETE /users/{user_id}` and
-    `DELETE /reservations/{reservation_id}`.
+    `204 No Content` is the structural exemption: there is no body to describe. Today that is
+    exactly `POST /auth/logout`, `DELETE /users/{user_id}` and `DELETE /reservations/{id}`.
+    `BODILESS_SUCCESS_PATHS` above is the named one, for a success that is deliberately empty
+    under a status other than 204.
     """
     undeclared = [
         f"{sorted(route.methods or [])} {path}"
         for path, route in _api_routes(create_app())
-        if route.status_code != 204 and route.response_model is None
+        if route.status_code != 204
+        and route.response_model is None
+        and path not in BODILESS_SUCCESS_PATHS
     ]
 
     assert undeclared == []
+
+
+def test_the_bodiless_exemptions_really_return_nothing() -> None:
+    """The exemption above is only honest while the route it names sends no body.
+
+    Without this, adding a response body to an exempted path would be invisible: the guard skips
+    it by name, so the contract would stop describing a body the endpoint actually returns.
+    `tests/integrations/test_webhook_receiver_api.py` asserts the empty `202` over HTTP; this
+    asserts that the exemption list has not outlived its reason.
+    """
+    exempted = [
+        route for path, route in _api_routes(create_app()) if path in BODILESS_SUCCESS_PATHS
+    ]
+
+    assert len(exempted) == len(BODILESS_SUCCESS_PATHS)
+    for route in exempted:
+        assert route.response_model is None
+        assert route.status_code == 202
 
 
 def test_no_operation_documents_the_fastapi_validation_shape() -> None:

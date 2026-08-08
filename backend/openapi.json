@@ -6025,6 +6025,56 @@
         ]
       }
     },
+    "/api/v1/webhooks/{provider}/{webhook_token}": {
+      "post": {
+        "description": "Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.",
+        "operationId": "receive_webhook_api_v1_webhooks__provider___webhook_token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "webhook_token",
+            "required": true,
+            "schema": {
+              "title": "Webhook Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Receive a PMS webhook notice",
+        "tags": [
+          "webhooks"
+        ]
+      }
+    },
     "/health": {
       "get": {
         "operationId": "health_health_get",

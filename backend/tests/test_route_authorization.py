@@ -26,6 +26,15 @@ ANONYMOUS_ENDPOINTS = {
     ("GET", "/health"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),
+    # `reservations-webhooks`: anonymous because the route token IS the credential (rule 12(b) of
+    # `steering/security.md`), paired with the provider's static per-tenant header (12(a)). A
+    # provider cannot hold a JWT, and ADR 0006 measured that none of the eleven evaluated
+    # providers signs its webhooks — so there is nothing else to authenticate with.
+    #
+    # It is exempt from declaring a permission, NOT from authenticating: the check moved into the
+    # use case, where `tests/integrations/test_webhook_receipt.py` asserts that an unknown token,
+    # an unknown provider, a missing header and a wrong one are indistinguishable.
+    ("POST", "/api/v1/webhooks/{provider}/{webhook_token}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),

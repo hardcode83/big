@@ -19,6 +19,7 @@ from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
+from app.integrations.api.webhooks_router import router as webhooks_router
 from app.properties.api.errors import register_property_error_handlers
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
@@ -62,6 +63,14 @@ def create_app() -> FastAPI:
     app.include_router(users_router, prefix=API_V1_PREFIX)
     app.include_router(reservations_router, prefix=API_V1_PREFIX)
     app.include_router(integrations_router, prefix=API_V1_PREFIX)
+    # `reservations-webhooks`: a SECOND router of the `integrations` module, and separate on
+    # purpose. It is the only anonymous route outside `auth`, because rule 12(b) of
+    # `steering/security.md` makes the route token itself the credential. Putting it on the
+    # router above — which carries `AUTHENTICATED_RESPONSES` and whose every route declares a
+    # permission — would hide an unauthenticated endpoint inside a shape that says otherwise.
+    # `tests/test_route_authorization.py` names it in its anonymous allowlist, which is the
+    # visible diff that decision has to pass through.
+    app.include_router(webhooks_router, prefix=API_V1_PREFIX)
     app.include_router(tenants_router, prefix=API_V1_PREFIX)
     # `properties-crud`: the first `api/` layer of the `properties` domain, which until now was
     # the only domain module without one. Its arrival is what makes `POST /reservations`

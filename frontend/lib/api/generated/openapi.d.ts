@@ -240,6 +240,13 @@ export interface paths {
      */
     post: operations["reset_user_password_api_v1_users__user_id__reset_password_post"];
   };
+  "/api/v1/webhooks/{provider}/{webhook_token}": {
+    /**
+     * Receive a PMS webhook notice
+     * @description Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.
+     */
+    post: operations["receive_webhook_api_v1_webhooks__provider___webhook_token__post"];
+  };
   "/health": {
     /** Health */
     get: operations["health_health_get"];
@@ -2785,6 +2792,32 @@ export interface operations {
       403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Receive a PMS webhook notice
+   * @description Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.
+   */
+  receive_webhook_api_v1_webhooks__provider___webhook_token__post: {
+    parameters: {
+      path: {
+        provider: string;
+        webhook_token: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": unknown;
         };
       };
       /** @description Validation Error */
