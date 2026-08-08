@@ -78,8 +78,8 @@ Sección aparte porque es la única que toca una capability ajena y archivada; s
 
 `sdd/project.md` no registra comando de lint ni de typecheck para el backend, y no existe ninguno: `backend/pyproject.toml` declara como dev deps solo `pytest`, `pytest-asyncio` y `pytest-cov` — sin ruff, mypy ni pyright. Lo que CI corre en su lugar es `alembic check` y la reversibilidad de las migraciones, así que eso es lo que se verifica aquí.
 
-- [ ] 10.1 Suite completa en verde: `docker compose exec backend uv run pytest` (con el stack levantado; con el stack parado, `docker compose run --rm backend uv run pytest`). Registrar el conteo de passed/skipped. [R1-R7]
-- [ ] 10.2 `docker compose exec backend uv run alembic check` — los modelos coinciden con el esquema migrado. [R2]
-- [ ] 10.3 Reversibilidad: `alembic downgrade base` y de vuelta `alembic upgrade head`, que es lo que corre `backend-tests.yml:295-300`. [R2]
-- [ ] 10.4 Comprobación manual de extremo a extremo contra el stack real, que es lo que este change existe para desbloquear: `make up`, `make bootstrap`, login como el `PROPERTY_MANAGER` sembrado, `POST /api/v1/properties`, y después **`POST /api/v1/reservations` sobre esa propiedad devolviendo `201`** — hoy devuelve `404` en todas las peticiones. Confirmar además que el `GET` de la propiedad no trae la contraseña de wifi y que el mismo `POST` como `TENANT_OWNER` da `403`. [R1, R2, R5, R6]
-- [ ] 10.5 Confirmar que `pms_credentials` sigue siendo solo de CLI: ninguna ruta nueva lo lee ni lo escribe, y `python -m app.integrations.cli.pms_credentials` sigue siendo la única vía. [R5]
+- [x] 10.1 Suite completa en verde: `docker compose exec backend uv run pytest` (con el stack levantado; con el stack parado, `docker compose run --rm backend uv run pytest`). Registrar el conteo de passed/skipped. [R1-R7]
+- [x] 10.2 `docker compose exec backend uv run alembic check` — los modelos coinciden con el esquema migrado. [R2]
+- [x] 10.3 Reversibilidad: `alembic downgrade base` y de vuelta `alembic upgrade head`, que es lo que corre `backend-tests.yml:295-300`. [R2]
+- [x] 10.4 Comprobación manual de extremo a extremo contra el stack real, que es lo que este change existe para desbloquear: `make up`, `make bootstrap`, login como el `PROPERTY_MANAGER` sembrado, `POST /api/v1/properties`, y después **`POST /api/v1/reservations` sobre esa propiedad devolviendo `201`** — hoy devuelve `404` en todas las peticiones. Confirmar además que el `GET` de la propiedad no trae la contraseña de wifi y que el mismo `POST` como `TENANT_OWNER` da `403`. [R1, R2, R5, R6]
+- [x] 10.5 Confirmar que `pms_credentials` sigue siendo solo de CLI: ninguna ruta nueva lo lee ni lo escribe, y `python -m app.integrations.cli.pms_credentials` sigue siendo la única vía. [R5]
