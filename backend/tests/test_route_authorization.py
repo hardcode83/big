@@ -263,7 +263,13 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     `tests/tenants/test_api.py`; by `properties-crud` with two property paths (four
     methods), asserted per method and per role in `tests/properties/test_authorization.py`;
     and by `cleaning` with the checklist template path (two methods), asserted the same way
-    in `tests/cleaning/test_templates_api.py`.
+    in `tests/cleaning/test_templates_api.py`; and by `reservations-webhooks` with the two
+    webhook-endpoint paths (one method each), asserted per role in
+    `tests/integrations/test_webhook_endpoints_api.py`.
+
+    The webhook **receiver** of that change is deliberately not here and will not be: it is
+    anonymous by design (rule 12(b) — the route token is the credential), so when it lands it
+    joins `ANONYMOUS_ENDPOINTS` above, which is the visible diff this module exists to force.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -284,6 +290,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/integrations/pms/import-csv",
+        "/api/v1/integrations/webhook-endpoints",
+        "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate",
         "/api/v1/users",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{user_id}/reset-password",

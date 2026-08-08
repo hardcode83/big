@@ -125,6 +125,20 @@ export interface paths {
      */
     post: operations["import_reservations_csv_api_v1_integrations_pms_import_csv_post"];
   };
+  "/api/v1/integrations/webhook-endpoints": {
+    /**
+     * Mint this tenant's webhook URL and header secret for one provider
+     * @description Generates the route token and the static header secret the provider will authenticate with, and returns both **once** — they are stored hashed and encrypted, so no later call can retrieve them. Answers `409` if the tenant already has an endpoint for this provider: replacing live material is what `rotate` is for.
+     */
+    post: operations["create_webhook_endpoint_api_v1_integrations_webhook_endpoints_post"];
+  };
+  "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate": {
+    /**
+     * Replace both secrets of an existing webhook endpoint
+     * @description Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.
+     */
+    post: operations["rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post"];
+  };
   "/api/v1/properties": {
     /**
      * List the tenant's properties
@@ -606,6 +620,20 @@ export interface components {
        */
       preferred_language?: string;
       role: components["schemas"]["UserRole"];
+    };
+    /**
+     * CreateWebhookEndpointRequest
+     * @description What `POST /api/v1/integrations/webhook-endpoints` accepts (R2.1).
+     *
+     * Neither secret appears here, and that is the whole shape of the operation: the caller does
+     * not choose the material, the system mints it. A request that accepted a token would let an
+     * operator paste a value they had already used somewhere, which is exactly the "constante
+     * global" rule 12(a) forbids.
+     */
+    CreateWebhookEndpointRequest: {
+      /** Header Name */
+      header_name: string;
+      provider: components["schemas"]["PMSProvider"];
     };
     /**
      * CurrentUserResponse
@@ -1363,6 +1391,35 @@ export interface components {
     ValidateCleaningTaskRequest: {
       validation_status: components["schemas"]["CleaningValidationStatus"];
     };
+    /**
+     * WebhookEndpointMaterialResponse
+     * @description The one and only time either secret is serialised (R2.3, rule 3(a)'s narrow exception).
+     *
+     * There is deliberately **no read endpoint** returning this shape, not even with the values
+     * masked: rule 3(a) permits handing them over "una sola vez en el momento de generarlo y en
+     * cada rotación", and a masked read would be a second serialisation the exception does not
+     * cover. Losing the URL is repaired by rotating, which is why `notice` says so in the response
+     * instead of in documentation the operator will not have open.
+     */
+    WebhookEndpointMaterialResponse: {
+      /** Header Name */
+      header_name: string;
+      /** Header Secret */
+      header_secret: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Notice
+       * @default Copy the URL and the header secret into the provider's panel now: they are shown once and cannot be retrieved afterwards. If they are lost, rotate this endpoint.
+       */
+      notice?: string;
+      provider: components["schemas"]["PMSProvider"];
+      /** Webhook Url */
+      webhook_url: string;
+    };
   };
   responses: never;
   parameters: never;
@@ -1986,6 +2043,80 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ImportReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Mint this tenant's webhook URL and header secret for one provider
+   * @description Generates the route token and the static header secret the provider will authenticate with, and returns both **once** — they are stored hashed and encrypted, so no later call can retrieve them. Answers `409` if the tenant already has an endpoint for this provider: replacing live material is what `rotate` is for.
+   */
+  create_webhook_endpoint_api_v1_integrations_webhook_endpoints_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWebhookEndpointRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["WebhookEndpointMaterialResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Replace both secrets of an existing webhook endpoint
+   * @description Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.
+   */
+  rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post: {
+    parameters: {
+      path: {
+        endpoint_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebhookEndpointMaterialResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

@@ -70,13 +70,33 @@ forzado en `infrastructure/`.
   > El `AuditLog` se escribe también en el **alta** (`WEBHOOK_ENDPOINT_CREATED`), no sólo en la
   > rotación: la acción ya existía en el vocabulario desde 1.4 y una creación sin rastro deja el
   > `WEBHOOK_ENDPOINT_ROTATED` posterior sin origen. 12 tests nuevos; 1523 en verde.
-- [ ] 1.6 Endpoints `POST /api/v1/integrations/webhook-endpoints` y `.../{id}/rotate` en
+- [x] 1.6 Endpoints `POST /api/v1/integrations/webhook-endpoints` y `.../{id}/rotate` en
   `api/router.py` + `schemas.py` + `dependencies.py`, con RBAC. Tests de endpoint incluyendo el rechazo
   sin autenticación y con rol insuficiente, y que la respuesta de lectura **no** contiene el material.
   [R2.3, R2.5]
-- [ ] 1.7 Regenerar las **dos mitades** del contrato y commitearlas: `make openapi` (backend) y
+  > **El permiso elegido, que el diseño no fijaba: `MANAGE_TENANT_SETTINGS`** (sólo `TENANT_OWNER`), no
+  > el `MANAGE_RESERVATIONS` que usa el import de CSV al lado. Acuñar este material decide **quién
+  > puede escribir en el tenant desde internet**, para todas las propiedades a la vez; eso es
+  > configuración del tenant («configurar preferencias del tenant», PRD §6), no operar reservas. Sin
+  > permiso nuevo, siguiendo el precedente que dejó `reservations` («un permiso que nadie razona por
+  > separado es uno que nadie administra»). El test parametriza los tres roles que **no** deben poder,
+  > incluido `PROPERTY_MANAGER`, que es la relajación plausible.
+  > **No hay endpoint de lectura**, y por eso la última cláusula de la tarea se verifica por ausencia:
+  > la regla 3(a) permite entregar el material «una sola vez», y una lectura enmascarada sería una
+  > segunda serialización que la excepción no cubre. Se documenta en el schema.
+  > **La URL absoluta sale de `request.base_url`**, no de configuración nueva: no existe un ajuste de
+  > origen público y añadirlo sería la tercera perilla contra la que argumenta D5. No es inyección de
+  > `Host`: la cabecera es de la petición del propio operador autenticado.
+  > `test_route_authorization.py` lleva las dos rutas nuevas en su snapshot, con la nota de que el
+  > receptor de §2 irá al allowlist anónimo y no aquí. 14 tests nuevos.
+- [x] 1.7 Regenerar las **dos mitades** del contrato y commitearlas: `make openapi` (backend) y
   `cd frontend && npm run api:generate` (`frontend/lib/api/generated/openapi.d.ts`). Verificar con
   `uv run python -m app.cli.openapi --check`. [documentation.md]
+  > **`npm run api:generate` no corre en el host de un worktree**: las dependencias del frontend viven
+  > en el volumen `frontend_node_modules`, no en el árbol (project.md § Worktree bootstrap), así que
+  > el comando documentado falla con `ERR_MODULE_NOT_FOUND`. Se generó dentro del contenedor
+  > `frontend`, alimentándole `backend/openapi.json` por stdin en la ruta que el script espera. Las
+  > dos mitades pasan su `--check`; el diff del `.d.ts` es puramente aditivo (+131, −0).
 
 ## 2. Recepción autenticada
 
