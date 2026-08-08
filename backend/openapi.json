@@ -1251,6 +1251,25 @@
         "title": "CurrentUserResponse",
         "type": "object"
       },
+      "DocumentStoredResponse": {
+        "description": "What a successful write returns: **no document number**.\n\nThe caller just sent it; echoing it back would put it in one more response body, one more\nproxy log and one more browser cache for no benefit.",
+        "properties": {
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "guest_id": {
+            "format": "uuid",
+            "title": "Guest Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guest_id",
+          "document_status"
+        ],
+        "title": "DocumentStoredResponse",
+        "type": "object"
+      },
       "ErrorBody": {
         "description": "The `error` object of the PRD §23 envelope.",
         "properties": {
@@ -1304,6 +1323,83 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "GuestDocumentResponse": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "document_expiry_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Expiry Date"
+          },
+          "document_number": {
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuestDocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "guest_id": {
+            "format": "uuid",
+            "title": "Guest Id",
+            "type": "string"
+          },
+          "nationality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nationality"
+          }
+        },
+        "required": [
+          "guest_id",
+          "full_name",
+          "nationality",
+          "date_of_birth",
+          "document_type",
+          "document_number",
+          "document_expiry_date",
+          "document_status"
+        ],
+        "title": "GuestDocumentResponse",
+        "type": "object"
+      },
       "GuestDocumentStatus": {
         "enum": [
           "NOT_PROVIDED",
@@ -1313,6 +1409,17 @@
           "REJECTED"
         ],
         "title": "GuestDocumentStatus",
+        "type": "string"
+      },
+      "GuestDocumentType": {
+        "enum": [
+          "DNI",
+          "NIE",
+          "PASSPORT",
+          "RESIDENCE_CARD",
+          "OTHER"
+        ],
+        "title": "GuestDocumentType",
         "type": "string"
       },
       "GuestSummaryResponse": {
@@ -1402,6 +1509,24 @@
           "errors"
         ],
         "title": "ImportReportResponse",
+        "type": "object"
+      },
+      "LegalRegistrationResponse": {
+        "properties": {
+          "legal_registration_status": {
+            "$ref": "#/components/schemas/LegalRegistrationStatus"
+          },
+          "reservation_id": {
+            "format": "uuid",
+            "title": "Reservation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reservation_id",
+          "legal_registration_status"
+        ],
+        "title": "LegalRegistrationResponse",
         "type": "object"
       },
       "LegalRegistrationStatus": {
@@ -2543,6 +2668,58 @@
           "reason"
         ],
         "title": "RowErrorResponse",
+        "type": "object"
+      },
+      "SetDocumentRequest": {
+        "additionalProperties": false,
+        "description": "The five document fields, all required together (R7.1).\n\nNot a partial patch: PRD §17 needs the set, and a guest with a number but no expiry date\nlooks documented and cannot be reported. `check_in_date`/`check_out_date` — the other two\nof the eight — are the reservation's and are never accepted here.",
+        "properties": {
+          "date_of_birth": {
+            "format": "date",
+            "title": "Date Of Birth",
+            "type": "string"
+          },
+          "document_expiry_date": {
+            "format": "date",
+            "title": "Document Expiry Date",
+            "type": "string"
+          },
+          "document_number": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/GuestDocumentType"
+          },
+          "nationality": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Nationality",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          }
+        },
+        "required": [
+          "nationality",
+          "date_of_birth",
+          "document_type",
+          "document_number",
+          "document_expiry_date"
+        ],
+        "title": "SetDocumentRequest",
         "type": "object"
       },
       "StorageType": {
@@ -5236,6 +5413,152 @@
         ]
       }
     },
+    "/api/v1/guests/{guest_id}/document": {
+      "get": {
+        "description": "The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.",
+        "operationId": "read_guest_document_api_v1_guests__guest_id__document_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read a guest's full identity document",
+        "tags": [
+          "legal"
+        ]
+      },
+      "patch": {
+        "description": "The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.",
+        "operationId": "set_guest_document_api_v1_guests__guest_id__document_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStoredResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Store a guest's identity document",
+        "tags": [
+          "legal"
+        ]
+      }
+    },
     "/api/v1/integrations/pms/import-csv": {
       "post": {
         "description": "Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).",
@@ -6130,6 +6453,75 @@
         "summary": "Update a reservation partially",
         "tags": [
           "reservations"
+        ]
+      }
+    },
+    "/api/v1/reservations/{reservation_id}/legal-registration/submit": {
+      "post": {
+        "description": "PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.",
+        "operationId": "submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report a stay to SES.Hospedajes",
+        "tags": [
+          "legal"
         ]
       }
     },

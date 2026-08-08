@@ -17,10 +17,11 @@ the worst possible kind of idempotence.
 import uuid
 from datetime import datetime
 
-from sqlalchemy import update
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.guests.domain.enums import LegalRegistrationStatus
+from app.guests.domain.ports import LegalRegistrationStay
 from app.reservations.infrastructure.models import ReservationModel
 
 
@@ -44,3 +45,58 @@ class SqlAlchemyLegalRegistrationInitialiser:
             .values(legal_registration_status=LegalRegistrationStatus.PENDING_GUEST_DATA)
         )
         return result.rowcount > 0
+
+
+class SqlAlchemyLegalRegistrationStayStore:
+    """`LegalRegistrationStayStore` — one column of `reservations`, and no more.
+
+    Every statement filters `tenant_id`, so a stay of another tenant simply is not there:
+    `get` answers `None` and `set_status` matches nothing. That is what makes the `404` of
+    R6 identical for "absent" and "someone else's".
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID
+    ) -> LegalRegistrationStay | None:
+        row = await self._session.execute(
+            select(
+                ReservationModel.id,
+                ReservationModel.property_id,
+                ReservationModel.guest_id,
+                ReservationModel.check_in_date,
+                ReservationModel.check_out_date,
+                ReservationModel.legal_registration_status,
+            ).where(
+                ReservationModel.tenant_id == tenant_id,
+                ReservationModel.id == reservation_id,
+            )
+        )
+        found = row.one_or_none()
+        if found is None:
+            return None
+        return LegalRegistrationStay(
+            reservation_id=found.id,
+            property_id=found.property_id,
+            guest_id=found.guest_id,
+            check_in_date=found.check_in_date,
+            check_out_date=found.check_out_date,
+            status=found.legal_registration_status,
+        )
+
+    async def set_status(
+        self,
+        tenant_id: uuid.UUID,
+        reservation_id: uuid.UUID,
+        status: LegalRegistrationStatus,
+    ) -> None:
+        await self._session.execute(
+            update(ReservationModel)
+            .where(
+                ReservationModel.tenant_id == tenant_id,
+                ReservationModel.id == reservation_id,
+            )
+            .values(legal_registration_status=status)
+        )

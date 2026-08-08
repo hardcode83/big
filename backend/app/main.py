@@ -19,6 +19,8 @@ from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
+from app.guests.api.errors import register_guest_error_handlers
+from app.guests.api.router import router as guests_router
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
 from app.notifications.api.router import router as notifications_router
@@ -59,6 +61,7 @@ def create_app() -> FastAPI:
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
     register_access_error_handlers(app)
+    register_guest_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -83,6 +86,10 @@ def create_app() -> FastAPI:
     # `access-notifications`: PRD §15's operator surface. The `access` domain had entities and
     # a table since `domain-foundation-ops` and no way to reach them until now.
     app.include_router(access_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: guest documents and the SES.Hospedajes submission (PRD §17).
+    # One router for everything that touches an identity document, which is the file a
+    # reviewer opens when a real provider arrives.
+    app.include_router(guests_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

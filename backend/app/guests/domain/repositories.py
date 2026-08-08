@@ -43,3 +43,34 @@ class GuestRepository(Protocol):
         never populate document fields — the asymmetry with the reads is deliberate.
         """
         ...
+
+    async def get_full(self, tenant_id: uuid.UUID, guest_id: uuid.UUID) -> Guest | None:
+        """The whole entity, document fields included (`access-notifications` R6, R7).
+
+        **The deliberate exception to this port's own rule**, and it is narrow on purpose.
+        The docstring above explains why reads return `GuestSummary`: an entity in a
+        response is one `model_validate` away from publishing an identity document. That
+        reasoning still holds for every caller that only needs to *show* a guest.
+
+        What it cannot serve is the two paths that need the fields themselves — deciding
+        whether a stay is ready to report (PRD §17, and even there only whether a number is
+        *stored*) and assembling the submission. Those are the two, they both live in
+        `guests/application/`, and rule 9 of `sdd/steering/security.md` puts an `AuditLog`
+        row behind the second.
+
+        `document_number_encrypted` comes back **as ciphertext**: decryption is
+        `app/core/crypto.py`'s, so the number is cleartext only inside the use case that
+        wrote its audit row first.
+        """
+        ...
+
+    async def save_document(self, tenant_id: uuid.UUID, guest: Guest) -> None:
+        """Write the identity-document fields of one guest (R7.1).
+
+        Narrow like `NotificationLogRepository.mark_breached`, and for the same reason: this
+        path exists to store a document, and a port that also let it rewrite `full_name`,
+        `email` or `preferred_language` would be an open door for the change that comes next.
+        Persists `nationality`, `date_of_birth`, `document_type`,
+        `document_number_encrypted`, `document_expiry_date` and `document_status`.
+        """
+        ...

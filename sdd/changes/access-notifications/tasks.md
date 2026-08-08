@@ -171,40 +171,40 @@ Desviaciones de esta sección, para que se lean como decisiones:
 
 ## 7. SES.Hospedajes: documento del huésped y registro legal
 
-- [ ] 7.1 (TDD) `backend/tests/guests/test_legal_registration.py` primero, luego
+- [x] 7.1 (TDD) `backend/tests/guests/test_legal_registration.py` primero, luego
   `backend/app/guests/domain/legal_registration.py`: servicio puro que decide `READY_TO_SUBMIT`
   sobre la unión huésped + reserva con los **ocho** campos de PRD §17 (design D11). Cubrir cada
   campo ausente por separado. [R6]
-- [ ] 7.2 `backend/app/guests/domain/ports.py` (nuevo): `SESHospedajesAdapter` (`submit_guest`,
+- [x] 7.2 `backend/app/guests/domain/ports.py` (nuevo): `SESHospedajesAdapter` (`submit_guest`,
   `get_submission_status`), `LegalSubmission` y `SubmissionResult`. `LegalSubmission` se construye
   desde el huésped y la reserva y es el **único** transporte del documento en claro. [R6]
-- [ ] 7.3 `backend/app/guests/infrastructure/adapters.py` (nuevo): `MockSESHospedajesAdapter`
+- [x] 7.3 `backend/app/guests/infrastructure/adapters.py` (nuevo): `MockSESHospedajesAdapter`
   marcado `EXTERNAL_DEPENDENCY`, con camino de éxito y camino de fallo forzable para el test de
   R6.5. Tests en `backend/tests/guests/test_ses_adapter.py`. [R6]
-- [ ] 7.4 `backend/app/guests/domain/entities.py` + `infrastructure/repositories.py`: escritura y
+- [x] 7.4 `backend/app/guests/domain/entities.py` + `infrastructure/repositories.py`: escritura y
   lectura del documento cifrado con `app/core/crypto.py` (regla 3). El puerto gana
   `set_document`, `get_document` y `get_full` — y las lecturas existentes siguen devolviendo
   `GuestSummary` sin documento. Tests en `backend/tests/guests/test_repositories.py`: el valor en
   la columna no es el texto plano, y `GuestSummary` no lo transporta. [R7]
-- [ ] 7.5 `backend/app/audit/domain/actions.py`: `ENTITY_GUEST` y las acciones
+- [x] 7.5 `backend/app/audit/domain/actions.py`: `ENTITY_GUEST` y las acciones
   `GUEST_DOCUMENT_UPDATED`, `GUEST_DOCUMENT_READ`, `LEGAL_REGISTRATION_SUBMITTED`. [R6, R7]
-- [ ] 7.6 `backend/app/guests/application/use_cases.py` (nuevo): `SetGuestDocumentUseCase`
+- [x] 7.6 `backend/app/guests/application/use_cases.py` (nuevo): `SetGuestDocumentUseCase`
   (cifra, mueve `document_status` a `PROVIDED`, reevalúa `READY_TO_SUBMIT`, audita con `ChangeSet`
   que registra **qué campos** cambiaron y nunca sus valores) y `ReadGuestDocumentUseCase`
   (descifra y audita el acceso, regla 9). Tests en
   `backend/tests/guests/test_use_cases.py` que verifican que el `ChangeSet` no contiene el número
   ni la fecha de nacimiento (R7.4). [R6, R7]
-- [ ] 7.7 `backend/app/guests/application/use_cases.py`: `SubmitLegalRegistrationUseCase` — `409`
+- [x] 7.7 `backend/app/guests/application/use_cases.py`: `SubmitLegalRegistrationUseCase` — `409`
   si la reserva no está en `READY_TO_SUBMIT` (R6.6, sin invocar el adapter); al éxito
   `SUBMITTED` + `TimelineEvent` `LEGAL_REGISTRATION_SUBMITTED`; al fallo `FAILED` + notificación
   `PENDING` al manager y **sin** evento de submission (R6.5). Tests de los tres caminos. [R6]
-- [ ] 7.8 `backend/app/guests/api/{__init__,router,schemas,dependencies,errors}.py` (nuevos) y
+- [x] 7.8 `backend/app/guests/api/{__init__,router,schemas,dependencies,errors}.py` (nuevos) y
   el endpoint de submit en el router de reservas o uno propio: los tres endpoints de la tabla del
   design. Registrar en `backend/app/main.py`. [R6, R7]
-- [ ] 7.9 `backend/tests/guests/test_api.py`: solo `SUPER_ADMIN`/`TENANT_OWNER`/`PROPERTY_MANAGER`
+- [x] 7.9 `backend/tests/guests/test_api.py`: solo `SUPER_ADMIN`/`TENANT_OWNER`/`PROPERTY_MANAGER`
   ven el documento completo (R7.2); ningún listado devuelve el número (R7.1); `404` idéntico
   cross-tenant; y toda lectura del documento deja su fila de `AuditLog` (R7.3). [R7]
-- [ ] 7.10 `backend/tests/guests/test_isolation.py`: test de tenant isolation del módulo `guests`,
+- [x] 7.10 `backend/tests/guests/test_isolation.py`: test de tenant isolation del módulo `guests`,
   obligatorio por DoD §28.18. [R6, R7]
 
 ## 8. Contrato de API y documentación
@@ -213,7 +213,7 @@ Desviaciones de esta sección, para que se lean como decisiones:
   contrato: `make openapi` y `cd frontend && npm run api:generate`. Commitear
   `backend/openapi.json` **y** `frontend/lib/api/generated/openapi.d.ts` — son las dos mitades del
   mismo puente (`steering/documentation.md`). [R3, R4, R6]
-- [ ] 8.2 `.env.example`: las dos variables nuevas con comentario y sin valor. [R4]
+- [x] 8.2 `.env.example`: las dos variables nuevas con comentario y sin valor. [R4]
 - [ ] 8.3 `README.md` raíz: mencionar los dos jobs nuevos del beat y los módulos que ganan API. [R1, R4]
 - [ ] 8.4 `docs/celery-jobs.md`: añadir `dispatch_notifications` y `provision_access_records` a la
   tabla de jobs con su cadencia y su propósito. [R1, R4]

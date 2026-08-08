@@ -277,6 +277,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/access-records/{record_id}/external",
         "/api/v1/access-records/{record_id}/manual-code",
         "/api/v1/notifications",
+        "/api/v1/guests/{guest_id}/document",
+        "/api/v1/reservations/{reservation_id}/legal-registration/submit",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
         "/api/v1/cleaning-checklist-templates",

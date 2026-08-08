@@ -153,6 +153,18 @@ export interface paths {
      */
     post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
   };
+  "/api/v1/guests/{guest_id}/document": {
+    /**
+     * Read a guest's full identity document
+     * @description The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.
+     */
+    get: operations["read_guest_document_api_v1_guests__guest_id__document_get"];
+    /**
+     * Store a guest's identity document
+     * @description The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.
+     */
+    patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
+  };
   "/api/v1/integrations/pms/import-csv": {
     /**
      * Import reservations from a CSV file
@@ -219,6 +231,13 @@ export interface paths {
      * @description Only the fields present in the body are applied. Dates and occupancy are revalidated on the RESULT, and `nights`/`total_guests` are recomputed. A body that changes nothing writes nothing and records no timeline event.
      */
     patch: operations["update_reservation_api_v1_reservations__reservation_id__patch"];
+  };
+  "/api/v1/reservations/{reservation_id}/legal-registration/submit": {
+    /**
+     * Report a stay to SES.Hospedajes
+     * @description PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.
+     */
+    post: operations["submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post"];
   };
   "/api/v1/tenants/{tenant_id}": {
     /**
@@ -748,6 +767,21 @@ export interface components {
       tenant_id: string;
     };
     /**
+     * DocumentStoredResponse
+     * @description What a successful write returns: **no document number**.
+     *
+     * The caller just sent it; echoing it back would put it in one more response body, one more
+     * proxy log and one more browser cache for no benefit.
+     */
+    DocumentStoredResponse: {
+      document_status: components["schemas"]["GuestDocumentStatus"];
+      /**
+       * Guest Id
+       * Format: uuid
+       */
+      guest_id: string;
+    };
+    /**
      * ErrorBody
      * @description The `error` object of the PRD §23 envelope.
      */
@@ -777,11 +811,36 @@ export interface components {
     ErrorEnvelope: {
       error: components["schemas"]["ErrorBody"];
     };
+    /** GuestDocumentResponse */
+    GuestDocumentResponse: {
+      /** Date Of Birth */
+      date_of_birth: string | null;
+      /** Document Expiry Date */
+      document_expiry_date: string | null;
+      /** Document Number */
+      document_number: string;
+      document_status: components["schemas"]["GuestDocumentStatus"];
+      document_type: components["schemas"]["GuestDocumentType"] | null;
+      /** Full Name */
+      full_name: string;
+      /**
+       * Guest Id
+       * Format: uuid
+       */
+      guest_id: string;
+      /** Nationality */
+      nationality: string | null;
+    };
     /**
      * GuestDocumentStatus
      * @enum {string}
      */
     GuestDocumentStatus: "NOT_PROVIDED" | "PENDING" | "PROVIDED" | "VERIFIED" | "REJECTED";
+    /**
+     * GuestDocumentType
+     * @enum {string}
+     */
+    GuestDocumentType: "DNI" | "NIE" | "PASSPORT" | "RESIDENCE_CARD" | "OTHER";
     /**
      * GuestSummaryResponse
      * @description The guest as a reservation may show it — no document data at all (R1.8, D17).
@@ -819,6 +878,15 @@ export interface components {
       skipped: number;
       /** Updated */
       updated: number;
+    };
+    /** LegalRegistrationResponse */
+    LegalRegistrationResponse: {
+      legal_registration_status: components["schemas"]["LegalRegistrationStatus"];
+      /**
+       * Reservation Id
+       * Format: uuid
+       */
+      reservation_id: string;
     };
     /**
      * LegalRegistrationStatus
@@ -1238,6 +1306,33 @@ export interface components {
       reason: string;
       /** Reference */
       reference?: string | null;
+    };
+    /**
+     * SetDocumentRequest
+     * @description The five document fields, all required together (R7.1).
+     *
+     * Not a partial patch: PRD §17 needs the set, and a guest with a number but no expiry date
+     * looks documented and cannot be reported. `check_in_date`/`check_out_date` — the other two
+     * of the eight — are the reservation's and are never accepted here.
+     */
+    SetDocumentRequest: {
+      /**
+       * Date Of Birth
+       * Format: date
+       */
+      date_of_birth: string;
+      /**
+       * Document Expiry Date
+       * Format: date
+       */
+      document_expiry_date: string;
+      /** Document Number */
+      document_number: string;
+      document_type: components["schemas"]["GuestDocumentType"];
+      /** Nationality */
+      nationality: string;
+      /** Reservation Id */
+      reservation_id?: string | null;
     };
     /**
      * StorageType
@@ -2358,6 +2453,85 @@ export interface operations {
     };
   };
   /**
+   * Read a guest's full identity document
+   * @description The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.
+   */
+  read_guest_document_api_v1_guests__guest_id__document_get: {
+    parameters: {
+      path: {
+        guest_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestDocumentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Store a guest's identity document
+   * @description The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.
+   */
+  set_guest_document_api_v1_guests__guest_id__document_patch: {
+    parameters: {
+      path: {
+        guest_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetDocumentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DocumentStoredResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Import reservations from a CSV file
    * @description Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).
    */
@@ -2759,6 +2933,43 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ReservationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Report a stay to SES.Hospedajes
+   * @description PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.
+   */
+  submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post: {
+    parameters: {
+      path: {
+        reservation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LegalRegistrationResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

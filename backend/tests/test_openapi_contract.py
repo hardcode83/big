@@ -88,6 +88,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # inbox that makes `IN_APP` delivery a fact rather than a claim (design D5/D6).
         "access-records",
         "notifications",
+        # PRD §17: guest documents and the SES.Hospedajes submission. The submit route lives
+        # under `reservations` by path but on the guests router, so the prefix set already
+        # names it.
+        "guests",
     }
 
 
