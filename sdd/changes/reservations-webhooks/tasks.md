@@ -24,7 +24,7 @@ forzado en `infrastructure/`.
   > `hash_webhook_token`, `secrets_match`) son stdlib puro y viven en `domain/` igual.
   > 20 tests nuevos; la entidad rechaza además un `token_hash` que sea el **token** en vez de su hash,
   > que es el único accidente capaz de anular D3 y que ninguna constraint de columna vería.
-- [ ] 1.2 `WebhookEndpointModel` en `backend/app/integrations/infrastructure/models.py` con
+- [x] 1.2 `WebhookEndpointModel` en `backend/app/integrations/infrastructure/models.py` con
   `TenantScopedMixin`, `UNIQUE(tenant_id, provider)`, `token_hash` `String(64)` `UNIQUE` y
   `header_secret_encrypted` `Text`; **y** las dos columnas de D9 en `WebhookEventModel`
   (`attempts SMALLINT NOT NULL DEFAULT 0`, `next_attempt_at TIMESTAMPTZ NULL`). Migración Alembic única

@@ -9,6 +9,7 @@ from sqlalchemy import (
     Enum,
     ForeignKey,
     Index,
+    SmallInteger,
     String,
     Text,
     UniqueConstraint,
@@ -79,6 +80,74 @@ class WebhookEventModel(Base, UUIDPrimaryKeyMixin):
     # No TimestampMixin: §7.26 declares received_at as the only timestamp.
     received_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
+    )
+
+    # --- Retry bookkeeping. NOT in PRD §7.26 (`reservations-webhooks` design D9). -------------
+    #
+    # The PRD asks for "3 reintentos con backoff exponencial" (§16) and gives the entity no
+    # place to remember either number, so the two are irreconcilable as written and something
+    # has to give. These columns are the smallest thing that can: purely internal accounting,
+    # no change to the semantics of any column §7.26 does declare.
+    #
+    # Why not Celery's own `autoretry_for`/`retry_backoff`, which needs no schema at all: that
+    # state lives in the broker, so a worker restart forgets it — and, worse, a cadence-driven
+    # job cannot then tell "being retried right now" from "never attempted", so it picks the row
+    # up again and processes it twice. A durable queue needs its counter next to the row.
+    attempts: Mapped[int] = mapped_column(SmallInteger, default=0, server_default="0")
+    next_attempt_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
+    )
+
+
+class WebhookEndpointModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
+    """The authentication material of rule 12(a)/(b), one row per tenant and provider.
+
+    `TenantScopedMixin` — unlike its sibling `WebhookEventModel` three classes up, whose
+    `tenant_id` is nullable because §7.26 says a payload that cannot be attributed is still
+    recorded. Nothing of the sort applies here: an endpoint without a tenant is not a degraded
+    endpoint, it is an unusable one. So this table is inside the global filter the ordinary way,
+    and carries its **own** isolation test (rule 1 and rule 3(c)): a scoping failure here does not
+    disclose data, it lets one client's webhooks be accepted as another's.
+
+    **Why a table of its own rather than columns on `pms_credentials`** (design D2): the direction
+    of trust is opposite. `pms_credentials` holds secrets the provider gave us, which rule 3(a)
+    says are never returned by any API, "ni enmascaradas". This holds a secret *we* minted for the
+    provider to authenticate itself with, and it is the single named exception to that rule —
+    returnable once, at creation and on each rotation, because an operator has to paste it into
+    the provider's panel and there is no subscription API to do it for them. One column cannot
+    carry both contracts.
+
+    `token_hash` and not the token (design D3): the route segment is the defence rule 12(b) asks
+    for, so a dump of this table must not hand it over. Unsalted SHA-256 because the lookup has to
+    be an index hit and the input is 256 bits of CSPRNG output — the reasoning is in
+    `app/integrations/domain/webhook_auth.py`, which is where the primitives live.
+    """
+
+    __tablename__ = "webhook_endpoints"
+    __table_args__ = (
+        # One endpoint per provider per tenant. No partial-index subtlety here, unlike
+        # `pms_credentials`: both columns are NOT NULL, so a plain UNIQUE really does constrain
+        # every row.
+        UniqueConstraint("tenant_id", "provider", name="uq_webhook_endpoints_tenant_provider"),
+    )
+
+    provider: Mapped[PMSProvider] = mapped_column(pms_provider_enum)
+    # 64 hex characters. UNIQUE across tenants on purpose: this is the column the receiving path
+    # queries with no tenant in hand (it is what resolves the tenant), so global uniqueness is
+    # what makes "exactly one row" a schema guarantee rather than an assumption of the caller.
+    # `index=True, unique=True` rather than a bare `unique=True`: the first gives a unique
+    # *index* (`ix_webhook_endpoints_token_hash`), the second a unique *constraint*, and
+    # `alembic check` compares the two shapes and would report drift against the migration.
+    token_hash: Mapped[str] = mapped_column(String(64), index=True, unique=True)
+    # The provider's own header name, a column and not a constant: nobody has yet verified what
+    # Beds24 actually sends (`sdd/roadmap/beds24-webhook-cutover-measurement.md` lists it among
+    # the three unmeasured things), so adapting must not require a migration.
+    header_name: Mapped[str] = mapped_column(String(100))
+    # Fernet ciphertext from this column's first migration, exactly as `pms_credentials`
+    # did it — R2.2 admits no intermediate state where it holds plaintext.
+    header_secret_encrypted: Mapped[str] = mapped_column(Text)
+    rotated_at: Mapped[datetime | None] = mapped_column(
+        DateTime(timezone=True), nullable=True, default=None
     )
 
 
