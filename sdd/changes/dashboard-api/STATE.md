@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/dashboard-api
-implementation_sha: a8b93926920a29ef086071b3f7715235b7998b23
-pr_number: 
-pr_url: 
-pr_state: 
+implementation_sha: ba0273c51b22602175cfa82a71d854343c3e3390
+pr_number: 75
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/75
+pr_state: OPEN
 merge_evidence: 
 merge_sha: 
 ---
