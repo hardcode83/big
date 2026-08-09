@@ -34,4 +34,4 @@
 | access-notifications | new, design, tasks, run, review, ship, archive | 205216 | 697062 | 217439895 | 143.4679 | 2026-08-08 | 2026-08-08 |
 | cleaning-photos-storage | new, design, tasks, run, review, ship, archive | 507425 | 1372474 | 311969941 | 223.9127 | 2026-08-08 | 2026-08-09 |
 | reservations-webhooks | new, design, tasks, run, review, ship, archive | 553657 | 1839411 | 395009670 | 262.6137 | 2026-08-08 | 2026-08-09 |
-| dashboard-api | new, design, tasks, run, review, ship | 410483 | 1166218 | 287516196 | 183.3641 | 2026-08-09 | — |
+| dashboard-api | new, design, tasks, run, review, ship, archive | 425934 | 1251691 | 309988498 | 198.8594 | 2026-08-09 | 2026-08-09 |

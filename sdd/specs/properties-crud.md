@@ -7,6 +7,13 @@ edición parcial, con los cuatro endpoints que declara PRD §23. Es el paso prev
 reserva, porque las tres vías de entrada de reservas —el alta manual, el import CSV y el sync del
 PMS— resuelven primero la propiedad, y ninguna puede resolver lo que no existe.
 
+**El módulo ya no expone sólo esos cuatro**: `dashboard-api` añadió al mismo router la lectura
+ligera `GET /api/v1/properties/{id}/state` (PRD §23:1942), que vive aquí porque `properties` posee
+la columna que reporta y el historial del que la data. Es lectura pura y no resuelve nada: el
+estado es el que `PropertyStateMachine` escribió por última vez. Bajo el mismo prefijo `/properties`
+se sirve además `GET /api/v1/properties/{id}/dashboard`, pero ese es un agregado multidominio y su
+router es el de `app/dashboard/`; ambos se describen en [`dashboard-api.md`](dashboard-api.md).
+
 El *cómo se opera* está en [`docs/properties.md`](../../docs/properties.md); aquí vive el *qué
 hace*.
 
@@ -187,7 +194,8 @@ no le concede forma enmascarada.
 ### Aislamiento y autorización
 
 - THE SYSTEM SHALL declarar el permiso exigido en cada una de las cuatro rutas, y SHALL exigir
-  `READ_PROPERTIES` para leer y `MANAGE_PROPERTIES` para mutar.
+  `READ_PROPERTIES` para leer y `MANAGE_PROPERTIES` para mutar. La quinta ruta del router,
+  `GET /{id}/state`, es lectura y SHALL declarar también `READ_PROPERTIES`.
 - WHERE el rol es `PROPERTY_MANAGER`, THE SYSTEM SHALL permitir lectura y mutación.
 - WHERE el rol es `TENANT_OWNER`, THE SYSTEM SHALL permitir la lectura y denegar la mutación con
   `403`.
@@ -211,7 +219,8 @@ PRD §6 divergen, resuelto a favor del PRD.
 
 ## Key files
 
-- `backend/app/properties/api/` — `router.py` (los cuatro endpoints de PRD §23), `schemas.py` (las
+- `backend/app/properties/api/` — `router.py` (los cuatro endpoints de PRD §23 más
+  `GET /{id}/state`, que añadió `dashboard-api`), `schemas.py` (las
   cotas, `extra="forbid"`, el rechazo de nulos explícitos y la respuesta sin secreto),
   `errors.py` (el `_MAPPING` a los códigos del envelope), `dependencies.py`.
 - `backend/app/properties/application/property_admin.py` — los cuatro casos de uso, el cifrado del

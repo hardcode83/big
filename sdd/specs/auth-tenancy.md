@@ -175,6 +175,15 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   que expire el token.
 - IF un token válido nombra un tenant inexistente o no `ACTIVE`, o un usuario inexistente o
   no `ACTIVE`, THEN THE SYSTEM SHALL responder `401`.
+- WHEN se construye el `RequestContext` de una petición autenticada, THE SYSTEM SHALL incluir
+  el `preferred_language` del usuario como un `Locale` ya resuelto, tomado de la **misma fila
+  que la revalidación acaba de releer**, de modo que no cueste ninguna consulta adicional. Lo
+  añadió `dashboard-api` (su diseño D3) para que la capa de lectura pueda localizar textos sin
+  releer el usuario ni depender de `Accept-Language`: PRD:205 fija el idioma en la preferencia
+  del usuario autenticado, que es la fila y no el navegador.
+- IF `users.preferred_language` contiene un valor que no corresponde a ningún `Locale`
+  soportado —la columna es `String(5)` y no lo restringe—, THEN THE SYSTEM SHALL degradar al
+  idioma por defecto en vez de fallar la petición.
 - THE SYSTEM SHALL pasar el `tenant_id` efectivo como parámetro explícito a cada método de
   repositorio, que filtra por él. Es el mecanismo autorizado.
 - THE SYSTEM SHALL aplicar además, como red de seguridad, un filtro global por tenant en el
@@ -381,7 +390,8 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
 
 ## Key files
 
-- Dominio: `backend/app/auth/domain/` — `context.py` (`RequestContext` inmutable),
+- Dominio: `backend/app/auth/domain/` — `context.py` (`RequestContext` inmutable, con
+  `preferred_language: Locale` desde `dashboard-api`),
   `policy.py` (`Permission`, `ROLE_PERMISSIONS`, `is_allowed`), `ports.py`, `entities.py`
   (`User`, `UserSession` con `is_usable`/`rotate`), `enums.py`, `value_objects.py`
   (`normalize_email`), `exceptions.py`.
