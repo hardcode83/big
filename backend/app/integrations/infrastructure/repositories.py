@@ -8,15 +8,24 @@ No method commits: the transactional boundary is the use case, as everywhere els
 """
 
 import uuid
+from collections.abc import Sequence
+from datetime import datetime
 
-from sqlalchemy import select
+from sqlalchemy import or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import SecretDecryptionError
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
-from app.integrations.domain.entities import PmsCredential, WebhookEndpoint, WebhookEvent
+from app.integrations.domain.entities import (
+    MAX_WEBHOOK_ATTEMPTS,
+    PmsCredential,
+    QueuedWebhookEvent,
+    WebhookEndpoint,
+    WebhookEvent,
+    WebhookEventFailure,
+)
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
 from app.integrations.domain.errors import WebhookEndpointAlreadyExistsError
 from app.integrations.infrastructure.models import (
@@ -30,12 +39,11 @@ WEBHOOK_ENDPOINT_CONSTRAINT = "uq_webhook_endpoints_tenant_provider"
 
 
 class SqlAlchemyWebhookEventRepository:
-    """Adapter for `WebhookEventRepository`. Writes the queue; the job reads it.
+    """Adapter for `WebhookEventRepository`. The receiver writes the queue; the job drains it.
 
-    Runs on an **unmarked** session by construction, because its only caller today is the
-    anonymous receiving path. That matters for the read side more than the write side — a marked
-    session hides `tenant_id IS NULL` rows without erroring — and the boundary is pinned by
-    `tests/test_tenant_filter.py`.
+    Runs on an **unmarked** session by construction. That matters for the read side more than the
+    write side — a marked session hides `tenant_id IS NULL` rows without erroring — and the
+    boundary is pinned by `tests/test_tenant_filter.py` and by this module's own queue tests.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -57,6 +65,78 @@ class SqlAlchemyWebhookEventRepository:
                 error=None if event.error is None else event.error.render(),
                 received_at=event.received_at,
             )
+        )
+
+    async def select_pending(
+        self, *, now: datetime, limit: int
+    ) -> list[QueuedWebhookEvent]:
+        rows = await self._session.execute(
+            select(
+                WebhookEventModel.id,
+                WebhookEventModel.tenant_id,
+                WebhookEventModel.provider,
+                WebhookEventModel.received_at,
+                WebhookEventModel.attempts,
+            )
+            .where(
+                WebhookEventModel.processed.is_(False),
+                WebhookEventModel.attempts < MAX_WEBHOOK_ATTEMPTS,
+                or_(
+                    WebhookEventModel.next_attempt_at.is_(None),
+                    WebhookEventModel.next_attempt_at <= now,
+                ),
+            )
+            # Oldest first, so a backlog drains in the order it arrived. It does NOT make the
+            # processing order-dependent — D13 and R5.7 rest on the re-read and on the
+            # ingestor's idempotency, not on this — it only keeps a starved notice from staying
+            # starved behind newer ones.
+            .order_by(WebhookEventModel.received_at)
+            .limit(limit)
+        )
+        # Columns, not entities: the payload is not selected at all, so it never reaches this
+        # process. `QueuedWebhookEvent` explains why that is the point rather than an
+        # optimisation.
+        return [QueuedWebhookEvent(*row) for row in rows]
+
+    async def mark_processed(
+        self, event_ids: Sequence[uuid.UUID], *, now: datetime
+    ) -> None:
+        if not event_ids:
+            return
+        await self._session.execute(
+            update(WebhookEventModel)
+            .where(WebhookEventModel.id.in_(event_ids))
+            .values(processed=True, processed_at=now, error=None)
+        )
+
+    async def record_failure(
+        self,
+        event_ids: Sequence[uuid.UUID],
+        *,
+        failure: WebhookEventFailure,
+        next_attempt_at: datetime,
+    ) -> None:
+        if not event_ids:
+            return
+        await self._session.execute(
+            update(WebhookEventModel)
+            .where(WebhookEventModel.id.in_(event_ids))
+            .values(
+                attempts=WebhookEventModel.attempts + 1,
+                next_attempt_at=next_attempt_at,
+                error=failure.render(),
+            )
+        )
+
+    async def exhaust(
+        self, event_ids: Sequence[uuid.UUID], *, failure: WebhookEventFailure
+    ) -> None:
+        if not event_ids:
+            return
+        await self._session.execute(
+            update(WebhookEventModel)
+            .where(WebhookEventModel.id.in_(event_ids))
+            .values(attempts=MAX_WEBHOOK_ATTEMPTS, error=failure.render())
         )
 
 

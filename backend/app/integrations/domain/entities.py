@@ -2,7 +2,7 @@ import json
 import re
 import uuid
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.core.encrypted_secret import EncryptedSecret
@@ -105,6 +105,59 @@ _IS_FIELD_PATH = re.compile(r"[A-Za-z_][A-Za-z0-9_]*(\.[A-Za-z_][A-Za-z0-9_]*)*"
 WEBHOOK_FAILURE_CODES = frozenset({UNATTRIBUTED, UNMAPPABLE, PROVIDER_UNAVAILABLE})
 """Closed on purpose, like `app/audit/domain/actions.py`'s vocabulary and for the same reason:
 an open set of codes is a free-text field with extra steps."""
+
+
+MAX_WEBHOOK_ATTEMPTS = 3
+"""How many times one notice is tried before it stops being selected (D9, R5.3, PRD §16).
+
+Counted on the row rather than in the broker or in Redis, which is the whole of D9: a durable
+queue whose retry state does not survive a worker restart reprocesses, and a cadence-driven job
+cannot then tell "in flight" from "never attempted".
+"""
+
+RETRY_BASE_DELAY = timedelta(minutes=1)
+"""The first wait after a failure; each further attempt doubles it (R5.3).
+
+One minute because that is the job's own cadence: waiting less would put the retry in the very
+next tick, which is not a backoff at all.
+"""
+
+
+def webhook_retry_delay(attempts: int) -> timedelta:
+    """How long to wait after `attempts` failed tries. Strictly increasing, by construction.
+
+    `attempts` is the count AFTER the failure being recorded, so the first retry waits
+    `RETRY_BASE_DELAY` and each subsequent one doubles. Exponential rather than fixed because a
+    provider that is down tends to stay down for longer than one tick, and a fixed delay turns
+    the retry budget into three attempts inside three minutes — spent before an outage that
+    lasts ten.
+    """
+    if attempts < 1:
+        raise ValueError(f"attempts must be at least 1 to have failed once, got {attempts}")
+    return RETRY_BASE_DELAY * 2 ** (attempts - 1)
+
+
+@dataclass(frozen=True)
+class QueuedWebhookEvent:
+    """One pending notice, as the processing job sees it — **without its payload** (D13).
+
+    The omission is the point, and it is the same move `WebhookEventFailure` makes one type up:
+    D13 says the body is used to know *what to look at* and never as data, and here not even
+    that, because the re-read is grouped per provider (D10) and needs nothing the body contains.
+    A type that cannot carry the payload makes "the job never trusts the body" structural rather
+    than a rule each writer has to remember — and the body is attacker-supplied, so a future
+    change reaching for `event.payload["reservation_id"]` would be reintroducing exactly what
+    rule 12(d) and D13 close.
+
+    `attempts` is the count BEFORE this run, which is what the backoff of the next failure is
+    computed from.
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID | None
+    provider: str
+    received_at: datetime
+    attempts: int
 
 
 @dataclass(frozen=True)

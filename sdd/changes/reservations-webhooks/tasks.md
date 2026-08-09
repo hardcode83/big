@@ -300,9 +300,18 @@ forzado en `infrastructure/`.
 
 ## 4. Procesamiento asíncrono
 
-- [ ] 4.1 Repositorio de la cola en `infrastructure/repositories.py`, leyendo desde una sesión **nunca
+- [x] 4.1 Repositorio de la cola en `infrastructure/repositories.py`, leyendo desde una sesión **nunca
   marcada**. Test que fija que las filas con `tenant_id` NULL son visibles ahí y **no** desde una sesión
   marcada — el comportamiento que `tests/test_tenant_filter.py` ya documenta al revés. [R5.5, R1.8]
+  > **El lote no lleva el cuerpo.** `select_pending` devuelve `QueuedWebhookEvent` —id, tenant,
+  > proveedor, `received_at` y `attempts`— y no selecciona `payload` en absoluto. D13 dice que el
+  > cuerpo no es dato, y con la re-lectura agrupada por proveedor (D10) el job tampoco lo necesita
+  > para saber qué mirar: un tipo que no puede transportarlo convierte esa garantía en estructura,
+  > igual que `WebhookEventFailure` hace con la regla 11. El cuerpo lo escribe un anónimo desde
+  > internet, así que la diferencia no es estética.
+  > `attempts` se incrementa **en el propio UPDATE** (`attempts + 1`), nunca desde un valor leído
+  > antes: dos ejecuciones solapadas escribirían las dos `attempts = 1` y el presupuesto de R5.3 no
+  > llegaría nunca a su techo.
 - [ ] 4.2 Caso de uso de procesamiento en `application/webhooks.py`: lee el lote, agrupa por tenant, y
   abre **una sesión marcada por tenant, nunca re-marcada**, extrayendo el helper de
   `app/scheduler/runner.py` en vez de usar `run_for_every_tenant` (que itera todos los tenants activos).

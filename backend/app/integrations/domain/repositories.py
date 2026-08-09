@@ -14,9 +14,17 @@ and not port ownership across domains.
 """
 
 import uuid
+from collections.abc import Sequence
+from datetime import datetime
 from typing import Protocol
 
-from app.integrations.domain.entities import PmsCredential, WebhookEndpoint, WebhookEvent
+from app.integrations.domain.entities import (
+    PmsCredential,
+    QueuedWebhookEvent,
+    WebhookEndpoint,
+    WebhookEvent,
+    WebhookEventFailure,
+)
 from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
 
 
@@ -29,8 +37,11 @@ class WebhookEventRepository(Protocol):
     attributed to be recorded rather than dropped (R1.8). A `tenant_id` parameter would have to
     accept `None`, which is exactly the signature that invites a caller to pass it by accident.
 
-    The reading half of this port — selecting a batch, counting attempts, marking processed —
-    belongs to the processing job and arrives with it. What the receiving path needs is one write.
+    The reading half arrived with the processing job (§4). Every method here runs on a session
+    that was **never marked**, and for this table that is not a convention but a correctness
+    requirement: `tenant_id` is nullable, so a marked session's `tenant_id = X` predicate hides
+    the `NULL` rows silently rather than erroring, and those are precisely the rows D11 has to
+    reach in order to exhaust them.
     """
 
     async def add(self, event: WebhookEvent) -> None:
@@ -40,6 +51,59 @@ class WebhookEventRepository(Protocol):
         has just resolved a tenant from a route token, and marking the session mid-request is the
         half-marked state `app/core/db.py` guards against (design D1). The `tenant_id` written is
         the one the token resolved, never anything the caller supplied.
+        """
+        ...
+
+    async def select_pending(
+        self, *, now: datetime, limit: int
+    ) -> list[QueuedWebhookEvent]:
+        """The batch this run may process, oldest first (R5.1, R5.3, D9).
+
+        `processed = FALSE AND attempts < MAX_WEBHOOK_ATTEMPTS AND (next_attempt_at IS NULL OR
+        next_attempt_at <= now)` — the three predicates of D9 in one place. The middle one is what
+        keeps a poisoned notice from being retried forever, and the last is the backoff: a notice
+        that just failed is invisible until its wait has passed, so it does not consume the batch
+        on every tick.
+
+        Returns `QueuedWebhookEvent`, which carries no payload. See that type for why.
+        """
+        ...
+
+    async def mark_processed(
+        self, event_ids: Sequence[uuid.UUID], *, now: datetime
+    ) -> None:
+        """`processed = TRUE`, `processed_at = now`, for a whole group at once (R5.1).
+
+        Grouped rather than one call per notice because the outcome is grouped: a re-read serves
+        every notice that named the same destination (D10), so they succeed or fail together.
+        """
+        ...
+
+    async def record_failure(
+        self,
+        event_ids: Sequence[uuid.UUID],
+        *,
+        failure: WebhookEventFailure,
+        next_attempt_at: datetime,
+    ) -> None:
+        """Charge one failed attempt and schedule the retry (R5.3).
+
+        `attempts` is incremented **in SQL** rather than written from a value this process read,
+        so two runs that somehow overlap cannot both write `attempts = 1`. Leaves `processed`
+        alone: an exhausted notice stays `FALSE` with its cause in `error`, which is what R5.3
+        asks for and what makes the queue readable as "these never landed".
+        """
+        ...
+
+    async def exhaust(
+        self, event_ids: Sequence[uuid.UUID], *, failure: WebhookEventFailure
+    ) -> None:
+        """Spend the whole retry budget at once, for a failure that retrying cannot fix (D11).
+
+        The one caller is the `tenant_id IS NULL` branch: there is no tenant to attribute a
+        reservation to, so the next attempt would fail identically. Setting `attempts` to the
+        maximum is what takes it out of `select_pending` for good — visible for diagnosis,
+        never selected again.
         """
         ...
 
