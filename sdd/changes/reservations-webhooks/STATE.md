@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/reservations-webhooks
-implementation_sha: 925b7d26d1ba7941ad0c04d18ef2e67c0fcc1c87
-pr_number: 
-pr_url: 
-pr_state: 
+implementation_sha: 4e7efac287934eb13ded64d4b116193f5be940c0
+pr_number: 74
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/74
+pr_state: OPEN
 merge_evidence: 
 merge_sha: 
 ---
