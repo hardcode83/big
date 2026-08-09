@@ -218,15 +218,21 @@ redacción concreta que queda desfasada— para que archivar no tenga que redesc
 - `sdd/specs/reservations.md` — corregir la forma de la ruta, que hoy documenta la de PRD §23
   (`POST /api/v1/webhooks/{provider}`) y pasa a llevar el segmento token; y retirar la nota de
   "Sin recepción de webhooks" de su sección de exclusiones.
-- `sdd/specs/celery-jobs.md` — registrar `process_webhook_events` entre los jobs del scheduler, y
-  **corregir el censo**: dice «SHALL registrar exactamente **cuatro** tareas periódicas» y ya son cinco.
-- `sdd/specs/local-environment.md` — «el worker ejecuta las **cuatro** tareas periódicas de PRD §8.3».
-  Es literalmente cierta si se lee «de PRD §8.3» como el calificativo que es —el quinto no lo es—, pero
-  se lee como censo del scheduler, así que conviene tocarla igual.
-- `sdd/specs/domain-foundation-financial.md` — declarar a este change como escritor vivo de
+- `sdd/specs/celery-jobs.md` — añadir `process_webhook_events` como **séptima** tarea. **Ojo, esta spec
+  cambió bajo los pies de este change**: cuando se escribió esta lista decía «SHALL registrar exactamente
+  cuatro tareas periódicas», y `access-notifications` ya la reescribió al archivar. Hoy (L22-28) separa
+  «los cuatro nombres literales de PRD §8.3» de «las dos tareas que PRD §8.3 no nombra», que es
+  exactamente la estructura que necesita la tercera: se añade a la segunda lista, no se corrige un censo.
+  Queda un censo suelto en **L168**, que describe `tasks.py` como «las cuatro tareas».
+- `sdd/specs/local-environment.md` (L172) — «el worker ejecuta las **cuatro** tareas periódicas de PRD
+  §8.3». Es literalmente cierta si se lee «de PRD §8.3» como el calificativo que es —las tres añadidas no
+  lo son—, pero se lee como censo del scheduler, así que conviene tocarla igual.
+- `sdd/specs/domain-foundation-financial.md` (L49) — declarar a este change como escritor vivo de
   `webhook_events.payload`, `webhook_events.error` y **`webhook_events.event_type`** en la tabla de
-  sumideros de la regla 11. La tercera se añadió en review: la columna se rellenaba desde el cuerpo y el
-  censo no la miraba (D7, y la tabla de `sdd/steering/security.md` ya pasó de seis columnas a siete).
+  sumideros de la regla 11, y **corregir el censo de esa misma línea**: dice «**Seis** columnas del
+  esquema son texto o JSON libre» y enumera `webhook_events.payload`/`error`; con `event_type` son siete.
+  La tercera columna se añadió en review, porque se rellenaba desde el cuerpo y el censo no la miraba
+  (D7; la tabla de `sdd/steering/security.md` ya pasó de seis a siete).
 - `sdd/specs/api-contract.md` — el endpoint de recepción y los de aprovisionamiento/rotación.
 - `sdd/specs/pms-beds24-adapter.md` — enlazar la recepción que su sección "Fuera de alcance" difiere aquí,
   y **pasar a pasado** la frontera de `special_requests`, que describe en futuro (*"se vuelve exigible en
