@@ -210,13 +210,35 @@ Criterios de aceptación:
 
 ## Affected specs
 
+Lo escribe `/sdd:archive`, no `run`: `sdd/specs/` es suyo. La lista es exacta a propósito —incluida la
+redacción concreta que queda desfasada— para que archivar no tenga que redescubrirla.
+
 - `sdd/specs/reservations-webhooks.md` — *(no existe aún — se creará al archivar)*: la capacidad completa
   de recepción y procesamiento.
 - `sdd/specs/reservations.md` — corregir la forma de la ruta, que hoy documenta la de PRD §23
   (`POST /api/v1/webhooks/{provider}`) y pasa a llevar el segmento token; y retirar la nota de
   "Sin recepción de webhooks" de su sección de exclusiones.
-- `sdd/specs/celery-jobs.md` — registrar `process_webhook_events` entre los jobs del scheduler.
+- `sdd/specs/celery-jobs.md` — registrar `process_webhook_events` entre los jobs del scheduler, y
+  **corregir el censo**: dice «SHALL registrar exactamente **cuatro** tareas periódicas» y ya son cinco.
+- `sdd/specs/local-environment.md` — «el worker ejecuta las **cuatro** tareas periódicas de PRD §8.3».
+  Es literalmente cierta si se lee «de PRD §8.3» como el calificativo que es —el quinto no lo es—, pero
+  se lee como censo del scheduler, así que conviene tocarla igual.
 - `sdd/specs/domain-foundation-financial.md` — declarar a este change como escritor vivo de
-  `webhook_events.payload` y `webhook_events.error` en la tabla de sumideros de la regla 11.
+  `webhook_events.payload`, `webhook_events.error` y **`webhook_events.event_type`** en la tabla de
+  sumideros de la regla 11. La tercera se añadió en review: la columna se rellenaba desde el cuerpo y el
+  censo no la miraba (D7, y la tabla de `sdd/steering/security.md` ya pasó de seis columnas a siete).
 - `sdd/specs/api-contract.md` — el endpoint de recepción y los de aprovisionamiento/rotación.
-- `sdd/specs/pms-beds24-adapter.md` — enlazar la recepción que su sección "Fuera de alcance" difiere aquí.
+- `sdd/specs/pms-beds24-adapter.md` — enlazar la recepción que su sección "Fuera de alcance" difiere aquí,
+  y **pasar a pasado** la frontera de `special_requests`, que describe en futuro (*"se vuelve exigible en
+  cuanto…"*) cuando el disparador ya se ha cumplido.
+- **`docs/diagrams/2026-08-06_autohost-er-entidades.png`** — `webhook_endpoints` es una **entidad nueva**,
+  así que el ER queda obsoleto: regenerar con `/sdd:diagram` y borrar el anterior
+  (`steering/documentation.md`, *Checklist de archivado*; precedente exacto: la tarea 9.3 de
+  `pms-provider-resolution`, cuando entró `pms_credentials`). Es un caso distinto del de la tarea 9.7 de
+  `properties-crud`, donde se razonó **no** regenerar: allí la migración sólo creaba y borraba un índice,
+  y un índice no es ni entidad ni relación. Aquí sí hay tabla nueva.
+
+Dos observaciones que los paneles dejaron dichas y que **no son de este change** (van sueltas, a criterio
+de quien archive): el comentario del servicio `frontend` en `docker-compose.deploy.yml` y la entrada
+`sdd/roadmap/api-ingress-routing.md` siguen redactados como si el camino de entrada de Beds24 estuviera
+sin decidir, cuando el proxy catch-all de `api-ingress-routing` ya lo satisface.
