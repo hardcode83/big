@@ -1,10 +1,10 @@
 # BLOCKED — reservations-webhooks
 
-**Dos entradas, y ninguna es una decisión.** Las ocho decisiones que ha habido en este change las
+**Tres entradas, y ninguna es una decisión.** Las ocho decisiones que ha habido en este change las
 resolvió Jose —cinco el 2026-08-08, tres el 2026-08-09— y cada una quedó escrita en su sitio
 (`design.md`, `steering/security.md`, ADR 0007), no aquí: una entrada resuelta se borra, no se marca.
-Lo que queda es el estado de la implementación y un re-review a medias, para que se pueda reanudar sin
-reconstruir nada de la conversación.
+Lo que queda es un re-review a medias, un puñado de correcciones que sólo puede escribir `/sdd:archive`
+y tres deudas con disparador, para que se pueda reanudar sin reconstruir nada de la conversación.
 
 Lo resuelto, por si alguien llega buscándolo. **El 2026-08-08**: **D8** (forma de la redacción de
 `special_requests`, ratificada), **D9** (columnas de reintento, ratificada →
@@ -17,99 +17,12 @@ diseño, no el código), la **capa** de `free_text.py` (se queda en `infrastruct
 el `DESIGN-CONFLICT` del arquitecto) y el **CSV** (`csv_parser.py` no se redacta: residuo aceptado con
 disparador). La tabla de cierre está en `design.md` § Open questions.
 
+**Y la implementación ya no está en esta lista: las seis secciones de `tasks.md` están completas y
+verificadas** (la sección 6 cerró el 2026-08-09). `tasks.md` sigue siendo la verdad de lo hecho.
+
 ---
 
-## 1. La implementación está a medias (secciones 1 a 5 de 6)
-
-- **Fase**: run
-- **Tipo**: `deferred` — el flujo puede reanudarlo sin decisión humana
-- **Qué y por qué**
-
-  `tasks.md` es la verdad de lo hecho y lo pendiente. Al cerrar esta sesión:
-
-  - **Sección 1 completa y verificada, con commit propio cada tarea**: 1.1 (entidad `WebhookEndpoint`,
-    puerto y las tres primitivas de autenticación), 1.2 (tabla `webhook_endpoints` + las dos columnas
-    de reintento), 1.3 (repositorio + test de aislamiento propio), 1.4 (vocabulario de auditoría +
-    denylist de la regla 11 para los dos secretos), 1.5 (casos de uso de alta y rotación), 1.6 (los dos
-    endpoints con RBAC) y 1.7 (las dos mitades del contrato regeneradas).
-  - **Sección 2 completa y verificada** (2.1 a 2.7): los dos limitadores, la evidencia del tope de
-    cuerpo, el caso de uso de recepción, la frontera de tarjeta, el router anónimo, el guard de
-    fixtures y las dos mitades del contrato.
-  - **Sección 3 completa y verificada** (3.1 y 3.2): `free_text.py` y su aplicación a
-    `special_requests` en los dos mapeos externos. Su panel **no está cerrado**, ver la entrada 2.
-  - **Sección 4 completa y verificada** (4.1 a 4.8), la más grande del change: la cola se drena y se
-    convierte en reservas. Repositorio de la cola sin cuerpo (`QueuedWebhookEvent`), los dos casos de
-    uso (lote sin marcar / tenant marcado), reintentos con techo, coalescing por destino, re-lectura
-    reutilizando el caso de uso de sync, transición por `AdvancePropertyStatesUseCase` sin tocarlo,
-    desorden, y la tarea Celery con su cadencia de 60 s.
-  - **Los paneles de las secciones 1, 2 y 4 cerrados en PASS**, siete reviewers cada uno. Dos rondas
-    de arreglo en la 2 y en la 4 (el máximo). Veintiún hallazgos aceptados y arreglados entre los
-    tres. El de la 4 está resumido en la cabecera de su sección en `tasks.md`, con la salvedad de que
-    su último arreglo (el compare-and-swap del lease) llegó después del re-review y no ha pasado por
-    el panel: lo cubre `/sdd:review`.
-  - **Sección 5 completa** (5.1 y 5.2): `.env.example` ya traía sus dos variables desde la tarea 2.1,
-    y se han escrito `docs/reservations-webhooks.md` y los tres retoques del README raíz, más las dos
-    páginas vecinas que el quinto job dejaba desfasadas. Sin panel: no toca código de producción.
-  - **Pendiente**: sólo la sección 6 (verificación).
-  - **Verde**: **la suite completa corrió al cerrar la sección 4** — 4157 pasan, 35 se saltan, los 35
-    placeholders preexistentes de `tests/properties/test_state_machine.py`, ajenos a este change. La
-    tarea 6.1 la vuelve a correr al cerrar.
-
-  **De paso, un fallo de la sesión que conviene no repetir**: un test nuevo del receptor usaba la
-  fixture `api` compartida, que **no** sustituye el throttle, así que ataba el cliente Redis de
-  proceso (`app.core.redis.get_redis`) al bucle de ese test y mataba a otro más tarde con «Event loop
-  is closed». Los docstrings de `test_webhook_receiver_api.py` y `test_login_throttle_over_http.py`
-  avisan de exactamente eso. La convención es construir el cliente en el propio test y sustituir
-  `get_webhook_throttle` salvo que el test *sea* sobre el límite de tasa.
-
-  **Dos deudas con disparador, que no bloquean nada ahora pero no deben perderse** (las dos están
-  razonadas en `design.md`, esto es sólo el recordatorio):
-
-  1. **La allowlist de IPs del proveedor** (D6), cuando se llegue a 25-50 unidades o a la primera
-     rotación que provoque un `429` cruzado, lo que ocurra primero.
-  2. **La Transform Rule de Cloudflare** que redacte `/api/v1/webhooks/*` en los logs del borde (D1),
-     **antes de que entre el primer tenant real**. Hoy la exposición es a la propia cuenta de Jose;
-     con un segundo cliente deja de serlo.
-
-  Y una **tercera deuda con disparador**, nueva de la sección 3: `csv_parser.py` llena
-  `special_requests` sin redactar, aceptado porque el import de CSV lo sube un operador autenticado.
-  Se revisa si el CSV deja de ser una reintroducción revisada por una persona y pasa a ser reingesta
-  cruda de una exportación del PMS (D8).
-
-  Dos observaciones de texto obsoleto que **no** son de este change y que los paneles dejaron dichas:
-  el comentario del servicio `frontend` en `docker-compose.deploy.yml` y la entrada
-  `sdd/roadmap/api-ingress-routing.md` siguen redactados como si el camino de entrada de Beds24
-  estuviera sin decidir; y `sdd/specs/pms-beds24-adapter.md` sigue describiendo la frontera de
-  `special_requests` en futuro (*"se vuelve exigible en cuanto…"*) cuando el disparador ya se ha
-  cumplido — eso último lo corrige `/sdd:archive`, que es quien escribe `sdd/specs/`.
-
-  **Y dos más de la sección 5, del mismo tipo y para el mismo destinatario.** Al añadir el quinto job
-  al scheduler quedan desfasadas dos specs que cuentan cuatro: `sdd/specs/celery-jobs.md` («SHALL
-  registrar exactamente **cuatro** tareas periódicas») y `sdd/specs/local-environment.md` («el worker
-  ejecuta las **cuatro** tareas periódicas de PRD §8.3»). La segunda es literalmente cierta si se lee
-  «de PRD §8.3» como el calificativo que es —el quinto no lo es—, pero se lee como censo del
-  scheduler, así que conviene tocarla igual. Las páginas de `docs/` equivalentes (`celery-jobs.md` y
-  el índice) ya se corrigieron aquí; éstas **no**, porque `sdd/specs/` sólo lo escribe `/sdd:archive`.
-
-  **Y una tercera cosa para archive, que no es texto sino un diagrama**: `webhook_endpoints` es una
-  **entidad nueva**, así que `docs/diagrams/2026-08-06_autohost-er-entidades.png` —28 entidades, 67
-  relaciones, generado desde la metadata de SQLAlchemy— queda obsoleto y toca regenerarlo con
-  `/sdd:diagram`, borrando el anterior (`steering/documentation.md`; el precedente exacto es la tarea
-  9.3 de `pms-provider-resolution`, cuando entró `pms_credentials`). **No se hace en la sección 5 a
-  propósito**: `documentation.md` declara `phases: [tasks, archive]` y esto vive en su *Checklist de
-  archivado*, no en el trabajo de `run`. Se anota aquí para que no dependa de que alguien se acuerde.
-  Nótese que es un caso distinto del de la tarea 9.7 de `properties-crud`, donde se razonó **no**
-  regenerar: allí la migración sólo creaba y borraba un índice, y un índice no es ni entidad ni
-  relación. Aquí sí hay tabla nueva.
-
-- **Dónde vive el trabajo**: worktree
-  `/Users/hardcode/personal/AutoHostAI/.claude/worktrees/sdd+reservations-webhooks`, rama
-  `sdd/reservations-webhooks`, publicada en `origin`. Su stack de Docker está levantado; `make down`
-  antes de borrar el worktree.
-- **Comando para reanudar**: `/sdd:run reservations-webhooks 6` — **con `/clear` antes**, que es donde
-  está el ahorro: la sección 6 sólo corre comandos y no necesita nada del contexto de esta sesión.
-
-## 2. El re-review de QA de la sección 3 se quedó a medias
+## 1. El re-review de QA de la sección 3 se quedó a medias
 
 - **Fase**: run
 - **Tipo**: `deferred` — no hace falta ninguna decisión humana, sólo volver a correrlo
@@ -136,6 +49,79 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
   pero **el tamaño real no está medido**; que los cinco tests nuevos fallarían si se revirtiera el
   arreglo; y que el guard de fixtures reescrito sigue probando lo que dice.
 
+  **Un segundo trozo sin panel, de la sección 4**: su último arreglo, el compare-and-swap del lease del
+  lote, llegó *después* del re-review, así que el `panel: PASS` de esa sección no lo cubre. Es el otro
+  hueco que `/sdd:review` cierra de una pasada.
+
 - **Comando para reanudar**: `/sdd:review reservations-webhooks` — a escala de feature cubre esto y lo
   demás, que es la forma recomendada de retomar un panel interrumpido. Si se prefiere acotar,
   `/sdd:run reservations-webhooks 3` re-dispara el panel de la sección.
+
+## 2. Texto y un diagrama que sólo puede escribir `/sdd:archive`
+
+- **Fase**: archive
+- **Tipo**: `deferred` — mecánico, sin decisión humana
+- **Qué y por qué**
+
+  `sdd/specs/` lo escribe `/sdd:archive`, no `run`, así que estas correcciones se anotan en vez de
+  hacerse. Las páginas equivalentes de `docs/` **ya se corrigieron** en la sección 5.
+
+  1. **`sdd/specs/celery-jobs.md`**: «SHALL registrar exactamente **cuatro** tareas periódicas» — con
+     `process_webhook_events` ya son cinco.
+  2. **`sdd/specs/local-environment.md`**: «el worker ejecuta las **cuatro** tareas periódicas de PRD
+     §8.3». Es literalmente cierta si se lee «de PRD §8.3» como el calificativo que es —el quinto no lo
+     es—, pero se lee como censo del scheduler, así que conviene tocarla igual.
+  3. **`sdd/specs/pms-beds24-adapter.md`**: describe la frontera de `special_requests` en futuro
+     (*"se vuelve exigible en cuanto…"*) cuando el disparador ya se ha cumplido.
+  4. **El diagrama ER**: `webhook_endpoints` es una **entidad nueva**, así que
+     `docs/diagrams/2026-08-06_autohost-er-entidades.png` —28 entidades, 67 relaciones, generado desde
+     la metadata de SQLAlchemy— queda obsoleto y toca regenerarlo con `/sdd:diagram`, borrando el
+     anterior (`steering/documentation.md`; el precedente exacto es la tarea 9.3 de
+     `pms-provider-resolution`, cuando entró `pms_credentials`). **No se hizo en la sección 5 a
+     propósito**: `documentation.md` declara `phases: [tasks, archive]` y esto vive en su *Checklist de
+     archivado*. Nótese que es un caso distinto del de la tarea 9.7 de `properties-crud`, donde se
+     razonó **no** regenerar: allí la migración sólo creaba y borraba un índice, y un índice no es ni
+     entidad ni relación. Aquí sí hay tabla nueva.
+
+  Dos observaciones más que los paneles dejaron dichas y que **no son de este change** (van sueltas, a
+  criterio de quien archive): el comentario del servicio `frontend` en `docker-compose.deploy.yml` y la
+  entrada `sdd/roadmap/api-ingress-routing.md` siguen redactados como si el camino de entrada de Beds24
+  estuviera sin decidir.
+
+- **Comando para reanudar**: `/sdd:archive reservations-webhooks`, **después** de que el PR esté
+  mergeado.
+
+## 3. Tres deudas con disparador
+
+- **Fase**: run
+- **Tipo**: `deferred` — no bloquean nada hoy; cada una tiene su disparador
+- **Qué y por qué**
+
+  Las tres están razonadas en `design.md`; esto es sólo el recordatorio para que no se pierdan al
+  archivar.
+
+  1. **La allowlist de IPs del proveedor** (D6), cuando se llegue a 25-50 unidades o a la primera
+     rotación que provoque un `429` cruzado, lo que ocurra primero.
+  2. **La Transform Rule de Cloudflare** que redacte `/api/v1/webhooks/*` en los logs del borde (D1),
+     **antes de que entre el primer tenant real**. Hoy la exposición es a la propia cuenta de Jose;
+     con un segundo cliente deja de serlo.
+  3. **`csv_parser.py` llena `special_requests` sin redactar** (D8), aceptado porque el import de CSV lo
+     sube un operador autenticado. Se revisa si el CSV deja de ser una reintroducción revisada por una
+     persona y pasa a ser reingesta cruda de una exportación del PMS.
+
+- **Comando para reanudar**: ninguno automático — se abren como changes propios cuando salte el
+  disparador.
+
+---
+
+**Dónde vive el trabajo**: worktree
+`/Users/hardcode/personal/AutoHostAI/.claude/worktrees/sdd+reservations-webhooks`, rama
+`sdd/reservations-webhooks`, publicada en `origin`. Su stack de Docker está levantado; `make down`
+antes de borrar el worktree.
+
+**Un fallo de sesión que conviene no repetir**: un test nuevo del receptor usaba la fixture `api`
+compartida, que **no** sustituye el throttle, así que ataba el cliente Redis de proceso
+(`app.core.redis.get_redis`) al bucle de ese test y mataba a otro más tarde con «Event loop is closed».
+Los docstrings de `test_webhook_receiver_api.py` y `test_login_throttle_over_http.py` avisan de
+exactamente eso. La convención es construir el cliente en el propio test y sustituir
+`get_webhook_throttle` salvo que el test *sea* sobre el límite de tasa.

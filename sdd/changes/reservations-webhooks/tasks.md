@@ -513,18 +513,34 @@ forzado en `infrastructure/`.
 
 ## 6. Verification
 
-- [ ] 6.1 Suite completa del backend: `docker compose exec backend uv run pytest -q -rs`
+- [x] 6.1 Suite completa del backend: `docker compose exec backend uv run pytest -q -rs`
   (project.md; el stack corre en Docker y `uv` no está en el host).
-- [ ] 6.2 Migraciones íntegras, con los tres comandos que corre el CI:
+- [x] 6.2 Migraciones íntegras, con los tres comandos que corre el CI:
   `uv run alembic upgrade head`, `uv run alembic check`, `uv run alembic downgrade base`.
-- [ ] 6.3 Contrato sin deriva en sus dos mitades: `uv run python -m app.cli.openapi --check` y
+- [x] 6.3 Contrato sin deriva en sus dos mitades: `uv run python -m app.cli.openapi --check` y
   `cd frontend && npm run api:generate` sin cambios pendientes en
   `frontend/lib/api/generated/openapi.d.ts`.
-- [ ] 6.4 Comprobación manual del flujo, **sin navegador** (un worktree no publica puertos): dar de alta
+- [x] 6.4 Comprobación manual del flujo, **sin navegador** (un worktree no publica puertos): dar de alta
   un endpoint por API, hacer `POST` al receptor desde dentro del stack con token y cabecera correctos y
   ver la fila en `webhook_events` con `processed=FALSE`; repetir con token incorrecto y ver el `404`;
   disparar el job y ver `processed=TRUE`.
 
+> **Cerrada el 2026-08-09.** 6.1: 4157 pasan, 35 se saltan — los 35 placeholders preexistentes de
+> `tests/properties/test_state_machine.py`, ajenos a este change. 6.2: `upgrade head` limpio,
+> `alembic check` sin operaciones nuevas y `downgrade base` recorriendo las diez revisiones hasta vaciar
+> el esquema; después se restauró y se re-sembró. 6.3: `openapi --check` en 0 y la regeneración de
+> `openapi.d.ts` sin dejar cambios en el árbol.
+>
+> 6.4, con worker y beat parados para poder observar la fila antes de que el job de 60 s se adelantara:
+> alta de un endpoint `MOCK` por API (201), `POST` al receptor con token y cabecera correctos → **202**
+> y una fila en `webhook_events` con `processed=f`, `attempts=0` y el tenant resuelto desde el token.
+> Los **tres** rechazos —token incorrecto, cabecera incorrecta y cabecera ausente— devolvieron el
+> **mismo 404** con el mismo cuerpo, sin oráculo y sin escribir fila. Al rearrancar el scheduler, el job
+> programado la drenó solo (`selected:1, processed:1, failed:0`) y la fila quedó en `processed=t` sin
+> error ni reintentos.
+>
+> **Sin panel de revisión**: la sección no toca código de producción — su diff son estas marcas.
+>
 > **Sin tarea de lint/typecheck a propósito.** Ni el `Makefile` ni `.github/workflows/backend-tests.yml`
 > definen ninguno para el backend (no hay ruff ni mypy configurados), así que inventar un comando aquí
 > sería inventarse la validación del proyecto (regla compartida 9). El typecheck que sí existe es el del
