@@ -190,7 +190,7 @@ incidencias `CRITICAL` abiertas. Si falta alguna foto responde `409` **enumerand
 Cuenta como cubierto un `photo_type` con **al menos una** foto subida para esa tarea. Fotos de
 otra tarea no cuentan, aunque sean del mismo tipo.
 
-## Dos límites que conviene conocer antes de operar
+## El límite que queda, y los dos que ya no lo son
 
 **El escalado por SLA ya funciona** (desde `access-notifications`). Al asignar se escribe una
 fila de `notification_logs` con `sla_deadline_at = ahora + TenantConfig.sla_medium_minutes` (240
@@ -204,10 +204,14 @@ se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta 
 genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
 `/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
-**Y las incidencias tampoco se pueden crear todavía.** La precondición de cierre consulta la
-tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que en la
-práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
+**El único límite vivo: las incidencias no se pueden crear todavía.** La precondición de cierre
+consulta la tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que
+en la práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
 limpiadora es de `maintenance` (PRD §26.11).
+
+Los otros dos que esta página llegó a listar ya están cerrados: el escalado por SLA, arriba, y
+**las fotos requeridas al cerrar**, que este change entrega y se cuentan en §«Las fotos de la
+limpieza».
 
 ## Operar el job
 
