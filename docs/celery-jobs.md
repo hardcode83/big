@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los seis jobs
+## Los siete jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -14,21 +14,28 @@ es el *cómo se usa y se diagnostica*.
 | `check_sla_breaches` | cada minuto | `NotificationLog` con SLA vencido → marca + escalado en cola |
 | `dispatch_notifications` | cada minuto | Drena las filas `PENDING` por su canal → `SENT` / `FAILED` / `SKIPPED` (change `access-notifications`) |
 | `provision_access_records` | cada 5 min | Reserva confirmada sin `AccessRecord` → lo crea en `PENDING`, revoca los de reservas canceladas y arranca el registro legal de PRD §17 (change `access-notifications`) |
+| `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API (change `reservations-webhooks`) — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
 
 Las cadencias viven en `backend/app/scheduler/schedule.py`. De esa misma tabla sale el TTL del
 lock de cada job, así que no se pueden desincronizar.
 
-**Los cuatro primeros son los de PRD §8.3, con sus cadencias. Los dos últimos no están en el
-PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3): el PRD dice *qué*
-tiene que pasar —§14 entrega notificaciones, §15 le da un registro de acceso a cada reserva
-confirmada— y no dice qué lo dispara. Los dos son idempotentes y dependen del reloj, así que
-beat es su sitio; los nombres de los cuatro originales no se han tocado.
+**Los cuatro primeros son los de PRD §8.3, con sus cadencias. Los tres últimos no están en el
+PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3, `reservations-webhooks`
+design D10): el PRD dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da un registro de
+acceso a cada reserva confirmada, §16 recibe los avisos del PMS— y no dice qué lo dispara. Los tres
+son idempotentes y dependen del reloj, así que beat es su sitio; los nombres de los cuatro originales
+no se han tocado. `test_schedule.py` los separa (`PRD_8_3` frente a `BEYOND_PRD_8_3`) para que nadie
+invoque «lo dice el PRD» sobre un número que el PRD no ha visto nunca.
 
 **Por qué `provision_access_records` es un barrido y no un enganche a la confirmación**: ya hay
 reservas confirmadas en la base de datos. Un hook en la transición solo cubriría las futuras y
 dejaría el histórico sin registro para siempre. Además las confirmaciones entran por tres
 caminos (el PATCH, el import CSV y el sync del PMS, los dos últimos vía `parse_ingested`, que
 confirma por defecto).
+
+**Los 60 s de `process_webhook_events` son un parámetro de seguridad, no de tuning**: el job
+coalesce todo un tick en una llamada por destino, así que la cadencia *es* el techo de llamadas
+salientes al proveedor — acortarla lo sube.
 
 **Los otros dos jobs de PRD §8.3 no están aquí a propósito**: `generate_price_recommendations`
 pertenece a `revenue` y `send_checkin_reminders` a `messaging-ai` / `access-notifications` —

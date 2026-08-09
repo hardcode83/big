@@ -99,7 +99,21 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # under `reservations` by path but on the guests router, so the prefix set already
         # names it.
         "guests",
+        # `reservations-webhooks`: the anonymous receiver. A module prefix of its own rather than
+        # a route under `integrations`, because rule 12(b) of `steering/security.md` makes the
+        # route token the credential and mixing it into the authenticated router would hide that.
+        "webhooks",
     }
+
+
+# Routes whose success answer carries no body at all, so there is no shape to declare. Listed by
+# path rather than exempting their status code wholesale: a `202` that later grew a body would be
+# a contract that says nothing, and blanket-exempting `202` is what would let it through.
+#
+# `reservations-webhooks` R1.1 requires this one to answer "sin cuerpo de negocio" — anything
+# echoed to an anonymous caller is a signal, and the only caller entitled to detail here is one
+# that already holds both secrets.
+BODILESS_SUCCESS_PATHS = frozenset({"/api/v1/webhooks/{provider}/{webhook_token}"})
 
 
 def _declares_its_success_media_types(route: APIRoute) -> bool:
@@ -118,7 +132,7 @@ def _declares_its_success_media_types(route: APIRoute) -> bool:
 def test_every_api_route_declares_a_response_model() -> None:
     """R3.2 — a success response with no declared shape is a contract that says nothing.
 
-    Two legitimate exemptions, both narrow:
+    Three legitimate exemptions, all narrow:
 
     * `204 No Content` — there is no body to describe. Today exactly `POST /auth/logout`,
       `DELETE /users/{user_id}` and `DELETE /reservations/{reservation_id}`.
@@ -127,6 +141,8 @@ def test_every_api_route_declares_a_response_model() -> None:
       returns image bytes: `response_model` describes a JSON schema, and there is no JSON
       schema for a JPEG. It names `image/jpeg`, `image/png` and `image/webp` — the allowlist
       `content_type_for_extension` answers from — so the contract still says what comes back.
+    * `BODILESS_SUCCESS_PATHS` — a success that is deliberately empty under a status other
+      than 204. Today exactly the webhook receiver's `202` (`reservations-webhooks` R1.1).
     """
     app = create_app()
     undeclared = [
@@ -135,9 +151,28 @@ def test_every_api_route_declares_a_response_model() -> None:
         if route.status_code != 204
         and route.response_model is None
         and not _declares_its_success_media_types(route)
+        and path not in BODILESS_SUCCESS_PATHS
     ]
 
     assert undeclared == []
+
+
+def test_the_bodiless_exemptions_really_return_nothing() -> None:
+    """The exemption above is only honest while the route it names sends no body.
+
+    Without this, adding a response body to an exempted path would be invisible: the guard skips
+    it by name, so the contract would stop describing a body the endpoint actually returns.
+    `tests/integrations/test_webhook_receiver_api.py` asserts the empty `202` over HTTP; this
+    asserts that the exemption list has not outlived its reason.
+    """
+    exempted = [
+        route for path, route in _api_routes(create_app()) if path in BODILESS_SUCCESS_PATHS
+    ]
+
+    assert len(exempted) == len(BODILESS_SUCCESS_PATHS)
+    for route in exempted:
+        assert route.response_model is None
+        assert route.status_code == 202
 
 
 def test_the_binary_exemption_does_not_wave_through_a_route_that_declares_nothing() -> None:
@@ -145,6 +180,14 @@ def test_the_binary_exemption_does_not_wave_through_a_route_that_declares_nothin
 
     A route with neither a model nor a declared `content` must still fail, and one whose
     `content` block is empty must fail too: an empty dict is a declaration of nothing.
+
+    `BODILESS_SUCCESS_PATHS` is subtracted here for the same reason the real check subtracts
+    it, and leaving it out is what broke when `reservations-webhooks` and
+    `cleaning-photos-storage` met: the webhook receiver declares no model and no media types
+    — deliberately, its `202` has no body — so it showed up in this list as if it were one of
+    the two synthetic routes. This test is about the **media-type** exemption not becoming
+    "anything goes"; a path exempted by name is the other exemption's business, and
+    `test_the_bodiless_exemptions_really_return_nothing` above is what guards that one.
     """
     app = create_app()
 
@@ -162,6 +205,7 @@ def test_the_binary_exemption_does_not_wave_through_a_route_that_declares_nothin
         if route.status_code != 204
         and route.response_model is None
         and not _declares_its_success_media_types(route)
+        and path not in BODILESS_SUCCESS_PATHS
     )
 
     assert undeclared == [

@@ -121,6 +121,24 @@ class Settings(BaseSettings):
     # three orders of magnitude of headroom over a real request.
     request_max_bytes: int = 1024 * 1024
 
+    # The two webhook limits of rule 12(c) (`reservations-webhooks` design D6). Two and not one,
+    # because they defend against opposite things and a single number cannot serve both.
+    #
+    # The per-token limit is GENEROUS: it protects the table from a provider whose legitimate
+    # traffic runs away. A provider sends from few IPs on behalf of MANY tenants, so a limit on
+    # the good traffic keyed by IP would throttle every tenant at once — which is why this one is
+    # keyed by token, i.e. per tenant.
+    #
+    # The per-IP limit is STRICT and applies **only to requests that failed authentication**. That
+    # is what makes probing for a route token cost something (R3.4) without the legitimate
+    # provider ever meeting it.
+    #
+    # Both carry a default because neither is a secret (rule 8 of `steering/security.md`). There is
+    # deliberately no `webhook_max_body_bytes`: the body ceiling is already `request_max_bytes`,
+    # applied to all of `/api/v1/` by `MaxBodySizeMiddleware` before routing (design D5).
+    webhook_rate_limit_per_minute: int = 120
+    webhook_probe_limit_per_minute: int = 20
+
     # Notification delivery (change `access-notifications`, design D4). No credential here:
     # the MVP adapters are a console logger and two mocks (PRD §14's channel table), and the
     # real WhatsApp/SMTP keys are already reserved by rule 8 of `steering/security.md`.

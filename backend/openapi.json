@@ -1274,6 +1274,25 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "CreateWebhookEndpointRequest": {
+        "description": "What `POST /api/v1/integrations/webhook-endpoints` accepts (R2.1).\n\nNeither secret appears here, and that is the whole shape of the operation: the caller does\nnot choose the material, the system mints it. A request that accepted a token would let an\noperator paste a value they had already used somewhere, which is exactly the \"constante\nglobal\" rule 12(a) forbids.",
+        "properties": {
+          "header_name": {
+            "pattern": "^[A-Za-z0-9][A-Za-z0-9-]{0,99}$",
+            "title": "Header Name",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/PMSProvider"
+          }
+        },
+        "required": [
+          "provider",
+          "header_name"
+        ],
+        "title": "CreateWebhookEndpointRequest",
+        "type": "object"
+      },
       "CreatedUserResponse": {
         "description": "A separate type, and the only shape that carries the one-time secret (design D10).\n\nReturned by `POST /users` and `POST /users/{id}/reset-password`, both with\n`Cache-Control: no-store`. It is never reachable from a `GET`.",
         "properties": {
@@ -3910,6 +3929,45 @@
         ],
         "title": "ValidateCleaningTaskRequest",
         "type": "object"
+      },
+      "WebhookEndpointMaterialResponse": {
+        "description": "The one and only time either secret is serialised (R2.3, rule 3(a)'s narrow exception).\n\nThere is deliberately **no read endpoint** returning this shape, not even with the values\nmasked: rule 3(a) permits handing them over \"una sola vez en el momento de generarlo y en\ncada rotación\", and a masked read would be a second serialisation the exception does not\ncover. Losing the URL is repaired by rotating, which is why `notice` says so in the response\ninstead of in documentation the operator will not have open.",
+        "properties": {
+          "header_name": {
+            "title": "Header Name",
+            "type": "string"
+          },
+          "header_secret": {
+            "title": "Header Secret",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notice": {
+            "default": "Copy the URL and the header secret into the provider's panel now: they are shown once and cannot be retrieved afterwards. If they are lost, rotate this endpoint.",
+            "title": "Notice",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/PMSProvider"
+          },
+          "webhook_url": {
+            "title": "Webhook Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "provider",
+          "header_name",
+          "webhook_url",
+          "header_secret"
+        ],
+        "title": "WebhookEndpointMaterialResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -5998,6 +6056,142 @@
         ]
       }
     },
+    "/api/v1/integrations/webhook-endpoints": {
+      "post": {
+        "description": "Generates the route token and the static header secret the provider will authenticate with, and returns both **once** — they are stored hashed and encrypted, so no later call can retrieve them. Answers `409` if the tenant already has an endpoint for this provider: replacing live material is what `rotate` is for.",
+        "operationId": "create_webhook_endpoint_api_v1_integrations_webhook_endpoints_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateWebhookEndpointRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mint this tenant's webhook URL and header secret for one provider",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
+    "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate": {
+      "post": {
+        "description": "Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.",
+        "operationId": "rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "endpoint_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Endpoint Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebhookEndpointMaterialResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Replace both secrets of an existing webhook endpoint",
+        "tags": [
+          "integrations"
+        ]
+      }
+    },
     "/api/v1/notifications": {
       "get": {
         "description": "The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).",
@@ -7495,6 +7689,86 @@
         "summary": "Issue a new temporary password for a user",
         "tags": [
           "users"
+        ]
+      }
+    },
+    "/api/v1/webhooks/{provider}/{webhook_token}": {
+      "post": {
+        "description": "Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.",
+        "operationId": "receive_webhook_api_v1_webhooks__provider___webhook_token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "title": "Provider",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "webhook_token",
+            "required": true,
+            "schema": {
+              "title": "Webhook Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {}
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Not authenticated. Returned identically for an unknown provider, an unknown route token, a missing static header and a wrong one — the endpoint never reveals which, so a caller cannot use it to discover whether a token exists."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited: either this endpoint's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume."
+          }
+        },
+        "summary": "Receive a PMS webhook notice",
+        "tags": [
+          "webhooks"
         ]
       }
     },

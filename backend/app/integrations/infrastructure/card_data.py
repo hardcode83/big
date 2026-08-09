@@ -117,8 +117,10 @@ is a diagnostic field — losing an opaque blob from it costs far less than a wr
 either direction.
 
 **Scope note**: this governs `raw_payload` only. Where a mapping deliberately promotes provider
-free text into a DTO field that gets persisted — `special_requests` — the question is different
-and open; see the third security finding in `BLOCKED.md`.
+free text into a DTO field that gets persisted — `special_requests` — the question is different,
+and it is no longer open: `free_text.py` answers it by redacting long digit runs on external
+sources (`reservations-webhooks` design D8, ratified 2026-08-08). A key-based denylist has
+nothing to judge there, which is why that field needed its own rule rather than an entry here.
 """
 
 

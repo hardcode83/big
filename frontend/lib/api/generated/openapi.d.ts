@@ -202,6 +202,20 @@ export interface paths {
      */
     post: operations["import_reservations_csv_api_v1_integrations_pms_import_csv_post"];
   };
+  "/api/v1/integrations/webhook-endpoints": {
+    /**
+     * Mint this tenant's webhook URL and header secret for one provider
+     * @description Generates the route token and the static header secret the provider will authenticate with, and returns both **once** — they are stored hashed and encrypted, so no later call can retrieve them. Answers `409` if the tenant already has an endpoint for this provider: replacing live material is what `rotate` is for.
+     */
+    post: operations["create_webhook_endpoint_api_v1_integrations_webhook_endpoints_post"];
+  };
+  "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate": {
+    /**
+     * Replace both secrets of an existing webhook endpoint
+     * @description Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.
+     */
+    post: operations["rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post"];
+  };
   "/api/v1/notifications": {
     /**
      * List the caller's own notifications
@@ -316,6 +330,13 @@ export interface paths {
      * @description Not part of the endpoint list of PRD §23: a deliberate addition, because `auth-account-recovery` is optional in PRD §24 and depends on the notification adapter, so without this the MVP has no recovery path at all. Replaces the stored hash, returns the new password exactly once and revokes every refresh session of the affected user — a reset that left them alive would not recover the account, it would just add one more credential to it.
      */
     post: operations["reset_user_password_api_v1_users__user_id__reset_password_post"];
+  };
+  "/api/v1/webhooks/{provider}/{webhook_token}": {
+    /**
+     * Receive a PMS webhook notice
+     * @description Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.
+     */
+    post: operations["receive_webhook_api_v1_webhooks__provider___webhook_token__post"];
   };
   "/health": {
     /** Health */
@@ -835,6 +856,20 @@ export interface components {
        */
       preferred_language?: string;
       role: components["schemas"]["UserRole"];
+    };
+    /**
+     * CreateWebhookEndpointRequest
+     * @description What `POST /api/v1/integrations/webhook-endpoints` accepts (R2.1).
+     *
+     * Neither secret appears here, and that is the whole shape of the operation: the caller does
+     * not choose the material, the system mints it. A request that accepted a token would let an
+     * operator paste a value they had already used somewhere, which is exactly the "constante
+     * global" rule 12(a) forbids.
+     */
+    CreateWebhookEndpointRequest: {
+      /** Header Name */
+      header_name: string;
+      provider: components["schemas"]["PMSProvider"];
     };
     /**
      * CurrentUserResponse
@@ -1740,6 +1775,35 @@ export interface components {
     /** ValidateCleaningTaskRequest */
     ValidateCleaningTaskRequest: {
       validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
+    /**
+     * WebhookEndpointMaterialResponse
+     * @description The one and only time either secret is serialised (R2.3, rule 3(a)'s narrow exception).
+     *
+     * There is deliberately **no read endpoint** returning this shape, not even with the values
+     * masked: rule 3(a) permits handing them over "una sola vez en el momento de generarlo y en
+     * cada rotación", and a masked read would be a second serialisation the exception does not
+     * cover. Losing the URL is repaired by rotating, which is why `notice` says so in the response
+     * instead of in documentation the operator will not have open.
+     */
+    WebhookEndpointMaterialResponse: {
+      /** Header Name */
+      header_name: string;
+      /** Header Secret */
+      header_secret: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Notice
+       * @default Copy the URL and the header secret into the provider's panel now: they are shown once and cannot be retrieved afterwards. If they are lost, rotate this endpoint.
+       */
+      notice?: string;
+      provider: components["schemas"]["PMSProvider"];
+      /** Webhook Url */
+      webhook_url: string;
     };
   };
   responses: never;
@@ -2836,6 +2900,80 @@ export interface operations {
     };
   };
   /**
+   * Mint this tenant's webhook URL and header secret for one provider
+   * @description Generates the route token and the static header secret the provider will authenticate with, and returns both **once** — they are stored hashed and encrypted, so no later call can retrieve them. Answers `409` if the tenant already has an endpoint for this provider: replacing live material is what `rotate` is for.
+   */
+  create_webhook_endpoint_api_v1_integrations_webhook_endpoints_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateWebhookEndpointRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["WebhookEndpointMaterialResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Replace both secrets of an existing webhook endpoint
+   * @description Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.
+   */
+  rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post: {
+    parameters: {
+      path: {
+        endpoint_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["WebhookEndpointMaterialResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the caller's own notifications
    * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
    */
@@ -3560,6 +3698,50 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Receive a PMS webhook notice
+   * @description Anonymous by design: the route token is the credential (rule 12(b)), paired with the provider's static header (rule 12(a)). Answers `202` with no body once the notice is queued, and an indistinguishable `404` for an unknown provider, an unknown token, a missing header and a wrong one alike. Nothing is re-read from the provider here — that is the job's work, coalesced across a batch.
+   */
+  receive_webhook_api_v1_webhooks__provider___webhook_token__post: {
+    parameters: {
+      path: {
+        provider: string;
+        webhook_token: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": unknown;
+        };
+      };
+      /** @description Not authenticated. Returned identically for an unknown provider, an unknown route token, a missing static header and a wrong one — the endpoint never reveals which, so a caller cannot use it to discover whether a token exists. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited: either this endpoint's per-minute delivery budget, or the stricter per-IP budget that only failed authentications consume. */
+      429: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
