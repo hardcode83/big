@@ -3,8 +3,9 @@
 **Tres entradas, y ninguna es una decisión.** Las ocho decisiones que ha habido en este change las
 resolvió Jose —cinco el 2026-08-08, tres el 2026-08-09— y cada una quedó escrita en su sitio
 (`design.md`, `steering/security.md`, ADR 0007), no aquí: una entrada resuelta se borra, no se marca.
-Lo que queda es un re-review a medias, un puñado de correcciones que sólo puede escribir `/sdd:archive`
-y tres deudas con disparador, para que se pueda reanudar sin reconstruir nada de la conversación.
+Lo que queda son los hallazgos que dejó abiertos el panel de `/sdd:review`, un puñado de correcciones
+que sólo puede escribir `/sdd:archive` y tres deudas con disparador, para que se pueda reanudar sin
+reconstruir nada de la conversación.
 
 Lo resuelto, por si alguien llega buscándolo. **El 2026-08-08**: **D8** (forma de la redacción de
 `special_requests`, ratificada), **D9** (columnas de reintento, ratificada →
@@ -22,40 +23,86 @@ verificadas** (la sección 6 cerró el 2026-08-09). `tasks.md` sigue siendo la v
 
 ---
 
-## 1. El re-review de QA de la sección 3 se quedó a medias
+## 1. Seis hallazgos abiertos del panel de `/sdd:review` (2026-08-09)
 
-- **Fase**: run
-- **Tipo**: `deferred` — no hace falta ninguna decisión humana, sólo volver a correrlo
+- **Fase**: review
+- **Tipo**: `deferred` — ninguno necesita decisión humana; son correcciones acotadas
 - **Qué y por qué**
 
-  El panel de la sección 3 corrió entero (siete reviewers, un mensaje). Tres sin hallazgos
-  (`sdd-review-cicd`, `sdd-review-i18n`, `sdd-review-tenancy`); arquitectura, seguridad, QA y
-  documentación con hallazgos. Se arreglaron ocho en la primera ronda —incluidos los dos que
-  importaban, los dos demostrados: el guard de fixtures que conservaba la banda cerrada 13-19 que el
-  redactor ya había abandonado, y el matcher ASCII que dejaba pasar un espacio duro y los dígitos
-  fullwidth o arábigo-indios— y las tres decisiones que quedaban las resolvió Jose ese mismo día.
+  **Lo que este review sí cerró, para que nadie lo repita.** Los dos huecos que esta entrada recogía
+  antes ya no existen: el re-review de QA de la sección 3 **corrió entero** (sus cinco comprobaciones
+  pendientes están resueltas, incluida la medición del falso positivo de `\s`) y el compare-and-swap
+  del lease del lote **quedó auditado** por seguridad, tenencia y QA — QA lo probó además con dos
+  sesiones concurrentes reales contra Postgres, no sólo con la lectura secuencial del repo. La matriz
+  de completitud da **los 22 criterios de R1–R6 cumplidos**, con implementación y test localizados, y
+  la suite de los módulos del change pasa (1727 tests). Cuatro de los siete reviewers devolvieron PASS
+  limpio (arquitectura, tenencia, documentación, CI/CD, i18n).
 
-  De los re-reviews de la ronda 1, **seguridad devolvió PASS** (verificado plantando un PAN en un
-  fixture real y comprobando que el guard se pone en rojo, más una medición de ReDoS contra el patrón
-  nuevo hasta 600k caracteres, lineal). **El de QA murió por límite de uso de sesión** antes de emitir
-  veredicto. Por eso la sección 3 **no** lleva la anotación `panel: PASS` en `tasks.md`: no se marca un
-  panel que no ha cerrado.
+  Lo que queda abierto son seis correcciones, ninguna de las cuales rompe un requisito:
 
-  Lo que le quedaba por comprobar a QA, para no reconstruirlo: que su hallazgo de dígitos no-ASCII está
-  cerrado; que `\d` no ensancha de más (`isdigit()`, `\d` e `isdecimal()` son tres conjuntos distintos)
-  y que el test del `²` fija algo real; **que `\s` no ensancha de más** — ahora incluye el salto de
-  línea, así que dos números cortos en líneas consecutivas se funden y pueden pasar de 13 dígitos: se
-  aceptó a conciencia, en el mismo saco que el falso positivo de los dos teléfonos que D8 ya acepta,
-  pero **el tamaño real no está medido**; que los cinco tests nuevos fallarían si se revirtiera el
-  arreglo; y que el guard de fixtures reescrito sigue probando lo que dice.
+  1. **`event_type` se deriva del cuerpo sin escurrir y su columna no tiene contrato** — *medio, el
+     único que merece arreglo antes de mergear*. `application/webhooks.py:171` construye
+     `event_type=_event_type(payload)` sobre el diccionario crudo mientras la línea 176 sí escurre
+     `payload`. Escurrir antes no cambiaría nada —`event`/`event_type`/`type`/`action` no son claves
+     "card-shaped"—, así que el fondo no es el orden: es que `webhook_events.event_type` es una columna
+     de 200 caracteres escrita desde un cuerpo que controla el proveedor, sin `scrub_card_data` y sin
+     `redact_long_digit_runs`, y **la tabla de la regla 11 no la reclama** (nombra seis columnas y ésta
+     no está). Referente: regla 13(a), *"eliminarlos… antes de que **nada** pueda persistirlos"*.
+     Agravante menor: el docstring de las líneas 172-175 afirma *"there is no moment at which an
+     unscrubbed payload exists on an object headed for the database"*, y para este campo es falso.
+     Arreglo: derivarlo del payload ya escurrido y darle forma cerrada (o pasarlo por
+     `redact_long_digit_runs`), y reclamar la columna en la tabla de la regla 11.
+  2. **La banda cerrada `13-19` sobrevive en un guard PCI hermano** — *medio*.
+     `backend/tests/integrations/test_channex_probe.py:405` conserva
+     `assert not re.search(r"\b\d{13,19}\b", raw)` sobre el **mismo** `FIXTURE_ROOT` que ahora cubre
+     `test_fixture_card_guard.py`. Es el defecto exacto que la sección 3 identificó y corrigió aquí, y
+     que centralizar `find_long_digit_runs` pretendía impedir que volviera a divergir. Fichero
+     **pre-existente** —no lo introdujo este change, su diff en `main...HEAD` está vacío—, pero un
+     fixture con `4111111111111111 1225` pegado pondría en rojo un guard y dejaría el otro en verde.
+     Referente: R4.4, D8.
+  3. **Un test que no puede fallar** — *medio*.
+     `test_the_matcher_and_the_counter_agree_on_what_a_digit_is` (`test_free_text.py`) afirma que
+     `redact_long_digit_runs("²" * 13)` no cambia, para fijar que `isdigit()` y `\d` discrepan. Pero
+     `\d` no matchea `²` en absoluto, así que la cadena nunca entra en `_DIGIT_RUN` y el contador nunca
+     se ejecuta: el test pasaría igual si el conteo usara `str.isdigit()`. Documenta una distinción
+     real sin ejercitar ninguna rama que pueda romperse. Referente: `steering/testing.md`, R4.1/D8.
+  4. **El falso positivo multilínea de `\s`, medido pero no fijado en la suite** — *bajo*. La medición
+     (encargo explícito, ya hecha): con etiquetas de campo —`"Phone: 600123456\nBooking ref: …"`, el
+     patrón operativo típico— **no dispara**, porque el texto de la etiqueta rompe la racha; sólo
+     dispara con dos números **adyacentes sin nada entre ellos** al cruzar la línea
+     (`"600123456\n1234567890"` → se funde en 19 dígitos y se redacta). Es más estrecho que el peor
+     caso temido y cae en el mismo saco de riesgo que D8 ya ratifica, pero el módulo sólo documenta el
+     caso del espacio. Arreglo: un caso multilínea en
+     `test_the_accepted_false_positive_is_documented_by_a_case`. Referente: R4.1, D8.
+  5. **Canal lateral por tiempo entre los tres rechazos** — *bajo*. Cuerpo, cabeceras y código son
+     idénticos en los tres `404` (D4 se cumple), pero el **coste** no: provider no soportado corta sin
+     tocar la base de datos, token desconocido cuesta un `SELECT`, y token válido con cabecera mala
+     cuesta además un descifrado Fernet y un `compare_digest`. No es accionable —256 bits de CSPRNG y
+     20 fallos/min por IP— pero es un residuo sin escribir. Arreglo: declararlo coste aceptado dentro
+     de D4, como D1 hace con el suyo, o igualar el trabajo en la rama "no encontrado". Referente:
+     R1.2/R1.6, D4.
+  6. **Un docstring que promete un invariante que su llamador incumple** — *bajo*.
+     `infrastructure/repositories.py:44-46` dice que `SqlAlchemyWebhookEventRepository` corre *"on an
+     **unmarked** session by construction"*, pero `scheduler/tasks.py:202` lo construye sobre la sesión
+     **marcada** que abre `run_in_marked_session`. Hoy es inofensivo —por esa vía sólo se invocan
+     `mark_processed`/`record_failure`/`exhaust`, que son `UPDATE`, nunca `select_pending`— y tenencia
+     confirmó que el filtro global añade el predicado correcto. El riesgo es que ese docstring es lo
+     que leerá quien añada mañana una lectura por esa vía. Arreglo: decir qué método exige sesión sin
+     marcar y cuál no. Referente: R5.5, D11.
 
-  **Un segundo trozo sin panel, de la sección 4**: su último arreglo, el compare-and-swap del lease del
-  lote, llegó *después* del re-review, así que el `panel: PASS` de esa sección no lo cubre. Es el otro
-  hueco que `/sdd:review` cierra de una pasada.
+  **Y un fichero que hay que borrar antes de mergear**, contado aparte porque es higiene y no lleva
+  R#: `backend/tests/integrations/conftest_zzz_probe.py` (26 líneas, entró en `bd12d65`) se
+  autodescribe como *"Throwaway probe"* y define un fixture `autouse=True` que monkeypatchea
+  `_to_endpoint` a su forma **pre-fix** de un hallazgo de seguridad ya cerrado. Hoy es inerte —pytest
+  no colecciona ese nombre y no hay `python_files` que amplíe el patrón—, pero es escombro commiteado
+  con forma de mina: un cambio de configuración de pytest lo activaría en silencio sobre todo
+  `tests/integrations/`.
 
-- **Comando para reanudar**: `/sdd:review reservations-webhooks` — a escala de feature cubre esto y lo
-  demás, que es la forma recomendada de retomar un panel interrumpido. Si se prefiere acotar,
-  `/sdd:run reservations-webhooks 3` re-dispara el panel de la sección.
+- **Comando para reanudar**: `/sdd:run reservations-webhooks` para los arreglos (el 1 es el único que
+  toca código de producción; el resto son tests, docstrings y un borrado), y después
+  `/sdd:review reservations-webhooks` acotado a lo tocado. **Ojo**: cualquier commit que cierre estos
+  hallazgos mueve HEAD, así que hay que re-correr `mark-ready` para que la evidencia de merge
+  certifique el rango arreglado y no el que falló.
 
 ## 2. Texto y un diagrama que sólo puede escribir `/sdd:archive`
 
@@ -116,8 +163,9 @@ verificadas** (la sección 6 cerró el 2026-08-09). `tasks.md` sigue siendo la v
 
 **Dónde vive el trabajo**: worktree
 `/Users/hardcode/personal/AutoHostAI/.claude/worktrees/sdd+reservations-webhooks`, rama
-`sdd/reservations-webhooks`, publicada en `origin`. Su stack de Docker está levantado; `make down`
-antes de borrar el worktree.
+`sdd/reservations-webhooks`. La rama existe en `origin` pero está **25 commits por detrás** de HEAD
+(el remoto apunta a `05b6ad1`, HEAD es `3c3feef`) y no hay upstream configurado: es un push viejo, no
+la publicación del change. Su stack de Docker está levantado; `make down` antes de borrar el worktree.
 
 **Un fallo de sesión que conviene no repetir**: un test nuevo del receptor usaba la fixture `api`
 compartida, que **no** sustituye el throttle, así que ataba el cliente Redis de proceso

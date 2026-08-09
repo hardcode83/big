@@ -14,6 +14,8 @@ import pytest
 from app.integrations.infrastructure.free_text import (
     LONG_DIGIT_RUN_REDACTED,
     MIN_REDACTED_DIGITS,
+    _DIGIT,
+    _digits_of,
     find_long_digit_runs,
     redact_long_digit_runs,
 )
@@ -133,10 +135,31 @@ def test_the_matcher_and_the_counter_agree_on_what_a_digit_is():
     """The bug underneath the two above: the pattern used `[0-9]` and the length used
     `str.isdigit()`, which are different alphabets.
 
-    `²` is `isdigit()` but is not a decimal digit and cannot spell a card number. Pinned because
-    a matcher and a counter that disagree about what a digit is will eventually disagree about a
+    **Asserted on the two primitives, not through `redact_long_digit_runs`.** The previous version
+    of this test asserted `redact_long_digit_runs("²" * 13) == "²" * 13` and could not fail: `\\d`
+    never matches `²`, so the string never enters a run and the counter is never reached — the
+    assertion held whether the counter used `\\d` or `str.isdigit()`. No input can make the public
+    function disagree with itself, because the counter only ever runs on a string the matcher
+    already matched. The invariant is therefore only observable one level down, which is where a
+    future edit would break it.
+
+    `²` is `isdigit()` but is not a decimal digit and cannot spell a card number. Pinned because a
+    matcher and a counter that disagree about what a digit is will eventually disagree about a
     card number — the same class as the drift between this module and the fixture guard.
     """
+    assert "²".isdigit(), "the character that separates the two alphabets"
+    assert _DIGIT.findall("²") == [], "the module's alphabet is `\\d`, which excludes it"
+
+    # The one that fails if the counter is ever switched back to `str.isdigit()`: it would count
+    # thirteen digits here and report a PAN-length run made of superscripts.
+    assert _digits_of("²" * 13) == ""
+
+    # And the same counter DOES count the scripts a card can really be written in, so the
+    # narrowing above is not a narrowing of the rule.
+    assert _digits_of("４１１１") == "４１１１"
+    assert _digits_of("٤١١١") == "٤١١١"
+
+    # The behavioural consequence, kept as documentation of what the invariant buys.
     assert redact_long_digit_runs("²" * 13) == "²" * 13
 
 
@@ -230,6 +253,27 @@ def test_the_accepted_false_positive_is_documented_by_a_case():
     both_phones = "600123456 600654321"
 
     assert redact_long_digit_runs(both_phones) == LONG_DIGIT_RUN_REDACTED
+
+
+def test_the_false_positive_crosses_a_line_break_too_and_that_is_measured():
+    """The same acceptance, extended to `\\n` — and bounded, because the bound is the point.
+
+    `_SEPARATORS` is built on `\\s`, which includes the line break, so the pair above does not have
+    to share a line. That widens the accepted false positive, and the widening was ratified sight
+    unseen; this pins how far it actually goes, because "two short numbers on consecutive lines
+    merge" sounds much worse than what it turns out to be.
+
+    **What does NOT trigger it is the operational shape.** A note with field labels — the way an
+    OTA or a person actually writes one — never merges, because the label's own letters end the
+    run before the next number starts. It takes two numbers adjacent across the break with nothing
+    between them but whitespace, which is the same profile D8 already accepted for two phones
+    separated by a space, not a new one.
+    """
+    labelled = "Phone: 600123456\nBooking ref: 1234567890"
+    assert redact_long_digit_runs(labelled) == labelled, "a label breaks the run"
+
+    unlabelled = "600123456\n1234567890"
+    assert redact_long_digit_runs(unlabelled) == LONG_DIGIT_RUN_REDACTED
 
 
 def test_a_run_longer_than_a_pan_goes_too():

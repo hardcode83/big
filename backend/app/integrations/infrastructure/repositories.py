@@ -41,9 +41,23 @@ WEBHOOK_ENDPOINT_CONSTRAINT = "uq_webhook_endpoints_tenant_provider"
 class SqlAlchemyWebhookEventRepository:
     """Adapter for `WebhookEventRepository`. The receiver writes the queue; the job drains it.
 
-    Runs on an **unmarked** session by construction. That matters for the read side more than the
-    write side — a marked session hides `tenant_id IS NULL` rows without erroring — and the
-    boundary is pinned by `tests/test_tenant_filter.py` and by this module's own queue tests.
+    **The session requirement is per method, not per class** — and the distinction is the whole
+    point, so it is spelled out rather than summarised:
+
+    - `select_pending` and `lease` **MUST** run on an *unmarked* session. `webhook_events.tenant_id`
+      is nullable (R1.8), and a marked session hides `tenant_id IS NULL` rows **without erroring**,
+      so an unattributed notice would silently never be drained. `scheduler/tasks.py` opens the
+      queue session unmarked for exactly this; `tests/test_tenant_filter.py` and this module's
+      queue tests pin it.
+    - `add`, `mark_processed`, `record_failure` and `exhaust` are safe either way: they are
+      `UPDATE`/`INSERT` by id, never a scan. `_webhook_tenant_use_case` does construct this
+      repository on the **marked** per-tenant session, and that is correct — the global filter adds
+      `tenant_id = :tenant` to those statements, which is a second lock on rows that already belong
+      to the tenant.
+
+    The previous docstring claimed the class ran unmarked "by construction". It did not, and the
+    claim was the risk: it read as a guarantee to anyone about to add a *read* on the per-tenant
+    path, which is the one combination that fails silently.
     """
 
     def __init__(self, session: AsyncSession) -> None:

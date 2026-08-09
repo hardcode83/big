@@ -18,6 +18,7 @@ an oracle that confirms a token exists — see `WebhookAuthenticationError`.
 """
 
 import logging
+import re
 import uuid
 from collections.abc import Awaitable, Callable, Sequence
 from dataclasses import dataclass
@@ -83,6 +84,44 @@ body is not the source of truth anyway (D13): it says *look*, and the re-read sa
 
 _EVENT_TYPE_KEYS = ("event", "event_type", "type", "action")
 _EVENT_TYPE_MAX_LENGTH = 200  # `webhook_events.event_type` is String(200).
+
+_EVENT_TYPE_SHAPE = re.compile(rf"[A-Za-z][A-Za-z0-9_.:\-]{{0,{_EVENT_TYPE_MAX_LENGTH - 1}}}")
+"""The closed form of an event label: a name, starting with a letter.
+
+**This column is claimed by rule 11 too, and this pattern is how it is honoured.** The first
+version of this module took the body's `event` verbatim and only truncated it, which made
+`webhook_events.event_type` a 200-character free-text column written from a body the provider
+controls — `scrub_card_data` cannot help there (`event`/`type`/`action` are not card-shaped keys,
+so a denylist has nothing to look at) and neither the rule 11 table nor any requirement named the
+column. A PAN under `event` would have persisted in clear. Rule 13(a) is explicit that card data
+dies "antes de que **nada** pueda persistirlos", and `nada` includes a diagnostic label.
+
+Requiring a **leading letter** is what closes the bare case structurally rather than by denylist:
+every label either provider might plausibly send is a name (`booking.created`, `BOOKING_MODIFIED`,
+`new_booking`), and no card number is. Anchored at the start, so `"4111111111111111 created"` does
+not match either — a search would have pulled `created` out of it and recorded a label for a value
+that is not one.
+
+Digits are allowed inside the name because provider vocabularies contain them (`beds24.booking.*`),
+which is why the shape alone is not enough — see `_LONG_DIGIT_RUN_IN_LABEL`.
+"""
+
+_LONG_DIGIT_RUN_IN_LABEL = re.compile(r"\d{5,}")
+"""What disqualifies an otherwise well-shaped label.
+
+The shape above admits digits, so `card4111111111111111` starts with a letter, contains no space,
+and would have matched it whole — carrying the PAN into the column that this whole exercise was
+about. Five is chosen well below `free_text.MIN_REDACTED_DIGITS` (13) rather than at it: this is a
+label, not prose, so there is no false-positive budget to protect — the longest run in any real
+vocabulary is the `24` of `beds24`. A separate, deliberately stricter rule than the one for
+`special_requests`, and the reason it can be stricter is that nothing operational is lost when a
+malformed label degrades to `UNKNOWN_EVENT_TYPE`: D13 makes the body an advisory and nothing
+branches on this string.
+
+Not a second copy of `free_text.redact_long_digit_runs`, which is the rule for **prose** and lives
+in `infrastructure/` where this layer cannot reach it (`test_layering.py`). Different input,
+different threshold, different answer on failure — redaction there, rejection here.
+"""
 
 
 class ReceiveWebhookUseCase:
@@ -164,16 +203,20 @@ class ReceiveWebhookUseCase:
         holds both secrets, and re-resolving would be a second lookup answering a question already
         answered. It also makes it impossible to record against an endpoint nobody authenticated.
         """
+        # **Scrubbed before it is stored, never after** (R4.1, rule 13(a), D7). Card data is
+        # discarded rather than encrypted or masked, because PCI DSS forbids retaining the CVV at
+        # all. Scrubbing once, here, is what makes the claim below true of the *whole* entity:
+        # every field headed for the database is derived from this value, so there is no moment at
+        # which anything on that object was read off the unscrubbed body. `event_type` used to be
+        # the exception — it was derived from `payload` directly — and that is why it is now taken
+        # from `scrubbed` and constrained by `_EVENT_TYPE_SHAPE`.
+        scrubbed = self._scrub(payload)
         event = WebhookEvent(
             id=uuid.uuid4(),
             tenant_id=endpoint.tenant_id,
             provider=endpoint.provider.value,
-            event_type=_event_type(payload),
-            # **Scrubbed before it is stored, never after** (R4.1, rule 13(a), D7). Card data is
-            # discarded rather than encrypted or masked, because PCI DSS forbids retaining the CVV
-            # at all. The scrubbed value is what the entity is built from, so there is no moment
-            # at which an unscrubbed payload exists on an object headed for the database.
-            payload=self._scrub(payload),
+            event_type=_event_type(scrubbed),
+            payload=scrubbed,
             received_at=now,
             processed=False,
         )
@@ -637,12 +680,19 @@ def _event_type(payload: dict[str, Any]) -> str:
     operator can read the queue, not so the job can branch on it. That is why an unrecognised
     shape is `UNKNOWN_EVENT_TYPE` instead of an error.
 
-    Truncated to the column width rather than allowed to fail the insert: the value comes from an
-    anonymous caller, and a 10 KB `event` string must not be able to abort the transaction that
-    is recording the notice.
+    Takes the **scrubbed** payload, and accepts only a value that is a name and carries no long run
+    of digits — see `_EVENT_TYPE_SHAPE` and `_LONG_DIGIT_RUN_IN_LABEL` for why a label the body
+    controls needs a closed form and not just a length cap (rule 11, rule 13(a)).
+
+    The shape is bounded by the column width, so a well-formed but absurdly long name is truncated
+    rather than refused: a 10 KB `event` string must not be able to abort the transaction that is
+    recording the notice, and the truncated prefix is still a name.
     """
     for key in _EVENT_TYPE_KEYS:
         value = payload.get(key)
-        if isinstance(value, str) and value.strip():
-            return value.strip()[:_EVENT_TYPE_MAX_LENGTH]
+        if not isinstance(value, str):
+            continue
+        match = _EVENT_TYPE_SHAPE.match(value.strip())
+        if match and not _LONG_DIGIT_RUN_IN_LABEL.search(match.group()):
+            return match.group()
     return UNKNOWN_EVENT_TYPE

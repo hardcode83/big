@@ -196,6 +196,77 @@ async def test_an_absurdly_long_event_type_cannot_abort_the_insert(
     assert len(stored) == 200
 
 
+@pytest.mark.parametrize(
+    "label",
+    [
+        "4111111111111111",  # a bare PAN under `event`
+        "4111 1111 1111 1111",  # the way it is printed; the shape stops at the first space
+        "card4111111111111111",  # well-shaped name, PAN glued to it
+        "4111111111111111 booking.modified",  # a real label hiding behind one
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_card_number_cannot_ride_into_the_label_column(
+    db_session, tenant_a, label
+) -> None:
+    """`webhook_events.event_type` is a rule 11 sink too, and it was the one nobody had claimed.
+
+    The column reads like an enum and is filled from whatever the body puts under
+    `event`/`type`/`action` — so it was a 200-character free-text column written from outside, and
+    `scrub_card_data` could not help: those keys are not card-shaped, so a denylist has nothing to
+    look at. Rule 13(a) kills cardholder data before **anything** persists it, and a diagnostic
+    label is a thing.
+
+    Closed structurally, not by denylist: a label is a name, and none of these four are. The last
+    two are the ones a shape check alone would have let through — a prefix search would have
+    recorded `booking.modified` for a value that is a PAN, and a bare shape check would have taken
+    `card4111111111111111` whole.
+    """
+    token = await _provision(db_session, tenant_a)
+
+    event_id = await _use_case(db_session).execute(
+        provider="beds24",
+        token=token,
+        get_header=_headers(**{HEADER_NAME: SECRET}),
+        payload={"event": label},
+        now=utc_now(),
+    )
+
+    stored = (
+        await db_session.execute(
+            text("SELECT event_type FROM webhook_events WHERE id = :id"), {"id": str(event_id)}
+        )
+    ).scalar_one()
+    assert stored == UNKNOWN_EVENT_TYPE
+    assert "4111" not in stored
+
+
+@pytest.mark.asyncio
+async def test_a_provider_vocabulary_with_digits_in_it_still_works(db_session, tenant_a) -> None:
+    """The other half of the rule above: rejecting digits outright would have been wrong.
+
+    `beds24` is a provider name with digits in it, so the label rule has to admit them and draw the
+    line at a **run** long enough to be a card — deliberately far below the 13 that
+    `free_text.py` uses for prose, because a label has no false-positive budget to protect.
+    """
+    token = await _provision(db_session, tenant_a)
+
+    event_id = await _use_case(db_session).execute(
+        provider="beds24",
+        token=token,
+        get_header=_headers(**{HEADER_NAME: SECRET}),
+        payload={"event": "beds24.booking.modified"},
+        now=utc_now(),
+    )
+
+    stored = (
+        await db_session.execute(
+            text("SELECT event_type FROM webhook_events WHERE id = :id"), {"id": str(event_id)}
+        )
+    ).scalar_one()
+    assert stored == "beds24.booking.modified"
+
+
 # --- Every failure is the same failure (R1.2, R1.3, R1.6, D4) ---
 
 

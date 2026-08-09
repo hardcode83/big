@@ -71,7 +71,9 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 
 ## Sumideros de texto en claro (regla 11)
 
-Seis columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
+Siete columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
+
+**La séptima se añadió tarde, y por qué importa cómo se encontró**: `webhook_events.event_type` no estaba en esta lista porque no *parece* texto libre — se llama "tipo" y uno espera un enum. Pero se rellenaba con lo que el cuerpo del webhook trajera bajo `event`/`type`/`action`, así que era una columna de 200 caracteres escrita desde fuera, y la enumeración de esta tabla es justo lo que decide si alguien la mira. La lección es que el censo se hace por **quién escribe la columna**, no por lo que su nombre promete.
 
 **Tres ya están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción) y `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA). Las otras tres siguen sin reclamar. La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
 
@@ -82,6 +84,7 @@ Seis columnas del esquema son texto o JSON libre por el que puede colarse un val
 | `audit_logs.changes` | estructurada | **`user-management`** (escritor vivo; `ChangeSet` + `AuditLogFactory` lo hacen cumplir) y quien audite documentos de huésped |
 | `webhook_events.payload` | estructurada | `reservations-webhooks` |
 | `webhook_events.error` | estructurada | `reservations-webhooks` |
+| `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | `reservations-webhooks` |
 | `notification_logs.last_error` | estructurada | `access-notifications` (aún sin escritor) |
 | `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y después `access-notifications` |
 

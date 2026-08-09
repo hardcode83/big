@@ -132,6 +132,24 @@ solo responde sobre un candidato que ya haya que adivinar. Donde una fuga byte a
 explotable es en la comparación del secreto, y ahí es donde la regla 12(a) pone el tiempo constante
 (D3).
 
+> **Completado en review (panel de seguridad, 2026-08-09).** La redacción anterior declaraba *una*
+> fuga de latencia —la del acierto/fallo de índice— cuando en realidad los tres rechazos tienen
+> **tres** perfiles de coste distintos, y conviene que estén los tres escritos:
+>
+> 1. **Provider no soportado**: corta en el constructor de `PMSProvider` y **no llega a tocar la
+>    base de datos**. Es el más barato de los tres con diferencia.
+> 2. **Token desconocido**: cuesta el `SELECT` indexado ya declarado arriba.
+> 3. **Token válido con cabecera ausente o incorrecta**: cuesta ese mismo `SELECT` **más** un
+>    descifrado Fernet del secreto almacenado y el `compare_digest`.
+>
+> El argumento de por qué se acepta no cambia y de hecho se refuerza: el único de los tres que
+> importa —distinguir "este token existe" de "no existe"— es el salto 2→3, y es el más pequeño de
+> los dos. Sigue sin ser una vía para *recuperar* nada: 256 bits de CSPRNG (R1.5) hacen que el
+> oráculo solo responda sobre candidatos que ya haya que adivinar, y el presupuesto de sondeo por
+> IP de D6 (20 fallos/min, cobrados **solo** en fallo) acota el muestreo necesario para promediar
+> ruido de red. Lo que se rechaza sigue siendo lo mismo: igualar el coste con trabajo de relleno
+> alarga el camino sin igualarlo, y añadiría un descifrado Fernet a la rama que hoy es gratis.
+
 Rejected: `401` con `WWW-Authenticate` — correcto en HTTP y un oráculo en la práctica.
 
 ### D5 — El orden de las comprobaciones es la defensa: cabeceras antes que cuerpo
@@ -237,6 +255,33 @@ del receptor completo.
 
 `error` nunca lleva texto del cuerpo: forma estructurada (código + campo), como exige la regla 11 y
 como el docstring del modelo ya advierte ("`error` must never echo the raw body back").
+
+> **Ampliado en review (panel de seguridad, 2026-08-09): faltaba una tercera columna.** Esta decisión
+> nombraba `payload` y `error`, que son las dos que la tabla de la regla 11 reclamaba, y dejaba fuera
+> **`webhook_events.event_type`** — que se rellenaba con lo que el cuerpo trajera bajo
+> `event`/`type`/`action`, sólo recortado a 200 caracteres. Es decir: una columna de texto libre de
+> 200 caracteres escrita desde fuera, y `scrub_card_data` no podía ayudar, porque esas cuatro claves
+> no son *card-shaped* y una denylist no tiene ahí nada que mirar. Un PAN bajo `event` habría
+> persistido en claro, que es exactamente el agujero que la regla 13 describe, desplazado una columna.
+>
+> **La causa está en cómo se hizo el censo, y por eso se corrige también ahí**: la tabla de la regla 11
+> se leyó como la lista de columnas a proteger, cuando es una lista que alguien tuvo que escribir. Una
+> columna llamada «tipo» no parece texto libre; lo es en cuanto la llena el cuerpo. `event_type` queda
+> añadida a esa tabla en `sdd/steering/security.md`, con la lección escrita al lado: el censo se hace
+> por **quién escribe la columna**, no por lo que su nombre promete.
+>
+> **La forma elegida es cerrada, no una denylist**: un `event_type` es un nombre —empieza por letra—
+> y ningún número de tarjeta lo es. Se admiten dígitos dentro (`beds24.booking.*` los lleva) pero se
+> rechaza cualquier racha de 5 o más, deliberadamente muy por debajo de los 13 de `free_text.py`:
+> aquí no hay presupuesto de falsos positivos que proteger, porque un `event_type` que no encaja
+> degrada a `UNKNOWN_EVENT_TYPE` y no se pierde nada — D13 ya dice que el cuerpo no decide nada. Y el
+> patrón se ancla al principio del valor: buscarlo en cualquier posición habría sacado `created` de
+> `"4111111111111111 created"` y registrado una etiqueta para un valor que no lo es.
+>
+> Nótese que **no** es una segunda copia de `free_text.redact_long_digit_runs`: distinta entrada
+> (una etiqueta, no prosa), distinto umbral y distinta respuesta al fallo —allí se redacta, aquí se
+> rechaza—. Además vive en `application/`, desde donde `test_layering.py` prohíbe alcanzar
+> `infrastructure/`, que es donde está la otra.
 
 Rejected: un scrubber propio del receptor — dos copias de una función de seguridad divergen en el
 primer arreglo unilateral, que es exactamente lo que el docstring de `card_data.py` explica.
