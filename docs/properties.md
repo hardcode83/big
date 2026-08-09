@@ -64,6 +64,14 @@ permitiera escribir esa columna dejaría el historial con agujeros sin que nada 
 
 Crear una propiedad **no** genera evento de timeline, por lo mismo: crear no es transitar.
 
+**Sí se puede leer**, desde `dashboard-api`: `GET /api/v1/properties/{id}/state` devuelve el
+estado canónico y el instante ISO-8601 UTC de la última transición — ambos **leídos**, nunca
+recalculados, que es la otra cara de la misma regla. `last_transition_at` llega `null` en una
+vivienda que nunca se ha movido, porque el alta no dejó transición que datar. La vivienda
+también aparece en el agregado `GET /api/v1/properties/{id}/dashboard` y en la colección
+`GET /api/v1/dashboard/properties`; los tres están documentados en
+[`docs/dashboard.md`](dashboard.md).
+
 ## La contraseña del wifi entra y no vuelve a salir
 
 Se puede enviar en el alta y en la edición, y se guarda cifrada. **No se puede leer de vuelta por
@@ -105,8 +113,6 @@ De los campos sensibles y de los de texto libre (`access_notes`, `cleaning_notes
 ## Lo que todavía no existe
 
 - **No hay pantalla**: esto es API. El frontend de propiedades llega con `dashboard-web`.
-- **No hay endpoint de estado ni de dashboard agregado** (`/properties/{id}/state`,
-  `/properties/{id}/dashboard`): están en PRD §23 y son de `dashboard-web`.
 - **Las credenciales del PMS no se tocan por API**, ni siquiera enmascaradas. Se gestionan con
   `python -m app.integrations.cli.pms_credentials`, y es a propósito: una credencial robada da
   escritura sobre la cuenta del cliente, así que no existe superficie HTTP que pueda filtrarla.

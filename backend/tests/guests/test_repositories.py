@@ -37,6 +37,85 @@ def _repository(db_session, tenant: TenantModel) -> SqlAlchemyGuestRepository:
     return SqlAlchemyGuestRepository(db_session)
 
 
+# --- `list_for_ids` (`dashboard-api` R1.7, task 6.1) ------------------------------------
+#
+# The batch reader the dashboard card needs. The tenancy panel of `dashboard-api` sections
+# 6-7 asked for these specifically: it is the one method built for the "dictionary lookup
+# keyed by an id that resolved in another tenant" hazard the aggregate introduces, and it
+# had no cross-tenant test anywhere in the suite — the end-to-end isolation test looked like
+# it covered the path but never reached it, because its seeded reservation had no guest.
+
+
+@pytest.mark.asyncio
+async def test_list_for_ids_returns_the_summaries_of_the_batch(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    one = await _guest(db_session, tenant, full_name="Marta García", email="m@example.com")
+    two = await _guest(db_session, tenant, full_name="Luis Pérez", email="l@example.com")
+    await _guest(db_session, tenant, full_name="Not asked for", email="n@example.com")
+
+    found = await _repository(db_session, tenant).list_for_ids(tenant.id, [one.id, two.id])
+
+    assert {guest.id for guest in found} == {one.id, two.id}
+    assert {guest.full_name for guest in found} == {"Marta García", "Luis Pérez"}
+
+
+@pytest.mark.asyncio
+async def test_list_for_ids_never_reads_another_tenants_guest(db_session) -> None:
+    """DoD §28.18 and rule 1 of `steering/security.md`.
+
+    The neighbour's id is passed in **explicitly**, so the tenant argument is the only thing
+    excluding it — exactly the call a buggy aggregate would make after joining on a global
+    UUID. `guests.id` is not composite with `tenant_id`, so nothing but this filter stops it.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    mine = await _guest(db_session, tenant_a, full_name="Mine", email="mine@example.com")
+    theirs = await _guest(db_session, tenant_b, full_name="Theirs", email="t@example.com")
+
+    found = await _repository(db_session, tenant_a).list_for_ids(
+        tenant_a.id, [mine.id, theirs.id]
+    )
+
+    assert [guest.id for guest in found] == [mine.id]
+    assert all(guest.full_name != "Theirs" for guest in found)
+
+
+@pytest.mark.asyncio
+async def test_list_for_ids_omits_an_id_that_does_not_resolve(db_session) -> None:
+    """Absent rather than raising: the caller keys the result by id and defaults."""
+    tenant = await _tenant(db_session, "TenantA")
+    mine = await _guest(db_session, tenant, full_name="Mine", email="mine@example.com")
+
+    found = await _repository(db_session, tenant).list_for_ids(
+        tenant.id, [mine.id, uuid.uuid4()]
+    )
+
+    assert [guest.id for guest in found] == [mine.id]
+
+
+@pytest.mark.asyncio
+async def test_list_for_ids_returns_summaries_without_document_data(db_session) -> None:
+    """Rule 4 of `steering/security.md` — the batch reader returns `GuestSummary` like its
+    siblings, so a document number is out of reach by construction."""
+    import dataclasses
+
+    tenant = await _tenant(db_session, "TenantA")
+    guest = await _guest(db_session, tenant, full_name="Marta", email="m@example.com")
+
+    found = await _repository(db_session, tenant).list_for_ids(tenant.id, [guest.id])
+
+    fields = {field.name for field in dataclasses.fields(found[0])}
+    assert "document_number_encrypted" not in fields
+    assert "date_of_birth" not in fields
+
+
+@pytest.mark.asyncio
+async def test_list_for_ids_with_an_empty_batch_returns_nothing(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+
+    assert await _repository(db_session, tenant).list_for_ids(tenant.id, []) == []
+
+
 @pytest.mark.asyncio
 async def test_get_returns_the_guest_of_its_tenant(db_session) -> None:
     tenant = await _tenant(db_session, "TenantA")

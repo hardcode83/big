@@ -17,6 +17,7 @@ from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
 from app.core.config import settings
+from app.dashboard.api.router import router as dashboard_router
 from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.log_redaction import install_webhook_token_redaction
@@ -33,6 +34,8 @@ from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
 from app.tenants.api.errors import register_tenant_error_handlers
 from app.tenants.api.router import router as tenants_router
+from app.timeline.api.errors import register_timeline_error_handlers
+from app.timeline.api.router import router as timeline_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -69,6 +72,7 @@ def create_app() -> FastAPI:
     register_cleaning_error_handlers(app)
     register_access_error_handlers(app)
     register_guest_error_handlers(app)
+    register_timeline_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -113,6 +117,17 @@ def create_app() -> FastAPI:
     # One router for everything that touches an identity document, which is the file a
     # reviewer opens when a real provider arrives.
     app.include_router(guests_router, prefix=API_V1_PREFIX)
+    # `dashboard-api`: the read side of PRD §10. `timeline` had `domain/` and
+    # `infrastructure/` since `timeline-state-machine` and no way to read an event back —
+    # its port said so, and said this was the change that would add one.
+    app.include_router(timeline_router, prefix=API_V1_PREFIX)
+    # `dashboard-api`: the aggregate of PRD §9.1-9.2. Its router serves TWO prefixes —
+    # `/dashboard/properties` (this change's own extension) and
+    # `/properties/{id}/dashboard` (named literally by §23:1943) — because the aggregate
+    # composes seven domains and belongs to none of them (design D1/D7). It raises
+    # `PropertyNotFoundError` from `app/properties/domain/`, which
+    # `register_property_error_handlers` above already maps to the §23 envelope.
+    app.include_router(dashboard_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

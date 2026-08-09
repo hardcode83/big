@@ -10,6 +10,7 @@ import re
 import uuid
 from dataclasses import dataclass, field
 
+from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import CleaningValidationError
 
 # `cleaning_checklist_completions.item_id` and `cleaning_photos.photo_type` are
@@ -275,3 +276,31 @@ def parse_template_content(
         )
 
     return ChecklistTemplateSpec(items=tuple(parsed_items), required_photos=tuple(parsed_photos))
+
+
+@dataclass(frozen=True)
+class CleaningTaskSummary:
+    """What a dashboard is allowed to know about a live cleaning task.
+
+    Added by `dashboard-api` for its batch reader (that change's R1, R2), and narrow for the
+    reason `app/cleaning/api/schemas.py:8-13` already records about this same entity:
+    "`CleaningTask` carries `notes`, which design D13 keeps out of this change's surface
+    entirely — a `from_attributes` dump would publish it the day someone writes to it."
+
+    The batch reader used to return whole `CleaningTask` entities, which handed a future
+    serialiser `notes` (free text, a rule-11 sink of `steering/security.md`),
+    `assigned_cleaner_id` and `validated_by_user_id`. The security panel of `dashboard-api`
+    section 4 caught it after the same fix had been applied to `maintenance`; this is that
+    fix, applied consistently.
+
+    Three fields, because the card needs exactly three things: which property this belongs
+    to (the caller groups the batch by it), and a status to render a label from
+    (`app/dashboard/domain/labels.py`). The id comes along so a client can correlate.
+
+    Whoever needs the cleaner, the schedule or the notes reads the task itself through
+    `CleaningTaskRepository.get` — which is what the cleaning endpoints already do.
+    """
+
+    id: uuid.UUID
+    property_id: uuid.UUID
+    status: CleaningTaskStatus
