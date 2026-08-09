@@ -37,14 +37,27 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
     fixtures y las dos mitades del contrato.
   - **Sección 3 completa y verificada** (3.1 y 3.2): `free_text.py` y su aplicación a
     `special_requests` en los dos mapeos externos. Su panel **no está cerrado**, ver la entrada 2.
-  - **Los paneles de las secciones 1 y 2 cerrados en PASS**, siete reviewers cada uno, con dos rondas
-    de arreglo en la sección 2 (el máximo). Catorce hallazgos aceptados y arreglados entre ambos.
-  - **Pendiente**: las secciones 4, 5 y 6 completas. La 4 (procesamiento asíncrono) es la más grande
-    del change, ocho tareas, y es la que convierte la cola en reservas.
-  - **Verde en lo que se ha tocado**: 1646 pasan en `tests/integrations` + `tests/reservations` +
-    `tests/test_layering.py`. **La suite completa no se ha vuelto a correr desde la sección 2** (allí
-    fueron 4065 pasan, 35 se saltan, todos placeholders preexistentes de
-    `tests/properties/test_state_machine.py`, ajenos a este change). La tarea 6.1 la corre al cerrar.
+  - **Sección 4 completa y verificada** (4.1 a 4.8), la más grande del change: la cola se drena y se
+    convierte en reservas. Repositorio de la cola sin cuerpo (`QueuedWebhookEvent`), los dos casos de
+    uso (lote sin marcar / tenant marcado), reintentos con techo, coalescing por destino, re-lectura
+    reutilizando el caso de uso de sync, transición por `AdvancePropertyStatesUseCase` sin tocarlo,
+    desorden, y la tarea Celery con su cadencia de 60 s.
+  - **Los paneles de las secciones 1, 2 y 4 cerrados en PASS**, siete reviewers cada uno. Dos rondas
+    de arreglo en la 2 y en la 4 (el máximo). Veintiún hallazgos aceptados y arreglados entre los
+    tres. El de la 4 está resumido en la cabecera de su sección en `tasks.md`, con la salvedad de que
+    su último arreglo (el compare-and-swap del lease) llegó después del re-review y no ha pasado por
+    el panel: lo cubre `/sdd:review`.
+  - **Pendiente**: las secciones 5 (documentación) y 6 (verificación).
+  - **Verde**: **la suite completa corrió al cerrar la sección 4** — 4157 pasan, 35 se saltan, los 35
+    placeholders preexistentes de `tests/properties/test_state_machine.py`, ajenos a este change. La
+    tarea 6.1 la vuelve a correr al cerrar.
+
+  **De paso, un fallo de la sesión que conviene no repetir**: un test nuevo del receptor usaba la
+  fixture `api` compartida, que **no** sustituye el throttle, así que ataba el cliente Redis de
+  proceso (`app.core.redis.get_redis`) al bucle de ese test y mataba a otro más tarde con «Event loop
+  is closed». Los docstrings de `test_webhook_receiver_api.py` y `test_login_throttle_over_http.py`
+  avisan de exactamente eso. La convención es construir el cliente en el propio test y sustituir
+  `get_webhook_throttle` salvo que el test *sea* sobre el límite de tasa.
 
   **Dos deudas con disparador, que no bloquean nada ahora pero no deben perderse** (las dos están
   razonadas en `design.md`, esto es sólo el recordatorio):
@@ -71,8 +84,8 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
   `/Users/hardcode/personal/AutoHostAI/.claude/worktrees/sdd+reservations-webhooks`, rama
   `sdd/reservations-webhooks`, publicada en `origin`. Su stack de Docker está levantado; `make down`
   antes de borrar el worktree.
-- **Comando para reanudar**: `/sdd:run reservations-webhooks 4` — **con `/clear` antes**, que es donde
-  está el ahorro: la sección 4 no necesita nada del contexto de esta sesión.
+- **Comando para reanudar**: `/sdd:run reservations-webhooks 5` — **con `/clear` antes**, que es donde
+  está el ahorro: la sección 5 no necesita nada del contexto de esta sesión.
 
 ## 2. El re-review de QA de la sección 3 se quedó a medias
 

@@ -298,7 +298,65 @@ forzado en `infrastructure/`.
   > escritura anónima desde internet, que es el disparador literal de P.8. Candidato a change futuro
   > si alguna vez el CSV pasa a ser una exportación cruda del PMS.
 
-## 4. Procesamiento asíncrono
+## 4. Procesamiento asíncrono <!-- panel: PASS 2026-08-09 -->
+
+> **Panel de la sección 4 (siete reviewers, un solo mensaje): PASS tras dos rondas.** Ronda 1:
+> `sdd-review-tenancy`, `sdd-review-cicd` y `sdd-review-i18n` sin hallazgos; arquitectura, seguridad,
+> QA y documentación con hallazgos. Ronda 2: los cuatro re-reviews en PASS salvo un `LOW` nuevo de
+> seguridad, arreglado también. Siete hallazgos aceptados, uno rechazado.
+>
+> **Los dos que importaban compartían raíz: una sola llamada de re-lectura abarcando todos los
+> proveedores del tenant.**
+> - **Arquitectura, medio — la ventana no era por destino.** `since` se calculaba como el mínimo
+>   `received_at` de **todo** el lote del tenant, cuando D10 ancla el retroceso en «el aviso más
+>   antiguo **del grupo**» y el grupo es el destino. Un proveedor veía su ventana ensanchada porque
+>   *otro* tenía un aviso más viejo en el mismo tick: el acoplamiento con el volumen de la regla
+>   12(d), desplazado del número de llamadas al ancho de la ventana.
+> - **QA, alto — el radio de explosión del fallo de mapeo.** `AmbiguousPropertyExternalIdError`
+>   escapa del `try` por proveedor del sync, así que una llamada que los abarcaba todos convertía el
+>   `pms_external_id` duplicado de **un** proveedor en fallo de los avisos de **todos** los demás del
+>   mismo tenant, y los re-marcaba en cada tick hasta que una persona arreglara el duplicado. Contra
+>   R5.4, **reproducido con probe** por el panel, y sin ningún test que lo viera.
+>
+>   Los dos se cierran con el mismo arreglo: `_reread` pasa a ser un bucle sobre `_reread_one`, una
+>   `sync.execute(providers={provider})` por destino, cada una con su ancla y su `except`. **El
+>   número de llamadas no cambia** —el caso de uso de sync ya emitía una por grupo de proveedor—; lo
+>   que cambia es la unidad de fallo y la de ventana. El re-review de QA verificó, revirtiendo el
+>   fichero, que los tests nuevos fallan sin el arreglo.
+>
+> - **Seguridad, medio — el techo de llamadas dependía de un TTL de Redis.** `select_pending` no
+>   tomaba ninguna prenda sobre las filas que devolvía, así que lo único que impedía que dos
+>   ejecuciones solapadas cogieran el mismo lote era el lock, cuyo TTL es finito **a propósito**
+>   (D9 de `celery-jobs` prefiere que caduque a que atasque). Una ejecución que se pasara de 180 s
+>   dejaba que el siguiente tick emitiera una segunda llamada al mismo destino. Arreglado con un
+>   lease del lote (`next_attempt_at = now + 15 min`, commiteado **antes** de trabajar), que **no
+>   toca `attempts`**: morir a medias cuesta una espera, nunca presupuesto de reintentos.
+> - **Seguridad, bajo (ronda 2) — el lease no era atómico respecto a la selección.** Era un `UPDATE`
+>   ciego por `id`, así que dos ejecuciones dentro de la ventana *select → commit* se lo pisaban y
+>   trabajaban el mismo lote. Ahora es un **compare-and-swap**: el `UPDATE` repite el predicado de
+>   `select_pending` y devuelve los ids ganados, y **se procesa lo reclamado, no lo visto**.
+> - **Documentación — tres docstrings que mentían.** El grave afirmaba un contrato de tenancy:
+>   *«Every method here runs on a session that was never marked»*, cuando `_webhook_tenant_use_case`
+>   construye ese mismo adapter sobre una sesión **marcada**, a propósito, para que la marca caiga en
+>   la misma transacción que la ingesta. Los otros dos: «The four Celery tasks of PRD §8.3» (ya son
+>   cinco, y una no es del PRD) y «Nothing writes here yet» en `WebhookEventModel` (obsoleto desde la
+>   sección 2). El reviewer devolvió PASS con los tres hallazgos escritos en el cuerpo; se verificaron
+>   uno a uno contra el código antes de aceptarlos.
+> - **QA, dos huecos de cobertura**: la agrupación de `_schedule_retry` por `attempts` distintos, y
+>   una aserción floja (`since < oldest` no distingue `min` de `max`), ahora exacta.
+>
+> **Rechazado, con motivo: el hallazgo `LOW` de seguridad sobre justicia entre tenants.** Se apoyaba
+> en dos afirmaciones falsas —«no HTTP router exists yet» y «there is no arrival-rate bound anywhere
+> in the tree today»—: `webhooks_router` está registrado en `main.py:78` y los dos limitadores de D6
+> son de la sección 2 (`webhook_rate_limit_per_minute = 120`). Con 120 altas/min por token contra un
+> lote de 500 cada 60 s, un tenant no puede adelantar al drenaje. El reviewer aceptó la corrección.
+> La observación de fondo —`select_pending` es FIFO global, sin cuota por tenant— es real como
+> preocupación de **escala**, no como defecto de esta sección: candidata a change futuro.
+>
+> **Una salvedad honesta**: el compare-and-swap es de la ronda 2 y llegó **después** del último
+> re-review de seguridad, así que lleva su propio test
+> (`test_two_runs_that_both_selected_the_batch_leave_exactly_one_owner`) pero no ha pasado por el
+> panel. Se agotaron las dos rondas que el flujo permite; lo cubre `/sdd:review` a escala de feature.
 
 - [x] 4.1 Repositorio de la cola en `infrastructure/repositories.py`, leyendo desde una sesión **nunca
   marcada**. Test que fija que las filas con `tenant_id` NULL son visibles ahí y **no** desde una sesión

@@ -99,15 +99,31 @@ class SqlAlchemyWebhookEventRepository:
         return [QueuedWebhookEvent(*row) for row in rows]
 
     async def lease(
-        self, event_ids: Sequence[uuid.UUID], *, until: datetime
-    ) -> None:
+        self, event_ids: Sequence[uuid.UUID], *, now: datetime, until: datetime
+    ) -> list[uuid.UUID]:
         if not event_ids:
-            return
-        await self._session.execute(
+            return []
+        rows = await self._session.execute(
             update(WebhookEventModel)
-            .where(WebhookEventModel.id.in_(event_ids))
+            .where(
+                WebhookEventModel.id.in_(event_ids),
+                # The selection predicate, repeated — this is what makes the claim a
+                # compare-and-swap rather than a blind write. Under READ COMMITTED a second
+                # run's UPDATE blocks on the winner's row locks and then re-evaluates against
+                # the row version the winner committed, where `next_attempt_at` is now in the
+                # future; the predicate fails and the loser claims nothing. Matching on `id`
+                # alone would let it overwrite the winner's claim and work the same batch.
+                WebhookEventModel.processed.is_(False),
+                WebhookEventModel.attempts < MAX_WEBHOOK_ATTEMPTS,
+                or_(
+                    WebhookEventModel.next_attempt_at.is_(None),
+                    WebhookEventModel.next_attempt_at <= now,
+                ),
+            )
             .values(next_attempt_at=until)
+            .returning(WebhookEventModel.id)
         )
+        return list(rows.scalars())
 
     async def mark_processed(
         self, event_ids: Sequence[uuid.UUID], *, now: datetime

@@ -332,6 +332,14 @@ commitea **antes** de trabajar. Se escribe en `next_attempt_at` y no en una colu
 `attempts`**: una ejecución que muera a medias le cuesta a sus avisos una espera, nunca un trozo
 de su presupuesto de reintentos.
 
+Y la reclamación es un **compare-and-swap**, no una escritura ciega (segunda ronda del mismo
+panel): el `UPDATE` repite el predicado de `select_pending` y devuelve los ids que ha ganado, así
+que de dos ejecuciones que hayan seleccionado las mismas filas antes de que ninguna commitease,
+exactamente una se queda cada fila —la perdedora bloquea sobre el lock de fila, reevalúa contra la
+versión que la ganadora commiteó, y no encuentra nada—. **Se procesa lo reclamado, no lo visto**:
+sin esa condición la perdedora pisaba la reclamación y trabajaba el mismo lote, que es dos llamadas
+salientes al mismo destino.
+
 Rejected: una subtarea Celery por evento con `autoretry_for` + `retry_backoff` — el estado del reintento
 vive en el broker, así que un reinicio del worker lo pierde y, peor, el job por cadencia no puede
 distinguir "en vuelo" de "pendiente" y reprocesa. Rejected: contar intentos en Redis — el contador

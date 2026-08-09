@@ -78,9 +78,15 @@ class WebhookEventRepository(Protocol):
         ...
 
     async def lease(
-        self, event_ids: Sequence[uuid.UUID], *, until: datetime
-    ) -> None:
-        """Claim this batch: hide these notices from any other run until `until` (R6.2, D10).
+        self, event_ids: Sequence[uuid.UUID], *, now: datetime, until: datetime
+    ) -> list[uuid.UUID]:
+        """Claim this batch and return what was actually claimed (R6.2, D10).
+
+        **A compare-and-swap, not a blind write**, which is the second half of the security
+        panel's finding: the claim re-asserts `select_pending`'s own predicate, so of two runs
+        that both selected the same rows before either committed, exactly one wins each row.
+        The caller processes the returned ids and nothing else — a run that claimed nothing does
+        nothing, instead of working a batch another run already owns.
 
         **Without it the "one outbound call per destination per tick" ceiling rests on a Redis
         TTL**, which is what the security panel of §4 found. `select_pending` takes no lock and

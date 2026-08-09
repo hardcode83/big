@@ -242,11 +242,47 @@ async def test_the_batch_is_claimed_before_any_work_begins(
 
 
 @pytest.mark.asyncio
+async def test_two_runs_that_both_selected_the_batch_leave_exactly_one_owner(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """The claim is a compare-and-swap, not a blind write (R6.2, D10).
+
+    Both runs select before either commits — the window the Redis lock is supposed to prevent
+    and cannot be relied on to, since its TTL is finite by design. `lease` re-asserts
+    `select_pending`'s own predicate, so the loser's UPDATE re-evaluates against the winner's
+    committed row and matches nothing. Without that predicate the loser would overwrite the
+    claim and work the identical batch, putting two concurrent outbound calls on one
+    destination. Found by the security panel of this section, second round.
+    """
+    event_id = await _failing_notice(db_session, tenant_a.id)
+    repository = SqlAlchemyWebhookEventRepository(db_session)
+    until = NOW + BATCH_LEASE
+
+    # Both runs see the row: neither has claimed it yet.
+    first_view = await repository.select_pending(now=NOW, limit=10)
+    second_view = await repository.select_pending(now=NOW, limit=10)
+    assert [event.id for event in first_view] == [event_id]
+    assert [event.id for event in second_view] == [event_id]
+
+    winner = await repository.lease([event_id], now=NOW, until=until)
+    await db_session.commit()
+    loser = await repository.lease([event_id], now=NOW, until=until + timedelta(hours=1))
+    await db_session.commit()
+
+    assert winner == [event_id]
+    assert loser == [], "the second run claimed a row the first already owned"
+    row = await db_session.get(WebhookEventModel, event_id)
+    await db_session.refresh(row)
+    # The winner's deadline stands; the loser did not push it out.
+    assert row.next_attempt_at == until
+
+
+@pytest.mark.asyncio
 async def test_the_lease_lapses_so_a_dead_runs_batch_is_not_stranded(
     db_session: AsyncSession, tenant_a
 ) -> None:
     """The other half of the trade: a claim nobody releases must expire on its own."""
-    await _failing_notice(db_session, tenant_a.id)
+    event_id = await _failing_notice(db_session, tenant_a.id)
     reached: list[datetime] = []
 
     async def dies(tenant_id, events, now):
@@ -274,6 +310,13 @@ async def test_the_lease_lapses_so_a_dead_runs_batch_is_not_stranded(
     with pytest.raises(RuntimeError):
         await use_case.execute(now=lapsed)
     assert reached == [NOW, lapsed]
+
+    # And after two deaths the retry budget is still whole. Pinned rather than inferred: the
+    # claim is written to the same column the backoff uses, so "the lease does not spend an
+    # attempt" is exactly the property a future change to `lease` could break silently.
+    row = await db_session.get(WebhookEventModel, event_id)
+    await db_session.refresh(row)
+    assert row.attempts == 0
 
 
 @pytest.mark.asyncio

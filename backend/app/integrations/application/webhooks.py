@@ -341,18 +341,29 @@ class ProcessWebhookEventsUseCase:
         self._batch_size = batch_size
 
     async def execute(self, *, now: datetime) -> WebhookProcessingReport:
-        batch = await self._queue.select_pending(now=now, limit=self._batch_size)
-        report = WebhookProcessingReport(selected=len(batch))
-        if not batch:
-            return report
+        selected = await self._queue.select_pending(now=now, limit=self._batch_size)
+        if not selected:
+            return WebhookProcessingReport()
 
         # Claim the batch BEFORE any work and commit it immediately, so a concurrent run sees
         # the claim rather than the rows. This is what makes D10's ceiling a property of the
         # queue instead of a property of the Redis lock's TTL — see `WebhookEventRepository.lease`.
-        await self._queue.lease(
-            [event.id for event in batch], until=now + BATCH_LEASE
+        #
+        # **Only what the claim actually won is processed.** Two runs can both select a row
+        # before either commits; the compare-and-swap in `lease` decides which one owns it, and
+        # working the rows this run merely *saw* would put both of them on the same destination,
+        # which is the coupling rule 12(d) forbids.
+        claimed = set(
+            await self._queue.lease(
+                [event.id for event in selected], now=now, until=now + BATCH_LEASE
+            )
         )
         await self._uow.commit()
+
+        batch = [event for event in selected if event.id in claimed]
+        report = WebhookProcessingReport(selected=len(batch))
+        if not batch:
+            return report
 
         by_tenant: dict[uuid.UUID, list[QueuedWebhookEvent]] = {}
         unattributed: list[QueuedWebhookEvent] = []
