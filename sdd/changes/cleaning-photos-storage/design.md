@@ -243,7 +243,17 @@ y el nombre del bucket dentro de la URL. Con `LOCAL` la URL lleva sólo el `phot
 a partir de aquí: *«`storage_key` no aparece en ninguna respuesta de la API, salvo dentro de una
 URL prefirmada emitida por un proveedor S3-compatible, donde la clave es parte del protocolo de
 firma y no puede retirarse»*. La primera mitad sigue siendo absoluta para todo lo demás — cuerpo,
-cabeceras, logs de API y el `url` de `LOCAL`.
+cabeceras y el `url` de `LOCAL`.
+
+**Los logs quedan fuera de esa lista, y es deliberado.** Una redacción anterior de este párrafo
+incluía «logs de API» entre lo que R3.2 cubre de forma absoluta, y eso contradecía a D7d —que
+acepta por escrito que la ruta registre la ruta absoluta en disco al reportar un
+`StorageWriteError`— y al código, que sigue a D7d. Lo señaló el panel de seguridad de
+`/sdd:review`: no era un incumplimiento, era **una contradicción dentro del texto normativo**, de
+las que permiten citar la mitad estricta contra código que funciona. Se resuelve en favor de D7d:
+R3.2 gobierna **respuestas de API**, no logs. Si algún día se decide ampliar la regla 11 de
+`steering/security.md` a rutas internas en logs, será una decisión consciente y con su propio
+diff, no la lectura accidental de una lista mal copiada.
 
 **Por qué es aceptable hoy, y sólo hoy**: no hay bucket configurado, así que `storage_for` lanza
 `StorageWriteError` → `502` antes de emitir ninguna URL (D2b y `BLOCKED.md` §4). La excepción es,
@@ -281,6 +291,38 @@ de la sección 4 tenía razón en que no estaban escritos en ninguna parte:
   logs — así que es dato, no incumplimiento. Se nombra aquí para que la decisión de ampliar la
   regla 11 a este caso sea consciente si algún día se toma.
 
+### D7e — Catálogo cerrado de asimetrías entre `LOCAL` y `S3`
+
+`steering/backend-architecture.md` §SOLID-L exige que dos implementaciones de un puerto sean
+*«100% intercambiables — mismas excepciones, misma forma de retorno, mismas precondiciones»*. Este
+change tiene un puerto con dos implementaciones y **no** son intercambiables al 100%. Dos de las
+diferencias estaban razonadas sólo en el docstring del adaptador, que es el sitio donde no las lee
+quien revisa el diseño; el panel de `/sdd:review` las sacó. Se recogen aquí para que la lista sea
+**cerrada**: cualquier asimetría que no esté en ella es un defecto, no una decisión.
+
+1. **La clave viaja dentro de la URL en `S3` y no en `LOCAL`** — D7c, con su condición de cierre.
+2. **El `Content-Type` lo sirve el proveedor en `S3` y `content_type_for_extension` en `LOCAL`** —
+   D7, resuelto derivando ambos de la misma allowlist.
+3. **`signed_url` devuelve una URL relativa al origen en `LOCAL` y absoluta en `S3`.** Es
+   deliberado y no tiene arreglo mejor: la aplicación **no conoce el origen público desde el que
+   la sirven** —túnel de Cloudflare en dev, puerto pelado en local— e inventárselo produciría URLs
+   que sólo funcionan en un entorno. El navegador resuelve la relativa contra la página en la que
+   está, que es donde ya vive la API. Consecuencia para el consumidor, y es la parte que había que
+   escribir: el campo `url` de la respuesta **no garantiza ser absoluto**, así que un cliente que
+   lo concatene a un origen propio se romperá el día que un tenant pase a `S3`. Un `<img src>` —el
+   único consumidor previsto, y el motivo de que la ruta sea anónima— funciona con las dos formas
+   sin tocar nada.
+4. **Las precondiciones sobre la clave sólo las verifica `LOCAL`.** `LocalFileStorage` rechaza con
+   `StorageWriteError` una clave vacía, con NUL o que se escape de la raíz, en `put`/`delete`/`read`
+   (tarea 1.4) pero **no** en `signed_url`, que no resuelve ruta; `S3FileStorage` no valida ninguna.
+   Así que la misma clave inválida es `502` en `LOCAL` y una URL firmada de aspecto normal en `S3`.
+   **Hoy es inalcanzable**: la única productora de claves es `storage_key_for_photo`, y la tarea 3.4
+   fija que ningún caso de uso acepta ni reenvía una clave venida del cliente. Se acepta como riesgo
+   residual y no se cierra aquí porque cerrarlo bien es mover la precondición al contrato del puerto
+   y aplicarla en un guardián compartido — superficie que este change no necesita. Si aparece un
+   segundo productor de claves (`maintenance`, `revenue` — D2), **esto deja de ser teórico** y es lo
+   primero que hay que hacer.
+
 ### D8 — La tercera cláusula de PRD §11 se aplica dentro de la entidad, extendiendo la evidencia
 
 **Chosen:** `CleaningCompletionEvidence` gana `required_photo_types` y `uploaded_photo_types`
@@ -317,10 +359,31 @@ reabre el agujero medido en `cleaning` (un `POST` anónimo de ~50 MB leído ente
 ### D11 — El tope se comprueba dos veces: en el middleware y durante el streaming
 
 **Chosen:** el middleware corta por `Content-Length` y por bytes acumulados; **además**, el caso de
-uso consume el `UploadFile` en trozos contando bytes y aborta al superar el tope. La segunda
-comprobación no es redundante: un cliente puede mentir en `Content-Length` o usar
-`Transfer-Encoding: chunked`, y sin ella el fichero llegaría entero al almacén antes de que nadie
-lo mida. R2.5 pide rechazar **antes** de leer el cuerpo completo, y sólo las dos juntas lo cumplen.
+uso consume el `UploadFile` en trozos contando bytes y aborta al superar el tope.
+
+**Corrección de la justificación, tras el panel de `/sdd:review`.** La primera redacción de esta
+decisión decía que la segunda comprobación es la que protege de un `Content-Length` mentido o de un
+`Transfer-Encoding: chunked`. **Eso es falso**, y el comentario que lo repetía dentro del código ya
+se corrigió en la sección 3; lo que quedaba sin corregir era este documento. El motivo es mecánico:
+FastAPI llama a `await request.form()` **antes** de resolver las dependencias, y el parser multipart
+de Starlette vuelca la parte del fichero a un `SpooledTemporaryFile` sin techo propio — así que
+cuando el bucle del caso de uso pide su primer trozo, el fichero ya se recibió entero y se escribió
+en disco. Contarlo después no lo des-recibe.
+
+Quien cumple R2.5 («rechazar antes de leer el cuerpo completo») es el **contador acumulativo del
+middleware**, y sólo él. Las dos comprobaciones siguen en pie porque la segunda compra otras dos
+cosas, y son las que hay que citar si alguien se plantea quitarla:
+
+- acota la **copia en memoria** del proceso al tope más un trozo, sea cual sea el tamaño del
+  fichero volcado a disco;
+- es el único techo para cualquier cableado que no tenga el middleware delante — una llamada
+  directa desde un test, un worker o un futuro consumidor no-HTTP del caso de uso.
+
+Es defensa en profundidad **detrás** de la garantía, no una segunda aplicación de la misma. Y por
+la misma razón, tampoco vale el movimiento inverso: quitar el contador del middleware alegando que
+el caso de uso ya cuenta dejaría a un llamante anónimo volcando a disco lo que quisiera antes de
+que la autenticación llegue a correr. La justificación completa vive junto al código, en el
+docstring de `_read_within_limit` (`backend/app/cleaning/application/use_cases.py`).
 
 ### D12 — El aislamiento se demuestra en el repositorio, no se hereda
 
@@ -347,11 +410,21 @@ firmada (R6.2).
 | Infraestructura | `backend/app/cleaning/infrastructure/repositories.py` | `SqlAlchemyCleaningPhotoRepository` con `JOIN` obligatorio (D12) |
 | API | `backend/app/cleaning/api/tasks_router.py` | `POST`/`GET /cleaning-tasks/{id}/photos` |
 | | `backend/app/cleaning/api/photos_router.py` *(nuevo)* | `GET /cleaning-photos/{photo_id}` anónimo firmado (D7) |
-| | `backend/app/cleaning/api/{schemas,dependencies,errors}.py` | DTOs, DI de los tres casos de uso, mapeo de `PhotosIncompleteError` → 409 y de firma inválida → 403 |
+| | `backend/app/cleaning/api/{schemas,dependencies,errors}.py` | DTOs, DI de los tres casos de uso, mapeo de `PhotosIncompleteError` → 409. **El 403 de firma NO va aquí** — ver la nota bajo la tabla |
 | Config y arranque | `backend/app/core/config.py`, `backend/app/main.py` | `photo_upload_max_bytes`; rama del middleware (D10); montaje del router nuevo |
 | Compose | `docker-compose.yml`, `docker-compose.deploy.yml` | Volumen para `/app/media/` en backend |
 | Contrato | `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts` | Regenerar ambos (`steering/documentation.md`) |
 | Tests | `backend/tests/cleaning/`, `backend/tests/integrations/` | Unit de dominio, casos de uso con fakes, integración de rutas, cruce de tenant, firma |
+
+**Dónde vive el 403 de firma, y por qué no en `errors.py`.** La fila de arriba decía «y de firma
+inválida → 403», y era una trampa: el patrón de la casa en `cleaning/api/errors.py` mapea con
+`message = str(exc)`, e `InvalidSignatureError` tiene tres mensajes distintos («does not match» /
+«has expired» / «outlives the maximum lifetime») cuando su contrato entero es la
+indistinguibilidad. Seguir el patrón ahí convertiría la ruta anónima en un **oráculo de existencia
+sobre el espacio de claves** para un atacante sin credenciales. El cuerpo del 403 es por eso una
+**constante precomputada en `photos_router.py`**, y los tres mensajes se conservan sólo para el
+log. Es lo que fija la tarea 4.3b; la fila de la tabla quedó desactualizada y se corrige aquí para
+que nadie «arregle» la inconsistencia moviéndolo de vuelta.
 
 ## Data & interfaces
 
