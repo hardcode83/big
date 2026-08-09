@@ -129,6 +129,33 @@ implementación sigue la **recomendación** de cada una y ninguna queda a medias
 
 ---
 
+## 7. El mismo error de razonamiento sobre topes de tamaño ya está reproducido en un segundo módulo
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: el panel de `/sdd:review` gastó dos rondas en una afirmación falsa sobre D11 —que
+  el conteo por trozos del caso de uso protege de un `Content-Length` mentido, cuando la comprobación
+  que de verdad cumple R2.5 es el contador acumulativo de `MaxBodySizeMiddleware`—. Estaba
+  reenunciada en **cinco** ficheros y cuatro habían derivado; quedó arreglada y con un solo hogar
+  (el docstring de `_read_within_limit`).
+  Al grepear apareció que **el patrón se ha reproducido solo, en otro change**:
+  `backend/app/integrations/api/router.py:56-58` (import de CSV, del change `integrations` /
+  `api-ingress-routing`) justifica su `file.read(limit+1)` como *«defence in depth for a request
+  whose body arrived in one chunk under a lying `Content-Length`»*. Un cuerpo que «arrived» ya está
+  volcado: esa lectura acota la copia en memoria, **no** caza al que miente. Misma clase de error,
+  módulo distinto, y nadie lo había mirado.
+  Lo que esto sugiere no es un tercer arreglo de redacción sino una **nota de steering**: una
+  comprobación de tamaño posterior a `request.form()` / `file.read()` acota memoria, no satisface un
+  requisito de «rechazar antes de leer»; eso sólo lo puede hacer el middleware. Escrita una vez en
+  `steering/backend.md` o `steering/security.md`, deja de reinventarse por módulo.
+- **recomendación**: no tocarlo aquí — es código de otro change, ningún requisito R1-R6 de éste lo
+  alcanza, y corregirlo ampliaría el alcance a superficie que este panel no ha revisado con ese
+  propósito.
+- **resume**: `/sdd:new` de una entrada propia, o incluirlo en `hardening-release`, que ya va a
+  tocar postura transversal del backend (ver §6(b), que está en el mismo caso).
+
+---
+
 ## 3. ¿`sdd/specs/file-storage.md` propia, o el puerto dentro de `sdd/specs/cleaning.md`?
 
 - **phase**: design

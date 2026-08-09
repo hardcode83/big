@@ -148,7 +148,24 @@ existente** (el cierre pasa a exigir fotos) y por eso va después de que la subi
   cuerpo **idéntico** al de un id inexistente; y una `CLEANER` no puede subir a una tarea que no es
   suya. [R6]
 
-## 4. Listado y servido firmado
+## 4. Listado y servido firmado <!-- panel: PASS 2026-08-09 -->
+<!-- Panel de feature completo en /sdd:review (esta sección nunca había tenido panel propio):
+     architect PASS tras 2 rondas · security PASS (2 avisos, ninguna regla incumplida) ·
+     tenancy PASS · qa PASS · documentation FAIL→PASS · cicd PASS · i18n PASS (sin superficie).
+
+     QA plantó 7 mutantes contra las garantías de esta sección y los 7 murieron: quitar el
+     `nosniff`, hacer variar el cuerpo del 403 entre "firma mala" y "no existe", degradar el
+     Content-Type a `application/octet-stream`, invertir el orden a verificar-después-de-leer,
+     publicar `storage_key` en el listado, y quitar el techo de TTL en la verificación. El de
+     `storage_key` murió sobre el **cuerpo serializado**, que es lo que pedía la tarea 4.1.
+
+     Hallazgo bloqueante, encontrado por separado por architect, documentation y qa: el
+     contrato del frontend estaba obsoleto — le faltaban las DOS rutas que añade esta sección
+     (`GET .../photos` y `GET /cleaning-photos/{photo_id}`) y conservaba la descripción previa
+     a la sección 5. La mitad backend sí estaba regenerada, así que `test_openapi_contract.py`
+     pasaba: no tiene jurisdicción sobre la otra mitad, que es exactamente por donde `cleaning`
+     rompió `main`. Regenerado; `npm run api:check` —el comando de `frontend-api-contract`—
+     pasa, y el typecheck del frontend también. -->
 
 - [x] 4.1 `ListCleaningPhotosUseCase` que devuelve las fotos con su URL firmada, **sin
   `storage_key`**. Tests con fakes: la respuesta no contiene la clave interna por ningún campo.
@@ -254,7 +271,24 @@ existente** (el cierre pasa a exigir fotos) y por eso va después de que la subi
   por no tener fotos: **ajustarlos añadiendo las fotos que la plantilla exige**, nunca relajando la
   plantilla del fixture para esquivar la regla nueva. [R4]
 
-## 6. Contrato, documentación y verificación
+## 6. Contrato, documentación y verificación <!-- panel: PASS 2026-08-09 -->
+<!-- Panel de feature completo en /sdd:review (esta sección tampoco había tenido panel propio).
+     Las tareas 6.1 y 6.4 estaban marcadas y sus afirmaciones NO se sostenían: 6.1 decía haber
+     commiteado las dos mitades del contrato y sólo estaba la del backend; 6.4 decía haber
+     hecho el typecheck del frontend "contra los tipos regenerados", y los tipos no lo estaban.
+     Ambas cosas son ciertas ya, y verificadas con el comando que corre CI, no de palabra.
+
+     El backend no tiene linter ni typechecker configurados (ni ruff, ni mypy, ni pyright en
+     `pyproject.toml`, y `backend-tests.yml` no lintea), así que esa mitad de 6.4 no tiene nada
+     que ejecutar. Es un hecho del proyecto, no un hueco de este change.
+
+     6.3 reverificado en la review: 4142 passed / 35 skipped, suite completa, en serie.
+     6.5 (recorrido manual E2E): hecho por el usuario contra el stack de este worktree, con el
+     tenant «E2E Manual» (4 propiedades, 2 fotos) como rastro en la BD de desarrollo.
+
+     Corrección de texto arrastrada de aquí: la justificación de D11 estaba reenunciada en
+     cinco ficheros y cuatro afirmaban lo contrario del código. Ver el commit 2d03961 y la
+     entrada §7 de BLOCKED.md, donde queda el patrón reproducido en otro módulo. -->
 
 - [x] 6.1 Anotar `summary`/`description` y modelos de respuesta de las tres rutas nuevas, regenerar
   `backend/openapi.json` con `make openapi` **y** `frontend/lib/api/generated/openapi.d.ts` con
