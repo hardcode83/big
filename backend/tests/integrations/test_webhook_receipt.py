@@ -203,6 +203,14 @@ async def test_an_absurdly_long_event_type_cannot_abort_the_insert(
         "4111 1111 1111 1111",  # the way it is printed; the shape stops at the first space
         "card4111111111111111",  # well-shaped name, PAN glued to it
         "4111111111111111 booking.modified",  # a real label hiding behind one
+        # The four separators the label's OWN charset admits, each of which splits the PAN into
+        # runs of four. A length rule that stops at the first separator is defeated by the
+        # alphabet it accepts — the same defect this change fixed in `test_channex_probe.py`, and
+        # the reason `_LONG_DIGIT_RUN_IN_LABEL` counts across them instead of `\d{5,}`.
+        "card4111-1111-1111-1111",
+        "card4111.1111.1111.1111",
+        "card4111_1111_1111_1111",
+        "card4111:1111:1111:1111",
     ],
 )
 @pytest.mark.asyncio
@@ -217,10 +225,11 @@ async def test_a_card_number_cannot_ride_into_the_label_column(
     look at. Rule 13(a) kills cardholder data before **anything** persists it, and a diagnostic
     label is a thing.
 
-    Closed structurally, not by denylist: a label is a name, and none of these four are. The last
-    two are the ones a shape check alone would have let through — a prefix search would have
-    recorded `booking.modified` for a value that is a PAN, and a bare shape check would have taken
-    `card4111111111111111` whole.
+    Closed structurally, not by denylist: a label is a name, and none of these is. The interesting
+    ones are the last five — a prefix search would have recorded `booking.modified` for a value
+    that is a PAN, a bare shape check would have taken `card4111111111111111` whole, and a length
+    rule written as `\\d{5,}` would have let every separator variant through, because `.`, `-`, `_`
+    and `:` are in the label's own charset and split the number into runs of four.
     """
     token = await _provision(db_session, tenant_a)
 

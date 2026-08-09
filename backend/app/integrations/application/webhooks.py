@@ -106,21 +106,28 @@ Digits are allowed inside the name because provider vocabularies contain them (`
 which is why the shape alone is not enough — see `_LONG_DIGIT_RUN_IN_LABEL`.
 """
 
-_LONG_DIGIT_RUN_IN_LABEL = re.compile(r"\d{5,}")
+_LONG_DIGIT_RUN_IN_LABEL = re.compile(r"\d(?:[._:\-]*\d){4,}")
 """What disqualifies an otherwise well-shaped label.
 
 The shape above admits digits, so `card4111111111111111` starts with a letter, contains no space,
 and would have matched it whole — carrying the PAN into the column that this whole exercise was
 about. Five is chosen well below `free_text.MIN_REDACTED_DIGITS` (13) rather than at it: this is a
 label, not prose, so there is no false-positive budget to protect — the longest run in any real
-vocabulary is the `24` of `beds24`. A separate, deliberately stricter rule than the one for
-`special_requests`, and the reason it can be stricter is that nothing operational is lost when a
-malformed label degrades to `UNKNOWN_EVENT_TYPE`: D13 makes the body an advisory and nothing
-branches on this string.
+vocabulary is the `24` of `beds24`. Nothing operational is lost when a malformed label degrades to
+`UNKNOWN_EVENT_TYPE`: D13 makes the body an advisory and nothing branches on this string.
 
-Not a second copy of `free_text.redact_long_digit_runs`, which is the rule for **prose** and lives
-in `infrastructure/` where this layer cannot reach it (`test_layering.py`). Different input,
-different threshold, different answer on failure — redaction there, rejection here.
+**The separators are counted across, and that is not decoration.** The first version of this
+pattern was a plain `\\d{5,}`, and it had exactly the defect this change had just finished fixing
+in `test_channex_probe.py`: `card4111-1111-1111-1111` starts with a letter, so it matched the
+shape, and its longest unbroken digit run is four, so it passed the length rule — the PAN reached
+the column anyway. `.`, `-`, `_` and `:` are in the label's own charset, so they are exactly what
+an attacker has available to break a run with, and a rule that stops at the first one is a rule
+its own alphabet defeats. Same lesson as `free_text._SEPARATORS`, learned twice.
+
+Still not a second copy of `free_text.redact_long_digit_runs`, which is the rule for **prose** and
+lives in `infrastructure/` where this layer cannot reach it (`test_layering.py`). Different input,
+different separators (that module tolerates whitespace and dashes; a label has no whitespace),
+different threshold, and a different answer on failure — redaction there, rejection here.
 """
 
 

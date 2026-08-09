@@ -278,6 +278,16 @@ como el docstring del modelo ya advierte ("`error` must never echo the raw body 
 > patrón se ancla al principio del valor: buscarlo en cualquier posición habría sacado `created` de
 > `"4111111111111111 created"` y registrado una etiqueta para un valor que no lo es.
 >
+> **Y la racha se cuenta *a través* de los separadores, que es donde el primer arreglo se equivocó.**
+> La regla se escribió al principio como un `\d{5,}` liso, y tenía el defecto exacto que este mismo
+> change acababa de corregir en `test_channex_probe.py`: `card4111-1111-1111-1111` empieza por letra,
+> así que encaja en la forma, y su racha ininterrumpida más larga es de cuatro, así que pasaba el
+> largo — el PAN llegaba igual a la columna. `.`, `-`, `_` y `:` están **en el charset de la propia
+> etiqueta**, o sea que son justo lo que hay disponible para partir una racha, y una regla a la que
+> derrota su propio alfabeto no es una regla. Es la misma lección de `free_text._SEPARATORS`,
+> aprendida dos veces en el mismo change: cuando el defecto reaparece a un nivel distinto del que se
+> arregló, lo que falló no fue el arreglo, fue no haber buscado la misma forma en todas partes.
+>
 > Nótese que **no** es una segunda copia de `free_text.redact_long_digit_runs`: distinta entrada
 > (una etiqueta, no prosa), distinto umbral y distinta respuesta al fallo —allí se redacta, aquí se
 > rechaza—. Además vive en `application/`, desde donde `test_layering.py` prohíbe alcanzar
