@@ -14,6 +14,25 @@ from app.maintenance.domain.enums import (
 )
 
 
+# ASSUMPTION (`dashboard-api` R2.3): the PRD does not define which `IncidentStatus` values
+# count as "open". PRD §9.1 asks the card for an open-incident count and §9.2 for the list,
+# without saying where the line falls, so it is drawn here — by exclusion, which is the
+# form that survives the enum growing: a status added later is open until someone decides
+# otherwise, and that is the safe direction for a count an operator acts on.
+#
+# `RESOLVED` and `CANCELLED` are the two terminal values of `IncidentStatus`.
+# `WAITING_EXTERNAL_PARTS` is deliberately open — the flat still has a broken thing in it.
+#
+# It lives in `domain/` beside the entity, the way `LIVE_STATUSES` does in `cleaning`, so
+# the rule has one home rather than a copy in each query that needs it. The `maintenance`
+# change owns it from here on; if its flow disagrees, it changes this constant, not a
+# `WHERE` clause somewhere.
+CLOSED_INCIDENT_STATUSES = frozenset(
+    {IncidentStatus.RESOLVED, IncidentStatus.CANCELLED}
+)
+OPEN_INCIDENT_STATUSES = frozenset(IncidentStatus) - CLOSED_INCIDENT_STATUSES
+
+
 @dataclass
 class Incident:
     id: uuid.UUID

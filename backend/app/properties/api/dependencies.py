@@ -19,11 +19,15 @@ from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.properties.application.property_admin import (
     CreatePropertyUseCase,
+    GetPropertyStateUseCase,
     GetPropertyUseCase,
     ListPropertiesUseCase,
     UpdatePropertyUseCase,
 )
-from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.properties.infrastructure.repositories import (
+    SqlAlchemyPropertyRepository,
+    SqlAlchemyPropertyStateTransitionRepository,
+)
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
@@ -42,6 +46,13 @@ def get_list_properties_use_case(session: SessionDep) -> ListPropertiesUseCase:
 
 def get_property_use_case(session: SessionDep) -> GetPropertyUseCase:
     return GetPropertyUseCase(properties=SqlAlchemyPropertyRepository(session))
+
+
+def get_property_state_use_case(session: SessionDep) -> GetPropertyStateUseCase:
+    return GetPropertyStateUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+    )
 
 
 def get_update_property_use_case(session: SessionDep) -> UpdatePropertyUseCase:

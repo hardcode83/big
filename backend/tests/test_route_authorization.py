@@ -265,7 +265,10 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     and by `cleaning` with the checklist template path (two methods), asserted the same way
     in `tests/cleaning/test_templates_api.py`; and by `access-notifications` with the five
     access-record paths and the in-app inbox, asserted per role in
-    `tests/access/test_api.py` and `tests/notifications/test_api.py`.
+    `tests/access/test_api.py` and `tests/notifications/test_api.py`; and by
+    `dashboard-api` with four read paths: the timeline, the property state, the dashboard
+    collection and the property aggregate, asserted per role in `tests/timeline/test_api.py`,
+    `tests/properties/test_state_api.py` and `tests/dashboard/test_api.py`.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -300,4 +303,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/tenants/{tenant_id}",
         "/api/v1/properties",
         "/api/v1/properties/{property_id}",
+        "/api/v1/properties/{property_id}/state",
+        "/api/v1/timeline/{property_id}",
+        "/api/v1/dashboard/properties",
+        "/api/v1/properties/{property_id}/dashboard",
     }

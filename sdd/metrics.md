@@ -32,3 +32,4 @@
 | properties-crud | new, design, tasks, run, review, archive | 252521 | 705045 | 321695788 | 214.1778 | 2026-08-07 | 2026-08-08 |
 | api-ingress-routing | new, design, tasks, run, review, archive | 7144867 | 2351309 | 521434721 | 363.1416 | 2026-08-02 | 2026-08-08 |
 | access-notifications | new, design, tasks, run, review, ship, archive | 205216 | 697062 | 217439895 | 143.4679 | 2026-08-08 | 2026-08-08 |
+| dashboard-api | new, design, tasks, run, review | 394951 | 1072538 | 267896343 | 170.4614 | 2026-08-09 | — |

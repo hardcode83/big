@@ -289,9 +289,12 @@ class PropertyStateTransitionRepository(Protocol):
     async def add(self, tenant_id: uuid.UUID, transition: PropertyStateTransition) -> None:
         """Append one transition to the history (`celery-jobs` R3.6).
 
-        `add` and nothing else, for the same reason `TimelineEventRepository` has only
-        `add`: a transition is a record of something that happened, and history is not
-        edited. The signature is where that rule lives.
+        **The only writer, and still the only one.** It used to be the only method here
+        full stop, for the same reason `TimelineEventRepository` has only `add`: a
+        transition is a record of something that happened, and history is not edited.
+        `dashboard-api` added `last_for_property` below — a *read* — which leaves that
+        property exactly where it was: what the signature of this port refuses is `save`,
+        `update` and `delete`, and none of the three appeared.
 
         **Precondition the caller owns**, identical to the one `TimelineEventRepository`
         already documents: `property_id` and `triggered_by_user_id` must have been
@@ -301,5 +304,28 @@ class PropertyStateTransitionRepository(Protocol):
         anchored to a neighbour's flat. This table is the audit record of property state
         (rule 9 of `sdd/steering/security.md`), so a misanchored row is a corrupted audit
         trail, not just a bad read.
+        """
+        ...
+
+    async def last_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> PropertyStateTransition | None:
+        """The most recent transition of one property, or `None` (`dashboard-api` R3.1).
+
+        The reader this port lacked. `add` has existed since `celery-jobs` and nothing ever
+        read the history back, so `GET /api/v1/properties/{id}/state` had no way to say
+        *when* the current state began — the `properties` row carries the state, not its
+        instant.
+
+        **A read, and emphatically not a resolution.** It returns the row
+        `PropertyStateMachine` wrote; it computes, infers and reconciles nothing.
+        `steering/backend.md` forbids "saltarse `PropertyStateMachine`" and R3.2 says the
+        read layer "SHALL NOT reimplementar la resolución de estado" — a method answering
+        "what state *should* this be in" would be precisely that reimplementation.
+
+        `None` for a property with no transitions and for a property of another tenant
+        alike. The caller cannot tell those apart from here, which is deliberate: it is
+        `PropertyRepository.get` that decides whether the property exists for this tenant,
+        and this method never becomes a second, weaker answer to that question.
         """
         ...

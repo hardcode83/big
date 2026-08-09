@@ -322,3 +322,145 @@ async def test_transition_add_refuses_another_tenants_transition(db_session) -> 
         await SqlAlchemyPropertyStateTransitionRepository(db_session).add(
             tenant_a.id, _transition(tenant_b.id, theirs.id)
         )
+
+
+# --- `last_for_property` (`dashboard-api` R3.1, task 3.1) -------------------------------
+
+
+async def _add_transition(db_session, tenant, model, **overrides) -> PropertyStateTransition:
+    transition = _transition(tenant.id, model.id, **overrides)
+    await SqlAlchemyPropertyStateTransitionRepository(db_session).add(tenant.id, transition)
+    return transition
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_is_none_when_nothing_has_transitioned(db_session) -> None:
+    """A property created and never moved: its state is the DDL default and there is no
+    transition to date it."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, model.id
+    )
+
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_returns_the_newest_transition(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 8, 1, tzinfo=UTC))
+    newest = await _add_transition(
+        db_session,
+        tenant,
+        model,
+        created_at=datetime(2026, 8, 7, tzinfo=UTC),
+        to_state=PropertyOperationalState.AWAITING_CLEANING,
+    )
+    await _add_transition(db_session, tenant, model, created_at=datetime(2026, 8, 4, tzinfo=UTC))
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, model.id
+    )
+
+    assert found is not None
+    assert found.id == newest.id
+    assert found.to_state is PropertyOperationalState.AWAITING_CLEANING
+    assert found.created_at == datetime(2026, 8, 7, tzinfo=UTC)
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_returns_a_domain_entity_with_every_field(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    written = await _add_transition(db_session, tenant, model)
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, model.id
+    )
+
+    assert found is not None
+    assert isinstance(found, PropertyStateTransition)
+    assert (found.from_state, found.to_state) == (written.from_state, written.to_state)
+    assert found.triggered_by is written.triggered_by
+    assert found.triggered_by_user_id == written.triggered_by_user_id
+    assert found.reason == written.reason
+    assert found.metadata == {"trigger": "CHECKIN_WINDOW_OPENED"}
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_breaks_a_shared_instant_by_id(db_session) -> None:
+    """Transitions are written with the instant the use case decided on, not `now()`, so
+    two of one operation can share `created_at` and "the last one" must still be total."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    shared = datetime(2026, 8, 5, 9, 0, tzinfo=UTC)
+    low = uuid.UUID("00000000-0000-4000-8000-000000000001")
+    high = uuid.UUID("ffffffff-0000-4000-8000-000000000002")
+    # Inserted low-then-high; the reversed order is covered below, so the answer cannot be
+    # "whichever went in last" wearing an ordering clause as a disguise.
+    await _add_transition(db_session, tenant, model, id=low, created_at=shared)
+    await _add_transition(db_session, tenant, model, id=high, created_at=shared)
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, model.id
+    )
+
+    assert found is not None and found.id == high
+
+
+@pytest.mark.asyncio
+async def test_the_shared_instant_tiebreak_does_not_depend_on_insertion_order(
+    db_session,
+) -> None:
+    """The other half of the pair the QA panel of section 3 asked for."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    shared = datetime(2026, 8, 5, 9, 0, tzinfo=UTC)
+    low = uuid.UUID("00000000-0000-4000-8000-000000000001")
+    high = uuid.UUID("ffffffff-0000-4000-8000-000000000002")
+    await _add_transition(db_session, tenant, model, id=high, created_at=shared)
+    await _add_transition(db_session, tenant, model, id=low, created_at=shared)
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, model.id
+    )
+
+    assert found is not None and found.id == high
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_never_reads_another_tenants_history(db_session) -> None:
+    """DoD §28.18, and design D11: `None` outside the tenant is what lets the route answer
+    `404` instead of `403`."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, internal_code="THEIRS")
+    await _add_transition(db_session, tenant_b, theirs)
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant_a.id, theirs.id
+    )
+
+    assert found is None
+
+
+@pytest.mark.asyncio
+async def test_last_for_property_does_not_mix_in_a_sibling_property(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    mine = await _property(db_session, tenant, internal_code="REDES11")
+    other = await _property(db_session, tenant, internal_code="PAJARITOS8")
+    await _add_transition(
+        db_session, tenant, other, created_at=datetime(2026, 8, 9, tzinfo=UTC)
+    )
+    written = await _add_transition(
+        db_session, tenant, mine, created_at=datetime(2026, 8, 1, tzinfo=UTC)
+    )
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).last_for_property(
+        tenant.id, mine.id
+    )
+
+    assert found is not None and found.id == written.id

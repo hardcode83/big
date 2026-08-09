@@ -26,6 +26,7 @@ from app.cleaning.domain.entities import (
     CleaningTask,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
+from app.cleaning.domain.value_objects import CleaningTaskSummary
 
 
 @dataclass(frozen=True)
@@ -92,6 +93,35 @@ class CleaningTaskRepository(Protocol):
         `ContextualStateResolver` decides "is there pending cleaning" over the collection
         it is handed (`app/properties/domain/state_resolution.py:143-147`), so handing it
         a pre-filtered slice would move that decision out of the machine.
+        """
+        ...
+
+    async def list_live_for_properties(
+        self, tenant_id: uuid.UUID, property_ids: Sequence[uuid.UUID]
+    ) -> Sequence[CleaningTaskSummary]:
+        """Live tasks of a batch of properties, in ONE query (`dashboard-api` R1.7).
+
+        **Returns `CleaningTaskSummary`, not `CleaningTask`.** The entity carries `notes`
+        — free text, a rule-11 sink of `steering/security.md` — plus `assigned_cleaner_id`
+        and `validated_by_user_id`, and this reader feeds a dashboard that needs none of
+        them. `api/schemas.py:8-13` already records the same hazard for this entity; the
+        projection makes it structural instead of a discipline each serialiser must
+        remember.
+
+        The batch counterpart of `list_live_for_reservation`, with the shape
+        `ReservationRepository.list_for_properties` established (that change's design D2):
+        the dashboard collection composes cards for N properties and must not issue N
+        queries. The caller groups by `property_id` in memory.
+
+        **`Sequence`, not `list`** — this Protocol declares a method called `list`, which
+        shadows the builtin inside the class body and would make `list[CleaningTask]` a
+        `TypeError` at import time. The same note `ReservationRepository` carries.
+
+        Same `LIVE_STATUSES` criterion as the per-reservation reader, and for the same
+        reason it is not a parameter: which statuses count as live is the domain's
+        decision, and letting a caller choose would put a second copy of it in the caller.
+
+        An empty `property_ids` returns an empty sequence without querying.
         """
         ...
 

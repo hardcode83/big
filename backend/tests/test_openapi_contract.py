@@ -92,6 +92,12 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # under `reservations` by path but on the guests router, so the prefix set already
         # names it.
         "guests",
+        # `dashboard-api`: the read side of PRD §10, and the first `api/` layer the
+        # `timeline` module has had.
+        "timeline",
+        # `dashboard-api`: the aggregate's own prefix. Its second route lives under
+        # `properties`, which the set already names.
+        "dashboard",
     }
 
 
