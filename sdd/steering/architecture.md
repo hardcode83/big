@@ -4,9 +4,9 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-06_autohost-er-entidades.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-09_autohost-er-entidades.png`.
 
-El de entidades se regeneró en `pms-provider-resolution` al entrar `pms_credentials` y `properties.pms_provider`: 28 entidades, 67 relaciones. El anterior, `2026-07-31_...`, se borró; y aquel a su vez había sustituido a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
+El de entidades se regeneró en `reservations-webhooks` al entrar `webhook_endpoints`: **29 entidades, 71 relaciones**. El anterior, `2026-08-06_...`, se borró; aquel salió de `pms-provider-resolution` con 28 y 67 al entrar `pms_credentials` y `properties.pms_provider`, y a su vez había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
 
 El hexagonal se regeneró en `dashboard-api` (el `2026-07-13_...` se borró). Dibujaba **trece** cajas de dominio y ya le faltaban `reviews` y `audit` desde `domain-foundation-financial`; ahora dibuja **dieciséis**, con `dashboard` marcado aparte porque es el único de solo lectura y sin `infrastructure/` propia.
 

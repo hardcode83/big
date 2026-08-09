@@ -75,16 +75,16 @@ Siete columnas del esquema son texto o JSON libre por el que puede colarse un va
 
 **La séptima se añadió tarde, y por qué importa cómo se encontró**: `webhook_events.event_type` no estaba en esta lista porque no *parece* texto libre — se llama "tipo" y uno espera un enum. Pero se rellenaba con lo que el cuerpo del webhook trajera bajo `event`/`type`/`action`, así que era una columna de 200 caracteres escrita desde fuera, y la enumeración de esta tabla es justo lo que decide si alguien la mira. La lección es que el censo se hace por **quién escribe la columna**, no por lo que su nombre promete.
 
-**Cuatro ya están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA) y `notification_logs.last_error` desde `access-notifications` (2026-08-08). Las **tres** de `webhook_events` siguen sin reclamar — `payload`, `error` y `event_type`, las tres de `reservations-webhooks`, que las reclamará al archivar. La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
+**Las siete están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA), `notification_logs.last_error` desde `access-notifications` (2026-08-08) y las **tres** de `webhook_events` —`payload`, `error` y `event_type`— desde `reservations-webhooks` (2026-08-09). La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
 
 **La forma estructurada es el defecto: el valor no sobrevive en absoluto**, ni siquiera enmascarado — `{"changed": true}`, o se elimina la clave.
 
 | Columna | Forma | Quién la escribe (y quién la heredará) |
 |---|---|---|
 | `audit_logs.changes` | estructurada | **`user-management`** (escritor vivo; `ChangeSet` + `AuditLogFactory` lo hacen cumplir) y quien audite documentos de huésped |
-| `webhook_events.payload` | estructurada | `reservations-webhooks` |
-| `webhook_events.error` | estructurada | `reservations-webhooks` |
-| `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | `reservations-webhooks` |
+| `webhook_events.payload` | estructurada | **`reservations-webhooks`** (escritor vivo; `scrub_card_data` descarta los datos de tarjeta antes de persistir) |
+| `webhook_events.error` | estructurada | **`reservations-webhooks`** (escritor vivo; código + campo, nunca el cuerpo recibido) |
+| `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | **`reservations-webhooks`** (escritor vivo; lo que no encaja degrada a `UNKNOWN_EVENT_TYPE`) |
 | `notification_logs.last_error` | estructurada | **`access-notifications`** (escritor vivo; el tipo de retorno del adapter no admite texto libre, así que lo hace cumplir por construcción) |
 | `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
 

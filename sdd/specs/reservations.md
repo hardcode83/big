@@ -12,9 +12,11 @@ limpieza, accesos, mensajería y statements se disparan desde el ciclo de una re
 Es además el primer módulo que **persiste** `TimelineEvent`: hasta esta capacidad
 `timeline-state-machine` construía eventos validados y nadie los escribía.
 
-No incluye recepción de webhooks (necesita `WebhookEvent`, de `domain-foundation-financial`,
-y su job de `celery-jobs`), ni frontend (`dashboard-web`), ni escritura de `AuditLog` (entidad
-de `domain-foundation-financial`).
+No incluye la recepción de webhooks: es una capacidad propia y ya existe, documentada en
+`specs/reservations-webhooks.md`. Entra por aquí sin puerta nueva —alimenta el
+`ReservationIngestor` de esta capacidad, que sigue siendo la única ruta de upsert—. Tampoco
+incluye frontend (`dashboard-web`) ni escritura de `AuditLog` (entidad de
+`domain-foundation-financial`).
 
 Las **transiciones de estado operacional dependientes del reloj** sí existen ya: las hace
 `celery-jobs`, que lee estas reservas para decidir cuándo una propiedad entra en ventana de
@@ -257,10 +259,11 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
 
 ## Estado y deuda conocida
 
-- **Sin recepción de webhooks** (`POST /api/v1/webhooks/{provider}` de PRD §16): requiere
-  `WebhookEvent` (PRD §7.26) de `domain-foundation-financial` y el job
-  `process_webhook_events` de `celery-jobs`. Entrada de roadmap propia:
-  `reservations-webhooks`.
+- **La recepción de webhooks ya existe**, en su capacidad propia
+  (`specs/reservations-webhooks.md`). La ruta **no** es la `POST /api/v1/webhooks/{provider}` de
+  PRD §23: lleva un segmento token por tenant (`POST /api/v1/webhooks/{provider}/{webhook_token}`),
+  cuarta desviación registrada en `docs/adr/0006-pms-channel-manager-provider.md`. Lo que llega por
+  ahí desemboca en el `ReservationIngestor` de esta spec, no en una segunda ruta de escritura.
 - **Sin `AuditLog`** (regla 9 de `steering/security.md`): la entidad pertenece a
   `domain-foundation-financial` y su **escritor ya existe** desde `user-management`
   (`app/audit/domain/`: `ChangeSet`, `AuditLogFactory`, puerto y adaptador). Queda pendiente

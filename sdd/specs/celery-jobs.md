@@ -22,13 +22,18 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL registrar los cuatro nombres literales de PRD §8.3 con sus cadencias:
   `check_checkin_windows`, `process_checkouts` y `mark_occupied_estimated` cada 5 minutos, y
   `check_sla_breaches` cada minuto.
-- THE SYSTEM SHALL registrar además las dos tareas que PRD §8.3 no nombra y que
-  `access-notifications` añadió: `dispatch_notifications` cada minuto y
-  `provision_access_records` cada 5 minutos. El PRD dice qué debe ocurrir, no qué lo dispara, así
-  que nombrarlas fue una decisión de ese change y no una contradicción; los cuatro originales no
-  se tocaron. `dispatch_notifications` va a un minuto porque una fila solo puede incumplir su
-  plazo **después** de entregarse: un emisor más lento retrasaría cada escalado en su propia
-  cadencia.
+- THE SYSTEM SHALL registrar además las tres tareas que PRD §8.3 no nombra: `dispatch_notifications`
+  cada minuto y `provision_access_records` cada 5 minutos, las dos de `access-notifications`, y
+  `process_webhook_events` cada 60 segundos, de `reservations-webhooks`. El PRD dice qué debe
+  ocurrir, no qué lo dispara, así que nombrarlas fue una decisión de cada change y no una
+  contradicción; los cuatro originales no se tocaron. `dispatch_notifications` va a un minuto porque
+  una fila solo puede incumplir su plazo **después** de entregarse: un emisor más lento retrasaría
+  cada escalado en su propia cadencia.
+- THE SYSTEM SHALL tratar la cadencia de `process_webhook_events` como un **parámetro de seguridad,
+  no de tuning**: ese job coalesce todo un tick en una llamada saliente por destino
+  (`specs/reservations-webhooks.md`), así que su cadencia **es** el techo de llamadas al proveedor y
+  acortarla lo sube. Los 60 segundos van holgados frente al techo de cuota medido en
+  `specs/pms-beds24-spike.md` (un ciclo de sync por cuenta cada 30 s).
 - THE SYSTEM SHALL derivar tanto el `beat_schedule` como el TTL del lock de cada tarea de una
   única tabla de cadencias, de modo que no puedan desincronizarse.
 - WHEN se ejecuta `make up`, THE SYSTEM SHALL arrancar un servicio `beat` junto a `worker`, con
@@ -165,8 +170,9 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 ## Key files
 
-- `backend/app/scheduler/` — `schedule.py` (cadencias y `beat_schedule`), `tasks.py` (las cuatro
-  tareas), `runner.py` (puente asyncio, engine y cliente Redis por ejecución, bucle por tenant),
+- `backend/app/scheduler/` — `schedule.py` (cadencias y `beat_schedule`), `tasks.py` (las siete
+  tareas), `runner.py` (puente asyncio, engine y cliente Redis por ejecución, bucle por tenant,
+  y el helper de sesión marcada por lote de tenants que usa `process_webhook_events`),
   `locks.py` (lock Redis con liberación por token).
 - `backend/app/worker.py` — la app Celery; junto a `app/scheduler/**` es el único sitio que
   importa Celery, verificado por `tests/test_layering.py`.
