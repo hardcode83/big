@@ -1,9 +1,10 @@
 """Ports owned by the notifications domain (`celery-jobs` design D11).
 
-Shaped by its only consumer today, the SLA enforcement job of PRD §14: find the logs
-whose deadline has passed, mark them, and append the escalation. Sending is not here and
-will not be — the `NotificationAdapter` of PRD §14 belongs to `access-notifications`,
-which owns delivery. This port never talks to a channel.
+Shaped by its two consumers: the SLA enforcement job of PRD §14 (find the logs whose
+deadline has passed, mark them, append the escalation) and, since `access-notifications`,
+the dispatcher that delivers them. Sending itself is still not here — the
+`NotificationAdapter` of PRD §14 lives in `app/notifications/domain/ports.py`. **This port
+never talks to a channel**; it only records what the dispatcher did.
 
 **`add` is the write path into three cleartext sinks**, and the contract that governs
 them is rule 11 of `sdd/steering/security.md` — read it there, it is not restated here
@@ -14,10 +15,25 @@ notifications it actually sends.
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from datetime import datetime
 from typing import Protocol
 
 from app.notifications.domain.entities import NotificationLog
+from app.notifications.domain.enums import NotificationStatus
+
+
+@dataclass(frozen=True)
+class NotificationLogPage:
+    """One page plus the total the client needs for `total_pages` (PRD §23).
+
+    Same shape as `app/reservations/domain/repositories.py:Page`, deliberately: the API
+    envelope of PRD §23 is the same everywhere, so the repositories that feed it answer the
+    same way.
+    """
+
+    items: tuple[NotificationLog, ...]
+    total: int
 
 
 class NotificationLogRepository(Protocol):
@@ -63,5 +79,91 @@ class NotificationLogRepository(Protocol):
         and nothing else, exactly as `TimelineEventRepository.add` documents for its own
         references — `notification_logs`' foreign keys are not composite with
         `tenant_id`, so the database would accept a row pointing at a neighbour's user.
+        """
+        ...
+
+    async def list_pending(self, tenant_id: uuid.UUID, limit: int) -> Sequence[NotificationLog]:
+        """The dispatcher's work queue: rows in `PENDING`, oldest first (R4.2).
+
+        `PENDING` is the seam every writer in this codebase leaves behind — `cleaning`'s
+        assignment notification and the SLA job's escalations both land here — so this is
+        the query that turns queued work into delivery.
+
+        Bounded by `limit` (`notification_batch_size`) because the job runs every minute and
+        a backlog must drain in slices rather than in one transaction that holds row locks
+        for as long as the provider takes.
+        """
+        ...
+
+    async def list_for_recipient(
+        self, tenant_id: uuid.UUID, recipient_user_id: uuid.UUID, *, page: int, per_page: int
+    ) -> NotificationLogPage:
+        """One page of the notifications addressed to **one user** (design D6).
+
+        Scoped by recipient and not only by tenant: a cleaner and a manager share a tenant
+        and must not read each other's notifications. The filter is applied here rather than
+        in the router because the user id comes from the token, and a repository that
+        accepted "all of the tenant's" would leave that restriction one forgetful caller
+        away.
+
+        Newest first — the opposite of `list_pending`, and on purpose: a queue is drained
+        oldest-first, an inbox is read newest-first.
+        """
+        ...
+
+    async def record_attempt(
+        self,
+        tenant_id: uuid.UUID,
+        log_id: uuid.UUID,
+        *,
+        status: NotificationStatus,
+        attempts: int,
+        sent_at: datetime | None,
+        last_error: str | None,
+    ) -> None:
+        """Write the outcome of one delivery attempt, and nothing else.
+
+        Narrow for the same reason as `mark_breached`: the dispatcher has no business
+        rewriting `recipient_contact`, `subject`, `body`, `related_*` or `sla_deadline_at`,
+        and a port that let it would be the open door for the change that comes next.
+
+        **`last_error` is a cleartext sink governed by rule 11 of
+        `sdd/steering/security.md`** — read it there, it is not restated here or anywhere
+        else on purpose. What makes the contract hold in practice is upstream of this
+        method: `NotificationAdapter` can only report a `NotificationErrorCode`, so there is
+        no provider text for any caller to serialise. This signature takes the already
+        encoded `str` because the column is one.
+
+        Takes an id rather than the entity: the dispatcher re-reads nothing between the
+        attempt and the record, so handing a stale entity back would invite a caller to
+        write the rest of its fields too.
+        """
+        ...
+
+    async def cancel_sla_deadline(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> int:
+        """Clear `sla_deadline_at` on the rows that point at one entity (R5, design D7).
+
+        The debt `cleaning` recorded when it recut its R6.4: answering an assignment must
+        close the pending deadline, so `check_sla_breaches` does not escalate a cleaning the
+        cleaner accepted in seconds. Clearing the deadline is what removes the row from
+        `list_sla_breach_candidates` — through its second condition (`sla_deadline_at IS NOT
+        NULL`) — **without touching `status` or `sla_breached`**, which would respectively
+        deny a delivery that happened or claim a breach that did not.
+
+        Matched through the polymorphic pair plus the type, so it can only reach the
+        assignment row of one task; `ix_notification_logs_related_type_related_id` covers
+        that shape.
+
+        **Zero rows is the normal case, not an error** — the opposite of `mark_breached`. A
+        task created before this change has no deadline to cancel, and a cleaner who answers
+        twice finds it already cleared. Returns how many rows it cleared, so a caller that
+        cares can log it.
         """
         ...

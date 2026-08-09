@@ -91,6 +91,14 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # is not under `/cleaning-tasks/` — the URL carries the photo id alone, never the
         # storage key (R3.2) and never the task.
         "cleaning-photos",
+        # `access-notifications`: the five access-record routes of PRD §15 and the in-app
+        # inbox that makes `IN_APP` delivery a fact rather than a claim (design D5/D6).
+        "access-records",
+        "notifications",
+        # PRD §17: guest documents and the SES.Hospedajes submission. The submit route lives
+        # under `reservations` by path but on the guests router, so the prefix set already
+        # names it.
+        "guests",
     }
 
 

@@ -1,6 +1,195 @@
 {
   "components": {
     "schemas": {
+      "AccessCreatedMode": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(AccessRecord.created_mode) without a named block (§7.16).",
+        "enum": [
+          "EXTERNAL_PMS_AUTOMATIC",
+          "MANUAL",
+          "MOCK"
+        ],
+        "title": "AccessCreatedMode",
+        "type": "string"
+      },
+      "AccessProvider": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(AccessRecord.provider) without a named block (§7.16).",
+        "enum": [
+          "GRINPASS",
+          "MANUAL",
+          "MOCK",
+          "EXTERNAL_MANAGED"
+        ],
+        "title": "AccessProvider",
+        "type": "string"
+      },
+      "AccessRecordPageResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/AccessRecordResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "AccessRecordPageResponse",
+        "type": "object"
+      },
+      "AccessRecordResponse": {
+        "properties": {
+          "code_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Code Masked"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "created_mode": {
+            "$ref": "#/components/schemas/AccessCreatedMode"
+          },
+          "external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "External Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "provider": {
+            "$ref": "#/components/schemas/AccessProvider"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/AccessRecordStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "valid_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid From"
+          },
+          "valid_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Valid To"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "provider",
+          "status",
+          "created_mode",
+          "code_masked",
+          "external_id",
+          "valid_from",
+          "valid_to",
+          "notes",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "AccessRecordResponse",
+        "type": "object"
+      },
+      "AccessRecordStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(AccessRecord.status) without a named block (§7.16).",
+        "enum": [
+          "PENDING",
+          "CREATED_EXTERNAL",
+          "MANUAL_ADDED",
+          "DELIVERED",
+          "EXPIRED",
+          "REVOKED"
+        ],
+        "title": "AccessRecordStatus",
+        "type": "string"
+      },
       "AssignCleaningTaskRequest": {
         "additionalProperties": false,
         "description": "`PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.\n\nNot a general-purpose patch: `status` moves only through the lifecycle endpoints (so\n`PropertyStateMachine` is never bypassed), and `notes` is out of this change's writable\nsurface entirely (design D13).",
@@ -1143,6 +1332,25 @@
         "title": "CurrentUserResponse",
         "type": "object"
       },
+      "DocumentStoredResponse": {
+        "description": "What a successful write returns: **no document number**.\n\nThe caller just sent it; echoing it back would put it in one more response body, one more\nproxy log and one more browser cache for no benefit.",
+        "properties": {
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "guest_id": {
+            "format": "uuid",
+            "title": "Guest Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "guest_id",
+          "document_status"
+        ],
+        "title": "DocumentStoredResponse",
+        "type": "object"
+      },
       "ErrorBody": {
         "description": "The `error` object of the PRD §23 envelope.",
         "properties": {
@@ -1197,6 +1405,83 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "GuestDocumentResponse": {
+        "properties": {
+          "date_of_birth": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Date Of Birth"
+          },
+          "document_expiry_date": {
+            "anyOf": [
+              {
+                "format": "date",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Document Expiry Date"
+          },
+          "document_number": {
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "document_type": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuestDocumentType"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "full_name": {
+            "title": "Full Name",
+            "type": "string"
+          },
+          "guest_id": {
+            "format": "uuid",
+            "title": "Guest Id",
+            "type": "string"
+          },
+          "nationality": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Nationality"
+          }
+        },
+        "required": [
+          "guest_id",
+          "full_name",
+          "nationality",
+          "date_of_birth",
+          "document_type",
+          "document_number",
+          "document_expiry_date",
+          "document_status"
+        ],
+        "title": "GuestDocumentResponse",
+        "type": "object"
+      },
       "GuestDocumentStatus": {
         "enum": [
           "NOT_PROVIDED",
@@ -1206,6 +1491,17 @@
           "REJECTED"
         ],
         "title": "GuestDocumentStatus",
+        "type": "string"
+      },
+      "GuestDocumentType": {
+        "enum": [
+          "DNI",
+          "NIE",
+          "PASSPORT",
+          "RESIDENCE_CARD",
+          "OTHER"
+        ],
+        "title": "GuestDocumentType",
         "type": "string"
       },
       "GuestSummaryResponse": {
@@ -1297,6 +1593,24 @@
         "title": "ImportReportResponse",
         "type": "object"
       },
+      "LegalRegistrationResponse": {
+        "properties": {
+          "legal_registration_status": {
+            "$ref": "#/components/schemas/LegalRegistrationStatus"
+          },
+          "reservation_id": {
+            "format": "uuid",
+            "title": "Reservation Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reservation_id",
+          "legal_registration_status"
+        ],
+        "title": "LegalRegistrationResponse",
+        "type": "object"
+      },
       "LegalRegistrationStatus": {
         "description": "Shared with reservations/ — PRD §7.6 and §7.7 define the identical enum\non both Guest and Reservation. Owned here (guests/) since it's\nconceptually the guest's legal registration state; reservations/ imports\nit rather than redefining it (see design.md Risks).",
         "enum": [
@@ -1332,6 +1646,179 @@
         ],
         "title": "LoginRequest",
         "type": "object"
+      },
+      "MarkExternalRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "title": "MarkExternalRequest",
+        "type": "object"
+      },
+      "NotificationChannel": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(NotificationLog.channel) without a named block (§7.24). Not the same enum as\nConversationChannel (§7.14): PUSH, IN_APP and CONSOLE do not exist there.",
+        "enum": [
+          "EMAIL",
+          "WHATSAPP",
+          "PUSH",
+          "IN_APP",
+          "CONSOLE"
+        ],
+        "title": "NotificationChannel",
+        "type": "string"
+      },
+      "NotificationPageResponse": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/NotificationResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "NotificationPageResponse",
+        "type": "object"
+      },
+      "NotificationResponse": {
+        "properties": {
+          "body": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Body"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/NotificationChannel"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "notification_type": {
+            "title": "Notification Type",
+            "type": "string"
+          },
+          "related_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Id"
+          },
+          "related_type": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Related Type"
+          },
+          "sent_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sent At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/NotificationStatus"
+          },
+          "subject": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Subject"
+          }
+        },
+        "required": [
+          "id",
+          "notification_type",
+          "channel",
+          "status",
+          "subject",
+          "body",
+          "related_type",
+          "related_id",
+          "sent_at",
+          "created_at"
+        ],
+        "title": "NotificationResponse",
+        "type": "object"
+      },
+      "NotificationStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(NotificationLog.status) without a named block (§7.24).",
+        "enum": [
+          "PENDING",
+          "SENT",
+          "FAILED",
+          "SKIPPED"
+        ],
+        "title": "NotificationStatus",
+        "type": "string"
       },
       "PMSProvider": {
         "description": "Which PMS a property talks to.\n\nReplaces PRD §22's single `PMS_PROVIDER` environment variable, which ADR 0006 retired\nbefore any code read it: a global selector cannot express two providers coexisting, and\nthat happens in both futures the ADR names — the migration window to Channex, where some\nproperties have moved and others have not, and the SaaS phase, where each client arrives\nwith the PMS they already pay for.\n\n`MOCK` is a first-class member, not a testing hack: it is the MVP's default and what the\nsuite and local startup run against, so a property with no provider resolves to it.\n\nDeliberately NOT the full list of the eleven providers ADR 0006 evaluated: `OCTORATE` joins\nthe day it is worth storing a credential for one.\n\nA member is **not** a promise that an adapter exists. `BEDS24` is here before its adapter\n(which arrives with `pms-beds24-adapter`) precisely so its account credential can be\nprovisioned and rotated first — the credential is the long-lived thing, the adapter is code.\nResolving such a property fails with `PmsUnavailableError` naming the gap, never by silently\nfalling back to the mock.",
@@ -1646,6 +2133,35 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "RegisterCodeRequest": {
+        "additionalProperties": false,
+        "description": "The one place a plaintext access code enters the system (R2.2).\n\nIt goes no further than `AccessRecord.register_manual_code`, which masks it. No column,\nno response field and no log line can hold it — see design D9.",
+        "properties": {
+          "code": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Code",
+            "type": "string"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "RegisterCodeRequest",
         "type": "object"
       },
       "RequiredPhotoPayload": {
@@ -2234,6 +2750,58 @@
           "reason"
         ],
         "title": "RowErrorResponse",
+        "type": "object"
+      },
+      "SetDocumentRequest": {
+        "additionalProperties": false,
+        "description": "The five document fields, all required together (R7.1).\n\nNot a partial patch: PRD §17 needs the set, and a guest with a number but no expiry date\nlooks documented and cannot be reported. `check_in_date`/`check_out_date` — the other two\nof the eight — are the reservation's and are never accepted here.",
+        "properties": {
+          "date_of_birth": {
+            "format": "date",
+            "title": "Date Of Birth",
+            "type": "string"
+          },
+          "document_expiry_date": {
+            "format": "date",
+            "title": "Document Expiry Date",
+            "type": "string"
+          },
+          "document_number": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/GuestDocumentType"
+          },
+          "nationality": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Nationality",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          }
+        },
+        "required": [
+          "nationality",
+          "date_of_birth",
+          "document_type",
+          "document_number",
+          "document_expiry_date"
+        ],
+        "title": "SetDocumentRequest",
         "type": "object"
       },
       "StorageType": {
@@ -3357,6 +3925,435 @@
   },
   "openapi": "3.1.0",
   "paths": {
+    "/api/v1/access-records": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). Filterable by `property_id`, `reservation_id` and `status`. Access codes appear only in their masked `****XX` form — the plaintext is never stored (PRD §15: the provider creates and delivers it).",
+        "operationId": "list_access_records_api_v1_access_records_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "reservation_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Reservation Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/AccessRecordStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRecordPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's access records",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/api/v1/access-records/{record_id}": {
+      "get": {
+        "description": "Responds `404` for a record of another tenant with a body identical to the one for an id that does not exist (R3.3).",
+        "operationId": "get_access_record_api_v1_access_records__record_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRecordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read one access record",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/api/v1/access-records/{record_id}/delivered": {
+      "post": {
+        "description": "Responds `409` unless the record is `MANUAL_ADDED` or `CREATED_EXTERNAL`: confirming delivery of a code nobody registered would be an assertion about a guest that has no basis.",
+        "operationId": "mark_delivered_api_v1_access_records__record_id__delivered_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRecordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Confirm the guest received the access instructions",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/api/v1/access-records/{record_id}/external": {
+      "post": {
+        "description": "PRD §15: GrinPass imports the reservation from the PMS and creates the code itself. Responds `409` if the record is not `PENDING`.",
+        "operationId": "mark_external_api_v1_access_records__record_id__external_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/MarkExternalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRecordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Declare that the provider manages this access",
+        "tags": [
+          "access"
+        ]
+      }
+    },
+    "/api/v1/access-records/{record_id}/manual-code": {
+      "post": {
+        "description": "PRD §15's `ManualAccessAdapter`. **Only the masked form is stored**: the plaintext reaches the domain, is reduced to `****XX` and is discarded — there is no column, no response field and no log line that can hold it. Responds `409` if the record is not `PENDING`.",
+        "operationId": "register_manual_code_api_v1_access_records__record_id__manual_code_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "record_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Record Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterCodeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AccessRecordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Register an access code arranged by hand",
+        "tags": [
+          "access"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "description": "Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.",
@@ -4788,6 +5785,152 @@
         ]
       }
     },
+    "/api/v1/guests/{guest_id}/document": {
+      "get": {
+        "description": "The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.",
+        "operationId": "read_guest_document_api_v1_guests__guest_id__document_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestDocumentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read a guest's full identity document",
+        "tags": [
+          "legal"
+        ]
+      },
+      "patch": {
+        "description": "The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.",
+        "operationId": "set_guest_document_api_v1_guests__guest_id__document_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guest_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guest Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetDocumentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DocumentStoredResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Store a guest's identity document",
+        "tags": [
+          "legal"
+        ]
+      }
+    },
     "/api/v1/integrations/pms/import-csv": {
       "post": {
         "description": "Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).",
@@ -4852,6 +5995,89 @@
         "summary": "Import reservations from a CSV file",
         "tags": [
           "integrations"
+        ]
+      }
+    },
+    "/api/v1/notifications": {
+      "get": {
+        "description": "The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).",
+        "operationId": "list_own_notifications_api_v1_notifications_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/NotificationPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the caller's own notifications",
+        "tags": [
+          "notifications"
         ]
       }
     },
@@ -5599,6 +6825,75 @@
         "summary": "Update a reservation partially",
         "tags": [
           "reservations"
+        ]
+      }
+    },
+    "/api/v1/reservations/{reservation_id}/legal-registration/submit": {
+      "post": {
+        "description": "PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.",
+        "operationId": "submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/LegalRegistrationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report a stay to SES.Hospedajes",
+        "tags": [
+          "legal"
         ]
       }
     },

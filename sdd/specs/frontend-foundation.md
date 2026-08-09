@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The frontend is a Next.js App Router application (TypeScript strict) that provides the **Application Shell**: the common layout, responsive navigation, base routes, and localized placeholders on which the product's functional modules are built progressively. It renders without a backend and contains no business logic, workflows, backend integrations, or authentication — those arrive in later changes. Its foundation defines the architectural boundaries, cross-cutting UI conventions, and extension points every future frontend module inherits.
+The frontend is a Next.js App Router application (TypeScript strict) that provides the **Application Shell**: the common layout, responsive navigation, base routes, and localized placeholders on which the product's functional modules are built progressively. It includes the frontend authentication session as a separate cross-cutting integration: login, ephemeral JWT handling, identity context, refresh and client-side UX guards. It contains no business authorization, RBAC or tenant-isolation enforcement; those remain backend responsibilities. Its foundation defines the architectural boundaries, cross-cutting UI conventions, and extension points every future frontend module inherits.
 
 ## Requirements
 
@@ -67,9 +67,11 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 - THE SYSTEM SHALL expose the deployed build identity through that same allowlist — `appVersion` and `buildCommitShort`, read from `NEXT_PUBLIC_*` — and nothing else about the build: the repository URL, the Pull Request number, the full commit SHA and the Actions run id never enter the snapshot, which the root layout serializes on **every** surface. See `app-version-visibility`.
 - THE SYSTEM SHALL treat that allowlist as a guarantee about **values**, not only about which field names cross: `public.ts` vets the shape of the build identity and yields `""` for anything off-shape, so a widened value cannot reach the browser through a field that is itself allowlisted. This has to happen at the boundary rather than in the component that displays the value — React serializes the snapshot as a prop into the root layout's RSC payload, so an unvetted value travels in the page source of every surface no matter what any component chooses to render. See `app-version-visibility`, "El límite valida la forma de la identidad".
 
-### Authentication readiness (not implemented)
+### Authentication integration boundary
 
-- THE SYSTEM SHALL document the future integration points for session context, authenticated transport, and route protection (an `AuthProvider` slot between i18n and query; API request-header/401 extension points; static-profile route groups) and SHALL NOT implement login, JWT issue/refresh, token persistence, RBAC, or functional route guards. The backend remains the authority for RBAC.
+- THE SYSTEM SHALL integrate the authentication session through `AuthProvider` between i18n and query, the API hooks `getHeaders`/`onUnauthorized`, and the static-profile route groups; the full session behavior is specified in `frontend-auth-session`.
+- THE SYSTEM SHALL keep authentication tokens out of persistent browser storage and SHALL keep `BACKEND_INTERNAL_URL` server-only; the public runtime configuration may expose only the browser-facing `apiBaseUrl`.
+- THE SYSTEM SHALL treat client-side guards as UX protection only. The frontend SHALL NOT implement business authorization, RBAC or tenant-isolation enforcement; the backend remains authoritative.
 
 ### Testing and documentation
 
@@ -81,6 +83,6 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 - `frontend/app/` — RootLayout (server, providers + locale + metadata), route groups `(workspace)`/`(public)`/`(field)`/`(guest)`, 19 placeholder pages plus the two functional dashboard surfaces (`/dashboard`, `/properties/[id]` — see `dashboard-web-frontend.md`), five shell layouts, `global-error.tsx`, per-segment `error.tsx`.
 - `frontend/features/shell/` — `navigation/` (route registry, selectors, active-route matching, breadcrumbs, route metadata), `state/use-shell-ui-store.ts`, `components/` (five shells + chrome: `ShellFrame`, `Topbar`, `Sidebar`, `BottomNavigation`, `MoreMenu`, `NavLink`, `Breadcrumbs`, `PageTitle`, `Brand`, `SkipLink`, `LocaleSwitcher`, `TabletNavTrigger`, `OverlayAutoCloser`, `RoutePlaceholder`, `PageHeader`, `ShellFooter`, `VersionBadge`).
 - `frontend/components/` — `ui/` (shadcn primitives: Button, Sheet, Tooltip, Separator, Skeleton, Badge), `states/` (`StatePanel`, `LoadingState`, `ErrorState`, `EmptyState`, `ModulePlaceholder`).
-- `frontend/lib/` — `api/` (transport + PRD §23 errors), `config/` (server/public/runtime boundary), `i18n/` (server/client init, locale resolution, catalogs), `query/` (client + tenant-scoped keys), `metadata/` (localized metadata builder), `utils.ts`.
+- `frontend/lib/` — `api/` (transport + PRD §23 errors), `auth/` (ephemeral session and refresh), `config/` (server/public/runtime boundary), `i18n/` (server/client init, locale resolution, catalogs), `query/` (client + tenant-scoped keys), `metadata/` (localized metadata builder), `utils.ts`.
 - `frontend/locales/{es,en}/{common,navigation,states}.json` — translation catalogs.
 - `frontend/{eslint.config.mjs,vitest.config.ts,tsconfig.json,components.json,test/}` — tooling and boundary enforcement.

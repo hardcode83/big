@@ -121,6 +121,25 @@ class Settings(BaseSettings):
     # three orders of magnitude of headroom over a real request.
     request_max_bytes: int = 1024 * 1024
 
+    # Notification delivery (change `access-notifications`, design D4). No credential here:
+    # the MVP adapters are a console logger and two mocks (PRD §14's channel table), and the
+    # real WhatsApp/SMTP keys are already reserved by rule 8 of `steering/security.md`.
+    #
+    # `notification_max_attempts` is what bounds duplicates. The dispatcher records the attempt
+    # BEFORE calling the adapter, so a process that dies mid-send re-sends at most until this
+    # ceiling instead of for ever — at-least-once, acotado, which is the trade design D4 takes
+    # in exchange for not adding a `SENDING` state and its stuck-row failure mode.
+    #
+    # **No backoff setting, deliberately**: `notification_logs` has no column for "next attempt
+    # at", and adding one to pace a console logger would be schema invented ahead of a need.
+    # A failed row is retried on the next tick until the ceiling. Revisit when a real SMTP
+    # adapter lands (`hardening-release`), which is also when rate limits start to matter.
+    notification_max_attempts: int = 3
+    # How many rows one run drains per tenant. The job runs every minute, so a backlog drains
+    # in slices instead of in one transaction that holds row locks for as long as the slowest
+    # provider takes.
+    notification_batch_size: int = 100
+
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.
     #

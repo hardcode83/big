@@ -112,11 +112,21 @@ def get_assign_cleaning_task_use_case(session: SessionDep) -> AssignCleaningTask
 
 
 def get_accept_cleaning_task_use_case(session: SessionDep) -> AcceptCleaningTaskUseCase:
-    return AcceptCleaningTaskUseCase(**_lifecycle_kwargs(session))
+    # The notification repository is the eighth collaborator only for the two operations
+    # that ANSWER an assignment (`access-notifications` R5): answering closes the SLA
+    # deadline the assignment opened. Starting, completing and validating happen after an
+    # answer, so their deadline is already closed and they do not get the port.
+    return AcceptCleaningTaskUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        **_lifecycle_kwargs(session),
+    )
 
 
 def get_reject_cleaning_task_use_case(session: SessionDep) -> RejectCleaningTaskUseCase:
-    return RejectCleaningTaskUseCase(**_lifecycle_kwargs(session))
+    return RejectCleaningTaskUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        **_lifecycle_kwargs(session),
+    )
 
 
 def get_start_cleaning_task_use_case(session: SessionDep) -> StartCleaningTaskUseCase:

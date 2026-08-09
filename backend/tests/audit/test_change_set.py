@@ -54,6 +54,38 @@ def test_diff_refuses_every_field_of_the_denylist(field: str) -> None:
     assert "new-secret" not in str(caught.value)
 
 
+def test_a_guests_birth_date_cannot_be_recorded_as_a_diff() -> None:
+    """Added by `access-notifications` after its feature-scale security panel.
+
+    `document_number_encrypted` was already denylisted and `date_of_birth` was not, so one
+    was protected by construction and the other by whoever wrote the next caller remembering
+    to use `redacted()`. The module claims the guarantee is structural; for the birth date it
+    was not.
+
+    It belongs on the list by the steering's own words — §"Datos sensibles": "PII de huéspedes
+    (documento de identidad, **fecha de nacimiento** — requeridos por SES.Hospedajes)".
+    """
+    with pytest.raises(AuditContractError):
+        ChangeSet("GUEST").diff("date_of_birth", None, "1990-05-04")
+
+    assert ChangeSet("GUEST").redacted("date_of_birth").as_dict() == {
+        "date_of_birth": {"changed": True}
+    }
+
+
+def test_nationality_is_deliberately_not_denylisted() -> None:
+    """Asserted as an absence, so growing the denylist stays a decision.
+
+    §"Datos sensibles" names the document and the birth date and not the nationality, and the
+    list's own comment warns against a denylist that quietly covers more than it says. The
+    guest use case records it with `redacted()` anyway — that discipline lives in the caller,
+    like `properties-crud` design D7 does for its note columns.
+    """
+    assert ChangeSet("GUEST").diff("nationality", None, "ES").as_dict() == {
+        "nationality": {"old": None, "new": "ES"}
+    }
+
+
 def test_redacted_is_available_for_a_denylisted_field_of_this_entity() -> None:
     """`password` is the one denylisted field a USER diff legitimately reports (R6.2)."""
     assert ChangeSet("USER").redacted("password").as_dict() == {"password": {"changed": True}}
@@ -163,16 +195,21 @@ def test_each_entity_has_its_own_field_allowlist() -> None:
 
 
 def test_an_unknown_entity_type_cannot_have_a_change_set() -> None:
-    """`RESERVATION` is the example on purpose: a real table with no audit trail yet.
+    """`INCIDENT` is the example on purpose: a real table with no audit trail yet.
 
-    It used to be `PROPERTY`, which `properties-crud` registered — so the name had to move to
-    another table that rule 9 of `steering/security.md` names but nobody writes yet
-    (`specs/reservations.md` records that debt). Whoever finally audits reservations will trip on
-    this line, and that is the intended behaviour: registering an entity type is a decision, so a
-    test asserting the opposite should demand a conscious edit rather than pass silently.
+    The name has now moved twice, and each move is the test working as designed. It was
+    `PROPERTY` until `properties-crud` registered it, then `RESERVATION` until
+    `access-notifications` registered *that* — for the legal-registration and access
+    projections of PRD §17 and §15, not for the module's own mutations, which
+    `specs/reservations.md` still records as owed.
+
+    `INCIDENT` is next in rule 9's enumeration with no writer at all (`maintenance` brings
+    it). Whoever audits it will trip on this line, which is the intended behaviour:
+    registering an entity type is a decision, so a test asserting the opposite should demand
+    a conscious edit rather than pass silently.
     """
     with pytest.raises(AuditContractError):
-        ChangeSet("RESERVATION")
+        ChangeSet("INCIDENT")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

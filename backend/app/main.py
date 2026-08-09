@@ -7,6 +7,8 @@ from fastapi import FastAPI
 # first request, or the global tenant filter (design D16) silently covers fewer
 # tables than it should — see app/core/models_registry.py.
 import app.core.models_registry  # noqa: F401
+from app.access.api.errors import register_access_error_handlers
+from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
@@ -18,8 +20,11 @@ from app.core.config import settings
 from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.openapi import install_openapi
+from app.guests.api.errors import register_guest_error_handlers
+from app.guests.api.router import router as guests_router
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
+from app.notifications.api.router import router as notifications_router
 from app.properties.api.errors import register_property_error_handlers
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
@@ -56,6 +61,8 @@ def create_app() -> FastAPI:
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
+    register_access_error_handlers(app)
+    register_guest_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -81,6 +88,17 @@ def create_app() -> FastAPI:
     # authorisation, and `tests/test_route_authorization.py` names it in `ANONYMOUS_ENDPOINTS`,
     # which is a visible diff by construction.
     app.include_router(cleaning_photos_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
+    # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
+    # (design D5/D6).
+    app.include_router(notifications_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: PRD §15's operator surface. The `access` domain had entities and
+    # a table since `domain-foundation-ops` and no way to reach them until now.
+    app.include_router(access_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: guest documents and the SES.Hospedajes submission (PRD §17).
+    # One router for everything that touches an identity document, which is the file a
+    # reviewer opens when a real provider arrives.
+    app.include_router(guests_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

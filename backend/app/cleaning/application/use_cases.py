@@ -29,6 +29,7 @@ from app.cleaning.domain.entities import (
 )
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
 from app.cleaning.domain.notifications import (
+    RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
     no_cleaner_available_notification,
 )
@@ -76,6 +77,7 @@ from app.integrations.domain.storage import (
     storage_key_for_photo,
     verify_signed_key,
 )
+from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import candidate_window
 from app.properties.domain.entities import Property
@@ -619,7 +621,51 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
         self._uow = uow
 
 
-class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
+class _AnswersAnAssignmentBase(_TaskLifecycleBase):
+    """The two operations that answer an assignment, and therefore close its SLA.
+
+    Added by `access-notifications` (its R5, design D7) to pay a debt this module recorded
+    when it shipped: `cleaning`'s own R6.4 asked for the deadline to be closed on an answer
+    and **could not be built** — `list_sla_breach_candidates` requires `status = SENT`,
+    nothing wrote that value, and `NotificationLogRepository` exposed no way to clear a
+    deadline. The change that brought the sender brought both.
+
+    Why it matters now and did not before: the assignment row now really reaches `SENT`, so
+    a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
+    four hours and escalate to the manager for a task that was answered immediately.
+
+    Only two use cases inherit this, not the six of `_TaskLifecycleBase`: starting,
+    completing and validating happen *after* an answer, so the deadline is already closed by
+    then, and giving them the port would be handing out a write nobody needs.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._notifications = notifications
+
+    async def _close_assignment_sla(
+        self, tenant_id: uuid.UUID, task: CleaningTask
+    ) -> None:
+        """R5.1 — the assignment notification stops being a breach candidate.
+
+        Idempotent and silent on zero rows (R5.3): a task created before this change has no
+        assignment row, and a second answer finds the deadline already cleared. Neither is an
+        error, so neither fails the response.
+        """
+        cleared = await self._notifications.cancel_sla_deadline(
+            tenant_id,
+            related_type=RELATED_TYPE_CLEANING_TASK,
+            related_id=task.id,
+            notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
+        )
+        if not cleared:
+            logger.info(
+                "cleaning.assignment_sla_already_closed",
+                extra={"tenant_id": str(tenant_id), "cleaning_task_id": str(task.id)},
+            )
+
+
+class AcceptCleaningTaskUseCase(_AnswersAnAssignmentBase):
     """R3.4 — the assigned cleaner takes the task."""
 
     async def execute(
@@ -629,6 +675,10 @@ class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
         previous = task.status
         task.accept(actor.user_id, now)
         await self._tasks.save(tenant_id, task)
+        # Before the single commit this use case already makes, so the answer and the closed
+        # deadline are one write or neither: a committed acceptance with a live deadline is
+        # exactly the escalation R5 exists to prevent.
+        await self._close_assignment_sla(tenant_id, task)
         # No property transition: `CLEANING_SCHEDULED` covers both ASSIGNED and ACCEPTED, and
         # `PropertyStateMachine._POLICY` declares no trigger for acceptance. The task's own
         # status is the record, and the audit row is what says who answered.
@@ -646,7 +696,7 @@ class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
         return task
 
 
-class RejectCleaningTaskUseCase(_TaskLifecycleBase):
+class RejectCleaningTaskUseCase(_AnswersAnAssignmentBase):
     """R3.5 and design D3 — terminal, plus a replacement so the property is never left with
     no live task."""
 
@@ -657,6 +707,10 @@ class RejectCleaningTaskUseCase(_TaskLifecycleBase):
         previous = task.status
         task.reject(actor.user_id, now)
         await self._tasks.save(tenant_id, task)
+        # A rejection is an answer too (`access-notifications` R5.1): the cleaner said no,
+        # so nobody is late. The replacement task below gets its own notification and its own
+        # deadline when a manager assigns it.
+        await self._close_assignment_sla(tenant_id, task)
         await self._transition(
             tenant_id=tenant_id,
             task=task,

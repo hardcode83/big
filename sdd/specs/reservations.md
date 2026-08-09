@@ -75,12 +75,26 @@ no las dispara; aporta el dato del que cuelgan.
   **resultado** y recalcular `nights` y `total_guests` cuando sus campos de origen cambien.
 - THE SYSTEM SHALL rechazar en `PATCH` los campos derivados (`nights`, `total_guests`), los
   de identidad (`tenant_id`, `property_id`, `external_pms_id`) y los que pertenecen a otras
-  capacidades (`access_status`, `legal_registration_status`).
+  capacidades (`access_status`, `legal_registration_status`). Desde `access-notifications` esas
+  dos columnas **sí tienen escritor**, y es uno solo cada una: `access_status` la proyecta el
+  repositorio de `access_records` en la misma transacción que mueve el registro, y
+  `legal_registration_status` la mueven el reconciliador de accesos y la submission legal. La
+  exclusión del `PATCH` es lo que mantiene esa unicidad.
 - WHEN se solicita `DELETE /api/v1/reservations/{id}`, THE SYSTEM SHALL pasar la reserva a
   `CANCELLED` conservando la fila y responder `204`.
 - IF la reserva ya está en `CANCELLED`, THEN THE SYSTEM SHALL responder `204` sin registrar
   un segundo evento de cancelación.
 - THE SYSTEM SHALL permitir editar una reserva cancelada, registrando la edición como tal.
+
+**Confirmar y cancelar tienen consecuencias fuera de esta capacidad, y no son hooks.** Desde
+`access-notifications`, el barrido `provision_access_records` recorre cada cinco minutos las
+reservas confirmadas sin `AccessRecord` para darles uno en `PENDING` y fijarles
+`legal_registration_status = PENDING_GUEST_DATA` (PRD §17 paso 1), y revoca el registro de las
+canceladas. No hay enganche en el camino de confirmación **a propósito**: hay reservas ya
+confirmadas en la base de datos que un hook nunca cubriría, y las confirmaciones entran por tres
+vías —`PATCH`, import CSV y sync PMS, las dos últimas vía `ReservationStatus.parse_ingested`, que
+por defecto confirma—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
+está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo junto al revocado.
 
 ### Timeline: evidencia de cada mutación, en la misma transacción
 

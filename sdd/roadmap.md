@@ -104,16 +104,18 @@ Categorías:
 - [ ] messaging-ai — [BE] Conversation + Message + MockAIAdapter + escalación (PRD §26.12, §13).
   needs: pms-beds24-adapter
 - [x] dashboard-web-frontend — [FE] dashboard FE (property cards, detalle, timeline) adelantado contra mocks/fixtures mientras dashboard-web (backend agregado) sigue su orden natural en el roadmap … → changes/archive/2026-08-01-dashboard-web-frontend/
-- [ ] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17).
+- [x] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17). → changes/archive/2026-08-08-access-notifications/
 - [ ] guest-portal-api — [BE] API y seguridad del portal de huésped: token opaco, autorización por estancia/tenant, consulta de información, check-in, PII, auditoría e incidencias (PRD §§6, 7.6, 7.7, 17, 22, 23 …
   needs: access-notifications · size: M · kind: feature
 - [ ] guest-portal-web — [FE] página `/guest/[token]`, instrucciones, formulario de check-in, soporte, estados accesibles e i18n ES/EN (PRD §§23-24; capability original `guest-portal`)
   needs: guest-portal-api · size: M · kind: feature
 - [ ] auth-account-recovery — [BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario.
-- [ ] frontend-auth-session — [FE] **el login real y la sesión en el frontend**, separado de `dashboard-web` el 2026-08-07 porque no depende de la API agregada y sí bloquea cualquier pantalla real.
+- [x] frontend-auth-session — [FE] **el login real y la sesión en el frontend**, separado de `dashboard-web` el 2026-08-07 porque no depende de la API agregada y sí bloquea cualquier pantalla real. → changes/archive/2026-08-08-frontend-auth-session/
   needs: api-ingress-routing · size: M · kind: feature
-- [ ] dashboard-web — [FE] dashboard API agregado + FE: property cards, detalle + timeline (PRD §26.15-17, §9, §24).
-  needs: properties-crud, frontend-auth-session · size: L · kind: feature
+- [ ] dashboard-api — [BE] **la API agregada del dashboard**: `GET /properties/{id}/dashboard`, `GET /properties/{id}/state` y `GET /timeline/{property_id}` (PRD §26.15-17, §9, §23, §24). Separada de `dashboard-web` el 2026-08-08 por la costura BE/FE …
+  needs: properties-crud · size: M · kind: feature
+- [ ] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` …
+  needs: dashboard-api, frontend-auth-session · size: S · kind: feature
 - [x] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal). → changes/archive/2026-08-08-api-ingress-routing/
   size: S · kind: infra
 - [ ] field-apps — [FE] apps mobile-first de limpiadora y técnico + bandeja de conversaciones (PRD §26.18-21, §24)
