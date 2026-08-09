@@ -75,7 +75,7 @@ Categorías:
 - [x] channex-staging-adapter — [BE] **el primer PMS real contra el que se valida el backend**. → changes/archive/2026-08-03-channex-staging-adapter/
 - [x] pms-beds24-spike — [BE] **medir Beds24 real antes de diseñar contra supuestos**. → changes/archive/2026-08-04-pms-beds24-spike/
 - [x] celery-jobs — [BE] scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14). → changes/archive/2026-08-05-celery-jobs/
-- [ ] reservations-webhooks — [BE] cierra el cuarto ítem de `reservations`, que se entregó sin él …
+- [x] reservations-webhooks — [BE] cierra el cuarto ítem de `reservations`, que se entregó sin él … → changes/archive/2026-08-09-reservations-webhooks/
 - [x] reservations — [BE] CRUD + MockPMSAdapter + import CSV (PRD §26.9, §16, §7.7). → changes/archive/2026-07-31-reservations/
 - [x] properties-crud — [BE] **dar a `properties` una vía de escritura, que hoy no tiene ninguna** … → changes/archive/2026-08-08-properties-crud/
   size: M · kind: feature

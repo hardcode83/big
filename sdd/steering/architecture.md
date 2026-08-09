@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-06_autohost-er-entidades.png` (regenerado en `pms-provider-resolution` al entrar `pms_credentials` y `properties.pms_provider`: 28 entidades, 67 relaciones. El anterior, `2026-07-31_...`, se borró; y aquel a su vez había sustituido a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-09_autohost-er-entidades.png` (regenerado en `reservations-webhooks` al entrar `webhook_endpoints`: **29 entidades, 71 relaciones**. El anterior, `2026-08-06_...`, se borró; aquel salió de `pms-provider-resolution` con 28 y 67 al entrar `pms_credentials` y `properties.pms_provider`, y a su vez había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
 
 ## Forma del sistema
 
