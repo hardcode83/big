@@ -486,7 +486,7 @@ async def test_a_provider_the_batch_did_not_name_is_not_called(
 
 @pytest.mark.asyncio
 async def test_receiving_a_webhook_makes_no_outbound_call(
-    api, db_session: AsyncSession, tenant_a, property_a
+    db_session: AsyncSession, tenant_a, property_a
 ) -> None:
     """R6.3, from the outside: the receiving route reaches no provider, synchronously or at all.
 
@@ -494,14 +494,36 @@ async def test_receiving_a_webhook_makes_no_outbound_call(
     a property of the ROUTE and a call could be smuggled in through any collaborator it wires.
     What proves it is that the request leaves a queued notice and nothing else — no reservation,
     no timeline event, which is all a re-read could possibly have produced.
+
+    The client is built here, with the throttle overridden, rather than taken from the `api`
+    fixture — the convention `test_webhook_receiver_api.py` states in its own docstring. The real
+    throttle would pull in `app.core.redis.get_redis`, whose process-wide memoisation binds a
+    connection pool to the FIRST event loop that touches it; pytest-asyncio gives each test its
+    own loop, so a later test using the real throttle dies with "Event loop is closed" in
+    teardown. Nothing here is about rate limiting.
     """
+    from httpx import ASGITransport, AsyncClient
+
     from app.core.crypto import encrypt
+    from app.core.db import get_db_session
+    from app.integrations.api.dependencies import get_webhook_throttle
     from app.integrations.domain.webhook_auth import (
         generate_header_secret,
         generate_webhook_token,
         hash_webhook_token,
     )
     from app.integrations.infrastructure.models import WebhookEndpointModel
+    from app.main import create_app
+
+    class _AllowAll:
+        async def probe_allowed(self, client_ip: str) -> bool:
+            return True
+
+        async def delivery_allowed(self, token_hash: str) -> bool:
+            return True
+
+        async def record_failed_attempt(self, client_ip: str) -> None:
+            return None
 
     token = generate_webhook_token()
     secret = generate_header_secret()
@@ -516,11 +538,22 @@ async def test_receiving_a_webhook_makes_no_outbound_call(
     )
     await db_session.flush()
 
-    response = await api.post(
-        f"/api/v1/webhooks/mock/{token}",
-        json={"event": "booking.modified"},
-        headers={"X-Provider-Auth": secret},
-    )
+    app = create_app()
+
+    async def _session_override():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_webhook_throttle] = _AllowAll
+
+    async with AsyncClient(
+        transport=ASGITransport(app=app), base_url="http://test"
+    ) as client:
+        response = await client.post(
+            f"/api/v1/webhooks/mock/{token}",
+            json={"event": "booking.modified"},
+            headers={"X-Provider-Auth": secret},
+        )
 
     assert response.status_code == 202
     queued = (
