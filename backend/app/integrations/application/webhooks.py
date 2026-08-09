@@ -267,6 +267,13 @@ class WebhookProcessingReport:
     failed: int = 0
     unattributed: int = 0
     tenants: int = 0
+    skipped_locked: bool = False
+    """The previous run is still going, so this one did nothing (`celery-jobs` R4.2).
+
+    The same field name `TenantRunReport` uses, deliberately: an operator reading worker logs
+    should not have to learn a second word for the same event because a different job produced
+    the line.
+    """
 
 
 @dataclass

@@ -394,9 +394,24 @@ forzado en `infrastructure/`.
   > en un aviso de cancelación): si alguien lo leyera algún día, el test se pone rojo. Su pareja es
   > `test_the_body_does_not_decide_anything`, donde el mismo cuerpo mentiroso y una re-lectura
   > distinta dan un estado final distinto.
-- [ ] 4.8 Registrar `process_webhook_events` en `CADENCES` (`app/scheduler/schedule.py`, 60 s) y la tarea
+- [x] 4.8 Registrar `process_webhook_events` en `CADENCES` (`app/scheduler/schedule.py`, 60 s) y la tarea
   Celery en `app/scheduler/tasks.py` con su lock, siguiendo el patrón `_guarded`. Test de que
   `beat_schedule` y el TTL del lock se derivan de `CADENCES` sin números duplicados. [R5.1]
+  > **`_guarded` se parte en dos, no se copia.** Este job no es un bucle por tenant —lee la cola
+  > primero y sólo entonces sabe a qué tenants concierne (D11)— pero necesita exactamente la misma
+  > exclusión mutua. El trozo de lock es `_locked(name, cadence, run, *, skipped)` y `_guarded`
+  > pasa a ser su caso por-tenant. `skipped` va por parámetro porque los informes difieren; el
+  > campo se llama `skipped_locked` en los dos para que un operador no tenga que aprender dos
+  > palabras para el mismo suceso.
+  > **La cadencia de 60 s es un parámetro de seguridad, no de tuning**, y así queda escrito en
+  > `CADENCES`: como el job coalesce todo un tick en una llamada por destino, la cadencia **es** el
+  > techo de llamadas salientes de la regla 12(d). Acortarla lo sube. `test_schedule.py` separa
+  > `PRD_8_3` de `BEYOND_PRD_8_3` para que nadie invoque «lo dice el PRD» sobre un número que el
+  > PRD no ha visto nunca.
+  > El test del composition root comprueba lo que sólo él puede romper: que el lote se lee desde
+  > sesión **sin marcar** y el trabajo por tenant desde una marcada — capturando las dos, porque es
+  > justo el par que un refactor podría colapsar en una sesión sin que nada se quejara hasta que un
+  > aviso sin tenant se volviera invisible para siempre.
 
 ## 5. Documentación
 

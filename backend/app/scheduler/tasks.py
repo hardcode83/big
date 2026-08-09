@@ -8,11 +8,13 @@ Names are the PRD's, literally: `check_checkin_windows`, `process_checkouts`,
 """
 
 import logging
+import uuid
 from dataclasses import asdict
-from datetime import datetime, timedelta
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.cleaning.application.use_cases import ProvisionCleaningTaskUseCase
 from app.cleaning.infrastructure.repositories import (
@@ -20,6 +22,18 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningTaskRepository,
 )
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.integrations.application.use_cases import SyncReservationsFromPmsUseCase
+from app.integrations.application.webhooks import (
+    ProcessTenantWebhookEventsUseCase,
+    ProcessWebhookEventsUseCase,
+    WebhookProcessingReport,
+)
+from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFactory
+from app.integrations.infrastructure.repositories import (
+    SqlAlchemyPmsCredentialRepository,
+    SqlAlchemyWebhookEventRepository,
+)
 from app.notifications.application.use_cases import EscalateBreachedSlasUseCase
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.properties.application.use_cases import AdvancePropertyStatesUseCase
@@ -33,8 +47,10 @@ from app.scheduler.locks import lock_ttl_for, task_lock
 from app.scheduler.runner import (
     TenantRunReport,
     run_for_every_tenant,
+    run_in_marked_session,
     run_sync,
     worker_redis,
+    worker_session_factory,
 )
 from app.scheduler.schedule import CADENCES
 from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
@@ -89,20 +105,34 @@ async def _escalate(session: AsyncSession, tenant_id, now: datetime):
     return await use_case.execute(tenant_id=tenant_id, now=now)
 
 
-async def _guarded(name: str, cadence: timedelta, work) -> dict:
-    """Take the lock, run for every tenant, and always return a serialisable report.
+async def _locked(name: str, cadence: timedelta, run, *, skipped) -> dict:
+    """Take the lock, run `run()`, and always return a serialisable report.
 
     Losing the lock is `skipped`, not a failure (R4.2): the previous run is still doing the
     work, and a Celery task that raised would look like a broken job to anyone reading the
     worker's log.
+
+    Split out from `_guarded` when `process_webhook_events` arrived: that job is not a
+    per-tenant loop — it reads a queue first and only then knows which tenants it concerns
+    (`reservations-webhooks` D11) — but it needs exactly the same mutual exclusion. `skipped`
+    is the report to hand back on contention, and it differs per job because the reports do.
     """
     async with worker_redis() as redis:
         async with task_lock(redis, name, lock_ttl_for(cadence)) as acquired:
             if not acquired:
                 logger.info("scheduler.skipped_locked", extra={"task": name})
-                return asdict(TenantRunReport(task=name, skipped_locked=True))
-            report = await run_for_every_tenant(name, work)
-            return asdict(report)
+                return asdict(skipped)
+            return asdict(await run())
+
+
+async def _guarded(name: str, cadence: timedelta, work) -> dict:
+    """The per-tenant shape: lock, then run `work` once for every active tenant."""
+    return await _locked(
+        name,
+        cadence,
+        lambda: run_for_every_tenant(name, work),
+        skipped=TenantRunReport(task=name, skipped_locked=True),
+    )
 
 
 def _clock_task(name: str, trigger: PropertyStateTrigger):
@@ -147,3 +177,90 @@ def process_checkouts() -> dict:
 def check_sla_breaches() -> dict:
     """PRD §14, every minute: escalate notifications whose SLA deadline has passed."""
     return run_sync(_guarded("check_sla_breaches", CADENCES["check_sla_breaches"], _escalate))
+
+
+# --- `reservations-webhooks`: the queue a stranger fills and only this drains ----------------
+
+WEBHOOK_TASK = "process_webhook_events"
+
+
+def _webhook_tenant_use_case(
+    session: AsyncSession, tenant_id: uuid.UUID
+) -> ProcessTenantWebhookEventsUseCase:
+    """One tenant's processing, wired to the session the runner just marked for it.
+
+    Everything below the provider is real, and the re-read is
+    `SyncReservationsFromPmsUseCase` rather than a second implementation of it — D14: that use
+    case already feeds `ReservationIngestor` as the single upsert route and already records
+    credential reads at the granularity rule 9 narrows by name.
+    """
+    return ProcessTenantWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(session),
+        sync=SyncReservationsFromPmsUseCase(
+            factory=SqlAlchemyPMSAdapterFactory(
+                credentials=SqlAlchemyPmsCredentialRepository(session)
+            ),
+            reservations=SqlAlchemyReservationRepository(session),
+            properties=SqlAlchemyPropertyRepository(session),
+            guests=SqlAlchemyGuestRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            uow=SqlAlchemyUnitOfWork(session),
+            audit=SqlAlchemyAuditLogRepository(session),
+        ),
+        # `AdvancePropertyStatesUseCase` unmodified, satisfying `PropertyStateAdvancer`
+        # structurally (D12). No provisioner: that collaborator belongs to the checkout
+        # trigger, and this job's trigger is a cancellation before check-in.
+        advance=AdvancePropertyStatesUseCase(
+            properties=SqlAlchemyPropertyRepository(session),
+            reservations=SqlAlchemyReservationRepository(session),
+            transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            configs=SqlAlchemyTenantConfigRepository(session),
+            uow=SqlAlchemyUnitOfWork(session),
+        ),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+async def _run_webhook_tenant(tenant_id, events, now):
+    result = await run_in_marked_session(
+        WEBHOOK_TASK,
+        tenant_id,
+        lambda session: _webhook_tenant_use_case(session, tenant_id).execute(
+            tenant_id=tenant_id, events=events, now=now
+        ),
+    )
+    # `None` is what the batch use case reads as "this tenant rolled back, charge its notices
+    # a retry on your own session". The runner has already logged the traceback.
+    return None if result.failed else result.value
+
+
+async def _process_webhook_events() -> WebhookProcessingReport:
+    now = datetime.now(UTC)
+    # NEVER marked, and that is R5.5 rather than a convention: `webhook_events.tenant_id` is
+    # nullable, and a marked session's global filter hides the `NULL` rows without erroring —
+    # the rows D11 exists to exhaust. Each tenant's own work then gets its own marked session,
+    # opened by `run_in_marked_session`, never this one.
+    async with worker_session_factory()() as session:
+        return await ProcessWebhookEventsUseCase(
+            queue=SqlAlchemyWebhookEventRepository(session),
+            run_for_tenant=_run_webhook_tenant,
+            uow=SqlAlchemyUnitOfWork(session),
+        ).execute(now=now)
+
+
+@celery_app.task(name=WEBHOOK_TASK)
+def process_webhook_events() -> dict:
+    """`reservations-webhooks` R5.1, every 60 s: turn queued notices into reservations.
+
+    Not a PRD §8.3 job — it arrives with the webhook receiver, and its cadence is what bounds
+    the outbound API traffic (see `CADENCES`).
+    """
+    return run_sync(
+        _locked(
+            WEBHOOK_TASK,
+            CADENCES[WEBHOOK_TASK],
+            _process_webhook_events,
+            skipped=WebhookProcessingReport(skipped_locked=True),
+        )
+    )
