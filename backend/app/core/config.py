@@ -97,10 +97,19 @@ class Settings(BaseSettings):
     # `/cleaning-checklist-templates` read in full before the `401`. The middleware branch in
     # `app/main.py` is what applies this number to the photo route and only to it.
     #
-    # It is checked TWICE, and the second check is not redundant (design D11): the middleware
-    # cuts on `Content-Length` and on accumulated bytes, and `UploadCleaningPhotoUseCase`
-    # counts the chunks it consumes — a client can lie in `Content-Length` or use
-    # `Transfer-Encoding: chunked`, and only the pair covers R2.5.
+    # It is checked TWICE, and the second check is not redundant — but not for the reason an
+    # earlier version of this comment gave (design D11, corrected). **What satisfies R2.5
+    # ("reject before reading the whole body") is `MaxBodySizeMiddleware`'s accumulating
+    # counter, and only it**: that is the half covering a client that understates
+    # `Content-Length` or sends `Transfer-Encoding: chunked` with none at all. The chunk
+    # counting inside `UploadCleaningPhotoUseCase` cannot do that job — FastAPI calls
+    # `await request.form()` before it resolves dependencies, so the file is already spooled
+    # to disk by the time the use case asks for its first chunk.
+    #
+    # The use-case count stays for two other reasons: it bounds the in-process copy to this
+    # ceiling plus one chunk, and it is the only ceiling for any caller with no middleware in
+    # front (a test, a worker, a future non-HTTP consumer). Full reasoning lives with the code,
+    # in the docstring of `UploadCleaningPhotoUseCase._read_within_limit`.
     photo_upload_max_bytes: int = 10 * 1024 * 1024
 
     # The ceiling for every OTHER body under `/api/v1/` (change `api-ingress-routing`). It is

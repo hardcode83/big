@@ -192,10 +192,14 @@ class PhotoTooLargeError(CleaningDomainError):
     """The upload exceeded `photo_upload_max_bytes` (R2.5) — 413.
 
     Raised while the file is being consumed in chunks, which is the second half of design
-    D11's pair. The first half is `MaxBodySizeMiddleware`, and it catches almost everything;
-    this one exists because `Content-Length` is a claim by the client and
-    `Transfer-Encoding: chunked` omits it entirely. Two checks, one number
-    (`settings.photo_upload_max_bytes`).
+    D11's pair. The first half is `MaxBodySizeMiddleware`, and it is the half that actually
+    satisfies R2.5 — including for a client that lies in `Content-Length` or sends
+    `Transfer-Encoding: chunked`. This one bounds the in-process copy and covers callers with
+    no middleware in front. Two checks, one number (`settings.photo_upload_max_bytes`).
+
+    Do not restate the reasoning here: it lives in one place, the docstring of
+    `UploadCleaningPhotoUseCase._read_within_limit`. It was previously duplicated across five
+    files and four of them drifted into claiming the opposite.
     """
 
 
