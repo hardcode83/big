@@ -292,6 +292,35 @@ como el docstring del modelo ya advierte ("`error` must never echo the raw body 
 > (una etiqueta, no prosa), distinto umbral y distinta respuesta al fallo —allí se redacta, aquí se
 > rechaza—. Además vive en `application/`, desde donde `test_layering.py` prohíbe alcanzar
 > `infrastructure/`, que es donde está la otra.
+>
+> **Tres residuos declarados, porque el arreglo tiene techo y conviene que esté escrito** (los tres
+> los levantó el re-review de seguridad tras dar el hallazgo por cerrado):
+>
+> 1. **Las letras también parten la racha, y están en el charset.** `x4111a1111a1111a1111` persiste
+>    verbatim. El argumento de los separadores aplica literalmente a `[A-Za-z]`, pero **no** se
+>    extiende el patrón: contar a través de letras rompería `beds24` y `v1.2.3`, y aun así perdería
+>    contra un PAN en base32. Contra un adversario que **codifica a propósito** ninguna regla de
+>    clases de caracteres gana. Lo que el patrón cierra es el caso plausible —el PAN tal y como se
+>    imprime, con guiones o puntos, llegando por accidente bajo `event`—, que es el que había. La vía
+>    para cerrar el caso deliberado no es el regex sino una **allowlist de vocabulario por
+>    proveedor**, que hoy no se puede escribir: la `ASSUMPTION` de `UNKNOWN_EVENT_TYPE` dice que el
+>    vocabulario no está medido para ninguno de los dos, y el spike no pudo observar los webhooks de
+>    Beds24 sin canales conectados. Cuando `beds24-webhook-cutover-measurement` los mida, esa
+>    allowlist es barata: D13 ya garantiza que nada ramifica sobre esta cadena, así que degradar a
+>    `unknown` lo desconocido no cuesta nada.
+> 2. **"Estructurada" aquí significa menos que en las otras seis filas de la tabla.** La regla 11 dice
+>    que *"el valor no sobrevive en absoluto"*, y lo que sobrevive aquí es la cadena externa verbatim
+>    cuando tiene forma de nombre: `Cerv3za-Fr14` o `code1234` pasan. La forma cerrada excluye los
+>    valores **numéricos largos**, no todo valor de la regla 3. Queda dicho explícitamente porque el
+>    contrato de esta columna lo escribió el mismo change que lo necesitaba, y quien gobierne el
+>    steering debe leerlo sabiendo eso.
+> 3. **Y lo más importante: cerrar `event_type` no saca el valor de la fila.** `scrub_card_data` es
+>    una denylist **por clave** —no inspecciona valores—, así que un PAN bajo `event` se sigue
+>    persistiendo en `webhook_events.payload`, que es la otra columna que alimenta esa misma clave.
+>    Es el riesgo que la D9 de `pms-beds24-adapter` acepta por escrito (*"una aguja no prevista
+>    pasa"*), ratificado por Jose, y no se re-litiga aquí. Pero la frase «un PAN bajo `event` habría
+>    persistido en claro» sólo queda resuelta para **una** de las dos columnas, y decirlo entero es
+>    más útil que dejar la mitad optimista.
 
 Rejected: un scrubber propio del receptor — dos copias de una función de seguridad divergen en el
 primer arreglo unilateral, que es exactamente lo que el docstring de `card_data.py` explica.
