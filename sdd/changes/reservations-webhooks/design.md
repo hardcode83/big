@@ -255,6 +255,33 @@ ignorando espacios y guiones) en `special_requests` **solo cuando la reserva vie
 externa** (webhook o sync de PMS), dejando intacto lo que una persona escribe por la API. Sin
 comprobación de Luhn.
 
+**Corrección del umbral tras implementarlo (aprobada por Jose el 2026-08-09): son 13 dígitos o más,
+sin tope superior.** La banda cerrada 13-19 era la longitud de un PAN, y como criterio de corte deja
+un agujero con disparador trivial: una racha *maximal* de 20+ dígitos queda fuera de la banda, así
+que un PAN pegado a cualquier otro número se funde con él y sobrevive entero — `4111111111111111 1225`
+(tarjeta y caducidad) son 20 dígitos y persistían en claro en una columna que la API devuelve. Redactar
+desde 13 sin tope **solo redacta un superconjunto** de lo ratificado, y sobre entradas que el propio
+argumento de la ratificación cubre a fortiori: si nada operativo llega a 13 dígitos, nada operativo
+llega a 20. La banda 13-19 se conserva como lo que siempre fue, el razonamiento de la longitud, y vive
+en el docstring de `MIN_REDACTED_DIGITS`. Lo encontró el panel de la sección 3.
+
+**Segunda corrección, del alfabeto (misma fecha y mismo panel): los separadores y los dígitos son
+Unicode, no ASCII.** «Ignorando espacios y guiones» escrito como `[ -]` sólo honra la decisión para
+el teclado en que se escribió: un **espacio duro** —lo que produce copiar una tarjeta de una web o un
+PDF, que es la forma más probable de que un PAN real llegue a una nota— la atravesaba entera, igual
+que los guiones que sustituye un procesador de texto; y con `[0-9]` una racha en dígitos fullwidth o
+arábigo-indios ni siquiera se reconocía como racha. **El punto sigue sin ser separador a propósito**
+(`4111.1111.1111.1111` sobrevive): los puntos unen decimales, fechas, versiones e IPs, y D8 no dice
+ignorarlos. Es el borde aceptado de la regla, con test propio.
+
+**Dónde vive, decidido explícitamente (Jose, 2026-08-09) tras un `DESIGN-CONFLICT` del arquitecto:**
+`free_text.py` se queda en `infrastructure/`, junto a `card_data.py`. La tabla de capas de
+`steering/backend-architecture.md` empujaría una función pura sin I/O hacia `domain/`, y el argumento
+es bueno; pesa más tener los **dos scrubbers de la misma frontera PCI en el mismo sitio**, que es donde
+quien busque uno encontrará el otro. La razón por la que `card_data.py` está en Infra —moverlo tocaba
+módulos de otros dos changes— no le aplicaba a un módulo nuevo, así que esta excepción se razona aquí
+en vez de heredarse por inercia.
+
 **Lo que cerró la ratificación**, porque el compromiso que había que aceptar era el falso positivo
 sobre una nota que lee el personal de limpieza: los casos operativos reales caen **por debajo** del
 umbral. Un código de portal español son 4-8 dígitos, un móvil español 9, uno internacional con
@@ -271,6 +298,16 @@ Rejected: Luhn completo — D9 ya lo rechazó por falsos positivos reales sobre 
 nada nuevo lo justifica. Rejected: descartar el campo entero para fuentes externas — tira información
 operativa real ("llegamos a las 23:00", "código del portal") por un riesgo que la redacción acota.
 Rejected: no hacer nada y volver a diferirlo — P.8 dice "bloqueante", no "diferible otra vez".
+
+**Residuo aceptado, nombrado a propósito para que sea decisión y no olvido (Jose, 2026-08-09):
+`csv_parser.py` también llena `special_requests` y NO se redacta.** El alcance de D8 es "fuente
+externa (webhook o sync de PMS)", y el disparador literal de P.8 es la escritura **no autenticada**
+desde internet; el import de CSV es un fichero que sube un operador autenticado. El panel de seguridad
+de la sección 3 objetó —con razón— que eso responde a *cómo se autenticó la escritura* y no a *si el
+PAN puede estar ahí*, porque una exportación del PMS reempaqueta las mismas notas del huésped. Se
+acepta el residuo en vez de ampliar el alcance ratificado. **Disparador para revisarlo**: que el CSV
+deje de ser una reintroducción revisada por una persona y pase a ser reingesta cruda de una exportación
+del PMS. Entonces hereda esta misma regla, no una nueva.
 
 ### D9 — La cola es durable: `attempts` y `next_attempt_at` en `webhook_events`
 
@@ -437,7 +474,7 @@ el canal, y un comentario no lo es.
 | Infra | `backend/app/integrations/infrastructure/models.py` | `WebhookEndpointModel`; `attempts`/`next_attempt_at` en `WebhookEventModel` (D9) |
 | Infra | `backend/app/integrations/infrastructure/repositories.py` | Repositorios de `WebhookEndpoint` y de la cola de `WebhookEvent` |
 | Infra | `backend/app/integrations/infrastructure/throttle.py` (nuevo) | Los dos limitadores de D6 |
-| Infra | `backend/app/integrations/infrastructure/free_text.py` (nuevo) | Redacción de rachas de dígitos de D8, y su reutilización desde los mapeos |
+| Infra | `backend/app/integrations/infrastructure/free_text.py` (nuevo) | Redacción de rachas de dígitos de D8, y su reutilización desde los mapeos. **En `infrastructure/` por decisión razonada, no por defecto** — ver D8; junto a `card_data.py`, el otro scrubber de la misma frontera. Exporta además el detector que usa el guard de fixtures, para que la regla no tenga dos copias |
 | Mapeos | `backend/app/integrations/infrastructure/{beds24,channex}/mapping.py` | Aplicar D8 a `special_requests` en las fuentes externas |
 | Scheduler | `backend/app/scheduler/{schedule.py,tasks.py,runner.py}` | `process_webhook_events` en `CADENCES`, la tarea, y el helper de sesión marcada por lote de D11 |
 | Auditoría | `backend/app/audit/domain/actions.py` | Entidad y acciones nuevas (D12) |
@@ -495,8 +532,9 @@ del lock se derivan de ahí sin tocar nada más.
   reservas de canal, y la cuenta de medición no tiene canales. Mitigación: fixtures reales anonimizados
   ya versionados + `MockPMSAdapter`; la medición de latencia y desorden es de
   `beds24-webhook-cutover-measurement`, que existe para eso.
-- **La redacción de D8 puede comerse un dato operativo real.** Mitigación: acotada a rachas de 13-19
-  dígitos y a fuentes externas, y es reversible en un sitio (`free_text.py`) si el falso positivo
+- **La redacción de D8 puede comerse un dato operativo real.** Mitigación: acotada a rachas de 13
+  dígitos **o más** (ver la corrección del umbral en D8; la banda 13-19 era el razonamiento, no el
+  corte) y a fuentes externas, y es reversible en un sitio (`free_text.py`) si el falso positivo
   resulta molesto en la práctica.
 - **`AuditContractError` aborta la transacción auditada.** Mitigación: ampliar el vocabulario es una
   tarea explícita y con test, no un efecto colateral de otra.

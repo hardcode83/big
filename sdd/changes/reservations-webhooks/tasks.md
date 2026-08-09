@@ -240,8 +240,28 @@ forzado en `infrastructure/`.
 >
 > **Un matiz que la ejecución obligó a introducir, y que esta cabecera decía mal**: el umbral operativo
 > es **13 o más**, no la banda cerrada 13-19 que dice D8. Leída como banda, una racha maximal de 20+
-> queda intacta y un PAN pegado a otro número sobrevive entero. Está razonado en la nota de 3.1 y en
-> `MIN_REDACTED_DIGITS`; `design.md` sigue diciendo 13-19 y hay que corregirlo (pendiente de Jose).
+> queda intacta y un PAN pegado a otro número sobrevive entero. Razonado en la nota de 3.1 y en
+> `MIN_REDACTED_DIGITS`, y **corregido ya en `design.md`** (Jose, 2026-08-09).
+>
+> **Panel de la sección 3 (siete reviewers, un solo mensaje): sin cerrar todavía.** `sdd-review-cicd`,
+> `sdd-review-i18n` y `sdd-review-tenancy` sin hallazgos. Arquitectura, seguridad, QA y documentación
+> con hallazgos; ocho arreglados en la primera ronda y tres elevados a decisión, **las tres resueltas
+> por Jose el 2026-08-09** y escritas en D8: el umbral (se corrige el diseño, no el código), la capa de
+> `free_text.py` (se queda en `infrastructure/`, razonado) y el CSV (residuo aceptado con disparador).
+> Los dos que importan, los dos demostrados en vez de argumentados:
+> - **Seguridad, alto — el guard de fixtures conservaba la banda cerrada que el redactor ya había
+>   abandonado.** `test_fixture_card_guard.py` llevaba su propio escáner con `13 <= n <= 19`, así que
+>   la misma fusión PAN+caducidad que motivó el cambio de umbral le hacía leer una racha de 21 y dar
+>   el fichero por limpio. Es exactamente la deriva contra la que avisa su propio docstring, llegando
+>   por otra puerta. Ahora deriva el matcher del runtime (`find_long_digit_runs`), así que no hay dos
+>   copias que puedan separarse. El re-review lo verificó plantando un PAN en un fixture real.
+> - **Seguridad y QA, medio, por separado — el matcher era ASCII.** Un espacio duro (lo que produce
+>   copiar una tarjeta de una web o un PDF) y los guiones tipográficos lo atravesaban enteros, y una
+>   racha en dígitos fullwidth o arábigo-indios ni se reconocía. La causa común: el patrón medía con
+>   `[0-9]` y la longitud contaba con `isdigit()` — dos alfabetos distintos. Ahora comparten uno.
+>
+> **Falta cerrar el re-review de QA**, que murió por límite de uso de sesión. Es la única razón por la
+> que esta sección no lleva `panel: PASS`; ver `BLOCKED.md`.
 
 - [x] 3.1 `infrastructure/free_text.py`: redacción de rachas de 13-19 dígitos ignorando espacios y
   guiones, sin Luhn. **TDD**: el test exige primero que un PAN con y sin separadores desaparezca y que
