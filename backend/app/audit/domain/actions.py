@@ -38,6 +38,13 @@ ENTITY_PROPERTY = "PROPERTY"
 # covered by that exemption.
 ENTITY_CLEANING_TASK = "CLEANING_TASK"
 
+# A row of `cleaning_photos`. Added by `cleaning-photos-storage` (R2.7). Its own entity type
+# rather than auditing the upload against the parent task, because `entity_id` is what
+# `ix_audit_logs_tenant_id_entity_type_entity_id` indexes: pointing several uploads at one
+# task id would make "who uploaded THIS photo" a scan over `changes` instead of a lookup.
+# The link back to the task travels as an auditable field of the diff.
+ENTITY_CLEANING_PHOTO = "CLEANING_PHOTO"
+
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
 USER_UPDATED = "USER_UPDATED"
@@ -81,6 +88,12 @@ CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
 CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
 CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
 
+# Cleaning photos (`cleaning-photos-storage`, R2.7). A person uploads it, so rule 9's actor
+# exemption — which covers only `SYSTEM` — does not reach it. There is no
+# `CLEANING_PHOTO_DELETED`: the proposal keeps deletion out of scope, and an action for an
+# operation the API does not offer is the speculative vocabulary this module argues against.
+CLEANING_PHOTO_UPLOADED = "CLEANING_PHOTO_UPLOADED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -90,6 +103,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_PROPERTY,
 
         ENTITY_CLEANING_TASK,
+        ENTITY_CLEANING_PHOTO,
     }
 )
 
@@ -114,5 +128,6 @@ ACTIONS = frozenset(
         CLEANING_TASK_STARTED,
         CLEANING_TASK_COMPLETED,
         CLEANING_TASK_VALIDATED,
+        CLEANING_PHOTO_UPLOADED,
     }
 )

@@ -118,6 +118,30 @@ class ChecklistIncompleteError(CleaningDomainError):
         )
 
 
+class PhotosIncompleteError(CleaningDomainError):
+    """Required photos are still missing at completion time (R4.1, R4.2) — 409.
+
+    The photo twin of `ChecklistIncompleteError`, deliberately built the same way: it carries
+    the missing `photo_type`s so the 409 can enumerate them, because a cleaner told only "you
+    cannot finish" has to guess which room to go back to. R4.2 asks for the enumeration "in the
+    same format the items are enumerated in today", and the format the items use is this
+    message — the cleaning handler serialises `str(exc)` and the envelope's `details` stays
+    empty for every other error of this module.
+
+    A **sibling** of `ChecklistIncompleteError` and not a subclass. They map to the same status
+    for the same reason and share a shape, but `isinstance` between them would be a lie: an
+    `except ChecklistIncompleteError` written to retry a checklist would swallow a photo
+    refusal it knows nothing about, and the error table in `api/errors.py` is ordered
+    subclass-first precisely because that relationship is load-bearing there.
+    """
+
+    def __init__(self, missing_photo_types: tuple[str, ...]) -> None:
+        self.missing_photo_types = missing_photo_types
+        super().__init__(
+            "Required photos are not uploaded: " + ", ".join(missing_photo_types)
+        )
+
+
 class BlockingIncidentError(CleaningDomainError):
     """An unresolved CRITICAL incident blocks completion (R5.2) — 409."""
 
@@ -135,6 +159,58 @@ class PropertyStateBlocksCleaningError(CleaningDomainError):
     The realistic case is R5.4's contextual resolution: `after_cleaning_completion` refuses to
     resolve while a booking is active (`state_resolution.py:128-131`), i.e. the next guest has
     already checked in.
+    """
+
+
+class PhotoTypeNotFoundError(CleaningDomainError):
+    """The `photo_type` is not one the task's template declares (R2.2) — 404.
+
+    The photo counterpart of `ChecklistItemNotFoundError`, and answered the same way for the
+    same reason: R2.2 asks for "the same 404 the checklist gives an unknown `item_id`". A 422
+    would be defensible in isolation and is wrong here — it would tell a caller that the value
+    is well-formed but absent, which over a template it cannot read is one bit more than the
+    404 gives.
+    """
+
+
+class UnsupportedPhotoFormatError(CleaningDomainError):
+    """The uploaded bytes are not an image format the allowlist accepts (R2.4) — 422.
+
+    A **sibling** of `CleaningValidationError` and not a subclass of it, although the outcome
+    is the same 422. Every entry of `_MAPPING` in `api/errors.py` is resolved by
+    `isinstance` with first-match-wins, so a subclass is correct only while its row happens to
+    sit above its base's — a property of the literal's line order, not of the type. Keeping
+    the hierarchy flat, as every other error in this module is, removes the hazard instead of
+    documenting it.
+
+    Determined from the **content** (`detect_image_type`) and never from the `Content-Type` the
+    client declared, which is rule 6 of `steering/security.md` and R2.4.
+    """
+
+
+class PhotoTooLargeError(CleaningDomainError):
+    """The upload exceeded `photo_upload_max_bytes` (R2.5) — 413.
+
+    Raised while the file is being consumed in chunks, which is the second half of design
+    D11's pair. The first half is `MaxBodySizeMiddleware`, and it catches almost everything;
+    this one exists because `Content-Length` is a claim by the client and
+    `Transfer-Encoding: chunked` omits it entirely. Two checks, one number
+    (`settings.photo_upload_max_bytes`).
+    """
+
+
+class PhotoStorageUnavailableError(CleaningDomainError):
+    """The storage backend refused or failed the write (R1.5) — 502.
+
+    The translation of `StorageWriteError`, which comes from `app/integrations/domain/`: like
+    the properties errors above, it is not a `CleaningDomainError`, so without this it would
+    escape a cleaning endpoint as an unhandled 500. R1.5 asks for a `502` in the PRD §23
+    envelope, and 502 is the honest code — the failure is a dependency's, not the caller's.
+
+    **No row is left behind when this is raised.** The object is written before the row
+    (design D4), so a failure here happens before anything was inserted; the opposite
+    direction — a commit that fails after the object landed — is compensated by deleting the
+    object, not by leaving a row pointing at nothing (R1.5).
     """
 
 

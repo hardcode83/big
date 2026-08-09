@@ -21,6 +21,7 @@ from app.cleaning.domain.exceptions import (
     ChecklistIncompleteError,
     CleaningTaskNotFoundError,
     InvalidCleaningTransitionError,
+    PhotosIncompleteError,
 )
 from app.cleaning.domain.value_objects import CleaningCompletionEvidence
 
@@ -43,11 +44,15 @@ def _task(status=CleaningTaskStatus.CREATED, assigned=None):
     )
 
 
-def _evidence(required=(), completed=(), critical=False):
+def _evidence(
+    required=(), completed=(), critical=False, required_photos=(), uploaded_photos=()
+):
     return CleaningCompletionEvidence(
         required_item_ids=frozenset(required),
         completed_item_ids=frozenset(completed),
         has_unresolved_critical_incident=critical,
+        required_photo_types=frozenset(required_photos),
+        uploaded_photo_types=frozenset(uploaded_photos),
     )
 
 
@@ -291,17 +296,109 @@ def test_an_unresolved_critical_incident_blocks_completion():
     assert task.status is CleaningTaskStatus.IN_PROGRESS
 
 
-def test_completion_does_not_yet_require_photos():
-    """The photo clause of PRD §11 belongs to `cleaning-photos-storage`.
+# --- complete: the third clause, the one `cleaning-photos-storage` brings (R4) -----
+#
+# `test_completion_does_not_yet_require_photos` used to sit here, pinning the *gap* so it was
+# visible in the suite and not only in the proposal, and saying in its own docstring that the
+# change closing the gap is the one that has to change it. This is that change, and these are
+# the tests that replaced it.
 
-    Pinned so the gap is visible in the suite instead of only in the proposal: when that
-    change lands, this test is what it has to change.
+
+def test_a_missing_required_photo_blocks_completion_and_says_which():
+    """R4.1, R4.2, R4.4 — the red test of task 5.1, written before the entity knew the rule.
+
+    Enumerating is half the requirement: "you cannot finish" without saying what is left is an
+    answer a cleaner standing in the flat cannot act on, which is exactly why
+    `ChecklistIncompleteError` carries its ids. The order is asserted because R4.4 asks for a
+    stable one — `frozenset` iteration order is not, so a body built straight from the set
+    difference would differ between runs and between processes.
     """
     task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
 
-    task.complete(CLEANER, _evidence(required={"a"}, completed={"a"}), LATER)
+    with pytest.raises(PhotosIncompleteError) as raised:
+        task.complete(
+            CLEANER,
+            _evidence(required_photos={"kitchen", "bathroom"}, uploaded_photos={"kitchen"}),
+            LATER,
+        )
+
+    assert raised.value.missing_photo_types == ("bathroom",)
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+    assert task.completed_at is None
+
+
+def test_the_missing_photo_types_come_out_sorted():
+    """R4.4 — same guarantee `missing_required_item_ids` gives, and for the same reason."""
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(PhotosIncompleteError) as raised:
+        task.complete(
+            CLEANER,
+            _evidence(required_photos={"kitchen", "bathroom", "bedroom", "living"}),
+            LATER,
+        )
+
+    assert raised.value.missing_photo_types == ("bathroom", "bedroom", "kitchen", "living")
+
+
+def test_completion_is_allowed_once_every_required_photo_is_there():
+    """R4.1 — "at least one per required type", so extra types and extra photos are fine.
+
+    `uploaded_photos` is a set of *types*, not of photos: R2.6 admits several shots of the same
+    room on purpose, and the rule never counts them.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.complete(
+        CLEANER,
+        _evidence(
+            required_photos={"kitchen", "bathroom"},
+            uploaded_photos={"kitchen", "bathroom", "balcony"},
+        ),
+        LATER,
+    )
 
     assert task.status is CleaningTaskStatus.COMPLETED
+
+
+def test_a_template_that_requires_no_photo_closes_without_any():
+    """**R4.5, and it is the criterion most likely to be broken by a well-meaning edit.**
+
+    The rule is "the required ones", not "some". A template whose `required_photos` are all
+    `required: false` — or that declares none at all — must still close with zero photos
+    uploaded, exactly as a checklist with no required item does. Turning the condition into
+    "any photo at all" would pass every other test in this section and break this one.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.complete(CLEANER, _evidence(required_photos=set(), uploaded_photos=set()), LATER)
+
+    assert task.status is CleaningTaskStatus.COMPLETED
+
+
+def test_the_items_clause_is_checked_before_the_photos_one():
+    """Task 5.3's ordering, and it is observable: which error comes out when both are unmet.
+
+    Not cosmetic. The checklist is what the cleaner works through first, so reporting the open
+    items before the missing photos matches the order the work happens in — and an ordering
+    nothing asserts is an ordering the next refactor is free to invert.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(ChecklistIncompleteError):
+        task.complete(
+            CLEANER, _evidence(required={"a"}, required_photos={"kitchen"}), LATER
+        )
+
+
+def test_the_photos_clause_is_checked_before_the_critical_incident_one():
+    """The other half of task 5.3's ordering: photos, then the blocking incident."""
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(PhotosIncompleteError):
+        task.complete(
+            CLEANER, _evidence(required_photos={"kitchen"}, critical=True), LATER
+        )
 
 
 @pytest.mark.parametrize(

@@ -22,6 +22,7 @@ from app.cleaning.domain.exceptions import (
     ChecklistIncompleteError,
     CleaningTaskNotFoundError,
     InvalidCleaningTransitionError,
+    PhotosIncompleteError,
 )
 from app.cleaning.domain.value_objects import CleaningCompletionEvidence
 
@@ -129,12 +130,25 @@ class CleaningTask:
     def complete(
         self, cleaner_id: uuid.UUID, evidence: CleaningCompletionEvidence, now: datetime
     ) -> None:
-        """PRD §11's validation rule, and the only place it exists (R5.1, R5.2, design D4).
+        """PRD §11's validation rule, and the only place it exists (R5.1, R5.2, R4, design D4).
 
-        Two of its three clauses. The third — "todas las fotos `required: true` subidas" —
-        belongs to `cleaning-photos-storage`, which owns the upload path; until it lands a
-        task can be closed without them, and that gap is recorded in the proposal's
-        §Out of scope rather than half-enforced here.
+        **All three of its clauses, since `cleaning-photos-storage`.** They are checked in the
+        order the work happens in: the checklist items the cleaner ticks off, then the photos
+        that document what was done, then the blocking incident that is a fact about the
+        property rather than about the cleaning. Whichever comes first is the one reported, and
+        `test_task_lifecycle.py` asserts the order at both of its boundaries — an ordering
+        nothing asserts is one the next refactor is free to invert.
+
+        The photo clause used to be absent, and this docstring used to say so and point at the
+        proposal's §Out of scope for the gap. That gap is closed: `CleaningCompletionEvidence`
+        now carries `required_photo_types` and `uploaded_photo_types` and a task with a
+        required photo missing cannot be closed (R4.1). What did **not** change is where the
+        rule lives — R4.3 keeps it here, one place, so no router and no use case can bypass it;
+        the use case's job is still only to gather the evidence.
+
+        Note what the third clause is *not*: "at least one photo". A template that declares no
+        `required: true` photo closes with none at all (R4.5), because `missing_required_...`
+        is a set difference and an empty requirement is met by anything, including nothing.
 
         **Takes `cleaner_id` like the other three.** It did not, and the security reviewer of
         `/sdd:review` was right that it was the only lifecycle method missing the guard: the
@@ -149,6 +163,9 @@ class CleaningTask:
         missing = evidence.missing_required_item_ids()
         if missing:
             raise ChecklistIncompleteError(missing)
+        missing_photos = evidence.missing_required_photo_types()
+        if missing_photos:
+            raise PhotosIncompleteError(missing_photos)
         if evidence.has_unresolved_critical_incident:
             raise BlockingIncidentError(
                 "An unresolved CRITICAL incident blocks completing this cleaning"

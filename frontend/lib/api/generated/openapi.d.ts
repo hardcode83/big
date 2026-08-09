@@ -97,6 +97,13 @@ export interface paths {
      */
     post: operations["complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/photos": {
+    /**
+     * Upload a photo of the cleaning
+     * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write. The response carries a signed URL valid for 3600 s and never the internal storage path.
+     */
+    post: operations["upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/reject": {
     /**
      * Decline an assigned cleaning task
@@ -259,6 +266,13 @@ export interface components {
        */
       file: string;
     };
+    /** Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post */
+    Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+      /** File */
+      file: string;
+      /** Photo Type */
+      photo_type: string;
+    };
     /** ChecklistItemPayload */
     ChecklistItemPayload: {
       /** Item Id */
@@ -338,6 +352,47 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * CleaningPhotoResponse
+     * @description One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
+     *
+     * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
+     * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
+     * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
+     * "the key never appears in a response" a property of this class rather than of everyone who
+     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
+     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
+     * nobody made.
+     *
+     * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
+     * a client uses instead of a path, and it is not stored anywhere.
+     */
+    CleaningPhotoResponse: {
+      /**
+       * Cleaning Task Id
+       * Format: uuid
+       */
+      cleaning_task_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Photo Type */
+      photo_type: string;
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -650,7 +705,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -1833,6 +1888,48 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a photo of the cleaning
+   * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write. The response carries a signed URL valid for 3600 s and never the internal storage path.
+   */
+  upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningPhotoResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

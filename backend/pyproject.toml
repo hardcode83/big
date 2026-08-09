@@ -10,6 +10,15 @@ dependencies = [
     "anyio>=4.0",
     "asyncpg>=0.31.0",
     "bcrypt>=4.2",
+    # Runtime dependency, not dev, and for the reason `httpx` and `cryptography` below each
+    # learned the hard way: `S3FileStorage` is production code on the photo upload path
+    # (`app/integrations/infrastructure/storage/s3.py`), and `devops/Dockerfile`'s prod stage
+    # installs with `uv sync --frozen --no-dev`, so a dev-group boto3 would be missing from the
+    # deployed image while the suite stayed green.
+    #
+    # EXTERNAL_DEPENDENCY: no AWS account backs this project, so the adapter is validated
+    # against the port contract and a stub client, never against S3 itself.
+    "boto3>=1.35",
     "celery>=5.6.3",
     # Runtime dependency, not dev: `app/core/crypto.py` decrypts provider credentials on the
     # sync path, so a dev-group `cryptography` would be absent from the deployed image —

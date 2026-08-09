@@ -81,6 +81,28 @@ class Settings(BaseSettings):
     csv_import_max_bytes: int = 10 * 1024 * 1024
     csv_import_max_rows: int = 1000
 
+    # Ceiling for a cleaning photo upload (change `cleaning-photos-storage`, R2.5, design
+    # D10/D11). Mirrors `csv_import_max_bytes` deliberately — same rule 6 of
+    # `steering/security.md` ("tamaño máx. configurable, default 10 MB"), same default, and
+    # the same "checked before the body is read" contract.
+    #
+    # It exists as its OWN setting rather than reusing the CSV one because the two ceilings
+    # answer to different things: a CSV import is bounded by how many reservations a person
+    # pastes in, a photo by what a phone camera produces. Sharing the number would make
+    # tuning one silently move the other.
+    #
+    # **Raising `JSON_BODY_MAX_BYTES` instead of adding this was the alternative, and it is
+    # forbidden** (design D10): that constant is the ceiling of every `/cleaning-` route, and
+    # lifting it re-opens the measured hole `cleaning` closed — an anonymous ~50 MB POST to
+    # `/cleaning-checklist-templates` read in full before the `401`. The middleware branch in
+    # `app/main.py` is what applies this number to the photo route and only to it.
+    #
+    # It is checked TWICE, and the second check is not redundant (design D11): the middleware
+    # cuts on `Content-Length` and on accumulated bytes, and `UploadCleaningPhotoUseCase`
+    # counts the chunks it consumes — a client can lie in `Content-Length` or use
+    # `Transfer-Encoding: chunked`, and only the pair covers R2.5.
+    photo_upload_max_bytes: int = 10 * 1024 * 1024
+
     # The ceiling for every OTHER body under `/api/v1/` (change `api-ingress-routing`). It is
     # deliberately separate from `csv_import_max_bytes` and two orders of magnitude smaller:
     # these are JSON payloads, and the largest legitimate one in the contract is a reservation.

@@ -4,6 +4,11 @@
 `tenant_scoped_classes()` (`app/core/db.py:62`), so the `JOIN` its adapter performs is the
 entire isolation mechanism. Those tests are not a formality: nothing else would catch a
 regression there.
+
+**`cleaning_photos` is the second table in that position** (change `cleaning-photos-storage`,
+R6.1/R6.2, design D12), and the tests at the bottom of this file are modelled on the
+completion ones deliberately — same table shape, same missing net, same obligation to prove
+the join rather than assume it.
 """
 
 import uuid
@@ -11,7 +16,11 @@ from datetime import UTC, datetime
 
 import pytest
 
-from app.cleaning.domain.entities import CleaningChecklistCompletion, CleaningTask
+from app.cleaning.domain.entities import (
+    CleaningChecklistCompletion,
+    CleaningPhoto,
+    CleaningTask,
+)
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import (
     CleaningTaskNotFoundError,
@@ -21,6 +30,7 @@ from app.cleaning.domain.repositories import CleaningTaskFilters
 from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningChecklistCompletionRepository,
     SqlAlchemyCleaningChecklistTemplateRepository,
+    SqlAlchemyCleaningPhotoRepository,
     SqlAlchemyCleaningTaskRepository,
 )
 from app.core.tenancy import CrossTenantWriteError
@@ -490,3 +500,203 @@ async def test_upsert_against_an_unknown_task_raises_the_same_error(db_session, 
                 id=uuid.uuid4(), cleaning_task_id=uuid.uuid4(), item_id="kitchen"
             ),
         )
+
+
+# --- photos: the second table with no net (R6.1, R6.2, design D12) -----------------
+#
+# Modelled on the completion tests above, because it is the same situation: no `tenant_id`
+# column, so `tenant_scoped_classes()` (`app/core/db.py:62`) never hands it to
+# `with_loader_criteria`, and the `JOIN cleaning_tasks` in every statement of
+# `SqlAlchemyCleaningPhotoRepository` is the entire isolation mechanism. R6.1 says it
+# outright: the isolation is derived from the join, not inherited from the global filter.
+
+
+def _photo(task, uploader, *, photo_type="kitchen", created_at=NOW) -> CleaningPhoto:
+    photo_id = uuid.uuid4()
+    return CleaningPhoto(
+        id=photo_id,
+        cleaning_task_id=task.id,
+        uploaded_by=uploader.id,
+        photo_type=photo_type,
+        # Shaped like `storage_key_for_photo` (design D3) without importing it: these tests
+        # are about the repository, and section 1's key builder has its own.
+        storage_key=f"tenants/{task.tenant_id}/cleaning-tasks/{task.id}/{photo_id}.jpg",
+        created_at=created_at,
+    )
+
+
+@pytest.mark.asyncio
+async def test_photo_add_and_read_back_round_trip(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    cleaner = users_by_role_a[UserRole.CLEANER]
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    photo = _photo(task, cleaner)
+
+    await repo.add(tenant_a.id, photo)
+
+    fetched = await repo.get(tenant_a.id, photo.id)
+    assert fetched is not None
+    assert fetched.storage_key == photo.storage_key
+    assert fetched.uploaded_by == cleaner.id
+    assert [found.id for found in await repo.list_for_task(tenant_a.id, task.id)] == [photo.id]
+    assert await repo.uploaded_photo_types(tenant_a.id, task.id) == frozenset({"kitchen"})
+
+
+@pytest.mark.asyncio
+async def test_uploaded_photo_types_collapses_repeats_of_the_same_type(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """R2.6 admits several photos of one type; design D8 asks only whether one exists."""
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    cleaner = users_by_role_a[UserRole.CLEANER]
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+
+    await repo.add(tenant_a.id, _photo(task, cleaner, photo_type="bathroom"))
+    await repo.add(tenant_a.id, _photo(task, cleaner, photo_type="bathroom"))
+    await repo.add(tenant_a.id, _photo(task, cleaner, photo_type="kitchen"))
+
+    assert await repo.uploaded_photo_types(tenant_a.id, task.id) == frozenset(
+        {"bathroom", "kitchen"}
+    )
+    assert len(await repo.list_for_task(tenant_a.id, task.id)) == 3
+
+
+@pytest.mark.asyncio
+async def test_add_writes_the_entitys_created_at_and_not_the_transaction_clock(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """The upload's instant, not `now()` — and nothing pinned this until it was lost.
+
+    `cleaning_photos.created_at` has a `server_default`, so omitting the column from the
+    insert still produces a row and every test here still passes; the difference only shows
+    up as ordering. Postgres `now()` is the *transaction* timestamp, so photos inserted
+    together would share one instant and `list_for_task`'s `created_at, id` ordering would
+    fall through to a random `uuid4` — stable between reads, but not upload order.
+
+    Written after a reviewer's `git checkout --` destroyed this adapter and the
+    reconstruction silently dropped the column: eight isolation tests stayed green through
+    a real behaviour change, which is exactly the gap this closes.
+    """
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    photo = _photo(task, users_by_role_a[UserRole.CLEANER])
+
+    await repo.add(tenant_a.id, photo)
+
+    stored = await repo.get(tenant_a.id, photo.id)
+    assert stored is not None
+    assert stored.created_at == photo.created_at
+
+
+@pytest.mark.asyncio
+async def test_add_does_not_write_the_ai_validation_result(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """`ai_validation_result` is out of scope: the column keeps waiting for `messaging-ai`.
+
+    Same shape as `test_save_does_not_write_notes` above — a column this change deliberately
+    does not open a write path to, pinned so that adding one is a decision and not a diff.
+    """
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    photo = _photo(task, users_by_role_a[UserRole.CLEANER])
+    photo.ai_validation_result = {"verdict": "clean"}
+
+    await repo.add(tenant_a.id, photo)
+
+    assert (await repo.get(tenant_a.id, photo.id)).ai_validation_result is None
+
+
+@pytest.mark.asyncio
+async def test_a_photo_of_another_tenant_is_unreachable_by_get(
+    db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_b
+):
+    """R6.2 — knowing the UUID is not access, which is the only thing `get` can get wrong."""
+    from app.auth.domain.enums import UserRole
+
+    neighbour_task = await insert_task(db_session, tenant_b, property_b, template_b)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    photo = _photo(neighbour_task, users_by_role_b[UserRole.CLEANER])
+    await repo.add(tenant_b.id, photo)
+
+    # The real identifier of a real row, handed straight to the neighbour's tenant.
+    assert await repo.get(tenant_a.id, photo.id) is None
+    # And it is still there for its owner — the test would also pass if nothing was written.
+    assert await repo.get(tenant_b.id, photo.id) is not None
+
+
+@pytest.mark.asyncio
+async def test_photos_of_another_tenant_are_invisible_to_list_for_task(
+    db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_b
+):
+    """R6.2 — and again with the neighbour's real task id, not an invented one."""
+    from app.auth.domain.enums import UserRole
+
+    neighbour_task = await insert_task(db_session, tenant_b, property_b, template_b)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    await repo.add(tenant_b.id, _photo(neighbour_task, users_by_role_b[UserRole.CLEANER]))
+
+    assert await repo.list_for_task(tenant_a.id, neighbour_task.id) == []
+    assert len(await repo.list_for_task(tenant_b.id, neighbour_task.id)) == 1
+
+
+@pytest.mark.asyncio
+async def test_photo_types_of_another_tenant_are_invisible(
+    db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_b
+):
+    """R6.2 on the path that feeds PRD §11's third clause (design D8).
+
+    A leak here would not read a photo, it would let one tenant's uploads satisfy another
+    tenant's completion rule — so it needs its own probe rather than trusting `get`'s.
+    """
+    from app.auth.domain.enums import UserRole
+
+    neighbour_task = await insert_task(db_session, tenant_b, property_b, template_b)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+    await repo.add(tenant_b.id, _photo(neighbour_task, users_by_role_b[UserRole.CLEANER]))
+
+    assert await repo.uploaded_photo_types(tenant_a.id, neighbour_task.id) == frozenset()
+    assert await repo.uploaded_photo_types(tenant_b.id, neighbour_task.id) == frozenset(
+        {"kitchen"}
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_photo_cannot_be_added_to_another_tenants_task(
+    db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_b
+):
+    """R6.3 — the write path answers what an unknown task answers, and writes nothing."""
+    from app.auth.domain.enums import UserRole
+
+    neighbour_task = await insert_task(db_session, tenant_b, property_b, template_b)
+    repo = SqlAlchemyCleaningPhotoRepository(db_session)
+
+    with pytest.raises(CleaningTaskNotFoundError):
+        await repo.add(tenant_a.id, _photo(neighbour_task, users_by_role_b[UserRole.CLEANER]))
+
+    assert await repo.list_for_task(tenant_b.id, neighbour_task.id) == []
+
+
+@pytest.mark.asyncio
+async def test_adding_a_photo_to_an_unknown_task_raises_the_same_error(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """R6.3 — indistinguishable from the cross-tenant case, one level below the status code."""
+    from app.auth.domain.enums import UserRole
+
+    stand_in = await insert_task(db_session, tenant_a, property_a, template_a)
+    photo = _photo(stand_in, users_by_role_a[UserRole.CLEANER])
+    photo.cleaning_task_id = uuid.uuid4()
+
+    with pytest.raises(CleaningTaskNotFoundError):
+        await SqlAlchemyCleaningPhotoRepository(db_session).add(tenant_a.id, photo)

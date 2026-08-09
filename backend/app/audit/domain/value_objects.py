@@ -164,6 +164,14 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "validated_at",
         }
     ),
+    # `cleaning-photos-storage`. Three fields, and what is **absent** is the point:
+    # `storage_key` is not auditable. R3.2 keeps the internal key out of every API response,
+    # and `audit_logs.changes` is a rule-11 sink whose whole contract is that a value cannot
+    # arrive through it without the column announcing it — writing the key here would put the
+    # one string the design works to keep private into the one column designed to be dumped.
+    # `photo_type` and the two ids are what an incident review actually asks for: who uploaded
+    # what kind of evidence, against which cleaning.
+    "CLEANING_PHOTO": frozenset({"photo_type", "cleaning_task_id", "uploaded_by"}),
 }
 
 _REDACTED_MARKER = {"changed": True}
