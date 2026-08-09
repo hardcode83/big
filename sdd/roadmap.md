@@ -61,6 +61,7 @@ Categorías:
 - [ ] backend-suite-runtime — [TECH] **atacar los 6m15s de la suite del backend**, que es la única palanca que ayuda en los Pull Request que **sí** tocan backend (el gate condicional de `ci-backend-tests-conditional-gate` solo ahorra en los que no).
 - [x] build-identity-contract — [INFRA] **atar el validador del frontend a lo que el CD compone de verdad**. → changes/archive/2026-08-08-build-identity-contract/
 - [ ] app-version-provenance — [INFRA] **parear lo que se ve en pantalla con el PR que lo produjo**.
+  needs: frontend-auth-session, build-identity-contract · size: M · kind: feature
 - [ ] infra-github-iac — [INFRA] gestionar la parte GitHub-side como código con el provider `integrations/github` (Actions secrets/variables, instalación de la App, acceso a packages, ajustes de repo), eliminando los pasos a mano en GitHub que tuvo `app-deploy-dev` …
 - [x] frontend-foundation — [FE] Application Shell de Next.js App Router (layout, navegación responsive, i18n ES/EN, TanStack Query, Zustand limitado a UI, testing y convenciones frontend), sin lógica de negocio ni integración backend (no está en el PRD original) → changes/archive/2026-07-21-frontend-foundation/
 - [x] frontend-docker-deps-autosync — [FE] fix: el contenedor `frontend` en dev sincroniza `node_modules` con el lockfile en cada arranque (entrypoint + `npm ci`), evitando el `Module not found` por volumen nombrado desactualizado al cambiar dependencias (no está en el plan original, añadido tras `frontend-foundation`) → changes/archive/2026-07-21-frontend-docker-deps-autosync/
