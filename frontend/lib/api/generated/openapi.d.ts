@@ -80,6 +80,15 @@ export interface paths {
      */
     post: operations["create_template_api_v1_cleaning_checklist_templates_post"];
   };
+  "/api/v1/cleaning-photos/{photo_id}": {
+    /**
+     * Serve a cleaning photo by signed URL
+     * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+     *
+     * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+     */
+    get: operations["serve_cleaning_photo_api_v1_cleaning_photos__photo_id__get"];
+  };
   "/api/v1/cleaning-tasks": {
     /**
      * List the tenant's cleaning tasks
@@ -128,9 +137,30 @@ export interface paths {
   "/api/v1/cleaning-tasks/{task_id}/complete": {
     /**
      * Finish a cleaning
-     * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+     * @description Applies PRD §11's validation rule, all three clauses of it: every `required` checklist item completed, at least one photo uploaded for every `required` `photo_type` of the template, and no unresolved `CRITICAL` incident. The first two are answered `409` with what is missing enumerated in the message. A template that declares no `required` photo closes with none. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
      */
     post: operations["complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/photos": {
+    /**
+     * List a cleaning task's photos
+     * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
+     *
+     * `storage_key` is not a field of this response and never will be (R3.2): what the URL reveals depends on the tenant's `storage_type`, exactly as documented on the upload.
+     */
+    get: operations["list_cleaning_photos_api_v1_cleaning_tasks__task_id__photos_get"];
+    /**
+     * Upload a photo of the cleaning
+     * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write.
+     *
+     * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+     *
+     * * `LOCAL` — the URL is a route of this API (`/api/v1/cleaning-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+     * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip; see `S3FileStorage.signed_url`.
+     *
+     * In neither case does `storage_key` appear as a field of the response body (R3.2).
+     */
+    post: operations["upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
   };
   "/api/v1/cleaning-tasks/{task_id}/reject": {
     /**
@@ -392,6 +422,13 @@ export interface components {
        */
       file: string;
     };
+    /** Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post */
+    Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+      /** File */
+      file: string;
+      /** Photo Type */
+      photo_type: string;
+    };
     /** ChecklistItemPayload */
     ChecklistItemPayload: {
       /** Item Id */
@@ -471,6 +508,65 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * CleaningPhotoListResponse
+     * @description The photos of one task (R3.1), each already carrying its signed URL.
+     *
+     * Wrapped in `data` rather than returned as a bare array, the shape `ChecklistResponse`
+     * already uses: a top-level JSON array cannot grow a field later without breaking every
+     * generated client, and this list has an obvious future one (`total`, if a task ever
+     * accumulates enough photos to page).
+     *
+     * **The element type is `CleaningPhotoResponse`, whose fields are an allowlist**, which is
+     * where R3.2 is actually enforced — see its docstring. Building this from the entities with
+     * `model_validate` would publish `storage_key` for every photo at once, so the only way in is
+     * through `from_upload`.
+     */
+    CleaningPhotoListResponse: {
+      /** Data */
+      data: components["schemas"]["CleaningPhotoResponse"][];
+    };
+    /**
+     * CleaningPhotoResponse
+     * @description One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
+     *
+     * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
+     * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
+     * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
+     * "the key never appears in a response" a property of this class rather than of everyone who
+     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
+     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
+     * nobody made.
+     *
+     * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
+     * a client uses instead of a path, and it is not stored anywhere.
+     */
+    CleaningPhotoResponse: {
+      /**
+       * Cleaning Task Id
+       * Format: uuid
+       */
+      cleaning_task_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Photo Type */
+      photo_type: string;
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -798,7 +894,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -2034,6 +2130,59 @@ export interface operations {
     };
   };
   /**
+   * Serve a cleaning photo by signed URL
+   * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+   *
+   * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+   */
+  serve_cleaning_photo_api_v1_cleaning_photos__photo_id__get: {
+    parameters: {
+      query: {
+        /** @description POSIX expiry the signature covers. */
+        exp: number;
+        /** @description Hex HMAC of the object's key and `exp`. */
+        sig: string;
+      };
+      path: {
+        photo_id: string;
+      };
+    };
+    responses: {
+      /** @description The photo's bytes, with the `Content-Type` derived from the stored object's extension, `X-Content-Type-Options: nosniff`, and a `Cache-Control` of `private, max-age=<what is left of the signature>` so no shared cache keeps the bytes and no browser keeps them past the URL's expiry. */
+      200: {
+        content: {
+          "image/jpeg": unknown;
+          "image/png": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description The signature is missing, wrong, expired, tampered with, or names a photo that does not exist. **All five answer with the same body**, deliberately: telling them apart would make this endpoint an existence oracle for an unauthenticated caller. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The photo's tenant stores objects in `S3`, where the browser fetches them directly from the provider, so there is nothing for this endpoint to serve. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The signature was valid but the object could not be read back. */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's cleaning tasks
    * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
    */
@@ -2301,7 +2450,7 @@ export interface operations {
   };
   /**
    * Finish a cleaning
-   * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+   * @description Applies PRD §11's validation rule, all three clauses of it: every `required` checklist item completed, at least one photo uploaded for every `required` `photo_type` of the template, and no unresolved `CRITICAL` incident. The first two are answered `409` with what is missing enumerated in the message. A template that declares no `required` photo closes with none. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
    */
   complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post: {
     parameters: {
@@ -2330,6 +2479,124 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List a cleaning task's photos
+   * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
+   *
+   * `storage_key` is not a field of this response and never will be (R3.2): what the URL reveals depends on the tenant's `storage_type`, exactly as documented on the upload.
+   */
+  list_cleaning_photos_api_v1_cleaning_tasks__task_id__photos_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningPhotoListResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a photo of the cleaning
+   * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write.
+   *
+   * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+   *
+   * * `LOCAL` — the URL is a route of this API (`/api/v1/cleaning-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+   * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip; see `S3FileStorage.signed_url`.
+   *
+   * In neither case does `storage_key` appear as a field of the response body (R3.2).
+   */
+  upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningPhotoResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is not `IN_PROGRESS`, so no evidence can be filed against it. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware` before the body is read, and again by the use case while it consumes the stream. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The file store refused the write; no row was persisted. */
+      502: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

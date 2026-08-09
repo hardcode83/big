@@ -1,8 +1,8 @@
 # Limpieza — cómo se opera
 
-Capability del change `cleaning` (PRD §11, §26.10). Esta página cuenta **cómo se usa y se
-opera**; el *qué hace* está en `sdd/specs/cleaning.md` con sus criterios EARS, y el contrato
-HTTP en `backend/openapi.json`.
+Capability de los changes `cleaning` y `cleaning-photos-storage` (PRD §11, §26.10). Esta página
+cuenta **cómo se usa y se opera**; el *qué hace* está en `sdd/specs/cleaning.md` con sus
+criterios EARS, y el contrato HTTP en `backend/openapi.json`.
 
 ## El ciclo, de principio a fin
 
@@ -23,9 +23,12 @@ limpiadora acepta        POST /accept
 limpiadora inicia        POST /start     → propiedad → CLEANING_IN_PROGRESS
         ▼
 marca el checklist       POST /checklist/{item_id}/complete   (idempotente)
+sube las fotos           POST /photos          (multipart, una por llamada)
         ▼
 cierra                   POST /complete
-        │  exige: todos los ítems `required` + ninguna incidencia CRITICAL abierta
+        │  exige: todos los ítems `required`
+        │        + al menos una foto de cada `photo_type` `required` de la plantilla
+        │        + ninguna incidencia CRITICAL abierta
         ▼
 propiedad → AWAITING_CHECKIN | READY_FOR_NEXT_GUEST | VACANT_READY   ← según sus reservas
         ▼
@@ -66,8 +69,9 @@ plantilla.
 |---|---|---|---|
 | Ver y crear plantillas | sí | sí | no |
 | Ver tareas | todas | todas | **solo las suyas** |
+| Ver las fotos de una tarea | todas | todas | **solo las de las suyas** |
 | Crear, asignar y validar | no | sí | no |
-| Aceptar, rechazar, iniciar, cerrar, marcar checklist | no | **no** | sí |
+| Aceptar, rechazar, iniciar, cerrar, marcar checklist, **subir fotos** | no | **no** | sí |
 
 Las dos filas de abajo no se solapan a propósito: PRD §11 dice «la limpiadora asignada» sin
 excepción, así que ejecutar es solo de ella y lo que el manager necesita —reasignar, crear,
@@ -77,13 +81,116 @@ Para una limpiadora, una tarea que no es suya responde **`404`**, no `403`, y co
 cuerpo que un id inexistente: un `403` convertiría el endpoint en una sonda para averiguar qué
 tareas existen.
 
-## Dos límites que conviene conocer antes de operar
+## Las fotos de la limpieza
 
-**Las fotos todavía no se piden.** La regla de PRD §11 tiene tres cláusulas y aquí se aplican
-dos: ítems requeridos e incidencias `CRITICAL`. La tercera —«todas las fotos `required`
-subidas»— llega con la entrada de roadmap `cleaning-photos-storage`, que trae el
-`StorageAdapter`, la subida y las signed URL. **Hasta entonces una limpieza puede cerrarse sin
-las fotos**, y eso es un hueco conocido, no un descuido.
+Las tres cláusulas de PRD §11 se aplican ya: ítems `required`, **fotos `required`** e
+incidencias `CRITICAL`. Lo que sigue es cómo se opera; el *qué hace*, con sus criterios EARS,
+está en `sdd/specs/cleaning.md`, y la forma exacta de cada petición y respuesta en
+`backend/openapi.json` (o en `/docs`).
+
+Qué fotos pide una tarea lo decide su plantilla, en el mismo `required_photos` del ejemplo de
+más arriba. Una plantilla sin ninguna foto `required` es legítima: entonces el cierre no exige
+ninguna.
+
+### Subir
+
+```bash
+curl -X POST .../api/v1/cleaning-tasks/<task_id>/photos \
+  -H 'Authorization: Bearer <token de la limpiadora asignada>' \
+  -F photo_type=kitchen \
+  -F file=@cocina.jpg
+```
+
+`201` con la foto y su URL firmada. Lo que conviene saber antes de operar:
+
+- **Una foto por llamada**, `multipart/form-data`. Varias del mismo `photo_type` están
+  permitidas a propósito — la que falta es la que no tiene ninguna, no la que tiene dos.
+- El formato se decide por los **bytes**, nunca por el `Content-Type` que manda el cliente:
+  JPEG, PNG y WebP. Cualquier otra cosa es un `422`. **HEIC/HEIF queda fuera**, y eso es lo que
+  más se va a notar operando: es el formato nativo de la cámara del iPhone, así que una
+  limpiadora con un iPhone tiene que tener el móvil en «Más compatible» o la subida le rebotará.
+  Es una decisión tomada, no un olvido: soportarlo obliga a transcodificar, porque Chrome y
+  Firefox no lo pintan.
+- La tarea tiene que estar **`IN_PROGRESS`**: contra cualquier otro estado es `409`. No se
+  archiva evidencia de una limpieza que no ha empezado o que ya se cerró.
+- Un `photo_type` que la plantilla no declara es `404`. Una tarea de otro tenant o de otra
+  limpiadora, también `404`, y con el mismo cuerpo que un id inexistente — misma razón que en la
+  tabla de arriba.
+- Tope de tamaño **propio**, `PHOTO_UPLOAD_MAX_BYTES` (10 MB por defecto): por encima es `413`,
+  cortado antes de leer el cuerpo entero. Si una foto no cabe, **sube esa variable y no
+  `REQUEST_MAX_BYTES`**: el techo general lo comparten todas las rutas JSON, y subirlo por una
+  foto se lo afloja a todas ellas. Esta variable existe justamente para no tener que tocarlo.
+- Si el almacén rechaza la escritura es `502` y **no queda fila**: el objeto se escribe primero y
+  la fila después, nunca al revés, para que no exista una foto en la base de datos que no exista
+  en disco.
+
+### Listar
+
+`GET /api/v1/cleaning-tasks/<task_id>/photos` devuelve `{"data": [...]}` con las fotos de la
+tarea, de la más antigua a la más reciente y **cada una ya con su URL firmada**. Lo lee la
+limpiadora asignada, y también el manager y el owner del tenant, que es como se revisa el
+trabajo sin tener que ser quien lo hizo.
+
+`storage_key` **no es un campo de la respuesta** y no va a serlo: la respuesta enumera sus
+campos uno a uno en vez de volcar la entidad, precisamente para que la ruta interna del objeto
+no se publique el día que alguien busque la forma cómoda.
+
+### La ruta que sirve la foto es anónima, y es deliberado
+
+`GET /api/v1/cleaning-photos/<photo_id>?exp=<...>&sig=<...>` **no lleva `require(...)`**. No es
+un olvido ni una regla que falte: un `<img src>` no manda cabecera `Authorization`, y una URL
+firmada que solo funcione desde `fetch` no sirve para mostrar una foto. **La firma es la
+credencial** — un HMAC sobre la clave interna del objeto (que empieza por `tenants/{tenant_id}/`)
+y sobre `exp`, así que no se puede trasladar a otra foto, a otro tenant ni a un plazo posterior.
+Vive 3600 s.
+
+Firma ausente, incorrecta, caducada, manipulada o de una foto que no existe: **las cinco
+contestan el mismo `403` con el mismo cuerpo**, byte a byte. Distinguirlas convertiría una ruta
+sin credenciales en un oráculo para averiguar qué fotos existen.
+
+Los bytes salen con el `Content-Type` derivado de la extensión almacenada,
+`X-Content-Type-Options: nosniff` —sin él, un fichero que empiece por `FF D8 FF` y lleve HTML
+dentro se ejecutaría como XSS almacenado en el origen de la API— y
+`Cache-Control: private, max-age=<lo que le quede a la firma>`, para que la copia del navegador
+caduque a la vez que la credencial que la trajo.
+
+### Dónde viven las fotos
+
+Cada tenant tiene un `storage_type`, `LOCAL` por defecto, y no se cambia desde el `update` de
+tenant: darle la vuelta dejaría apuntando a un almacén las fotos que están en el otro.
+
+- **`LOCAL`** — el adaptador escribe bajo **`/app/media`** dentro del contenedor `backend`, que
+  es el volumen con nombre `backend_media` de `docker-compose.yml`. El objeto queda en
+  `tenants/<tenant_id>/cleaning-tasks/<task_id>/<photo_id>.<ext>`, así que el tenant es el primer
+  segmento de la clave y por tanto de lo que firma el HMAC. La URL es **relativa**
+  (`/api/v1/cleaning-photos/<photo_id>?exp=…&sig=…`), la resuelve el cliente contra su propio
+  origen, y **no contiene la ruta interna del objeto**.
+- **`S3`** — la URL firmada la emite el propio proveedor, así que necesariamente lleva el bucket
+  y la clave del objeto: es inherente a cómo funciona un presigned URL y no es algo que esta API
+  pueda recortar. Para un tenant `S3` la ruta de servido de arriba contesta `404`, porque el
+  navegador va directo al almacén.
+
+**Coste que hay que conocer: `docker compose down -v` borra el volumen y con él todas las fotos
+subidas.** `make down` no lo hace —para los contenedores y conserva los volúmenes—, pero el
+`-v` es un reflejo frecuente para «empezar limpio» y aquí se lleva por delante la evidencia de
+todas las limpiezas. Es un stack de desarrollo y no hay copia de seguridad de nada de eso.
+
+### Al cerrar
+
+`POST /complete` comprueba, **en este orden**: ítems `required` → fotos `required` →
+incidencias `CRITICAL` abiertas. Si falta alguna foto responde `409` **enumerando los
+`photo_type` que faltan**, ordenados, con la misma forma que el `409` de los ítems:
+
+```json
+{"error": {"code": "CONFLICT",
+           "message": "Required photos are not uploaded: bathroom, kitchen",
+           "details": {}}}
+```
+
+Cuenta como cubierto un `photo_type` con **al menos una** foto subida para esa tarea. Fotos de
+otra tarea no cuentan, aunque sean del mismo tipo.
+
+## El límite que queda, y los dos que ya no lo son
 
 **El escalado por SLA ya funciona** (desde `access-notifications`). Al asignar se escribe una
 fila de `notification_logs` con `sla_deadline_at = ahora + TenantConfig.sla_medium_minutes` (240
@@ -97,10 +204,14 @@ se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta 
 genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
 `/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
-**Y las incidencias tampoco se pueden crear todavía.** La precondición de cierre consulta la
-tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que en la
-práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
+**El único límite vivo: las incidencias no se pueden crear todavía.** La precondición de cierre
+consulta la tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que
+en la práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
 limpiadora es de `maintenance` (PRD §26.11).
+
+Los otros dos que esta página llegó a listar ya están cerrados: el escalado por SLA, arriba, y
+**las fotos requeridas al cerrar**, que este change entrega y se cuentan en §«Las fotos de la
+limpieza».
 
 ## Operar el job
 
@@ -139,20 +250,22 @@ enumera, y ampliar esa tabla es una decisión de steering (design D13).
 
 [`diagrams/2026-07-13_autohost-secuencia-limpieza.png`](diagrams/2026-07-13_autohost-secuencia-limpieza.png)
 dibuja el flujo **completo** de PRD §11 y sigue siendo el objetivo, así que no se ha
-redibujado: recortarlo a lo construido borraría el destino que `cleaning-photos-storage` y
-`access-notifications` van a levantar. Lo que sí conviene saber al leerlo es qué tres cosas no
-existen aún, para no buscarlas en el código:
+redibujado: recortarlo a lo construido borraría el destino que `access-notifications` va a
+levantar. Lo que sí conviene saber al leerlo es qué partes no existen aún, para no buscarlas en
+el código:
 
 | En el diagrama | Hoy |
 |---|---|
 | `NotificationAdapter` → «WhatsApp / email (mock)» | Este módulo solo **escribe** la fila de `notification_logs`, en `PENDING`. El envío lo hace `dispatch_notifications` (change `access-notifications`), que es lo que la marca `SENT`. |
-| «subir fotos requeridas» y `AIAdapter.validate_cleaning_photo()` | Nada de eso existe: fotos y `StorageAdapter` son de `cleaning-photos-storage`, la validación con IA de `messaging-ai`. |
+| «subir fotos requeridas» | **Ya existe** (`cleaning-photos-storage`): subida, listado, URL firmada y la tercera cláusula del cierre. El adaptador se llama `FileStoragePort` y vive en `app/integrations/`, no `StorageAdapter`. |
+| `AIAdapter.validate_cleaning_photo()` | No existe. La foto se guarda y se sirve, pero nada la valida; `ai_validation_result` no se escribe ni se devuelve. Es de `messaging-ai`. |
 | `PropertyStateMachine` «crear CleaningTask» | La crea `ProvisionCleaningTaskUseCase`, invocado **dentro** de la transacción del caso de uso que mueve el estado (design D1). La máquina sigue decidiendo la transición y nada más — crear entidades no es su trabajo. |
 
 ## Entradas de roadmap relacionadas
 
-- `cleaning-photos-storage` — fotos, `StorageAdapter`, signed URL, y la tercera cláusula de la
-  regla de validación.
+- `cleaning-photos-storage` — **ya entregada**: fotos, almacenamiento (`LOCAL`/`S3`), URL
+  firmadas y la tercera cláusula de la regla de validación. Lo que aportó se cuenta arriba, en
+  §«Las fotos de la limpieza».
 - `access-notifications` — **entregado**: trajo el emisor que marca `SENT` y el cierre del plazo al responder.
 - `maintenance` — creación de incidencias, incluida la que bloquea el cierre.
 - `field-apps` — la app mobile-first de la limpiadora que consume todo esto.

@@ -17,6 +17,18 @@ from tests.route_walk import flatten_routes
 # login and refresh are the endpoints that mint credentials, so they cannot require
 # one; the rest is FastAPI's own generated documentation.
 #
+# `GET /api/v1/cleaning-photos/{photo_id}` is the fourth kind and the only one that serves
+# tenant data (`cleaning-photos-storage`, design D7). It cannot require a token because a
+# browser fetching an `<img src>` sends no `Authorization` header, so a signed URL gated on
+# one would work for nothing. **Its authorisation is the HMAC in its query string**, verified
+# by `ServeLocalCleaningPhotoUseCase` against the object key read from the database — a key
+# that begins with `tenants/{tenant_id}/`, so a valid signature proves the caller was handed a
+# URL minted for that photo of that tenant. Refusals answer one constant `403` body for
+# "wrong", "expired", "tampered" and "no such photo" alike, so the exemption does not hand an
+# unauthenticated caller an existence oracle. Pinned in `tests/cleaning/test_serve_photo_api.py`
+# and `tests/cleaning/test_serve_photo_use_case.py`; the entry below is the visible diff this
+# allowlist exists to force.
+#
 # Keyed on (METHOD, path), not on path alone. R3.3 names the exemptions with their verb
 # — "POST /api/v1/auth/login" — and a bare-path allowlist exempts every method on that
 # path: a `GET /login`, a `DELETE /auth/refresh` "revoke my chain" convenience endpoint
@@ -26,6 +38,7 @@ ANONYMOUS_ENDPOINTS = {
     ("GET", "/health"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),
+    ("GET", "/api/v1/cleaning-photos/{photo_id}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
@@ -263,7 +276,9 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     `tests/tenants/test_api.py`; by `properties-crud` with two property paths (four
     methods), asserted per method and per role in `tests/properties/test_authorization.py`;
     and by `cleaning` with the checklist template path (two methods), asserted the same way
-    in `tests/cleaning/test_templates_api.py`; and by `access-notifications` with the five
+    in `tests/cleaning/test_templates_api.py`; by `cleaning-photos-storage` with the photo
+    upload path, whose `EXECUTE_CLEANING_TASKS` permission and cleaner-owns-the-task rule are
+    asserted in `tests/cleaning/test_photos_api.py`; and by `access-notifications` with the five
     access-record paths and the in-app inbox, asserted per role in
     `tests/access/test_api.py` and `tests/notifications/test_api.py`.
     """
@@ -288,6 +303,7 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/checklist",
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",
+        "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
