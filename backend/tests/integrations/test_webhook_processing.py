@@ -1,0 +1,436 @@
+"""Draining the webhook queue into reservations (R5.1-R5.7, R6.1-R6.4, D10-D14).
+
+Integration against real Postgres, because what is being proven is mostly about rows: which
+notices a run selects, which it marks, and what the ingest left behind. The one collaborator
+that is faked is the PMS itself — a test that reached a provider would not be a test.
+"""
+
+import uuid
+from datetime import UTC, datetime, timedelta
+
+import pytest
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
+from app.integrations.application.use_cases import (
+    WEBHOOK_SOURCE,
+    SyncReservationsFromPmsUseCase,
+)
+from app.integrations.application.webhooks import (
+    ProcessTenantWebhookEventsUseCase,
+    ProcessWebhookEventsUseCase,
+    TenantWebhookOutcome,
+)
+from app.integrations.domain.entities import (
+    MAX_WEBHOOK_ATTEMPTS,
+    QueuedWebhookEvent,
+)
+from app.integrations.domain.enums import PMSProvider
+from app.integrations.domain.errors import PmsUnavailableError
+from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE, MockPMSAdapter
+from app.integrations.infrastructure.models import WebhookEventModel
+from app.integrations.infrastructure.repositories import SqlAlchemyWebhookEventRepository
+from app.properties.infrastructure.models import PropertyModel
+from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+from app.reservations.infrastructure.models import ReservationModel
+from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+from app.timeline.domain.enums import TimelineActorType
+from app.timeline.infrastructure.models import TimelineEventModel
+from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
+
+NOW = datetime(2026, 8, 9, 12, 0, tzinfo=UTC)
+
+
+class _Factory:
+    """A `PMSAdapterFactory` over a per-provider map, recording every resolution.
+
+    `calls` is what the coalescing assertions read: one entry per `reservations_for`, which is
+    one entry per outbound conversation with a provider.
+    """
+
+    def __init__(self, adapters: dict[PMSProvider, object]) -> None:
+        self._adapters = adapters
+        self.calls: list[PMSProvider] = []
+
+    def supports_messaging(self, provider) -> bool:
+        return False
+
+    def provider_for(self, property):
+        return property.pms_provider or PMSProvider.MOCK
+
+    async def reservations_for(self, property, *, read_log):
+        provider = self.provider_for(property)
+        self.calls.append(provider)
+        outcome = self._adapters[provider]
+        if isinstance(outcome, Exception):
+            raise outcome
+        return outcome
+
+    async def messaging_for(self, property):
+        raise AssertionError("the webhook job must never resolve messaging")
+
+
+class _CountingAdvancer:
+    """Stands in for `AdvancePropertyStatesUseCase` (D12: it is invoked, never modified)."""
+
+    def __init__(self) -> None:
+        self.calls: list[tuple[uuid.UUID, object]] = []
+
+    async def execute(self, *, tenant_id, trigger, now):
+        self.calls.append((tenant_id, trigger))
+        return None
+
+
+def _tenant_use_case(
+    db_session: AsyncSession, factory: _Factory, advance: _CountingAdvancer
+) -> ProcessTenantWebhookEventsUseCase:
+    return ProcessTenantWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        sync=SyncReservationsFromPmsUseCase(
+            factory=factory,
+            reservations=SqlAlchemyReservationRepository(db_session),
+            properties=SqlAlchemyPropertyRepository(db_session),
+            guests=SqlAlchemyGuestRepository(db_session),
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            uow=SqlAlchemyUnitOfWork(db_session),
+            audit=SqlAlchemyAuditLogRepository(db_session),
+        ),
+        advance=advance,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+
+
+async def _notice(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID | None,
+    provider: str = "MOCK",
+    received_at: datetime = NOW,
+    attempts: int = 0,
+) -> QueuedWebhookEvent:
+    event = WebhookEventModel(
+        tenant_id=tenant_id,
+        provider=provider,
+        event_type="booking.modified",
+        payload={"reservation_id": "the job must not read this"},
+        received_at=received_at,
+        attempts=attempts,
+    )
+    session.add(event)
+    await session.flush()
+    return QueuedWebhookEvent(
+        id=event.id,
+        tenant_id=tenant_id,
+        provider=provider,
+        received_at=received_at,
+        attempts=attempts,
+    )
+
+
+async def _beds24_property(session: AsyncSession, tenant_id: uuid.UUID) -> PropertyModel:
+    prop = PropertyModel(
+        tenant_id=tenant_id,
+        name="Beds24 flat",
+        internal_code="B24-1",
+        pms_external_id="PMS-B24",
+        pms_provider=PMSProvider.BEDS24,
+    )
+    session.add(prop)
+    await session.flush()
+    return prop
+
+
+# --- The re-read turns notices into reservations (R5.1, R5.2, R6.1) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_notice_becomes_reservations_through_the_ingestor(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R5.2: `ReservationIngestor` is the single upsert route, reached by re-reading (R6.1)."""
+    notice = await _notice(db_session, tenant_id=tenant_a.id)
+    factory = _Factory({PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False)})
+
+    outcome = await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[notice], now=NOW
+    )
+
+    assert outcome == TenantWebhookOutcome(processed=1, failed=0)
+    ingested = (
+        await db_session.execute(
+            select(ReservationModel.external_pms_id).where(
+                ReservationModel.tenant_id == tenant_a.id
+            )
+        )
+    ).scalars().all()
+    assert ingested, "the re-read produced no reservation at all"
+    row = await db_session.get(WebhookEventModel, notice.id)
+    await db_session.refresh(row)
+    assert row.processed is True
+    assert row.processed_at == NOW
+
+
+@pytest.mark.asyncio
+async def test_the_ingest_timeline_event_carries_the_webhook_as_its_cause(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R5.6's first half and D12: the causality lives on the ingest's own `TimelineEvent`.
+
+    Actor `WEBHOOK` here and NOT on the transition, which keeps `property_state_transitions`
+    free of an actor rule 9 names only in order to exclude it from the audit exemption.
+    """
+    notice = await _notice(db_session, tenant_id=tenant_a.id)
+    factory = _Factory({PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False)})
+
+    await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[notice], now=NOW
+    )
+
+    events = (
+        await db_session.execute(
+            select(TimelineEventModel).where(TimelineEventModel.tenant_id == tenant_a.id)
+        )
+    ).scalars().all()
+    assert events
+    assert {event.actor_type for event in events} == {TimelineActorType.WEBHOOK}
+    assert {event.metadata_["source"] for event in events} == {WEBHOOK_SOURCE}
+
+
+@pytest.mark.asyncio
+async def test_the_transition_goes_through_the_use_case_that_already_owns_it(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R5.6's second half, D12. This change is the first production caller of the trigger."""
+    from app.properties.domain.transition_enums import PropertyStateTrigger
+
+    notice = await _notice(db_session, tenant_id=tenant_a.id)
+    advance = _CountingAdvancer()
+
+    await _tenant_use_case(
+        db_session,
+        _Factory({PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False)}),
+        advance,
+    ).execute(tenant_id=tenant_a.id, events=[notice], now=NOW)
+
+    assert advance.calls == [
+        (tenant_a.id, PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN)
+    ]
+
+
+@pytest.mark.asyncio
+async def test_nothing_is_advanced_when_no_notice_landed(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """A provider that could not be reached leaves the portfolio untouched: re-evaluating it
+    would be work provoked by a notice that produced no data."""
+    notice = await _notice(db_session, tenant_id=tenant_a.id)
+    advance = _CountingAdvancer()
+    factory = _Factory({PMSProvider.MOCK: PmsUnavailableError("down")})
+
+    outcome = await _tenant_use_case(db_session, factory, advance).execute(
+        tenant_id=tenant_a.id, events=[notice], now=NOW
+    )
+
+    assert outcome == TenantWebhookOutcome(processed=0, failed=1)
+    assert advance.calls == []
+
+
+# --- Isolation: per event and per tenant (R5.4) ----------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_one_providers_failure_does_not_cost_the_other_its_notices(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R5.4 per event: two notices, two providers, one provider down."""
+    await _beds24_property(db_session, tenant_a.id)
+    healthy = await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK")
+    broken = await _notice(db_session, tenant_id=tenant_a.id, provider="BEDS24")
+    factory = _Factory(
+        {
+            PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False),
+            PMSProvider.BEDS24: PmsUnavailableError("no adapter"),
+        }
+    )
+
+    outcome = await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[healthy, broken], now=NOW
+    )
+
+    assert outcome == TenantWebhookOutcome(processed=1, failed=1)
+    landed = await db_session.get(WebhookEventModel, healthy.id)
+    failed = await db_session.get(WebhookEventModel, broken.id)
+    await db_session.refresh(landed)
+    await db_session.refresh(failed)
+    assert landed.processed is True
+    assert failed.processed is False
+    assert failed.attempts == 1
+    assert failed.error == '{"code":"PROVIDER_UNAVAILABLE"}'
+
+
+@pytest.mark.asyncio
+async def test_a_notice_naming_an_unknown_provider_fails_alone(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """`webhook_events.provider` is free-form (§7.26), so an unserviceable value is a data
+    state and not a bug — and it must not take the batch down with it."""
+    good = await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK")
+    strange = await _notice(db_session, tenant_id=tenant_a.id, provider="octorate")
+    factory = _Factory({PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False)})
+
+    outcome = await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[good, strange], now=NOW
+    )
+
+    assert outcome == TenantWebhookOutcome(processed=1, failed=1)
+    row = await db_session.get(WebhookEventModel, strange.id)
+    await db_session.refresh(row)
+    assert row.error == '{"code":"PROVIDER_UNAVAILABLE","field":"provider"}'
+    # Retried, not exhausted: a provider this system does not serve today may be one it serves
+    # tomorrow, and `attempts = 3` would make that unrecoverable without hand-written SQL.
+    assert row.attempts == 1
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_whose_run_failed_does_not_stop_the_others(
+    db_session: AsyncSession, tenant_a, tenant_b
+) -> None:
+    """R5.4 per tenant, at the batch use case's own boundary.
+
+    The runner reports a rolled-back tenant as `None`, and the batch use case then owes those
+    notices a retry recorded on ITS session — the failed tenant's is gone.
+    """
+    broken = await _notice(db_session, tenant_id=tenant_a.id)
+    survivor = await _notice(db_session, tenant_id=tenant_b.id)
+    await db_session.commit()
+    seen: list[uuid.UUID] = []
+
+    async def run_for_tenant(tenant_id, events, now):
+        seen.append(tenant_id)
+        if tenant_id == tenant_a.id:
+            return None
+        return TenantWebhookOutcome(processed=len(events))
+
+    report = await ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=run_for_tenant,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(now=NOW)
+
+    assert set(seen) == {tenant_a.id, tenant_b.id}
+    assert report.tenants == 2
+    assert report.processed == 1
+    assert report.failed == 1
+    charged = await db_session.get(WebhookEventModel, broken.id)
+    await db_session.refresh(charged)
+    assert charged.attempts == 1
+    assert charged.next_attempt_at == NOW + timedelta(minutes=1)
+    assert survivor.id is not None
+
+
+# --- The unattributed branch (R1.8, D11) -----------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_a_notice_without_a_tenant_is_exhausted_rather_than_retried(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """D11: there is no tenant to attribute a reservation to, so the next attempt would fail
+    identically. It is spent at once — visible for diagnosis, never selected again."""
+    orphan = await _notice(db_session, tenant_id=None)
+    await db_session.commit()
+
+    async def run_for_tenant(tenant_id, events, now):
+        return TenantWebhookOutcome(processed=len(events))
+
+    report = await ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=run_for_tenant,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(now=NOW)
+
+    assert report.unattributed == 1
+    assert report.tenants == 0
+    row = await db_session.get(WebhookEventModel, orphan.id)
+    await db_session.refresh(row)
+    assert row.attempts == MAX_WEBHOOK_ATTEMPTS
+    assert row.error == '{"code":"UNATTRIBUTED","field":"tenant_id"}'
+    assert (
+        await SqlAlchemyWebhookEventRepository(db_session).select_pending(now=NOW, limit=10)
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_an_empty_queue_costs_nothing(db_session: AsyncSession) -> None:
+    async def run_for_tenant(tenant_id, events, now):
+        raise AssertionError("nothing was selected, so nothing may run")
+
+    report = await ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=run_for_tenant,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(now=NOW)
+
+    assert report.selected == 0
+    assert report.tenants == 0
+
+
+@pytest.mark.asyncio
+async def test_the_batch_splits_by_tenant(
+    db_session: AsyncSession, tenant_a, tenant_b
+) -> None:
+    """R5.5: each tenant's notices are handed over as one group, so each gets exactly one
+    marked session rather than one per notice."""
+    await _notice(db_session, tenant_id=tenant_a.id)
+    await _notice(db_session, tenant_id=tenant_a.id)
+    await _notice(db_session, tenant_id=tenant_b.id)
+    await db_session.commit()
+    handed: dict[uuid.UUID, int] = {}
+
+    async def run_for_tenant(tenant_id, events, now):
+        handed[tenant_id] = handed.get(tenant_id, 0) + len(events)
+        return TenantWebhookOutcome(processed=len(events))
+
+    report = await ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=run_for_tenant,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(now=NOW)
+
+    assert handed == {tenant_a.id: 2, tenant_b.id: 1}
+    assert report.selected == 3
+    assert report.processed == 3
+
+
+@pytest.mark.asyncio
+async def test_the_re_read_window_starts_before_the_oldest_notice(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """A notice announces a change that already happened, so `since` cannot be the notice's own
+    `received_at` — that would ask the provider for everything changed AFTER the change."""
+    seen: list[datetime] = []
+
+    class _RecordingAdapter:
+        async def list_reservations(self, since, property_external_id=None):
+            seen.append(since)
+            return await MockPMSAdapter(include_broken_rows=False).list_reservations(
+                since, property_external_id
+            )
+
+        async def get_reservation(self, external_id):
+            return None
+
+    oldest = NOW - timedelta(minutes=30)
+    first = await _notice(db_session, tenant_id=tenant_a.id, received_at=oldest)
+    second = await _notice(db_session, tenant_id=tenant_a.id, received_at=NOW)
+
+    await _tenant_use_case(
+        db_session, _Factory({PMSProvider.MOCK: _RecordingAdapter()}), _CountingAdvancer()
+    ).execute(tenant_id=tenant_a.id, events=[first, second], now=NOW)
+
+    assert seen and all(since < oldest for since in seen)
+    assert SEED_PROPERTY_CODE == property_a.pms_external_id

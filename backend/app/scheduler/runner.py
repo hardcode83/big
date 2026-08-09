@@ -117,6 +117,55 @@ async def list_active_tenants() -> list[uuid.UUID]:
         return list(rows.scalars())
 
 
+@dataclass
+class TenantWorkResult:
+    """What one tenant's turn produced, with success told apart from a `None` return.
+
+    A bare `None` cannot carry both answers: `work` returning nothing is ordinary — most jobs
+    are written for their side effects — so a caller that read `None` as failure would count
+    every successful run as broken.
+    """
+
+    value: Any = None
+    failed: bool = False
+
+
+async def run_in_marked_session(
+    task: str,
+    tenant_id: uuid.UUID,
+    work: Callable[[AsyncSession], Awaitable[T]],
+) -> TenantWorkResult:
+    """One tenant's work, in a session marked for it and nothing else (design D5, D12).
+
+    **Extracted so `reservations-webhooks` can reuse it** (its D11). That job cannot use
+    `run_for_every_tenant`: it iterates every ACTIVE tenant, and a webhook batch concerns only
+    the handful that actually received a notice — running the rest would open sessions and
+    charge failures for tenants with nothing to do. What it needs is precisely this: the
+    "one marked session per tenant, never re-marked, rolled back on failure" part, fed from a
+    list somebody else computed.
+
+    The failure boundary is the same one `celery-jobs` fixed: the session rolls back, the
+    traceback goes to the log rather than up, and the caller decides what to do with the turn
+    that broke.
+    """
+    async with worker_session_factory()() as session:
+        # One-way, one tenant per session: `bind_session_to_tenant` refuses to re-mark,
+        # and a session that was marked must never be reused for a different tenant.
+        bind_session_to_tenant(session, tenant_id)
+        try:
+            return TenantWorkResult(value=await work(session))
+        except Exception:
+            await session.rollback()
+            # The tenant id is the point: the operator needs to know *whose* run broke,
+            # and the traceback goes to the log rather than up, so the other tenants
+            # still get their turn (design D12).
+            logger.exception(
+                "scheduler.tenant_run_failed",
+                extra={"task": task, "tenant_id": str(tenant_id)},
+            )
+            return TenantWorkResult(failed=True)
+
+
 async def run_for_every_tenant(
     task: str,
     work: Callable[[AsyncSession, uuid.UUID, datetime], Awaitable[T]],
@@ -130,22 +179,15 @@ async def run_for_every_tenant(
 
     for tenant_id in tenant_ids:
         report.tenants += 1
-        async with worker_session_factory()() as session:
-            # One-way, one tenant per session: `bind_session_to_tenant` refuses to re-mark,
-            # and a session that was marked must never be reused for a different tenant.
-            bind_session_to_tenant(session, tenant_id)
-            try:
-                report.results.append(await work(session, tenant_id, at))
-            except Exception:
-                await session.rollback()
-                report.failed += 1
-                # The tenant id is the point: the operator needs to know *whose* run broke,
-                # and the traceback goes to the log rather than up, so the other tenants
-                # still get their turn (design D12).
-                logger.exception(
-                    "scheduler.tenant_run_failed",
-                    extra={"task": task, "tenant_id": str(tenant_id)},
-                )
+        result = await run_in_marked_session(
+            task, tenant_id, lambda session, at=at, tenant_id=tenant_id: work(
+                session, tenant_id, at
+            )
+        )
+        if result.failed:
+            report.failed += 1
+        else:
+            report.results.append(result.value)
     return report
 
 

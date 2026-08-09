@@ -24,12 +24,14 @@ the mock must raise what a real adapter raises and return the same shapes, so a 
 tested against it behaves the same in production.
 """
 
+import uuid
 from datetime import datetime
 from typing import TYPE_CHECKING, Protocol
 
 from app.integrations.domain.dtos import ParseResult, PmsFetchResult, ReservationDTO
 from app.integrations.domain.entities import CredentialReadLog
 from app.integrations.domain.enums import PMSProvider
+from app.properties.domain.transition_enums import PropertyStateTrigger
 
 if TYPE_CHECKING:  # pragma: no cover - import only for the annotation
     # `Property` lives in another domain's `domain/` layer, and this port names it because
@@ -186,6 +188,32 @@ class PMSAdapterFactory(Protocol):
 
     async def messaging_for(self, property: "Property") -> PMSMessagingPort:
         """The messaging port, or `PMSMessagingUnsupportedError` if the provider has none."""
+        ...
+
+
+class PropertyStateAdvancer(Protocol):
+    """The transition side of R5.6, as the webhook job is allowed to see it (D12).
+
+    A port with exactly the one method, rather than an import of
+    `AdvancePropertyStatesUseCase`, and the reason is the decision itself: D12 says this change
+    invokes that use case **without modifying it** and introduces no transition actor of its
+    own. A port sized to "ask the existing owner to re-evaluate" is the shape that cannot grow
+    into a second writer of `current_operational_state`, which `steering/backend.md` forbids
+    outright ("no saltarse `PropertyStateMachine`").
+
+    `app/scheduler/tasks.py` supplies `AdvancePropertyStatesUseCase`, which satisfies this
+    structurally. Nothing adapts it, because nothing needs to.
+    """
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, trigger: PropertyStateTrigger, now: datetime
+    ) -> object:
+        """Re-evaluate this tenant's properties for `trigger`, transitioning those that qualify.
+
+        The return value is that use case's own report and this port does not name its type:
+        the webhook job counts notices, not transitions, and the transition's record of itself
+        is the `PropertyStateTransition` row, not a value passed back here.
+        """
         ...
 
 

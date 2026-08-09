@@ -17,21 +17,42 @@ reason, and it is raised at four different points. That is what keeps the endpoi
 an oracle that confirms a token exists — see `WebhookAuthenticationError`.
 """
 
+import logging
 import uuid
-from collections.abc import Callable
-from datetime import datetime
+from collections.abc import Awaitable, Callable, Sequence
+from dataclasses import dataclass
+from datetime import datetime, timedelta
 from typing import Any
 
 from app.core.crypto import SecretDecryptionError, decrypt
 from app.core.unit_of_work import UnitOfWork
-from app.integrations.domain.entities import WebhookEndpoint, WebhookEvent
+from app.integrations.application.use_cases import (
+    WEBHOOK_SOURCE,
+    SyncReservationsFromPmsUseCase,
+)
+from app.integrations.domain.entities import (
+    PROVIDER_UNAVAILABLE,
+    UNATTRIBUTED,
+    UNMAPPABLE,
+    QueuedWebhookEvent,
+    WebhookEndpoint,
+    WebhookEvent,
+    WebhookEventFailure,
+    webhook_retry_delay,
+)
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.domain.errors import WebhookAuthenticationError
+from app.integrations.domain.ports import PropertyStateAdvancer
 from app.integrations.domain.repositories import (
     WebhookEndpointRepository,
     WebhookEventRepository,
 )
 from app.integrations.domain.webhook_auth import hash_webhook_token, secrets_match
+from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
+from app.properties.domain.transition_enums import PropertyStateTrigger
+from app.timeline.domain.enums import TimelineActorType
+
+logger = logging.getLogger(__name__)
 
 CardDataScrubber = Callable[[Any], Any]
 """The card-data discard of rule 13(a), injected rather than imported.
@@ -209,6 +230,326 @@ class ReceiveWebhookUseCase:
         if endpoint is None:
             raise WebhookAuthenticationError
         return endpoint
+
+
+DEFAULT_BATCH_SIZE = 500
+"""How many notices one execution may take on.
+
+It bounds the DATABASE work of a tick, not the outbound calls — those are bounded by the
+grouping of D10 and stay at one per destination however large this is. A ceiling exists so a
+backlog drains over several ticks instead of one execution holding a transaction open across
+thousands of rows; 500 is comfortably above the cadence's expected arrival rate, so in ordinary
+operation the batch is the whole queue.
+"""
+
+RE_READ_LOOKBACK = timedelta(hours=1)
+"""How far BEFORE the oldest notice in the group the re-read window starts.
+
+`ASSUMPTION`, and the reason it cannot be zero: a notice announces a change that already
+happened, so its `received_at` is strictly *after* the modification it reports. Anchoring
+`since` on the notice itself would ask the provider for everything changed since a moment after
+the change — excluding the very reservation the notice exists to point at.
+
+The margin has to cover the provider's delivery latency, and **that latency is unmeasured**:
+`sdd/roadmap/beds24-webhook-cutover-measurement.md` names it as one of the three things its
+measurement exists to establish. An hour is generous against any plausible delivery delay and
+cheap against the cost that matters — the number of outbound CALLS is fixed by D10 and does not
+move with the window. Revisit when the measurement lands.
+"""
+
+
+@dataclass
+class WebhookProcessingReport:
+    """What one execution of `process_webhook_events` did, in terms an operator can act on."""
+
+    selected: int = 0
+    processed: int = 0
+    failed: int = 0
+    unattributed: int = 0
+    tenants: int = 0
+
+
+@dataclass
+class TenantWebhookOutcome:
+    """One tenant's slice of a run. Returned so the batch report can add it up."""
+
+    processed: int = 0
+    failed: int = 0
+
+
+TenantBatchRunner = Callable[
+    [uuid.UUID, list[QueuedWebhookEvent], datetime],
+    Awaitable[TenantWebhookOutcome | None],
+]
+"""Runs one tenant's notices inside a session marked for that tenant (R5.5, D11).
+
+Injected rather than imported, for the reason every session concern is: opening one is
+`infrastructure/`'s job, and `app/scheduler/runner.py` already owns the "one marked session per
+tenant, never re-marked" pattern this reuses.
+
+`None` means that tenant's whole transaction failed and was rolled back — the runner's own
+failure boundary. The batch use case then owes those notices a retry, recorded on ITS session,
+because the tenant's is gone.
+"""
+
+
+class ProcessWebhookEventsUseCase:
+    """Drain the queue: read the batch unmarked, split it by tenant, delegate (R5.1, R5.4, R5.5).
+
+    **Reads from a session that was never marked, and that is a correctness requirement rather
+    than a convention** (D11): `webhook_events.tenant_id` is nullable, and a marked session's
+    global filter hides the `NULL` rows without erroring — the rows this use case exists to
+    exhaust.
+
+    It does no re-reading and no ingesting itself. Everything that touches a tenant's data
+    happens on that tenant's own marked session, one tenant at a time, which is where
+    `ProcessTenantWebhookEventsUseCase` runs.
+    """
+
+    def __init__(
+        self,
+        *,
+        queue: WebhookEventRepository,
+        run_for_tenant: TenantBatchRunner,
+        uow: UnitOfWork,
+        batch_size: int = DEFAULT_BATCH_SIZE,
+    ) -> None:
+        self._queue = queue
+        self._run_for_tenant = run_for_tenant
+        self._uow = uow
+        self._batch_size = batch_size
+
+    async def execute(self, *, now: datetime) -> WebhookProcessingReport:
+        batch = await self._queue.select_pending(now=now, limit=self._batch_size)
+        report = WebhookProcessingReport(selected=len(batch))
+        if not batch:
+            return report
+
+        by_tenant: dict[uuid.UUID, list[QueuedWebhookEvent]] = {}
+        unattributed: list[QueuedWebhookEvent] = []
+        for event in batch:
+            if event.tenant_id is None:
+                unattributed.append(event)
+            else:
+                by_tenant.setdefault(event.tenant_id, []).append(event)
+
+        if unattributed:
+            # D11's honest branch. R1's authentication is what makes this unreachable — the
+            # token is what resolves the tenant — but §7.26 allows the row, so the code says
+            # what happens to one rather than pretending it cannot exist. The whole retry
+            # budget goes at once because no amount of retrying invents a tenant: the notice
+            # stays visible for diagnosis and is never selected again.
+            await self._queue.exhaust(
+                [event.id for event in unattributed],
+                failure=WebhookEventFailure(code=UNATTRIBUTED, field="tenant_id"),
+            )
+            await self._uow.commit()
+            report.unattributed = len(unattributed)
+            report.failed += len(unattributed)
+            logger.warning(
+                "webhooks.unattributed_notices_exhausted",
+                extra={"count": len(unattributed)},
+            )
+
+        for tenant_id, events in by_tenant.items():
+            report.tenants += 1
+            outcome = await self._run_for_tenant(tenant_id, events, now)
+            if outcome is None:
+                # That tenant's transaction rolled back, so nothing it might have written to
+                # the queue survived either. The retry is recorded here, on a session that is
+                # still alive — otherwise a tenant whose run died would keep being selected
+                # with `attempts` frozen at its old value, which is a poisoned notice with no
+                # ceiling (R5.3).
+                await _schedule_retry(
+                    self._queue,
+                    events,
+                    failure=WebhookEventFailure(code=PROVIDER_UNAVAILABLE),
+                    now=now,
+                )
+                await self._uow.commit()
+                report.failed += len(events)
+                continue
+            report.processed += outcome.processed
+            report.failed += outcome.failed
+        return report
+
+
+class ProcessTenantWebhookEventsUseCase:
+    """One tenant's notices, on a session already marked for that tenant (R5.2, R5.6, R6.1-R6.4).
+
+    **The body of the notice is never consulted** (D13). What a notice contributes is its
+    `provider`, and what that buys is a *destination*: every notice naming the same provider is
+    served by ONE re-read (D10), so N notices between two ticks cost one outbound call and the
+    call count is bounded by the cadence rather than by how many requests a stranger sent us.
+    `QueuedWebhookEvent` carries no payload at all, so this is structural.
+
+    **The re-read is `SyncReservationsFromPmsUseCase`, unchanged in substance** (D14). That is
+    where `ReservationIngestor` is fed as the single upsert route (R5.2), where the per-provider
+    isolation lives, and where the credential-read audit already implements the granularity that
+    the second named exception of rule 9 authorises. Writing a second one here would be a second
+    implementation of a rule that has exactly one formulation.
+    """
+
+    def __init__(
+        self,
+        *,
+        queue: WebhookEventRepository,
+        sync: SyncReservationsFromPmsUseCase,
+        advance: PropertyStateAdvancer,
+        uow: UnitOfWork,
+    ) -> None:
+        self._queue = queue
+        self._sync = sync
+        self._advance = advance
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        events: Sequence[QueuedWebhookEvent],
+        now: datetime,
+    ) -> TenantWebhookOutcome:
+        known, unknown = _by_provider(events)
+        outcome = TenantWebhookOutcome()
+
+        if unknown:
+            # `webhook_events.provider` is a free-form column (§7.26 types it VARCHAR because
+            # the set of providers is open), so a value no adapter can serve is a data state,
+            # not a bug. It fails ALONE — this is the per-event isolation of R5.4 at its most
+            # literal — and it is retried rather than exhausted, because the provider it names
+            # may be one this system learns tomorrow.
+            await _schedule_retry(
+                self._queue,
+                unknown,
+                failure=WebhookEventFailure(code=PROVIDER_UNAVAILABLE, field="provider"),
+                now=now,
+            )
+            outcome.failed += len(unknown)
+
+        if known:
+            await self._reread(tenant_id=tenant_id, known=known, now=now, outcome=outcome)
+
+        await self._uow.commit()
+        return outcome
+
+    async def _reread(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        known: dict[PMSProvider, list[QueuedWebhookEvent]],
+        now: datetime,
+        outcome: TenantWebhookOutcome,
+    ) -> None:
+        since = (
+            min(event.received_at for group in known.values() for event in group)
+            - RE_READ_LOOKBACK
+        )
+        try:
+            report = await self._sync.execute(
+                tenant_id=tenant_id,
+                since=since,
+                now=now,
+                # ONLY the providers this batch named. Without it a notice from one provider
+                # would spend another's quota on every tick, which is the opposite of what
+                # rule 12(d) asks for.
+                providers=set(known),
+                actor_type=TimelineActorType.WEBHOOK,
+                source=WEBHOOK_SOURCE,
+            )
+        except AmbiguousPropertyExternalIdError:
+            # Two properties of one provider share a `pms_external_id`. The re-read happened;
+            # what failed is resolving its result onto a home, which is what `UNMAPPABLE`
+            # names. Retried rather than exhausted because a person can fix the duplicate.
+            await _schedule_retry(
+                self._queue,
+                [event for group in known.values() for event in group],
+                failure=WebhookEventFailure(
+                    code=UNMAPPABLE, field="property.pms_external_id"
+                ),
+                now=now,
+            )
+            outcome.failed += sum(len(group) for group in known.values())
+            return
+
+        failed_providers = {value.upper() for value in report.provider_failures}
+        landed: list[QueuedWebhookEvent] = []
+        for provider, group in known.items():
+            if provider.value.upper() in failed_providers:
+                await _schedule_retry(
+                    self._queue,
+                    group,
+                    failure=WebhookEventFailure(code=PROVIDER_UNAVAILABLE),
+                    now=now,
+                )
+                outcome.failed += len(group)
+            else:
+                landed.extend(group)
+
+        if not landed:
+            return
+
+        # R5.6 and D12: the transition is performed by the use case that already owns it,
+        # unmodified, so it carries actor `SYSTEM` and writes its `PropertyStateTransition`
+        # and its `TimelineEvent` in one transaction. This change introduces no new transition
+        # actor; the causality lives one step earlier, on the ingest's own `TimelineEvent`,
+        # which the re-read above wrote with actor `WEBHOOK`.
+        #
+        # Once per tenant, not once per notice: the use case re-evaluates the whole portfolio
+        # against the trigger, so calling it again per notice would repeat the same query for
+        # an answer that cannot have changed.
+        await self._advance.execute(
+            tenant_id=tenant_id,
+            trigger=PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN,
+            now=now,
+        )
+        await self._queue.mark_processed([event.id for event in landed], now=now)
+        outcome.processed += len(landed)
+
+
+def _by_provider(
+    events: Sequence[QueuedWebhookEvent],
+) -> tuple[dict[PMSProvider, list[QueuedWebhookEvent]], list[QueuedWebhookEvent]]:
+    """Split the notices into the ones naming a provider we can serve, and the rest.
+
+    Parsed exactly as the receiving path parses the route's `{provider}`, so a notice recorded
+    through the front door always resolves here.
+    """
+    known: dict[PMSProvider, list[QueuedWebhookEvent]] = {}
+    unknown: list[QueuedWebhookEvent] = []
+    for event in events:
+        try:
+            provider = PMSProvider(event.provider.strip().upper())
+        except ValueError:
+            unknown.append(event)
+            continue
+        known.setdefault(provider, []).append(event)
+    return known, unknown
+
+
+async def _schedule_retry(
+    queue: WebhookEventRepository,
+    events: Sequence[QueuedWebhookEvent],
+    *,
+    failure: WebhookEventFailure,
+    now: datetime,
+) -> None:
+    """Charge one attempt to each notice and set its own next slot (R5.3).
+
+    Grouped by CURRENT `attempts` rather than issued per notice: the backoff is a function of
+    how many times that particular notice has already failed, so two notices in the same group
+    with different histories must not be given the same slot. In practice this is one or two
+    statements, because a group's notices usually share a history.
+    """
+    by_attempts: dict[int, list[uuid.UUID]] = {}
+    for event in events:
+        by_attempts.setdefault(event.attempts, []).append(event.id)
+    for attempts, event_ids in by_attempts.items():
+        await queue.record_failure(
+            event_ids,
+            failure=failure,
+            next_attempt_at=now + webhook_retry_delay(attempts + 1),
+        )
 
 
 def _event_type(payload: dict[str, Any]) -> str:

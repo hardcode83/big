@@ -9,6 +9,7 @@ describe a state nobody can reconstruct.
 
 import dataclasses
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass
 from datetime import datetime
 
@@ -61,6 +62,15 @@ from app.timeline.domain.repositories import TimelineEventRepository
 
 PMS_SOURCE = "pms"
 CSV_SOURCE = "csv"
+WEBHOOK_SOURCE = "webhook"
+"""Where the causal chain of R5.6 starts, on the ingest's own `TimelineEvent` (D12).
+
+A third value beside the two that already exist rather than a reuse of `PMS_SOURCE`, because the
+question a person asks the timeline is *why did this reservation change now* — and "the provider
+told us something changed" is a different answer from "the periodic sync came round". The data
+travels the same road (the re-read goes through the same adapter and the same mapping); what
+differs is what set it in motion, and that is exactly what `source` records.
+"""
 
 
 class SyncReservationsFromPmsUseCase:
@@ -99,9 +109,34 @@ class SyncReservationsFromPmsUseCase:
 
 
     async def execute(
-        self, *, tenant_id: uuid.UUID, since: datetime, now: datetime
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        since: datetime,
+        now: datetime,
+        providers: Collection[PMSProvider] | None = None,
+        actor_type: TimelineActorType = TimelineActorType.SYSTEM,
+        source: str = PMS_SOURCE,
     ) -> IngestReport:
         """One call to the PMS **per provider**, not per tenant and not per property.
+
+        **The three optional arguments are what `reservations-webhooks` reuses this for** (its
+        D14), and they are arguments rather than a second use case on purpose: the re-read a
+        webhook triggers is this same operation — resolve the adapter, pull, feed
+        `ReservationIngestor` — and writing it again would be a second implementation of the
+        credential-read granularity that rule 9 of `steering/security.md` narrows by name. What
+        genuinely differs is only *which* providers to talk to and *who* to attribute the
+        resulting timeline events to.
+
+        `providers` restricts the run to a subset. `None` means every provider the portfolio
+        resolves to, which is what the scheduled and manual syncs want; the webhook job passes
+        the providers its batch actually names, so a notice from one provider never spends
+        another's quota.
+
+        `actor_type`/`source` describe **why** the reservation appeared, and only that. They do
+        not reach `property_state_transitions` — D12 is explicit that this change introduces no
+        new transition actor — they land on the ingest's own `TimelineEvent`, which is where the
+        causal chain of R5.6 is recorded.
 
         Per tenant is what this used to do, and it presupposes a single adapter per run — the
         assumption R2.2 retires. Per property would be the easy replacement and is the one that
@@ -127,6 +162,8 @@ class SyncReservationsFromPmsUseCase:
 
         try:
             for provider, group in _group_by_provider(self._factory, properties).items():
+                if providers is not None and provider not in providers:
+                    continue
                 await self._sync_one_provider(
                     tenant_id=tenant_id,
                     provider=provider,
@@ -135,6 +172,8 @@ class SyncReservationsFromPmsUseCase:
                     now=now,
                     report=report,
                     read_log=read_log,
+                    actor_type=actor_type,
+                    source=source,
                 )
         finally:
             # These rows are added to the SAME unit of work as the ingest, so what they really
@@ -177,6 +216,8 @@ class SyncReservationsFromPmsUseCase:
         now: datetime,
         report: IngestReport,
         read_log: CredentialReadLog,
+        actor_type: TimelineActorType,
+        source: str,
     ) -> None:
         """One provider's slice of the run. A failure here does NOT abort the others.
 
@@ -243,9 +284,9 @@ class SyncReservationsFromPmsUseCase:
                 rows=[IngestRow(dto=row) for row in fetched.reservations],
                 resolve_property=resolve,
                 now=now,
-                actor_type=TimelineActorType.SYSTEM,
+                actor_type=actor_type,
                 actor_user_id=None,
-                source=PMS_SOURCE,
+                source=source,
             ),
         )
 

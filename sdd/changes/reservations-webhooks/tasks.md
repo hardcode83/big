@@ -312,11 +312,27 @@ forzado en `infrastructure/`.
   > `attempts` se incrementa **en el propio UPDATE** (`attempts + 1`), nunca desde un valor leído
   > antes: dos ejecuciones solapadas escribirían las dos `attempts = 1` y el presupuesto de R5.3 no
   > llegaría nunca a su techo.
-- [ ] 4.2 Caso de uso de procesamiento en `application/webhooks.py`: lee el lote, agrupa por tenant, y
+- [x] 4.2 Caso de uso de procesamiento en `application/webhooks.py`: lee el lote, agrupa por tenant, y
   abre **una sesión marcada por tenant, nunca re-marcada**, extrayendo el helper de
   `app/scheduler/runner.py` en vez de usar `run_for_every_tenant` (que itera todos los tenants activos).
   Aislamiento por evento: uno que falla no arrastra a los demás. Alimenta `ReservationIngestor` como
   única ruta de upsert. Tests de los dos aislamientos (por evento y por tenant). [R5.1, R5.2, R5.4, R5.5]
+  > **Dos casos de uso, uno por sesión.** `ProcessWebhookEventsUseCase` corre sobre la sesión sin
+  > marcar —lee el lote, lo parte por tenant, agota la rama sin tenant de D11— y delega cada tenant
+  > a `ProcessTenantWebhookEventsUseCase`, que corre sobre la marcada. El helper extraído es
+  > `runner.run_in_marked_session`, y `run_for_every_tenant` pasa a usarlo, así que no hay dos
+  > implementaciones del patrón. Devuelve `TenantWorkResult` en vez de un valor pelado porque
+  > `None` es un retorno legítimo de un job escrito por efectos: leerlo como fallo contaría como
+  > roto cada ejecución correcta.
+  > **La re-lectura es `SyncReservationsFromPmsUseCase`, con tres argumentos nuevos**
+  > (`providers`, `actor_type`, `source`) y ningún cambio de sustancia — que es lo que pide D14:
+  > ahí ya viven la ruta única de upsert (R5.2), el aislamiento por proveedor y la granularidad de
+  > auditoría que la regla 9 acota por su nombre. `providers` acota la ejecución a los proveedores
+  > que el lote nombra, para que un aviso de uno no gaste la cuota de otro.
+  > **Efecto colateral en un test de `celery-jobs`**: `test_every_tenant_gets_a_session_bound_to_itself`
+  > comparaba `id(session)`, y al extraer el helper cada sesión queda inalcanzable antes de que se
+  > construya la siguiente, así que CPython reutiliza la dirección. Se guardan los objetos en vez de
+  > sus direcciones: la garantía es la misma, el instrumento ya no.
 - [ ] 4.3 Reintentos: `attempts < 3` en la selección, incremento y `next_attempt_at = now + backoff` al
   fallar, `error` estructurado al agotarlos. Tests: los tres reintentos con su espaciado creciente, que
   el cuarto no ocurre, y que un evento agotado **no** vuelve a seleccionarse en cada tick. Incluye la
