@@ -336,6 +336,23 @@ Cadencia inicial 60 s en `CADENCES`, holgada frente al techo medido de un ciclo 
 La coalescencia no necesita una ventana propia porque **el lote ya es la ventana**. Un test cierra R6.3:
 el puerto del adapter no se toca desde el router.
 
+**El «destino» es `(tenant, proveedor)`, y la granularidad es la garantía.** Se precisa aquí porque la
+sección 4 obligó a elegirla y la elección no es indiferente: con destino **por reserva**, N avisos sobre
+N reservas distintas darían N llamadas salientes —acotadas por el volumen de peticiones, que es
+exactamente lo que 12(d) prohíbe—. Agrupando por proveedor, el techo por ejecución es
+(tenants × proveedores del lote) y no se mueve con el tráfico. La re-lectura es por tanto la
+`list_reservations` que el sync ya hace, no una `get_reservation` por aviso.
+
+**Y el `since` de esa re-lectura no puede anclarse en el aviso** (decidido en la implementación de 4.2,
+`RE_READ_LOOKBACK`, marcado `ASSUMPTION` en el código). Un aviso anuncia un cambio **ya ocurrido**, así
+que su `received_at` es posterior a la modificación que reporta: pedir al proveedor «todo lo cambiado
+desde el aviso» excluye justo la reserva que el aviso señala. El margen tiene que cubrir la latencia de
+entrega del proveedor, y **esa latencia está sin medir** — es una de las tres cosas que
+`sdd/roadmap/beds24-webhook-cutover-measurement.md` existe para establecer. Se toma **una hora antes del
+aviso más antiguo del grupo**: holgada frente a cualquier retraso plausible y barata frente a lo que
+importa, porque el **número de llamadas** lo fija el agrupamiento de arriba y no se mueve con el ancho de
+la ventana. Se revisa cuando llegue la medición.
+
 Rejected: una ventana de coalescencia en Redis además de la cadencia — dos relojes para una sola
 garantía, y el segundo no añade ninguna. Rejected: re-leer en el receptor con un debounce — cualquier
 llamada saliente síncrona en la ruta de recepción es exactamente lo que 12(d) prohíbe.
@@ -413,6 +430,16 @@ granularidad "una fila por credencial distinta y por ejecución" de la segunda e
 regla 9 (`app/integrations/application/use_cases.py:22-25,74-77,124-139`). R6.4 queda cubierto **por
 reutilización**, y la tarea que lo verifica es un test, no código nuevo.
 
+**Lo que la implementación sí añadió, y por qué no es una segunda implementación** (sección 4):
+`SyncReservationsFromPmsUseCase.execute` recibe tres argumentos opcionales — `providers`, `actor_type` y
+`source` — con los valores por defecto que tenía antes, de modo que el sync programado y el manual no
+cambian de comportamiento. `providers` acota la ejecución a los proveedores que el lote de webhooks
+nombra (sin él, un aviso de un proveedor gastaría la cuota de otro en cada tick); `actor_type`/`source`
+sólo describen **por qué** apareció la reserva y aterrizan en el `TimelineEvent` de la ingesta, nunca en
+`property_state_transitions` — D12 sigue intacto. Lo que **no** se duplicó es lo que esta decisión
+protege: la resolución de credenciales, la ruta única de upsert y el registro de lecturas siguen
+existiendo una sola vez.
+
 Rejected: una auditoría propia del procesamiento de webhooks — sería una segunda implementación de una
 granularidad que ya está decidida, medida y con su excepción nombrada en la regla 9.
 
@@ -467,7 +494,8 @@ el canal, y un comentario no lo es.
 |---|---|---|
 | API receptor | `backend/app/integrations/api/webhooks_router.py` (nuevo) | Endpoint de recepción, orden de comprobaciones de D5, `404` uniforme de D4 |
 | API administración | `backend/app/integrations/api/router.py`, `schemas.py`, `dependencies.py` | Alta y rotación del endpoint de webhook, con RBAC; respuesta de un solo uso con token y secreto |
-| Dominio | `backend/app/integrations/domain/{entities.py,repositories.py,errors.py}` | Entidad `WebhookEndpoint`, su puerto de repositorio, errores propios |
+| Dominio | `backend/app/integrations/domain/{entities.py,repositories.py,errors.py}` | Entidad `WebhookEndpoint`, su puerto de repositorio, errores propios; y para §4, `QueuedWebhookEvent` (el lote **sin cuerpo**, D13), el presupuesto de reintentos y la mitad lectora de `WebhookEventRepository` |
+| Dominio | `backend/app/integrations/domain/ports.py` | `PropertyStateAdvancer`: el puerto de un solo método por el que llega `AdvancePropertyStatesUseCase` sin importarlo (D12) |
 | Aplicación | `backend/app/integrations/application/webhooks.py` (nuevo) | Caso de uso de recepción (autenticar, descartar tarjeta, persistir) y de procesamiento del lote |
 | Aplicación | `backend/app/integrations/application/use_cases.py` | Casos de uso de alta y rotación, con su `AuditLog`; constante `WEBHOOK_SOURCE` junto a `PMS_SOURCE`/`CSV_SOURCE` |
 | Transiciones | **ningún fichero nuevo bajo `backend/app/properties/`** | `process_webhook_events` invoca `AdvancePropertyStatesUseCase` **sin modificarlo** (D12) y se convierte en el primer llamante en producción de `RESERVATION_CANCELLED_BEFORE_CHECKIN`. Si la implementación descubre que hace falta tocar `app/properties/`, es un `DESIGN-CONFLICT` y para |
