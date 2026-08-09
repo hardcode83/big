@@ -98,6 +98,17 @@ class SqlAlchemyWebhookEventRepository:
         # optimisation.
         return [QueuedWebhookEvent(*row) for row in rows]
 
+    async def lease(
+        self, event_ids: Sequence[uuid.UUID], *, until: datetime
+    ) -> None:
+        if not event_ids:
+            return
+        await self._session.execute(
+            update(WebhookEventModel)
+            .where(WebhookEventModel.id.in_(event_ids))
+            .values(next_attempt_at=until)
+        )
+
     async def mark_processed(
         self, event_ids: Sequence[uuid.UUID], *, now: datetime
     ) -> None:

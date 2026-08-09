@@ -54,8 +54,12 @@ class WebhookEventModel(Base, UUIDPrimaryKeyMixin):
     mistake. `error` must never echo the raw body back: that would reintroduce through
     the text column what `payload` just dropped.
 
-    Nothing writes here yet; `reservations-webhooks` inherits the contract with its own
-    test. Do not restate rule 11 here.
+    `reservations-webhooks` is the writer, and it holds the contract with its own tests: the
+    receiving route inserts the row (with the body scrubbed of card data first), and the
+    `process_webhook_events` job updates `processed`/`processed_at`, `attempts`,
+    `next_attempt_at` and `error`. Every value that reaches `error` is rendered from a
+    `WebhookEventFailure`, which is what makes rule 11's structured form structural rather than
+    remembered. Do not restate rule 11 here.
     """
 
     __tablename__ = "webhook_events"

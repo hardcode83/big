@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.integrations.application.webhooks import (
+    BATCH_LEASE,
     ProcessWebhookEventsUseCase,
     TenantWebhookOutcome,
 )
@@ -158,6 +159,121 @@ async def test_a_notice_is_invisible_until_its_wait_has_passed(
 
     assert (await use_case.execute(now=row.next_attempt_at - timedelta(seconds=1))).selected == 0
     assert (await use_case.execute(now=row.next_attempt_at)).selected == 1
+
+
+@pytest.mark.asyncio
+async def test_notices_with_different_histories_get_different_slots(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """`_schedule_retry` groups by CURRENT `attempts` (R5.3, D9).
+
+    Two notices that fail together in the same group can have failed a different number of
+    times before, and the backoff is a function of that history. Issuing one statement for the
+    whole group would give the veteran the newcomer's slot — a silent shortening of its wait,
+    which is the one way an exponential backoff stops being exponential. Nothing pinned this
+    until the QA panel of this section asked for it.
+    """
+    fresh = WebhookEventModel(
+        tenant_id=tenant_a.id,
+        provider="MOCK",
+        event_type="booking.modified",
+        payload={},
+        received_at=NOW,
+        attempts=0,
+    )
+    veteran = WebhookEventModel(
+        tenant_id=tenant_a.id,
+        provider="MOCK",
+        event_type="booking.modified",
+        payload={},
+        received_at=NOW,
+        attempts=1,
+    )
+    db_session.add_all([fresh, veteran])
+    await db_session.flush()
+    await db_session.commit()
+
+    await _always_failing_batch(db_session).execute(now=NOW)
+
+    await db_session.refresh(fresh)
+    await db_session.refresh(veteran)
+    assert (fresh.attempts, veteran.attempts) == (1, 2)
+    # First failure waits one base delay; the second waits two.
+    assert fresh.next_attempt_at == NOW + RETRY_BASE_DELAY
+    assert veteran.next_attempt_at == NOW + RETRY_BASE_DELAY * 2
+
+
+@pytest.mark.asyncio
+async def test_the_batch_is_claimed_before_any_work_begins(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """R6.2 and D10: the outbound-call ceiling must not depend on the Redis lock's TTL.
+
+    `select_pending` takes no row lock, so two overlapping runs would otherwise select the SAME
+    notices and each re-read the same destination — and runs CAN overlap, because `task_lock`'s
+    TTL is finite by design (`celery-jobs` D9 prefers expiry to a permanent wedge). The lease is
+    what makes a concurrent run see the claim instead of the rows. Found by the security panel
+    of this section.
+    """
+    event_id = await _failing_notice(db_session, tenant_a.id)
+    claimed: list[int] = []
+
+    async def run_for_tenant(tenant_id, events, now):
+        # Mid-run: a second execution starting here must find nothing to do.
+        concurrent = await SqlAlchemyWebhookEventRepository(db_session).select_pending(
+            now=now, limit=10
+        )
+        claimed.append(len(concurrent))
+        return TenantWebhookOutcome(processed=0)
+
+    await ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=run_for_tenant,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    ).execute(now=NOW)
+
+    assert claimed == [0], "a concurrent run could still see the leased batch"
+    # The claim costs the notice no retry budget: a run that dies mid-batch must not spend an
+    # attempt the notice never got.
+    row = await db_session.get(WebhookEventModel, event_id)
+    await db_session.refresh(row)
+    assert row.attempts == 0
+    assert row.next_attempt_at == NOW + BATCH_LEASE
+
+
+@pytest.mark.asyncio
+async def test_the_lease_lapses_so_a_dead_runs_batch_is_not_stranded(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """The other half of the trade: a claim nobody releases must expire on its own."""
+    await _failing_notice(db_session, tenant_a.id)
+    reached: list[datetime] = []
+
+    async def dies(tenant_id, events, now):
+        reached.append(now)
+        raise RuntimeError("the worker died before recording anything")
+
+    use_case = ProcessWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        run_for_tenant=dies,
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    with pytest.raises(RuntimeError):
+        await use_case.execute(now=NOW)
+
+    assert reached == [NOW]
+    # Still claimed a moment before the lease ends: nothing reached the runner.
+    assert (
+        await use_case.execute(now=NOW + BATCH_LEASE - timedelta(seconds=1))
+    ).selected == 0
+    assert reached == [NOW]
+
+    # And the moment it lapses, the batch is workable again — the claim expired on its own,
+    # with the retry budget untouched, so nothing was stranded by the death of its owner.
+    lapsed = NOW + BATCH_LEASE
+    with pytest.raises(RuntimeError):
+        await use_case.execute(now=lapsed)
+    assert reached == [NOW, lapsed]
 
 
 @pytest.mark.asyncio

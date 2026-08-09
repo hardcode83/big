@@ -318,6 +318,20 @@ selecciona `processed = FALSE AND attempts < 3 AND (next_attempt_at IS NULL OR n
 al fallar incrementa `attempts` y fija `next_attempt_at = now + backoff(attempts)`. Eso son los "3
 reintentos con backoff exponencial" de PRD §16, persistidos.
 
+**Añadido en la sección 4 tras el panel de seguridad: la selección además _reclama_ el lote.**
+`select_pending` no tomaba ninguna prenda sobre las filas que devolvía —ni bloqueo, ni lease, y ni
+`attempts` ni `next_attempt_at` se movían al seleccionar—, así que lo único que impedía que dos
+ejecuciones solapadas cogieran **las mismas filas** era el lock de Redis, cuyo TTL es finito **a
+propósito** (D9 de `celery-jobs` prefiere un lock que caduque a uno que atasque el job para
+siempre). Una ejecución que se pasara de su TTL dejaba que el siguiente tick re-seleccionara el
+mismo lote y emitiera una **segunda llamada saliente al mismo destino**: el techo de D10 pasaba a
+depender de un TTL en vez de de la cola, que es justo el acoplamiento con el volumen que la regla
+12(d) prohíbe. Ahora el lote se marca `next_attempt_at = now + BATCH_LEASE` (15 min) y se
+commitea **antes** de trabajar. Se escribe en `next_attempt_at` y no en una columna nueva porque
+«no seleccionable antes de este instante» es ya lo que esa columna significa, y **no toca
+`attempts`**: una ejecución que muera a medias le cuesta a sus avisos una espera, nunca un trozo
+de su presupuesto de reintentos.
+
 Rejected: una subtarea Celery por evento con `autoretry_for` + `retry_backoff` — el estado del reintento
 vive en el broker, así que un reinicio del worker lo pierde y, peor, el job por cadencia no puede
 distinguir "en vuelo" de "pendiente" y reprocesa. Rejected: contar intentos en Redis — el contador
@@ -342,6 +356,16 @@ N reservas distintas darían N llamadas salientes —acotadas por el volumen de 
 exactamente lo que 12(d) prohíbe—. Agrupando por proveedor, el techo por ejecución es
 (tenants × proveedores del lote) y no se mueve con el tráfico. La re-lectura es por tanto la
 `list_reservations` que el sync ya hace, no una `get_reservation` por aviso.
+
+**Una re-lectura por destino, en bucle, y no una llamada que los lleve todos** (corregido en la
+sección 4 tras los paneles de arquitectura y QA). El número de llamadas es el mismo —el caso de uso
+de sync ya emitía una por grupo de proveedor—, pero la unidad de fallo y la de ventana pasan a ser
+el destino. Importa por dos cosas que se midieron: `AmbiguousPropertyExternalIdError` escapa del
+`try` por proveedor del sync, así que una sola llamada abarcando todos convertía el
+`pms_external_id` duplicado de **un** proveedor en fallo de los avisos de **todos** los demás del
+mismo tenant —contra R5.4, reproducido por el panel—; y la ventana quedaba anclada en el aviso más
+antiguo del lote entero, ensanchando la de un proveedor porque otro distinto tenía un aviso más
+viejo en el mismo tick.
 
 **Y el `since` de esa re-lectura no puede anclarse en el aviso** (decidido en la implementación de 4.2,
 `RE_READ_LOOKBACK`, marcado `ASSUMPTION` en el código). Un aviso anuncia un cambio **ya ocurrido**, así

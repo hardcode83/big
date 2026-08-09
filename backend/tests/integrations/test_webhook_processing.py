@@ -28,8 +28,10 @@ from app.integrations.domain.entities import (
     MAX_WEBHOOK_ATTEMPTS,
     QueuedWebhookEvent,
 )
+from app.integrations.application.webhooks import RE_READ_LOOKBACK
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.domain.errors import PmsUnavailableError
+from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
 from app.integrations.infrastructure.mock_pms import SEED_PROPERTY_CODE, MockPMSAdapter
 from app.integrations.infrastructure.models import WebhookEventModel
 from app.integrations.infrastructure.repositories import SqlAlchemyWebhookEventRepository
@@ -676,5 +678,105 @@ async def test_the_re_read_window_starts_before_the_oldest_notice(
         db_session, _Factory({PMSProvider.MOCK: _RecordingAdapter()}), _CountingAdvancer()
     ).execute(tenant_id=tenant_a.id, events=[first, second], now=NOW)
 
-    assert seen and all(since < oldest for since in seen)
+    # The EXACT anchor, not merely "earlier than the oldest notice". With the notices 30
+    # minutes apart and a 1 h lookback, `since < oldest` holds just as well when anchored on
+    # the NEWEST notice, so the looser assertion could not tell `min` from `max` — which is
+    # precisely the selection D10 specifies. The QA panel of this section caught that.
+    assert seen == [oldest - RE_READ_LOOKBACK]
     assert SEED_PROPERTY_CODE == property_a.pms_external_id
+
+
+@pytest.mark.asyncio
+async def test_each_destination_gets_its_own_window(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """D10 anchors the lookback on the oldest notice **of the group**, and the group is the
+    destination.
+
+    A shared anchor would widen one provider's window because a *different* provider happened
+    to have an older notice in the same tick — the volume coupling of rule 12(d), displaced
+    from the call count onto the window width. Found by the architecture panel of this section.
+    """
+    await _beds24_property(db_session, tenant_a.id)
+    seen: dict[PMSProvider, list[datetime]] = {}
+
+    class _RecordingFor:
+        def __init__(self, provider: PMSProvider) -> None:
+            self._provider = provider
+
+        async def list_reservations(self, since, property_external_id=None):
+            seen.setdefault(self._provider, []).append(since)
+            return await MockPMSAdapter(include_broken_rows=False).list_reservations(
+                since, property_external_id
+            )
+
+        async def get_reservation(self, external_id):
+            return None
+
+    ancient = NOW - timedelta(days=2)
+    old_mock = await _notice(
+        db_session, tenant_id=tenant_a.id, provider="MOCK", received_at=ancient
+    )
+    fresh_beds24 = await _notice(
+        db_session, tenant_id=tenant_a.id, provider="BEDS24", received_at=NOW
+    )
+    factory = _Factory(
+        {
+            PMSProvider.MOCK: _RecordingFor(PMSProvider.MOCK),
+            PMSProvider.BEDS24: _RecordingFor(PMSProvider.BEDS24),
+        }
+    )
+
+    await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[old_mock, fresh_beds24], now=NOW
+    )
+
+    assert seen[PMSProvider.MOCK] == [ancient - RE_READ_LOOKBACK]
+    # The two-day-old MOCK notice must not drag BEDS24's window back with it.
+    assert seen[PMSProvider.BEDS24] == [NOW - RE_READ_LOOKBACK]
+
+
+@pytest.mark.asyncio
+async def test_an_unresolvable_property_costs_only_its_own_destination(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R5.4, for the branch the QA panel of this section demonstrated was broken.
+
+    `AmbiguousPropertyExternalIdError` escapes `_sync_one_provider`'s own try, so while the
+    re-read was one call carrying every provider, one provider's duplicate `pms_external_id`
+    marked EVERY other provider's notices failed — and re-marked them on every tick until a
+    person fixed the duplicate. Re-reading per destination is what confines it.
+    """
+    await _beds24_property(db_session, tenant_a.id)
+    healthy = await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK")
+    ambiguous = await _notice(db_session, tenant_id=tenant_a.id, provider="BEDS24")
+
+    class _AmbiguousAdapter:
+        async def list_reservations(self, since, property_external_id=None):
+            raise AmbiguousPropertyExternalIdError(
+                tenant_id=tenant_a.id, pms_external_id="PMS-B24"
+            )
+
+        async def get_reservation(self, external_id):
+            return None
+
+    factory = _Factory(
+        {
+            PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False),
+            PMSProvider.BEDS24: _AmbiguousAdapter(),
+        }
+    )
+
+    outcome = await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[healthy, ambiguous], now=NOW
+    )
+
+    assert outcome == TenantWebhookOutcome(processed=1, failed=1)
+    landed = await db_session.get(WebhookEventModel, healthy.id)
+    blocked = await db_session.get(WebhookEventModel, ambiguous.id)
+    await db_session.refresh(landed)
+    await db_session.refresh(blocked)
+    assert landed.processed is True
+    assert landed.error is None
+    assert blocked.processed is False
+    assert blocked.error == '{"code":"UNMAPPABLE","field":"property.pms_external_id"}'

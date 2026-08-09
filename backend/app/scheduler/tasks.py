@@ -1,10 +1,14 @@
-"""The four Celery tasks of PRD §8.3 (`celery-jobs` R1, design D2).
+"""The periodic Celery tasks (`celery-jobs` R1, design D2).
 
 Thin by design: take the lock, wire the use case to a session the runner owns, return the
 report. No rules live here — this is the scheduler's equivalent of a FastAPI router.
 
-Names are the PRD's, literally: `check_checkin_windows`, `process_checkouts`,
-`mark_occupied_estimated`, `check_sla_breaches`.
+**Four of PRD §8.3, plus one that is not in it.** The four carry the PRD's names literally —
+`check_checkin_windows`, `process_checkouts`, `mark_occupied_estimated`, `check_sla_breaches`
+— and run the same per-tenant loop. The fifth, `process_webhook_events`, arrived with
+`reservations-webhooks`: the PRD never named it because §16 describes the queue without a
+drainer, and its shape differs too — it reads a queue first and only then knows which tenants
+it concerns, so it takes the lock through `_locked` without going through `_guarded`.
 """
 
 import logging

@@ -37,11 +37,19 @@ class WebhookEventRepository(Protocol):
     attributed to be recorded rather than dropped (R1.8). A `tenant_id` parameter would have to
     accept `None`, which is exactly the signature that invites a caller to pass it by accident.
 
-    The reading half arrived with the processing job (§4). Every method here runs on a session
-    that was **never marked**, and for this table that is not a convention but a correctness
-    requirement: `tenant_id` is nullable, so a marked session's `tenant_id = X` predicate hides
-    the `NULL` rows silently rather than erroring, and those are precisely the rows D11 has to
-    reach in order to exhaust them.
+    The reading half arrived with the processing job (§4), and **which session an adapter runs
+    on depends on the caller, not on the method** — the panel of that section caught this
+    paragraph claiming otherwise. There are two callers and the difference is deliberate:
+
+    - The **batch** half — `select_pending`, `lease`, and the `exhaust`/`record_failure` the
+      batch issues for notices no tenant session can reach — runs on a session that was
+      **never marked**. For this table that is not a convention but a correctness requirement:
+      `tenant_id` is nullable, so a marked session's `tenant_id = X` predicate hides the `NULL`
+      rows silently rather than erroring, and those are precisely the rows D11 has to exhaust.
+    - The **per-tenant** half — the `mark_processed`/`record_failure` that record one tenant's
+      outcome — runs on that tenant's **marked** session, on purpose: it is what puts the mark
+      in the same transaction as the ingest that earned it. The global filter narrows those
+      writes to the tenant as well, so the scoping is belt and braces.
     """
 
     async def add(self, event: WebhookEvent) -> None:
@@ -66,6 +74,26 @@ class WebhookEventRepository(Protocol):
         on every tick.
 
         Returns `QueuedWebhookEvent`, which carries no payload. See that type for why.
+        """
+        ...
+
+    async def lease(
+        self, event_ids: Sequence[uuid.UUID], *, until: datetime
+    ) -> None:
+        """Claim this batch: hide these notices from any other run until `until` (R6.2, D10).
+
+        **Without it the "one outbound call per destination per tick" ceiling rests on a Redis
+        TTL**, which is what the security panel of §4 found. `select_pending` takes no lock and
+        moves nothing, so two overlapping runs select the SAME rows and each re-reads the same
+        destination — and the runs can overlap, because `task_lock`'s TTL is finite on purpose
+        (`celery-jobs` D9 prefers a lock that expires to one that wedges the job for ever). A
+        run that overruns its lock would therefore multiply outbound calls exactly as the queue
+        grows, which is the coupling rule 12(d) forbids.
+
+        Written to `next_attempt_at` rather than to a column of its own: "not selectable before
+        this instant" is already what that column means, and a second column would be a second
+        answer to the same question. It leaves `attempts` **untouched**, so a run that dies
+        mid-batch costs its notices a delay and never a slice of their retry budget.
         """
         ...
 

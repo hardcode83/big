@@ -242,6 +242,20 @@ thousands of rows; 500 is comfortably above the cadence's expected arrival rate,
 operation the batch is the whole queue.
 """
 
+BATCH_LEASE = timedelta(minutes=15)
+"""How long a run's claim on its batch holds (R6.2, D10).
+
+Sized against the thing it defends: `task_lock`'s TTL is three cadences (180 s), so a second
+run cannot even start before then, and the lease must comfortably outlive that window or it
+would expire at the same moment the lock does and defend nothing.
+
+The cost of it being too long is bounded and mild — a run that dies mid-batch leaves its
+remaining notices invisible until the lease lapses, then they return with their retry budget
+intact, because `lease` does not touch `attempts`. Fifteen minutes is a handful of ticks: long
+enough that no plausible overrun escapes it, short enough that a crashed worker's backlog is
+not stranded.
+"""
+
 RE_READ_LOOKBACK = timedelta(hours=1)
 """How far BEFORE the oldest notice in the group the re-read window starts.
 
@@ -331,6 +345,14 @@ class ProcessWebhookEventsUseCase:
         report = WebhookProcessingReport(selected=len(batch))
         if not batch:
             return report
+
+        # Claim the batch BEFORE any work and commit it immediately, so a concurrent run sees
+        # the claim rather than the rows. This is what makes D10's ceiling a property of the
+        # queue instead of a property of the Redis lock's TTL — see `WebhookEventRepository.lease`.
+        await self._queue.lease(
+            [event.id for event in batch], until=now + BATCH_LEASE
+        )
+        await self._uow.commit()
 
         by_tenant: dict[uuid.UUID, list[QueuedWebhookEvent]] = {}
         unattributed: list[QueuedWebhookEvent] = []
@@ -448,49 +470,31 @@ class ProcessTenantWebhookEventsUseCase:
         now: datetime,
         outcome: TenantWebhookOutcome,
     ) -> None:
-        since = (
-            min(event.received_at for group in known.values() for event in group)
-            - RE_READ_LOOKBACK
-        )
-        try:
-            report = await self._sync.execute(
-                tenant_id=tenant_id,
-                since=since,
-                now=now,
-                # ONLY the providers this batch named. Without it a notice from one provider
-                # would spend another's quota on every tick, which is the opposite of what
-                # rule 12(d) asks for.
-                providers=set(known),
-                actor_type=TimelineActorType.WEBHOOK,
-                source=WEBHOOK_SOURCE,
-            )
-        except AmbiguousPropertyExternalIdError:
-            # Two properties of one provider share a `pms_external_id`. The re-read happened;
-            # what failed is resolving its result onto a home, which is what `UNMAPPABLE`
-            # names. Retried rather than exhausted because a person can fix the duplicate.
-            await _schedule_retry(
-                self._queue,
-                [event for group in known.values() for event in group],
-                failure=WebhookEventFailure(
-                    code=UNMAPPABLE, field="property.pms_external_id"
-                ),
-                now=now,
-            )
-            outcome.failed += sum(len(group) for group in known.values())
-            return
+        """One re-read per destination, each isolated from the others (D10, R5.4, R6.2).
 
-        failed_providers = {value.upper() for value in report.provider_failures}
+        **A loop, not one call carrying every provider**, and both halves of that matter. The
+        window: D10 anchors the lookback on "el aviso más antiguo **del grupo**", and the group
+        is the destination — a shared anchor would widen one provider's window because a
+        *different* provider happened to have an older notice in the same tick, which is the
+        volume coupling rule 12(d) exists to avoid, displaced onto the window. The blast radius:
+        `AmbiguousPropertyExternalIdError` escapes `_sync_one_provider`'s own try, so a single
+        call spanning every provider turned one provider's duplicate `pms_external_id` into a
+        failure for every OTHER provider's notices — R5.4 says a notice that fails must not stop
+        the rest, and the QA panel of this section demonstrated it did.
+
+        The call count is unchanged: `SyncReservationsFromPmsUseCase` already emitted one call
+        per provider group internally, so N loop iterations with one provider each cost exactly
+        what one call with N providers did.
+        """
         landed: list[QueuedWebhookEvent] = []
         for provider, group in known.items():
-            if provider.value.upper() in failed_providers:
-                await _schedule_retry(
-                    self._queue,
-                    group,
-                    failure=WebhookEventFailure(code=PROVIDER_UNAVAILABLE),
-                    now=now,
-                )
-                outcome.failed += len(group)
-            else:
+            if await self._reread_one(
+                tenant_id=tenant_id,
+                provider=provider,
+                group=group,
+                now=now,
+                outcome=outcome,
+            ):
                 landed.extend(group)
 
         if not landed:
@@ -512,6 +516,62 @@ class ProcessTenantWebhookEventsUseCase:
         )
         await self._queue.mark_processed([event.id for event in landed], now=now)
         outcome.processed += len(landed)
+
+    async def _reread_one(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        provider: PMSProvider,
+        group: list[QueuedWebhookEvent],
+        now: datetime,
+        outcome: TenantWebhookOutcome,
+    ) -> bool:
+        """Re-read ONE destination. `True` when its notices may be marked processed.
+
+        `since` is anchored on this destination's own oldest notice, never on the tenant's
+        batch — see `_reread`.
+        """
+        since = min(event.received_at for event in group) - RE_READ_LOOKBACK
+        try:
+            report = await self._sync.execute(
+                tenant_id=tenant_id,
+                since=since,
+                now=now,
+                # ONLY this destination. Without the filter a notice from one provider would
+                # spend another's quota on every tick, which is the opposite of what rule
+                # 12(d) asks for.
+                providers={provider},
+                actor_type=TimelineActorType.WEBHOOK,
+                source=WEBHOOK_SOURCE,
+            )
+        except AmbiguousPropertyExternalIdError:
+            # Two properties of this provider share a `pms_external_id`. The re-read happened;
+            # what failed is resolving its result onto a home, which is what `UNMAPPABLE`
+            # names. Retried rather than exhausted because a person can fix the duplicate —
+            # and charged to THIS destination only, which is why the loop exists.
+            await _schedule_retry(
+                self._queue,
+                group,
+                failure=WebhookEventFailure(
+                    code=UNMAPPABLE, field="property.pms_external_id"
+                ),
+                now=now,
+            )
+            outcome.failed += len(group)
+            return False
+
+        if provider.value.upper() in {
+            value.upper() for value in report.provider_failures
+        }:
+            await _schedule_retry(
+                self._queue,
+                group,
+                failure=WebhookEventFailure(code=PROVIDER_UNAVAILABLE),
+                now=now,
+            )
+            outcome.failed += len(group)
+            return False
+        return True
 
 
 def _by_provider(
