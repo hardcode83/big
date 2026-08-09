@@ -333,27 +333,67 @@ forzado en `infrastructure/`.
   > comparaba `id(session)`, y al extraer el helper cada sesión queda inalcanzable antes de que se
   > construya la siguiente, así que CPython reutiliza la dirección. Se guardan los objetos en vez de
   > sus direcciones: la garantía es la misma, el instrumento ya no.
-- [ ] 4.3 Reintentos: `attempts < 3` en la selección, incremento y `next_attempt_at = now + backoff` al
+- [x] 4.3 Reintentos: `attempts < 3` en la selección, incremento y `next_attempt_at = now + backoff` al
   fallar, `error` estructurado al agotarlos. Tests: los tres reintentos con su espaciado creciente, que
   el cuarto no ocurre, y que un evento agotado **no** vuelve a seleccionarse en cada tick. Incluye la
   rama de `tenant_id` NULL de D11 (se cuenta, se marca agotada, no bucle infinito). [R5.3, R1.8]
-- [ ] 4.4 Coalescing: agrupar el lote por destino de re-lectura y emitir **una** llamada por destino
+  > **Las dos mitades se prueban por separado porque fallan por separado.** El espaciado es regla
+  > pura de `domain/` (`webhook_retry_delay`) y va con test unitario de invariante —doblar, y
+  > rechazar `attempts=0`, que es el error de quien pasa el contador de antes del fallo—; el techo
+  > es una propiedad de un predicado SQL contra una fila, así que se demuestra empujando el mismo
+  > aviso por ticks sucesivos hasta que deja de seleccionarse. La única forma de probar que el
+  > cuarto intento no ocurre es intentar provocarlo.
+  > La rama sin tenant vive en `test_webhook_processing.py`, junto al resto de D11.
+- [x] 4.4 Coalescing: agrupar el lote por destino de re-lectura y emitir **una** llamada por destino
   distinto y por ejecución. Tests: N avisos del mismo destino producen una sola llamada, y un test que
   fija que **el puerto del adapter no se toca desde el router** (R6.3). [R6.1, R6.2, R6.3]
-- [ ] 4.5 Re-lectura por API a través del `pms_factory` existente, sin auditoría propia: reutiliza la
+  > **El destino es `(tenant, proveedor)`, y esa granularidad es la garantía, no un detalle.** Con
+  > destino por reserva, N avisos sobre N reservas distintas darían N llamadas — acotado por el
+  > volumen de peticiones, que es justo lo que la regla 12(d) prohíbe. Agrupando por proveedor, el
+  > techo por tick es (tenants × proveedores) y no se mueve con el tráfico. Veinte avisos, una
+  > llamada; dos destinos, una cada uno; y un proveedor que el lote no nombra no se llama (para eso
+  > está `providers`, si no un aviso gastaría la cuota de otro proveedor cada tick).
+  > R6.3 se prueba **desde fuera**, con un `POST` real al receptor: deja la fila encolada y **nada
+  > más** —cero reservas, cero timeline—, que es todo lo que una llamada saliente podría haber
+  > producido. Inspeccionar los imports del router probaría menos: una llamada podría colarse por
+  > cualquier colaborador que el router cablea.
+- [x] 4.5 Re-lectura por API a través del `pms_factory` existente, sin auditoría propia: reutiliza la
   granularidad "una fila por credencial distinta y por ejecución" que ya implementa el caso de uso de
   sync (D14). Test que lo verifica sobre una ejecución con varias propiedades servidas por una misma
   credencial de cuenta. [R6.4, R6.1]
-- [ ] 4.6 Transición y causalidad: invocar `AdvancePropertyStatesUseCase` **sin modificarlo** con
+  > Test contra el `SqlAlchemyPMSAdapterFactory` **real**, porque lo que se comprueba es la
+  > granularidad y un factory falso no la produce. Dos propiedades BEDS24 sobre una credencial de
+  > cuenta, una ejecución, **una** fila `PMS_CREDENTIAL_READ`, sin actor ni IP — como la regla 9
+  > dice de las suyas. Y la mitad difícil: BEDS24 aún no tiene adapter, así que la ejecución
+  > **falla** después de descifrar, y un rastro que sólo registrara los éxitos se dejaría fuera
+  > precisamente la lectura que ocurrió.
+- [x] 4.6 Transición y causalidad: invocar `AdvancePropertyStatesUseCase` **sin modificarlo** con
   `trigger=RESERVATION_CANCELLED_BEFORE_CHECKIN` (primer llamante en producción), y escribir el
   `TimelineEvent` de la ingesta con `actor_type=TimelineActorType.WEBHOOK` y una constante
   `WEBHOOK_SOURCE` nueva junto a `PMS_SOURCE`/`CSV_SOURCE`. Tests: la transición persiste su
   `PropertyStateTransition` **y** su `TimelineEvent` en la misma transacción, y la cadena causal es
   legible (evento → timeline de ingesta con actor `WEBHOOK` → transición con actor `SYSTEM`). Si esto
   exige tocar `app/properties/`, **es un `DESIGN-CONFLICT` y hay que parar** (D12). [R5.6]
-- [ ] 4.7 Desorden: test que procesa dos avisos del mismo objeto en orden inverso y comprueba que el
+  > **Ningún fichero de `app/properties/` tocado, así que no hay `DESIGN-CONFLICT`.** El caso de
+  > uso llega por el puerto `PropertyStateAdvancer` (`integrations/domain/ports.py`), de un solo
+  > método, y `AdvancePropertyStatesUseCase` lo satisface estructuralmente sin adaptador de por
+  > medio. Un puerto del tamaño de «pídele al dueño que reevalúe» es el que no puede crecer hasta
+  > convertirse en un segundo escritor de `current_operational_state`.
+  > Los tests corren la transición **de verdad**: propiedad en `AWAITING_CHECKIN`, la re-lectura
+  > devuelve la reserva cancelada, y al final hay `PropertyStateTransition` con actor `SYSTEM`, su
+  > `TimelineEvent`, la propiedad en `VACANT_READY` y **cero filas de `AuditLog`** — la primera
+  > excepción nombrada de la regla 9 sigue en pie porque ningún actor `WEBHOOK` llega a
+  > `property_state_transitions`. Ese último assert es el que se rompería el día que algo empezara
+  > a producir uno.
+- [x] 4.7 Desorden: test que procesa dos avisos del mismo objeto en orden inverso y comprueba que el
   estado final es el mismo, apoyándose en la idempotencia por `(tenant_id, external_pms_id)` y en que el
   dato viene de la re-lectura y no del cuerpo. [R5.7, R6.1]
+  > **Nada ordena ni secuencia, y ese es el punto**: lo que lo sostiene es que el cuerpo no se
+  > aplica (D13) y la re-lectura devuelve el estado actual las dos veces. Para que el test lo
+  > demuestre en vez de suponerlo, el cuerpo del aviso **miente a propósito** (`status: CONFIRMED`
+  > en un aviso de cancelación): si alguien lo leyera algún día, el test se pone rojo. Su pareja es
+  > `test_the_body_does_not_decide_anything`, donde el mismo cuerpo mentiroso y una re-lectura
+  > distinta dan un estado final distinto.
 - [ ] 4.8 Registrar `process_webhook_events` en `CADENCES` (`app/scheduler/schedule.py`, 60 s) y la tarea
   Celery en `app/scheduler/tasks.py` con su lock, siguiendo el patrón `_guarded`. Test de que
   `beat_schedule` y el TTL del lock se derivan de `CADENCES` sin números duplicados. [R5.1]

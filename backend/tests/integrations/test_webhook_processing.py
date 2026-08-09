@@ -406,6 +406,217 @@ async def test_the_batch_splits_by_tenant(
     assert report.processed == 3
 
 
+# --- Coalescing: the call count follows the cadence, not the traffic (R6.1-R6.3, D10) --------
+
+
+@pytest.mark.asyncio
+async def test_many_notices_for_one_provider_cost_one_call(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R6.2 and D10: the batch IS the coalescing window, so no second clock is needed.
+
+    Twenty notices is the shape rule 12(d) exists for — an anonymous caller who found the route
+    and is hammering it. What must not scale with that number is the outbound call.
+    """
+    notices = [await _notice(db_session, tenant_id=tenant_a.id) for _ in range(20)]
+    factory = _Factory({PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False)})
+
+    outcome = await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=notices, now=NOW
+    )
+
+    assert factory.calls == [PMSProvider.MOCK]
+    assert outcome == TenantWebhookOutcome(processed=20, failed=0)
+
+
+@pytest.mark.asyncio
+async def test_two_destinations_cost_one_call_each(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """One call per DISTINCT destination per execution — not one per notice, not one for all."""
+    await _beds24_property(db_session, tenant_a.id)
+    notices = [
+        await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK"),
+        await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK"),
+        await _notice(db_session, tenant_id=tenant_a.id, provider="BEDS24"),
+        await _notice(db_session, tenant_id=tenant_a.id, provider="BEDS24"),
+    ]
+    factory = _Factory(
+        {
+            PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False),
+            PMSProvider.BEDS24: MockPMSAdapter(include_broken_rows=False),
+        }
+    )
+
+    await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=notices, now=NOW
+    )
+
+    assert sorted(factory.calls, key=lambda p: p.value) == [
+        PMSProvider.BEDS24,
+        PMSProvider.MOCK,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_a_provider_the_batch_did_not_name_is_not_called(
+    db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """`providers` is what keeps one provider's notice from spending another's quota.
+
+    Without it the re-read would sync the tenant's whole portfolio on every tick that any
+    notice arrived, which is the coupling between request volume and outbound traffic that
+    rule 12(d) forbids — just displaced onto a provider that was never mentioned.
+    """
+    await _beds24_property(db_session, tenant_a.id)
+    notice = await _notice(db_session, tenant_id=tenant_a.id, provider="MOCK")
+    factory = _Factory(
+        {
+            PMSProvider.MOCK: MockPMSAdapter(include_broken_rows=False),
+            PMSProvider.BEDS24: AssertionError("BEDS24 named no notice in this batch"),
+        }
+    )
+
+    await _tenant_use_case(db_session, factory, _CountingAdvancer()).execute(
+        tenant_id=tenant_a.id, events=[notice], now=NOW
+    )
+
+    assert factory.calls == [PMSProvider.MOCK]
+
+
+@pytest.mark.asyncio
+async def test_receiving_a_webhook_makes_no_outbound_call(
+    api, db_session: AsyncSession, tenant_a, property_a
+) -> None:
+    """R6.3, from the outside: the receiving route reaches no provider, synchronously or at all.
+
+    Asserted over the whole receiving path rather than by inspecting the router, because R6.3 is
+    a property of the ROUTE and a call could be smuggled in through any collaborator it wires.
+    What proves it is that the request leaves a queued notice and nothing else — no reservation,
+    no timeline event, which is all a re-read could possibly have produced.
+    """
+    from app.core.crypto import encrypt
+    from app.integrations.domain.webhook_auth import (
+        generate_header_secret,
+        generate_webhook_token,
+        hash_webhook_token,
+    )
+    from app.integrations.infrastructure.models import WebhookEndpointModel
+
+    token = generate_webhook_token()
+    secret = generate_header_secret()
+    db_session.add(
+        WebhookEndpointModel(
+            tenant_id=tenant_a.id,
+            provider=PMSProvider.MOCK,
+            token_hash=hash_webhook_token(token),
+            header_name="X-Provider-Auth",
+            header_secret_encrypted=encrypt(secret).ciphertext,
+        )
+    )
+    await db_session.flush()
+
+    response = await api.post(
+        f"/api/v1/webhooks/mock/{token}",
+        json={"event": "booking.modified"},
+        headers={"X-Provider-Auth": secret},
+    )
+
+    assert response.status_code == 202
+    queued = (
+        await db_session.execute(
+            select(WebhookEventModel.id).where(WebhookEventModel.tenant_id == tenant_a.id)
+        )
+    ).scalars().all()
+    assert len(queued) == 1
+    for model in (ReservationModel, TimelineEventModel):
+        produced = (
+            await db_session.execute(
+                select(model.id).where(model.tenant_id == tenant_a.id)
+            )
+        ).scalars().all()
+        assert produced == [], f"{model.__tablename__} was written on the receiving path"
+
+
+# --- The re-read's credential audit is reused, not rebuilt (R6.4, D14) -----------------------
+
+
+@pytest.mark.asyncio
+async def test_one_account_credential_serving_two_properties_is_audited_once(
+    db_session: AsyncSession, tenant_a
+) -> None:
+    """R6.4 through the REAL factory, because the granularity is what is being checked.
+
+    The formulation lives in one place — the second named exception of rule 9 in
+    `steering/security.md` — and this change writes no second implementation of it (D14). What
+    this proves is that the reuse actually reaches it: two properties on one account credential,
+    one execution, one row. `BEDS24` has no adapter yet, so the run also fails the notice, and
+    that is the harder half of the case: the credential was decrypted BEFORE the failure, so a
+    trail that only recorded successes would be missing precisely the read that happened.
+    """
+    from app.audit.domain.actions import ENTITY_PMS_CREDENTIAL, PMS_CREDENTIAL_READ
+    from app.audit.infrastructure.models import AuditLogModel
+    from app.core.crypto import encrypt
+    from app.integrations.domain.entities import PmsCredential
+    from app.integrations.domain.enums import PmsCredentialScope
+    from app.integrations.infrastructure.pms_factory import SqlAlchemyPMSAdapterFactory
+    from app.integrations.infrastructure.repositories import (
+        SqlAlchemyPmsCredentialRepository,
+    )
+
+    await _beds24_property(db_session, tenant_a.id)
+    second = PropertyModel(
+        tenant_id=tenant_a.id,
+        name="Beds24 flat two",
+        internal_code="B24-2",
+        pms_external_id="PMS-B24-2",
+        pms_provider=PMSProvider.BEDS24,
+    )
+    db_session.add(second)
+    credential = PmsCredential(
+        id=uuid.uuid4(),
+        tenant_id=tenant_a.id,
+        provider=PMSProvider.BEDS24,
+        scope=PmsCredentialScope.ACCOUNT,
+        secret=encrypt("refresh-token"),
+    )
+    await SqlAlchemyPmsCredentialRepository(db_session).upsert(tenant_a.id, credential)
+    await db_session.flush()
+    notice = await _notice(db_session, tenant_id=tenant_a.id, provider="BEDS24")
+
+    use_case = ProcessTenantWebhookEventsUseCase(
+        queue=SqlAlchemyWebhookEventRepository(db_session),
+        sync=SyncReservationsFromPmsUseCase(
+            factory=SqlAlchemyPMSAdapterFactory(
+                credentials=SqlAlchemyPmsCredentialRepository(db_session)
+            ),
+            reservations=SqlAlchemyReservationRepository(db_session),
+            properties=SqlAlchemyPropertyRepository(db_session),
+            guests=SqlAlchemyGuestRepository(db_session),
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            uow=SqlAlchemyUnitOfWork(db_session),
+            audit=SqlAlchemyAuditLogRepository(db_session),
+        ),
+        advance=_CountingAdvancer(),
+        uow=SqlAlchemyUnitOfWork(db_session),
+    )
+    outcome = await use_case.execute(tenant_id=tenant_a.id, events=[notice], now=NOW)
+
+    assert outcome == TenantWebhookOutcome(processed=0, failed=1)
+    rows = (
+        await db_session.execute(
+            select(AuditLogModel).where(AuditLogModel.action == PMS_CREDENTIAL_READ)
+        )
+    ).scalars().all()
+    assert len(rows) == 1, "two properties on one account credential is still one read"
+    assert rows[0].entity_type == ENTITY_PMS_CREDENTIAL
+    assert rows[0].entity_id == credential.id
+    # Rule 9's own wording: these rows go without an actor, and the webhook job has no more of
+    # one than the command does.
+    assert rows[0].actor_user_id is None
+    assert rows[0].actor_ip is None
+
+
 @pytest.mark.asyncio
 async def test_the_re_read_window_starts_before_the_oldest_notice(
     db_session: AsyncSession, tenant_a, property_a
