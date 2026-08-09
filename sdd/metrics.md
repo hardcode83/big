@@ -31,3 +31,4 @@
 | pms-beds24-adapter | new, design, tasks, run, review, archive | 267607 | 713296 | 203542711 | 153.3613 | 2026-08-05 | 2026-08-07 |
 | properties-crud | new, design, tasks, run, review, archive | 252521 | 705045 | 321695788 | 214.1778 | 2026-08-07 | 2026-08-08 |
 | api-ingress-routing | new, design, tasks, run, review, archive | 7144867 | 2351309 | 521434721 | 363.1416 | 2026-08-02 | 2026-08-08 |
+| cleaning-photos-storage | new, design, tasks, run, review | 497688 | 1270684 | 276149067 | 200.2808 | 2026-08-08 | — |
