@@ -49,3 +49,9 @@ class ErrorCode(StrEnum):
     # Absence. Also the answer for a resource of another tenant, which must not reveal
     # that it exists (`steering/security.md` rule 1).
     NOT_FOUND = "NOT_FOUND"
+
+    # A dependency of ours failed, not the caller (`cleaning-photos-storage` R1.5: the file
+    # store refused the write). Distinct from `INTERNAL_ERROR` on purpose — the frontend can
+    # tell "retrying may work" from "this is our bug", and the two are different messages to
+    # show a cleaner standing in a flat with a photo she cannot upload.
+    BAD_GATEWAY = "BAD_GATEWAY"

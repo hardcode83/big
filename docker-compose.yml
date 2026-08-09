@@ -85,6 +85,18 @@ services:
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
+      # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
+      # Volumen con nombre y NO un bind mount del árbol: `/app` es el repositorio por el bind
+      # de arriba, así que sin este volumen las fotos aparecerían en `git status`. El
+      # `LocalFileStorage` escribe exactamente aquí (`MEDIA_ROOT = /app/media`).
+      #
+      # Va montado solo en `backend`: es el único servicio que sube y sirve ficheros. `worker`
+      # y `beat` no tocan almacenamiento hoy, y montarles el volumen "por si acaso" sería
+      # ampliar el radio de escritura sin ningún llamante.
+      #
+      # Coste que conviene saber: `docker compose down -v` se lleva las fotos. Es dev, pero es
+      # mejor leerlo aquí que descubrirlo.
+      - backend_media:/app/media
     ports:
       # Publicado en todas las interfaces A PROPÓSITO, al contrario que `postgres` y
       # `redis`. Vale igual para el `3000` de `frontend`, y es ahí donde está el motivo:
@@ -232,6 +244,7 @@ services:
 
 volumes:
   postgres_data:
+  backend_media:
   backend_venv:
   worker_venv:
   beat_venv:

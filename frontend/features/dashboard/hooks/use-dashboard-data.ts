@@ -3,7 +3,7 @@
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
 import { ApiError } from "@/lib/api";
-import { DEV_TENANT_ID } from "@/lib/config/constants";
+import { useAuth } from "@/lib/auth";
 
 import {
   getDashboardDataSource,
@@ -21,11 +21,15 @@ import { dashboardKeys } from "./query-keys";
  * (`getDashboardDataSource`) — never on a concrete implementation — so the mock
  * is replaced by HTTP without touching this file or the components that use it.
  *
- * ASSUMPTION / DEBT (auth-tenancy): the tenant id comes from `DEV_TENANT_ID`
- * until a session context exists; this is the single place hooks read it.
+ * The tenant id comes from the authenticated context. The guard owns UX access;
+ * the backend remains the authority for tenant isolation.
  */
 function useTenantId(): string {
-  return DEV_TENANT_ID;
+  const { user } = useAuth();
+  if (!user) {
+    throw new Error("Dashboard requires an authenticated tenant context");
+  }
+  return user.tenant_id;
 }
 
 /**

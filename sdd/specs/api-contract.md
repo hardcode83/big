@@ -45,10 +45,13 @@ typecheck del frontend contra los tipos derivados, que pertenece a otra capacida
 
 - THE SYSTEM SHALL definir en `app/core/error_codes.py` el `StrEnum` `ErrorCode` como
   **única fuente de verdad** de los códigos del envoltorio de PRD §23.
-- THE SYSTEM SHALL referenciar ese registro desde los ocho sitios que emiten un código:
+- THE SYSTEM SHALL referenciar ese registro desde los nueve sitios que emiten un código:
   los atributos `code` de las subclases de `AppError`, el diccionario `_HTTP_STATUS_CODES`,
-  las tablas `_MAPPING` de `auth`, `properties`, `reservations` y `tenants`, los literales de
-  `integrations` y `TOO_LARGE_CODE` de `app/core/http_limits.py`.
+  las tablas `_MAPPING` de `auth`, `cleaning`, `properties`, `reservations` y `tenants`, los
+  literales de `integrations` y `TOO_LARGE_CODE` de `app/core/http_limits.py`. La de `cleaning`
+  existía desde aquel change y quedaba fuera de la guarda; entró con `cleaning-photos-storage`,
+  que es lo que hizo que la omisión importara — le añade cuatro filas, una con un código
+  (`BAD_GATEWAY`) que ninguna otra tabla emite.
 - THE SYSTEM SHALL incluir cada `_MAPPING` nuevo en la guarda que recorre el registro. Una
   tabla que la guarda no importa queda fuera de la comprobación aunque exista, y el módulo
   seguiría pudiendo emitir un literal ajeno a `ErrorCode` sin que la suite lo notara.
@@ -60,9 +63,12 @@ typecheck del frontend contra los tipos derivados, que pertenece a otra capacida
   comprobado por su compilador. El catálogo publicado y el registro deben coincidir
   exactamente.
 
-Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFLICT`,
+Los doce códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFLICT`,
 `PAYLOAD_TOO_LARGE`, `METHOD_NOT_ALLOWED`, `INVALID_CREDENTIALS`, `INVALID_TOKEN`,
-`FORBIDDEN`, `RATE_LIMITED` y `NOT_FOUND`.
+`FORBIDDEN`, `RATE_LIMITED`, `NOT_FOUND` y `BAD_GATEWAY`. Este último lo añadió
+`cleaning-photos-storage` para el fallo del almacén de ficheros, distinto de `INTERNAL_ERROR` a
+propósito: el frontend distingue «reintentar puede funcionar» de «esto es un bug nuestro», y son
+dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
 
 ### Lo que el documento declara sobre los errores
 
@@ -89,6 +95,14 @@ Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFL
   Un endpoint que quiera declarar el suyo lo hace en su propio `responses=`.
 - THE SYSTEM SHALL declarar todo endpoint bajo `/api/v1` cuyo código de éxito no sea `204`
   con un modelo de respuesta, verificado estructuralmente sobre las rutas registradas.
+- WHERE el cuerpo de éxito no es JSON y por tanto no tiene modelo Pydantic que nombrar, THE
+  SYSTEM SHALL admitir en su lugar un bloque `content` que enumere sus media types. Hoy es
+  exactamente `GET /cleaning-photos/{photo_id}`, que devuelve bytes de imagen y declara
+  `image/jpeg`, `image/png` e `image/webp` — la misma allowlist desde la que se resuelve el
+  `Content-Type` servido, así que el contrato no puede desviarse de lo que la ruta manda.
+- THE SYSTEM SHALL mantener esa exención **estrecha**: un `content` ausente o vacío no la
+  satisface y sigue fallando la guarda, comprobado con rutas de prueba que declaran una cosa y
+  la otra.
 
 ### Verificación estructural sin vacuidad
 
@@ -180,8 +194,13 @@ Los once códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFL
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 16 de las 19 operaciones lo
-  referencian; las tres restantes son `login`, `refresh` y `GET /health`.
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 44 de las 48 operaciones lo
+  referencian. Las cuatro restantes son `login`, `refresh`, `GET /health` y
+  `GET /api/v1/cleaning-photos/{photo_id}` — esta última la única anónima que **sirve datos de un
+  tenant**: no puede exigir token porque un navegador que resuelve un `<img src>` no manda
+  cabecera `Authorization`, y su autorización es la firma HMAC de su query string. Está nombrada
+  con su verbo en el allowlist de `tests/test_route_authorization.py`, que es el diff visible que
+  ese allowlist existe para forzar.
 
 ## Key files
 

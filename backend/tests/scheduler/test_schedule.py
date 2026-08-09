@@ -20,28 +20,39 @@ PRD_8_3 = {
     "mark_occupied_estimated": timedelta(minutes=5),
 }
 
-#: Jobs that are NOT in PRD §8.3, with the change that added them and why the number is what
-#: it is. Kept apart from `PRD_8_3` so "the PRD says so" never gets claimed for a cadence the
-#: PRD has never heard of.
-#:   process_webhook_events | 60 s | `reservations-webhooks` D10 — the cadence is the ceiling
-#:                                   on outbound provider calls (rule 12(d)), not a tuning knob
+#: Jobs that are NOT in PRD §8.3, kept in their own table so the divergence is visible
+#: rather than absorbed into the transcription above (`access-notifications` design D2/D3,
+#: `reservations-webhooks` design D10). The PRD says *what* must happen — §14 delivers
+#: notifications, §15 gives every confirmed reservation an access record, §16 receives the
+#: PMS notices — and is silent on what triggers any of them. Keeping them apart is also what
+#: stops "the PRD says so" ever being claimed for a cadence the PRD has never heard of.
+#:   process_webhook_events | 60 s | the cadence is the ceiling on outbound provider calls
+#:                                   (rule 12(d)), not a tuning knob
 BEYOND_PRD_8_3 = {
+    "dispatch_notifications": timedelta(minutes=1),
+    "provision_access_records": timedelta(minutes=5),
     "process_webhook_events": timedelta(seconds=60),
 }
 
-EXPECTED_CADENCES = {**PRD_8_3, **BEYOND_PRD_8_3}
+ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3
 
 
-def test_the_cadences_are_the_ones_prd_8_3_specifies() -> None:
-    assert CADENCES == EXPECTED_CADENCES
+def test_the_cadences_of_prd_8_3_are_untouched() -> None:
+    """Additions may not quietly retune a cadence the PRD specifies."""
+    for name, cadence in PRD_8_3.items():
+        assert CADENCES[name] == cadence
+
+
+def test_the_calendar_is_prd_8_3_plus_exactly_the_declared_additions() -> None:
+    assert CADENCES == ALL_CADENCES
 
 
 def test_the_beat_schedule_covers_every_cadence_and_nothing_else() -> None:
     schedule = beat_schedule()
 
-    assert {entry["task"] for entry in schedule.values()} == set(EXPECTED_CADENCES)
+    assert {entry["task"] for entry in schedule.values()} == set(ALL_CADENCES)
     for entry in schedule.values():
-        assert entry["schedule"] == EXPECTED_CADENCES[entry["task"]]
+        assert entry["schedule"] == ALL_CADENCES[entry["task"]]
 
 
 def test_the_beat_entry_and_the_lock_ttl_both_derive_from_one_number() -> None:

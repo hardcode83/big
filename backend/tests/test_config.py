@@ -254,6 +254,41 @@ def test_lifetimes_and_throttle_are_configurable_per_environment(
     assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
 
 
+def test_notification_delivery_has_its_documented_defaults() -> None:
+    """Change `access-notifications`, design D4."""
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.notification_max_attempts == 3
+    assert settings.notification_batch_size == 100
+
+
+@pytest.mark.parametrize(
+    ("env_var", "field_name", "value"),
+    [
+        ("NOTIFICATION_MAX_ATTEMPTS", "notification_max_attempts", 5),
+        ("NOTIFICATION_BATCH_SIZE", "notification_batch_size", 25),
+    ],
+)
+def test_notification_delivery_is_configurable_per_environment(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, field_name: str, value: int
+) -> None:
+    monkeypatch.setenv(env_var, str(value))
+
+    assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
+
+
+def test_there_is_no_notification_backoff_setting() -> None:
+    """Design D4, asserted as an absence.
+
+    `notification_logs` has no "next attempt at" column, so a backoff setting would promise
+    pacing the schema cannot deliver. Adding one must come with the column and a decision,
+    not slip in as a knob.
+    """
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert not hasattr(settings, "notification_retry_backoff_seconds")
+
+
 def test_the_application_has_no_setting_for_a_trusted_client_ip_header() -> None:
     """Change `api-ingress-routing`, design D3: resolving the real client address is
     uvicorn's job, gated by `--forwarded-allow-ips`. A setting here would be a second

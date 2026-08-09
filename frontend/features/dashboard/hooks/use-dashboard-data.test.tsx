@@ -1,7 +1,7 @@
 import type { ReactNode } from "react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { renderHook, waitFor } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
 
@@ -11,6 +11,10 @@ import {
   usePropertyDetail,
   usePropertyTimeline,
 } from "./use-dashboard-data";
+
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+}));
 
 function wrapper() {
   const client = new QueryClient({

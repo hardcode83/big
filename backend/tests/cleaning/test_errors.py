@@ -27,9 +27,14 @@ from app.cleaning.domain.exceptions import (
     CleaningValidationError,
     DuplicateLiveCleaningTaskError,
     InvalidCleaningTransitionError,
+    PhotoStorageUnavailableError,
+    PhotoTooLargeError,
+    PhotoTypeNotFoundError,
+    PhotosIncompleteError,
     PropertyNotFoundError,
     PropertyStateBlocksCleaningError,
     ReservationNotFoundError,
+    UnsupportedPhotoFormatError,
 )
 
 
@@ -75,16 +80,40 @@ def test_no_row_names_an_exception_from_another_module():
         (InvalidCleaningTransitionError("x"), 409),
         (PropertyStateBlocksCleaningError("x"), 409),
         (ChecklistIncompleteError(("a",)), 409),
+        # Its sibling, and checked next to it for the reason its own docstring gives: the two
+        # are "deliberately built the same way" but are not related by `isinstance`, so nothing
+        # makes the photo row inherit the checklist row's status. Without this case, changing
+        # `_MAPPING`'s `PhotosIncompleteError` entry to any other code leaves this file green —
+        # `test_every_domain_error_has_a_row` only checks presence, never the status.
+        (PhotosIncompleteError(("a",)), 409),
         (BlockingIncidentError("x"), 409),
         (AmbiguousChecklistTemplateError("x"), 409),
         (DuplicateLiveCleaningTaskError("x"), 409),
         (CleaningValidationError("x"), 422),
+        # `cleaning-photos-storage`. The four outcomes of the upload that the checklist had no
+        # equivalent of: a type the template does not declare, a body over the ceiling, bytes
+        # that are not an accepted image, and a file store that refused the write.
+        (PhotoTypeNotFoundError("x"), 404),
+        (PhotoTooLargeError("x"), 413),
+        (UnsupportedPhotoFormatError("x"), 422),
+        (PhotoStorageUnavailableError("x"), 502),
     ],
 )
 def test_each_error_maps_to_its_status(error, expected_status):
     status, _ = http_error_for(error)
 
     assert status == expected_status
+
+
+def test_the_storage_failure_is_a_502_and_not_a_500():
+    """R1.5 — and the distinction the code carries is "retrying may work", not "our bug".
+
+    A 500 would take the `Unexpected cleaning error` branch of the handler and throw away the
+    one thing the caller can act on.
+    """
+    status, code = http_error_for(PhotoStorageUnavailableError("x"))
+
+    assert (status, code.value) == (502, "BAD_GATEWAY")
 
 
 def test_subclasses_come_before_their_base():

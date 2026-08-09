@@ -123,7 +123,7 @@ describe("createApiClient (D12)", () => {
     expect(error.status).toBe(502);
   });
 
-  it("invokes onUnauthorized on a 401 (refresh extension point)", async () => {
+  it("does not invoke recovery for an unauthenticated 401", async () => {
     const onUnauthorized = vi.fn();
     const fetchImpl = vi.fn().mockResolvedValue(
       jsonResponse(
@@ -139,6 +139,84 @@ describe("createApiClient (D12)", () => {
 
     await client.request("/health").catch(() => undefined);
 
+    expect(onUnauthorized).not.toHaveBeenCalled();
+  });
+
+  it("recovers one eligible authenticated request and retries it once", async () => {
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "UNAUTHENTICATED", message: "expired" } },
+          { status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ ok: true }));
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+
+    await expect(client.request("/health")).resolves.toEqual({ ok: true });
     expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    expect(onUnauthorized).toHaveBeenCalledWith(
+      expect.objectContaining({
+        path: "/health",
+        hadAccessToken: true,
+        retryCount: 0,
+      }),
+    );
+  });
+
+  it.each([
+    "/api/v1/auth/login",
+    "/api/v1/auth/refresh",
+    "/api/v1/auth/logout",
+  ] as const)("excludes %s from automatic recovery", async (path) => {
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: { code: "UNAUTHENTICATED", message: "expired" } },
+        { status: 401 },
+      ),
+    );
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+
+    await client
+      .request(path, { method: "POST", body: path.endsWith("login") ? { email: "a", password: "b" } : path.endsWith("refresh") ? { refresh_token: "refresh" } : undefined } as never)
+      .catch(() => undefined);
+
+    expect(onUnauthorized).not.toHaveBeenCalled();
+    expect(fetchImpl).toHaveBeenCalledOnce();
+  });
+
+  it("does not retry the original request twice", async () => {
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi.fn().mockResolvedValue(
+      jsonResponse(
+        { error: { code: "UNAUTHENTICATED", message: "still expired" } },
+        { status: 401 },
+      ),
+    );
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+
+    await client.request("/health").catch(() => undefined);
+
+    expect(onUnauthorized).toHaveBeenCalledOnce();
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
 });

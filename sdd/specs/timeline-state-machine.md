@@ -23,6 +23,16 @@ transición y el `TimelineEvent` en una sola transacción con el `correlation_id
 capacidad produce. La política sigue sin tocar reloj, base de datos ni red — lo que cambió es
 que ya no evalúa en el vacío (ver `specs/celery-jobs.md`).
 
+**Qué no es una transición de estado de propiedad**: `access-notifications` trajo la máquina de
+estados del `AccessRecord` y la del registro legal de la reserva, y ninguna de las dos pasa por
+aquí. La regla «un único lugar donde ocurren las transiciones» habla del estado operacional de la
+*propiedad*; el ciclo de vida de un acceso o de una presentación ante SES.Hospedajes es de su
+entidad, vive en ella y no toca `current_operational_state`. Lo que sí comparten es la fábrica:
+sus eventos (`ACCESS_CODE_PENDING`, `ACCESS_CODE_MANUAL_ADDED`, `ACCESS_CODE_CREATED_EXTERNAL`,
+`ACCESS_CODE_DELIVERED`, `LEGAL_REGISTRATION_SUBMITTED`) se construyen por ella como cualquier
+otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ninguno y la fila de
+`AuditLog` es la que lo registra.
+
 ## Requirements
 
 ### Estados canónicos y autoridad única

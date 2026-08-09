@@ -11,6 +11,7 @@ import uuid
 from collections.abc import Sequence
 from dataclasses import dataclass
 from datetime import datetime
+from typing import Protocol
 
 from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
@@ -23,10 +24,12 @@ from app.cleaning.domain.assignment import resolve_auto_assignee
 from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
     CleaningChecklistTemplate,
+    CleaningPhoto,
     CleaningTask,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
 from app.cleaning.domain.notifications import (
+    RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
     no_cleaner_available_notification,
 )
@@ -38,18 +41,24 @@ from app.cleaning.domain.exceptions import (
     CleaningValidationError,
     DuplicateLiveCleaningTaskError,
     InvalidCleaningTransitionError,
+    PhotoStorageUnavailableError,
+    PhotoTooLargeError,
+    PhotoTypeNotFoundError,
     PropertyNotFoundError,
     PropertyStateBlocksCleaningError,
     ReservationNotFoundError,
+    UnsupportedPhotoFormatError,
 )
 from app.cleaning.domain.ports import BlockingIncidentQuery
 from app.cleaning.domain.repositories import (
     CleaningChecklistCompletionRepository,
     CleaningChecklistTemplateRepository,
+    CleaningPhotoRepository,
     CleaningTaskFilters,
     CleaningTaskRepository,
     Page,
     TemplatePage,
+    UnscopedCleaningPhotoLocationQuery,
 )
 from app.cleaning.domain.templates import resolve_template
 from app.cleaning.domain.value_objects import (
@@ -57,6 +66,18 @@ from app.cleaning.domain.value_objects import (
     parse_template_content,
 )
 from app.core.unit_of_work import UnitOfWork
+from app.integrations.domain.storage import (
+    MAGIC_BYTES_LENGTH,
+    FileStorageFactory,
+    FileStoragePort,
+    InvalidSignatureError,
+    StorageWriteError,
+    content_type_for_extension,
+    detect_image_type,
+    storage_key_for_photo,
+    verify_signed_key,
+)
+from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.properties.domain.clock_triggers import candidate_window
 from app.properties.domain.entities import Property
@@ -429,6 +450,45 @@ class _AuditWriter:
             ),
         )
 
+    async def record_photo_upload(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        photo: CleaningPhoto,
+        actor: "CleaningActor",
+        now: datetime,
+    ) -> None:
+        """R2.7 — the upload's own row, against the photo and not against the task.
+
+        A second method rather than an `entity_type=` parameter on `record` above: the two
+        differ in the entity they point at, in the action vocabulary they may use and in the
+        fields `ChangeSet` will accept, so one signature covering both would take three
+        arguments whose only legal combinations are these two.
+
+        **`storage_key` is not in the diff, and its absence is the design.** R3.2 keeps the
+        internal key out of every API response, and `audit_logs.changes` is a rule-11 sink —
+        the one column whose contract is that nothing arrives through it unannounced. What the
+        row records is who uploaded which kind of evidence against which cleaning.
+        """
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.CLEANING_PHOTO_UPLOADED,
+                entity_type=audit_actions.ENTITY_CLEANING_PHOTO,
+                entity_id=photo.id,
+                actor_user_id=actor.user_id,
+                # Rule 9: `actor_ip` is one of the two things `audit_logs` records that
+                # `property_state_transitions` cannot, and an upload is a person's action.
+                actor_ip=actor.ip,
+                changes=ChangeSet(audit_actions.ENTITY_CLEANING_PHOTO)
+                .diff("photo_type", None, photo.photo_type)
+                .diff("cleaning_task_id", None, photo.cleaning_task_id)
+                .diff("uploaded_by", None, photo.uploaded_by),
+                now=now,
+            ),
+        )
+
 
 @dataclass(frozen=True)
 class CleaningActor:
@@ -561,7 +621,51 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
         self._uow = uow
 
 
-class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
+class _AnswersAnAssignmentBase(_TaskLifecycleBase):
+    """The two operations that answer an assignment, and therefore close its SLA.
+
+    Added by `access-notifications` (its R5, design D7) to pay a debt this module recorded
+    when it shipped: `cleaning`'s own R6.4 asked for the deadline to be closed on an answer
+    and **could not be built** — `list_sla_breach_candidates` requires `status = SENT`,
+    nothing wrote that value, and `NotificationLogRepository` exposed no way to clear a
+    deadline. The change that brought the sender brought both.
+
+    Why it matters now and did not before: the assignment row now really reaches `SENT`, so
+    a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
+    four hours and escalate to the manager for a task that was answered immediately.
+
+    Only two use cases inherit this, not the six of `_TaskLifecycleBase`: starting,
+    completing and validating happen *after* an answer, so the deadline is already closed by
+    then, and giving them the port would be handing out a write nobody needs.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
+        super().__init__(**kwargs)
+        self._notifications = notifications
+
+    async def _close_assignment_sla(
+        self, tenant_id: uuid.UUID, task: CleaningTask
+    ) -> None:
+        """R5.1 — the assignment notification stops being a breach candidate.
+
+        Idempotent and silent on zero rows (R5.3): a task created before this change has no
+        assignment row, and a second answer finds the deadline already cleared. Neither is an
+        error, so neither fails the response.
+        """
+        cleared = await self._notifications.cancel_sla_deadline(
+            tenant_id,
+            related_type=RELATED_TYPE_CLEANING_TASK,
+            related_id=task.id,
+            notification_type=NotificationType.CLEANING_TASK_ASSIGNED.value,
+        )
+        if not cleared:
+            logger.info(
+                "cleaning.assignment_sla_already_closed",
+                extra={"tenant_id": str(tenant_id), "cleaning_task_id": str(task.id)},
+            )
+
+
+class AcceptCleaningTaskUseCase(_AnswersAnAssignmentBase):
     """R3.4 — the assigned cleaner takes the task."""
 
     async def execute(
@@ -571,6 +675,10 @@ class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
         previous = task.status
         task.accept(actor.user_id, now)
         await self._tasks.save(tenant_id, task)
+        # Before the single commit this use case already makes, so the answer and the closed
+        # deadline are one write or neither: a committed acceptance with a live deadline is
+        # exactly the escalation R5 exists to prevent.
+        await self._close_assignment_sla(tenant_id, task)
         # No property transition: `CLEANING_SCHEDULED` covers both ASSIGNED and ACCEPTED, and
         # `PropertyStateMachine._POLICY` declares no trigger for acceptance. The task's own
         # status is the record, and the audit row is what says who answered.
@@ -588,7 +696,7 @@ class AcceptCleaningTaskUseCase(_TaskLifecycleBase):
         return task
 
 
-class RejectCleaningTaskUseCase(_TaskLifecycleBase):
+class RejectCleaningTaskUseCase(_AnswersAnAssignmentBase):
     """R3.5 and design D3 — terminal, plus a replacement so the property is never left with
     no live task."""
 
@@ -599,6 +707,10 @@ class RejectCleaningTaskUseCase(_TaskLifecycleBase):
         previous = task.status
         task.reject(actor.user_id, now)
         await self._tasks.save(tenant_id, task)
+        # A rejection is an answer too (`access-notifications` R5.1): the cleaner said no,
+        # so nobody is late. The replacement task below gets its own notification and its own
+        # deadline when a manager assigns it.
+        await self._close_assignment_sla(tenant_id, task)
         await self._transition(
             tenant_id=tenant_id,
             task=task,
@@ -765,19 +877,29 @@ class AssignCleaningTaskUseCase(_TaskLifecycleBase):
 
 
 class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
-    """R5.1-R5.4 — the close, and the only place PRD §11's rule is applied."""
+    """R5.1-R5.4, and R4 of `cleaning-photos-storage` — the close.
+
+    **Gathers the evidence; does not judge it.** All three clauses of PRD §11 are applied by
+    `CleaningTask.complete()` and nowhere else (R4.3, design D4/D8), so what this class owns is
+    four reads — the template, the checklist completions, the uploaded photo types and the
+    blocking-incident flag — and the assembly of one `CleaningCompletionEvidence` from them.
+    Moving any of the four comparisons up here would split an invariant `cleaning` spent a
+    whole change concentrating in one method.
+    """
 
     def __init__(
         self,
         *,
         completions: CleaningChecklistCompletionRepository,
         templates: CleaningChecklistTemplateRepository,
+        photos: CleaningPhotoRepository,
         incidents: BlockingIncidentQuery,
         **kwargs,
     ) -> None:
         super().__init__(**kwargs)
         self._completions = completions
         self._templates = templates
+        self._photos = photos
         self._incidents = incidents
 
     async def execute(
@@ -799,6 +921,15 @@ class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
             completed_item_ids=frozenset(
                 completion.item_id for completion in completions if completion.completed
             ),
+            # PRD §11's third clause (R4.1). `required_photo_types()` filters on
+            # `required: true` and `photo_types()` — the one the upload path uses — does not;
+            # reading the wrong one here would make every declared type mandatory and break
+            # R4.5, which is why the two accessors are named for the questions they answer.
+            required_photo_types=spec.required_photo_types(),
+            # Distinct types, straight from the repository. Scoped by `tenant_id` like every
+            # other read here, and its contract answers with an empty set for a task that is
+            # not this tenant's — which blocks a close rather than granting one (design D12).
+            uploaded_photo_types=await self._photos.uploaded_photo_types(tenant_id, task.id),
             has_unresolved_critical_incident=await self._incidents.has_unresolved_critical(
                 tenant_id, task.property_id
             ),
@@ -1120,6 +1251,435 @@ class CompleteChecklistItemUseCase(_TaskLifecycleBase):
         # No audit row and no property transition: rule 9's enumeration does not cover
         # checklist progress, and the property does not move until the task is completed.
         await self._uow.commit()
+
+
+#: How much of the upload is consumed per iteration. Big enough that a 10 MB photo is ~160
+#: reads and small enough that the counter below reacts long before the ceiling: at most one
+#: chunk beyond the limit is ever held, which is what makes "abort on exceeding" mean
+#: something rather than "abort after buffering everything".
+_UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+class ChunkedUpload(Protocol):
+    """What `UploadCleaningPhotoUseCase` needs from an uploaded file: bytes, on demand.
+
+    Declared here rather than typed as Starlette's `UploadFile` because
+    `tests/test_layering.py` forbids `application/` from importing `fastapi` — and the reason
+    behind that rule bites here in particular: the use case must be able to consume a
+    **stream** it did not buffer, so what it depends on is the read contract, not the web
+    framework's object. `UploadFile` satisfies this Protocol as it is, and so does a test fake
+    of four lines.
+    """
+
+    async def read(self, size: int = -1) -> bytes:
+        """Up to `size` bytes, or `b""` once the file is exhausted."""
+        ...
+
+
+@dataclass(frozen=True)
+class UploadedCleaningPhoto:
+    """The stored photo and the signed URL that reads it back (design D7).
+
+    Two fields rather than one entity because the URL is not a property of the row: it is
+    minted per request, expires in 3600 s, and depends on the tenant's storage backend. The
+    entity carries `storage_key`, which R3.2 forbids in any response — enumerating the
+    response fields at the schema, never dumping this, is what keeps that true.
+    """
+
+    photo: CleaningPhoto
+    url: str
+
+
+class UploadCleaningPhotoUseCase(_TaskTransitionMixin):
+    """R2 — the assigned cleaner uploads one photo of the cleaning.
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, and moves no property state: an
+    upload is evidence, not a lifecycle step. What `_load_task` brings is the pair of rules
+    that must not be re-derived per use case — the task is resolved **inside the tenant**, and
+    a `CLEANER` only reaches the tasks assigned to them (R6.3, R6.4), both answered with the
+    single `CleaningTaskNotFoundError` constant so another tenant's task is byte-identical to
+    an id that never existed.
+
+    **Two guarantees live here and nowhere else**, both inherited from the review panels of
+    sections 1 and 2:
+
+    * Every `storage_key` is built by `storage_key_for_photo` from the **session's**
+      `tenant_id`. No key, fragment or file name from the client reaches it, and none is ever
+      returned. The port's methods take an arbitrary `key` on purpose — they are shared with
+      `maintenance` and `revenue` — so the port cannot enforce this and this is the only place
+      that can.
+    * `uploaded_by` is `actor.user_id`, from the verified token, never from the body.
+      `cleaning_photos.uploaded_by` is a plain FK to `users.id` with no tenant restriction and
+      the repository writes it verbatim — deliberately, exactly as `completed_by` is treated —
+      so an id taken from a request would record a neighbour's user as the author.
+
+    Order of operations is design D4 and it is not interchangeable: **object first, row
+    second**, and a failed commit deletes the object. R1.5 forbids a row pointing at an object
+    that is not there — that is a broken `GET` for ever — while the opposite failure leaves an
+    orphaned object, which is recoverable rubbish.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        templates: CleaningChecklistTemplateRepository,
+        photos: CleaningPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+        max_bytes: int,
+    ) -> None:
+        self._tasks = tasks
+        self._templates = templates
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+        self._audit = _AuditWriter(audit)
+        self._uow = uow
+        # Passed in rather than read from `app.core.config` here: `application/` receives its
+        # configuration the same way it receives its ports, which is what lets a test drive the
+        # 413 path with a two-byte ceiling instead of a 10 MB fixture.
+        self._max_bytes = max_bytes
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        photo_type: str,
+        upload: ChunkedUpload,
+        actor: CleaningActor,
+        now: datetime,
+    ) -> UploadedCleaningPhoto:
+        task = await self._load_task(tenant_id, task_id, actor)
+        if task.status is not CleaningTaskStatus.IN_PROGRESS:
+            # R2.3, and the same boundary `CompleteChecklistItemUseCase` draws: evidence
+            # belongs to the execution of the cleaning, so it cannot be filed before starting
+            # or after finishing. Refused **before** anything is read or written.
+            raise InvalidCleaningTransitionError(
+                f"Cannot upload a cleaning photo to a task in status {task.status.value}"
+            )
+
+        template = await self._templates.get(tenant_id, task.checklist_template_id)
+        if template is None:
+            raise ChecklistTemplateNotFoundError(
+                "The task's checklist template no longer exists"
+            )
+        spec = parse_template_content(
+            template.items, template.required_photos, template_id=template.id
+        )
+        if photo_type not in spec.photo_types():
+            # R2.2 — the same 404 the checklist gives an unknown `item_id`.
+            raise PhotoTypeNotFoundError(f"Unknown photo type {photo_type!r}")
+
+        content = await self._read_within_limit(upload)
+        # D5/R2.4: the format comes from the BYTES. Whatever `Content-Type` the client
+        # declared is not consulted anywhere in this module.
+        image = detect_image_type(content[:MAGIC_BYTES_LENGTH])
+        if image is None:
+            raise UnsupportedPhotoFormatError(
+                "The uploaded file is not a JPEG, PNG or WebP image"
+            )
+
+        photo_id = uuid.uuid4()
+        storage_key = storage_key_for_photo(
+            # The tenant of the verified token, never a value that travelled with the
+            # request. This call is the only producer of keys in the cleaning module.
+            tenant_id=tenant_id,
+            task_id=task.id,
+            photo_id=photo_id,
+            # From the detected MIME, so the client's file name never reaches the key (D3).
+            extension=image.extension,
+        )
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        # R1.2 — which backend this is stays unknown here; the factory answers from the
+        # tenant's stored `storage_type`.
+        storage = self._storage.storage_for(config.storage_type)
+        try:
+            await storage.put(storage_key, content, content_type=image.mime)
+        except StorageWriteError as exc:
+            # Nothing has been inserted yet, so there is nothing to compensate: this is why
+            # the object goes first (D4).
+            raise PhotoStorageUnavailableError(
+                "The photo could not be stored; please try again"
+            ) from exc
+
+        photo = CleaningPhoto(
+            id=photo_id,
+            cleaning_task_id=task.id,
+            uploaded_by=actor.user_id,
+            photo_type=photo_type,
+            storage_key=storage_key,
+            created_at=now,
+        )
+        try:
+            await self._photos.add(tenant_id, photo)
+            await self._audit.record_photo_upload(
+                tenant_id=tenant_id, photo=photo, actor=actor, now=now
+            )
+            await self._uow.commit()
+        except Exception:
+            # The compensating delete of design D4, and the reason `FileStoragePort.delete`
+            # has a caller at all. Best effort by contract: it must not replace the real
+            # failure with one of its own on the way out.
+            await self._delete_quietly(storage, storage_key)
+            raise
+
+        return UploadedCleaningPhoto(photo=photo, url=storage.signed_url(storage_key))
+
+    async def _read_within_limit(self, upload: ChunkedUpload) -> bytes:
+        """Consume the upload in chunks, counting, and abort the moment it is too big (D11).
+
+        **What this does NOT do, despite an earlier comment here saying it did: it does not
+        protect against a lying `Content-Length` or a chunked upload.** It cannot, and the
+        reason is mechanical. `app/core/http_limits.py` documents it: FastAPI calls
+        `await request.form()` inside its route wrapper *before* it solves dependencies, and
+        Starlette's multipart parser spools the file part to a `SpooledTemporaryFile` that has
+        no size ceiling of its own. So by the time this loop asks for its first chunk, the file
+        has already been received in full and written to the container's disk. Counting it
+        afterwards cannot un-receive it.
+
+        The check that genuinely stops an oversized or dishonest body is
+        `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
+        (`http_limits.py:116-129`), which tallies bytes as they arrive and cuts the stream the
+        moment the total passes the ceiling — that is the half covering a client that
+        understates `Content-Length` or sends `Transfer-Encoding: chunked` with none at all.
+        The `Content-Length` refusal before it is only the cheap fast path.
+
+        **So do not "simplify" the middleware branch on the grounds that the use case already
+        counts.** Deleting the middleware's counter would leave an anonymous caller able to
+        make the backend spool an arbitrary volume to disk before authentication ever runs —
+        the exact hole that module exists to close, measured twice by two different changes.
+
+        What this loop does buy, and why it stays:
+
+        * It bounds the **in-process copy**. `content` ends up in memory, and the ceiling plus
+          one chunk is the peak this holds regardless of how large the spooled file is.
+        * It is the ceiling for any wiring that has no middleware in front — a direct call from
+          a test, a worker, or a future non-HTTP caller of this use case. The use case cannot
+          assume an ASGI stack it does not own.
+
+        R2.5 ("reject before reading the whole body") is satisfied by the middleware; this is
+        defence in depth behind it, not a second enforcement of the same guarantee.
+        """
+        chunks: list[bytes] = []
+        received = 0
+        while True:
+            chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            received += len(chunk)
+            if received > self._max_bytes:
+                # Raised before the chunk is kept, so the peak held is the ceiling plus one
+                # chunk — not the size of whatever the client decided to send.
+                raise PhotoTooLargeError(
+                    f"The photo exceeds the {self._max_bytes} byte limit"
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    @staticmethod
+    async def _delete_quietly(storage: FileStoragePort, storage_key: str) -> None:
+        """Delete, and swallow whatever that costs — the caller is already failing.
+
+        The key IS logged, and that is deliberate rather than an oversight of R3.2: that rule
+        governs API responses, and an orphaned object is only recoverable by someone who can
+        find it. This log line is the whole recovery procedure for design D4's accepted
+        failure mode.
+        """
+        try:
+            await storage.delete(storage_key)
+        except Exception:
+            logger.warning(
+                "cleaning.orphaned_photo_object",
+                extra={"storage_key": storage_key},
+            )
+
+
+class ListCleaningPhotosUseCase(_TaskTransitionMixin):
+    """R3.1 — the photos of one task, each with a freshly minted signed URL.
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, exactly as the upload does and for
+    exactly the same two rules: the task is resolved **inside the tenant**, and a `CLEANER`
+    only reaches the tasks assigned to them (R6.3, R6.4). A manager or owner sees every photo
+    of every task of their tenant, and neither role can name a cleaner through any request
+    field — `CleaningActor.restrict_to_cleaner_id` derives it from the persisted role.
+
+    Resolving the task first is also what makes the listing's 404 the shared, byte-identical
+    `CleaningTaskNotFoundError`: another tenant's task and an id that never existed are one
+    outcome. Reading `list_for_task` on its own would answer an empty list for both, which
+    leaks nothing but says "this task exists and has no photos" to a caller who owns neither.
+
+    **`storage_key` leaves this use case inside `UploadedCleaningPhoto.photo` and stops at the
+    schema.** It has to: `signed_url` is what turns it into the one thing a client may see, and
+    the port takes the key. R3.2 is enforced by `CleaningPhotoResponse` enumerating its fields
+    (never `model_validate`/`from_attributes` over the entity), and `tests/cleaning/
+    test_photo_listing_api.py` asserts it against the **serialised body**, not the field list.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        photos: CleaningPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+    ) -> None:
+        self._tasks = tasks
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        now: datetime,
+    ) -> tuple[UploadedCleaningPhoto, ...]:
+        task = await self._load_task(tenant_id, task_id, actor)
+        photos = await self._photos.list_for_task(tenant_id, task.id)
+        config = await self._configs.get_or_create(tenant_id, now)
+        # R1.2 again: which backend answers stays unknown here. `LOCAL` mints a URL of this
+        # API's own serving route, `S3` a presigned one straight at the provider — the caller
+        # gets a URL either way and cannot tell from this code which it is.
+        storage = self._storage.storage_for(config.storage_type)
+        return tuple(
+            UploadedCleaningPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
+            for photo in photos
+        )
+
+
+@dataclass(frozen=True)
+class ServedPhoto:
+    """The bytes to answer with, and the `Content-Type` to answer them with.
+
+    `content_type` comes from `content_type_for_extension` and from nowhere else (design D7,
+    task 4.3c). It is carried here rather than left to the route to work out, so the route has
+    nothing to derive and nothing to guess.
+    """
+
+    content: bytes
+    content_type: str
+
+
+class ServeLocalCleaningPhotoUseCase:
+    """The anonymous signed serving route's use case (design D7, D7b) — R3.3.
+
+    **The order of the three steps is the security property, not an implementation detail**:
+
+    1. **Resolve** `photo_id → (storage_key, tenant_id)` with the unscoped query of D7b. There
+       is no session tenant here — the route is anonymous because an `<img src>` sends no
+       `Authorization` header — so this is the only way to learn either fact.
+    2. **Verify** the signature against the key that came out of step 1, never against
+       anything the client sent. The signature covers the whole key, which begins with
+       `tenants/{tenant_id}/` (D3), so a signature that verifies **proves** the caller was
+       handed a URL minted for this photo of this tenant. That is the entire authorisation of
+       this endpoint.
+    3. **Serve**, and only now: resolve the tenant's backend and read the bytes.
+
+    Inverting 1 and 2 is impossible (there is nothing to verify against yet). Inverting 2 and 3
+    is the failure this ordering exists to prevent, and it has its own test.
+
+    Every refusal in steps 1 and 2 raises the **same** `InvalidSignatureError`, which the route
+    turns into one constant `403` body — task 4.3b. "No such photo", "wrong signature",
+    "expired" and "over the TTL ceiling" must be indistinguishable from outside, or this
+    endpoint becomes an existence oracle over the photo keyspace for a caller with no
+    credentials at all, on a route `api-ingress-routing` left reachable from the internet.
+
+    Step 3 answers differently on purpose, and it is not a leak: `LocalFileReadUnsupportedError`
+    (an `S3` tenant, no local serving) becomes a `404` and a `StorageWriteError` a `502`, but
+    both are only reachable **after** a valid signature, i.e. by someone already holding proof
+    that the photo exists.
+
+    `now` is passed in like every other use case here, and converted to POSIX seconds for
+    `verify_signed_key`, which is pure and takes the clock as an argument (task 1.3). One
+    reading, converted, rather than two parameters that could disagree about *when* this
+    request happened.
+    """
+
+    def __init__(
+        self,
+        *,
+        locations: UnscopedCleaningPhotoLocationQuery,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+        signing_key: bytes,
+    ) -> None:
+        self._locations = locations
+        self._configs = configs
+        self._storage = storage
+        self._signing_key = signing_key
+
+    async def execute(
+        self,
+        *,
+        photo_id: uuid.UUID,
+        expiry: int,
+        signature: str,
+        now: datetime,
+    ) -> ServedPhoto:
+        location = await self._locations.locate_without_tenant_scoping(photo_id)
+        if location is None:
+            # Step 1 failed. Raised as the SAME error a bad signature raises so the route has
+            # one thing to catch and one body to answer with (4.3b). The message is for the
+            # log; it does not reach the response.
+            #
+            # Known and accepted residue: this path skips the HMAC of step 2, so it is
+            # marginally faster than a signature that fails to verify. Distinguishing a UUID
+            # that exists from one that does not through that difference means measuring
+            # microseconds across the internet over a 122-bit keyspace, per candidate id. The
+            # body is identical, which is what R3.4 asks for.
+            raise InvalidSignatureError(f"no photo resolves for id {photo_id}")
+
+        # Against the key from the DATABASE. Nothing the client sent contributes to it — the
+        # URL carries only the photo id, its expiry and the signature (R3.2 keeps the key out
+        # of every response, so it could not carry the key even if we wanted it to).
+        verify_signed_key(
+            signing_key=self._signing_key,
+            key=location.storage_key,
+            expiry=expiry,
+            signature=signature,
+            now=int(now.timestamp()),
+        )
+
+        # Everything below happens only after a valid signature. `get_or_create` can in
+        # principle insert, which would be a write on an anonymous request — in practice never,
+        # because the upload that created this photo already created the row, and in any case
+        # this route never commits, so the flush dies with the request's transaction.
+        config = await self._configs.get_or_create(location.tenant_id, now)
+        # Raises `LocalFileReadUnsupportedError` for an `S3` tenant, before instantiating
+        # anything — design D1's refusal point. There is no local serving for that backend
+        # because the browser fetches the object straight from the provider.
+        reader = self._storage.read_for(config.storage_type)
+        content = await reader.read(location.storage_key)
+        return ServedPhoto(
+            content=content,
+            # Task 4.3c: the ONLY admitted source. The MIME detected at upload is not
+            # persisted; with `LOCAL` it survives solely inside the key's extension (D3).
+            # Deriving it from anything else — or omitting it and letting Starlette sniff —
+            # turns a polyglot that starts with `FF D8 FF` and carries HTML into stored XSS on
+            # the API's own origin. `_extension_of` refuses a key it cannot read rather than
+            # falling back to a default, for the same reason.
+            content_type=content_type_for_extension(_extension_of(location.storage_key)),
+        )
+
+
+def _extension_of(storage_key: str) -> str:
+    """The extension inside a storage key, with no default and no guess.
+
+    Returns `""` for a key with no extension, which `content_type_for_extension` then refuses
+    with a `ValueError` — a 500, correctly, because such a key can only come from a bug of
+    ours: every key is built by `storage_key_for_photo`, which validates the extension against
+    the image allowlist before assembling it. Substituting `application/octet-stream` here
+    would be exactly the fallback task 4.3c exists to forbid.
+    """
+    _, separator, extension = storage_key.rpartition(".")
+    return extension if separator else ""
 
 
 def _effective_checkout(

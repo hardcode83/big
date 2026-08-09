@@ -31,4 +31,6 @@
 | pms-beds24-adapter | new, design, tasks, run, review, archive | 267607 | 713296 | 203542711 | 153.3613 | 2026-08-05 | 2026-08-07 |
 | properties-crud | new, design, tasks, run, review, archive | 252521 | 705045 | 321695788 | 214.1778 | 2026-08-07 | 2026-08-08 |
 | api-ingress-routing | new, design, tasks, run, review, archive | 7144867 | 2351309 | 521434721 | 363.1416 | 2026-08-02 | 2026-08-08 |
+| access-notifications | new, design, tasks, run, review, ship, archive | 205216 | 697062 | 217439895 | 143.4679 | 2026-08-08 | 2026-08-08 |
+| cleaning-photos-storage | new, design, tasks, run, review, ship, archive | 507425 | 1372474 | 311969941 | 223.9127 | 2026-08-08 | 2026-08-09 |
 | reservations-webhooks | new, design, tasks, run, review, ship | 519009 | 1701781 | 343634528 | 229.8635 | 2026-08-08 | — |

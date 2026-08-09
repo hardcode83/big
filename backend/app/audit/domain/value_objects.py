@@ -37,6 +37,17 @@ REDACTED_FIELDS = frozenset(
         # listed. An exact-name denylist that does not carry the exact names is decoration.
         "document_number",
         "document_number_encrypted",
+        # Added by `access-notifications` after its feature-scale security panel. The number
+        # was already here and the birth date was not, so `redacted()` was the only form for
+        # one and mere convention for the other — the module claims its guarantee holds "by
+        # construction", and for `date_of_birth` it did not.
+        #
+        # It belongs here on the steering's own words: §"Datos sensibles" reads "PII de
+        # huéspedes (documento de identidad, **fecha de nacimiento** — requeridos por
+        # SES.Hospedajes)". `nationality` is deliberately NOT added: the same sentence does
+        # not name it, and a denylist that quietly grows past what the rule says is one
+        # nobody can reason about — the exact failure this list's own comment warns against.
+        "date_of_birth",
         "wifi_password",
         "wifi_password_encrypted",
         "access_code",
@@ -179,6 +190,62 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "validated_at",
         }
     ),
+    # `cleaning-photos-storage`. Three fields, and what is **absent** is the point:
+    # `storage_key` is not auditable. R3.2 keeps the internal key out of every API response,
+    # and `audit_logs.changes` is a rule-11 sink whose whole contract is that a value cannot
+    # arrive through it without the column announcing it — writing the key here would put the
+    # one string the design works to keep private into the one column designed to be dumped.
+    # `photo_type` and the two ids are what an incident review actually asks for: who uploaded
+    # what kind of evidence, against which cleaning.
+    "CLEANING_PHOTO": frozenset({"photo_type", "cleaning_task_id", "uploaded_by"}),
+    # `access-notifications`. Rule 9 of `steering/security.md` names `AccessRecord` in its
+    # enumeration, so every operator action on one writes a row.
+    #
+    # **`code_masked` is listed and NOT denylisted**, unlike every other secret-adjacent
+    # column above, and the denylist's own comment already anticipated it: what the entity
+    # stores is *already* the `****XX` form rule 4 grants, so forcing `{"changed": true}`
+    # would record less than the rule permits. There is no plaintext column to protect
+    # (design D9) — the value never reaches the entity, let alone this diff.
+    #
+    # `notes` is here because `revoke()` writes the reason into it and losing that would make
+    # a revocation unattributable. It is free text an operator types, so the use cases record
+    # it with `redacted()`, the same discipline `properties-crud` design D7 applies to its
+    # three note columns — a manager pasting a door code into "notes" is the case both guard.
+    "ACCESS_RECORD": frozenset(
+        {"status", "provider", "created_mode", "code_masked", "external_id", "notes"}
+    ),
+    # `access-notifications`. Rule 9: "acceso/modificación de documentos de Guest".
+    #
+    # `document_number_encrypted` is listed here AND denylisted above, exactly like
+    # `secret_encrypted` and `wifi_password_encrypted`: the allowlist says it may appear in a
+    # guest's audit row at all, the denylist says only as `{"changed": true}`. Removing it
+    # here would make `redacted()` fail too, and a document being replaced would leave no
+    # trace.
+    #
+    # `date_of_birth` is listed here AND denylisted above — see the entry there for why. This
+    # comment used to argue the opposite ("auditable as a diff, and that is deliberate"), and
+    # it survived the commit that moved the field onto the denylist: the stale-copy failure
+    # rule 11's own paragraph describes, found by the panel's re-review. Nothing here restates
+    # the reasoning any more; it cites.
+    #
+    # `nationality` is the one that IS auditable as a diff, deliberately: §"Datos sensibles"
+    # names the document and the birth date and stops. The use cases record it with
+    # `redacted()` anyway (design D11) — that discipline lives in the caller, like
+    # `properties-crud` design D7 does for its note columns.
+    "GUEST": frozenset(
+        {
+            "nationality",
+            "date_of_birth",
+            "document_type",
+            "document_number_encrypted",
+            "document_expiry_date",
+            "document_status",
+            "legal_registration_status",
+        }
+    ),
+    # `access-notifications`. The legal registration of a stay (PRD §17) moves on the
+    # reservation, not on the guest (design D10), so its audit rows point at a reservation.
+    "RESERVATION": frozenset({"legal_registration_status", "access_status"}),
 }
 
 _REDACTED_MARKER = {"changed": True}

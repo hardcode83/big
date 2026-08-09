@@ -7,10 +7,13 @@ from fastapi import FastAPI
 # first request, or the global tenant filter (design D16) silently covers fewer
 # tables than it should — see app/core/models_registry.py.
 import app.core.models_registry  # noqa: F401
+from app.access.api.errors import register_access_error_handlers
+from app.access.api.router import router as access_router
 from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
+from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
 from app.core.config import settings
@@ -18,9 +21,12 @@ from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.log_redaction import install_webhook_token_redaction
 from app.core.openapi import install_openapi
+from app.guests.api.errors import register_guest_error_handlers
+from app.guests.api.router import router as guests_router
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
 from app.integrations.api.webhooks_router import router as webhooks_router
+from app.notifications.api.router import router as notifications_router
 from app.properties.api.errors import register_property_error_handlers
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
@@ -61,6 +67,8 @@ def create_app() -> FastAPI:
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
+    register_access_error_handlers(app)
+    register_guest_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -86,6 +94,25 @@ def create_app() -> FastAPI:
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
+    # `cleaning-photos-storage`: the **only anonymous route this application mounts** besides
+    # login, refresh and `/health` (design D7). Its own router because it is the only one, and
+    # because sharing `cleaning_tasks_router` — which declares `AUTHENTICATED_RESPONSES` and
+    # hangs every route off a `require(...)` — would put an unauthenticated endpoint one copied
+    # decorator away from twelve authorised ones. The signature in its query string is its
+    # authorisation, and `tests/test_route_authorization.py` names it in `ANONYMOUS_ENDPOINTS`,
+    # which is a visible diff by construction.
+    app.include_router(cleaning_photos_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
+    # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
+    # (design D5/D6).
+    app.include_router(notifications_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: PRD §15's operator surface. The `access` domain had entities and
+    # a table since `domain-foundation-ops` and no way to reach them until now.
+    app.include_router(access_router, prefix=API_V1_PREFIX)
+    # `access-notifications`: guest documents and the SES.Hospedajes submission (PRD §17).
+    # One router for everything that touches an identity document, which is the file a
+    # reviewer opens when a real provider arrives.
+    app.include_router(guests_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.
@@ -97,8 +124,12 @@ def create_app() -> FastAPI:
     # narrower inner ceiling never gets to see the request; the generic 1 MiB would have
     # refused a 10 MB CSV before the upload instance could allow it.
     #
-    # The three cases, and each number has its own reason:
+    # The four cases, and each number has its own reason:
     #
+    # * `/cleaning-tasks/…/photos` → `PHOTO_UPLOAD_MAX_BYTES` (10 MiB). From
+    #   `cleaning-photos-storage` (R5, design D10). **It is first, and the position is the
+    #   mechanism, not tidiness**: the path also starts with `/cleaning-`, so an `elif` after
+    #   that branch would never be reached and every photo above 1 MiB would be refused.
     # * `/integrations/` → `CSV_IMPORT_MAX_BYTES` (10 MiB). Rule 6 of steering/security.md.
     # * `/cleaning-` → `JSON_BODY_MAX_BYTES` (1 MiB). From `cleaning`: the checklist template
     #   endpoint takes a **client-sized array**, so its body is not a small fixed object, and
@@ -116,18 +147,46 @@ def create_app() -> FastAPI:
     # so collapsing them would make a future tuning of the knob silently move a measured
     # boundary.
     #
-    # **The obligation `cleaning` recorded for `cleaning-photos-storage` is now cheap.**
+    # **The obligation `cleaning` recorded for `cleaning-photos-storage` is now paid.**
     # `POST /cleaning-tasks/{id}/photos` starts with `/cleaning-`, so the JSON ceiling would
     # refuse any photo above 1 MiB. `cleaning` noted the repair would have to "teach
     # `MaxBodySizeMiddleware` to exclude a path, or split the prefixes" — the per-path
-    # provider IS that capability, so the repair is one branch here, before the `/cleaning-`
-    # one. Still NOT by raising `JSON_BODY_MAX_BYTES`, which would remove the JSON ceiling
-    # from every cleaning route and re-open the hole it closes.
+    # provider IS that capability, so the repair is the one branch below, before the
+    # `/cleaning-` one. Still NOT by raising `JSON_BODY_MAX_BYTES`, which would remove the
+    # JSON ceiling from every cleaning route and re-open the hole it closes.
+    #
+    # The photo branch matches on BOTH ends — the `/cleaning-tasks/` prefix and a trailing
+    # `/photos` — so the wider ceiling reaches that one collection and no neighbour that
+    # happens to end the same way. `tests/cleaning/test_photo_body_limit.py` pins all three
+    # halves: the photo body passes, the template body is still refused, and a lookalike path
+    # keeps the JSON ceiling.
+    #
+    # **ACCEPTED RISK, photo branch: 10 MiB of anonymous body before any authentication.**
+    # This provider is consulted by the middleware, which by construction runs before the
+    # route is resolved and before `require(...)` — that is the whole reason it exists. So the
+    # match is on the path string alone: anyone who can guess the URL shape can make the
+    # backend receive up to `PHOTO_UPLOAD_MAX_BYTES` per request without a token, and the
+    # answer (a 401) comes only after the body is in. The pattern is also **wider than the
+    # route**: `/api/v1/cleaning-tasks/photos` and `/api/v1/cleaning-tasks/a/b/c/photos` match
+    # it too, so those consume up to 10 MiB and then answer 404/405. Tightening the pattern to
+    # a UUID segment would narrow the second half but not the first, which is the one that
+    # matters — a real task id is just as guessable in shape.
+    #
+    # Accepted because it is the irreducible cost of having an upload endpoint at all, and it
+    # is the same bargain `/integrations/` already struck with `CSV_IMPORT_MAX_BYTES` (also
+    # 10 MiB, also pre-auth). What bounds it is that 10 MiB is ~40× below the 400 MB body that
+    # made `api-ingress-routing` mount this middleware in the first place, and that it is a
+    # per-request ceiling, not a per-connection one. Written down here because it was not
+    # written down anywhere: the other three branches each carry the measurement that justifies
+    # their number, and this one carried none.
     app.add_middleware(
         MaxBodySizeMiddleware,
         path_prefixes=(API_V1_PREFIX,),
         max_bytes_provider=lambda path: (
-            settings.csv_import_max_bytes
+            settings.photo_upload_max_bytes
+            if path.startswith(f"{API_V1_PREFIX}/cleaning-tasks/")
+            and path.endswith("/photos")
+            else settings.csv_import_max_bytes
             if path.startswith(f"{API_V1_PREFIX}/integrations/")
             else JSON_BODY_MAX_BYTES
             if path.startswith(f"{API_V1_PREFIX}/cleaning-")

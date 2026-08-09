@@ -1,6 +1,8 @@
 # AutoHostAI — Frontend
 
-Application Shell del frontend Next.js (App Router, TypeScript strict). Este change entrega la **fundación**: layout, navegación responsive, rutas base y placeholders para todos los módulos del PRD §24. **No** contiene lógica de negocio, workflows, llamadas al backend ni autenticación — esas llegan en changes posteriores.
+Application Shell del frontend Next.js (App Router, TypeScript strict). Este change entrega la **fundación**: layout, navegación responsive, rutas base y placeholders para todos los módulos del PRD §24. La autenticación se integra como sesión efímera en el runtime del navegador: los JWT viven solo en memoria y los guards son de UX client-side; el backend conserva toda la autoridad.
+
+La sesión se pierde con un reload completo, cierre de pestaña o nuevo runtime y requiere login de nuevo. No se usan cookies de autenticación, `localStorage`, `sessionStorage`, IndexedDB, BFF ni `middleware.ts` de autenticación. Una migración futura a cookies/middleware o sesión server-side requiere un change arquitectónico separado.
 
 ## Comandos
 
@@ -88,8 +90,14 @@ Cada ruta renderiza `RoutePlaceholder` (Server Component) → `ModulePlaceholder
 `app/providers.tsx` (frontera cliente fina) compone, en orden:
 
 ```
-RuntimeConfigProvider → I18nProvider → [slot AuthProvider futuro] → QueryProvider
+RuntimeConfigProvider → I18nProvider → AuthProvider → QueryProvider
 ```
+
+`AuthProvider` expone identidad y estado React, mientras `lib/auth` conserva los
+tokens únicamente en memoria y coordina el refresh single-flight. Los guards de
+`workspace`, `cleaner` y `technician` son client-side y solo mejoran la UX; RBAC,
+JWT y tenant isolation siguen siendo responsabilidad del backend. La shell pública
+y el portal guest no reciben el guard JWT.
 
 Zustand no necesita provider. No se añaden providers de theme/analytics/flags.
 
@@ -102,11 +110,11 @@ Zustand no necesita provider. No se añaden providers de theme/analytics/flags.
 
 `lib/api`: transporte genérico basado en `fetch`, configurable por base URL, con el envelope de error de PRD §23 (`{error:{code,message,details}}`). Sus tipos se derivan exclusivamente de `../backend/openapi.json` mediante el generador fijado `openapi-typescript@6.7.6`; el artefacto versionado vive en `lib/api/generated/openapi.d.ts`. `npm run api:generate` lo regenera y `npm run api:check` falla mostrando la deriva si la salida cambia. El flujo usa Node 22, `npm ci` y normaliza la salida para producir bytes idénticos en macOS, Linux y CI.
 
-El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tipa sus cuerpos JSON y respuestas de éxito. No contiene endpoints, DTOs escritos a mano, wrappers, repositorios, servicios de dominio, tokens ni llamadas funcionales desde el shell. Los errores siguen pasando por `ApiError` y `parseApiError`; los hooks `getHeaders` y `onUnauthorized` quedan como puntos de extensión para auth futura. Nunca lee Zustand.
+El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tipa sus cuerpos JSON y respuestas de éxito. No contiene endpoints, DTOs escritos a mano, wrappers, repositorios ni servicios de dominio. La integración `frontend-auth-session` usa sus hooks `getHeaders` y `onUnauthorized` para añadir el access token efímero, renovar una sesión elegible tras un `401`, reintentar una vez y excluir los endpoints de autenticación; el login, la sesión en memoria, el logout best-effort y los guards client-side de UX viven en `lib/auth` y `features/auth`. Los errores siguen pasando por `ApiError` y `parseApiError`; nunca se persisten tokens ni se lee Zustand para la sesión.
 
 ## Internacionalización (ES/EN)
 
-`i18next` + `react-i18next`, namespaces `common`, `navigation`, `states` en `locales/{es,en}`. **Toda string visible pasa por claves i18n; nada hardcodeado.** El locale se resuelve por cookie `autohostai.locale` (validada contra `es|en`, fallback `es`), server-side por request, y se sincroniza con `<html lang>`. Un test de paridad falla ante claves ausentes en cualquiera de los dos idiomas.
+`i18next` + `react-i18next`, namespaces `common`, `navigation`, `states` y `auth` en `locales/{es,en}`. **Toda string visible pasa por claves i18n; nada hardcodeado.** El locale se resuelve por cookie `autohostai.locale` (validada contra `es|en`, fallback `es`), server-side por request, y se sincroniza con `<html lang>`. Un test de paridad falla ante claves ausentes en cualquiera de los dos idiomas.
 
 ## Estados transversales
 
@@ -127,24 +135,24 @@ El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tip
 `lib/config`, con frontera estricta (design D15):
 
 - `server.ts` (`server-only`): variables privadas/runtime; nunca importable desde un Client Component.
-- `public.ts`: allowlist explícita del subconjunto público serializable (`appEnv`, `defaultLocale`, `featureFlags` vacío). Nada se vuelca desde `process.env`.
+- `public.ts`: allowlist explícita del subconjunto público serializable (`apiBaseUrl`, `appEnv`, `defaultLocale`, `featureFlags` vacío). `apiBaseUrl` tiene por defecto el valor vacío para usar rutas same-origin a través del proxy existente. Nada se vuelca desde `process.env`.
 - `runtime-config-provider.tsx`: acceso cliente al snapshot público.
 - `constants.ts`: defaults no sensibles (locale `es`, cookie de locale).
 
-El código de aplicación no lee `process.env` fuera de esta frontera. `BACKEND_INTERNAL_URL` permanece server-only y no se consume al renderizar el shell. Las feature flags futuras se declararán en el registro tipado central (hoy vacío).
+El código de aplicación no lee `process.env` fuera de esta frontera. `BACKEND_INTERNAL_URL` permanece server-only y no se consume al renderizar el shell; `apiBaseUrl` no lo expone al navegador. Las feature flags futuras se declararán en el registro tipado central (hoy vacío).
 
 ## Testing
 
 Vitest + Testing Library + jest-dom + axe-core. Tests colocados junto al módulo (`*.test.ts[x]`); helpers en `test/`. Cobertura de esta fundación: registro de rutas y cobertura PRD §24, aislamiento de navegación por perfil, active route, estados distinguibles, i18n y paridad de catálogos, config (allowlist/sin secretos), metadata (noindex, sin IDs/tokens), error boundaries y accesibilidad (axe + comprobación manual de teclado/foco/viewports). No se mockean endpoints ni datos de negocio.
 
-## Preparación para autenticación (sin implementarla)
+## Límites de autenticación frontend
 
-Puntos de extensión ya presentes, **sin** login/JWT/RBAC/guards:
+La sesión frontend ya implementa login y refresh efímero, pero mantiene estos límites:
 
-- Los route groups (`(public)`, `(workspace)`, `(field)`, `(guest)`) separan las superficies que un futuro gate protegerá o seleccionará por experiencia.
-- `AppProviders` documenta el slot del futuro `AuthProvider` (entre i18n y query).
-- El cliente API expone composición de headers/manejo de `401` sin token concreto.
+- Los route groups (`(public)`, `(workspace)`, `(field)`, `(guest)`) separan las superficies que el guard client-side protege por experiencia; la autorización efectiva sigue en el backend.
+- `AppProviders` monta `AuthProvider` entre i18n y query.
+- El cliente API expone composición de headers y recuperación elegible de `401`.
 - Cada shell filtra el registro por su perfil estático, no por permisos.
-- Ningún token se guarda en localStorage, Zustand, config ni cookies.
+- Ningún token se guarda en localStorage, sessionStorage, IndexedDB, Zustand, config ni cookies.
 
 El backend seguirá siendo la autoridad de RBAC; el frontend solo adaptará la presentación.

@@ -55,8 +55,38 @@ class Permission(str, enum.Enum):
     READ_CLEANING_TEMPLATES = "READ_CLEANING_TEMPLATES"
     MANAGE_CLEANING_TEMPLATES = "MANAGE_CLEANING_TEMPLATES"
 
+    # Added by `access-notifications`.
+    #
+    # `READ_OWN_NOTIFICATIONS` is self-service and not a role capability: the endpoint
+    # returns the rows addressed to the caller, so a cleaner needs it exactly as much as an
+    # owner does. Scoping happens in the repository (`list_for_recipient`), which is why the
+    # permission can be universal without being a leak.
+    READ_OWN_NOTIFICATIONS = "READ_OWN_NOTIFICATIONS"
+    # Access records split read/manage on the same reasoning as `reservations` and
+    # `properties`: PRD §6 gives `TENANT_OWNER` visibility and `PROPERTY_MANAGER` the
+    # operation. `CLEANER`/`TECHNICIAN` get neither — a guest's door code is not part of
+    # doing a cleaning or a repair.
+    READ_ACCESS_RECORDS = "READ_ACCESS_RECORDS"
+    MANAGE_ACCESS_RECORDS = "MANAGE_ACCESS_RECORDS"
+    # Guest identity documents (PRD §17). Separate from `READ_RESERVATIONS` deliberately:
+    # rule 4 of `steering/security.md` treats the document number as the most sensitive
+    # value in the system, and folding it into "can read bookings" would grant it to every
+    # future holder of that permission by accident.
+    READ_GUEST_DOCUMENTS = "READ_GUEST_DOCUMENTS"
+    MANAGE_GUEST_DOCUMENTS = "MANAGE_GUEST_DOCUMENTS"
+    # Submitting the legal registration to SES.Hospedajes is an operation, not a read of the
+    # document, so it is its own permission: an operator may need to submit without ever
+    # being shown the number.
+    SUBMIT_LEGAL_REGISTRATION = "SUBMIT_LEGAL_REGISTRATION"
 
-_SELF_SERVICE = frozenset({Permission.READ_OWN_PROFILE, Permission.MANAGE_OWN_SESSION})
+
+_SELF_SERVICE = frozenset(
+    {
+        Permission.READ_OWN_PROFILE,
+        Permission.MANAGE_OWN_SESSION,
+        Permission.READ_OWN_NOTIFICATIONS,
+    }
+)
 _RESERVATION_READ = frozenset({Permission.READ_RESERVATIONS})
 _RESERVATION_MANAGE = frozenset({Permission.READ_RESERVATIONS, Permission.MANAGE_RESERVATIONS})
 _USER_READ = frozenset({Permission.READ_USERS})
@@ -79,6 +109,22 @@ _CLEANING_EXECUTE = frozenset(
     {Permission.READ_CLEANING_TASKS, Permission.EXECUTE_CLEANING_TASKS}
 )
 
+_ACCESS_READ = frozenset({Permission.READ_ACCESS_RECORDS})
+_ACCESS_MANAGE = frozenset(
+    {Permission.READ_ACCESS_RECORDS, Permission.MANAGE_ACCESS_RECORDS}
+)
+# The document read comes with the legal submission for the manager and the owner: PRD §17
+# names both among the three roles that may see a full document number, and the submission
+# is what they do with it.
+_LEGAL_READ = frozenset({Permission.READ_GUEST_DOCUMENTS})
+_LEGAL_MANAGE = frozenset(
+    {
+        Permission.READ_GUEST_DOCUMENTS,
+        Permission.MANAGE_GUEST_DOCUMENTS,
+        Permission.SUBMIT_LEGAL_REGISTRATION,
+    }
+)
+
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
 # introduce the endpoints needing them.
@@ -88,6 +134,15 @@ _CLEANING_EXECUTE = frozenset(
 # one tenant, and cross-tenant visibility is explicitly deferred to the `saas-cross-tenant`
 # roadmap entry. Granting it here would pre-empt that decision. `CLEANER` and `TECHNICIAN`
 # see only their own tasks and tickets, never the booking ledger.
+#
+# **That rule outlives one PRD sentence, and `access-notifications` is where it first
+# collides with one.** PRD §17 says "solo roles `SUPER_ADMIN`, `TENANT_OWNER`,
+# `PROPERTY_MANAGER` pueden ver documento completo". That sentence is a **ceiling**, not a
+# grant: it names who may, and this table still decides who does. `SUPER_ADMIN` gets no
+# `READ_GUEST_DOCUMENTS` here for the same reason it gets no reservation permission — it has
+# no operational role inside a tenant until `saas-cross-tenant` decides what cross-tenant
+# access looks like, and identity documents are the worst possible place to pre-empt that.
+# Nothing in §17 is violated: no role outside its three sees a document.
 #
 # **Consequence of `_PROPERTY_READ` for the owner, assumed and not accidental** (design D12):
 # the owner cannot register her own flat — the manager does. `app/cli/bootstrap.py` creates both
@@ -105,6 +160,11 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # Reads the work and owns the standard the tenant cleans to; does not operate it.
         | _CLEANING_READ
         | _CLEANING_TEMPLATE_MANAGE
+        # Sees how her guests get in, and may see a document she is legally responsible for
+        # (PRD §17 names `TENANT_OWNER` among the three roles). Registering the code and
+        # submitting to SES.Hospedajes is operation, which PRD §6 gives to the manager.
+        | _ACCESS_READ
+        | _LEGAL_READ
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -120,6 +180,10 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # whose owner never logs in, `process_checkouts` would have nothing to resolve, because
         # `checklist_template_id` is NOT NULL.
         | _CLEANING_TEMPLATE_MANAGE
+        # Operates access and the legal registration: PRD §15 has an operator register the
+        # code, and PRD §17 step 4 has "manager puede hacer submit".
+        | _ACCESS_MANAGE
+        | _LEGAL_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     UserRole.TECHNICIAN: _SELF_SERVICE,

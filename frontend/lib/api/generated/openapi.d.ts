@@ -5,6 +5,41 @@
 
 
 export interface paths {
+  "/api/v1/access-records": {
+    /**
+     * List the tenant's access records
+     * @description Paginated with `page`/`per_page` (PRD §23). Filterable by `property_id`, `reservation_id` and `status`. Access codes appear only in their masked `****XX` form — the plaintext is never stored (PRD §15: the provider creates and delivers it).
+     */
+    get: operations["list_access_records_api_v1_access_records_get"];
+  };
+  "/api/v1/access-records/{record_id}": {
+    /**
+     * Read one access record
+     * @description Responds `404` for a record of another tenant with a body identical to the one for an id that does not exist (R3.3).
+     */
+    get: operations["get_access_record_api_v1_access_records__record_id__get"];
+  };
+  "/api/v1/access-records/{record_id}/delivered": {
+    /**
+     * Confirm the guest received the access instructions
+     * @description Responds `409` unless the record is `MANUAL_ADDED` or `CREATED_EXTERNAL`: confirming delivery of a code nobody registered would be an assertion about a guest that has no basis.
+     */
+    post: operations["mark_delivered_api_v1_access_records__record_id__delivered_post"];
+  };
+  "/api/v1/access-records/{record_id}/external": {
+    /**
+     * Declare that the provider manages this access
+     * @description PRD §15: GrinPass imports the reservation from the PMS and creates the code itself. Responds `409` if the record is not `PENDING`.
+     */
+    post: operations["mark_external_api_v1_access_records__record_id__external_post"];
+  };
+  "/api/v1/access-records/{record_id}/manual-code": {
+    /**
+     * Register an access code arranged by hand
+     * @description PRD §15's `ManualAccessAdapter`. **Only the masked form is stored**: the plaintext reaches the domain, is reduced to `****XX` and is discarded — there is no column, no response field and no log line that can hold it. Responds `409` if the record is not `PENDING`.
+     */
+    post: operations["register_manual_code_api_v1_access_records__record_id__manual_code_post"];
+  };
   "/api/v1/auth/login": {
     /**
      * Exchange email and password for a token pair
@@ -44,6 +79,15 @@ export interface paths {
      * @description `items[].item_id` becomes the key a checklist is completed by and travels as a URL path segment, so it is restricted to letters, digits, `.`, `_` and `-`, capped at 100 characters and unique within the template.
      */
     post: operations["create_template_api_v1_cleaning_checklist_templates_post"];
+  };
+  "/api/v1/cleaning-photos/{photo_id}": {
+    /**
+     * Serve a cleaning photo by signed URL
+     * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+     *
+     * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+     */
+    get: operations["serve_cleaning_photo_api_v1_cleaning_photos__photo_id__get"];
   };
   "/api/v1/cleaning-tasks": {
     /**
@@ -93,9 +137,30 @@ export interface paths {
   "/api/v1/cleaning-tasks/{task_id}/complete": {
     /**
      * Finish a cleaning
-     * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+     * @description Applies PRD §11's validation rule, all three clauses of it: every `required` checklist item completed, at least one photo uploaded for every `required` `photo_type` of the template, and no unresolved `CRITICAL` incident. The first two are answered `409` with what is missing enumerated in the message. A template that declares no `required` photo closes with none. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
      */
     post: operations["complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/photos": {
+    /**
+     * List a cleaning task's photos
+     * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
+     *
+     * `storage_key` is not a field of this response and never will be (R3.2): what the URL reveals depends on the tenant's `storage_type`, exactly as documented on the upload.
+     */
+    get: operations["list_cleaning_photos_api_v1_cleaning_tasks__task_id__photos_get"];
+    /**
+     * Upload a photo of the cleaning
+     * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write.
+     *
+     * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+     *
+     * * `LOCAL` — the URL is a route of this API (`/api/v1/cleaning-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+     * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip; see `S3FileStorage.signed_url`.
+     *
+     * In neither case does `storage_key` appear as a field of the response body (R3.2).
+     */
+    post: operations["upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
   };
   "/api/v1/cleaning-tasks/{task_id}/reject": {
     /**
@@ -118,6 +183,18 @@ export interface paths {
      */
     post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
   };
+  "/api/v1/guests/{guest_id}/document": {
+    /**
+     * Read a guest's full identity document
+     * @description The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.
+     */
+    get: operations["read_guest_document_api_v1_guests__guest_id__document_get"];
+    /**
+     * Store a guest's identity document
+     * @description The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.
+     */
+    patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
+  };
   "/api/v1/integrations/pms/import-csv": {
     /**
      * Import reservations from a CSV file
@@ -138,6 +215,13 @@ export interface paths {
      * @description Overwrites the route token and the header secret in one transaction. There is no grace window: the previous pair stops authenticating immediately, so notices sent to the old URL are lost until the provider's panel is updated — the `pms_sync` poll recovers them.
      */
     post: operations["rotate_webhook_endpoint_api_v1_integrations_webhook_endpoints__endpoint_id__rotate_post"];
+  };
+  "/api/v1/notifications": {
+    /**
+     * List the caller's own notifications
+     * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
+     */
+    get: operations["list_own_notifications_api_v1_notifications_get"];
   };
   "/api/v1/properties": {
     /**
@@ -191,6 +275,13 @@ export interface paths {
      * @description Only the fields present in the body are applied. Dates and occupancy are revalidated on the RESULT, and `nights`/`total_guests` are recomputed. A body that changes nothing writes nothing and records no timeline event.
      */
     patch: operations["update_reservation_api_v1_reservations__reservation_id__patch"];
+  };
+  "/api/v1/reservations/{reservation_id}/legal-registration/submit": {
+    /**
+     * Report a stay to SES.Hospedajes
+     * @description PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.
+     */
+    post: operations["submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post"];
   };
   "/api/v1/tenants/{tenant_id}": {
     /**
@@ -258,6 +349,78 @@ export type webhooks = Record<string, never>;
 export interface components {
   schemas: {
     /**
+     * AccessCreatedMode
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.created_mode) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessCreatedMode: "EXTERNAL_PMS_AUTOMATIC" | "MANUAL" | "MOCK";
+    /**
+     * AccessProvider
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.provider) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessProvider: "GRINPASS" | "MANUAL" | "MOCK" | "EXTERNAL_MANAGED";
+    /** AccessRecordPageResponse */
+    AccessRecordPageResponse: {
+      /** Data */
+      data: components["schemas"]["AccessRecordResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /** AccessRecordResponse */
+    AccessRecordResponse: {
+      /** Code Masked */
+      code_masked: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      created_mode: components["schemas"]["AccessCreatedMode"];
+      /** External Id */
+      external_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Notes */
+      notes: string | null;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      provider: components["schemas"]["AccessProvider"];
+      /** Reservation Id */
+      reservation_id: string | null;
+      status: components["schemas"]["AccessRecordStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Valid From */
+      valid_from: string | null;
+      /** Valid To */
+      valid_to: string | null;
+    };
+    /**
+     * AccessRecordStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (AccessRecord.status) without a named block (§7.16).
+     * @enum {string}
+     */
+    AccessRecordStatus: "PENDING" | "CREATED_EXTERNAL" | "MANUAL_ADDED" | "DELIVERED" | "EXPIRED" | "REVOKED";
+    /**
      * AssignCleaningTaskRequest
      * @description `PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.
      *
@@ -279,6 +442,13 @@ export interface components {
        * @description UTF-8 CSV with the documented columns
        */
       file: string;
+    };
+    /** Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post */
+    Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+      /** File */
+      file: string;
+      /** Photo Type */
+      photo_type: string;
     };
     /** ChecklistItemPayload */
     ChecklistItemPayload: {
@@ -359,6 +529,65 @@ export interface components {
        * Format: date-time
        */
       updated_at: string;
+    };
+    /**
+     * CleaningPhotoListResponse
+     * @description The photos of one task (R3.1), each already carrying its signed URL.
+     *
+     * Wrapped in `data` rather than returned as a bare array, the shape `ChecklistResponse`
+     * already uses: a top-level JSON array cannot grow a field later without breaking every
+     * generated client, and this list has an obvious future one (`total`, if a task ever
+     * accumulates enough photos to page).
+     *
+     * **The element type is `CleaningPhotoResponse`, whose fields are an allowlist**, which is
+     * where R3.2 is actually enforced — see its docstring. Building this from the entities with
+     * `model_validate` would publish `storage_key` for every photo at once, so the only way in is
+     * through `from_upload`.
+     */
+    CleaningPhotoListResponse: {
+      /** Data */
+      data: components["schemas"]["CleaningPhotoResponse"][];
+    };
+    /**
+     * CleaningPhotoResponse
+     * @description One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
+     *
+     * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
+     * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
+     * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
+     * "the key never appears in a response" a property of this class rather than of everyone who
+     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
+     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
+     * nobody made.
+     *
+     * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
+     * a client uses instead of a path, and it is not stored anywhere.
+     */
+    CleaningPhotoResponse: {
+      /**
+       * Cleaning Task Id
+       * Format: uuid
+       */
+      cleaning_task_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Photo Type */
+      photo_type: string;
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -669,6 +898,21 @@ export interface components {
       tenant_id: string;
     };
     /**
+     * DocumentStoredResponse
+     * @description What a successful write returns: **no document number**.
+     *
+     * The caller just sent it; echoing it back would put it in one more response body, one more
+     * proxy log and one more browser cache for no benefit.
+     */
+    DocumentStoredResponse: {
+      document_status: components["schemas"]["GuestDocumentStatus"];
+      /**
+       * Guest Id
+       * Format: uuid
+       */
+      guest_id: string;
+    };
+    /**
      * ErrorBody
      * @description The `error` object of the PRD §23 envelope.
      */
@@ -685,7 +929,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -698,11 +942,36 @@ export interface components {
     ErrorEnvelope: {
       error: components["schemas"]["ErrorBody"];
     };
+    /** GuestDocumentResponse */
+    GuestDocumentResponse: {
+      /** Date Of Birth */
+      date_of_birth: string | null;
+      /** Document Expiry Date */
+      document_expiry_date: string | null;
+      /** Document Number */
+      document_number: string;
+      document_status: components["schemas"]["GuestDocumentStatus"];
+      document_type: components["schemas"]["GuestDocumentType"] | null;
+      /** Full Name */
+      full_name: string;
+      /**
+       * Guest Id
+       * Format: uuid
+       */
+      guest_id: string;
+      /** Nationality */
+      nationality: string | null;
+    };
     /**
      * GuestDocumentStatus
      * @enum {string}
      */
     GuestDocumentStatus: "NOT_PROVIDED" | "PENDING" | "PROVIDED" | "VERIFIED" | "REJECTED";
+    /**
+     * GuestDocumentType
+     * @enum {string}
+     */
+    GuestDocumentType: "DNI" | "NIE" | "PASSPORT" | "RESIDENCE_CARD" | "OTHER";
     /**
      * GuestSummaryResponse
      * @description The guest as a reservation may show it — no document data at all (R1.8, D17).
@@ -741,6 +1010,15 @@ export interface components {
       /** Updated */
       updated: number;
     };
+    /** LegalRegistrationResponse */
+    LegalRegistrationResponse: {
+      legal_registration_status: components["schemas"]["LegalRegistrationStatus"];
+      /**
+       * Reservation Id
+       * Format: uuid
+       */
+      reservation_id: string;
+    };
     /**
      * LegalRegistrationStatus
      * @description Shared with reservations/ — PRD §7.6 and §7.7 define the identical enum
@@ -757,6 +1035,66 @@ export interface components {
       /** Password */
       password: string;
     };
+    /** MarkExternalRequest */
+    MarkExternalRequest: {
+      /** Notes */
+      notes?: string | null;
+    };
+    /**
+     * NotificationChannel
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (NotificationLog.channel) without a named block (§7.24). Not the same enum as
+     * ConversationChannel (§7.14): PUSH, IN_APP and CONSOLE do not exist there.
+     * @enum {string}
+     */
+    NotificationChannel: "EMAIL" | "WHATSAPP" | "PUSH" | "IN_APP" | "CONSOLE";
+    /** NotificationPageResponse */
+    NotificationPageResponse: {
+      /** Data */
+      data: components["schemas"]["NotificationResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /** NotificationResponse */
+    NotificationResponse: {
+      /** Body */
+      body: string | null;
+      channel: components["schemas"]["NotificationChannel"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Notification Type */
+      notification_type: string;
+      /** Related Id */
+      related_id: string | null;
+      /** Related Type */
+      related_type: string | null;
+      /** Sent At */
+      sent_at: string | null;
+      status: components["schemas"]["NotificationStatus"];
+      /** Subject */
+      subject: string | null;
+    };
+    /**
+     * NotificationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (NotificationLog.status) without a named block (§7.24).
+     * @enum {string}
+     */
+    NotificationStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
     /**
      * PaymentStatus
      * @enum {string}
@@ -890,6 +1228,19 @@ export interface components {
     RefreshRequest: {
       /** Refresh Token */
       refresh_token: string;
+    };
+    /**
+     * RegisterCodeRequest
+     * @description The one place a plaintext access code enters the system (R2.2).
+     *
+     * It goes no further than `AccessRecord.register_manual_code`, which masks it. No column,
+     * no response field and no log line can hold it — see design D9.
+     */
+    RegisterCodeRequest: {
+      /** Code */
+      code: string;
+      /** Notes */
+      notes?: string | null;
     };
     /** RequiredPhotoPayload */
     RequiredPhotoPayload: {
@@ -1086,6 +1437,33 @@ export interface components {
       reason: string;
       /** Reference */
       reference?: string | null;
+    };
+    /**
+     * SetDocumentRequest
+     * @description The five document fields, all required together (R7.1).
+     *
+     * Not a partial patch: PRD §17 needs the set, and a guest with a number but no expiry date
+     * looks documented and cannot be reported. `check_in_date`/`check_out_date` — the other two
+     * of the eight — are the reservation's and are never accepted here.
+     */
+    SetDocumentRequest: {
+      /**
+       * Date Of Birth
+       * Format: date
+       */
+      date_of_birth: string;
+      /**
+       * Document Expiry Date
+       * Format: date
+       */
+      document_expiry_date: string;
+      /** Document Number */
+      document_number: string;
+      document_type: components["schemas"]["GuestDocumentType"];
+      /** Nationality */
+      nationality: string;
+      /** Reservation Id */
+      reservation_id?: string | null;
     };
     /**
      * StorageType
@@ -1442,6 +1820,205 @@ export type external = Record<string, never>;
 export interface operations {
 
   /**
+   * List the tenant's access records
+   * @description Paginated with `page`/`per_page` (PRD §23). Filterable by `property_id`, `reservation_id` and `status`. Access codes appear only in their masked `****XX` form — the plaintext is never stored (PRD §15: the provider creates and delivers it).
+   */
+  list_access_records_api_v1_access_records_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        reservation_id?: string | null;
+        status?: components["schemas"]["AccessRecordStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one access record
+   * @description Responds `404` for a record of another tenant with a body identical to the one for an id that does not exist (R3.3).
+   */
+  get_access_record_api_v1_access_records__record_id__get: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Confirm the guest received the access instructions
+   * @description Responds `409` unless the record is `MANUAL_ADDED` or `CREATED_EXTERNAL`: confirming delivery of a code nobody registered would be an assertion about a guest that has no basis.
+   */
+  mark_delivered_api_v1_access_records__record_id__delivered_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Declare that the provider manages this access
+   * @description PRD §15: GrinPass imports the reservation from the PMS and creates the code itself. Responds `409` if the record is not `PENDING`.
+   */
+  mark_external_api_v1_access_records__record_id__external_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["MarkExternalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Register an access code arranged by hand
+   * @description PRD §15's `ManualAccessAdapter`. **Only the masked form is stored**: the plaintext reaches the domain, is reduced to `****XX` and is discarded — there is no column, no response field and no log line that can hold it. Responds `409` if the record is not `PENDING`.
+   */
+  register_manual_code_api_v1_access_records__record_id__manual_code_post: {
+    parameters: {
+      path: {
+        record_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RegisterCodeRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["AccessRecordResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Exchange email and password for a token pair
    * @description Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.
    */
@@ -1610,6 +2187,59 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Serve a cleaning photo by signed URL
+   * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+   *
+   * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+   */
+  serve_cleaning_photo_api_v1_cleaning_photos__photo_id__get: {
+    parameters: {
+      query: {
+        /** @description POSIX expiry the signature covers. */
+        exp: number;
+        /** @description Hex HMAC of the object's key and `exp`. */
+        sig: string;
+      };
+      path: {
+        photo_id: string;
+      };
+    };
+    responses: {
+      /** @description The photo's bytes, with the `Content-Type` derived from the stored object's extension, `X-Content-Type-Options: nosniff`, and a `Cache-Control` of `private, max-age=<what is left of the signature>` so no shared cache keeps the bytes and no browser keeps them past the URL's expiry. */
+      200: {
+        content: {
+          "image/jpeg": unknown;
+          "image/png": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description The signature is missing, wrong, expired, tampered with, or names a photo that does not exist. **All five answer with the same body**, deliberately: telling them apart would make this endpoint an existence oracle for an unauthenticated caller. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The photo's tenant stores objects in `S3`, where the browser fetches them directly from the provider, so there is nothing for this endpoint to serve. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The signature was valid but the object could not be read back. */
+      502: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
@@ -1884,7 +2514,7 @@ export interface operations {
   };
   /**
    * Finish a cleaning
-   * @description Applies PRD §11's validation rule: every `required` checklist item completed and no unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. The required-photo clause arrives with `cleaning-photos-storage`. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
+   * @description Applies PRD §11's validation rule, all three clauses of it: every `required` checklist item completed, at least one photo uploaded for every `required` `photo_type` of the template, and no unresolved `CRITICAL` incident. The first two are answered `409` with what is missing enumerated in the message. A template that declares no `required` photo closes with none. The property's next state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or `VACANT_READY`.
    */
   complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post: {
     parameters: {
@@ -1913,6 +2543,124 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List a cleaning task's photos
+   * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
+   *
+   * `storage_key` is not a field of this response and never will be (R3.2): what the URL reveals depends on the tenant's `storage_type`, exactly as documented on the upload.
+   */
+  list_cleaning_photos_api_v1_cleaning_tasks__task_id__photos_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningPhotoListResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a photo of the cleaning
+   * @description `multipart/form-data` with a `photo_type` the task's template declares and a `file`. The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `photo_type` are allowed on purpose. `404` when the `photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` over the configured size ceiling, `502` when the file store refuses the write.
+   *
+   * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+   *
+   * * `LOCAL` — the URL is a route of this API (`/api/v1/cleaning-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+   * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip; see `S3FileStorage.signed_url`.
+   *
+   * In neither case does `storage_key` appear as a field of the response body (R3.2).
+   */
+  upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["CleaningPhotoResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is not `IN_PROGRESS`, so no evidence can be filed against it. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware` before the body is read, and again by the use case while it consumes the stream. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The file store refused the write; no row was persisted. */
+      502: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
@@ -2036,6 +2784,85 @@ export interface operations {
     };
   };
   /**
+   * Read a guest's full identity document
+   * @description The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.
+   */
+  read_guest_document_api_v1_guests__guest_id__document_get: {
+    parameters: {
+      path: {
+        guest_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GuestDocumentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Store a guest's identity document
+   * @description The five fields PRD §17 requires of the guest, all together. The number is encrypted at rest (Fernet) and **is not echoed back**. Naming a `reservation_id` re-evaluates that stay's readiness to be reported; omitting it stores the document and touches no booking. Every call writes an `AuditLog` row recording which fields changed, never their values.
+   */
+  set_guest_document_api_v1_guests__guest_id__document_patch: {
+    parameters: {
+      path: {
+        guest_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["SetDocumentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["DocumentStoredResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Import reservations from a CSV file
    * @description Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).
    */
@@ -2124,6 +2951,44 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["WebhookEndpointMaterialResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the caller's own notifications
+   * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
+   */
+  list_own_notifications_api_v1_notifications_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["NotificationPageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
@@ -2473,6 +3338,43 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["ReservationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Report a stay to SES.Hospedajes
+   * @description PRD §17 step 4. Runs against `MockSESHospedajesAdapter` — real submission is a declared MVP non-goal (PRD §29) and needs credentials, a DPA with the provider and a retention policy first. Responds `409` unless the stay is `READY_TO_SUBMIT`, without invoking the adapter. On failure the stay becomes `FAILED` and the managers are notified.
+   */
+  submit_legal_registration_api_v1_reservations__reservation_id__legal_registration_submit_post: {
+    parameters: {
+      path: {
+        reservation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["LegalRegistrationResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
