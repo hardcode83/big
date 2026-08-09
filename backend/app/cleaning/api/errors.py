@@ -27,9 +27,14 @@ from app.cleaning.domain.exceptions import (
     CleaningValidationError,
     DuplicateLiveCleaningTaskError,
     InvalidCleaningTransitionError,
+    PhotoStorageUnavailableError,
+    PhotosIncompleteError,
+    PhotoTooLargeError,
+    PhotoTypeNotFoundError,
     PropertyNotFoundError,
     PropertyStateBlocksCleaningError,
     ReservationNotFoundError,
+    UnsupportedPhotoFormatError,
 )
 from app.core.error_codes import ErrorCode
 from app.core.errors import error_envelope
@@ -39,15 +44,24 @@ _MAPPING: tuple[tuple[type[CleaningDomainError], int, ErrorCode], ...] = (
     (CleaningTaskNotFoundError, 404, ErrorCode.NOT_FOUND),
     (ChecklistTemplateNotFoundError, 404, ErrorCode.NOT_FOUND),
     (ChecklistItemNotFoundError, 404, ErrorCode.NOT_FOUND),
+    (PhotoTypeNotFoundError, 404, ErrorCode.NOT_FOUND),
     (PropertyNotFoundError, 404, ErrorCode.NOT_FOUND),
     (ReservationNotFoundError, 404, ErrorCode.NOT_FOUND),
     (InvalidCleaningTransitionError, 409, ErrorCode.CONFLICT),
     (PropertyStateBlocksCleaningError, 409, ErrorCode.CONFLICT),
     (ChecklistIncompleteError, 409, ErrorCode.CONFLICT),
+    # PRD §11's third clause (R4.2). Same status and same shape as the items row above: the
+    # missing `photo_type`s ride in the message, which is where `ChecklistIncompleteError` puts
+    # its ids and what R4.2 means by "the same format".
+    (PhotosIncompleteError, 409, ErrorCode.CONFLICT),
     (BlockingIncidentError, 409, ErrorCode.CONFLICT),
     (AmbiguousChecklistTemplateError, 409, ErrorCode.CONFLICT),
     (DuplicateLiveCleaningTaskError, 409, ErrorCode.CONFLICT),
+    (PhotoTooLargeError, 413, ErrorCode.PAYLOAD_TOO_LARGE),
+    (UnsupportedPhotoFormatError, 422, ErrorCode.VALIDATION_ERROR),
     (CleaningValidationError, 422, ErrorCode.VALIDATION_ERROR),
+    # 502 and not 500: the write that failed is a dependency's, and the caller can retry.
+    (PhotoStorageUnavailableError, 502, ErrorCode.BAD_GATEWAY),
 )
 
 

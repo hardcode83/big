@@ -24,10 +24,33 @@ from app.maintenance.infrastructure.models import IncidentModel
 from app.properties.domain.enums import PropertyOperationalState
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
-from tests.cleaning.conftest import auth_header, insert_task
+from tests.cleaning.conftest import auth_header, insert_task, insert_template
 
 TASKS = "/api/v1/cleaning-tasks"
 NOW = datetime.now(UTC)
+
+#: Three bytes of JPEG magic and some filler — `detect_image_type` reads the head and nothing
+#: else, so this is a real image as far as the upload path is concerned.
+JPEG = b"\xff\xd8\xff" + b"\x11" * 64
+
+
+async def _upload_photo(api, task_id, cleaner_header, *, photo_type="kitchen"):
+    """Upload one photo of `photo_type` through the real endpoint.
+
+    Every test below that closes a task calls this, because `STANDARD_PHOTOS` declares
+    `kitchen` as `required: true` and PRD §11's third clause is enforced from
+    `cleaning-photos-storage` on (R4.1). **The template is never relaxed to avoid it** — a
+    fixture edited to stop demanding the photo would delete the coverage of the rule this
+    change exists to add, in the tests most likely to be read as proof that it works.
+    """
+    response = await api.post(
+        f"{TASKS}/{task_id}/photos",
+        data={"photo_type": photo_type},
+        files={"file": ("photo.jpg", JPEG, "image/jpeg")},
+        headers=cleaner_header,
+    )
+    assert response.status_code == 201, response.text
+    return response.json()
 
 
 async def _insert_cleaner(session, tenant, *, status=UserStatus.ACTIVE):
@@ -121,6 +144,15 @@ async def test_the_whole_flow_from_assignment_to_completion(
         )
         assert ticked.status_code == 204
 
+    # R4.1: and now the third clause, which used to be absent from this flow. The items are
+    # all ticked, so the only thing left is the photo `STANDARD_PHOTOS` marks `required`.
+    still_blocked = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
+    assert still_blocked.status_code == 409
+    assert "photo" in still_blocked.json()["error"]["message"].lower()
+    assert "kitchen" in still_blocked.json()["error"]["message"]
+
+    await _upload_photo(api, task_a.id, cleaner)
+
     done = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
     assert done.status_code == 200
     assert done.json()["status"] == CleaningTaskStatus.COMPLETED.value
@@ -129,17 +161,24 @@ async def test_the_whole_flow_from_assignment_to_completion(
     # R5.4: no booking at all, so the contextual destination is VACANT_READY.
     assert await _state_of(db_session, property_a.id) is PropertyOperationalState.VACANT_READY
 
-    # Rule 9: every one of those was a person, so every one wrote its row.
+    # Rule 9: every one of those was a person, so every one wrote its row — including the
+    # upload, which R2.7 gave its own action.
     assert await _audit_actions_of(db_session, tenant_a.id) == [
         audit_actions.CLEANING_TASK_ASSIGNED,
         audit_actions.CLEANING_TASK_ACCEPTED,
         audit_actions.CLEANING_TASK_STARTED,
+        audit_actions.CLEANING_PHOTO_UPLOADED,
         audit_actions.CLEANING_TASK_COMPLETED,
     ]
 
 
-async def _drive_to_completable(api, task_id, cleaner_user, manager_user):
-    """assign → accept → start → tick both required items, leaving the task closable."""
+async def _drive_to_completable(api, task_id, cleaner_user, manager_user, *, photos=True):
+    """assign → accept → start → tick both required items → upload the required photo.
+
+    `photos=False` leaves the third clause of PRD §11 unmet on purpose, for the tests that are
+    *about* that clause. Everything else takes the default, because a task without the photo is
+    no longer "completable" and a helper that said it was would be lying in its name.
+    """
     cleaner = auth_header(api, cleaner_user)
     await api.patch(
         f"{TASKS}/{task_id}",
@@ -150,6 +189,8 @@ async def _drive_to_completable(api, task_id, cleaner_user, manager_user):
     await api.post(f"{TASKS}/{task_id}/start", headers=cleaner)
     for item in ("kitchen", "bathroom"):
         await api.post(f"{TASKS}/{task_id}/checklist/{item}/complete", headers=cleaner)
+    if photos:
+        await _upload_photo(api, task_id, cleaner)
     return cleaner
 
 
@@ -287,6 +328,9 @@ async def test_a_critical_incident_blocks_completion(
     await api.post(f"{TASKS}/{task_a.id}/start", headers=cleaner)
     for item in ("kitchen", "bathroom"):
         await api.post(f"{TASKS}/{task_a.id}/checklist/{item}/complete", headers=cleaner)
+    # R4.1: with the required photo missing this would be a 409 too, and the assertion below
+    # would pass for the wrong reason. The clause under test here is the incident.
+    await _upload_photo(api, task_a.id, cleaner)
 
     db_session.add(
         IncidentModel(
@@ -350,6 +394,7 @@ async def test_a_resolved_critical_incident_does_not_block(
     await api.post(f"{TASKS}/{task_a.id}/start", headers=cleaner)
     for item in ("kitchen", "bathroom"):
         await api.post(f"{TASKS}/{task_a.id}/checklist/{item}/complete", headers=cleaner)
+    await _upload_photo(api, task_a.id, cleaner)
 
     db_session.add(
         IncidentModel(
@@ -365,6 +410,180 @@ async def test_a_resolved_critical_incident_does_not_block(
     await db_session.flush()
 
     assert (await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)).status_code == 200
+
+
+# --- PRD §11's third clause: the required photos (R4) ------------------------------
+
+
+async def _task_with_photos(db_session, tenant, prop, required_photos, *, name):
+    """A task on a property awaiting cleaning, under a template with these photo entries.
+
+    The property state matters: the close asks `PropertyStateMachine` to move it, and that
+    machine has no policy entry from the fixture's default state — which is what the `task_a`
+    fixture arranges and what these tests, which build their own template, have to arrange too.
+    """
+    prop.current_operational_state = PropertyOperationalState.AWAITING_CLEANING
+    db_session.add(prop)
+    template = await insert_template(
+        db_session, tenant, name=name, required_photos=required_photos
+    )
+    task = await insert_task(db_session, tenant, prop, template)
+    await db_session.flush()
+    return task
+
+
+#: A template that declares one required type and one optional one. The standard fixture has
+#: only the required one, so `photo_types()` and `required_photo_types()` agree there and a
+#: test built on it cannot tell them apart (R4.5).
+MIXED_PHOTOS = [
+    {"photo_type": "kitchen", "label": "Cocina", "required": True},
+    {"photo_type": "balcony", "label": "Terraza", "required": False},
+]
+
+
+@pytest.mark.asyncio
+async def test_a_close_without_the_required_photo_is_a_409_naming_the_type(
+    api, db_session, users_by_role_a, cleaner_a, task_a
+):
+    """R4.1, R4.2 — the whole point of section 5, over the real endpoint.
+
+    The checklist is fully ticked and there is no incident, so the *only* thing standing
+    between this task and `COMPLETED` is the photo — which is what makes the 409 attributable.
+    The task must still be `IN_PROGRESS` afterwards: a refusal that had already moved the
+    status would leave the cleaner unable to retry after uploading.
+    """
+    cleaner = await _drive_to_completable(
+        api, task_a.id, cleaner_a, users_by_role_a[UserRole.PROPERTY_MANAGER], photos=False
+    )
+
+    blocked = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
+
+    assert blocked.status_code == 409
+    assert blocked.json()["error"]["code"] == "CONFLICT"
+    assert "kitchen" in blocked.json()["error"]["message"]
+
+    row = await db_session.get(CleaningTaskModel, task_a.id)
+    await db_session.refresh(row)
+    assert row.status is CleaningTaskStatus.IN_PROGRESS
+
+    # And uploading it is all that was missing.
+    await _upload_photo(api, task_a.id, cleaner)
+    assert (await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)).status_code == 200
+
+
+@pytest.mark.asyncio
+async def test_a_photo_of_another_type_does_not_satisfy_the_required_one(
+    api, db_session, tenant_a, property_a, users_by_role_a, cleaner_a
+):
+    """R4.1 — "one photo per required type", not "one photo".
+
+    The template declares `kitchen` required and `balcony` optional; the cleaner uploads only
+    the optional one. A rule written as "has this task any photo?" would close here.
+    """
+    task = await _task_with_photos(
+        db_session, tenant_a, property_a, MIXED_PHOTOS, name="Con opcional"
+    )
+    cleaner = await _drive_to_completable(
+        api, task.id, cleaner_a, users_by_role_a[UserRole.PROPERTY_MANAGER], photos=False
+    )
+    await _upload_photo(api, task.id, cleaner, photo_type="balcony")
+
+    blocked = await api.post(f"{TASKS}/{task.id}/complete", headers=cleaner)
+
+    assert blocked.status_code == 409
+    assert "kitchen" in blocked.json()["error"]["message"]
+    assert "balcony" not in blocked.json()["error"]["message"]
+
+
+@pytest.mark.asyncio
+async def test_an_optional_photo_type_is_not_required_to_close(
+    api, db_session, tenant_a, property_a, users_by_role_a, cleaner_a
+):
+    """**R4.5, and the test that separates the two accessors.**
+
+    `ChecklistTemplateSpec` has two: `photo_types()` (every declared type, which gates the
+    upload — R2.2) and `required_photo_types()` (only `required: true`, which gates the close).
+    On the standard template they answer the same set, so reading the wrong one there changes
+    nothing and no test would notice. Here `balcony` is declared and optional, so the two
+    answers differ and the mistake is a 409 the cleaner cannot clear.
+    """
+    task = await _task_with_photos(
+        db_session, tenant_a, property_a, MIXED_PHOTOS, name="Con opcional"
+    )
+    cleaner = await _drive_to_completable(
+        api, task.id, cleaner_a, users_by_role_a[UserRole.PROPERTY_MANAGER]
+    )
+
+    done = await api.post(f"{TASKS}/{task.id}/complete", headers=cleaner)
+
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == CleaningTaskStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_a_template_demanding_no_photo_closes_with_none(
+    api, db_session, tenant_a, property_a, users_by_role_a, cleaner_a
+):
+    """R4.5 in its plainest form — the rule is "the required ones", not "some"."""
+    task = await _task_with_photos(db_session, tenant_a, property_a, [], name="Sin fotos")
+    cleaner = await _drive_to_completable(
+        api, task.id, cleaner_a, users_by_role_a[UserRole.PROPERTY_MANAGER], photos=False
+    )
+
+    done = await api.post(f"{TASKS}/{task.id}/complete", headers=cleaner)
+
+    assert done.status_code == 200, done.text
+    assert done.json()["status"] == CleaningTaskStatus.COMPLETED.value
+
+
+@pytest.mark.asyncio
+async def test_a_photo_of_another_task_does_not_unlock_this_close(
+    api, db_session, tenant_a, tenant_b, property_b, template_b, users_by_role_a, cleaner_a,
+    task_a,
+):
+    """Scoping by task on the path that feeds the completion rule (design D12).
+
+    `uploaded_photo_types` counts only the photos of **the task being closed**: a `kitchen`
+    photo that exists in `cleaning_photos` but hangs off another task does not satisfy this
+    task's requirement, and the close is still refused naming `kitchen`. That is what this
+    test demonstrates end to end, and the whole of it.
+
+    It does **not** demonstrate the tenant half of R6, even though the other task here belongs
+    to another tenant: `cleaning_photos` has no `tenant_id` column, so a photo whose
+    `cleaning_task_id` is `task_a` *is* tenant A's by construction and "another tenant's photo
+    of this task" is not a row that can exist. The query filters by `cleaning_task_id` first,
+    so the neighbour's row is excluded before the tenant clause is ever consulted — drop that
+    clause from the repository and this test stays green.
+
+    The tenant clause is covered where a mutation of it does show up:
+    `tests/cleaning/test_repositories.py::test_photo_types_of_another_tenant_are_invisible`,
+    which asks `uploaded_photo_types` for the neighbour's **own** task id under both tenants and
+    so exercises the `JOIN` on `cleaning_tasks` directly (R6.2, design D8).
+
+    The neighbour's row is inserted directly, since its cleaner has no token here.
+    """
+    from app.cleaning.infrastructure.models import CleaningPhotoModel
+
+    cleaner_b = await _insert_cleaner(db_session, tenant_b)
+    task_b = await insert_task(db_session, tenant_b, property_b, template_b)
+    db_session.add(
+        CleaningPhotoModel(
+            id=uuid.uuid4(),
+            cleaning_task_id=task_b.id,
+            uploaded_by=cleaner_b.id,
+            photo_type="kitchen",
+            storage_key=f"tenants/{tenant_b.id}/cleaning-tasks/{task_b.id}/{uuid.uuid4()}.jpg",
+        )
+    )
+    await db_session.flush()
+    cleaner = await _drive_to_completable(
+        api, task_a.id, cleaner_a, users_by_role_a[UserRole.PROPERTY_MANAGER], photos=False
+    )
+
+    blocked = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
+
+    assert blocked.status_code == 409
+    assert "kitchen" in blocked.json()["error"]["message"]
 
 
 # --- rejection and its replacement ------------------------------------------------
@@ -594,7 +813,9 @@ async def test_the_manager_records_a_verdict(
     await api.post(f"{TASKS}/{task_a.id}/start", headers=cleaner)
     for item in ("kitchen", "bathroom"):
         await api.post(f"{TASKS}/{task_a.id}/checklist/{item}/complete", headers=cleaner)
-    await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
+    await _upload_photo(api, task_a.id, cleaner)
+    completed = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
+    assert completed.status_code == 200, completed.text
 
     response = await api.post(
         f"{TASKS}/{task_a.id}/validate",

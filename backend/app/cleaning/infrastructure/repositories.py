@@ -11,6 +11,16 @@ scopes it transitively through `cleaning_task_id`), so `tenant_scoped_classes()`
 `with_loader_criteria`. Its adapter therefore resolves the parent task inside the tenant
 before touching a single row, and refuses when it does not resolve. R7.5 asks for a
 dedicated isolation test precisely because nothing else here would catch a regression.
+
+**`cleaning_photos` is the second table in that position** (change `cleaning-photos-storage`,
+R6.1, design D12). It is scoped transitively through `cleaning_task_id` and carries no
+`tenant_id` column either, so the same selection-by-column leaves it outside
+`with_loader_criteria` — limit 5 of `app/core/db.py`'s own docstring names it. Every
+statement of `SqlAlchemyCleaningPhotoRepository` therefore joins `cleaning_tasks` and filters
+the tenant *there*: R6.1 states it as the rule, that the isolation of these rows is **derived
+from the join and not inherited** from the global filter. Dropping the join would not weaken
+a second line of defence, it would remove the only one, and no query would start failing to
+say so.
 """
 
 import uuid
@@ -25,6 +35,7 @@ from app.cleaning.domain.entities import (
     LIVE_STATUSES,
     CleaningChecklistCompletion,
     CleaningChecklistTemplate,
+    CleaningPhoto,
     CleaningTask,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
@@ -32,11 +43,17 @@ from app.cleaning.domain.exceptions import (
     CleaningTaskNotFoundError,
     DuplicateLiveCleaningTaskError,
 )
+from app.cleaning.domain.repositories import (
+    CleaningTaskFilters,
+    Page,
+    SignedPhotoLocation,
+    TemplatePage,
+)
 from app.cleaning.domain.value_objects import CleaningTaskSummary
-from app.cleaning.domain.repositories import CleaningTaskFilters, Page, TemplatePage
 from app.cleaning.infrastructure.models import (
     CleaningChecklistCompletionModel,
     CleaningChecklistTemplateModel,
+    CleaningPhotoModel,
     CleaningTaskModel,
 )
 from app.core.tenancy import CrossTenantWriteError
@@ -389,6 +406,163 @@ class SqlAlchemyCleaningChecklistCompletionRepository:
         await self._session.flush()
 
 
+class SqlAlchemyCleaningPhotoRepository:
+    """The other table with no `tenant_id` and no loader-criteria net (R6.1, design D12).
+
+    Its direct precedent is the completion adapter above, and the shape is deliberately the
+    same: `cleaning_photos` is scoped through `cleaning_task_id` alone, so every method here
+    either resolves the parent task **within** `tenant_id` before writing, or joins
+    `cleaning_tasks` and filters the tenant on that side before reading. There is no statement
+    in this class that touches `cleaning_photos` by itself, because such a statement would be
+    unscoped — and would still return rows, which is what makes the omission dangerous rather
+    than noisy.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, photo: CleaningPhoto) -> None:
+        """Resolve the parent task inside the tenant, then insert against the id that resolved.
+
+        Raises `CleaningTaskNotFoundError` with no argument, which is exactly what an unknown
+        task raises: R6.3 requires the two to be indistinguishable, so a caller cannot use the
+        write path to probe whether a task id exists in some other tenant. A distinct message
+        here would leak the difference the status code above is careful to hide.
+        """
+        owner = await self._session.scalar(
+            select(CleaningTaskModel.id).where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningTaskModel.id == photo.cleaning_task_id,
+            )
+        )
+        if owner is None:
+            raise CleaningTaskNotFoundError()
+
+        # `cleaning_task_id=owner` and not `photo.cleaning_task_id`: the same value, but the
+        # one this transaction proved belongs to the tenant. Writing the entity's copy would
+        # mean validating one identifier and persisting another — against a table with nothing
+        # underneath to catch the difference.
+        #
+        # `ai_validation_result` is absent **on purpose**, on the same criterion that keeps
+        # `notes` out of `_MUTABLE_TASK_COLUMNS`: the column exists for a later change and this
+        # one opens no write path to it. Adding it here is a decision, not a diff, and a test
+        # pins that.
+        self._session.add(
+            CleaningPhotoModel(
+                id=photo.id,
+                cleaning_task_id=owner,
+                uploaded_by=photo.uploaded_by,
+                photo_type=photo.photo_type,
+                storage_key=photo.storage_key,
+                # Written, not left to `server_default`. Postgres `now()` is the
+                # *transaction* timestamp, so several photos inserted together would share
+                # one instant and `list_for_task`'s ordering would fall through to a random
+                # `uuid4` — stable between reads, but not upload order. The entity carries
+                # the time the upload happened and that is the one that belongs in the row.
+                created_at=photo.created_at,
+            )
+        )
+        await self._session.flush()
+
+    async def list_for_task(
+        self, tenant_id: uuid.UUID, task_id: uuid.UUID
+    ) -> Sequence[CleaningPhoto]:
+        rows = await self._session.execute(
+            select(CleaningPhotoModel)
+            .join(CleaningTaskModel, CleaningTaskModel.id == CleaningPhotoModel.cleaning_task_id)
+            .where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningPhotoModel.cleaning_task_id == task_id,
+            )
+            .order_by(CleaningPhotoModel.created_at, CleaningPhotoModel.id)
+        )
+        return [_to_photo(model) for model in rows.scalars()]
+
+    async def get(self, tenant_id: uuid.UUID, photo_id: uuid.UUID) -> CleaningPhoto | None:
+        """The join is the whole point: knowing the UUID must not be access (R6.2).
+
+        A plain `SELECT` by primary key would answer here, and it would answer for every
+        tenant — the row names no owner of its own. So the tenant is asserted where it lives,
+        on `cleaning_tasks`, and a photo of a neighbour reads as `None`: the same answer an id
+        that never existed gets.
+        """
+        result = await self._session.execute(
+            select(CleaningPhotoModel)
+            .join(CleaningTaskModel, CleaningTaskModel.id == CleaningPhotoModel.cleaning_task_id)
+            .where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningPhotoModel.id == photo_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_photo(model) if model is not None else None
+
+    async def uploaded_photo_types(
+        self, tenant_id: uuid.UUID, task_id: uuid.UUID
+    ) -> frozenset[str]:
+        """`DISTINCT` in the database, not in Python.
+
+        The caller asks a set-membership question (design D8), so the rows a tenant uploads
+        repeatedly for one type are noise the database can drop before sending them. Collapsing
+        them here instead would fetch a whole task's worth of strings to throw most away.
+        """
+        rows = await self._session.execute(
+            select(CleaningPhotoModel.photo_type)
+            .join(CleaningTaskModel, CleaningTaskModel.id == CleaningPhotoModel.cleaning_task_id)
+            .where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningPhotoModel.cleaning_task_id == task_id,
+            )
+            .distinct()
+        )
+        return frozenset(rows.scalars())
+
+
+class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
+    """Implements `UnscopedCleaningPhotoLocationQuery` — design D7b, and the one read here
+    that does **not** take a tenant.
+
+    It is a class of its own rather than a method on the adapter above, and that separation is
+    the mechanism: the repository the authenticated use cases hold cannot express this query,
+    so no use case can accidentally reach for it instead of the scoped `get`. Its only wiring
+    is `get_serve_local_cleaning_photo_use_case`, for the anonymous route of design D7.
+
+    It still joins `cleaning_tasks`, but for a different reason than everything above: not to
+    filter, but because `tenant_id` lives there and is one of the two facts the caller needs.
+
+    **Contract of the session it is given: never marked with a tenant.** The anonymous route
+    does not go through `get_authenticated_request`, which is the only place that marks, so the
+    global filter of `app/core/db.py` is inert on its session — limit 2 of that docstring.
+    Given a marked session this query would silently scope to that tenant and refuse every
+    photo of any other, which would read as a broken signature rather than as a wiring mistake.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def locate_without_tenant_scoping(
+        self, photo_id: uuid.UUID
+    ) -> SignedPhotoLocation | None:
+        """Two columns, no entity: the key to rebuild and the tenant that owns it.
+
+        Returning `SignedPhotoLocation` rather than `CleaningPhoto` keeps everything else about
+        the row — who uploaded it, when, of what — out of a request nobody authenticated.
+        """
+        row = (
+            await self._session.execute(
+                select(CleaningPhotoModel.storage_key, CleaningTaskModel.tenant_id)
+                .join(
+                    CleaningTaskModel,
+                    CleaningTaskModel.id == CleaningPhotoModel.cleaning_task_id,
+                )
+                .where(CleaningPhotoModel.id == photo_id)
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return SignedPhotoLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)
+
+
 class SqlAlchemyBlockingIncidentQuery:
     """R5.2 — is a `CRITICAL` incident of this property still open?
 
@@ -493,4 +667,22 @@ def _to_completion(model: CleaningChecklistCompletionModel) -> CleaningChecklist
         completed_at=model.completed_at,
         completed_by=model.completed_by,
         notes=model.notes,
+    )
+
+
+def _to_photo(model: CleaningPhotoModel) -> CleaningPhoto:
+    """`ai_validation_result` is read even though `add` never writes it.
+
+    Not an inconsistency: the column is written by nobody in this change, but whatever a later
+    one puts there belongs to the entity, and a mapper that dropped it would make the value
+    invisible to every caller the moment it starts existing.
+    """
+    return CleaningPhoto(
+        id=model.id,
+        cleaning_task_id=model.cleaning_task_id,
+        uploaded_by=model.uploaded_by,
+        photo_type=model.photo_type,
+        storage_key=model.storage_key,
+        created_at=model.created_at,
+        ai_validation_result=model.ai_validation_result,
     )

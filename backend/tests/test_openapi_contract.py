@@ -14,11 +14,12 @@ import socket
 
 import httpx
 import pytest
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from fastapi.routing import APIRoute
 from pydantic import BaseModel, Field
 
 from app.auth.api.errors import _MAPPING as AUTH_MAPPING
+from app.cleaning.api.errors import _MAPPING as CLEANING_MAPPING
 from app.cli.openapi import _document, check, serialise
 from app.core.config import settings
 from app.core.error_codes import ErrorCode
@@ -80,10 +81,16 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # them — it is a floor and not an equality so an added route does not fail here, but the
         # prefix set IS exact, so a new module has to be named.
         "properties",
-        # `cleaning`: templates plus the ten task routes of PRD §23 minus the two photo ones,
-        # which belong to `cleaning-photos-storage`.
+        # `cleaning`: templates plus the ten task routes of PRD §23 that did not need file
+        # storage. `cleaning-photos-storage` adds the last two (`POST` and `GET .../photos`),
+        # completing the twelve.
         "cleaning-checklist-templates",
         "cleaning-tasks",
+        # The same change's third route, and the only anonymous one that serves tenant data:
+        # `GET /cleaning-photos/{photo_id}` (design D7). A prefix of its own because the path
+        # is not under `/cleaning-tasks/` — the URL carries the photo id alone, never the
+        # storage key (R3.2) and never the task.
+        "cleaning-photos",
         # `access-notifications`: the five access-record routes of PRD §15 and the in-app
         # inbox that makes `IN_APP` delivery a fact rather than a claim (design D5/D6).
         "access-records",
@@ -101,20 +108,72 @@ def test_the_route_guard_actually_sees_the_api() -> None:
     }
 
 
+def _declares_its_success_media_types(route: APIRoute) -> bool:
+    """True when the route spells out the content of its success response by hand.
+
+    The escape hatch for a body that is not JSON and therefore has no Pydantic model to name.
+    It is **not** a weakening of the rule below: the obligation is "declare the shape of what
+    you return", and a `content` block naming the media types discharges it just as a
+    `response_model` does. What stays forbidden is declaring nothing — an empty or absent
+    `content` is falsy here and still fails.
+    """
+    declared = (route.responses or {}).get(route.status_code or 200, {})
+    return bool(declared.get("content"))
+
+
 def test_every_api_route_declares_a_response_model() -> None:
     """R3.2 — a success response with no declared shape is a contract that says nothing.
 
-    `204 No Content` is the one legitimate exemption: there is no body to describe.
-    Today that is exactly `POST /auth/logout`, `DELETE /users/{user_id}` and
-    `DELETE /reservations/{reservation_id}`.
+    Two legitimate exemptions, both narrow:
+
+    * `204 No Content` — there is no body to describe. Today exactly `POST /auth/logout`,
+      `DELETE /users/{user_id}` and `DELETE /reservations/{reservation_id}`.
+    * a body that is not JSON, which declares its media types in `responses` instead. Today
+      exactly `GET /cleaning-photos/{photo_id}` (`cleaning-photos-storage`, design D7), which
+      returns image bytes: `response_model` describes a JSON schema, and there is no JSON
+      schema for a JPEG. It names `image/jpeg`, `image/png` and `image/webp` — the allowlist
+      `content_type_for_extension` answers from — so the contract still says what comes back.
     """
+    app = create_app()
     undeclared = [
         f"{sorted(route.methods or [])} {path}"
-        for path, route in _api_routes(create_app())
-        if route.status_code != 204 and route.response_model is None
+        for path, route in _api_routes(app)
+        if route.status_code != 204
+        and route.response_model is None
+        and not _declares_its_success_media_types(route)
     ]
 
     assert undeclared == []
+
+
+def test_the_binary_exemption_does_not_wave_through_a_route_that_declares_nothing() -> None:
+    """The guard on the exemption above — otherwise it could quietly become "anything goes".
+
+    A route with neither a model nor a declared `content` must still fail, and one whose
+    `content` block is empty must fail too: an empty dict is a declaration of nothing.
+    """
+    app = create_app()
+
+    @app.get(f"{API_PREFIX}/no-shape-at-all")
+    async def shapeless():  # pragma: no cover - never called, only described
+        return Response(b"")
+
+    @app.get(f"{API_PREFIX}/empty-content-block", responses={200: {"content": {}}})
+    async def empty_block():  # pragma: no cover - never called, only described
+        return Response(b"")
+
+    undeclared = sorted(
+        path
+        for path, route in _api_routes(app)
+        if route.status_code != 204
+        and route.response_model is None
+        and not _declares_its_success_media_types(route)
+    )
+
+    assert undeclared == [
+        f"{API_PREFIX}/empty-content-block",
+        f"{API_PREFIX}/no-shape-at-all",
+    ]
 
 
 def test_no_operation_documents_the_fastapi_validation_shape() -> None:
@@ -165,7 +224,17 @@ def test_no_error_code_lives_outside_the_registry() -> None:
     # `properties-crud` and the review panel demonstrated the gap by injecting a bare string into
     # its mapping and watching this test still pass — the guard was blind to a module it was
     # supposed to cover, which is worse than not having it.
-    for mapping in (AUTH_MAPPING, PROPERTY_MAPPING, RESERVATION_MAPPING, TENANT_MAPPING):
+    # `cleaning` was the second module in that blind spot — its mapping has existed since
+    # `cleaning` and was never inspected here — and `cleaning-photos-storage` is what makes the
+    # omission matter: it adds four rows, one of them carrying a code (`BAD_GATEWAY`) that no
+    # other mapping emits.
+    for mapping in (
+        AUTH_MAPPING,
+        CLEANING_MAPPING,
+        PROPERTY_MAPPING,
+        RESERVATION_MAPPING,
+        TENANT_MAPPING,
+    ):
         declared += [code for _, _, code in mapping]
     declared += [subclass.code for subclass in _every_subclass(AppError)]
 

@@ -54,9 +54,15 @@ class ChecklistItemSpec:
 class RequiredPhotoSpec:
     """One entry of `cleaning_checklist_templates.required_photos`.
 
-    Carried through validation and resolution but **not enforced at completion**: the
-    photo half of PRD §11's rule belongs to `cleaning-photos-storage` (proposal §Out of
-    scope). Keeping the spec here means that change adds an enforcement, not a parser.
+    `required` is what PRD §11's third clause is asked about at completion time, and since
+    `cleaning-photos-storage` (R4) it is enforced: `ChecklistTemplateSpec.required_photo_types()`
+    reads it, `CleaningCompletionEvidence` carries it and `CleaningTask.complete()` refuses
+    without it. `cleaning` parsed this spec and deliberately did not enforce it, which is why
+    that change added the parser and this one added only the enforcement.
+
+    The column's name says `required_photos` while the entries in it may perfectly well be
+    optional; that is the schema `domain-foundation-ops` created and it is not being renamed
+    for a docstring. The flag is what decides, not the column.
     """
 
     photo_type: str
@@ -66,22 +72,52 @@ class RequiredPhotoSpec:
 
 @dataclass(frozen=True)
 class CleaningCompletionEvidence:
-    """Everything `CleaningTask.complete()` needs to apply PRD §11's rule.
+    """Everything `CleaningTask.complete()` needs to apply PRD §11's rule — **all three
+    clauses** of it, since `cleaning-photos-storage` (design D8).
 
     Passed in rather than fetched: the entity stays pure Python and the use case owns the
     reads. `has_unresolved_critical_incident` is a boolean and not a list of incidents on
     purpose — `cleaning` only *reads* incidents for this precondition (proposal §Out of
     scope), so importing the maintenance aggregate here would couple the two domains for
     a yes/no answer.
+
+    The two photo fields are the **exact mirror** of the two item fields, down to the shape of
+    the accessor, and that symmetry is the design (D8): one rule, expressed twice in the same
+    words, so a reader who has understood the checklist clause has already understood the photo
+    one. They are sets of `photo_type` and not of photos because the question is membership —
+    R4.1 asks for *at least one* photo per required type, so counts and order carry nothing.
+
+    **Both photo fields default to empty, and the defaults are not symmetric in effect.** An
+    evidence built without them requires no photo and so permits the close, which is the same
+    direction the item fields already default in and the only safe one for a value object that
+    a future caller may build partially: a default that *blocked* would turn every unrelated
+    construction into a refusal nobody asked for. What makes the rule enforced is the use case
+    populating both fields, which is where R4.3 puts the reading and where its test lives.
     """
 
     required_item_ids: frozenset[str] = field(default_factory=frozenset)
     completed_item_ids: frozenset[str] = field(default_factory=frozenset)
     has_unresolved_critical_incident: bool = False
+    required_photo_types: frozenset[str] = field(default_factory=frozenset)
+    uploaded_photo_types: frozenset[str] = field(default_factory=frozenset)
 
     def missing_required_item_ids(self) -> tuple[str, ...]:
         """Sorted so the 409 body is stable across runs and diffable in tests."""
         return tuple(sorted(self.required_item_ids - self.completed_item_ids))
+
+    def missing_required_photo_types(self) -> tuple[str, ...]:
+        """The third clause of PRD §11, in the same line as the first (R4.1, R4.4).
+
+        Sorted for the same reason: `frozenset` iteration order is unspecified and varies with
+        the hash seed, so a 409 body built straight from the difference would be a different
+        body between two processes serving the same request.
+
+        A **difference**, never a truth test on `uploaded_photo_types`: R4.5 says the rule is
+        "the required ones", not "some", so a template declaring only optional photos yields an
+        empty `required_photo_types` and this returns `()` — the close proceeds with no photos
+        at all, exactly as it does for a checklist with no required item.
+        """
+        return tuple(sorted(self.required_photo_types - self.uploaded_photo_types))
 
 
 @dataclass(frozen=True)
@@ -102,6 +138,29 @@ class ChecklistTemplateSpec:
 
     def item_ids(self) -> frozenset[str]:
         return frozenset(item.item_id for item in self.items)
+
+    def photo_types(self) -> frozenset[str]:
+        """Every `photo_type` the template declares, required or not (R2.2).
+
+        The photo counterpart of `item_ids()`, and it deliberately does **not** filter on
+        `required`: a template that asks for an optional "before" shot still declares a type
+        the cleaner may upload. What `required: true` governs is the completion rule of
+        PRD §11's third clause, which is a different question asked at a different moment.
+        """
+        return frozenset(photo.photo_type for photo in self.required_photos)
+
+    def required_photo_types(self) -> frozenset[str]:
+        """The types PRD §11's third clause demands at completion (R4.1) — mirror of
+        `required_item_ids()`.
+
+        The two photo accessors answer different questions and both have exactly one caller:
+        `photo_types()` gates the **upload** (R2.2 — may this type be uploaded at all?), this
+        one gates the **close** (R4.1 — is this type there?). Collapsing them would make every
+        declared type mandatory, which is R4.5's failure exactly.
+        """
+        return frozenset(
+            photo.photo_type for photo in self.required_photos if photo.required
+        )
 
     def items_as_json(self) -> list[dict[str, object]]:
         """What goes into `cleaning_checklist_templates.items`.
