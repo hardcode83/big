@@ -471,14 +471,45 @@ forzado en `infrastructure/`.
   > justo el par que un refactor podría colapsar en una sesión sin que nada se quejara hasta que un
   > aviso sin tenant se volviera invisible para siempre.
 
-## 5. Documentación
+## 5. Documentación <!-- panel: PASS 2026-08-09 (solo sdd-review-documentation) -->
 
-- [ ] 5.1 `.env.example` con las tres variables nuevas, con nombre y comentario (llevan default: no son
-  secretos, `security.md` regla 8). README raíz si cambia estructura o comandos. [documentation.md]
-- [ ] 5.2 `docs/reservations-webhooks.md`: cómo se opera — obtener la URL y el secreto, pegarlos en el
+> **No corrió el panel de siete, y la anotación lo dice para que no se lea como si lo hubiera hecho.**
+> La sección no toca código de producción —cuatro ficheros de documentación y nada más—, que es el
+> caso en que `/sdd:run` se salta el panel. Se lanzó **sólo `sdd-review-documentation`**, que es la
+> lente que esta sección existe para satisfacer, con los referentes en el propio prompt. Devolvió PASS
+> sin hallazgos, y no fue una lectura por encima: verificó contra el código los códigos de estado, el
+> permiso `MANAGE_TENANT_SETTINGS`, los dos límites (120/20), la cadencia de 60 s, el presupuesto de
+> reintentos (3, con 1/2/4 minutos), el umbral de 13 dígitos, el vocabulario de auditoría y las
+> afirmaciones sobre Beds24 contra el spike, más que resuelve cada enlace interno.
+
+- [x] 5.1 `.env.example` con las **dos** variables nuevas, con nombre y comentario (llevan default: no
+  son secretos, `security.md` regla 8). README raíz si cambia estructura o comandos. [documentation.md]
+  > **Eran «tres» y son dos**, y la tarea se escribió antes de que D5 se corrigiera: no hay
+  > `WEBHOOK_MAX_BODY_BYTES` porque `REQUEST_MAX_BYTES` ya cubre todo `/api/v1/` antes del enrutado.
+  > La tabla de *Changes by area* de `design.md` seguía listando las tres y se ha corregido también.
+  > Las dos que sí existen llegaron a `.env.example` con la tarea 2.1, junto al limitador que las lee.
+  > **En el README raíz cambian tres cosas**: el scheduler deja de ser «las cuatro tareas de PRD §8.3»
+  > (hay un quinto job que el PRD no ha visto), `integrations/` pasa a guardar dos tablas y no una, y
+  > la capability gana su párrafo junto al de reservas.
+- [x] 5.2 `docs/reservations-webhooks.md`: cómo se opera — obtener la URL y el secreto, pegarlos en el
   panel del proveedor, rotar, y qué hacer cuando la rotación deja avisos perdidos (el sondeo de
   `pms_sync` los recupera). Marcar `ASSUMPTION` la forma de D8 y `EXTERNAL_DEPENDENCY` la cabecera
   estática sin verificar. [documentation.md]
+  > **«Pegarlos en el panel del proveedor» resultó ser media verdad**, y la página dice la otra mitad:
+  > el spike midió que Beds24 **sí** tiene API para configurarlos (`POST /properties`, contra lo que
+  > afirmaba ADR 0006) y Channex también, así que el panel es un camino de dos. Con dos trampas que
+  > sólo se ven operando: en Beds24 `customHeader` es **una sola cadena `Nombre: valor`**, no dos
+  > campos, y la configuración es **por propiedad** aunque nuestro material sea por tenant.
+  > El `EXTERNAL_DEPENDENCY` es más ancho de lo que la tarea suponía: no es sólo que la cabecera esté
+  > sin verificar, es que **nunca ha llegado un webhook real de ningún proveedor a este receptor** —
+  > la cuenta de desarrollo no puede tener canales OTA y una reserva creada por API no dispara aviso.
+  > Latencia, orden y cabecera quedan los tres abiertos, y los cierra la ventana de corte.
+  > Además del `ASSUMPTION` de D8 que la tarea pedía, la página marca el de `RE_READ_LOOKBACK`: la hora
+  > de margen existe porque el aviso llega *después* del cambio que anuncia, y anclar en el aviso
+  > excluiría justo la reserva que señala.
+  > **Se han tocado dos páginas vecinas que este change dejaba desfasadas**: `docs/celery-jobs.md`
+  > («los cuatro jobs» ya no eran cuatro) y `docs/README.md`, su índice. Las de `sdd/specs/` **no** —
+  > las escribe `/sdd:archive`, y quedan anotadas en `BLOCKED.md`.
 
 ## 6. Verification
 

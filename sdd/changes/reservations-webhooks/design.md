@@ -538,7 +538,7 @@ el canal, y un comentario no lo es.
 | Mapeos | `backend/app/integrations/infrastructure/{beds24,channex}/mapping.py` | Aplicar D8 a `special_requests` en las fuentes externas |
 | Scheduler | `backend/app/scheduler/{schedule.py,tasks.py,runner.py}` | `process_webhook_events` en `CADENCES`, la tarea, y el helper de sesión marcada por lote de D11 |
 | Auditoría | `backend/app/audit/domain/actions.py` | Entidad y acciones nuevas (D12) |
-| Config | `backend/app/core/config.py`, `.env.example` | `webhook_rate_limit_per_minute`, `webhook_probe_limit_per_minute`, `webhook_max_body_bytes` |
+| Config | `backend/app/core/config.py`, `.env.example` | `webhook_rate_limit_per_minute` y `webhook_probe_limit_per_minute` — **dos, no tres**: D5 retiró `webhook_max_body_bytes` porque `request_max_bytes` ya cubre todo `/api/v1/` |
 | Migración | `backend/alembic/versions/` | `webhook_endpoints` + las dos columnas de `webhook_events` |
 | Tests | `backend/tests/integrations/`, `backend/tests/scheduler/` | Aislamiento propio de `webhook_endpoints`, receptor, cola, reintentos, guard de fixtures |
 | Docs | `docs/reservations-webhooks.md`, `README.md`, `.env.example` | Según `steering/documentation.md` |

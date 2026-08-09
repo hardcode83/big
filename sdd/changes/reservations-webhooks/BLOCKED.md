@@ -19,7 +19,7 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
 
 ---
 
-## 1. La implementación está a medias (secciones 1 a 3 de 6)
+## 1. La implementación está a medias (secciones 1 a 5 de 6)
 
 - **Fase**: run
 - **Tipo**: `deferred` — el flujo puede reanudarlo sin decisión humana
@@ -47,7 +47,10 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
     tres. El de la 4 está resumido en la cabecera de su sección en `tasks.md`, con la salvedad de que
     su último arreglo (el compare-and-swap del lease) llegó después del re-review y no ha pasado por
     el panel: lo cubre `/sdd:review`.
-  - **Pendiente**: las secciones 5 (documentación) y 6 (verificación).
+  - **Sección 5 completa** (5.1 y 5.2): `.env.example` ya traía sus dos variables desde la tarea 2.1,
+    y se han escrito `docs/reservations-webhooks.md` y los tres retoques del README raíz, más las dos
+    páginas vecinas que el quinto job dejaba desfasadas. Sin panel: no toca código de producción.
+  - **Pendiente**: sólo la sección 6 (verificación).
   - **Verde**: **la suite completa corrió al cerrar la sección 4** — 4157 pasan, 35 se saltan, los 35
     placeholders preexistentes de `tests/properties/test_state_machine.py`, ajenos a este change. La
     tarea 6.1 la vuelve a correr al cerrar.
@@ -80,12 +83,31 @@ disparador). La tabla de cierre está en `design.md` § Open questions.
   `special_requests` en futuro (*"se vuelve exigible en cuanto…"*) cuando el disparador ya se ha
   cumplido — eso último lo corrige `/sdd:archive`, que es quien escribe `sdd/specs/`.
 
+  **Y dos más de la sección 5, del mismo tipo y para el mismo destinatario.** Al añadir el quinto job
+  al scheduler quedan desfasadas dos specs que cuentan cuatro: `sdd/specs/celery-jobs.md` («SHALL
+  registrar exactamente **cuatro** tareas periódicas») y `sdd/specs/local-environment.md` («el worker
+  ejecuta las **cuatro** tareas periódicas de PRD §8.3»). La segunda es literalmente cierta si se lee
+  «de PRD §8.3» como el calificativo que es —el quinto no lo es—, pero se lee como censo del
+  scheduler, así que conviene tocarla igual. Las páginas de `docs/` equivalentes (`celery-jobs.md` y
+  el índice) ya se corrigieron aquí; éstas **no**, porque `sdd/specs/` sólo lo escribe `/sdd:archive`.
+
+  **Y una tercera cosa para archive, que no es texto sino un diagrama**: `webhook_endpoints` es una
+  **entidad nueva**, así que `docs/diagrams/2026-08-06_autohost-er-entidades.png` —28 entidades, 67
+  relaciones, generado desde la metadata de SQLAlchemy— queda obsoleto y toca regenerarlo con
+  `/sdd:diagram`, borrando el anterior (`steering/documentation.md`; el precedente exacto es la tarea
+  9.3 de `pms-provider-resolution`, cuando entró `pms_credentials`). **No se hace en la sección 5 a
+  propósito**: `documentation.md` declara `phases: [tasks, archive]` y esto vive en su *Checklist de
+  archivado*, no en el trabajo de `run`. Se anota aquí para que no dependa de que alguien se acuerde.
+  Nótese que es un caso distinto del de la tarea 9.7 de `properties-crud`, donde se razonó **no**
+  regenerar: allí la migración sólo creaba y borraba un índice, y un índice no es ni entidad ni
+  relación. Aquí sí hay tabla nueva.
+
 - **Dónde vive el trabajo**: worktree
   `/Users/hardcode/personal/AutoHostAI/.claude/worktrees/sdd+reservations-webhooks`, rama
   `sdd/reservations-webhooks`, publicada en `origin`. Su stack de Docker está levantado; `make down`
   antes de borrar el worktree.
-- **Comando para reanudar**: `/sdd:run reservations-webhooks 5` — **con `/clear` antes**, que es donde
-  está el ahorro: la sección 5 no necesita nada del contexto de esta sesión.
+- **Comando para reanudar**: `/sdd:run reservations-webhooks 6` — **con `/clear` antes**, que es donde
+  está el ahorro: la sección 6 sólo corre comandos y no necesita nada del contexto de esta sesión.
 
 ## 2. El re-review de QA de la sección 3 se quedó a medias
 

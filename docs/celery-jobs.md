@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los cuatro jobs
+## Los jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -12,9 +12,17 @@ es el *cómo se usa y se diagnostica*.
 | `mark_occupied_estimated` | cada 5 min | Hora de check-in alcanzada → `OCCUPIED_ESTIMATED` |
 | `process_checkouts` | cada 5 min | Hora de check-out pasada → `AWAITING_CLEANING` **+ crea la `CleaningTask`** (change `cleaning`), y la asigna si hay una sola limpiadora activa → `CLEANING_SCHEDULED` |
 | `check_sla_breaches` | cada minuto | `NotificationLog` con SLA vencido → marca + escalado en cola |
+| `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
 
-Las cadencias son las de PRD §8.3 y viven en `backend/app/scheduler/schedule.py`. De esa
-misma tabla sale el TTL del lock de cada job, así que no se pueden desincronizar.
+Las cadencias de los cuatro primeros son las de PRD §8.3 y viven en
+`backend/app/scheduler/schedule.py`. De esa misma tabla sale el TTL del lock de cada job, así
+que no se pueden desincronizar.
+
+**El quinto no es de PRD §8.3**, y `test_schedule.py` los separa (`PRD_8_3` frente a
+`BEYOND_PRD_8_3`) para que nadie invoque «lo dice el PRD» sobre un número que el PRD no ha visto
+nunca. Sus 60 s **son un parámetro de seguridad, no de tuning**: el job coalesce todo un tick en
+una llamada por destino, así que la cadencia *es* el techo de llamadas salientes al proveedor —
+acortarla lo sube.
 
 **Los otros dos jobs de PRD §8.3 no están aquí a propósito**: `generate_price_recommendations`
 pertenece a `revenue` y `send_checkin_reminders` a `messaging-ai` / `access-notifications` —
