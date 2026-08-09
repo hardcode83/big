@@ -87,13 +87,17 @@ async def test_every_tenant_gets_a_session_bound_to_itself(db_session, worker_se
     bindings = []
 
     async def work(session: AsyncSession, tenant_id: uuid.UUID, now: datetime):
-        bindings.append((id(session), session.info.get(TENANT_ID_SESSION_KEY), tenant_id))
+        # The SESSION, not `id(session)`. Since `run_in_marked_session` was extracted, each
+        # session is unreachable again before the next one is built, so CPython is free to
+        # hand out the same address twice — and it does. Holding the objects is what makes
+        # identity mean identity rather than "was allocated where the last one used to be".
+        bindings.append((session, session.info.get(TENANT_ID_SESSION_KEY), tenant_id))
 
     await runner.run_for_every_tenant("t", work, now=NOW)
 
     assert all(marked == tenant_id for _, marked, tenant_id in bindings)
     # Two distinct session objects: re-marking one is what `bind_session_to_tenant` refuses.
-    assert len({session_id for session_id, _, _ in bindings}) == 2
+    assert len({id(session) for session, _, _ in bindings}) == 2
 
 
 @pytest.mark.asyncio
@@ -152,6 +156,59 @@ async def test_a_failing_tenant_leaves_nothing_written(db_session, worker_sessio
     )
     assert ghosts is None
     assert tenant.id is not None
+
+
+@pytest.mark.asyncio
+async def test_run_in_marked_session_marks_the_session_and_reports_success(
+    db_session, worker_sessions
+) -> None:
+    """The helper `reservations-webhooks` reuses (its D11).
+
+    It needs the marked session without the tenant loop: a webhook batch concerns only the
+    tenants that received a notice, and `run_for_every_tenant` iterates every ACTIVE one.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    await db_session.commit()
+
+    result = await runner.run_in_marked_session(
+        "t", tenant.id, lambda session: _marked_tenant_of(session)
+    )
+
+    assert result.failed is False
+    assert result.value == tenant.id
+
+
+@pytest.mark.asyncio
+async def test_run_in_marked_session_tells_a_none_return_from_a_failure(
+    db_session, worker_sessions
+) -> None:
+    """A job written for its side effects returns `None`, so `None` cannot also mean "broke" —
+    which is why the helper answers with a result object instead of a bare value."""
+    tenant = await _tenant(db_session, "TenantA")
+    await db_session.commit()
+
+    async def returns_nothing(session):
+        return None
+
+    async def explodes(session):
+        session.add(PropertyModel(tenant_id=tenant.id, name="ghost", internal_code="GHOST-2"))
+        await session.flush()
+        raise RuntimeError("boom")
+
+    quiet = await runner.run_in_marked_session("t", tenant.id, returns_nothing)
+    broken = await runner.run_in_marked_session("t", tenant.id, explodes)
+
+    assert (quiet.value, quiet.failed) == (None, False)
+    assert (broken.value, broken.failed) == (None, True)
+    # The rollback of design D12, observed rather than assumed.
+    ghost = await db_session.scalar(
+        select(PropertyModel.id).where(PropertyModel.internal_code == "GHOST-2")
+    )
+    assert ghost is None
+
+
+async def _marked_tenant_of(session: AsyncSession):
+    return session.info.get(TENANT_ID_SESSION_KEY)
 
 
 @pytest.mark.asyncio
