@@ -82,7 +82,7 @@ Categorías:
 - [ ] seed-data-demo — [CROSS] **el seed completo de PRD §27**, para poder recorrer y demostrar el producto sin escribir SQL a mano …
   needs: properties-crud · size: S · kind: feature
 - [x] cleaning — [BE] CleaningTask + checklist + fotos + StorageAdapter + validación (PRD §26.10, §11). → changes/archive/2026-08-08-cleaning/
-- [ ] cleaning-photos-storage — [BE] **las fotos de limpieza y el puerto de almacenamiento que no existe**.
+- [x] cleaning-photos-storage — [BE] **las fotos de limpieza y el puerto de almacenamiento que no existe**. → changes/archive/2026-08-09-cleaning-photos-storage/
   completes: cleaning · size: M · kind: feature
 - [ ] object-storage-provisioning — [INFRA] **elegir proveedor de almacenamiento de objetos y provisionarlo**, para que el camino `S3` del puerto de ficheros deje de estar muerto. El nombre no lleva `s3-` a propósito: el proveedor es parte de lo que hay que decidir, y OCI Object Storage (compatible con S3, y el dev ya corre en Oracle) compite con R2 y AWS. Arrastra una obligación que no puede llegar como sorpresa: el día que se configure un bucket, R3.2 de `cleaning-photos-storage` se incumple en ese mismo commit y ningún test lo detiene …
   completes: cleaning-photos-storage · size: M · kind: infra
