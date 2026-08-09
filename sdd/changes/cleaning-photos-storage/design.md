@@ -464,7 +464,37 @@ sobre tamaño · `422` MIME no admitido · `404` `photo_type` desconocido o tare
 - **Un test de tamaño que pase por casualidad**: R5.2 exige un test que falle si alguien sube
   `JSON_BODY_MAX_BYTES` globalmente — hay que escribirlo en rojo primero.
 
-## Open questions
+## Open questions — **las tres cerradas el 2026-08-09** (decisión de Jose, al cerrar `/sdd:review`)
+
+Se dejaron abiertas durante todo el change porque ninguna bloqueaba la implementación: en las tres,
+el código siguió la recomendación, así que cerrarlas **no cambia ni una línea**. Quedan aquí con su
+razonamiento entero, y no en un `BLOCKED.md` que ya no existe, porque lo que importa de una decisión
+no es que se tomó sino por qué y a cambio de qué.
+
+- **Q1 — HEIC/HEIF: NO se admite.** La allowlist queda en JPEG/PNG/WebP. **El coste, y hay que
+  decirlo entero**: HEIC es el formato **nativo de la cámara de iPhone**, así que si las limpiadoras
+  suben desde iPhone sin que el navegador transcodifique, `field-apps` (PRD §26.19) se encontrará
+  subidas rechazadas con `422` y la causa **no será evidente desde la UI**. La salida barata es que
+  `field-apps` fuerce captura en JPEG. Admitirlo de verdad obligaría a elegir entre transcodificar en
+  el backend (dependencia pesada: `pillow-heif`/`libheif`) o servirlo tal cual (Chrome y Firefox no
+  lo pintan), y eso es una decisión de producto sobre hardware real. El código deja la allowlist en
+  **una sola constante**, así que ampliarla es una línea el día que el hardware de las limpiadoras
+  desmienta esto.
+- **Q2 — la clave de firma se deriva de `JWT_SECRET_KEY` por HKDF**, sin secreto propio. Evita
+  provisionar un `MEDIA_SIGNING_KEY` en Terraform (`random_password` + `oci_vault_secret`), en el
+  compose, en el deploy y en `.env.example`, y la separación de dominio criptográfico ya da lo que
+  importa: firmar una URL no puede producir ni verificar un JWT. **Lo que se pierde**, y es una
+  propiedad operativa real, no teórica: no se puede **rotar la firma de las fotos sin invalidar todas
+  las sesiones**, ni al revés. El prefijo de versión en el mensaje firmado (hoy `v2`) deja la puerta
+  abierta a migrar el esquema sin romper URLs vivas, así que revertir esta decisión más adelante es
+  un cambio localizado.
+- **Q3 — `sdd/specs/file-storage.md` propia**, no plegar el puerto dentro de `sdd/specs/cleaning.md`.
+  El puerto es compartido (D2, vive en `app/integrations/`) y tendrá al menos dos consumidores más
+  —`maintenance` para fotos de incidente y `revenue` para `expenses.receipt_storage_key`—, así que
+  plegarlo lo escondería bajo un dominio que sólo es su primer usuario. **Se ejecuta en
+  `/sdd:archive`**, que es quien escribe las specs vivas; hasta entonces no hay nada que hacer.
+
+Redacción original de las tres, conservada:
 
 - **Q1 — ¿HEIC/HEIF admitido?** D5 deja fuera el formato nativo de la cámara de iPhone. Admitirlo
   significa magic bytes de `ftyp` + decidir si se transcodifica (dependencia pesada) o se sirve
