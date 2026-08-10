@@ -66,9 +66,10 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 10
     login_lockout_minutes: int = 15
 
-    # Password recovery (`auth-account-recovery` design D13). None of the three is a secret,
-    # so all three carry a working default and none belongs in the `${VAR:?}` fail-fast list
-    # of rule 8 of `steering/security.md`.
+    # Password recovery. Design D13 named three; `password_reset_grace_minutes` below is the
+    # fourth, added by D7's grace amendment during `run`, so **four** settings live here. None
+    # of them is a secret, so each carries a working default and none belongs in the
+    # `${VAR:?}` fail-fast list of rule 8 of `steering/security.md`.
     #
     # 30 minutes is R3.4's "del orden de los minutos, no de los días", with enough margin for
     # somebody to read the mail on a phone.

@@ -1169,6 +1169,75 @@ async def test_revoke_oldest_beyond_leaves_used_and_expired_rows_alone(
 
 
 @pytest.mark.asyncio
+async def test_revoke_oldest_beyond_spares_every_link_inside_the_grace_window(
+    db_session, tenant_a
+) -> None:
+    """R2.5 / design D7's grace amendment, against the real SQL.
+
+    This is the test that pins `created_at <= older_than`, and it needs saying why it looks
+    redundant next to the four above: every one of those passes `older_than=now` over rows
+    aged in minutes, so their boundary is vacuously true and **deleting the predicate leaves
+    them all green** (measured — the review panel deleted it and the whole suite stayed
+    green). The behaviour only has teeth when `older_than` is strictly in the past and a
+    candidate row is younger than it, which is precisely the state the amendment exists for:
+    the link just mailed to the account's owner must survive the window in which they click
+    it, even when it is the row the cap would otherwise retire.
+    """
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    grace_boundary = now - timedelta(minutes=2)
+    # Four live links, all issued seconds ago: a burst, with the owner's request last.
+    for seconds_ago in (40, 30, 20, 10):
+        await repo.add(
+            tenant_a.id,
+            _reset_token(tenant_a.id, user.id, created_at=now - timedelta(seconds=seconds_ago)),
+        )
+    await db_session.flush()
+
+    revoked = await repo.revoke_oldest_beyond(tenant_a.id, user.id, 3, now, grace_boundary)
+
+    assert revoked == 0, (
+        "every live link is younger than the grace boundary, so nothing may be retired "
+        "and the caller must discard instead"
+    )
+    assert await repo.count_live(tenant_a.id, user.id, now) == 4
+
+
+@pytest.mark.asyncio
+async def test_revoke_oldest_beyond_still_retires_a_link_older_than_the_grace_window(
+    db_session, tenant_a
+) -> None:
+    """The other half of the boundary: the grace spares the young, it does not spare
+    everything. Without this, a predicate that blocked every revocation would pass the test
+    above and the cap would silently stop capping."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    grace_boundary = now - timedelta(minutes=2)
+    stale = _reset_token(tenant_a.id, user.id, created_at=now - timedelta(minutes=25))
+    await repo.add(tenant_a.id, stale)
+    for seconds_ago in (30, 20, 10):
+        await repo.add(
+            tenant_a.id,
+            _reset_token(tenant_a.id, user.id, created_at=now - timedelta(seconds=seconds_ago)),
+        )
+    await db_session.flush()
+
+    revoked = await repo.revoke_oldest_beyond(tenant_a.id, user.id, 3, now, grace_boundary)
+
+    assert revoked == 1
+    row = (
+        await db_session.execute(
+            select(PasswordResetTokenModel).where(PasswordResetTokenModel.id == stale.id)
+        )
+    ).scalar_one()
+    assert row.revoked_at is not None
+    assert row.used_at is None, "revoked and used are different facts"
+    assert await repo.count_live(tenant_a.id, user.id, now) == 3
+
+
+@pytest.mark.asyncio
 async def test_revoke_oldest_beyond_does_not_reach_another_tenant(
     db_session, tenant_a, tenant_b
 ) -> None:

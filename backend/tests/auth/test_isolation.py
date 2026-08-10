@@ -393,6 +393,7 @@ async def test_the_request_context_carries_the_users_language(
     not ship must degrade to `es` here rather than reach a renderer.
     """
     from app.auth.api.dependencies import get_authenticated_request
+    from fastapi import Request
     from fastapi.security import HTTPAuthorizationCredentials
 
     user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored)
@@ -404,7 +405,21 @@ async def test_the_request_context_carries_the_users_language(
         now=utc_now(),
     )
 
+    # `request` arrived with `auth-account-recovery` R5.4, after this test was written: the
+    # dependency now also gates accounts owing a password change and needs the route to
+    # consult the exempt list. Same stand-in scope as the test above — the user under test
+    # does not owe a change, so the gate is not what this test exercises.
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "GET",
+            "path": "/api/v1/auth/me",
+            "headers": [],
+        }
+    )
+
     authenticated = await get_authenticated_request(
+        request=request,
         session=db_session,
         codec=codec,
         credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),

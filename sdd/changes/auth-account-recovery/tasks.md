@@ -84,6 +84,10 @@ tres rutas y el código de error nuevo existan ya.
 - [x] 3.1 `backend/app/core/config.py`: `PASSWORD_RESET_TOKEN_MINUTES=30`,
   `PASSWORD_RESET_MAX_LIVE_TOKENS=3` y `FRONTEND_BASE_URL=http://localhost:3000` (D13). Los seis
   nombres `SMTP_*` **no** entran aquí. Extender `backend/tests/test_config.py`. [R2.5, R3.4]
+  **Acabaron siendo cuatro**: `PASSWORD_RESET_GRACE_MINUTES=2` entró después, con la enmienda del
+  margen de gracia de D7, y con él el validador que exige que sea estrictamente menor que
+  `PASSWORD_RESET_TOKEN_MINUTES` — porque una gracia igual o mayor que la vida del token no
+  revocaría nunca nada y devolvería la cota a ser un descarte permanente.
 - [x] 3.2 `backend/app/core/error_codes.py`: `ErrorCode.PASSWORD_CHANGE_REQUIRED`. [R5.4]
 - [x] 3.3 `backend/app/auth/api/errors.py`: **cuatro** entradas nuevas en `_MAPPING` —el plan
   decía «tres» agrupando las dos de `422` en una línea, pero `_MAPPING` despacha por clase exacta
@@ -317,7 +321,8 @@ tres rutas y el código de error nuevo existan ya.
   `steering/documentation.md` es «Variable de entorno nueva → `.env.example` actualizado», y la
   dispara el cambio de configuración, no la sección de documentación. Lo levantaron a la vez los
   paneles de documentación y de seguridad de la sección 3.
-  `.env.example`: los tres ajustes de D13 con comentario, y los seis nombres `SMTP_HOST`,
+  `.env.example`: los cuatro ajustes con comentario —los tres de D13 más
+  `PASSWORD_RESET_GRACE_MINUTES`, de la enmienda de D7—, y los seis nombres `SMTP_HOST`,
   `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`, `SMTP_FROM_EMAIL`, `SMTP_USE_TLS` **reservados
   por nombre y sin valor**, con el comentario de que llegan con `hardening-release`. No entran en
   `Settings` ni en los `${VAR:?}` de los composes. [R6.6]
@@ -370,14 +375,21 @@ tres rutas y el código de error nuevo existan ya.
   altera arquitectura, flujos o modelo de datos de forma que un diagrama existente queda obsoleto
   → regenerarlo». **Tarea añadida en `run`**, no en `tasks`: la levantó el panel de la sección 2,
   porque el plan original no la contemplaba.
-  **Hecho**: `docs/diagrams/2026-08-10_autohost-er-entidades.png` (8128×4846), generado leyendo
-  `Base.metadata` tras `app.core.models_registry` y renderizado con `mmdc -s 2 -w 4080` para
-  igualar el lienzo del anterior; el PNG viejo, borrado con `git rm`. El script de volcado es de
-  un solo uso y **no se commitea** —no lo era antes tampoco—, así que la regla de recuento se
-  escribe en `steering/architecture.md`, que es lo que hacía falta: la cifra anterior («67
-  relaciones») no era reproducible, y con la regla de ahora —una relación por columna con clave
-  ajena— el esquema previo daba 70, no 67. Queda **29 entidades, 72 relaciones** (70 pares de
-  tablas distintos).
+  **Hecho, y rehecho en `review` tras mergear `main`**: `docs/diagrams/2026-08-10_autohost-er-entidades.png`,
+  generado leyendo `Base.metadata` tras `app.core.models_registry` y renderizado con
+  `mmdc -s 2 -w 4080` para igualar el lienzo del anterior. El script de volcado es de un solo uso
+  y **no se commitea** —no lo era antes tampoco—, así que la regla de recuento se escribe en
+  `steering/architecture.md`, que es lo que hacía falta: la cifra de `pms-provider-resolution`
+  («67 relaciones») no era reproducible, y con la regla de ahora —una relación por columna con
+  clave ajena— aquel esquema daba 70, no 67.
+  **La primera pasada salió con la cifra equivocada, y el panel de documentación de `review` lo
+  cogió**: se generó desde el `Base.metadata` de esta rama, que iba 77 commits por detrás y por
+  tanto no tenía `webhook_endpoints`; daba «29 entidades, 72 relaciones» y borraba un
+  `2026-08-06_...` que en `main` ya no existía. Regenerado desde el metadata **mergeado**, queda
+  **30 entidades, 73 relaciones** (71 pares de tablas distintos), y el borrado que corresponde es
+  el de `2026-08-09_...`. Lección que vale más que la cifra: un diagrama generado desde el código
+  hereda la antigüedad de la rama, así que en un change largo se regenera **después** de traer la
+  base, no antes.
 
 ## 11. Verification
 
@@ -390,6 +402,36 @@ las tareas 7.4b, 8.3, 9.2b. Dos observaciones más, levantadas al re-verificar y
 el cuerpo real de `clear_lock` no lo ejecutaba ningún test (ahora sí, contra el Redis de compose)
 y el orden de D8 estaba afirmado en un comentario en vez de comprobado (ahora lo atestigua una
 sesión ajena que lee la fila desde dentro del callback).
+
+Panel de feature (`/sdd:review`, 2026-08-10): arquitectura, seguridad, QA, tenancy e i18n PASS;
+documentación FAIL(3) y cicd FAIL(1). Cinco hallazgos, todos cerrados en una ronda, y tres de
+ellos tenían la misma causa raíz — la rama iba **77 commits por detrás de `main`**, así que eran
+defectos que sólo existían al mergear:
+  1. La implementación estaba **sin commitear** (HEAD era el commit del proposal), así que
+     `mark-ready` habría certificado un SHA que no contenía el change. Commiteada en dos commits.
+  2. **Dos cabezas de Alembic** al mergear: `a7c4e91b2d05` y `a4d17e83b6c1` declaraban el mismo
+     padre. Re-apuntada; los tres pasos de CI verificados sobre una base de datos limpia de
+     verdad (11 migraciones arriba, `check` sin deriva, 11 abajo) en vez de sobre la de dev, que
+     tenía estado que enmascaraba el fallo.
+  3. **La cláusula de gracia de R2.5 no la protegía ningún test contra el SQL real** — el panel
+     de QA borró `created_at <= older_than` y la suite entera siguió en verde, porque los cuatro
+     tests de repositorio pasaban `older_than=now` sobre filas de minutos. Es el cuarto test
+     vacuo de este change (7.4b, 8.3, 9.2b). Cerrado en `test_repositories.py` con los dos lados
+     del límite, y comprobado que el primero **falla** si se quita la cláusula.
+  4. Diagrama ER y `steering/architecture.md`: ver 10.6.
+  5. «Los tres ajustes» cuando son cuatro: ver 3.1 y 10.1.
+
+Y un sexto que no vino del panel sino de correr la suite **después** de mergear, que es el único
+sitio donde se veía: `tests/auth/test_reset_password_cli.py` dejaba envenenado el cliente global
+de `app.core.redis` —memoiza uno solo, y `redis.asyncio` lo ata al bucle de eventos vivo cuando
+se construye—, así que el siguiente test de la sesión que tocaba Redis de verdad moría con
+`RuntimeError: Event loop is closed`. Lo pagaba
+`tests/integrations/test_webhook_receiver_api.py::test_the_router_drives_the_real_throttle`,
+cientos de tests más tarde y en otro módulo, y **pasaba en aislamiento**: sólo una ejecución
+completa lo enseña. Producción no se ve afectada (la API mantiene un bucle toda su vida y el CLI
+hace `asyncio.run` una vez y sale), así que el arreglo es una fixture `autouse` en el fichero que
+lo provoca. Vale registrarlo porque es la forma que ninguno de los dos paneles podía ver: el de
+sección no corre la suite entera, y el de feature la corrió **antes** de traer `main`.
 -->
 
 
@@ -398,12 +440,27 @@ sesión ajena que lee la fila desde dentro del callback).
   `docker compose run --rm backend uv run pytest`).
   **4834 pasan, 35 se saltan, 0 fallan** (681 s). Los 35 saltos son los de siempre, ninguno de
   este change. La cuenta de partida al abrirlo eran 4603, así que el change deja **+231 tests**.
+  **Re-corrida en `review` tras mergear `main`: 5715 pasan, 35 se saltan, 0 fallan** (200 s). El
+  salto de 4834 a 5715 es casi todo de `main` (`reservations-webhooks`, `dashboard-api`,
+  `backend-suite-runtime` traen sus suites, y ese último es también el motivo de que 5715 tarden
+  200 s donde 4834 tardaban 681); de este change son los dos tests nuevos del límite de gracia.
+  Hicieron falta **tres** ejecuciones completas: la primera destapó 6 fallos —4 de un test de
+  `dashboard-api` que llamaba a `get_authenticated_request` con la firma de antes de R5.4, 1 de
+  contenedor rancio sin el montaje que `app-version-provenance` añadió al compose, y 1 de fuga
+  del cliente global de Redis (arriba)—, la segunda dejó sólo ése, y la tercera cerró en verde.
 - [x] 11.2 Migraciones: `docker compose exec backend uv run alembic upgrade head`,
   `uv run alembic check` (los modelos coinciden con el esquema migrado) y
   `uv run alembic downgrade base` — los tres pasos que corre `backend-tests.yml`.
   **Los tres en verde**: `upgrade head` deja `a7c4e91b2d05 (head)`, `check` responde «No new
   upgrade operations detected», y `downgrade base` baja hasta la raíz sin error. La base de dev
   se volvió a subir a `head` después, porque `downgrade base` se lleva sus datos.
+  **Re-verificado en `review` tras mergear `main`, y esta vez sobre una base de datos limpia de
+  verdad**: la de dev tenía `alembic_version = a7c4e91b2d05` de la pasada anterior, así que
+  `upgrade head` no hacía nada y `check` fallaba pidiendo `webhook_endpoints` — el estado de dev
+  enmascaraba el resultado en las dos direcciones. Con una base recién creada: **11 migraciones
+  arriba** hasta `a7c4e91b2d05 (head)` pasando por `a4d17e83b6c1`, `check` sin deriva, y **11
+  abajo** hasta base. Se hizo así, y no con `downgrade base` sobre dev, porque había una suite
+  corriendo contra ese stack.
 - [x] 11.3 Contrato sin deriva: `docker compose run --rm --no-deps -T backend python -m
   app.cli.openapi --check` y `cd frontend && npm run api:check`, que son los que ejecutan
   `api-contract.yml` y `frontend-api-contract.yml`.

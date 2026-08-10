@@ -23,6 +23,39 @@ from app.cli.reset_password import AccountNotFoundError, apply_reset, main, rese
 from tests.auth.conftest import PASSWORD, insert_user
 
 
+@pytest.fixture(autouse=True)
+def _drop_the_cached_redis_client():
+    """Keeps this file's real-Redis tests from poisoning everything that runs after them.
+
+    `app.core.redis.get_redis()` memoises one module-global client, and a
+    `redis.asyncio` client binds its connection pool to whichever event loop was running
+    when it was built. Two tests here reach that global — `test_it_really_lifts_the_lock_in_redis`
+    on the per-test loop, and the `main()` tests through the loop `asyncio.run` creates and
+    then closes — so without this the global outlives its loop and the next test in the
+    session that touches real Redis dies with `RuntimeError: Event loop is closed`. It is not
+    even a test in this module that pays: it was
+    `tests/integrations/test_webhook_receiver_api.py::test_the_router_drives_the_real_throttle`,
+    hundreds of tests later, which is why the failure only showed up in a full-suite run and
+    passed in isolation.
+
+    Production is unaffected, and that is why the fix lives here rather than in
+    `app/core/redis.py`: the API process keeps one loop for its whole life, and the CLI does
+    `asyncio.run` once and exits. Only a test session builds and discards loops around a
+    surviving global.
+
+    Dropping the reference rather than `aclose()`-ing it is deliberate: by the time the
+    `main()` tests return, the loop the pool is bound to is already closed, so awaiting
+    `close_redis()` would raise the very error this fixture exists to avoid. `test_throttle.py`
+    sidesteps the whole problem differently — it builds its own client per test and closes it,
+    never touching the global — which is the better pattern where the code under test lets you
+    choose, and this command does not.
+    """
+    yield
+    import app.core.redis as redis_module
+
+    redis_module._client = None
+
+
 @pytest.mark.asyncio
 async def test_the_printed_password_is_the_one_that_works(
     db_session, tenant_a, hasher

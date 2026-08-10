@@ -347,6 +347,14 @@ Rejected: documentar el SQL — es exactamente lo que este change existe para re
 que llegará con `hardening-release`: `SMTP_HOST`, `SMTP_PORT`, `SMTP_USERNAME`, `SMTP_PASSWORD`,
 `SMTP_FROM_EMAIL`, `SMTP_USE_TLS`.
 
+**Son cuatro, no tres, desde la enmienda del margen de gracia de D7** (`run`, 2026-08-10):
+`PASSWORD_RESET_GRACE_MINUTES=2` se añadió allí y obedece a la misma regla que los otros tres
+—valor por defecto, sin sensibilidad, fuera de los `${VAR:?}`—, con la diferencia de que
+`Settings` valida además que sea estrictamente menor que `PASSWORD_RESET_TOKEN_MINUTES`. Esta
+frase existe porque «los tres ajustes» sobrevivió en varios sitios después de la enmienda y el
+panel de documentación de review lo levantó: la cuenta de D13 es histórica, la del sistema es
+cuatro.
+
 30 minutos es «del orden de los minutos, no de los días» de R3.4 con margen para que alguien lea el
 correo en el móvil. `FRONTEND_BASE_URL` es lo que compone el enlace
 (`{base}/reset-password?token=…`); no es un secreto, así que lleva valor por defecto, y la página
@@ -438,11 +446,11 @@ que la IP.
 | Infraestructura auth | `backend/app/auth/infrastructure/models.py`, `repositories.py`, `throttle.py` | `UserModel.must_change_password`; `PasswordResetTokenModel`; `SqlAlchemyPasswordResetTokenRepository`; `RedisLoginThrottle.clear_account_lock` |
 | Notificaciones | `backend/app/notifications/domain/enums.py` | Decimoséptimo `NotificationType.PASSWORD_RESET_REQUESTED`, declarado como divergencia de PRD §14 |
 | Auditoría | `backend/app/audit/domain/actions.py`, `value_objects.py` | `USER_PASSWORD_CHANGED`, `USER_PASSWORD_RECOVERED` en `ACTIONS`; `must_change_password` en `AUDITABLE_FIELDS["USER"]` |
-| Núcleo | `backend/app/core/error_codes.py`, `config.py` | `ErrorCode.PASSWORD_CHANGE_REQUIRED`; los tres ajustes de D13 |
+| Núcleo | `backend/app/core/error_codes.py`, `config.py` | `ErrorCode.PASSWORD_CHANGE_REQUIRED`; los cuatro ajustes de D13 (tres suyos más `PASSWORD_RESET_GRACE_MINUTES`, de la enmienda de D7) y el validador que ata la gracia a la vida del token |
 | CLI | `backend/app/cli/reset_password.py` (nuevo) | Comando de recuperación asistida de D12 |
 | Migración | `backend/alembic/versions/<rev>_password_recovery.py` (nuevo) | Tabla `password_reset_tokens` + columna `users.must_change_password` |
 | Contrato | `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts` | Regenerados (`make openapi` y `npm run api:generate`) — las dos mitades del puente, `steering/documentation.md` |
-| Configuración | `.env.example` | Los tres ajustes con comentario y los seis nombres SMTP reservados sin valor |
+| Configuración | `.env.example` | Los cuatro ajustes con comentario y los seis nombres SMTP reservados sin valor |
 | Documentación | `docs/auth-account-recovery.md` (nuevo), `infra/environments/dev/RUNBOOK.md` | Operación de los tres endpoints, el `EXTERNAL_DEPENDENCY` de R6.4 y el procedimiento de D12 |
 | Tests | `backend/tests/auth/`, `backend/tests/notifications/` | Ver «Riesgos» y R4.5 |
 
