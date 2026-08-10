@@ -342,6 +342,10 @@ jobs:
         # resumen diría «no llegó» sobre una suite que sí se midió.
         run: |
           set -uo pipefail
+          # El número de workers de abajo solo tiene sentido contra esto, y el runner no lo
+          # publica en ninguna parte del log. Dejarlo escrito evita tener que adivinarlo la
+          # próxima vez que alguien quiera ajustar `-n`.
+          echo "runner: $(nproc) vCPU, $(free -g | awk '/^Mem:/ {print $2}') GB"
           started=$(date +%s)
 
           set +e
