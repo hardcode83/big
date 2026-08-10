@@ -1,0 +1,9 @@
+{
+  "app_version": "0.1.0+2026-08-10.abcdef1",
+  "commit_short": "abcdef1",
+  "built_at": "2026-08-10T00:00:00Z",
+  "repository_url": "https://github.com/private-sentinel/build-identity-fixture",
+  "pull_request_number": 987654321,
+  "commit_sha": "dddddddddddddddddddddddddddddddddddddddd",
+  "actions_run_id": 876543210
+}

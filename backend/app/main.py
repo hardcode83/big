@@ -24,6 +24,7 @@ from app.core.log_redaction import install_webhook_token_redaction
 from app.core.openapi import install_openapi
 from app.guests.api.errors import register_guest_error_handlers
 from app.guests.api.router import router as guests_router
+from app.provenance.api.router import router as provenance_router
 from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
 from app.integrations.api.webhooks_router import router as webhooks_router
@@ -36,6 +37,7 @@ from app.tenants.api.errors import register_tenant_error_handlers
 from app.tenants.api.router import router as tenants_router
 from app.timeline.api.errors import register_timeline_error_handlers
 from app.timeline.api.router import router as timeline_router
+from app.provenance.api.router import router as provenance_router
 
 API_V1_PREFIX = "/api/v1"
 
@@ -128,6 +130,7 @@ def create_app() -> FastAPI:
     # `PropertyNotFoundError` from `app/properties/domain/`, which
     # `register_property_error_handlers` above already maps to the §23 envelope.
     app.include_router(dashboard_router, prefix=API_V1_PREFIX)
+    app.include_router(provenance_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint
     # check is too late.

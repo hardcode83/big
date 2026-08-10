@@ -28,7 +28,10 @@ jobs:
       version: ${{ steps.compose.outputs.version }}
       commit_short: ${{ steps.compose.outputs.commit_short }}
       built_at: ${{ steps.compose.outputs.built_at }}
-      repo_url: ${{ steps.compose.outputs.repo_url }}
+      repository_url: ${{ steps.compose.outputs.repository_url }}
+      pull_request_number: ${{ steps.compose.outputs.pull_request_number }}
+      commit_sha: ${{ steps.compose.outputs.commit_sha }}
+      actions_run_id: ${{ steps.compose.outputs.actions_run_id }}
     steps:
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
@@ -36,12 +39,34 @@ jobs:
         id: compose
         # La composición y validación viven en el productor versionado y se escriben
         # en GITHUB_OUTPUT solo después de validar todos los campos [R1].
-        run: node frontend/scripts/build-identity.mjs
+        env:
+          COMMIT_MESSAGE: ${{ github.event.head_commit.message }}
+        run: |
+          set -euo pipefail
+          node frontend/scripts/build-identity.mjs
+          repository_url="${GITHUB_SERVER_URL}/${GITHUB_REPOSITORY}"
+          pull_request_number="$(bash .github/scripts/extract-pr.sh "$COMMIT_MESSAGE")"
+          APP_PROVENANCE_REPOSITORY_URL="$repository_url" \
+          APP_PROVENANCE_PULL_REQUEST_NUMBER="$pull_request_number" \
+          APP_PROVENANCE_COMMIT_SHA="$GITHUB_SHA" \
+          APP_PROVENANCE_ACTIONS_RUN_ID="$GITHUB_RUN_ID" \
+          python3 scripts/validate-provenance-contract.py
+          {
+            echo "repository_url=$repository_url"
+            echo "pull_request_number=$pull_request_number"
+            echo "commit_sha=$GITHUB_SHA"
+            echo "actions_run_id=$GITHUB_RUN_ID"
+          } >> "$GITHUB_OUTPUT"
 
   # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
   build-backend:
     needs: provenance
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: build-backend-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -65,7 +90,7 @@ jobs:
           # Labels OCI (R1.5): la identidad de la imagen legible con `docker inspect` en la
           # VM y en la página del package de GHCR, sin variables de runtime.
           labels: |
-            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
+            org.opencontainers.image.source=${{ needs.provenance.outputs.repository_url }}
             org.opencontainers.image.revision=${{ github.sha }}
             org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
             org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
@@ -75,7 +100,12 @@ jobs:
 
   build-frontend:
     needs: provenance
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: build-frontend-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -105,8 +135,7 @@ jobs:
             NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}
             NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}
           labels: |
-            org.opencontainers.image.source=${{ needs.provenance.outputs.repo_url }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit_short }}
             org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
             org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
@@ -115,7 +144,7 @@ jobs:
 
   # --- Deploy LOCAL en la VM (runner self-hosted); sin SSH ni puertos entrantes [R3, R4, R5] ---
   deploy:
-    needs: [build-backend, build-frontend]
+    needs: [provenance, build-backend, build-frontend]
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
     permissions:
@@ -173,6 +202,11 @@ jobs:
             echo "ENCRYPTION_KEY=${ENC_KEY}"
             echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
             echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
+            echo "APP_VERSION=${{ needs.provenance.outputs.version }}"
+            echo "APP_PROVENANCE_REPOSITORY_URL=${{ needs.provenance.outputs.repository_url }}"
+            echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
+            echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"
+            echo "APP_PROVENANCE_ACTIONS_RUN_ID=${{ needs.provenance.outputs.actions_run_id }}"
           } > .env
           chmod 600 .env
 

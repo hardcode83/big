@@ -1,0 +1,30 @@
+{
+  "fields": [
+    {
+      "name": "repository_url",
+      "environment": "APP_PROVENANCE_REPOSITORY_URL",
+      "pattern": "^https://github\\.com/[^/\\s?#]+/[^/\\s?#]+$"
+    },
+    {
+      "name": "pull_request_number",
+      "environment": "APP_PROVENANCE_PULL_REQUEST_NUMBER",
+      "minimum": 1
+    },
+    {
+      "name": "commit_sha",
+      "environment": "APP_PROVENANCE_COMMIT_SHA",
+      "pattern": "^[0-9a-f]{40}$"
+    },
+    {
+      "name": "actions_run_id",
+      "environment": "APP_PROVENANCE_ACTIONS_RUN_ID",
+      "minimum": 1
+    }
+  ],
+  "public_forbidden_fields": [
+    "repository_url",
+    "pull_request_number",
+    "actions_run_id",
+    "commit_sha"
+  ]
+}

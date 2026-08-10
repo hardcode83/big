@@ -121,6 +121,16 @@ class Settings(BaseSettings):
     # three orders of magnitude of headroom over a real request.
     request_max_bytes: int = 1024 * 1024
 
+    # Build provenance is private backend configuration. These remain strings so an absent
+    # value in the deploy `.env` is an unavailable provenance block, not a boot-time failure;
+    # `PrivateProvenance.from_settings` validates the four values atomically before exposure.
+    app_provenance_repository_url: str = ""
+    app_provenance_pull_request_number: str = ""
+    app_provenance_commit_sha: str = ""
+    app_provenance_actions_run_id: str = ""
+    # Produced by the same build-identity-contract output consumed by the frontend.
+    # Empty is only a local-development fallback; deploy writes the full build identity.
+    app_version: str = ""
     # The two webhook limits of rule 12(c) (`reservations-webhooks` design D6). Two and not one,
     # because they defend against opposite things and a single number cannot serve both.
     #

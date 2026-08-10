@@ -4,5 +4,16 @@
   "version": {
     "label": "Deployed version",
     "unknown": "unknown version"
+  },
+  "provenance": {
+    "open": "Build provenance",
+    "title": "Build provenance",
+    "loading": "Loading…",
+    "error": "Provenance is unavailable.",
+    "unknown": "Unknown provenance.",
+    "repository": "Repository",
+    "pullRequest": "Pull request",
+    "commit": "Commit",
+    "actionsRun": "Actions run"
   }
 }

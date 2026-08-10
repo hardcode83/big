@@ -46,6 +46,7 @@ export async function WorkspaceShell({ children }: { children: ReactNode }) {
             label: t("common:version.label"),
             unknown: t("common:version.unknown"),
           }}
+          showProvenance
         />
       }
       bottomNavigation={<BottomNavigation profile={PROFILE} />}

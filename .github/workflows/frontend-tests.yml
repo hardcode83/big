@@ -25,6 +25,41 @@ permissions:
   contents: read
 
 jobs:
+  provenance-contract:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Version parity
+        run: make check-version-parity
+      - name: Pull request extractor self-test
+        run: bash .github/scripts/extract-pr.sh --self-test
+      - name: Provenance producer contract self-test
+        run: python3 scripts/validate-provenance-contract.py --self-test
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: npm ci
+      - name: Generated API contract and provenance disclosure tests
+        working-directory: frontend
+        run: npm run api:check && npm test -- --run features/provenance
+      - name: Production build and public artifact disclosure gate
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          export APP_PROVENANCE_REPOSITORY_URL='https://github.com/private-sentinel/repository'
+          export APP_PROVENANCE_PULL_REQUEST_NUMBER='987654321'
+          export APP_PROVENANCE_COMMIT_SHA='dddddddddddddddddddddddddddddddddddddddd'
+          export APP_PROVENANCE_ACTIONS_RUN_ID='876543210'
+          npm run build
+          npm run test:public-artifacts
+
   frontend-tests:
     runs-on: ubuntu-latest
     timeout-minutes: 15

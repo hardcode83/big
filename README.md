@@ -26,6 +26,7 @@ Al cabo de unos segundos:
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make openapi           # regenera el contrato de API (ver abajo)
+make check-version-parity # comprueba VERSION, backend y frontend
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -174,6 +175,11 @@ continúa comprobando por separado que `backend/openapi.json` corresponde al có
 La documentación interactiva sigue disponible en http://localhost:8000/docs con el stack
 levantado.
 
+La procedencia privada del build y sus verificaciones operativas están descritas en
+[`docs/app-version-provenance.md`](docs/app-version-provenance.md). El módulo backend vive en
+`backend/app/provenance/`; sus metadatos no se publican en la configuración ni en el HTML del
+frontend.
+
 ## Variables de entorno
 
 Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real. Lo que hace aceptable ese default de Postgres es que `docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**, así que la base de datos no es alcanzable desde otros equipos de tu red. Los secretos reales (credenciales de proveedores externos) nunca llevan valor por defecto ahí — solo el nombre (`security.md` #8).
@@ -290,6 +296,7 @@ npm run typecheck   # TypeScript strict, sin emitir
 npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
 npm test            # Vitest + Testing Library
 npm run build       # build de producción
+npm run test:public-artifacts # escanea .next/static, server/standalone y rutas públicas
 npm run test:entrypoint  # test del entrypoint de dev (sincronización de node_modules)
 ```
 

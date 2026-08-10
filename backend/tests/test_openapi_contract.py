@@ -109,6 +109,7 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # a route under `integrations`, because rule 12(b) of `steering/security.md` makes the
         # route token the credential and mixing it into the authenticated router would hide that.
         "webhooks",
+        "provenance",
     }
 
 

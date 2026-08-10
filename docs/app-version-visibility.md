@@ -67,9 +67,11 @@ gh pr list --search a2f3c1d --state all
 gh api /repos/autohostai-labs/AutoHostAI/commits/a2f3c1d/pulls --jq '.[0].number'
 ```
 
-El pareo en un clic desde la propia pantalla está en el roadmap como entrada aparte
-(`app-version-provenance`): exige que el frontend tenga autenticación antes, porque los
-enlaces nombran el repositorio privado y hoy el HTML de todas las páginas es público.
+El badge sigue siendo únicamente identidad pública: `appVersion` y `buildCommitShort` pueden
+viajar en el HTML de todas las superficies. El pareo autenticado con PR, commit completo y run
+de Actions pertenece a `app-version-provenance`: se solicita bajo demanda desde el workspace
+autenticado mediante `GET /api/v1/provenance`, y nunca forma parte del HTML público, `RootLayout`,
+`PublicRuntimeConfig` ni los bundles.
 
 ## Dos cosas que confunden si no se saben
 
@@ -118,5 +120,6 @@ identifica cada despliegue sin ambigüedad. El hueco para adoptar SemVer está a
 exige rediseñar nada.
 
 `backend/pyproject.toml` y `frontend/package.json` declaran también un `version` por
-convención de sus ecosistemas; **hoy nadie los usa y pueden divergir de `VERSION` sin que
-nada avise**. Comprobarlo en CI está en la entrada de roadmap `app-version-provenance`.
+convención de sus ecosistemas. El target host-side `make check-version-parity`, ejecutado en el
+workflow de frontend y documentado en el README, falla si cualquiera de los tres valores falta,
+está vacío o diverge de `VERSION`.

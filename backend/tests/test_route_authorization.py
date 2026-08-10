@@ -341,4 +341,5 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
+        "/api/v1/provenance",
     }

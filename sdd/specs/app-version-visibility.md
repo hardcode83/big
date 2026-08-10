@@ -3,7 +3,8 @@
 ## Purpose
 
 Permite saber qué versión de la aplicación está corriendo **sin entrar en la VM**: el CD hornea
-una identidad de build dentro de la imagen del frontend y en los labels OCI de ambas imágenes,
+una identidad de build dentro de la imagen del frontend y en labels OCI compatibles con la
+frontera de cada imagen,
 y el shell la muestra en un badge en el pie. Sirve al operador —confirmar un rollback (manual
 por SHA, `RUNBOOK §6.4`), descartar el cachéo del edge— no a las personas de
 `steering/product.md`: es herramienta de diagnóstico, no funcionalidad de producto.
@@ -22,22 +23,24 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
   tanto la fecha de la cadena como el label `.created`.
 - IF `VERSION` no existe, está vacío o no tiene forma `X.Y.Z`, THEN THE SYSTEM SHALL fallar el
   build nombrando el problema, antes de construir imagen alguna.
-- THE SYSTEM SHALL NOT usar los campos `version` de `backend/pyproject.toml` ni
-  `frontend/package.json` para nada: los declaran por convención de sus ecosistemas y **pueden
-  divergir de `VERSION` sin que nada avise**. Comprobarlo en CI queda pendiente en la entrada
-  de roadmap `app-version-provenance`.
+- THE SYSTEM SHALL mantener `VERSION`, `backend/pyproject.toml` y
+  `frontend/package.json` en parity; `make check-version-parity` lo comprueba desde el host y
+  falla identificando cualquier valor ausente, vacío o divergente.
 
 ### Identidad horneada en la imagen, nunca inyectada en runtime
 
 - THE SYSTEM SHALL pasar `NEXT_PUBLIC_APP_VERSION` y `NEXT_PUBLIC_BUILD_COMMIT_SHORT` como
   build-args a la etapa `builder` de `frontend/devops/Dockerfile`, declarados al final de la
   etapa para no invalidar la caché de las capas de dependencias.
-- THE SYSTEM SHALL emitir en **ambas** imágenes los labels
-  `org.opencontainers.image.{source,revision,version,created}` con idénticos valores, de modo
-  que `docker inspect` en la VM y la página del package en GHCR queden pareados con la UI.
-- THE SYSTEM SHALL NOT introducir ninguna variable de runtime —ni en `docker-compose.deploy.yml`
-  ni en el `.env` que el CD renderiza en la VM— que rinda la versión: la fuente es la imagen.
-  Una variable de compose reporta lo que compose cree, no lo que la imagen es.
+- THE SYSTEM SHALL emitir en la imagen backend los labels
+  `org.opencontainers.image.{source,revision,version,created}`. La imagen frontend SHALL emitir
+  únicamente `org.opencontainers.image.revision` con el SHA corto, `version` y `created`; no
+  SHALL incluir `source`, la URL privada del repositorio, el SHA completo ni la provenance
+  privada completa. La identidad pública `version` debe seguir siendo la misma que muestra la UI.
+- La identidad pública SHALL seguir originándose en la imagen frontend mediante build args. El
+  CD SHALL escribir además `APP_VERSION` únicamente en la configuración privada del backend,
+  para que el endpoint autenticado de provenance devuelva la misma identidad; esa variable no
+  se entrega al frontend ni sustituye la identidad horneada que pinta la UI.
 - THE SYSTEM SHALL excluir `.env*` del contexto de build del frontend: el `.gitignore` raíz los
   ignora, así que un `.env.local` de una máquina de desarrollo no está en git pero sí entraría
   por `COPY . .`, y `npm run build` inlinearía sus `NEXT_PUBLIC_*` en el bundle.
@@ -124,11 +127,11 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
 
 ### La versión del frontend es la versión del despliegue
 
-- THE SYSTEM SHALL tratar la identidad del frontend como la del despliegue completo, sin
-  endpoint de versión en el backend ni comparación entre ambos. El monorepo construye las dos
-  imágenes del mismo commit en el mismo run, el job `deploy` depende de ambos builds y escribe
-  una única `IMAGE_TAG`, y el compose pinea los **cuatro** servicios a ella: divergir exige
-  intervención manual en la VM.
+- THE SYSTEM SHALL tratar la identidad del frontend como la del despliegue completo y mantenerla
+  congruente con `app_version` del endpoint autenticado `/api/v1/provenance`. El monorepo
+  construye las dos imágenes del mismo commit en el mismo run, el job `deploy` depende de ambos
+  builds y escribe una única `IMAGE_TAG`, y el compose pinea los **cuatro** servicios a ella:
+  divergir exige intervención manual en la VM.
 - WHERE un deploy falla a medias, THE SYSTEM SHALL dejar la deriva en la dirección
   conservadora: `frontend` declara `depends_on: backend: service_healthy`, así que el frontend
   no se recrea y sigue sirviendo el badge **antiguo**. El badge no puede afirmar un despliegue
@@ -156,7 +159,7 @@ Antes de esta capacidad la única identidad era el tag `sha-<commit>` que el CD 
 
 - `VERSION` — la parte fija de la versión del producto.
 - `.github/workflows/deploy-dev.yml` — job `provenance` (composición y validación de `VERSION`),
-  build-args del frontend y labels OCI en ambos builds.
+  build-args del frontend y labels OCI diferenciados por frontera de divulgación.
 - `frontend/devops/Dockerfile` — `ARG`/`ENV` `NEXT_PUBLIC_*` en la etapa `builder`.
 - `frontend/.dockerignore` — exclusión de `.env*` del contexto de build.
 - `frontend/lib/config/public.ts` — `appVersion` y `buildCommitShort` en la allowlist pública,
@@ -189,10 +192,11 @@ línea, sin desbordamiento a 390, 360 ni 320 px de ancho, y 7 px de separación 
 `NEXT_PUBLIC_APP_VERSION` envenenado (SHA de 40 caracteres más `run_id`), ni el HTML de `/login`
 ni el de `/guest/<token>` contienen esos valores, y el snapshot rinde `appVersion: ""`.
 
-**Pendiente de comprobar sobre la VM**: que los labels OCI de las dos imágenes lleven idénticos
-valores. Los valores son idénticos por construcción (un único job `provenance` alimenta ambos
-builds), pero que aterrizaran en las imágenes publicadas no se ha verificado — el token de `gh`
-disponible no tiene `read:packages` y el package es privado.
+**Pendiente de comprobar sobre la VM**: que los labels OCI permitidos hayan aterrizado en las
+imágenes publicadas. El job `provenance` comparte la identidad pública `version` con ambos
+builds; el backend conserva además `source` y SHA completo, mientras que el frontend queda
+limitado a SHA corto, `version` y `created`. La inspección de packages privados requiere acceso
+`read:packages`.
 
 La congruencia entre el productor CD y esta frontera pública se verifica en la prueba de
 contrato ejecutada por el check `frontend-tests` en los Pull Requests. La verificación falla si
