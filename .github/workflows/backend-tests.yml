@@ -71,10 +71,10 @@ permissions:
 # No sustituyen a `timeout-minutes: 20` del job, que es otra cosa: una guillotina cuyo
 # incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
 #
-# Dimensionadas sobre la **mediana medida** (~205s el 2026-08-10) y no sobre el mejor caso,
-# que es lo que evita que el presupuesto se vuelva ruido. El aviso deja ~27 % de crecimiento,
-# bastante más que la variabilidad medida del runner (±5-7 %), así que un aviso significa
-# deriva y no mala suerte.
+# Dimensionadas sobre el **peor caso observado** (205s el 2026-08-10) y no sobre la mediana
+# (164s) ni sobre el mejor caso (145s), que es lo que evita que el presupuesto se vuelva
+# ruido. El aviso deja ~27 % de crecimiento sobre ese peor caso, bastante más que la
+# variabilidad medida del runner (±5-7 %), así que un aviso significa deriva y no mala suerte.
 env:
   BACKEND_SUITE_BUDGET_SECONDS: "260"   # ~4m20s — pasarlo avisa
   BACKEND_SUITE_CEILING_SECONDS: "400"  # ~6m40s — pasarlo pone el check en rojo
@@ -474,8 +474,17 @@ jobs:
           else
             duration_line="**${SUITE_SECONDS}s**"
             if [ "$SUITE_SECONDS" -gt "$CEILING" ]; then
+              # Si la suite YA venía en rojo, su motivo manda y el techo se AÑADE en vez de
+              # sustituirlo — el mismo cuidado que tiene la rama de «la duración no llegó»
+              # unas líneas más arriba. Sin esto, una suite con tests rojos que además pasa
+              # del techo se resume como «tardó demasiado» y el rojo de verdad desaparece
+              # del resumen, que es justo lo que D7 pide poder juzgar sin abrir el log.
+              if [ "$verdict" = "pass" ]; then
+                detail="la suite tardó ${SUITE_SECONDS}s y el techo declarado son ${CEILING}s"
+              else
+                detail="${detail}; y además tardó ${SUITE_SECONDS}s, por encima del techo declarado de ${CEILING}s"
+              fi
               verdict=fail
-              detail="la suite tardó ${SUITE_SECONDS}s y el techo declarado son ${CEILING}s"
             elif [ "$SUITE_SECONDS" -gt "$BUDGET" ]; then
               over_budget=1
             fi

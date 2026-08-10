@@ -254,6 +254,11 @@ la fase 2 ya se mida contra el presupuesto.
   `-n auto`: hoy daría 4 y mañana lo que el runner traiga, y 7.4 tiene un techo de 15) —
   **Files:** `.github/workflows/backend-tests.yml`. La ejecución en serie sigue siendo la de
   local por defecto; quien quiera paralelo lo pasa por la línea de órdenes. [R2.1]
+  *(**el número declarado acabó siendo `-n 2`, no `-n 4`.** El enunciado de arriba es el original.
+  Al medirlo en CI, `-n 4` daba 227-233s y `-n 2` **205s**: el runner de este repositorio privado
+  trae **2 vCPU**, no los 4 que la premisa de D6 daba por sabidos, y cuatro workers sobre dos
+  núcleos sobresuscriben. Corregido en §8.1 y en la corrección de D6; el paso imprime ahora
+  `runner: N vCPU` en el log para que nadie lo vuelva a suponer)*
 - [x] 7.7 Verificación de la fase 2 en local: **tres ejecuciones consecutivas verdes** con `-n 4`
   **más una con un `-n` distinto** (un reparto diferente prueba independencia del worker mejor que
   repetir el mismo), todas con los recuentos de 3.4 y sin `attached to a different loop` ni

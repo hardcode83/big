@@ -261,7 +261,7 @@ después de su base, el test en rojo, y fuera— pero la cita no la respalda.
 | Ids de test estables | `backend/tests/reservations/test_authorization.py`, `backend/tests/auth/test_user_admin_authorization.py`, `backend/tests/properties/test_state_machine.py` | Fase 2: UUID literal donde hoy hay `uuid.uuid4()` dentro de `parametrize` |
 | Carrera determinista | `backend/tests/integrations/test_webhook_endpoints.py` | Barrera entre el `SELECT` y el `flush` de los dos llamantes (D5) |
 | Guardián de orden | `backend/tests/cleaning/test_errors.py` | Aserción invertida corregida y demostrada en rojo (D8) |
-| Workflow | `.github/workflows/backend-tests.yml` | Paso de `pytest` cronometrado con salida de job; presupuesto en `env:`; comparación en el job consolidador; fase 2: `-n 4`; cabecera con la cifra nueva fechada |
+| Workflow | `.github/workflows/backend-tests.yml` | Paso de `pytest` cronometrado con salida de job; presupuesto en `env:`; comparación en el job consolidador; fase 2: `-n 2` (corregido desde `-n 4`, ver D6); cabecera con la cifra nueva fechada |
 | Especificación | `sdd/specs/backend-ci.md` | §Coste con la medición fechada nueva y su procedimiento; §Aislamiento con el modelo de esquema una vez y, en fase 2, la base por worker; requisito nuevo del presupuesto |
 | Convenciones | `sdd/steering/testing.md` | La convención de fixtures compartidas dice que el esquema se construye una vez por ejecución y que el aislamiento entre tests es por vaciado de filas |
 | Medición | `sdd/changes/backend-suite-runtime/measurement.md` (ya escrito en esta fase) | Procedimiento repetible de R1: plugin de atribución, banco de coste unitario, resultados locales y cómo se miden las tres ejecuciones en CI (esa parte la completa la implementación) |
@@ -295,9 +295,10 @@ después de su base, el test en rojo, y fuera— pero la cita no la respalda.
   completa dio verde con los mismos recuentos y apareció **una sola** (D5). R3.5 —tres ejecuciones
   consecutivas verdes— es el cierre, y en fase 2 se repite con `-n 4` y con un `-n` distinto, porque
   un reparto diferente prueba independencia del worker mejor que repetir el mismo.
-- **El 3,16× de xdist no se transfiere entero a CI** (4 vCPU compartidos con PostgreSQL y Redis
-  frente a 12 aquí). Es la razón de que R2.1 se mida en CI y no se declare por extrapolación, y de
-  que la proyección honesta sea 2-2,5×.
+- **El 3,16× de xdist no se transfiere entero a CI** (núcleos compartidos con PostgreSQL y Redis,
+  frente a 12 aquí). Es la razón de que R2.1 se mida en CI y no se declare por extrapolación — y el
+  riesgo se materializó: la proyección de 2-2,5× partía de «4 vCPU», que resultó ser **2**, y lo
+  medido fue **1,48×** con `-n 2`. Ver la corrección de D6.
 - **Objetivo de R2.1 con la fase 1 sola**: 168s locales × 1,54 (la razón medida CI/local) ≈
   **4m 18s**. Cumple los 5m 00s con **~42s de margen** sobre una suite que creció 2,5× en seis días.
   Con la fase 2, ~**2m** y margen de verdad. Es exactamente el material de la pregunta abierta 2.

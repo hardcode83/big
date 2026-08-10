@@ -89,12 +89,18 @@ Va como subsección nueva, después de «Aislamiento entre ejecuciones concurren
 > - Esto **no** sustituye a `timeout-minutes`, que es otra cosa: una guillotina cuyo
 >   incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
 
-## (d) §Key files — añadir dos entradas
+## (d) §Key files — añadir una entrada y actualizar otra
+
+Añadir:
+
+> - `backend/tests/test_table_wipe.py` — demuestra que el vaciado entre tests alcanza a las tablas
+>   hijas y cubre exactamente las de la metadata.
+
+**Actualizar** la línea de `Makefile`, que **ya existe** en §Key files («`Makefile` — target
+`db-clean-test`») — es una sustitución, no un alta, y duplicarla sería el error fácil aquí:
 
 > - `Makefile` (`db-clean-test`) — barrido de bases desechables huérfanas, incluidas las que crea
 >   el paralelismo (`…_test_ci_gw0`).
-> - `backend/tests/test_table_wipe.py` — demuestra que el vaciado entre tests alcanza a las tablas
->   hijas y cubre exactamente las de la metadata.
 
 Y actualizar la línea existente de `backend/tests/conftest.py`, que hoy dice «creación y borrado de
 la base de datos de la suite»:

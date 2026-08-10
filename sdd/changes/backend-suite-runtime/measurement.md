@@ -4,9 +4,12 @@ Procedimiento y resultados. Está aquí y no en prosa dentro del design porque R
 **repetible por cualquiera**: los dos scripts se pegan tal cual y producen las mismas tablas.
 
 Condiciones de la medición local: **2026-08-10**, worktree `sdd/backend-suite-runtime`, stack propio
-de compose (`make up`), contenedor `backend` con **12 núcleos** disponibles. El runner de GitHub
-(`ubuntu-latest`, 4 vCPU) es **1,54×** más lento: 15m 34s frente a 10m 06s para la misma suite
-(run `31336428305`, 2026-08-09).
+de compose (`make up`), contenedor `backend` con **12 núcleos** disponibles. El runner de GitHub es
+**1,54×** más lento: 15m 34s frente a 10m 06s para la misma suite (run `31336428305`, 2026-08-09).
+
+> Cuando se escribió esta línea decía «`ubuntu-latest`, 4 vCPU». **Es falso para este
+> repositorio**, y se midió más abajo: es privado, y los runners estándar de repos privados traen
+> **2 vCPU**. Ver «Fase 2 en CI, y la premisa que se cayó».
 
 ## 1. Atribución del tiempo por causa
 
@@ -351,10 +354,16 @@ del día va de **145s a 205s**, así que 260s da margen sobre el **peor** caso m
 la mediana. Ceñirlo a la mediana convertiría un día lento del runner en avisos, que es exactamente
 como un presupuesto deja de mirarse.
 
-### Fase 2 (`-n 4`), medida en local
+### Fase 2, medida en local (histórico: se midió con `-n 4`)
 
-Pendiente de medir en CI (tarea 8.1). En esta máquina, sobre la suite completa y con los recuentos
-intactos (5 336 pasados + 35 omitidos, mismo motivo):
+> **Sección superada.** Se escribió antes de medir la fase 2 en CI, cuando el número declarado
+> todavía era `-n 4` y se proyectaba 2-2,5× sobre la premisa —falsa— de 4 vCPU. Las cifras locales
+> de abajo son válidas y siguen siendo las que justifican el paralelismo **en local**; la
+> proyección para CI que traía no lo era. La cifra que manda es la de «Medición final (R2.1)»,
+> más arriba: mediana **164s** con `-n 2`.
+
+En esta máquina (12 núcleos), sobre la suite completa y con los recuentos intactos (5 336 pasados +
+35 omitidos, mismo motivo):
 
 | Reparto | Ejecuciones |
 |---|---|
@@ -362,6 +371,5 @@ intactos (5 336 pasados + 35 omitidos, mismo motivo):
 | `-n 4` | **57,39s · 56,11s · 53,16s** |
 | `-n 3` | 63,93s |
 
-**3,5×** sobre la serie de la misma máquina. La proyección honesta para CI sigue siendo la de D6
-—**2-2,5×**, no 3,5×— porque `ubuntu-latest` tiene 4 vCPU y ahí dentro corren también PostgreSQL y
-Redis, mientras esta máquina tiene 12. La cifra que manda la pone 8.1.
+**3,5×** sobre la serie de la misma máquina — y ese 3,5× local es la razón por la que la fase 2 se
+mantuvo aunque en CI solo aporte 1,48×.
