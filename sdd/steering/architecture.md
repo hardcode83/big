@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-06_autohost-er-entidades.png` (regenerado en `pms-provider-resolution` al entrar `pms_credentials` y `properties.pms_provider`: 28 entidades, 67 relaciones. El anterior, `2026-07-31_...`, se borró; y aquel a su vez había sustituido a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-10_autohost-er-entidades.png` (regenerado en `auth-account-recovery` al entrar `password_reset_tokens` y `users.must_change_password`: **29 entidades y 72 relaciones**, contando una relación por **columna con clave ajena** — son 70 si se cuentan pares de tablas distintos, porque dos tablas se relacionan por dos columnas en dos casos. La regla de recuento se escribe aquí porque antes no estaba: la cifra anterior decía «28 entidades, 67 relaciones» y con esta regla el esquema de entonces daba 70, así que las dos cifras no eran comparables y no había forma de saber cuál contaba qué. Los PNG anteriores —`2026-08-06_...`, `2026-07-31_...` y `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real— se fueron borrando al sustituirse. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
 
 ## Forma del sistema
 

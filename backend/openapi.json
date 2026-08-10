@@ -242,6 +242,30 @@
         "title": "Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post",
         "type": "object"
       },
+      "ChangePasswordRequest": {
+        "additionalProperties": false,
+        "description": "The current password and the replacement.\n\nThe account is the one the access token belongs to; this body cannot name a user.\nA new password that breaks the password policy is answered with `422` saying which\nrule it broke.",
+        "properties": {
+          "current_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest",
+        "type": "object"
+      },
       "ChecklistItemPayload": {
         "additionalProperties": false,
         "properties": {
@@ -1304,6 +1328,10 @@
             "title": "Id",
             "type": "string"
           },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1327,7 +1355,8 @@
           "name",
           "email",
           "role",
-          "preferred_language"
+          "preferred_language",
+          "must_change_password"
         ],
         "title": "CurrentUserResponse",
         "type": "object"
@@ -1386,6 +1415,7 @@
           "INVALID_TOKEN",
           "FORBIDDEN",
           "RATE_LIMITED",
+          "PASSWORD_CHANGE_REQUIRED",
           "NOT_FOUND",
           "BAD_GATEWAY"
         ],
@@ -1403,6 +1433,35 @@
           "error"
         ],
         "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "ForgotPasswordRequest": {
+        "additionalProperties": false,
+        "description": "The address to send a recovery link to.",
+        "properties": {
+          "email": {
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ForgotPasswordRequest",
+        "type": "object"
+      },
+      "ForgotPasswordResponse": {
+        "description": "The same acknowledgement for every request.\n\nIt does not indicate whether the address belongs to an account.",
+        "properties": {
+          "detail": {
+            "default": "If the address belongs to an account, a recovery link has been sent.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "ForgotPasswordResponse",
         "type": "object"
       },
       "GuestDocumentResponse": {
@@ -2715,6 +2774,30 @@
         ],
         "title": "ReservationStatus",
         "type": "string"
+      },
+      "ResetPasswordRequest": {
+        "additionalProperties": false,
+        "description": "The recovery token from the emailed link, and the new password.",
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest",
+        "type": "object"
       },
       "RowErrorResponse": {
         "description": "One row the import could not take, with what a person needs to fix it.",
@@ -4354,6 +4437,108 @@
         ]
       }
     },
+    "/api/v1/auth/change-password": {
+      "post": {
+        "description": "Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.",
+        "operationId": "change_password_api_v1_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change your own password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "description": "Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.",
+        "operationId": "forgot_password_api_v1_auth_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask for a password recovery link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "description": "Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.",
@@ -4520,6 +4705,41 @@
           }
         },
         "summary": "Rotate a refresh token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "description": "Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.",
+        "operationId": "reset_password_api_v1_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set a new password using a recovery token",
         "tags": [
           "auth"
         ]

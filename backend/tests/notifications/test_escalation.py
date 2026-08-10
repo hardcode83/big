@@ -30,8 +30,42 @@ PRD_14_TYPES = (
 )
 
 
-def test_the_enum_is_exactly_the_sixteen_types_of_prd_14() -> None:
-    assert tuple(member.value for member in NotificationType) == PRD_14_TYPES
+# Types this product has that PRD §14 does not, each with the change that added it and why.
+# A divergence is allowed to exist; being unnamed is what is not.
+DECLARED_DIVERGENCES = (
+    # `auth-account-recovery` R6.1: password recovery is not an operational event, so §14's
+    # catalogue — cleanings, incidents, technicians, guests, prices, SLA — has no slot for it.
+    "PASSWORD_RESET_REQUESTED",
+)
+
+
+def test_the_enum_is_the_sixteen_types_of_prd_14_plus_its_declared_divergences() -> None:
+    """Still a snapshot, so a new type has to appear in this diff (the original point).
+
+    It used to assert equality with the sixteen alone. That stopped being true when
+    `auth-account-recovery` added the seventeenth, and the honest fix is to name the
+    divergence rather than to relax the assertion into a subset check — which would let the
+    next type in silently.
+    """
+    assert tuple(member.value for member in NotificationType) == (
+        PRD_14_TYPES + DECLARED_DIVERGENCES
+    )
+
+
+def test_the_prd_catalogue_is_still_fully_present() -> None:
+    """The divergences ADD; none of them replaced a type the PRD asks for."""
+    values = {member.value for member in NotificationType}
+
+    assert set(PRD_14_TYPES) <= values
+    assert len(PRD_14_TYPES) == 16
+
+
+def test_every_divergence_is_a_real_member() -> None:
+    """Stops the divergence list from documenting a type that no longer exists."""
+    values = {member.value for member in NotificationType}
+
+    for divergence in DECLARED_DIVERGENCES:
+        assert divergence in values
 
 
 def test_each_member_name_equals_its_value() -> None:

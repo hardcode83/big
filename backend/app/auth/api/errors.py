@@ -14,9 +14,13 @@ from app.auth.domain.exceptions import (
     AuthDomainError,
     EmailAlreadyExistsError,
     InvalidCredentialsError,
+    InvalidRecoveryTokenError,
     InvalidTokenError,
     LastOwnerError,
+    PasswordChangeRequiredError,
+    PasswordPolicyError,
     PasswordTooLongError,
+    PasswordUnchangedError,
     SelfRoleChangeError,
     SessionReuseDetectedError,
     TooManyAttemptsError,
@@ -43,6 +47,18 @@ _MAPPING: tuple[tuple[type[AuthDomainError], int, ErrorCode], ...] = (
     (SelfRoleChangeError, 422, ErrorCode.VALIDATION_ERROR),
     (LastOwnerError, 422, ErrorCode.VALIDATION_ERROR),
     (UnassignableRoleError, 422, ErrorCode.VALIDATION_ERROR),
+    # Added by `auth-account-recovery`. The two password refusals answer `422` for the same
+    # reason as the three above: the request is what is wrong, not the caller's rights.
+    (PasswordPolicyError, 422, ErrorCode.VALIDATION_ERROR),
+    (PasswordUnchangedError, 422, ErrorCode.VALIDATION_ERROR),
+    # `401 INVALID_TOKEN` for every reason a recovery link can fail (R3.3) — unknown, used,
+    # expired, revoked, or an account that stopped being ACTIVE. One status and one code, so
+    # the response cannot be used to tell those five apart. It shares the code with the JWT
+    # errors above but not the class: see `InvalidRecoveryTokenError`'s docstring.
+    (InvalidRecoveryTokenError, 401, ErrorCode.INVALID_TOKEN),
+    # `403` and not `401`: the credential was accepted. What is refused is operating with a
+    # password that still has to be changed (R5.4).
+    (PasswordChangeRequiredError, 403, ErrorCode.PASSWORD_CHANGE_REQUIRED),
 )
 
 

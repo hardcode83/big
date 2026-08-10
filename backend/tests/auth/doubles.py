@@ -33,6 +33,16 @@ class InMemoryLoginThrottle:
     async def reset_failures(self, user_id: uuid.UUID) -> None:
         self.failures.pop(user_id, None)
 
+    async def clear_account_lock(self, user_id: uuid.UUID) -> None:
+        """Both the counter and the lock (`auth-account-recovery` R3.5c, design D8).
+
+        Faithful to `RedisLoginThrottle.clear_account_lock`, which is what makes the
+        difference from `reset_failures` observable in a use-case test: a double that only
+        dropped the counter would let a broken implementation pass.
+        """
+        self.failures.pop(user_id, None)
+        self.locked.discard(user_id)
+
 
 class UnlimitedLoginThrottle(InMemoryLoginThrottle):
     """For tests about something other than throttling."""
@@ -52,6 +62,13 @@ class CountingPasswordHasher:
     otherwise the first burn of a process costs two bcrypt operations and this double
     would assert a property the implementation does not have. That prewarming is
     pinned separately in `test_password_hasher.py`.
+
+    **`hash` is deliberately NOT counted**, so this double measures the cost of REFUSAL
+    paths only — `verify` and `burn` are the two calls a rejection can reach. Do not reach
+    for it to bound the total bcrypt cost of a successful operation: a successful password
+    change spends a `verify` AND a `hash`, and only the first would show up here. Named by
+    the security panel of `auth-account-recovery` section 4, which used this double to prove
+    a locked account pays zero bcrypt and needed the limit of the claim to be explicit.
     """
 
     def __init__(self, inner) -> None:
@@ -179,6 +196,122 @@ class FakeSessionRepository:
 
     async def revoke_family(self, tenant_id, family_id, reason, now):  # pragma: no cover
         raise AssertionError("administration revokes by user, not by family")
+
+
+class FakePasswordResetTokenRepository:
+    """In-memory `PasswordResetTokenRepository` (`auth-account-recovery` R2, R3).
+
+    `consume_globally` is deliberately faithful about the one property that matters: it is
+    **atomic** — the usability check and the write are one indivisible step here too, so a use
+    case that presented the same token twice gets one success and one None, exactly as the
+    single conditional UPDATE of design D1 behaves. A double that checked and then wrote would
+    hide the race the real adapter is built to close.
+    """
+
+    def __init__(self) -> None:
+        self.tokens: dict[uuid.UUID, object] = {}
+
+    def seed(self, token) -> object:
+        self.tokens[token.id] = token
+        return token
+
+    async def add(self, tenant_id, token) -> None:
+        if token.tenant_id != tenant_id:
+            raise ValueError("Cannot store a reset token for another tenant")
+        self.tokens[token.id] = token
+
+    async def consume_globally(self, token_hash, now):
+        for token in self.tokens.values():
+            if token.token_hash == token_hash and token.is_usable(now):
+                token.used_at = now
+                return token
+        return None
+
+    async def count_live(self, tenant_id, user_id, now) -> int:
+        return sum(
+            1
+            for t in self.tokens.values()
+            if t.tenant_id == tenant_id and t.user_id == user_id and t.is_usable(now)
+        )
+
+    async def revoke_oldest_beyond(
+        self, tenant_id, user_id, keep_newest, now, older_than
+    ) -> int:
+        """Same ordering as the adapter — newest first, `id` as tiebreaker — so a use-case
+        test cannot pass against a double that keeps a different token than production would.
+        """
+        live = [
+            t
+            for t in self.tokens.values()
+            if t.tenant_id == tenant_id and t.user_id == user_id and t.is_usable(now)
+        ]
+        live.sort(key=lambda t: (t.created_at, t.id), reverse=True)
+        revoked = 0
+        for token in live[max(keep_newest, 0) :]:
+            # Same grace boundary as the adapter: a link newer than `older_than` is never
+            # retired, so a use-case test cannot pass against a double that ignores it.
+            if token.created_at > older_than:
+                continue
+            token.revoked_at = now
+            revoked += 1
+        return revoked
+
+    async def revoke_other_live(self, tenant_id, user_id, keep_id, now) -> int:
+        revoked = 0
+        for token in self.tokens.values():
+            if (
+                token.tenant_id == tenant_id
+                and token.user_id == user_id
+                and token.id != keep_id
+                and token.is_usable(now)
+            ):
+                token.revoked_at = now
+                revoked += 1
+        return revoked
+
+
+class CapturingEmailAdapter:
+    """A `NotificationAdapter` that keeps what it was asked to send.
+
+    The only way to assert design D2's central property: the SENT text carries the link and
+    the STORED row does not. The real `ConsoleEmailAdapter` cannot serve here — it is
+    forbidden from logging content or recipient, which is exactly why the flow cannot be
+    exercised by hand in dev.
+    """
+
+    def __init__(self, *, delivered: bool = True) -> None:
+        self.sent: list[dict] = []
+        self._delivered = delivered
+
+    async def send(self, *, recipient_contact, subject, body, channel):
+        from app.notifications.domain.results import (
+            NotificationErrorCode,
+            NotificationResult,
+        )
+
+        self.sent.append(
+            {
+                "recipient_contact": recipient_contact,
+                "subject": subject,
+                "body": body,
+                "channel": channel,
+            }
+        )
+        return (
+            NotificationResult.ok()
+            if self._delivered
+            else NotificationResult.failure(NotificationErrorCode.ADAPTER_ERROR)
+        )
+
+
+class FakeNotificationLogRepository:
+    def __init__(self) -> None:
+        self.rows: list[tuple] = []
+
+    async def add(self, tenant_id, log) -> None:
+        if log.tenant_id != tenant_id:
+            raise ValueError("Cannot store a notification for another tenant")
+        self.rows.append((tenant_id, log))
 
 
 class FakeUnitOfWork:

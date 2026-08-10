@@ -1,24 +1,33 @@
 """Repository adapters, including their tenant scoping (R4.2, R6.5)."""
 
+import asyncio
 import uuid
 from datetime import timedelta
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.domain.entities import User, UserSession
+from app.auth.domain.entities import PasswordResetToken, User, UserSession
 from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
 from app.auth.domain.exceptions import EmailAlreadyExistsError
 from app.auth.domain.repositories import MAX_PAGE, MAX_PER_PAGE, UserFilters
 from app.auth.domain.value_objects import normalize_email
 from app.core.tenancy import CrossTenantWriteError
-from app.auth.infrastructure.models import UserModel, UserSessionModel
+from app.auth.infrastructure.models import (
+    PasswordResetTokenModel,
+    UserModel,
+    UserSessionModel,
+)
 from app.auth.infrastructure.repositories import (
+    SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemySessionRepository,
     SqlAlchemyTenantStatusReader,
     SqlAlchemyUserRepository,
 )
 from app.tenants.domain.enums import TenantStatus
+from app.tenants.infrastructure.models import TenantModel
 from tests.auth.conftest import insert_tenant, insert_user, utc_now
 
 
@@ -822,3 +831,450 @@ async def test_no_administration_method_commits(db_session, tenant_a) -> None:
     assert (
         await db_session.execute(select(UserModel).where(UserModel.id == user.id))
     ).scalar_one_or_none() is None
+
+
+# --- recovery tokens (`auth-account-recovery` R2.5, R3.2, R3.5, design D1/D3/D7) ----
+
+
+@pytest.mark.asyncio
+async def test_a_password_write_must_name_the_temporary_flag(db_session, tenant_a) -> None:
+    """Design D5 at the repository, not only at the entity.
+
+    `set_password_hash` makes the pairing impossible to skip in the entity, but
+    `apply_changes` takes a mapping, so it is a second write path where a caller could name
+    one column and not the other — and D5's own argument is that two things which must be
+    done together are two things somebody will eventually do separately.
+    """
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(ValueError, match="must be written together"):
+        await repo.apply_changes(tenant_a.id, user.id, {"password_hash": "lonely"})
+
+
+@pytest.mark.asyncio
+async def test_the_temporary_flag_cannot_be_cleared_on_its_own(db_session, tenant_a) -> None:
+    """The dangerous direction: clearing the flag alone would release an account whose
+    password is still the temporary one an administrator handed out (R5.4)."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(ValueError, match="must be written together"):
+        await repo.apply_changes(tenant_a.id, user.id, {"must_change_password": False})
+
+
+@pytest.mark.asyncio
+async def test_writing_the_password_and_its_flag_together_is_allowed(
+    db_session, tenant_a
+) -> None:
+    """The rule is a coupling, not a prohibition — the real reset path writes both."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    await repo.apply_changes(
+        tenant_a.id, user.id, {"password_hash": "fresh", "must_change_password": True}
+    )
+
+    refreshed = (
+        await db_session.execute(select(UserModel).where(UserModel.id == user.id))
+    ).scalar_one()
+    assert refreshed.password_hash == "fresh"
+    assert refreshed.must_change_password is True
+
+
+@pytest.mark.asyncio
+async def test_the_coupling_does_not_burden_unrelated_columns(db_session, tenant_a) -> None:
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    await repo.apply_changes(tenant_a.id, user.id, {"name": "Ana Ruiz"})
+
+    refreshed = (
+        await db_session.execute(select(UserModel).where(UserModel.id == user.id))
+    ).scalar_one()
+    assert refreshed.name == "Ana Ruiz"
+
+
+def _reset_token(tenant_id, user_id, *, token_hash=None, minutes=30, **overrides):
+    now = utc_now()
+    values = {
+        "id": uuid.uuid4(),
+        "tenant_id": tenant_id,
+        "user_id": user_id,
+        "token_hash": token_hash or uuid.uuid4().hex + uuid.uuid4().hex,
+        "expires_at": now + timedelta(minutes=minutes),
+        "created_at": now,
+        "updated_at": now,
+    }
+    values.update(overrides)
+    return PasswordResetToken(**values)
+
+
+@pytest.mark.asyncio
+async def test_a_stored_token_can_be_consumed_and_returns_its_owner(
+    db_session, tenant_a
+) -> None:
+    """The anonymous caller learns whose token it was only from the returned row (D3)."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_a.id, user.id)
+    await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    consumed = await repo.consume_globally(token.token_hash, utc_now())
+
+    assert consumed is not None
+    assert consumed.id == token.id
+    assert consumed.user_id == user.id
+    assert consumed.tenant_id == tenant_a.id
+    assert consumed.used_at is not None
+
+
+@pytest.mark.asyncio
+async def test_a_token_cannot_be_consumed_twice(db_session, tenant_a) -> None:
+    """R3.2: a presented link is a spent link."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_a.id, user.id)
+    await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    assert await repo.consume_globally(token.token_hash, utc_now()) is not None
+    assert await repo.consume_globally(token.token_hash, utc_now()) is None
+
+
+@pytest.mark.asyncio
+async def test_an_expired_token_cannot_be_consumed(db_session, tenant_a) -> None:
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_a.id, user.id, minutes=-1)
+    await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    assert await repo.consume_globally(token.token_hash, utc_now()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_revoked_token_cannot_be_consumed(db_session, tenant_a) -> None:
+    """The clause that stops this UPDATE from winning a tie against a concurrent revocation."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_a.id, user.id, revoked_at=utc_now())
+    await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    assert await repo.consume_globally(token.token_hash, utc_now()) is None
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_token_hash_consumes_nothing(db_session, tenant_a) -> None:
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+
+    assert await repo.consume_globally("f" * 64, utc_now()) is None
+
+
+@pytest.mark.asyncio
+async def test_consuming_is_unscoped_and_finds_a_token_of_any_tenant(
+    db_session, tenant_a, tenant_b
+) -> None:
+    """Design D3: the second and last unscoped query. No caller supplies the tenant.
+
+    The token of tenant B resolves without anyone naming B, and the row is what reveals it.
+    """
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_b.id, user_b.id)
+    await repo.add(tenant_b.id, token)
+    await db_session.flush()
+
+    consumed = await repo.consume_globally(token.token_hash, utc_now())
+
+    assert consumed is not None
+    assert consumed.tenant_id == tenant_b.id
+
+
+@pytest.mark.asyncio
+async def test_adding_a_token_for_another_tenant_is_refused(
+    db_session, tenant_a, tenant_b
+) -> None:
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+
+    with pytest.raises(CrossTenantWriteError):
+        await repo.add(tenant_a.id, _reset_token(tenant_b.id, user_b.id))
+
+
+@pytest.mark.asyncio
+async def test_count_live_counts_only_spendable_tokens(db_session, tenant_a) -> None:
+    """The cap of design D7 is about links that still work, not rows that exist."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    for token in (
+        _reset_token(tenant_a.id, user.id),
+        _reset_token(tenant_a.id, user.id),
+        _reset_token(tenant_a.id, user.id, minutes=-1),
+        _reset_token(tenant_a.id, user.id, used_at=now),
+        _reset_token(tenant_a.id, user.id, revoked_at=now),
+    ):
+        await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    assert await repo.count_live(tenant_a.id, user.id, now) == 2
+
+
+@pytest.mark.asyncio
+async def test_count_live_does_not_see_another_tenant(
+    db_session, tenant_a, tenant_b
+) -> None:
+    user_a = await insert_user(db_session, tenant=tenant_a)
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    await repo.add(tenant_b.id, _reset_token(tenant_b.id, user_b.id))
+    await db_session.flush()
+
+    assert await repo.count_live(tenant_a.id, user_a.id, utc_now()) == 0
+
+
+@pytest.mark.asyncio
+async def test_revoke_other_live_kills_the_siblings_and_spares_the_one_kept(
+    db_session, tenant_a
+) -> None:
+    """R3.5b. `keep_id` stays `used`, not `revoked`: the two are different facts."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    keep = _reset_token(tenant_a.id, user.id)
+    other, another = (
+        _reset_token(tenant_a.id, user.id),
+        _reset_token(tenant_a.id, user.id),
+    )
+    for token in (keep, other, another):
+        await repo.add(tenant_a.id, token)
+    await db_session.flush()
+    now = utc_now()
+    consumed = await repo.consume_globally(keep.token_hash, now)
+    assert consumed is not None
+
+    revoked = await repo.revoke_other_live(tenant_a.id, user.id, keep.id, now)
+
+    assert revoked == 2
+    rows = {
+        row.id: row
+        for row in (
+            await db_session.execute(
+                select(PasswordResetTokenModel).where(
+                    PasswordResetTokenModel.user_id == user.id
+                )
+            )
+        ).scalars().all()
+    }
+    assert rows[keep.id].revoked_at is None
+    assert rows[keep.id].used_at is not None
+    assert rows[other.id].revoked_at is not None
+    assert rows[another.id].revoked_at is not None
+
+
+@pytest.mark.asyncio
+async def test_revoke_oldest_beyond_keeps_the_newest_and_revokes_the_rest(
+    db_session, tenant_a
+) -> None:
+    """R2.5 / design D7 as amended: the cap retires the OLDEST rather than dropping the
+    request, so a legitimate recovery always wins."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    # Explicit, spaced `created_at` so the ordering under test is not at the mercy of clock
+    # resolution — which is exactly why the adapter's ORDER BY carries an `id` tiebreaker.
+    tokens = []
+    for minutes_ago in (30, 20, 10):
+        token = _reset_token(
+            tenant_a.id, user.id, created_at=now - timedelta(minutes=minutes_ago)
+        )
+        await repo.add(tenant_a.id, token)
+        tokens.append(token)
+    await db_session.flush()
+    oldest, middle, newest = tokens
+
+    revoked = await repo.revoke_oldest_beyond(tenant_a.id, user.id, 2, now, now)
+
+    assert revoked == 1
+    rows = {
+        row.id: row
+        for row in (
+            await db_session.execute(
+                select(PasswordResetTokenModel).where(
+                    PasswordResetTokenModel.user_id == user.id
+                )
+            )
+        ).scalars().all()
+    }
+    assert rows[oldest.id].revoked_at is not None
+    assert rows[oldest.id].used_at is None, "revoked and used are different facts"
+    assert rows[middle.id].revoked_at is None
+    assert rows[newest.id].revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_oldest_beyond_converges_when_the_cap_is_lowered(
+    db_session, tenant_a
+) -> None:
+    """`keep_newest` rather than "revoke one": an account left above a lowered cap would
+    otherwise stay above it for ever."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    for minutes_ago in (50, 40, 30, 20, 10):
+        await repo.add(
+            tenant_a.id,
+            _reset_token(tenant_a.id, user.id, created_at=now - timedelta(minutes=minutes_ago)),
+        )
+    await db_session.flush()
+
+    revoked = await repo.revoke_oldest_beyond(tenant_a.id, user.id, 1, now, now)
+
+    assert revoked == 4
+    assert await repo.count_live(tenant_a.id, user.id, now) == 1
+
+
+@pytest.mark.asyncio
+async def test_revoke_oldest_beyond_leaves_used_and_expired_rows_alone(
+    db_session, tenant_a
+) -> None:
+    """It operates on LIVE tokens only: a spent link keeps `used_at` and gains no
+    `revoked_at`, or the trail would stop distinguishing the two."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    now = utc_now()
+    spent = _reset_token(tenant_a.id, user.id, used_at=now - timedelta(minutes=5))
+    expired = _reset_token(tenant_a.id, user.id, minutes=-1)
+    for token in (spent, expired):
+        await repo.add(tenant_a.id, token)
+    await db_session.flush()
+
+    revoked = await repo.revoke_oldest_beyond(tenant_a.id, user.id, 0, now, now)
+
+    assert revoked == 0
+    rows = {
+        row.id: row
+        for row in (
+            await db_session.execute(
+                select(PasswordResetTokenModel).where(
+                    PasswordResetTokenModel.user_id == user.id
+                )
+            )
+        ).scalars().all()
+    }
+    assert rows[spent.id].revoked_at is None
+    assert rows[expired.id].revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_oldest_beyond_does_not_reach_another_tenant(
+    db_session, tenant_a, tenant_b
+) -> None:
+    user_a = await insert_user(db_session, tenant=tenant_a)
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token_b = _reset_token(tenant_b.id, user_b.id)
+    await repo.add(tenant_b.id, token_b)
+    await db_session.flush()
+
+    assert await repo.revoke_oldest_beyond(tenant_a.id, user_a.id, 0, utc_now(), utc_now()) == 0
+    row = (
+        await db_session.execute(
+            select(PasswordResetTokenModel).where(PasswordResetTokenModel.id == token_b.id)
+        )
+    ).scalar_one()
+    assert row.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_revoke_other_live_does_not_reach_another_tenant(
+    db_session, tenant_a, tenant_b
+) -> None:
+    user_a = await insert_user(db_session, tenant=tenant_a)
+    user_b = await insert_user(db_session, tenant=tenant_b)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token_b = _reset_token(tenant_b.id, user_b.id)
+    await repo.add(tenant_b.id, token_b)
+    await db_session.flush()
+
+    assert await repo.revoke_other_live(tenant_a.id, user_a.id, uuid.uuid4(), utc_now()) == 0
+    row = (
+        await db_session.execute(
+            select(PasswordResetTokenModel).where(
+                PasswordResetTokenModel.id == token_b.id
+            )
+        )
+    ).scalar_one()
+    assert row.revoked_at is None
+
+
+@pytest.mark.asyncio
+async def test_two_simultaneous_presentations_of_one_token_leave_exactly_one_winner(
+    test_engine,
+) -> None:
+    """The race R3.2 exists to close, proved against real Postgres (design D1).
+
+    Two transactions present the same link at the same time. Only one may come back with a
+    row: if both did, both callers would go on to reset the password, and a single-use
+    credential would have been honoured twice. No fake can show this — what is being proved
+    is that the conditional UPDATE serialises, because Postgres re-evaluates its WHERE
+    against the new row version when the blocked statement unblocks.
+    """
+    tenant_id, user_id, token_hash = uuid.uuid4(), uuid.uuid4(), uuid.uuid4().hex * 2
+    async with AsyncSession(test_engine, expire_on_commit=False) as session:
+        session.add(
+            TenantModel(id=tenant_id, name=f"t-{tenant_id.hex[:8]}", billing_email="o@x.com")
+        )
+        await session.flush()
+        session.add(
+            UserModel(
+                id=user_id,
+                tenant_id=tenant_id,
+                name="Ana",
+                email=f"ana-{user_id.hex[:8]}@example.com",
+                password_hash="hashed",
+                role=UserRole.TENANT_OWNER,
+                status=UserStatus.ACTIVE,
+            )
+        )
+        await session.flush()
+        session.add(
+            PasswordResetTokenModel(
+                id=uuid.uuid4(),
+                tenant_id=tenant_id,
+                user_id=user_id,
+                token_hash=token_hash,
+                expires_at=utc_now() + timedelta(minutes=30),
+            )
+        )
+        await session.commit()
+
+    async def _consume():
+        async with AsyncSession(test_engine, expire_on_commit=False) as session:
+            consumed = await SqlAlchemyPasswordResetTokenRepository(session).consume_globally(
+                token_hash, utc_now()
+            )
+            await session.commit()
+            return consumed
+
+    results = await asyncio.gather(_consume(), _consume(), return_exceptions=True)
+
+    winners = [r for r in results if not isinstance(r, BaseException) and r is not None]
+    losers = [r for r in results if r is None]
+    assert len(winners) == 1, f"expected exactly one winner, got {results}"
+    assert len(losers) == 1, f"expected exactly one loser, got {results}"
+
+
+@pytest.mark.asyncio
+async def test_two_tokens_cannot_share_a_hash(db_session, tenant_a) -> None:
+    """`uq_password_reset_tokens_token_hash` is what makes `rowcount` a decision (D1)."""
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    shared = uuid.uuid4().hex + uuid.uuid4().hex
+    await repo.add(tenant_a.id, _reset_token(tenant_a.id, user.id, token_hash=shared))
+    await repo.add(tenant_a.id, _reset_token(tenant_a.id, user.id, token_hash=shared))
+
+    with pytest.raises(IntegrityError):
+        await db_session.flush()

@@ -84,7 +84,20 @@ REDACTED_FIELDS = frozenset(
 # entity attributes, and by the closed `action`/`entity_type` vocabulary of actions.py.
 AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     "USER": frozenset(
-        {"name", "email", "phone", "preferred_language", "role", "status", "password"}
+        {
+            "name",
+            "email",
+            "phone",
+            "preferred_language",
+            "role",
+            "status",
+            "password",
+            # `auth-account-recovery` R5.1/design D9. Auditable as a real diff and NOT
+            # redacted, unlike `password` beside it: it is a boolean of account state, not a
+            # value of rule 3 of `steering/security.md`, so recording that it went from true
+            # to false leaks nothing and is exactly what a review of an incident wants.
+            "must_change_password",
+        }
     ),
     "TENANT": frozenset(
         {"name", "billing_email", "country", "timezone", "default_language"}

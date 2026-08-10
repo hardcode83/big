@@ -40,6 +40,20 @@ export interface paths {
      */
     post: operations["register_manual_code_api_v1_access_records__record_id__manual_code_post"];
   };
+  "/api/v1/auth/change-password": {
+    /**
+     * Change your own password
+     * @description Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.
+     */
+    post: operations["change_password_api_v1_auth_change_password_post"];
+  };
+  "/api/v1/auth/forgot-password": {
+    /**
+     * Ask for a password recovery link
+     * @description Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.
+     */
+    post: operations["forgot_password_api_v1_auth_forgot_password_post"];
+  };
   "/api/v1/auth/login": {
     /**
      * Exchange email and password for a token pair
@@ -67,6 +81,13 @@ export interface paths {
      * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
+  };
+  "/api/v1/auth/reset-password": {
+    /**
+     * Set a new password using a recovery token
+     * @description Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.
+     */
+    post: operations["reset_password_api_v1_auth_reset_password_post"];
   };
   "/api/v1/cleaning-checklist-templates": {
     /**
@@ -428,6 +449,20 @@ export interface components {
       file: string;
       /** Photo Type */
       photo_type: string;
+    };
+    /**
+     * ChangePasswordRequest
+     * @description The current password and the replacement.
+     *
+     * The account is the one the access token belongs to; this body cannot name a user.
+     * A new password that breaks the password policy is answered with `422` saying which
+     * rule it broke.
+     */
+    ChangePasswordRequest: {
+      /** Current Password */
+      current_password: string;
+      /** New Password */
+      new_password: string;
     };
     /** ChecklistItemPayload */
     ChecklistItemPayload: {
@@ -851,6 +886,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Must Change Password */
+      must_change_password: boolean;
       /** Name */
       name: string;
       /** Preferred Language */
@@ -894,7 +931,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND" | "BAD_GATEWAY";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -906,6 +943,27 @@ export interface components {
      */
     ErrorEnvelope: {
       error: components["schemas"]["ErrorBody"];
+    };
+    /**
+     * ForgotPasswordRequest
+     * @description The address to send a recovery link to.
+     */
+    ForgotPasswordRequest: {
+      /** Email */
+      email: string;
+    };
+    /**
+     * ForgotPasswordResponse
+     * @description The same acknowledgement for every request.
+     *
+     * It does not indicate whether the address belongs to an account.
+     */
+    ForgotPasswordResponse: {
+      /**
+       * Detail
+       * @default If the address belongs to an account, a recovery link has been sent.
+       */
+      detail?: string;
     };
     /** GuestDocumentResponse */
     GuestDocumentResponse: {
@@ -1391,6 +1449,16 @@ export interface components {
      * @enum {string}
      */
     ReservationStatus: "PENDING" | "CONFIRMED" | "CANCELLED" | "CHECKED_IN_ESTIMATED" | "CHECKED_OUT_ESTIMATED" | "COMPLETED" | "NO_SHOW";
+    /**
+     * ResetPasswordRequest
+     * @description The recovery token from the emailed link, and the new password.
+     */
+    ResetPasswordRequest: {
+      /** New Password */
+      new_password: string;
+      /** Token */
+      token: string;
+    };
     /**
      * RowErrorResponse
      * @description One row the import could not take, with what a person needs to fix it.
@@ -1955,6 +2023,66 @@ export interface operations {
     };
   };
   /**
+   * Change your own password
+   * @description Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.
+   */
+  change_password_api_v1_auth_change_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChangePasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Ask for a password recovery link
+   * @description Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.
+   */
+  forgot_password_api_v1_auth_forgot_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ForgotPasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["ForgotPasswordResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Exchange email and password for a token pair
    * @description Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.
    */
@@ -2045,6 +2173,29 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TokenPairResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Set a new password using a recovery token
+   * @description Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.
+   */
+  reset_password_api_v1_auth_reset_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResetPasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Validation Error */
       422: {

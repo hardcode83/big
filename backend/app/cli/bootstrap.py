@@ -136,9 +136,10 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         # Idempotency keys on the tenant NAME, and `tenants` has no uniqueness on it,
         # so that typo creates a second tenant and then tries these same addresses.
         #
-        # Deliberately through the PORT rather than a raw cross-tenant select: that
-        # keeps `find_by_email_globally` the only unscoped query in the system, so
-        # D16's grep-based audit stays exhaustive. A second hand-rolled one here would
+        # Deliberately through the PORT rather than a raw cross-tenant select: that keeps
+        # the unscoped queries in the system down to the two named `*_globally` ones —
+        # `find_by_email_globally` (D16) and `consume_globally` (`auth-account-recovery`
+        # D3) — so the grep-based audit stays exhaustive. A hand-rolled one here would
         # have made that claim false and the audit incomplete.
         existing = await users.find_by_email_globally(seed.email)
         if existing is not None and existing.tenant_id != tenant.id:

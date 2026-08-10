@@ -63,3 +63,16 @@ class RedisLoginThrottle:
 
     async def reset_failures(self, user_id: uuid.UUID) -> None:
         await self._redis.delete(f"login:fail:{user_id}")
+
+    async def clear_account_lock(self, user_id: uuid.UUID) -> None:
+        """Drop the counter AND the lock (`auth-account-recovery` R3.5c, design D8).
+
+        `reset_failures` deletes only `login:fail:<uid>`, which is all the login path needs.
+        A completed recovery needs both: ten failures are what usually precede "I've lost my
+        password", so leaving `login:lock:<uid>` alive would have the recovered user rejected
+        by the very next login with the same generic `401` for the rest of the lockout window.
+
+        One `DELETE` for both keys, so there is no window where the counter is gone and the
+        lock is not.
+        """
+        await self._redis.delete(f"login:fail:{user_id}", f"login:lock:{user_id}")

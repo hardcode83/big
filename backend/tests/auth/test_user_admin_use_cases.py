@@ -101,6 +101,11 @@ async def test_creating_a_user_returns_a_usable_temporary_password(ports) -> Non
     # Normalised on the way in (ADR 0005, design D19).
     assert created.user.email == "ana@example.com"
     assert created.user.status is UserStatus.ACTIVE
+    # `auth-account-recovery` R5.2: the password above is temporary and travels by WhatsApp
+    # or by voice, so the account owes a change before it can operate. Asserted here because
+    # without it a regression dropping the flag would hand out permanent temporary passwords
+    # and the whole suite would stay green.
+    assert created.user.must_change_password is True
     assert ports["uow"].commits == 1
 
 
@@ -626,7 +631,13 @@ async def test_resetting_issues_a_new_password_and_kills_the_sessions(ports) -> 
     )
 
     assert await ports["hasher"].verify(result.temporary_password, user.password_hash)
-    assert ports["users"].applied[0][2] == {"password_hash": user.password_hash}
+    # `must_change_password` travels with the hash, never apart from it
+    # (`auth-account-recovery` R5.2, design D5).
+    assert ports["users"].applied[0][2] == {
+        "password_hash": user.password_hash,
+        "must_change_password": True,
+    }
+    assert user.must_change_password is True
     assert ports["sessions"].revocations == [
         (TENANT, user.id, SessionRevokedReason.PASSWORD_RESET)
     ]

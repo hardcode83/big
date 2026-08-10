@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    Boolean,
     DateTime,
     Enum,
     ForeignKey,
@@ -9,6 +10,7 @@ from sqlalchemy import (
     String,
     Uuid,
     column,
+    false,
     func,
 )
 from sqlalchemy.orm import Mapped, mapped_column
@@ -50,6 +52,11 @@ class UserModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     )
     preferred_language: Mapped[str] = mapped_column(String(5), default="es", server_default="es")
     last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # `auth-account-recovery` R5.1. `server_default false` so the migration needs no backfill:
+    # existing accounts keep today's behaviour, because a deployment must not lock anybody out.
+    must_change_password: Mapped[bool] = mapped_column(
+        Boolean, default=False, server_default=false()
+    )
 
 
 class UserSessionModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
@@ -79,3 +86,35 @@ class UserSessionModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMi
     revoked_reason: Mapped[SessionRevokedReason | None] = mapped_column(
         Enum(SessionRevokedReason, name="session_revoked_reason", native_enum=True), default=None
     )
+
+
+class PasswordResetTokenModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
+    """One recovery link's server-side state (`auth-account-recovery` R3.1, design D1).
+
+    Not part of the PRD §7 entity list: PRD §24 lists `/forgot-password` without saying where
+    the token lives, and single use is impossible without durable server-side state — the same
+    reasoning that put `user_sessions` here.
+
+    Tenant-scoped like everything else, so the global filter of `app/core/db.py` covers it.
+    That matters even though the consuming query is deliberately unscoped (design D3): the
+    unscoped lookup is one named method, and every OTHER access to this table is caught by the
+    net.
+    """
+
+    __tablename__ = "password_reset_tokens"
+    __table_args__ = (
+        # UNIQUE, not merely indexed. It is what makes the conditional `UPDATE ... WHERE
+        # token_hash = :h` of design D1 address at most one row, so `rowcount` is a decision
+        # and not a count. A duplicate digest would mean two tokens sharing a fate.
+        Index("uq_password_reset_tokens_token_hash", "token_hash", unique=True),
+        # Serves `count_live` (the per-account cap of design D7) and `revoke_other_live`.
+        Index("ix_password_reset_tokens_tenant_id_user_id", "tenant_id", "user_id"),
+    )
+
+    user_id: Mapped[uuid.UUID] = mapped_column(Uuid, ForeignKey("users.id"))
+    # SHA-256 in hexadecimal: 64 characters, fixed. The cleartext token is NEVER stored —
+    # R4.1 requires that the row not permit reconstructing it.
+    token_hash: Mapped[str] = mapped_column(String(64))
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True))
+    used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)

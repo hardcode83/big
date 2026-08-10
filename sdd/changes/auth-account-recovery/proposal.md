@@ -90,6 +90,34 @@ Acceptance criteria:
    validación en el borde eso sale como error no mapeado en lugar de como `422`.
 7. IF la contraseña nueva es idéntica a la actual, THEN THE SYSTEM SHALL responder `422`: un
    cambio que no cambia nada revoca todas las sesiones del usuario sin rotar credencial alguna.
+8. WHILE la cuenta está bloqueada por acumulación de fallos, THE SYSTEM SHALL rechazar la
+   petición **sin verificar** la contraseña presentada; y IF la contraseña actual presentada no
+   coincide, THEN THE SYSTEM SHALL contabilizar el fallo en el **mismo** contador por cuenta que
+   `login` (`login:fail:<uid>`), de modo que el bloqueo de 10 fallos de `auth-tenancy` cubra
+   también esta vía.
+
+   **Criterio añadido en `run` (2026-08-10), no en `new`**: lo levantó el panel de seguridad de
+   la sección 4 y lo aprobó Jose. La propuesta original no decía nada de throttling aquí, con el
+   razonamiento de que el llamante ya está autenticado y por tanto el presupuesto por IP de
+   `login`/`refresh` no aplica. Eso era cierto sobre la **clave** del contador y falso sobre la
+   conclusión: el presupuesto tiene que existir, pero por `user_id`. Sin él, este endpoint
+   verifica una credencial igual que `login` pero **más barato para el atacante** —sin bloqueo,
+   sin contador y sin rastro—, y eso abre dos agujeros concretos: (a) quien robe un token de
+   acceso de 15 minutos puede convertirlo en la contraseña real probándola bcrypt a bcrypt, y
+   cualquier rol autenticado sirve porque `MANAGE_OWN_SESSION` lo tienen todos; (b) un bucle de
+   contraseñas deliberadamente erróneas retiene todas las plazas del `CapacityLimiter` de bcrypt
+   —que es **compartido con `login`**— sin revocar las sesiones del atacante, así que degrada el
+   login de todo el mundo sin necesidar credencial robada alguna. Es la regla 7 de
+   `steering/security.md` («bloqueo tras 10 fallos») aplicada a todo camino que verifica una
+   contraseña, no sólo al anónimo.
+
+   **Lo que este criterio NO cierra, dicho aquí para que no se lea como más de lo que es**: el
+   contador sólo avanza cuando la verificación falla, así que quien conoce una contraseña válida
+   —la suya— sigue pudiendo quemar un bcrypt por petición indefinidamente mandando una
+   contraseña nueva que incumple la política. No obtiene credencial alguna, pero degrada el
+   `CapacityLimiter` compartido con `login` igual que el escenario (b). El residuo está medido y
+   registrado en D14, junto con lo único que lo cerraría —un presupuesto por usuario y por
+   minuto, ofrecido y descartado— y con el motivo por el que no se mitiga con un reordenamiento.
 
 ### R2 — Solicitud de recuperación, anónima e indistinguible
 
@@ -114,9 +142,38 @@ Acceptance criteria:
    con `RATE_LIMITED` antes de resolver el email. Partir el presupuesto permitiría gastar dos
    desde una misma dirección, que es literalmente el razonamiento con el que `auth-tenancy`
    metió `refresh` en el contador de `login`.
-5. THE SYSTEM SHALL acotar además cuántas solicitudes vivas puede acumular **una misma cuenta**,
+5. THE SYSTEM SHALL acotar además cuántos enlaces vivos puede acumular **una misma cuenta**,
    de modo que la dirección de una víctima no pueda inundarse desde IPs distintas, y SHALL
    aplicar esa cota sin que el resultado sea observable en la respuesta (R2.2 sigue mandando).
+   WHEN la cuenta ya está en la cota, THE SYSTEM SHALL **revocar el enlace vivo más antiguo y
+   emitir el nuevo**, en lugar de descartar la solicitud; y SHALL NOT revocar un enlace vivo
+   **más joven que un margen de gracia corto**, descartando la solicitud en silencio cuando
+   todos los vivos estén dentro de ese margen.
+
+   **Segunda mitad añadida en `run` (2026-08-10)**: lo levantó el panel de seguridad de la
+   sección 6 y lo aprobó Jose. La redacción original —descartar la solicitud al alcanzar la
+   cota— convertía la cota en un arma de doble filo: cualquiera que conozca una dirección gasta
+   tres peticiones, dentro del presupuesto de 10/min por IP, y durante los 30 minutos de vida
+   del token **toda recuperación real del titular devuelve el mismo `202` y no envía nada**.
+   R2.2 garantiza que la víctima no recibe señal alguna, y recargando a medida que expiran la
+   supresión es indefinida; la única salida era que un administrador emitiera una temporal. Es
+   decir: la cota anulaba justo la capacidad que este change existe para dar. Revocando el más
+   antiguo, una solicitud legítima **siempre gana**, el número de enlaces válidos que coexisten
+   sigue acotado —que es una propiedad de seguridad por derecho propio— y el volumen de correo
+   lo sigue acotando el presupuesto por IP.
+
+   **Tercera parte, el margen de gracia, añadida en `run` (2026-08-10)** y aprobada por Jose: el
+   mismo panel midió que revocar-el-más-antiguo, tal cual, quitaba dos propiedades que descartar
+   sí daba. (a) Antes, al llegar a la cota no se enviaba nada, así que una cuenta recibía **como
+   máximo `cota` avisos por ventana de vida del token, sin importar cuántas IPs preguntaran**;
+   enviando siempre, el correo por cuenta pasa a ser 10/min × número de IPs — exactamente la
+   inundación entre IPs que la cláusula de propósito de esta regla nombra, así que la frase de
+   arriba sobre el presupuesto por IP era falsa: un presupuesto **por IP** no puede acotar un
+   total **por cuenta**. (b) Un atacante sostenido a ~3 peticiones/minuto retiraba el enlace
+   recién enviado al titular en unos 20 segundos, con lo que el titular pasaba de no recibir
+   correo a recibir correo cuyo enlace ya no sirve. El margen cierra las dos con un solo
+   mecanismo: el enlace del titular es irrevocable durante la ventana en que lo va a pulsar, y el
+   correo por cuenta vuelve a estar acotado a `cota` por ventana de gracia.
 6. THE SYSTEM SHALL registrar el intento en el log de la aplicación en inglés, con el resultado
    y sin el email, sin el token y sin ninguna forma reversible de ninguno de los dos.
 
