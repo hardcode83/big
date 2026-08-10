@@ -17,6 +17,13 @@ import pytest
 from app.auth.domain.enums import UserRole
 from tests.auth.conftest import auth_header
 
+# A literal, not `uuid.uuid4()`. Inside `@pytest.mark.parametrize` a random value becomes
+# part of the test id, and under `pytest -n` each worker collects a different one — the
+# suite then aborts with "Different tests were collected between gw0 and gw3" before running
+# anything. It reads better too: what these cases need is an id that resolves to nothing,
+# and any fixed one does that.
+ABSENT_ID = "3f1a6c2e-0000-4000-8000-000000000002"
+
 READERS = {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
 MANAGERS = {UserRole.TENANT_OWNER}
 ALL_ROLES = list(UserRole)
@@ -108,10 +115,10 @@ async def test_resetting_a_password_is_allowed_for_managers_only(
     [
         ("GET", "/api/v1/users", None),
         ("POST", "/api/v1/users", {}),
-        ("GET", f"/api/v1/users/{uuid.uuid4()}", None),
-        ("PATCH", f"/api/v1/users/{uuid.uuid4()}", {"name": "x"}),
-        ("DELETE", f"/api/v1/users/{uuid.uuid4()}", None),
-        ("POST", f"/api/v1/users/{uuid.uuid4()}/reset-password", None),
+        ("GET", f"/api/v1/users/{ABSENT_ID}", None),
+        ("PATCH", f"/api/v1/users/{ABSENT_ID}", {"name": "x"}),
+        ("DELETE", f"/api/v1/users/{ABSENT_ID}", None),
+        ("POST", f"/api/v1/users/{ABSENT_ID}/reset-password", None),
     ],
 )
 @pytest.mark.asyncio

@@ -35,3 +35,4 @@
 | cleaning-photos-storage | new, design, tasks, run, review, ship, archive | 507425 | 1372474 | 311969941 | 223.9127 | 2026-08-08 | 2026-08-09 |
 | reservations-webhooks | new, design, tasks, run, review, ship, archive | 553657 | 1839411 | 395009670 | 262.6137 | 2026-08-08 | 2026-08-09 |
 | dashboard-api | new, design, tasks, run, review, ship, archive | 425934 | 1251691 | 309988498 | 198.8594 | 2026-08-09 | 2026-08-09 |
+| backend-suite-runtime | new, design, tasks, run, review, ship | 425336 | 1054866 | 233814306 | 160.6534 | 2026-08-09 | — |

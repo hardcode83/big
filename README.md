@@ -227,6 +227,12 @@ dentro del contenedor (una versión anterior de este README decía `cd backend &
 no funciona en una máquina limpia). El frontend sí se ejecuta en el host, con las dependencias que
 `npm install` deja en `frontend/node_modules`.
 
+**En paralelo, si tienes prisa**: `docker compose exec backend uv run pytest -n auto` reparte la
+suite entre tantos procesos como núcleos tengas. En una máquina de 12 baja de ~3m a menos de 1m.
+Cada worker se lleva su propia base de datos desechable y su propia base lógica de Redis, así que no
+se pisan; el tope son 16 workers, que es cuanto Redis sirve por defecto. El comando de arriba —en
+serie— sigue siendo el canónico, y es el que conviene con `-k`, porque la salida se lee en orden.
+
 **Desde un worktree enlazado**: la suite habla con `postgres:5432` y `redis:6379` por la red de
 compose, que es el camino que ha usado siempre — los puertos del host nunca estuvieron en esa ruta, así
 que no publicar no le afecta. La primera forma (`exec`) va siempre: no crea ni recrea nada, se engancha
@@ -244,8 +250,8 @@ El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml
 migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
 `downgrade base`, con Postgres y Redis como services.
 
-La suite tarda ~6 minutos, así que **solo se ejecuta cuando el diff toca `backend/**` o el
-propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
+La suite tarda ~3 minutos (medido el 2026-08-10), así que **solo se ejecuta cuando el diff
+toca `backend/**` o el propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
 no toca el backend termina en verde en segundos, y el resumen de la ejecución dice
 explícitamente que la suite se omitió, para que ese verde no se lea como una suite que pasó.
 Un `workflow_dispatch` manual la ejecuta entera en cualquier caso.
