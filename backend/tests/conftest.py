@@ -3,6 +3,7 @@ import asyncio
 import asyncpg
 import pytest
 import pytest_asyncio
+from sqlalchemy import text
 from sqlalchemy.engine import make_url
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.pool import NullPool
@@ -20,13 +21,30 @@ from app.core.config import settings
 from app.core.db import Base
 
 # Tests get their own database, never the one `make up`/`migrate` manage — otherwise
-# `Base.metadata.drop_all` wipes the dev stack's schema (tables gone,
-# `alembic_version` still claims head). The name carries a per-run suffix so two
-# concurrent pytest runs on one Postgres don't drop each other's tables; see
-# tests/db_names.py.
+# the suite wipes the dev stack's schema (tables gone, `alembic_version` still claims
+# head). The name carries a per-run suffix so two concurrent pytest runs on one
+# Postgres don't drop each other's tables; see tests/db_names.py.
 _DEV_DB_URL = make_url(settings.database_url)
 _TEST_DB_NAME = scoped_name(_DEV_DB_URL.database or "postgres", "test")
 _TEST_DB_URL = _DEV_DB_URL.set(database=_TEST_DB_NAME).render_as_string(hide_password=False)
+
+# One statement that empties every table, because the schema is now built once per run
+# (see `_the_run_database`) and isolation between tests is deletion of rows rather than
+# DDL: 21ms against the 361ms that create_all + drop_all cost per test.
+#
+# A single statement and not one DELETE per table: asyncpg refuses several commands in a
+# prepared statement, and the data-modifying CTEs run exactly once each whether or not the
+# primary query reads them. They share one snapshot and foreign keys are checked when the
+# statement ends, so the order between tables does not matter. No sequences to reset: every
+# primary key in the tree is a UUID (`app/core/db.py`).
+#
+# The list comes from the metadata, the same source `create_all` uses, so a new table joins
+# the wipe on its own — and a table absent from the metadata does not exist in this database
+# either.
+_WIPE_EVERY_TABLE = "WITH " + ", ".join(
+    f'd{index} AS (DELETE FROM "{table.name}")'
+    for index, table in enumerate(Base.metadata.sorted_tables)
+) + " SELECT 1"
 
 
 async def _admin_connection():
@@ -39,16 +57,6 @@ async def _admin_connection():
     )
 
 
-async def _ensure_test_database_exists() -> None:
-    conn = await _admin_connection()
-    try:
-        exists = await conn.fetchval("SELECT 1 FROM pg_database WHERE datname = $1", _TEST_DB_NAME)
-        if not exists:
-            await conn.execute(f'CREATE DATABASE "{_TEST_DB_NAME}"')
-    finally:
-        await conn.close()
-
-
 async def _drop_test_database() -> None:
     conn = await _admin_connection()
     try:
@@ -59,39 +67,64 @@ async def _drop_test_database() -> None:
         await conn.close()
 
 
+async def _build_the_run_database() -> None:
+    await _drop_test_database()
+    conn = await _admin_connection()
+    try:
+        await conn.execute(f'CREATE DATABASE "{_TEST_DB_NAME}"')
+    finally:
+        await conn.close()
+
+    engine = create_async_engine(_TEST_DB_URL, poolclass=NullPool)
+    try:
+        async with engine.begin() as connection:
+            await connection.run_sync(Base.metadata.create_all)
+    finally:
+        await engine.dispose()
+
+
 @pytest.fixture(scope="session", autouse=True)
-def _remove_the_run_database_at_the_end():
-    """Without this, every run would leave a `<db>_test_<pid>` behind for ever.
+def _the_run_database():
+    """Builds `<db>_test_<suffix>` from nothing at the start of the run, and drops it after.
+
+    Dropping first is what makes "from nothing" true. Creating only if missing was
+    harmless while every test recreated the whole schema, but the schema is now built
+    once here, so inheriting a database left behind by a dead run would mean inheriting
+    *its* schema — and the case is real in CI, where `PYTEST_DB_SUFFIX: ci` pins the name
+    and makes it reusable. Without the final drop, every local run would leave a
+    `<db>_test_<pid>` behind for ever.
 
     Deliberately a sync fixture running `asyncio.run`: a session-scoped ASYNC fixture
     would need pytest-asyncio's session loop scope, and mixing loop scopes is what
     produced the "attached to a different loop" failures this file already works
-    around. A fresh loop for one DROP has no such problem.
+    around. A fresh loop that closes before any test starts has no such problem.
     """
+    asyncio.run(_build_the_run_database())
     yield
     asyncio.run(_drop_test_database())
 
 
 @pytest_asyncio.fixture
 async def test_engine():
-    """Engine on the test database, schema created and dropped around the test.
+    """Engine on the test database, whose tables are emptied before the test runs.
 
     A dedicated engine per test (NullPool: no connection kept across checkouts)
     avoids reusing a pooled asyncpg connection across pytest-asyncio's per-test
     event loops, which raises "attached to a different loop" / "another operation
     is in progress" once more than one DB-touching test runs in the same session.
-    """
-    await _ensure_test_database_exists()
 
+    The schema itself is built once per run by `_the_run_database`; what happens here is
+    the wipe. `lock_timeout` turns a previous test that left a transaction open into an
+    immediate, readable error instead of a hang — the failure mode that emptying rows has
+    and dropping the schema did not.
+    """
     engine = create_async_engine(_TEST_DB_URL, poolclass=NullPool)
 
     async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.create_all)
+        await conn.execute(text("SET lock_timeout = '10s'"))
+        await conn.execute(text(_WIPE_EVERY_TABLE))
 
     yield engine
-
-    async with engine.begin() as conn:
-        await conn.run_sync(Base.metadata.drop_all)
 
     await engine.dispose()
 

@@ -12,17 +12,45 @@ The suffix is the process id: unique among *live* processes, which is exactly th
 collision that matters, and it keeps the names short and greppable in `\\l` output.
 `PYTEST_DB_SUFFIX` overrides it so a CI job can pin a name it can clean up.
 
-A run killed with SIGKILL leaves its database behind. Harmless — a later run reusing
-that pid creates-if-missing and drops every table per test anyway — but
-`make db-clean-test` exists for the tidy-minded.
+A run killed with SIGKILL leaves its database behind. Harmless, but not for the reason it
+used to be: the suite no longer rebuilds the schema in every test, so it can no longer
+paper over an inherited one. What makes it harmless now is that the run drops the database
+and creates it again before the first test (`tests/conftest.py::_the_run_database`), so a
+name it reuses carries nothing from the run that died on it. `make db-clean-test` still
+exists for the tidy-minded.
 """
 
 import os
+import re
+
+# The suffix reaches `DROP DATABASE`/`CREATE DATABASE` as a quoted identifier, and those two
+# run over asyncpg's simple query protocol (no bind parameters), which accepts several commands
+# separated by `;`. A `"` in the value would therefore close the identifier and let the rest of
+# it execute. Whoever sets the variable can already run code, so this is not a privilege boundary
+# — it is blast radius: the run now drops its database *before* the first test, so a pasted or
+# mistyped value gets to be destructive at startup rather than at teardown.
+_SAFE_SUFFIX = re.compile(r"\A[A-Za-z0-9_-]+\Z")
+
+# Postgres truncates identifiers at 63 bytes, quotes included. With a long enough `POSTGRES_DB`,
+# `<base>_test_<suffix>` truncates back onto `<base>` — the dev database that `make up` manages,
+# which the suite must never touch.
+_MAX_IDENTIFIER_BYTES = 63
 
 
 def run_suffix() -> str:
-    return os.environ.get("PYTEST_DB_SUFFIX") or str(os.getpid())
+    suffix = os.environ.get("PYTEST_DB_SUFFIX") or str(os.getpid())
+    if not _SAFE_SUFFIX.match(suffix):
+        raise ValueError(
+            f"PYTEST_DB_SUFFIX must match {_SAFE_SUFFIX.pattern}, got {suffix!r}"
+        )
+    return suffix
 
 
 def scoped_name(base: str, purpose: str) -> str:
-    return f"{base}_{purpose}_{run_suffix()}"
+    name = f"{base}_{purpose}_{run_suffix()}"
+    if len(name.encode()) > _MAX_IDENTIFIER_BYTES:
+        raise ValueError(
+            f"the throwaway database name {name!r} exceeds Postgres' {_MAX_IDENTIFIER_BYTES}-byte "
+            "identifier limit and would be truncated onto another database"
+        )
+    return name
