@@ -221,6 +221,12 @@ dentro del contenedor (una versión anterior de este README decía `cd backend &
 no funciona en una máquina limpia). El frontend sí se ejecuta en el host, con las dependencias que
 `npm install` deja en `frontend/node_modules`.
 
+**En paralelo, si tienes prisa**: `docker compose exec backend uv run pytest -n auto` reparte la
+suite entre tantos procesos como núcleos tengas. En una máquina de 12 baja de ~3m a menos de 1m.
+Cada worker se lleva su propia base de datos desechable y su propia base lógica de Redis, así que no
+se pisan; el tope son 16 workers, que es cuanto Redis sirve por defecto. El comando de arriba —en
+serie— sigue siendo el canónico, y es el que conviene con `-k`, porque la salida se lee en orden.
+
 **Desde un worktree enlazado**: la suite habla con `postgres:5432` y `redis:6379` por la red de
 compose, que es el camino que ha usado siempre — los puertos del host nunca estuvieron en esa ruta, así
 que no publicar no le afecta. La primera forma (`exec`) va siempre: no crea ni recrea nada, se engancha

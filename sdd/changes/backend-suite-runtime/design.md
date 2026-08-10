@@ -149,10 +149,33 @@ cada dos es la definición del problema, no de la mala suerte.
 
 ### D6 — Paralelismo con `pytest-xdist`, en una segunda fase y con aislamiento por worker
 
-**Chosen:** después de D1-D5, `pytest -n 4` en CI. Medido en local sobre 4 678 tests: **176,69s
-serie → 55,97s con `-n 4`**, en verde, **3,16×**. En el runner de GitHub no se transferirá entero
-—`ubuntu-latest` tiene 4 vCPU y ahí dentro también corren PostgreSQL y Redis, mientras esta máquina
-tiene 12— así que la proyección honesta es **2-2,5×**.
+**Chosen:** después de D1-D5, `pytest -n 2` en CI. Medido en local sobre 4 678 tests: **176,69s
+serie → 55,97s con `-n 4`**, en verde, **3,16×**.
+
+> **Corregido el 2026-08-10, durante la implementación (§7-§8).** Esta decisión decía `-n 4` y
+> proyectaba **2-2,5×** en CI sobre la premisa de que «`ubuntu-latest` tiene 4 vCPU». **Esa premisa
+> es falsa para este repositorio**: es privado, y los runners estándar de repos privados traen
+> **2 vCPU**. Se midió en vez de suponerlo —el paso de la suite ahora imprime `runner: 2 vCPU, 7 GB`
+> en el log— y las cifras salieron así, con el resto del workflow igual:
+>
+> | Configuración en CI | Duración | vs. fase 1 |
+> |---|---|---|
+> | Fase 1, en serie | 243s (mediana de 3) | — |
+> | Fase 2, `-n 4` | 227s · 233s | 1,06× |
+> | Fase 2, `-n 2` | **205s** | **1,19×** |
+>
+> Con dos núcleos compartidos además con PostgreSQL y Redis, cuatro workers **sobresuscriben** y
+> salen peor que dos. Así que el número declarado pasa a ser **`-n 2`**, elegido por medición y no
+> por la proyección.
+>
+> Lo que esto cambia y lo que no: la fase 2 aporta **38s** en CI, no los minutos que se esperaban, y
+> **R2.1 ya se cumplía con la fase 1 sola** (243s frente a 300s). Se mantiene porque en local sí da
+> **3,5×** (190s → 54s), que es valor real para quien desarrolla, y porque correrla en paralelo
+> también en CI mantiene el aislamiento por worker ejercitado en cada PR en vez de solo en las
+> máquinas de quien lo recuerde. Decisión del usuario, 2026-08-10.
+>
+> La lección para la próxima: el tamaño del runner es un dato **medible**, y esta decisión lo dio
+> por sabido. De ahí que el paso lo imprima ahora en el log.
 
 Exige cuatro cosas, y las cuatro salen de haberlo intentado, no de imaginarlo:
 
@@ -178,8 +201,10 @@ Exige cuatro cosas, y las cuatro salen de haberlo intentado, no de imaginarlo:
 
 Rejected: `--dist loadfile` como sustituto de (3) o (4) — no arregla ninguna de las dos; la
 recolección divergente aborta igual y las claves de Redis se comparten entre ficheros.
-Rejected: `-n auto` en CI — hoy daría 4 y mañana lo que el runner traiga, y (4) tiene un techo de 15;
-el número se declara.
+Rejected: `-n auto` en CI — daría lo que el runner traiga, y (4) tiene un techo de 16; el número se
+declara. La corrección de arriba lo confirma por las malas: `auto` habría dado 2 y habría acertado
+por casualidad, pero el día que el runner cambie de tamaño nadie se enteraría de que el número
+cambió con él.
 Rejected: dejar la suite en serie también en local — no hace falta declarar nada: quien quiera
 `-n auto` lo pasa por la línea de órdenes, y la salida en serie sigue siendo la legible para
 `pytest -k`.

@@ -13,10 +13,11 @@ name: backend-tests
 #
 # --- Por qué son tres jobs y no uno (change `ci-backend-tests-conditional-gate`) ---
 #
-# La suite tarda **~4m03s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
+# La suite tarda **~3m25s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
 # `sdd/backend-suite-runtime`; el paso dominante sigue siendo el de `pytest`). La misma
-# medición sobre `main` ese día dio **15m54s**: la diferencia es el change
-# `backend-suite-runtime`, que dejó de construir y tirar el esquema en cada test.
+# medición sobre `main` ese día dio **15m30s**: la diferencia es el change
+# `backend-suite-runtime`, que dejó de construir y tirar el esquema de la base de datos en
+# cada test —eso solo ya la bajó a 4m03s— y después la paralelizó con `pytest-xdist`.
 #
 # Esta cifra ha mentido dos veces ya, y las dos por lo mismo —envejeció sin que nada
 # fallara—. Primero afirmó "~1 minuto" y sobre ella se decidió ejecutar la suite en todos
@@ -30,7 +31,7 @@ name: backend-tests
 # cuando el diff toca el backend. Pero el check se sigue reportando SIEMPRE:
 #
 #   backend-tests-detect  decide si el diff toca el área      (siempre corre, ~20s)
-#   backend-tests-suite   la verificación de verdad           (corre si toca, ~4m30s)
+#   backend-tests-suite   la verificación de verdad           (corre si toca, ~4m)
 #   backend-tests         consolida y reporta                 (siempre corre)
 #
 # SIGUE PROHIBIDO poner `paths:` en `on:`, y la razón original no ha cambiado: con un
@@ -68,9 +69,14 @@ permissions:
 #
 # No sustituyen a `timeout-minutes: 20` del job, que es otra cosa: una guillotina cuyo
 # incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
+#
+# Dimensionadas sobre la **mediana medida** (~205s el 2026-08-10) y no sobre el mejor caso,
+# que es lo que evita que el presupuesto se vuelva ruido. El aviso deja ~27 % de crecimiento,
+# bastante más que la variabilidad medida del runner (±5-7 %), así que un aviso significa
+# deriva y no mala suerte.
 env:
-  BACKEND_SUITE_BUDGET_SECONDS: "300"   # 5m00s — objetivo de R2.1; pasarlo avisa
-  BACKEND_SUITE_CEILING_SECONDS: "450"  # 7m30s — pasarlo pone el check en rojo
+  BACKEND_SUITE_BUDGET_SECONDS: "260"   # ~4m20s — pasarlo avisa
+  BACKEND_SUITE_CEILING_SECONDS: "400"  # ~6m40s — pasarlo pone el check en rojo
 
 jobs:
   # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
@@ -319,10 +325,15 @@ jobs:
       - name: Suite completa (incluye auth, RBAC y aislamiento por tenant)
         id: suite
         working-directory: backend
-        # `-n 4`: número declarado, no `-n auto`. Hoy `auto` daría 4 en `ubuntu-latest`, pero
-        # mañana daría lo que el runner traiga, y el aislamiento de Redis por worker tiene un
-        # techo de 16 bases lógicas (`tests/conftest.py`). El número se declara y se revisa en
-        # el diff, como las dos cifras del presupuesto.
+        # `-n 2`: número declarado y **medido**, no `-n auto`. El runner de este repositorio trae
+        # 2 vCPU —es privado, y los estándar de repos privados son de dos núcleos—, compartidos
+        # además con PostgreSQL y Redis. Medido el 2026-08-10 sobre la misma referencia:
+        # en serie 243s · `-n 4` 227-233s · `-n 2` **205s**. Cuatro workers sobre dos núcleos
+        # sobresuscriben y salen peor que dos.
+        #
+        # Se declara en vez de usar `auto` porque `auto` acertaría hoy por casualidad y cambiaría
+        # solo el día que cambie el runner, sin que nadie se entere; y porque el aislamiento de
+        # Redis por worker tiene un techo de 16 bases lógicas (`tests/conftest.py`).
         #
         # Cada worker se lleva su propia base de datos desechable (`…_test_ci_gw0`, ver
         # `tests/db_names.py`) y su propia base lógica de Redis, que es lo que hace que esto
