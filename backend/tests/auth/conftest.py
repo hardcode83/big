@@ -55,6 +55,7 @@ async def insert_user(
     status: UserStatus = UserStatus.ACTIVE,
     hasher: BcryptPasswordHasher | None = None,
     normalize: bool = True,
+    preferred_language: str = "es",
 ) -> UserModel:
     """Creates a user the way production does: with the email normalised (D19).
 
@@ -77,6 +78,7 @@ async def insert_user(
         ),
         role=role,
         status=status,
+        preferred_language=preferred_language,
     )
     session.add(user)
     await session.flush()

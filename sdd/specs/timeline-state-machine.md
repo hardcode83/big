@@ -15,6 +15,17 @@ regla "nunca se editan eventos pasados" expresada en una firma, y rechaza un `me
 la columna `JSONB` no pueda almacenar. Construir el evento sigue siendo exclusivamente
 competencia de la fábrica que esta capacidad define.
 
+**Dónde se leen**: desde `dashboard-api` (2026-08-09) el timeline dejó de ser sólo escritura y
+tiene superficie de lectura — el endpoint `GET /api/v1/timeline/{property_id}` y el último
+evento por propiedad que alimenta las cards. **Esa lectura no se añadió a
+`TimelineEventRepository`**: vive en un `Protocol` aparte, `TimelineEventReader`, en el mismo
+fichero. Es Interface Segregation, pero sobre todo es lo que conserva la propiedad que el
+párrafo anterior describe: que `add` sea el único método del escritor es lo que hace visible
+la inmutabilidad en una firma, y colgarle dos lectores la habría cambiado por un fichero más
+corto. Un test lo fija: los métodos del escritor son exactamente `{add}` y son disjuntos de
+los del lector. El *qué devuelve* esa lectura, con sus filtros, su orden y su localización,
+está en [`dashboard-api.md`](dashboard-api.md).
+
 **Quién la conduce**: desde `celery-jobs` esta política tiene ejecutor. Su
 `AdvancePropertyStatesUseCase` (`app/properties/application/use_cases.py`) es el primer y
 único escritor de `current_operational_state` y de `property_state_transitions`: pregunta a
@@ -22,6 +33,16 @@ competencia de la fábrica que esta capacidad define.
 transición y el `TimelineEvent` en una sola transacción con el `correlation_id` que esta
 capacidad produce. La política sigue sin tocar reloj, base de datos ni red — lo que cambió es
 que ya no evalúa en el vacío (ver `specs/celery-jobs.md`).
+
+**Qué no es una transición de estado de propiedad**: `access-notifications` trajo la máquina de
+estados del `AccessRecord` y la del registro legal de la reserva, y ninguna de las dos pasa por
+aquí. La regla «un único lugar donde ocurren las transiciones» habla del estado operacional de la
+*propiedad*; el ciclo de vida de un acceso o de una presentación ante SES.Hospedajes es de su
+entidad, vive en ella y no toca `current_operational_state`. Lo que sí comparten es la fábrica:
+sus eventos (`ACCESS_CODE_PENDING`, `ACCESS_CODE_MANUAL_ADDED`, `ACCESS_CODE_CREATED_EXTERNAL`,
+`ACCESS_CODE_DELIVERED`, `LEGAL_REGISTRATION_SUBMITTED`) se construyen por ella como cualquier
+otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ninguno y la fila de
+`AuditLog` es la que lo registra.
 
 ## Requirements
 
@@ -133,6 +154,9 @@ que ya no evalúa en el vacío (ver `specs/celery-jobs.md`).
 - `backend/app/properties/domain/value_objects.py` — solicitudes, actores,
   contexto y resultado correlacionado.
 - `backend/app/properties/domain/transition_enums.py` — triggers semánticos.
+- `backend/app/timeline/domain/repositories.py` — `TimelineEventRepository` (sólo `add`, la
+  inmutabilidad expresada en una firma) y, separado, `TimelineEventReader` (la lectura que
+  añadió `dashboard-api`).
 - `backend/app/timeline/domain/services.py` — `TimelineEventFactory` y eventos de
   cambio de estado.
 - `backend/app/timeline/domain/value_objects.py` — contrato de entrada del factory.

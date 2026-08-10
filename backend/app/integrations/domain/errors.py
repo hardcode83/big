@@ -47,6 +47,74 @@ class PMSMessagingUnsupportedError(RuntimeError):
     """
 
 
+class WebhookAuthenticationError(RuntimeError):
+    """An incoming webhook did not authenticate. **One error for every reason, on purpose.**
+
+    Design D4 requires that an unknown provider, an unknown route token, a missing static header
+    and a wrong static header be **indistinguishable** to the caller: any distinguishable answer
+    turns the endpoint into an oracle that confirms "this token exists", and rule 12(b)'s whole
+    value is that the route cannot be probed.
+
+    A single class with no discriminating attribute is how that becomes true *by construction*
+    rather than by every raiser remembering to be vague. The alternative — a small hierarchy, or
+    one error carrying a `reason` — reads better in a log and is exactly the shape that leaks the
+    day someone maps reasons onto status codes, which is the natural next change.
+
+    It carries **no message about which check failed** for the same reason. What an operator needs
+    in order to debug a misconfigured provider is on the other side: the rate-limit counters and
+    the absence of rows in `webhook_events`, neither of which is reachable from the internet.
+
+    Not a `PmsUnavailableError`: nothing about the provider is unavailable, and the two demand
+    opposite responses — one is retried, this one must never be.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("webhook request did not authenticate")
+
+
+class WebhookBodyTooLargeError(RuntimeError):
+    """The request body exceeded the configured cap (rule 12(c), R3.2).
+
+    Separate from `WebhookAuthenticationError` because it is **not** an authentication outcome and
+    does not have to be indistinguishable: by the time the body is read, the caller has already
+    proved it holds the token and the secret (design D5's ordering), so telling it that its body
+    is too big reveals nothing an authenticated caller does not already know. It maps to `413`.
+    """
+
+
+class WebhookRateLimitedError(RuntimeError):
+    """The caller exceeded one of the two rate limits of design D6 (rule 12(c), R3.1).
+
+    Maps to `429`. Deliberately does not say **which** of the two limits was hit: the per-IP probe
+    limit only ever fires for requests that already failed authentication, so naming it would
+    reintroduce the oracle design D4 closes.
+    """
+
+
+class WebhookEndpointAlreadyExistsError(RuntimeError):
+    """This tenant already has an endpoint for this provider (`UNIQUE(tenant_id, provider)`).
+
+    Creation **refuses** instead of overwriting, and that is the point of having a separate
+    rotation operation at all. The repository's `upsert` would happily replace the row, which
+    means a second `POST` to the creation endpoint would silently invalidate live material — the
+    provider keeps sending to the old route, every webhook `404`s (design D4), and nothing says
+    why. The operator would read "created" and believe they had provisioned a second integration.
+
+    Rotation is meant to be a deliberate act (design D3), so the only way to replace material is
+    the endpoint that says so and writes `WEBHOOK_ENDPOINT_ROTATED`.
+    """
+
+
+class WebhookEndpointNotFoundError(RuntimeError):
+    """No endpoint with that id **in this tenant**.
+
+    One error for "no such id" and for "belongs to another tenant", exactly as
+    `PropertyNotFoundError` is used: the repository's scoped `get` returns `None` for both, so the
+    API answers one indistinguishable `404` rather than confirming a neighbour's endpoint exists
+    (rule 1 of `steering/security.md`).
+    """
+
+
 class MissingPmsCredentialError(RuntimeError):
     """A property names a provider whose credentials are not stored.
 

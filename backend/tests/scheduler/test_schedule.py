@@ -1,4 +1,4 @@
-"""The beat calendar against PRD §8.3 (`celery-jobs` R1.1, R1.2).
+"""The beat calendar against PRD §8.3 (`celery-jobs` R1.1, R1.2) and its one addition.
 
 The table is transcribed from the PRD, not derived from `CADENCES`, so a cadence cannot be
 changed without this failing — which is the whole point of R1.2 naming the numbers.
@@ -6,6 +6,7 @@ changed without this failing — which is the whole point of R1.2 naming the num
 
 from datetime import timedelta
 
+from app.scheduler.locks import lock_ttl_for
 from app.scheduler.schedule import CADENCES, beat_schedule
 
 #: PRD §8.3, "Jobs programados (Celery)". The two rows this change does not own are listed
@@ -19,17 +20,52 @@ PRD_8_3 = {
     "mark_occupied_estimated": timedelta(minutes=5),
 }
 
+#: Jobs that are NOT in PRD §8.3, kept in their own table so the divergence is visible
+#: rather than absorbed into the transcription above (`access-notifications` design D2/D3,
+#: `reservations-webhooks` design D10). The PRD says *what* must happen — §14 delivers
+#: notifications, §15 gives every confirmed reservation an access record, §16 receives the
+#: PMS notices — and is silent on what triggers any of them. Keeping them apart is also what
+#: stops "the PRD says so" ever being claimed for a cadence the PRD has never heard of.
+#:   process_webhook_events | 60 s | the cadence is the ceiling on outbound provider calls
+#:                                   (rule 12(d)), not a tuning knob
+BEYOND_PRD_8_3 = {
+    "dispatch_notifications": timedelta(minutes=1),
+    "provision_access_records": timedelta(minutes=5),
+    "process_webhook_events": timedelta(seconds=60),
+}
 
-def test_the_cadences_are_the_ones_prd_8_3_specifies() -> None:
-    assert CADENCES == PRD_8_3
+ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3
+
+
+def test_the_cadences_of_prd_8_3_are_untouched() -> None:
+    """Additions may not quietly retune a cadence the PRD specifies."""
+    for name, cadence in PRD_8_3.items():
+        assert CADENCES[name] == cadence
+
+
+def test_the_calendar_is_prd_8_3_plus_exactly_the_declared_additions() -> None:
+    assert CADENCES == ALL_CADENCES
 
 
 def test_the_beat_schedule_covers_every_cadence_and_nothing_else() -> None:
     schedule = beat_schedule()
 
-    assert {entry["task"] for entry in schedule.values()} == set(PRD_8_3)
+    assert {entry["task"] for entry in schedule.values()} == set(ALL_CADENCES)
     for entry in schedule.values():
-        assert entry["schedule"] == PRD_8_3[entry["task"]]
+        assert entry["schedule"] == ALL_CADENCES[entry["task"]]
+
+
+def test_the_beat_entry_and_the_lock_ttl_both_derive_from_one_number() -> None:
+    """`reservations-webhooks` 4.8, and the property `celery-jobs` built `CADENCES` for.
+
+    A cadence written twice — once for beat, once to size the lock — is a cadence that can be
+    changed in one place and stay stale in the other, and the symptom would be a lock expiring
+    mid-run rather than an error anyone could read.
+    """
+    for name, cadence in CADENCES.items():
+        entry = beat_schedule()[f"{name}-every-{int(cadence.total_seconds())}s"]
+        assert entry["schedule"] is cadence
+        assert lock_ttl_for(cadence) == cadence * 3
 
 
 def test_every_scheduled_task_is_registered_with_celery() -> None:

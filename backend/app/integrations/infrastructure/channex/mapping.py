@@ -17,6 +17,7 @@ from typing import Any
 
 from app.integrations.domain.dtos import ReservationDTO
 from app.integrations.infrastructure.card_data import scrub_card_data
+from app.integrations.infrastructure.free_text import redact_long_digit_runs
 
 # `ota_name` values Channex reports, mapped to our vocabulary. Anything absent falls to
 # `OTHER` rather than raising: `ReservationChannel.parse` rejects unknown values and the
@@ -92,7 +93,12 @@ def to_reservation_dto(element: dict[str, Any]) -> ReservationDTO:
         ota_commission=_ota_commission(ota_name, attributes.get("ota_commission")),
         currency=(attributes.get("currency") or "EUR").upper(),
         status=_status(attributes.get("status")),
-        special_requests=_text(attributes.get("notes")),
+        # Redacted because this is an EXTERNAL source (design D8). Sharper here than in Beds24:
+        # `attributes.raw_message` is the OTA's original message and `guarantee.card_number` is
+        # what Channex parses **out of it**, so this provider is measured to carry card data
+        # inside free text. `raw_message` is dropped wholesale by `scrub_card_data`, but `notes`
+        # cannot be — it is promoted into a column an operator reads.
+        special_requests=redact_long_digit_runs(_text(attributes.get("notes"))),
         # The element as the DTO's docstring requires — when an import produces something
         # unexpected, this is the only way to tell a provider bug from ours — minus its
         # cardholder data, which rule 13 of `steering/security.md` says is DISCARDED at the

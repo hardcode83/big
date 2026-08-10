@@ -99,9 +99,21 @@ alta automática no tendría a qué apuntar. Convención de desviación de ADR 0
 
 ### Cierre y validación
 
-- WHEN la limpiadora asignada cierra la tarea, THE SYSTEM SHALL verificar que todos los ítems
-  `required` de la plantilla están completados y que no hay ninguna incidencia `CRITICAL` sin
-  resolver en la propiedad, y responder `409` enumerando los ítems que falten.
+- WHEN la limpiadora asignada cierra la tarea, THE SYSTEM SHALL verificar las **tres** cláusulas
+  de la regla de PRD §11: que todos los ítems `required` de la plantilla están completados, que
+  hay al menos una foto subida por **cada** `photo_type` con `required: true`, y que no hay
+  ninguna incidencia `CRITICAL` sin resolver en la propiedad. Responde `409` enumerando lo que
+  falte.
+- THE SYSTEM SHALL comprobarlas en el orden en que ocurre el trabajo —ítems, fotos, incidencia—
+  y reportar la primera que falle, con el orden fijado por tests en sus dos fronteras.
+- THE SYSTEM SHALL enumerar los `photo_type` que faltan de forma **estable** —diferencia de
+  conjuntos ordenada, igual que los ítems—, porque el orden de iteración de un `frozenset` varía
+  con la semilla de hash y produciría cuerpos distintos entre dos procesos.
+- WHERE la plantilla no declara ninguna foto `required: true`, THE SYSTEM SHALL permitir el cierre
+  sin ninguna foto: la regla es «las requeridas», no «alguna».
+- THE SYSTEM SHALL aplicar las tres cláusulas **dentro de `CleaningTask.complete()`** y en ningún
+  otro sitio. El caso de uso solo reúne la evidencia —plantilla, completions, tipos de foto
+  subidos e incidencias— y se la pasa a la entidad.
 - WHEN el cierre supera la validación, THE SYSTEM SHALL pasar la tarea a `COMPLETED` con
   `completed_at`, poner `validation_status` en `PASSED` y resolver el estado de la propiedad por
   contexto: `AWAITING_CHECKIN` si hay reserva que llega hoy, `READY_FOR_NEXT_GUEST` si la hay
@@ -112,10 +124,78 @@ alta automática no tendría a qué apuntar. Convención de desviación de ADR 0
 - THE SYSTEM SHALL dejar `ai_validation_result` sin escribir: la validación automática depende
   de `MockAIAdapter`, que llega con `messaging-ai`.
 
-**La cláusula de fotos de PRD §11 no se aplica todavía.** La regla tiene tres partes y aquí
-rigen dos; «todas las fotos `required` subidas» llega con `cleaning-photos-storage`, que trae el
-`StorageAdapter` y la subida. **Hasta entonces una limpieza puede cerrarse sin fotos**, y es un
-hueco conocido, no un descuido.
+### Fotos de la limpieza
+
+El almacenamiento en sí —puerto, adaptadores `LOCAL`/`S3`, claves y firma— es una capability
+compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo que es de limpieza.
+
+- WHEN la limpiadora asignada solicita `POST /api/v1/cleaning-tasks/{id}/photos` con un fichero y
+  un `photo_type`, THE SYSTEM SHALL almacenar el fichero, persistir una fila de `CleaningPhoto`
+  con `uploaded_by`, `photo_type` y `storage_key`, y responder `201` con la foto y su URL firmada.
+- THE SYSTEM SHALL exigir `EXECUTE_CLEANING_TASKS` para subir —el permiso exclusivo del `CLEANER`—
+  y `READ_CLEANING_TASKS` para listar, porque leer la evidencia es lo que hacen el manager y el
+  owner mientras que subirla es de la limpiadora.
+- IF el `photo_type` no pertenece a las `required_photos` de la plantilla de la tarea, THEN THE
+  SYSTEM SHALL responder `404`, igual que el checklist con un `item_id` desconocido. La plantilla
+  declara los tipos admisibles **con independencia de su `required`**: un tipo opcional se puede
+  subir, y lo que `required: true` gobierna es el cierre.
+- IF la tarea no está en `IN_PROGRESS`, THEN THE SYSTEM SHALL responder `409` sin escribir nada:
+  ni fila ni objeto en el almacén.
+- THE SYSTEM SHALL admitir **varias fotos del mismo `photo_type`** para una misma tarea, a
+  propósito: una limpiadora fotografía dos ángulos del mismo baño, y el cierre exige «al menos
+  una por tipo requerido», no «exactamente una». No hay restricción de unicidad en la tabla.
+- THE SYSTEM SHALL escribir el objeto en el almacén **antes** de insertar la fila, y borrarlo en
+  *best effort* si la transacción falla. Una fila que apunte a un objeto inexistente es un `GET`
+  roto para siempre; un objeto sin fila es basura recuperable, y ese es el fallo barato.
+- IF la escritura en el almacén falla, THEN THE SYSTEM SHALL responder `502` —código
+  `BAD_GATEWAY`, no `INTERNAL_ERROR`— y no dejar fila.
+- IF el contenido no es una imagen admitida, THEN THE SYSTEM SHALL responder `422`; IF supera el
+  tope de tamaño, THEN `413`. El formato se decide por los **bytes** del fichero y nunca por el
+  `Content-Type` declarado, y el nombre del fichero que envía el cliente no llega ni a la clave de
+  almacenamiento ni a la respuesta.
+- WHEN se solicita `GET /api/v1/cleaning-tasks/{id}/photos`, THE SYSTEM SHALL devolver las fotos
+  de esa tarea **de la más antigua a la más reciente**, cada una con una URL firmada acuñada para
+  esa respuesta.
+- THE SYSTEM SHALL no incluir `storage_key` en ningún cuerpo ni cabecera de respuesta. La única
+  excepción, nombrada, es lo que una URL prefirmada de un proveedor S3-compatible lleva dentro por
+  el propio protocolo de firma (ver [`file-storage`](file-storage.md) §Catálogo de asimetrías).
+- WHERE el `storage_type` del tenant es `LOCAL`, THE SYSTEM SHALL servir el fichero desde
+  `GET /api/v1/cleaning-photos/{photo_id}`, **anónimo a propósito**: un `<img src>` no envía
+  cabecera `Authorization`, así que exigir el token haría la URL firmada inservible para lo único
+  que existe. La firma es la credencial — cubre la clave completa, que empieza por el `tenant_id`,
+  así que presentarla válida demuestra que quien la trae recibió una URL acuñada para esa foto de
+  ese tenant.
+- THE SYSTEM SHALL resolver en esa ruta `photo_id → (storage_key, tenant_id)` con una lectura
+  **explícitamente sin scoping de tenant**, acotada a ese caso de uso, y verificar la firma
+  **después** de reconstruir la clave. El orden es lo que la hace segura, y esa lectura no vive
+  en el repositorio de fotos para que no quede al alcance de los casos de uso autenticados.
+- IF la firma es inválida, ha caducado, ha sido manipulada o nombra una foto inexistente, THEN THE
+  SYSTEM SHALL responder `403` con un cuerpo **constante y precomputado**, idéntico en los cuatro
+  casos. No se serializa el mensaje de la excepción —el patrón de `errors.py`— porque los tres
+  mensajes de firma más el «no existe» convertirían la ruta en un oráculo de existencia sobre el
+  espacio de claves para un llamante sin credenciales; los mensajes sobreviven solo en el log.
+- WHERE el `storage_type` del tenant es `S3`, THE SYSTEM SHALL responder `404` en esa ruta: el
+  navegador va directo al proveedor y aquí no hay nada que servir. Solo es alcanzable **tras** una
+  firma válida, así que no revela nada.
+- THE SYSTEM SHALL sellar **toda** respuesta de esa ruta —los bytes y las tres negativas— con
+  `X-Content-Type-Options: nosniff`, y derivar el `Content-Type` únicamente de la extensión de la
+  clave. Sin ello, un polyglot que empiece por `FF D8 FF` y lleve HTML sería XSS almacenado sobre
+  el origen de la API, que `api-ingress-routing` dejó alcanzable desde internet.
+- THE SYSTEM SHALL responder los bytes con `Cache-Control: private, max-age=<lo que le queda a la
+  firma>`, de modo que ninguna caché compartida los guarde y ninguna copia del navegador
+  sobreviva a la credencial que la compró. Las negativas van con `no-store`: cada una es un
+  veredicto sobre *esta* petición en *este* instante.
+- THE SYSTEM SHALL aplicar a la ruta de subida su **propio** tope de tamaño, configurable con
+  default 10 MB, comprobado **antes** de leer el cuerpo entero, y THE SYSTEM SHALL mantener el
+  techo JSON de 1 MiB para **todas** las demás rutas bajo `/cleaning-`, con un test que falle si
+  alguien lo sube globalmente. La rama del tope de fotos va **antes** que la de `/cleaning-` en el
+  middleware, porque la ruta también empieza por ese prefijo y el orden del `if/elif` es lo que
+  decide.
+- THE SYSTEM SHALL registrar cada subida en `AuditLog` con actor e IP, contra la propia foto como
+  entidad y no contra la tarea, y **sin** `storage_key` entre los campos auditables: la clave
+  interna no entra en la columna diseñada para volcarse.
+- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos: la validación
+  automática llega con `messaging-ai`. No hay borrado de fotos por ninguna vía de la API.
 
 ### Notificación y SLA
 
@@ -126,16 +206,26 @@ hueco conocido, no un descuido.
   owner si no hay ninguno— **sin** plazo de SLA.
 - THE SYSTEM SHALL escribir `subject` y `body` conforme al contrato de la regla 11 que fijó
   `celery-jobs`: identificadores y tipo, nunca el contenido de otra fila.
-- THE SYSTEM SHALL limitarse a persistir la notificación; el envío es de `access-notifications`.
+- THE SYSTEM SHALL limitarse a persistir la notificación; la entrega la hace
+  `dispatch_notifications`, de `access-notifications`.
 - WHEN la limpiadora responde, THE SYSTEM SHALL no escribir una segunda notificación de
   asignación.
+- WHEN una limpiadora acepta o rechaza la tarea, THE SYSTEM SHALL anular el plazo de la fila
+  `CLEANING_TASK_ASSIGNED` de esa tarea —`cancel_sla_deadline`, que solo pone `sla_deadline_at`
+  a nulo— **antes de su único `commit`**, de modo que la respuesta y el plazo cerrado sean una
+  escritura o ninguna: una aceptación comiteada con el plazo vivo es exactamente el escalado que
+  esto evita.
+- THE SYSTEM SHALL conceder esa escritura únicamente a los dos casos de uso que **responden** a
+  una asignación, y no a iniciar, cerrar ni validar: para entonces el plazo ya está cerrado.
+- IF la tarea no tiene fila de asignación o su plazo ya está cerrado, THEN THE SYSTEM SHALL
+  completar la respuesta sin error y sin modificar nada: una tarea creada antes de
+  `access-notifications` no tiene plazo que anular, así que cero filas es el caso normal.
 
-**El escalado queda inerte hasta `access-notifications`.** Este es el primer escritor de
+**El escalado está vivo desde `access-notifications`.** Este es el primer escritor de
 `CLEANING_TASK_ASSIGNED`, cuyo escalado a `SLA_BREACH` para el `PROPERTY_MANAGER` está definido
-desde `celery-jobs`. Pero `check_sla_breaches` solo considera candidatos con `status = SENT` y
-**nada marca `SENT`** porque el emisor no existe todavía: el plazo se escribe y pasa sin que
-nadie escale. Cerrar el SLA al responder viaja con ese change, con la consecuencia nombrada en su
-entrada de roadmap.
+desde `celery-jobs`; `check_sla_breaches` solo considera candidatos con `status = SENT`, y el
+emisor que llegó con `access-notifications` es el primero que escribe ese valor. La cadena
+funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 
 ### Aislamiento y autorización
 
@@ -151,10 +241,17 @@ entrada de roadmap.
 - THE SYSTEM SHALL resolver dentro del tenant `property_id`, `reservation_id` y la plantilla
   antes de crear una tarea: los `INSERT` no pasan por el filtro global de sesión, así que esas
   búsquedas son lo único que impide una fila que apunte fuera.
-- THE SYSTEM SHALL demostrar con tests propios que `cleaning_checklist_completions` no es
-  alcanzable desde otro tenant. No tiene columna `tenant_id` —scoping transitivo por FK— y
-  `tenant_scoped_classes()` selecciona por columna, así que el filtro global **no la cubre** y
-  todo su aislamiento recae en el `JOIN` con la tarea padre.
+- THE SYSTEM SHALL demostrar con tests propios que `cleaning_checklist_completions` y
+  `cleaning_photos` no son alcanzables desde otro tenant. Ninguna de las dos tiene columna
+  `tenant_id` —scoping transitivo por FK— y `tenant_scoped_classes()` selecciona por columna, así
+  que el filtro global **no las cubre** y todo su aislamiento recae en el `JOIN` con la tarea
+  padre.
+- THE SYSTEM SHALL hacer ese `JOIN` con `cleaning_tasks` en **todas** las consultas de
+  `cleaning_photos` —alta, listado, lectura individual y tipos subidos—: ninguna parte de la tabla
+  a secas. Los tests cubren el cruce de tenant en subida, listado y URL firmada.
+- WHILE el solicitante tiene rol `CLEANER`, THE SYSTEM SHALL admitir subida y listado de fotos
+  **solo** sobre las tareas cuya `assigned_cleaner_id` sea la suya, derivado del rol persistido en
+  el token verificado y no de ningún campo de la petición.
 - THE SYSTEM SHALL declarar el permiso de cada endpoint. `EXECUTE_CLEANING_TASKS` es exclusivo
   del `CLEANER`: aceptar, rechazar, iniciar, cerrar y marcar el checklist son de la persona
   asignada, y lo que el manager necesita —crear, asignar y validar— va por
@@ -165,16 +262,21 @@ entrada de roadmap.
 
 ## Key files
 
-- `backend/app/cleaning/domain/` — `entities.py` (la invariante de PRD §11 en
+- `backend/app/cleaning/domain/` — `entities.py` (las tres cláusulas de PRD §11 en
   `CleaningTask.complete`), `templates.py` (resolución y ambigüedad), `assignment.py`
-  (`resolve_auto_assignee`), `value_objects.py` (validación del contenido de plantilla),
-  `notifications.py`, `ports.py`, `repositories.py`, `exceptions.py`.
+  (`resolve_auto_assignee`), `value_objects.py` (validación del contenido de plantilla y
+  `CleaningCompletionEvidence`), `notifications.py`, `ports.py`, `repositories.py`
+  (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
-  ciclo de vida, el checklist y las plantillas.
-- `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; el de completions es el
-  único aislamiento de su tabla.
-- `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `schemas.py`,
-  `dependencies.py`, `errors.py`.
+  ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local).
+- `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
+  son el único aislamiento de sus tablas.
+- `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
+  ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
+- `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
+  almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
+- `backend/app/main.py` — el montaje del router anónimo y la rama del tope de subida en
+  `MaxBodySizeMiddleware`.
 - `backend/app/properties/application/use_cases.py` — el punto donde el provisioner se compone
   con la transición del checkout.
 - `backend/alembic/versions/d4b0c7a91f38_cleaning_live_task_unique.py` — el índice parcial.

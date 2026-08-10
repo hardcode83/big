@@ -189,6 +189,14 @@ services:
       APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
       APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
       APP_PROVENANCE_ACTIONS_RUN_ID: ${APP_PROVENANCE_ACTIONS_RUN_ID:-}
+    volumes:
+      # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
+      # Aquí la imagen no lleva bind mount del código, pero el volumen sigue siendo obligatorio
+      # por otro motivo: sin él `/app/media` vive en la capa escribible del contenedor y cada
+      # despliegue —que reemplaza el contenedor con la imagen nueva— se llevaría las fotos.
+      #
+      # Solo en `backend`, como en dev: `worker` y `beat` no tocan almacenamiento.
+      - backend_media:/app/media
     # Publicado SOLO en loopback de la VM (R4.3): no es alcanzable desde internet ni desde la VCN,
     # pero un operador con SSH puede llegar con `ssh -L 8000:localhost:8000` (ver RUNBOOK §7.4).
     # Sin el prefijo 127.0.0.1 Docker publicaría en 0.0.0.0 y crearía una vía alternativa al túnel.
@@ -377,3 +385,6 @@ services:
 volumes:
   postgres_data:
   redis_data:
+  # Ficheros subidos por la aplicación (change `cleaning-photos-storage`, R1.3). Persiste entre
+  # despliegues, que es justo lo que la capa escribible del contenedor no hace.
+  backend_media:

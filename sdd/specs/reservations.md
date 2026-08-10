@@ -12,9 +12,11 @@ limpieza, accesos, mensajería y statements se disparan desde el ciclo de una re
 Es además el primer módulo que **persiste** `TimelineEvent`: hasta esta capacidad
 `timeline-state-machine` construía eventos validados y nadie los escribía.
 
-No incluye recepción de webhooks (necesita `WebhookEvent`, de `domain-foundation-financial`,
-y su job de `celery-jobs`), ni frontend (`dashboard-web`), ni escritura de `AuditLog` (entidad
-de `domain-foundation-financial`).
+No incluye la recepción de webhooks: es una capacidad propia y ya existe, documentada en
+`specs/reservations-webhooks.md`. Entra por aquí sin puerta nueva —alimenta el
+`ReservationIngestor` de esta capacidad, que sigue siendo la única ruta de upsert—. Tampoco
+incluye frontend (`dashboard-web`) ni escritura de `AuditLog` (entidad de
+`domain-foundation-financial`).
 
 Las **transiciones de estado operacional dependientes del reloj** sí existen ya: las hace
 `celery-jobs`, que lee estas reservas para decidir cuándo una propiedad entra en ventana de
@@ -75,12 +77,26 @@ no las dispara; aporta el dato del que cuelgan.
   **resultado** y recalcular `nights` y `total_guests` cuando sus campos de origen cambien.
 - THE SYSTEM SHALL rechazar en `PATCH` los campos derivados (`nights`, `total_guests`), los
   de identidad (`tenant_id`, `property_id`, `external_pms_id`) y los que pertenecen a otras
-  capacidades (`access_status`, `legal_registration_status`).
+  capacidades (`access_status`, `legal_registration_status`). Desde `access-notifications` esas
+  dos columnas **sí tienen escritor**, y es uno solo cada una: `access_status` la proyecta el
+  repositorio de `access_records` en la misma transacción que mueve el registro, y
+  `legal_registration_status` la mueven el reconciliador de accesos y la submission legal. La
+  exclusión del `PATCH` es lo que mantiene esa unicidad.
 - WHEN se solicita `DELETE /api/v1/reservations/{id}`, THE SYSTEM SHALL pasar la reserva a
   `CANCELLED` conservando la fila y responder `204`.
 - IF la reserva ya está en `CANCELLED`, THEN THE SYSTEM SHALL responder `204` sin registrar
   un segundo evento de cancelación.
 - THE SYSTEM SHALL permitir editar una reserva cancelada, registrando la edición como tal.
+
+**Confirmar y cancelar tienen consecuencias fuera de esta capacidad, y no son hooks.** Desde
+`access-notifications`, el barrido `provision_access_records` recorre cada cinco minutos las
+reservas confirmadas sin `AccessRecord` para darles uno en `PENDING` y fijarles
+`legal_registration_status = PENDING_GUEST_DATA` (PRD §17 paso 1), y revoca el registro de las
+canceladas. No hay enganche en el camino de confirmación **a propósito**: hay reservas ya
+confirmadas en la base de datos que un hook nunca cubriría, y las confirmaciones entran por tres
+vías —`PATCH`, import CSV y sync PMS, las dos últimas vía `ReservationStatus.parse_ingested`, que
+por defecto confirma—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
+está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo junto al revocado.
 
 ### Timeline: evidencia de cada mutación, en la misma transacción
 
@@ -243,10 +259,11 @@ no las dispara; aporta el dato del que cuelgan.
 
 ## Estado y deuda conocida
 
-- **Sin recepción de webhooks** (`POST /api/v1/webhooks/{provider}` de PRD §16): requiere
-  `WebhookEvent` (PRD §7.26) de `domain-foundation-financial` y el job
-  `process_webhook_events` de `celery-jobs`. Entrada de roadmap propia:
-  `reservations-webhooks`.
+- **La recepción de webhooks ya existe**, en su capacidad propia
+  (`specs/reservations-webhooks.md`). La ruta **no** es la `POST /api/v1/webhooks/{provider}` de
+  PRD §23: lleva un segmento token por tenant (`POST /api/v1/webhooks/{provider}/{webhook_token}`),
+  cuarta desviación registrada en `docs/adr/0006-pms-channel-manager-provider.md`. Lo que llega por
+  ahí desemboca en el `ReservationIngestor` de esta spec, no en una segunda ruta de escritura.
 - **Sin `AuditLog`** (regla 9 de `steering/security.md`): la entidad pertenece a
   `domain-foundation-financial` y su **escritor ya existe** desde `user-management`
   (`app/audit/domain/`: `ChangeSet`, `AuditLogFactory`, puerto y adaptador). Queda pendiente

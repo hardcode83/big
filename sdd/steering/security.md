@@ -46,6 +46,10 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 
    **Lo que esta excepción NO concede**: no exime la rotación, no exime la lectura con actor humano, y no dice nada sobre otras credenciales ni sobre otras entidades. Igual que la de arriba, **este razonamiento no es un criterio reutilizable**: que un acceso sea automático y frecuente no basta por sí solo, o cualquier lectura en bucle se auto-eximiría.
 
+   **Tercera excepción nombrada, y acotada al actor y a la ruta: la lectura del material de autenticación de webhooks en la ruta de recepción anónima no registra `AuditLog`.** Decidida en `reservations-webhooks` (2026-08-08, design D15, aprobada por Jose) tras el panel de seguridad de su sección 1. La obligación general la pone la regla 3(b) —auditar la lectura de toda credencial de proveedor— y aquí se levanta por una razón de cadencia que es peor que la de la segunda excepción, no mejor: la "lectura" equivalente ocurre en **cada webhook entrante**, y un webhook entrante es una petición **anónima, desde internet, a la cadencia que el proveedor decida**. Auditarla concede a un tercero no autenticado la capacidad de escribir filas en `audit_logs` a voluntad: es una denegación de servicio disfrazada de diligencia, y ahoga exactamente el índice `ix_audit_logs_tenant_id_actor_user_id_created_at` que la excepción anterior existe para mantener respondible.
+
+   **Lo que esta excepción NO concede, y es donde se parece a las otras dos**: no exime la **creación** ni la **rotación** del material, que son actos humanos con RBAC y siguen escribiendo su fila (`WEBHOOK_ENDPOINT_CREATED`, `WEBHOOK_ENDPOINT_ROTATED`). Y **no exime la lectura con actor humano o iniciada por API**: un comando de soporte o una herramienta de operador que lea este material trae su propio `WEBHOOK_ENDPOINT_READ` el día que exista. Hoy no existe, y por eso no está en el vocabulario — pre-autorizar un actor que nadie ejercita es lo mismo que el párrafo de `SCHEDULER` dice que no se hace.
+
    **Cómo se amplía esta excepción, si alguna vez procede**: con una entrada nueva y nombrada aquí, aprobada en el design del change que la pida. El razonamiento de arriba **no es un criterio reutilizable** — es la justificación de este caso concreto. Cualquiera puede satisfacer «registra más», «el actor no aporta un quién nuevo» y «dos orígenes de verdad divergen» y seguir necesitando su propia aprobación; en particular esta excepción no absuelve a nada más de la lista, y `reservations` sigue debiendo el `AuditLog` de sus mutaciones (anotado en `specs/reservations.md`).
 10. **Reglas de seguridad de la IA** (PRD §13): nunca prometer reembolsos/compensaciones, admitir responsabilidad, dar asesoría legal, revelar datos de otros huéspedes, inventar códigos/disponibilidad/precios, ni afirmar que un técnico va sin assignment real.
 11. **Sumideros de texto en claro** — aplicación de las reglas 3 y 4 a las columnas de texto o JSON libre que pueden acabar transportando un valor sensible sin declararlo en su nombre. Detalle abajo; **este es el único sitio donde vive el contrato**, el resto lo cita.
@@ -67,19 +71,22 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 
 ## Sumideros de texto en claro (regla 11)
 
-Seis columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
+Siete columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
 
-**Tres ya están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción) y `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA). Las otras tres siguen sin reclamar. La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
+**La séptima se añadió tarde, y por qué importa cómo se encontró**: `webhook_events.event_type` no estaba en esta lista porque no *parece* texto libre — se llama "tipo" y uno espera un enum. Pero se rellenaba con lo que el cuerpo del webhook trajera bajo `event`/`type`/`action`, así que era una columna de 200 caracteres escrita desde fuera, y la enumeración de esta tabla es justo lo que decide si alguien la mira. La lección es que el censo se hace por **quién escribe la columna**, no por lo que su nombre promete.
+
+**Las siete están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA), `notification_logs.last_error` desde `access-notifications` (2026-08-08) y las **tres** de `webhook_events` —`payload`, `error` y `event_type`— desde `reservations-webhooks` (2026-08-09). La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
 
 **La forma estructurada es el defecto: el valor no sobrevive en absoluto**, ni siquiera enmascarado — `{"changed": true}`, o se elimina la clave.
 
 | Columna | Forma | Quién la escribe (y quién la heredará) |
 |---|---|---|
 | `audit_logs.changes` | estructurada | **`user-management`** (escritor vivo; `ChangeSet` + `AuditLogFactory` lo hacen cumplir) y quien audite documentos de huésped |
-| `webhook_events.payload` | estructurada | `reservations-webhooks` |
-| `webhook_events.error` | estructurada | `reservations-webhooks` |
-| `notification_logs.last_error` | estructurada | `access-notifications` (aún sin escritor) |
-| `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y después `access-notifications` |
+| `webhook_events.payload` | estructurada | **`reservations-webhooks`** (escritor vivo; `scrub_card_data` descarta los datos de tarjeta antes de persistir) |
+| `webhook_events.error` | estructurada | **`reservations-webhooks`** (escritor vivo; código + campo, nunca el cuerpo recibido) |
+| `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | **`reservations-webhooks`** (escritor vivo; lo que no encaja degrada a `UNKNOWN_EVENT_TYPE`) |
+| `notification_logs.last_error` | estructurada | **`access-notifications`** (escritor vivo; el tipo de retorno del adapter no admite texto libre, así que lo hace cumplir por construcción) |
+| `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
 
 **La excepción es una y solo una**: `subject`/`body` admiten la forma enmascarada `****XX` de un **código de acceso**, porque renderizan un mensaje que el huésped debe recibir.
 

@@ -1,9 +1,12 @@
 """Cleaning task endpoints (PRD §23, R3, R4, R5, R7).
 
-Ten of the twelve routes PRD §23 lists for cleaning. The two missing are
-`POST`/`GET /cleaning-tasks/{id}/photos`, which belong to `cleaning-photos-storage`
-(proposal §Out of scope) — deliberately absent rather than stubbed, so the OpenAPI contract
-never advertises something that answers nothing.
+All twelve routes PRD §23 lists for cleaning. The two photo routes —
+`POST` and `GET /cleaning-tasks/{id}/photos` — arrive with `cleaning-photos-storage`, which
+completes the set; they were deliberately absent rather than stubbed until then, so the
+OpenAPI contract never advertised something that answers nothing.
+
+The third route that change adds, `GET /cleaning-photos/{photo_id}`, is **not** here: it is
+anonymous and lives in `photos_router.py`, whose module docstring says why.
 
 Thin by contract: map Pydantic → use case → Pydantic. Every route declares its permission
 with `require(...)`, which `tests/test_route_authorization.py` walks.
@@ -14,9 +17,9 @@ is `CLEANER`, so R7.2 cannot be dropped by omitting a query parameter.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, Query, Response, status
+from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile, status
 
 from app.auth.api.dependencies import AuthenticatedRequest, get_client_ip, now_utc, require
 from app.auth.domain.policy import Permission
@@ -28,16 +31,21 @@ from app.cleaning.api.dependencies import (
     get_complete_checklist_item_use_case,
     get_complete_cleaning_task_use_case,
     get_create_cleaning_task_use_case,
+    get_list_cleaning_photos_use_case,
     get_list_cleaning_tasks_use_case,
     get_reject_cleaning_task_use_case,
     get_start_cleaning_task_use_case,
+    get_upload_cleaning_photo_use_case,
     get_validate_cleaning_task_use_case,
 )
 from app.cleaning.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    MAX_PHOTO_TYPE_LENGTH,
     AssignCleaningTaskRequest,
     ChecklistResponse,
+    CleaningPhotoListResponse,
+    CleaningPhotoResponse,
     CleaningTaskPageResponse,
     CleaningTaskResponse,
     CreateCleaningTaskRequest,
@@ -53,13 +61,15 @@ from app.cleaning.application.use_cases import (
     CreateCleaningTaskUseCase,
     GetChecklistUseCase,
     GetCleaningTaskUseCase,
+    ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
     RejectCleaningTaskUseCase,
     StartCleaningTaskUseCase,
+    UploadCleaningPhotoUseCase,
     ValidateCleaningTaskUseCase,
 )
 from app.cleaning.domain.enums import CleaningTaskStatus
-from app.core.openapi import AUTHENTICATED_RESPONSES
+from app.core.openapi import AUTHENTICATED_RESPONSES, ErrorEnvelope
 
 router = APIRouter(
     prefix="/cleaning-tasks", tags=["cleaning"], responses=AUTHENTICATED_RESPONSES
@@ -277,11 +287,13 @@ async def start_cleaning_task(
     response_model=CleaningTaskResponse,
     summary="Finish a cleaning",
     description=(
-        "Applies PRD §11's validation rule: every `required` checklist item completed and no "
-        "unresolved `CRITICAL` incident, answered `409` with the missing items enumerated. "
-        "The required-photo clause arrives with `cleaning-photos-storage`. The property's next "
-        "state is resolved from its bookings, so it becomes `AWAITING_CHECKIN`, "
-        "`READY_FOR_NEXT_GUEST` or `VACANT_READY`."
+        "Applies PRD §11's validation rule, all three clauses of it: every `required` "
+        "checklist item completed, at least one photo uploaded for every `required` "
+        "`photo_type` of the template, and no unresolved `CRITICAL` incident. The first two "
+        "are answered `409` with what is missing enumerated in the message. A template that "
+        "declares no `required` photo closes with none. The property's next state is resolved "
+        "from its bookings, so it becomes `AWAITING_CHECKIN`, `READY_FOR_NEXT_GUEST` or "
+        "`VACANT_READY`."
     ),
 )
 async def complete_cleaning_task(
@@ -352,6 +364,166 @@ async def get_checklist(
         actor=_actor(authenticated, client_ip),
     )
     return ChecklistResponse.build(views)
+
+
+# The four statuses this route adds on top of the router's 401/403, declared so the published
+# contract lists what the handler can actually answer. `app/core/openapi.py` (design D8 of
+# `cleaning`) refuses to *invent* per-endpoint catalogues of 404/409/429 — "declaring a
+# plausible-but-unverified set would replace today's lie with a different one" — and leaves the
+# door open for "an endpoint that wants to declare its own". This one qualifies: each entry
+# below is a row of `app/cleaning/api/errors.py::_MAPPING` reached from this handler's own
+# raise sites, not a guess about what an upload might plausibly return.
+#
+#   404 ← `PhotoTypeNotFoundError` / `CleaningTaskNotFoundError`
+#   409 ← `InvalidCleaningTransitionError` (task not `IN_PROGRESS`)
+#   413 ← `PhotoTooLargeError` from the use case, and the `MaxBodySizeMiddleware` 413 that
+#         precedes it — the middleware never reaches this handler but answers on its path, so
+#         a client sees it from this operation and the contract has to say so.
+#   502 ← `PhotoStorageUnavailableError`
+#
+# The `422` is not here on purpose: FastAPI injects it automatically for any route with a
+# validated body or parameter, and `_point_errors_at_envelope` rewrites it to the envelope.
+_PHOTO_UPLOAD_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The `photo_type` is not declared by the task's template, or the task does not "
+            "exist for this caller — another tenant's task and another cleaner's task are "
+            "both answered this way, indistinguishably."
+        ),
+    },
+    409: {
+        "model": ErrorEnvelope,
+        "description": "The task is not `IN_PROGRESS`, so no evidence can be filed against it.",
+    },
+    413: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by "
+            "`MaxBodySizeMiddleware` before the body is read, and again by the use case while "
+            "it consumes the stream."
+        ),
+    },
+    502: {
+        "model": ErrorEnvelope,
+        "description": "The file store refused the write; no row was persisted.",
+    },
+}
+
+
+@router.post(
+    "/{task_id}/photos",
+    response_model=CleaningPhotoResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Upload a photo of the cleaning",
+    responses=_PHOTO_UPLOAD_RESPONSES,
+    description=(
+        "`multipart/form-data` with a `photo_type` the task's template declares and a `file`. "
+        "The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the "
+        "`Content-Type` the client sends is never consulted; anything else is a `422`. "
+        "Several photos of the same `photo_type` are allowed on purpose. `404` when the "
+        "`photo_type` is not in the template, `409` when the task is not `IN_PROGRESS`, `413` "
+        "over the configured size ceiling, `502` when the file store refuses the write. "
+        "\n\n"
+        "The response carries a **signed URL valid for 3600 s**, and what that URL reveals "
+        "depends on the tenant's `storage_type`:\n\n"
+        "* `LOCAL` — the URL is a route of this API (`/api/v1/cleaning-photos/{photo_id}`) "
+        "carrying only the photo's id, its expiry and a signature. The internal storage path "
+        "is not in it.\n"
+        "* `S3` — the URL is a **presigned URL minted by the object store itself**, so it "
+        "necessarily contains the bucket and the full object key. That is inherent to how "
+        "presigned URLs work and is not something this API can strip; see "
+        "`S3FileStorage.signed_url`.\n\n"
+        "In neither case does `storage_key` appear as a field of the response body (R3.2)."
+    ),
+)
+async def upload_cleaning_photo(
+    authenticated: ExecuteDep,
+    task_id: uuid.UUID,
+    photo_type: Annotated[str, Form(min_length=1, max_length=MAX_PHOTO_TYPE_LENGTH)],
+    # The `UploadFile` is handed to the use case unread, which consumes it in chunks counting
+    # bytes (design D11). Read that as "this handler adds no buffering of its own", NOT as
+    # "the body has not been received yet" — by the time this signature binds, it has.
+    # `app/core/http_limits.py` spells out why: FastAPI calls `await request.form()` before it
+    # solves dependencies, and Starlette's multipart parser spools the part to a
+    # `SpooledTemporaryFile` with no ceiling of its own. The thing that actually stops an
+    # oversized upload from being received is `MaxBodySizeMiddleware`, which runs before any
+    # of this. See `_read_within_limit` for what the use case's count does cover.
+    file: Annotated[UploadFile, File()],
+    use_case: Annotated[
+        UploadCleaningPhotoUseCase, Depends(get_upload_cleaning_photo_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningPhotoResponse:
+    """`EXECUTE_CLEANING_TASKS`, i.e. the `CLEANER`, and only over her own tasks.
+
+    The row-level half is not declared here and cannot be: it is derived inside the use case
+    from `CleaningActor.restrict_to_cleaner_id`, off the **persisted** role in the verified
+    token (R6.4). There is no request field — path, query, form or otherwise — through which a
+    caller could name a different cleaner, and `file.filename` reaches neither the storage key
+    nor the response.
+    """
+    uploaded = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        photo_type=photo_type,
+        upload=file,
+        actor=_actor(authenticated, client_ip),
+        now=now_utc(),
+    )
+    return CleaningPhotoResponse.from_upload(uploaded)
+
+
+# The listing's only added status, on the same criterion as `_PHOTO_UPLOAD_RESPONSES` above:
+# a row of `_MAPPING` reached from this handler's own raise site, not a guess.
+#
+#   404 ← `CleaningTaskNotFoundError` from `_load_task`, for an unknown task, another
+#         tenant's task and another cleaner's task alike.
+_PHOTO_LISTING_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task does not exist for this caller — an unknown id, another tenant's task "
+            "and another cleaner's task are all answered this way, indistinguishably."
+        ),
+    },
+}
+
+
+@router.get(
+    "/{task_id}/photos",
+    response_model=CleaningPhotoListResponse,
+    summary="List a cleaning task's photos",
+    responses=_PHOTO_LISTING_RESPONSES,
+    description=(
+        "Every photo uploaded for the task, oldest first, each with a **signed URL valid for "
+        "3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to "
+        "them; a manager or owner reaches every task of their tenant. That restriction comes "
+        "from the token's persisted role and no request field can widen it.\n\n"
+        "`storage_key` is not a field of this response and never will be (R3.2): what the URL "
+        "reveals depends on the tenant's `storage_type`, exactly as documented on the upload."
+    ),
+)
+async def list_cleaning_photos(
+    authenticated: ReadDep,
+    task_id: uuid.UUID,
+    use_case: Annotated[ListCleaningPhotosUseCase, Depends(get_list_cleaning_photos_use_case)],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningPhotoListResponse:
+    """`READ_CLEANING_TASKS`, plus the row-level rule derived inside the use case.
+
+    `ReadDep` and not `ExecuteDep`: reading the evidence is what a manager and an owner do
+    (R3.1), while uploading it is the cleaner's alone. The half that keeps a cleaner to her own
+    tasks is not declared here and cannot be — it comes from
+    `CleaningActor.restrict_to_cleaner_id` off the persisted role (R6.4).
+    """
+    photos = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        now=now_utc(),
+    )
+    return CleaningPhotoListResponse.build(photos)
 
 
 @router.post(

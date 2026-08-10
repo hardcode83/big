@@ -329,6 +329,48 @@ class SqlAlchemyPropertyStateTransitionRepository:
         )
         await self._session.flush()
 
+    async def last_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> PropertyStateTransition | None:
+        """The newest row for that property within the tenant (`dashboard-api` R3.1).
+
+        `id DESC` as the tiebreaker for the same reason the timeline reader needs one: the
+        transition and its `TimelineEvent` are written with the instant the use case decided
+        on, not with `now()`, so two transitions of one operation can share `created_at` and
+        "the last one" would otherwise be whichever the planner happened to return.
+
+        `ix_property_state_transitions_property_id_created_at` covers the leading keys.
+        """
+        result = await self._session.execute(
+            select(PropertyStateTransitionModel)
+            .where(
+                PropertyStateTransitionModel.tenant_id == tenant_id,
+                PropertyStateTransitionModel.property_id == property_id,
+            )
+            .order_by(
+                PropertyStateTransitionModel.created_at.desc(),
+                PropertyStateTransitionModel.id.desc(),
+            )
+            .limit(1)
+        )
+        model = result.scalar_one_or_none()
+        return _to_transition(model) if model is not None else None
+
+
+def _to_transition(model: PropertyStateTransitionModel) -> PropertyStateTransition:
+    return PropertyStateTransition(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        property_id=model.property_id,
+        to_state=model.to_state,
+        triggered_by=model.triggered_by,
+        created_at=model.created_at,
+        from_state=model.from_state,
+        triggered_by_user_id=model.triggered_by_user_id,
+        reason=model.reason,
+        metadata=model.metadata_ or {},
+    )
+
 
 def _translate_duplicate(error: IntegrityError) -> None:
     """Raise the domain error for a known constraint, or return so the caller re-raises.

@@ -387,7 +387,13 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     would have slipped in unguarded, which is the same class of gap one directory up. Rule
     13(c) of `steering/security.md` asks for a guard over the files on disk — all of them.
     """
-    import re
+    # The run matcher comes from the redactor itself, for the same reason the needles below come
+    # from the anonymiser: this guard kept its own `\b\d{13,19}\b`, and a closed band leaves a
+    # maximal run of 20+ digits alone — `4111111111111111 1225` (card then expiry) merges into one
+    # 20-digit run and the file reports clean. `free_text.py` abandoned that band for "13 or more"
+    # and its sibling guard (`test_fixture_card_guard.py`) was moved onto the shared matcher; this
+    # one was not, so the two guards over the SAME fixture tree disagreed about what a PAN is.
+    from app.integrations.infrastructure.free_text import find_long_digit_runs
 
     # The card-family needles come from the anonymiser itself, never a second hand-kept list.
     # The first version pinned five spellings and went blind to `stripeToken` and
@@ -402,7 +408,8 @@ def test_no_committed_fixture_carries_card_data(fixture_path):
     card_needles = CARD_NEEDLES
 
     raw = fixture_path.read_text(encoding="utf-8")
-    assert not re.search(r"\b\d{13,19}\b", raw), f"PAN-shaped number in {fixture_path.name}"
+    runs = find_long_digit_runs(raw)
+    assert not runs, f"PAN-shaped number in {fixture_path.name}: {runs}"
     assert "12/2027" not in raw
 
     # Whatever the TYPE. The first version exempted non-strings, so `{"cvv": 123}` passed both

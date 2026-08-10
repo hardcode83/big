@@ -11,12 +11,14 @@ docstring), so the check in `add` is the only thing between a bug and a cross-te
 """
 
 import uuid
+from collections.abc import Sequence
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.guests.domain.entities import Guest
+from app.guests.domain.exceptions import GuestNotFoundError
 from app.guests.domain.value_objects import GuestSummary, normalize_email
 from app.guests.infrastructure.models import GuestModel
 
@@ -33,6 +35,23 @@ class SqlAlchemyGuestRepository:
         )
         model = result.scalar_one_or_none()
         return _to_summary(model) if model is not None else None
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, guest_ids: Sequence[uuid.UUID]
+    ) -> Sequence[GuestSummary]:
+        """One statement for N guests (`dashboard-api` R1.7).
+
+        An empty batch short-circuits rather than emitting `IN ()`.
+        """
+        if not guest_ids:
+            return []
+        rows = await self._session.execute(
+            select(GuestModel).where(
+                GuestModel.tenant_id == tenant_id,
+                GuestModel.id.in_(list(guest_ids)),
+            )
+        )
+        return [_to_summary(model) for model in rows.scalars()]
 
     async def find_by_email(self, tenant_id: uuid.UUID, email: str) -> GuestSummary | None:
         """Deterministic pick when a tenant holds several guests with one address.
@@ -93,6 +112,66 @@ class SqlAlchemyGuestRepository:
             )
         )
         await self._session.flush()
+
+
+    async def get_full(self, tenant_id: uuid.UUID, guest_id: uuid.UUID) -> Guest | None:
+        result = await self._session.execute(
+            select(GuestModel).where(
+                GuestModel.tenant_id == tenant_id, GuestModel.id == guest_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_entity(model) if model is not None else None
+
+    async def save_document(self, tenant_id: uuid.UUID, guest: Guest) -> None:
+        if guest.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="guest",
+                entity_tenant_id=guest.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        result = await self._session.execute(
+            update(GuestModel)
+            .where(GuestModel.tenant_id == tenant_id, GuestModel.id == guest.id)
+            # Six columns and no others. The port says why it is narrow; this is what makes
+            # it true — a caller cannot reach `full_name` or `email` through this method
+            # however it mutates the entity it passes in.
+            .values(
+                nationality=guest.nationality,
+                date_of_birth=guest.date_of_birth,
+                document_type=guest.document_type,
+                document_number_encrypted=guest.document_number_encrypted,
+                document_expiry_date=guest.document_expiry_date,
+                document_status=guest.document_status,
+            )
+        )
+        if result.rowcount == 0:
+            raise GuestNotFoundError(guest.id)
+
+
+def _to_entity(model: GuestModel) -> Guest:
+    """The whole row, `document_number_encrypted` still encrypted.
+
+    Decryption is `app/core/crypto.py`'s and happens inside the use case that has already
+    written its `AuditLog` row (rule 9), never here.
+    """
+    return Guest(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        full_name=model.full_name,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        email=model.email,
+        phone=model.phone,
+        preferred_language=model.preferred_language,
+        nationality=model.nationality,
+        date_of_birth=model.date_of_birth,
+        document_type=model.document_type,
+        document_number_encrypted=model.document_number_encrypted,
+        document_expiry_date=model.document_expiry_date,
+        document_status=model.document_status,
+        legal_registration_status=model.legal_registration_status,
+    )
 
 
 def _to_summary(model: GuestModel) -> GuestSummary:

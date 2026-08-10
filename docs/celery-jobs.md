@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los cuatro jobs
+## Los siete jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -12,9 +12,30 @@ es el *cómo se usa y se diagnostica*.
 | `mark_occupied_estimated` | cada 5 min | Hora de check-in alcanzada → `OCCUPIED_ESTIMATED` |
 | `process_checkouts` | cada 5 min | Hora de check-out pasada → `AWAITING_CLEANING` **+ crea la `CleaningTask`** (change `cleaning`), y la asigna si hay una sola limpiadora activa → `CLEANING_SCHEDULED` |
 | `check_sla_breaches` | cada minuto | `NotificationLog` con SLA vencido → marca + escalado en cola |
+| `dispatch_notifications` | cada minuto | Drena las filas `PENDING` por su canal → `SENT` / `FAILED` / `SKIPPED` (change `access-notifications`) |
+| `provision_access_records` | cada 5 min | Reserva confirmada sin `AccessRecord` → lo crea en `PENDING`, revoca los de reservas canceladas y arranca el registro legal de PRD §17 (change `access-notifications`) |
+| `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API (change `reservations-webhooks`) — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
 
-Las cadencias son las de PRD §8.3 y viven en `backend/app/scheduler/schedule.py`. De esa
-misma tabla sale el TTL del lock de cada job, así que no se pueden desincronizar.
+Las cadencias viven en `backend/app/scheduler/schedule.py`. De esa misma tabla sale el TTL del
+lock de cada job, así que no se pueden desincronizar.
+
+**Los cuatro primeros son los de PRD §8.3, con sus cadencias. Los tres últimos no están en el
+PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3, `reservations-webhooks`
+design D10): el PRD dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da un registro de
+acceso a cada reserva confirmada, §16 recibe los avisos del PMS— y no dice qué lo dispara. Los tres
+son idempotentes y dependen del reloj, así que beat es su sitio; los nombres de los cuatro originales
+no se han tocado. `test_schedule.py` los separa (`PRD_8_3` frente a `BEYOND_PRD_8_3`) para que nadie
+invoque «lo dice el PRD» sobre un número que el PRD no ha visto nunca.
+
+**Por qué `provision_access_records` es un barrido y no un enganche a la confirmación**: ya hay
+reservas confirmadas en la base de datos. Un hook en la transición solo cubriría las futuras y
+dejaría el histórico sin registro para siempre. Además las confirmaciones entran por tres
+caminos (el PATCH, el import CSV y el sync del PMS, los dos últimos vía `parse_ingested`, que
+confirma por defecto).
+
+**Los 60 s de `process_webhook_events` son un parámetro de seguridad, no de tuning**: el job
+coalesce todo un tick en una llamada por destino, así que la cadencia *es* el techo de llamadas
+salientes al proveedor — acortarla lo sube.
 
 **Los otros dos jobs de PRD §8.3 no están aquí a propósito**: `generate_price_recommendations`
 pertenece a `revenue` y `send_checkin_reminders` a `messaging-ai` / `access-notifications` —
@@ -68,6 +89,28 @@ significan cosas distintas para quien opera:
 | `without_action` | El tipo de notificación no tiene escalado definido | No, pero queda registrado |
 | `without_recipient` | No hay manager ni owner activo a quien avisar | **Sí, urgente.** El incumplimiento se deja **sin marcar** y se reintenta cada minuto hasta que alguien arregle el roster |
 | `recipients_truncated` | Había más destinatarios que una página (100) | **Sí.** Alguien no recibió el aviso |
+
+### `dispatch_notifications`
+
+| Contador | Significa | ¿Hay que hacer algo? |
+|---|---|---|
+| `sent` | Entregada y marcada `SENT` | No |
+| `retrying` | Falló y le quedan intentos; vuelve en el siguiente tick | No, salvo que persista |
+| `failed` | Agotó `NOTIFICATION_MAX_ATTEMPTS` (3 por defecto) | **Sí.** Nadie recibió el aviso; el motivo está en `last_error` en forma estructurada |
+| `skipped` | El canal de la fila no tiene adapter (hoy solo `PUSH`) | No, es lo esperado hasta que exista |
+
+La entrega es **at-least-once acotada**: el intento se registra y se comitea *antes* de llamar
+al adapter, así que un proceso que muera a mitad reenvía como mucho hasta el techo de intentos,
+en lugar de sin límite.
+
+### `provision_access_records`
+
+| Contador | Significa | ¿Hay que hacer algo? |
+|---|---|---|
+| `created` | Reserva confirmada que estrena `AccessRecord` en `PENDING` | No |
+| `revoked` | Acceso de una reserva cancelada | No |
+| `expired` | `valid_to` pasado | No. Hoy **siempre vale 0**: nada rellena `valid_to` hasta que haya un proveedor de accesos real |
+| `legal_status_initialised` | Reserva que pasa a `PENDING_GUEST_DATA` (PRD §17 paso 1) | No |
 
 ## Limitaciones conocidas
 

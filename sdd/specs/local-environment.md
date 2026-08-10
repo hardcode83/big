@@ -169,7 +169,7 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 
 - El backend expone `GET /health` → `200 {"status": "ok"}`.
 - El frontend renderiza dinámicamente (sin cachear el resultado en build time) una página raíz que hace fetch a `${BACKEND_INTERNAL_URL}/health` y muestra `backend: ok` o `backend: ko` según la respuesta.
-- El worker ejecuta las cuatro tareas periódicas de PRD §8.3 que `celery-jobs` registra en `backend/app/worker.py`, con broker/backend en `REDIS_URL`; `beat` es quien las dispara (ver `specs/celery-jobs.md`). El fichero de estado de `beat` aparece como `backend/celerybeat-schedule` en el árbol de trabajo —el bind mount de `./backend` lo hace persistente en el host, no efímero— y está en `.gitignore`.
+- El worker ejecuta las siete tareas periódicas que `celery-jobs` registra en `backend/app/worker.py` —las cuatro nombradas por PRD §8.3 más las tres que no lo están: `dispatch_notifications`, `provision_access_records` y `process_webhook_events`—, con broker/backend en `REDIS_URL`; `beat` es quien las dispara (ver `specs/celery-jobs.md`). El fichero de estado de `beat` aparece como `backend/celerybeat-schedule` en el árbol de trabajo —el bind mount de `./backend` lo hace persistente en el host, no efímero— y está en `.gitignore`.
 
 ### Inicialización de git
 

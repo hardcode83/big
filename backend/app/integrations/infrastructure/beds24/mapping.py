@@ -20,6 +20,7 @@ from typing import Any
 
 from app.integrations.domain.dtos import ReservationDTO
 from app.integrations.infrastructure.card_data import scrub_card_data
+from app.integrations.infrastructure.free_text import redact_long_digit_runs
 
 # Beds24's `channel` values, mapped to our vocabulary. Anything absent falls to `OTHER` rather
 # than raising: `ReservationChannel.parse` rejects unknown values and the ingestor turns that
@@ -120,7 +121,13 @@ def to_reservation_dto(element: dict[str, Any]) -> ReservationDTO:
         status=_status(element.get("status")),
         # `comments` is where the guest's own note lands. NOT `custom1`..`custom10`: those are
         # free-text operator fields (`docs/beds24-spike.md`), and NOT `notes`, which is internal.
-        special_requests=_text(element.get("comments")),
+        #
+        # Redacted because this is an EXTERNAL source (design D8). `scrub_card_data` cannot help
+        # on the way to this column — it judges keys, and here the whole value is unstructured
+        # guest text — so the long-digit-run rule is what keeps a pasted PAN out of a column that
+        # persists and that the API returns. Text typed through the authenticated API is left
+        # alone; see `free_text.py`.
+        special_requests=redact_long_digit_runs(_text(element.get("comments"))),
         # The element as the DTO's docstring requires, minus its cardholder data. Beds24 carries
         # `stripeToken` and `pcibookingToken` — `null` on the measurement account, which has no
         # channels and therefore no payments, but present in the schema. Rule 13 applies even

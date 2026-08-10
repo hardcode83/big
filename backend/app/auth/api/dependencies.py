@@ -30,6 +30,7 @@ from app.auth.infrastructure.token_codec import JwtTokenCodec
 from app.core.config import settings
 from app.core.db import bind_session_to_tenant, get_db_session
 from app.core.errors import ForbiddenError
+from app.core.i18n import Locale
 # The single SqlAlchemyUnitOfWork of the project. `auth` used to carry its own
 # eight-line copy; `user-management` consolidated them (its design D16), which was the
 # debt `sdd/specs/reservations.md` assigned to "the next change that touches auth".
@@ -235,7 +236,15 @@ async def get_authenticated_request(
         # is a blocking acceptance criterion (design D15).
         raise InvalidTokenError("Token is not valid")
 
-    context = RequestContext(user_id=user.id, tenant_id=user.tenant_id, role=user.role)
+    # `preferred_language` costs no query: the user row was just reloaded above, and
+    # discarding it here is what `dashboard-api` design D3 changed. `Locale.resolve`
+    # degrades an unsupported stored value to `es` rather than failing the request.
+    context = RequestContext(
+        user_id=user.id,
+        tenant_id=user.tenant_id,
+        role=user.role,
+        preferred_language=Locale.resolve(user.preferred_language),
+    )
     # From here on every ORM statement on this session is tenant-filtered (design D16).
     bind_session_to_tenant(session, context.tenant_id)
     return AuthenticatedRequest(context=context, family_id=claims.family_id)

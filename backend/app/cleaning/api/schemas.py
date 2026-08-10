@@ -14,15 +14,18 @@ Two rules this module exists to enforce, both inherited from
 """
 
 import uuid
+from collections.abc import Sequence
 from datetime import datetime
 from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
+from app.cleaning.application.use_cases import UploadedCleaningPhoto
 from app.cleaning.domain.entities import CleaningChecklistTemplate, CleaningTask
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
 from app.cleaning.domain.value_objects import (
     MAX_ITEMS,
+    MAX_KEY_LENGTH,
     MAX_LABEL_LENGTH,
     MAX_REQUIRED_PHOTOS,
 )
@@ -231,3 +234,68 @@ class ChecklistResponse(BaseModel):
     @classmethod
     def build(cls, views) -> "ChecklistResponse":
         return cls(data=[ChecklistItemStateResponse.from_view(view) for view in views])
+
+
+# --- cleaning photos --------------------------------------------------------------
+
+# `cleaning_photos.photo_type` is `String(100)` and the template validator applies the same
+# ceiling (`MAX_KEY_LENGTH`), so the two agree: a longer value is a 422 from the schema here
+# instead of a `StringDataRightTruncationError` from the driver.
+MAX_PHOTO_TYPE_LENGTH = MAX_KEY_LENGTH
+
+
+class CleaningPhotoResponse(BaseModel):
+    """One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
+
+    `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
+    `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
+    the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
+    "the key never appears in a response" a property of this class rather than of everyone who
+    ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
+    yet (proposal §Out of scope), and a field that is always `null` is a contract promise
+    nobody made.
+
+    `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
+    a client uses instead of a path, and it is not stored anywhere.
+    """
+
+    id: uuid.UUID
+    cleaning_task_id: uuid.UUID
+    photo_type: str
+    uploaded_by: uuid.UUID
+    created_at: datetime
+    url: str
+
+    @classmethod
+    def from_upload(cls, uploaded: UploadedCleaningPhoto) -> "CleaningPhotoResponse":
+        return cls(
+            id=uploaded.photo.id,
+            cleaning_task_id=uploaded.photo.cleaning_task_id,
+            photo_type=uploaded.photo.photo_type,
+            uploaded_by=uploaded.photo.uploaded_by,
+            created_at=uploaded.photo.created_at,
+            url=uploaded.url,
+        )
+
+
+class CleaningPhotoListResponse(BaseModel):
+    """The photos of one task (R3.1), each already carrying its signed URL.
+
+    Wrapped in `data` rather than returned as a bare array, the shape `ChecklistResponse`
+    already uses: a top-level JSON array cannot grow a field later without breaking every
+    generated client, and this list has an obvious future one (`total`, if a task ever
+    accumulates enough photos to page).
+
+    **The element type is `CleaningPhotoResponse`, whose fields are an allowlist**, which is
+    where R3.2 is actually enforced — see its docstring. Building this from the entities with
+    `model_validate` would publish `storage_key` for every photo at once, so the only way in is
+    through `from_upload`.
+    """
+
+    data: list[CleaningPhotoResponse]
+
+    @classmethod
+    def build(
+        cls, uploaded: "Sequence[UploadedCleaningPhoto]"
+    ) -> "CleaningPhotoListResponse":
+        return cls(data=[CleaningPhotoResponse.from_upload(item) for item in uploaded])

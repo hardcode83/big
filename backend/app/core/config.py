@@ -81,6 +81,37 @@ class Settings(BaseSettings):
     csv_import_max_bytes: int = 10 * 1024 * 1024
     csv_import_max_rows: int = 1000
 
+    # Ceiling for a cleaning photo upload (change `cleaning-photos-storage`, R2.5, design
+    # D10/D11). Mirrors `csv_import_max_bytes` deliberately — same rule 6 of
+    # `steering/security.md` ("tamaño máx. configurable, default 10 MB"), same default, and
+    # the same "checked before the body is read" contract.
+    #
+    # It exists as its OWN setting rather than reusing the CSV one because the two ceilings
+    # answer to different things: a CSV import is bounded by how many reservations a person
+    # pastes in, a photo by what a phone camera produces. Sharing the number would make
+    # tuning one silently move the other.
+    #
+    # **Raising `JSON_BODY_MAX_BYTES` instead of adding this was the alternative, and it is
+    # forbidden** (design D10): that constant is the ceiling of every `/cleaning-` route, and
+    # lifting it re-opens the measured hole `cleaning` closed — an anonymous ~50 MB POST to
+    # `/cleaning-checklist-templates` read in full before the `401`. The middleware branch in
+    # `app/main.py` is what applies this number to the photo route and only to it.
+    #
+    # It is checked TWICE, and the second check is not redundant — but not for the reason an
+    # earlier version of this comment gave (design D11, corrected). **What satisfies R2.5
+    # ("reject before reading the whole body") is `MaxBodySizeMiddleware`'s accumulating
+    # counter, and only it**: that is the half covering a client that understates
+    # `Content-Length` or sends `Transfer-Encoding: chunked` with none at all. The chunk
+    # counting inside `UploadCleaningPhotoUseCase` cannot do that job — FastAPI calls
+    # `await request.form()` before it resolves dependencies, so the file is already spooled
+    # to disk by the time the use case asks for its first chunk.
+    #
+    # The use-case count stays for two other reasons: it bounds the in-process copy to this
+    # ceiling plus one chunk, and it is the only ceiling for any caller with no middleware in
+    # front (a test, a worker, a future non-HTTP consumer). Full reasoning lives with the code,
+    # in the docstring of `UploadCleaningPhotoUseCase._read_within_limit`.
+    photo_upload_max_bytes: int = 10 * 1024 * 1024
+
     # The ceiling for every OTHER body under `/api/v1/` (change `api-ingress-routing`). It is
     # deliberately separate from `csv_import_max_bytes` and two orders of magnitude smaller:
     # these are JSON payloads, and the largest legitimate one in the contract is a reservation.
@@ -100,6 +131,42 @@ class Settings(BaseSettings):
     # Produced by the same build-identity-contract output consumed by the frontend.
     # Empty is only a local-development fallback; deploy writes the full build identity.
     app_version: str = ""
+    # The two webhook limits of rule 12(c) (`reservations-webhooks` design D6). Two and not one,
+    # because they defend against opposite things and a single number cannot serve both.
+    #
+    # The per-token limit is GENEROUS: it protects the table from a provider whose legitimate
+    # traffic runs away. A provider sends from few IPs on behalf of MANY tenants, so a limit on
+    # the good traffic keyed by IP would throttle every tenant at once — which is why this one is
+    # keyed by token, i.e. per tenant.
+    #
+    # The per-IP limit is STRICT and applies **only to requests that failed authentication**. That
+    # is what makes probing for a route token cost something (R3.4) without the legitimate
+    # provider ever meeting it.
+    #
+    # Both carry a default because neither is a secret (rule 8 of `steering/security.md`). There is
+    # deliberately no `webhook_max_body_bytes`: the body ceiling is already `request_max_bytes`,
+    # applied to all of `/api/v1/` by `MaxBodySizeMiddleware` before routing (design D5).
+    webhook_rate_limit_per_minute: int = 120
+    webhook_probe_limit_per_minute: int = 20
+
+    # Notification delivery (change `access-notifications`, design D4). No credential here:
+    # the MVP adapters are a console logger and two mocks (PRD §14's channel table), and the
+    # real WhatsApp/SMTP keys are already reserved by rule 8 of `steering/security.md`.
+    #
+    # `notification_max_attempts` is what bounds duplicates. The dispatcher records the attempt
+    # BEFORE calling the adapter, so a process that dies mid-send re-sends at most until this
+    # ceiling instead of for ever — at-least-once, acotado, which is the trade design D4 takes
+    # in exchange for not adding a `SENDING` state and its stuck-row failure mode.
+    #
+    # **No backoff setting, deliberately**: `notification_logs` has no column for "next attempt
+    # at", and adding one to pace a console logger would be schema invented ahead of a need.
+    # A failed row is retried on the next tick until the ceiling. Revisit when a real SMTP
+    # adapter lands (`hardening-release`), which is also when rate limits start to matter.
+    notification_max_attempts: int = 3
+    # How many rows one run drains per tenant. The job runs every minute, so a backlog drains
+    # in slices instead of in one transaction that holds row locks for as long as the slowest
+    # provider takes.
+    notification_batch_size: int = 100
 
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.

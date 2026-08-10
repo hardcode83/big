@@ -7,6 +7,7 @@ import pytest
 
 from app.auth.domain.context import RequestContext
 from app.auth.domain.enums import UserRole
+from app.core.i18n import Locale
 
 
 def _context(**overrides) -> RequestContext:
@@ -14,6 +15,7 @@ def _context(**overrides) -> RequestContext:
         "user_id": uuid.uuid4(),
         "tenant_id": uuid.uuid4(),
         "role": UserRole.PROPERTY_MANAGER,
+        "preferred_language": Locale.ES,
     }
     values.update(overrides)
     return RequestContext(**values)
@@ -39,13 +41,25 @@ def test_context_rejects_a_role_outside_the_enum() -> None:
         _context(role="ADMIN")
 
 
+def test_context_rejects_a_language_outside_the_enum() -> None:
+    """The boundary resolves the stored string; this object only holds a `Locale`."""
+    with pytest.raises(ValueError):
+        _context(preferred_language="es")
+
+
 def test_context_keeps_what_it_was_given() -> None:
     user_id, tenant_id = uuid.uuid4(), uuid.uuid4()
 
-    context = RequestContext(user_id=user_id, tenant_id=tenant_id, role=UserRole.CLEANER)
-
-    assert (context.user_id, context.tenant_id, context.role) == (
-        user_id,
-        tenant_id,
-        UserRole.CLEANER,
+    context = RequestContext(
+        user_id=user_id,
+        tenant_id=tenant_id,
+        role=UserRole.CLEANER,
+        preferred_language=Locale.EN,
     )
+
+    assert (
+        context.user_id,
+        context.tenant_id,
+        context.role,
+        context.preferred_language,
+    ) == (user_id, tenant_id, UserRole.CLEANER, Locale.EN)

@@ -22,6 +22,7 @@ from typing import Annotated, Any
 from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.integrations.domain.enums import PMSProvider
+from app.properties.application.property_admin import PropertyState
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.repositories import PATCHABLE_PROPERTY_FIELDS
@@ -265,6 +266,27 @@ class PropertyResponse(BaseModel):
             status=property.status,
             created_at=property.created_at,
             updated_at=property.updated_at,
+        )
+
+
+class PropertyStateResponse(BaseModel):
+    """The light state endpoint of PRD §23:1942 (`dashboard-api` R3.1).
+
+    Exactly the two values R3.1 names, and no more: the client that polls this to refresh an
+    indicator does not want the property again. `current_operational_state` is the canonical
+    literal, never translated (R5.5); `last_transition_at` is ISO-8601 UTC and is `null` for
+    a property that has never moved — creation is not a transition, so there is no instant,
+    as opposed to one we failed to find.
+    """
+
+    current_operational_state: PropertyOperationalState
+    last_transition_at: datetime | None
+
+    @classmethod
+    def from_domain(cls, state: PropertyState) -> "PropertyStateResponse":
+        return cls(
+            current_operational_state=state.current_operational_state,
+            last_transition_at=state.last_transition_at,
         )
 
 

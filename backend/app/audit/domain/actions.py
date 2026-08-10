@@ -22,6 +22,12 @@ ENTITY_TENANT_CONFIG = "TENANT_CONFIG"
 # credential spread across property columns would have nothing to point at (ADR 0006, obligation
 # 4, and `pms-provider-resolution` design D4).
 ENTITY_PMS_CREDENTIAL = "PMS_CREDENTIAL"
+# A row of `webhook_endpoints`: the material WE mint for a provider to authenticate itself with,
+# not a credential a provider gave us. A distinct entity type for the same reason it is a distinct
+# table (`reservations-webhooks` design D2) — the two have opposite exposure contracts, and one
+# spelling for both would make "who read a provider credential" and "who minted an endpoint
+# secret" the same audit question over the same index.
+ENTITY_WEBHOOK_ENDPOINT = "WEBHOOK_ENDPOINT"
 # A row of `properties` (`properties-crud` design D7). Rule 9's enumeration names "estados de
 # propiedad" and not the property itself, so creating one or editing its address was invisible
 # until this change. Audited anyway, on the precedent rule 9 already set for `TenantConfig`: the
@@ -37,6 +43,26 @@ ENTITY_PROPERTY = "PROPERTY"
 # person, so each writes its row. The task created by `process_checkouts` is `SYSTEM` and is
 # covered by that exemption.
 ENTITY_CLEANING_TASK = "CLEANING_TASK"
+
+# A row of `cleaning_photos`. Added by `cleaning-photos-storage` (R2.7). Its own entity type
+# rather than auditing the upload against the parent task, because `entity_id` is what
+# `ix_audit_logs_tenant_id_entity_type_entity_id` indexes: pointing several uploads at one
+# task id would make "who uploaded THIS photo" a scan over `changes` instead of a lookup.
+# The link back to the task travels as an auditable field of the diff.
+ENTITY_CLEANING_PHOTO = "CLEANING_PHOTO"
+# A row of `access_records` (`access-notifications`). Rule 9 of `sdd/steering/security.md`
+# names `AccessRecord` in its enumeration explicitly — unlike `PROPERTY`, which had to be
+# argued for — so no reasoning is needed here beyond the citation.
+ENTITY_ACCESS_RECORD = "ACCESS_RECORD"
+# A row of `guests` (`access-notifications`). Rule 9: "acceso/modificación de documentos de
+# Guest". Note **acceso**: a read writes a row too, which is unusual in this vocabulary and
+# is why `GUEST_DOCUMENT_READ` exists alongside the update.
+ENTITY_GUEST = "GUEST"
+# A row of `reservations` (`access-notifications`). Only for the legal-registration
+# submission of PRD §17: `specs/reservations.md` records that the module's own mutations
+# still owe their `AuditLog`, and this change does not pay that debt — it audits the one
+# operation it introduces.
+ENTITY_RESERVATION = "RESERVATION"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -61,6 +87,28 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 PMS_CREDENTIAL_READ = "PMS_CREDENTIAL_READ"
 PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 
+# No `WEBHOOK_ENDPOINT_READ` counterpart to `PMS_CREDENTIAL_READ` **today**, and the asymmetry is
+# the point. The credential read is audited because ADR 0006 obligation 4 requires it and because
+# each read decrypts. Here the equivalent "read" happens on **every incoming webhook** — an
+# anonymous, internet-facing request at provider cadence — so auditing it would let an outsider
+# write rows to `audit_logs` at will, which is a denial-of-service dressed as diligence.
+#
+# **This comment is not where that exemption is granted, and it cannot be.** Rule 3(b) of
+# `steering/security.md` requires the read of a provider credential to be audited, and rule 9 says
+# an exception to it arrives "con una entrada nueva y nombrada aquí, aprobada en el design del
+# change que la pida" — steering, not a comment. It went through that route: design D15, approved by
+# Jose on 2026-08-08, and written as the **third named exception of rule 9**, which is where it
+# lives. This comment cites it. The security panel of section 1 caught that the route had been
+# skipped, which is the only reason it exists at all.
+#
+# Its scope is narrow and stays narrow: it covers the **anonymous receiving path only**. Rule 9 is
+# explicit that it "no exime la lectura con actor humano", so a support command or operator tool
+# that reads this material brings its own `WEBHOOK_ENDPOINT_READ` when it lands. Not added now,
+# because an action for an operation nothing performs is the speculative vocabulary this module's
+# docstring argues against — the same reasoning rule 9 applies to `SCHEDULER`.
+WEBHOOK_ENDPOINT_CREATED = "WEBHOOK_ENDPOINT_CREATED"
+WEBHOOK_ENDPOINT_ROTATED = "WEBHOOK_ENDPOINT_ROTATED"
+
 # There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
 # (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
 # nunca `DELETE` real"). An action for an operation the API does not offer would be the
@@ -81,15 +129,51 @@ CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
 CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
 CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
 
+# Cleaning photos (`cleaning-photos-storage`, R2.7). A person uploads it, so rule 9's actor
+# exemption — which covers only `SYSTEM` — does not reach it. There is no
+# `CLEANING_PHOTO_DELETED`: the proposal keeps deletion out of scope, and an action for an
+# operation the API does not offer is the speculative vocabulary this module argues against.
+CLEANING_PHOTO_UPLOADED = "CLEANING_PHOTO_UPLOADED"
+# Access records (`access-notifications`). One action per operation, same reasoning as the
+# cleaning ones: rule 9 is only auditable if the operation is findable by `action` rather than
+# by a JSONB query over `changes`.
+#
+# `ACCESS_RECORD_CREATED` and `ACCESS_RECORD_REVOKED` are written by the reconciler of design
+# D2, whose actor is automatic, so their rows carry `actor_user_id = NULL`. That is NOT the
+# named `SYSTEM` exception of rule 9 — that one is about property state transitions and does
+# not extend here. The row is written; it just has no person to name, exactly like the
+# credential-resolution rows of `pms-provider-resolution`.
+ACCESS_RECORD_CREATED = "ACCESS_RECORD_CREATED"
+ACCESS_CODE_REGISTERED = "ACCESS_CODE_REGISTERED"
+ACCESS_MARKED_EXTERNAL = "ACCESS_MARKED_EXTERNAL"
+ACCESS_DELIVERED = "ACCESS_DELIVERED"
+ACCESS_REVOKED = "ACCESS_REVOKED"
+ACCESS_EXPIRED = "ACCESS_EXPIRED"
+
+# Guest documents and the legal registration (`access-notifications`, PRD §17).
+#
+# `GUEST_DOCUMENT_READ` is the odd one in this file: every other action records a *mutation*.
+# Rule 9 asks for "acceso/modificación", and for an identity document the access is the part
+# that matters — a leak is somebody reading, not somebody writing.
+GUEST_DOCUMENT_UPDATED = "GUEST_DOCUMENT_UPDATED"
+GUEST_DOCUMENT_READ = "GUEST_DOCUMENT_READ"
+LEGAL_REGISTRATION_SUBMITTED = "LEGAL_REGISTRATION_SUBMITTED"
+LEGAL_REGISTRATION_FAILED = "LEGAL_REGISTRATION_FAILED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
         ENTITY_TENANT,
         ENTITY_TENANT_CONFIG,
         ENTITY_PMS_CREDENTIAL,
+        ENTITY_WEBHOOK_ENDPOINT,
         ENTITY_PROPERTY,
 
         ENTITY_CLEANING_TASK,
+        ENTITY_CLEANING_PHOTO,
+        ENTITY_ACCESS_RECORD,
+        ENTITY_GUEST,
+        ENTITY_RESERVATION,
     }
 )
 
@@ -104,6 +188,8 @@ ACTIONS = frozenset(
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,
         PMS_CREDENTIAL_ROTATED,
+        WEBHOOK_ENDPOINT_CREATED,
+        WEBHOOK_ENDPOINT_ROTATED,
         PROPERTY_CREATED,
         PROPERTY_UPDATED,
 
@@ -114,5 +200,16 @@ ACTIONS = frozenset(
         CLEANING_TASK_STARTED,
         CLEANING_TASK_COMPLETED,
         CLEANING_TASK_VALIDATED,
+        CLEANING_PHOTO_UPLOADED,
+        ACCESS_RECORD_CREATED,
+        ACCESS_CODE_REGISTERED,
+        ACCESS_MARKED_EXTERNAL,
+        ACCESS_DELIVERED,
+        ACCESS_REVOKED,
+        ACCESS_EXPIRED,
+        GUEST_DOCUMENT_UPDATED,
+        GUEST_DOCUMENT_READ,
+        LEGAL_REGISTRATION_SUBMITTED,
+        LEGAL_REGISTRATION_FAILED,
     }
 )
