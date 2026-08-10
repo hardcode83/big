@@ -14,6 +14,15 @@ import { useShellUiStore } from "@/features/shell/state/use-shell-ui-store";
 
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" }));
 vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ status: "authenticated" }),
+}));
+vi.mock("@/lib/auth/session-store", () => ({
+  getSessionTokens: () => ({ accessToken: "test" }),
+}));
+vi.mock("@/lib/config/runtime-config-provider", () => ({
+  useRuntimeConfig: () => ({ apiBaseUrl: "" }),
+}));
 // Server t (getServerT) reads the locale cookie; default to the es fallback.
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),

@@ -130,6 +130,12 @@ def test_only_the_owner_administers_users_or_settings() -> None:
         assert allowed == {UserRole.TENANT_OWNER}
 
 
+def test_only_owner_and_property_manager_read_build_provenance() -> None:
+    allowed = {
+        role for role in UserRole if is_allowed(role, Permission.READ_BUILD_PROVENANCE)
+    }
+
+    assert allowed == {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
 # The permissions that gate, in their own module, facts the timeline also reveals by the
 # mere existence of an entry (`dashboard-api`, security panel of section 2).
 _IMPLIED_BY_READING_A_TIMELINE = (

@@ -27,7 +27,7 @@ COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.work
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh bootstrap openapi db-clean-test
+.PHONY: up down logs ps sh bootstrap openapi check-version-parity db-clean-test
 
 up:
 	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
@@ -140,6 +140,9 @@ bootstrap:
 # generación que no toca base de datos, Redis ni red (design D6).
 openapi:
 	$(COMPOSE) run --rm --no-deps -T backend python -m app.cli.openapi
+
+check-version-parity:
+	python3 scripts/check-version-parity.py
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
 # `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y

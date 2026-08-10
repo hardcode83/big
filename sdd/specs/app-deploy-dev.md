@@ -19,9 +19,25 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - WHEN la forma producida por el CD deje de ser aceptada por el contrato público vigente del
   frontend, THE SYSTEM SHALL hacer fallar la verificación de congruencia en los checks de CI
   aplicables al Pull Request.
-- THE SYSTEM SHALL emitir en ambas imágenes los labels `org.opencontainers.image.{source,revision,version,created}` con los valores de ese job.
+- THE SYSTEM SHALL emitir en la imagen backend los labels OCI `source`, `revision`, `version` y
+  `created`, incluyendo la URL y el SHA completo porque esa imagen queda dentro de la frontera
+  backend/autenticada. La imagen frontend SHALL emitir únicamente `revision` con el SHA corto,
+  `version` y `created`; SHALL NOT incluir `source`, la URL privada del repositorio, el SHA
+  completo ni ningún campo `APP_PROVENANCE_*` en labels, build args, environment o artefactos.
 - THE SYSTEM SHALL fijar todas las GitHub Actions por SHA de commit.
 - WHERE falla el build de una de las dos imágenes, THE SYSTEM SHALL abortar el deploy (el job `deploy` tiene `needs` de ambos builds); nunca se despliega un commit a medias.
+
+### Procedencia privada del despliegue
+
+- THE SYSTEM SHALL publish `repository_url`, `pull_request_number`, `commit_sha` and
+  `actions_run_id` as outputs of the `provenance` job, together with the canonical `version`.
+- THE SYSTEM SHALL derive the repository URL from `GITHUB_SERVER_URL/GITHUB_REPOSITORY` and
+  extract the Pull Request number only from the supported merge-subject formats; unsupported or
+  ambiguous subjects SHALL produce unknown provenance.
+- THE SYSTEM SHALL write `APP_VERSION` and `APP_PROVENANCE_*` to the private VM `.env` without
+  logging their values, and `docker-compose.deploy.yml` SHALL inject them only into `backend`.
+- THE SYSTEM SHALL validate all four private fields in the backend as an atomic unit; incomplete
+  or invalid configuration SHALL be exposed as unavailable provenance, never as partial values.
 
 ### Compose de deploy (`docker-compose.deploy.yml`)
 

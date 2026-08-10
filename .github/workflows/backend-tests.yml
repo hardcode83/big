@@ -368,6 +368,12 @@ jobs:
           echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
           exit "$status"
 
+      - name: Wiring E2E de provenance (workflow real a endpoint autorizado)
+        working-directory: backend
+        env:
+          PROVENANCE_WORKFLOW_PATH: ${{ github.workspace }}/.github/workflows/deploy-dev.yml
+        run: uv run pytest -q tests/provenance/test_workflow_to_endpoint_wiring.py
+
       - name: Las migraciones se pueden deshacer hasta la base
         working-directory: backend
         # `downgrade base` no lo cubre la suite (test_migrations.py desanda revisión a

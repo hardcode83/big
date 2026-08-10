@@ -1,4 +1,5 @@
 import { VersionBadge, type VersionBadgeLabels } from "./version-badge";
+import { ProvenancePanel } from "@/features/provenance";
 
 /**
  * Shell footer (change app-version-visibility, R2.1/R2.2).
@@ -10,12 +11,15 @@ import { VersionBadge, type VersionBadgeLabels } from "./version-badge";
  */
 export function ShellFooter({
   versionLabels,
+  showProvenance = false,
 }: {
   versionLabels: VersionBadgeLabels;
+  showProvenance?: boolean;
 }) {
   return (
     <footer className="flex shrink-0 items-center border-t px-4 py-2">
       <VersionBadge labels={versionLabels} />
+      {showProvenance && <div className="ml-auto"><ProvenancePanel /></div>}
     </footer>
   );
 }

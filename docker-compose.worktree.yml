@@ -31,6 +31,8 @@ services:
 
   backend:
     ports: !reset []
+    volumes:
+      - ./.github/workflows/deploy-dev.yml:/workspace/deploy-dev.yml:ro
 
   frontend:
     ports: !reset []

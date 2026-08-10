@@ -85,6 +85,10 @@ services:
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
+      # The provenance wiring regression reads the production workflow as an executable
+      # contract. Keep the host workflow visible read-only so the project test command works
+      # both locally and in CI without embedding a duplicate fixture in backend/.
+      - ./.github/workflows/deploy-dev.yml:/workspace/deploy-dev.yml:ro
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Volumen con nombre y NO un bind mount del árbol: `/app` es el repositorio por el bind
       # de arriba, así que sin este volumen las fotos aparecerían en `git status`. El
