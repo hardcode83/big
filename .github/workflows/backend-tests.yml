@@ -349,7 +349,7 @@ jobs:
           started=$(date +%s)
 
           set +e
-          uv run pytest -q -rs -n 4
+          uv run pytest -q -rs -n 2
           status=$?
           set -e
 
