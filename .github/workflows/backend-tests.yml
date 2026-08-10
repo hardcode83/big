@@ -13,17 +13,24 @@ name: backend-tests
 #
 # --- Por qué son tres jobs y no uno (change `ci-backend-tests-conditional-gate`) ---
 #
-# La suite tarda **~6m15s**, y el workflow completo ~7m05s (medido el 2026-08-03; el
-# resto —arranque de containers, checkout, `uv`, las tres órdenes de Alembic— suma 49s).
-# Una versión anterior de esta cabecera afirmaba "~1 minuto" y sobre esa cifra se decidió
-# ejecutar la suite en todos los PR; era seis veces menor que la realidad.
+# La suite tarda **~4m03s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
+# `sdd/backend-suite-runtime`; el paso dominante sigue siendo el de `pytest`). La misma
+# medición sobre `main` ese día dio **15m54s**: la diferencia es el change
+# `backend-suite-runtime`, que dejó de construir y tirar el esquema en cada test.
+#
+# Esta cifra ha mentido dos veces ya, y las dos por lo mismo —envejeció sin que nada
+# fallara—. Primero afirmó "~1 minuto" y sobre ella se decidió ejecutar la suite en todos
+# los PR, cuando era seis veces menor que la realidad; después "~6m15s" del 2026-08-03,
+# que en seis días se había quedado corta 2,5×. Por eso ahora hay un presupuesto declarado
+# más abajo y el check lo compara en cada ejecución: para que la próxima deriva se vea en
+# el propio resumen y no seis días tarde.
 #
 # Como de los PR que no tocan `backend/**` la suite no puede decir nada nuevo —es
 # hermética a ese directorio, ver `sdd/specs/backend-ci.md`—, ahora solo se ejecuta
 # cuando el diff toca el backend. Pero el check se sigue reportando SIEMPRE:
 #
 #   backend-tests-detect  decide si el diff toca el área      (siempre corre, ~20s)
-#   backend-tests-suite   la verificación de verdad           (corre si toca, ~7m)
+#   backend-tests-suite   la verificación de verdad           (corre si toca, ~4m30s)
 #   backend-tests         consolida y reporta                 (siempre corre)
 #
 # SIGUE PROHIBIDO poner `paths:` en `on:`, y la razón original no ha cambiado: con un
@@ -48,6 +55,22 @@ concurrency:
 
 permissions:
   contents: read
+
+# --- Presupuesto de tiempo de la suite (change `backend-suite-runtime`, R4.1, D7) ---
+#
+# Dato versionado y revisable en el diff, nunca un ajuste de la UI de GitHub: la norma
+# IaC-first de `steering/infra.md` vale también para los umbrales del propio gate.
+#
+# Son DOS cifras y no una a propósito. Un solo umbral obliga a elegir entre convertir la
+# variabilidad del runner —±20-30 %— en bloqueos de merge, o publicar un aviso que nadie
+# mira. Así que: pasar el presupuesto emite un aviso destacado en el resumen, y solo pasar
+# el techo pone el check en rojo.
+#
+# No sustituyen a `timeout-minutes: 20` del job, que es otra cosa: una guillotina cuyo
+# incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
+env:
+  BACKEND_SUITE_BUDGET_SECONDS: "300"   # 5m00s — objetivo de R2.1; pasarlo avisa
+  BACKEND_SUITE_CEILING_SECONDS: "450"  # 7m30s — pasarlo pone el check en rojo
 
 jobs:
   # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------
@@ -219,6 +242,11 @@ jobs:
     permissions:
       contents: read
 
+    outputs:
+      # Segundos que tardó el paso de `pytest`, para que el job que reporta pueda
+      # contrastarlos con el presupuesto sin hacer `checkout` ni llamar a la API.
+      pytest_seconds: ${{ steps.suite.outputs.seconds }}
+
     # Postgres Y Redis. Redis no es opcional: tests/auth/test_throttle.py prueba el
     # adaptador de Redis a propósito SIN skip (es la única implementación de
     # producción de R5.1-R5.4), así que sin este servicio esos tests van a rojo en vez
@@ -289,8 +317,29 @@ jobs:
         run: uv run alembic check
 
       - name: Suite completa (incluye auth, RBAC y aislamiento por tenant)
+        id: suite
         working-directory: backend
-        run: uv run pytest -q -rs
+        # Cronometrado aquí dentro, y no restando marcas de tiempo de la API de GitHub,
+        # porque la duración tiene que existir **aunque `pytest` falle**: el paso captura
+        # el código de salida, publica los segundos y solo después se rinde con él.
+        #
+        # `set +e` explícito, y por la misma razón que lo lleva el job de detección más
+        # arriba: GitHub invoca los `run:` con `bash -e {0}`, así que `-e` está activo por
+        # defecto y un `set -uo pipefail` NO lo desactiva. Sin esta línea el paso abortaría
+        # en el propio `pytest` y las dos siguientes no llegarían a ejecutarse — es decir,
+        # la duración faltaría exactamente en el caso que esto existe para cubrir, y el
+        # resumen diría «no llegó» sobre una suite que sí se midió.
+        run: |
+          set -uo pipefail
+          started=$(date +%s)
+
+          set +e
+          uv run pytest -q -rs
+          status=$?
+          set -e
+
+          echo "seconds=$(( $(date +%s) - started ))" >> "$GITHUB_OUTPUT"
+          exit "$status"
 
       - name: Las migraciones se pueden deshacer hasta la base
         working-directory: backend
@@ -317,6 +366,9 @@ jobs:
           SUITE_RESULT: ${{ needs.backend-tests-suite.result }}
           BACKEND: ${{ needs.backend-tests-detect.outputs.backend }}
           REASON: ${{ needs.backend-tests-detect.outputs.reason }}
+          SUITE_SECONDS: ${{ needs.backend-tests-suite.outputs.pytest_seconds }}
+          BUDGET: ${{ env.BACKEND_SUITE_BUDGET_SECONDS }}
+          CEILING: ${{ env.BACKEND_SUITE_CEILING_SECONDS }}
         # Los casos se enumeran uno a uno en vez de escribir un `!= 'failure'`
         # abreviado: esa forma daría verde ante una cancelación y ante un job de
         # detección roto, que son precisamente los dos falsos verdes que hay que
@@ -350,6 +402,58 @@ jobs:
             suite_line="${SUITE_RESULT}"
           fi
 
+          # --- Presupuesto de tiempo (R4.2, R4.3, D7) -------------------------------
+          #
+          # El resumen nombra SIEMPRE las dos cifras declaradas, se haya ejecutado la
+          # suite o no: un aviso o un rojo tienen que poder juzgarse sin abrir el log.
+          #
+          # Tres situaciones y no dos. Que la suite se saltara por el camino corto no
+          # deja laguna: no hay duración porque no hubo nada que medir. Que se ejecutara
+          # y la duración NO llegue sí es una laguna, y R4.3 prohíbe resolverla en verde.
+          #
+          # Y los valores se validan como enteros ANTES de compararlos, porque las
+          # comparaciones de abajo van en posición de test de un `if` — y esa posición está
+          # **exenta** de `set -e`. Con un valor no numérico, `[ … -gt … ]` no compara: da
+          # error y bash lee el error como «falso», es decir, como «no pasa del techo». Una
+          # cifra corrupta se convertiría así en un verde silencioso, que es exactamente lo
+          # que R4.3 prohíbe. Encontrado por el panel de QA de esta sección, probándolo.
+          # Valida forma **y** rango. Solo la forma no basta: una ristra de 30 dígitos pasa
+          # el filtro de caracteres y luego desborda la aritmética de `[ … -gt … ]`, que
+          # vuelve a fallar en posición de test y vuelve a leerse como «falso» — la misma
+          # laguna, un paso más adentro. Nueve dígitos son 31 años de suite: de sobra.
+          is_integer() {
+            case "${1:-}" in
+              '' | *[!0-9]*) return 1 ;;
+            esac
+            [ "${#1}" -le 9 ]
+          }
+
+          over_budget=""
+          if ! is_integer "${BUDGET:-}" || ! is_integer "${CEILING:-}"; then
+            # Las dos cifras son literales de este mismo fichero, así que esto solo puede
+            # pasar si alguien las rompe al editarlas. Se cae a la cara: un gate que no
+            # sabe contra qué compara no puede dar verde.
+            verdict=fail
+            detail="las cifras declaradas del presupuesto no son enteros (presupuesto='${BUDGET:-}', techo='${CEILING:-}'), así que no hay contra qué comparar"
+            duration_line="sin comparar"
+          elif [ "$SUITE_RESULT" = "skipped" ]; then
+            duration_line="no aplica — la suite no se ejecutó"
+          elif ! is_integer "${SUITE_SECONDS:-}"; then
+            duration_line="**no llegó**"
+            if [ "$verdict" = "pass" ]; then
+              verdict=fail
+              detail="la suite se ejecutó pero su duración no llegó hasta aquí en forma de entero (recibido: '${SUITE_SECONDS:-}'), así que el presupuesto no se ha podido comprobar"
+            fi
+          else
+            duration_line="**${SUITE_SECONDS}s**"
+            if [ "$SUITE_SECONDS" -gt "$CEILING" ]; then
+              verdict=fail
+              detail="la suite tardó ${SUITE_SECONDS}s y el techo declarado son ${CEILING}s"
+            elif [ "$SUITE_SECONDS" -gt "$BUDGET" ]; then
+              over_budget=1
+            fi
+          fi
+
           {
             echo "## backend-tests"
             echo ""
@@ -358,8 +462,22 @@ jobs:
             echo "| Veredicto | ${verdict} |"
             echo "| Suite del backend | ${suite_line} |"
             echo "| Decisión de área | \`${BACKEND:-desconocida}\` (\`${REASON:-sin razón}\`) |"
+            echo "| Duración de \`pytest\` | ${duration_line} |"
+            echo "| Presupuesto · techo | ${BUDGET}s · ${CEILING}s |"
             echo ""
             echo "${detail}"
+            if [ -n "$over_budget" ]; then
+              echo ""
+              echo "> ⚠️ **La suite pasó del presupuesto**: ${SUITE_SECONDS}s frente a los ${BUDGET}s"
+              echo "> declarados. No bloquea el merge —para eso está el techo de ${CEILING}s—, pero es"
+              echo "> la señal de que el coste está volviendo a subir. Se mide, no se redondea."
+            fi
+            if [ "$duration_line" = "**no llegó**" ]; then
+              echo ""
+              echo "> La suite se ejecutó pero no publicó su duración, así que **el presupuesto no se"
+              echo "> ha comprobado**. Esto no se degrada a verde: sin la cifra, el check no sabe si"
+              echo "> hubo regresión."
+            fi
             if [ "$suite_line" = "**OMITIDA** (no ejecutada)" ]; then
               echo ""
               echo "> Este check está verde porque **no había nada que verificar**, no porque"
@@ -370,5 +488,8 @@ jobs:
           if [ "$verdict" != "pass" ]; then
             echo "::error::${detail}"
             exit 1
+          fi
+          if [ -n "$over_budget" ]; then
+            echo "::warning::la suite tardó ${SUITE_SECONDS}s y el presupuesto son ${BUDGET}s"
           fi
           echo "::notice::${detail}"

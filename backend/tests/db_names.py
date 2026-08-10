@@ -29,7 +29,12 @@ import re
 # it execute. Whoever sets the variable can already run code, so this is not a privilege boundary
 # — it is blast radius: the run now drops its database *before* the first test, so a pasted or
 # mistyped value gets to be destructive at startup rather than at teardown.
-_SAFE_SUFFIX = re.compile(r"\A[A-Za-z0-9_-]+\Z")
+#
+# The class is deliberately the same one `make db-clean-test` sweeps with
+# (`datname ~ '_(test|migrations)_[0-9a-z]+$'`, `Makefile`): a suffix this accepted but that
+# pattern did not would create databases the orphan sweeper can never find. The two widen
+# together or not at all.
+_SAFE_SUFFIX = re.compile(r"\A[0-9a-z]+\Z")
 
 # Postgres truncates identifiers at 63 bytes, quotes included. With a long enough `POSTGRES_DB`,
 # `<base>_test_<suffix>` truncates back onto `<base>` — the dev database that `make up` manages,

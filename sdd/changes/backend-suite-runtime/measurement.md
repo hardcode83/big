@@ -269,3 +269,28 @@ gh api /repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs \
 `concurrency: backend-tests-${{ github.ref }}` con `cancel-in-progress: true`, así que tres disparos
 solapados se cancelan entre sí y solo sobrevive el último. La cifra de R2.1 es la **mediana de las
 tres**, y el paso que se mide es el de `pytest`.
+
+Sí se pueden solapar **entre referencias distintas**: el grupo de concurrencia lleva `github.ref`,
+así que una ejecución sobre `main` y otra sobre la rama no se cancelan. Las tandas de abajo se
+hicieron así, y por eso la de la rama terminó mucho antes que la de `main`.
+
+### Resultado (2026-08-10)
+
+Fase 1, commit `ab71ada`. El paso medido es «Suite completa (incluye auth, RBAC y aislamiento por
+tenant)», leído de `/repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs`.
+
+| Referencia | Ejecuciones | Mediana |
+|---|---|---|
+| `main` (antes) | 954s · *(2ª y 3ª en curso)* | — |
+| `sdd/backend-suite-runtime` (fase 1) | **246s · 217s · 243s** | **243s (4m 03s)** |
+
+Ids: rama `31397418050`, `31397960091`, `31398465326`; `main` `31397414664`. Las cuatro en verde.
+
+**R2.1 se cumple con la fase 1 sola**: 243s frente a los 300s del objetivo, **57s de margen**, y
+**3,93×** sobre los 954s de `main`. El paso dominante del workflow sigue siendo el de `pytest`, que
+es lo que se buscaba: ya no lo domina el DDL por test, sino el trabajo real de los tests.
+
+Nótese que los 954s de `main` son **peores que los 618,51s locales de §1** —el runner de GitHub es
+más lento que esta máquina, la razón medida ronda 1,5×— y también peores que los 15m 34s del
+proposal, porque la suite ha seguido creciendo. Esa es exactamente la deriva que R4 quiere hacer
+visible en el propio check en vez de descubrirla seis días tarde.

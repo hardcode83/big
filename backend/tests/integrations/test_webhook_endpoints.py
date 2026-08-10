@@ -320,7 +320,21 @@ async def test_an_insert_that_loses_the_unique_race_is_a_domain_refusal(
             result = await self._session.execute(*args, **kwargs)
             if not self._has_read:
                 self._has_read = True
-                await both_have_read.wait()
+                # Bounded on purpose. A barrier of two parties waits for ever if only one
+                # arrives, and today both always do — `upsert`'s cross-tenant guard is the
+                # one early return before the SELECT, and both callers pass the same tenant.
+                # But "today" is the whole problem: with no bound, an edit that ever made
+                # that return asymmetric would turn this into a CI hang until the job's
+                # 20-minute timeout, and a hang reads as broken infrastructure rather than
+                # as the broken test it would be. The timeout makes it a red instead.
+                #
+                # Note for whoever meets that red: cancelling a `Barrier.wait()` does NOT
+                # break the barrier for the other party — CPython only decrements the count
+                # — so the survivor is saved by its own timeout, not by a `BrokenBarrierError`.
+                # Both callers therefore fail, and the assertion below reports `2 != 1`
+                # rather than naming a timeout. The cause is asymmetric arrival, not domain
+                # logic.
+                await asyncio.wait_for(both_have_read.wait(), timeout=30)
             return result
 
     async def create(session: AsyncSession) -> None:

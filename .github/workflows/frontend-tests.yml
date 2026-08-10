@@ -6,7 +6,8 @@ name: frontend-tests
 #
 # Nota de coherencia: la comparación "igual que backend-tests" ya no es exacta. Desde el
 # change `ci-backend-tests-conditional-gate`, backend-tests reporta su check en todos los PR
-# pero solo ejecuta la suite cuando el diff toca `backend/**`, porque tardaba ~6 minutos.
+# pero solo ejecuta la suite cuando el diff toca `backend/**`, porque tardaba ~6 minutos —y
+# llegó a tardar 15m54s antes de que `backend-suite-runtime` la bajara a ~4m—.
 # Aquí no se ha replicado **a propósito**: este workflow tarda ~1m30-2m15, y ese patrón
 # cuesta tres jobs. Es una decisión revisable, no un olvido — si el frontend crece hasta
 # doler, backend-tests.yml es el precedente a copiar.

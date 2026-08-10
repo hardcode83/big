@@ -47,7 +47,7 @@ Independiente del resto del change; se hace primero porque es barato y no depend
   vacía), y retirar la fila. **Hecho** = queda constancia de las dos ejecuciones en el commit o en
   el resumen de `/sdd:run`; el árbol no conserva la fila. [R5.2]
 
-## 3. Fase 1 — el esquema se construye una vez por ejecución (D1, D2, D3, D4)
+## 3. Fase 1 — el esquema se construye una vez por ejecución (D1, D2, D3, D4) <!-- panel: PASS 2026-08-10 -->
 
 - [x] 3.1 Fixture de sesión que construye la base de datos de la ejecución **desde cero**:
   `DROP DATABASE IF EXISTS … WITH (FORCE)` + `CREATE DATABASE` + `Base.metadata.create_all` al
@@ -89,7 +89,7 @@ Independiente del resto del change; se hace primero porque es barato y no depend
   average 16,7 sobre 12 núcleos). La comparación limpia está abajo, y la de verdad —la que manda
   para R2.1— es la de CI en §5)*
 
-## 4. Estabilidad de la fase 1 (D5)
+## 4. Estabilidad de la fase 1 (D5) <!-- panel: PASS 2026-08-10 -->
 
 - [x] 4.1 Hacer determinista la carrera del índice único:
   `test_an_insert_that_loses_the_unique_race_is_a_domain_refusal` deja de confiar en la
@@ -103,14 +103,23 @@ Independiente del resto del change; se hace primero porque es barato y no depend
   repositorio, no el repositorio: `upsert` no pasa por `find_for`, inlinea su propio `execute`, así
   que la costura está ahí. `asyncio.Barrier(2)` suelta a los dos llamantes justo después de su
   SELECT y antes del `flush`, que es el único estado en el que uno puede perder el índice)*
-- [ ] 4.2 **Tres ejecuciones consecutivas verdes** en local con la fase 1, comprobando en el log
+- [x] 4.2 **Tres ejecuciones consecutivas verdes** en local con la fase 1, comprobando en el log
   que no aparece `attached to a different loop` ni `another operation is in progress`, y que los
   tres recuentos coinciden entre sí y con 3.4 — **Files:** ninguno; queda la evidencia en el
   resumen del run. [R3.5, R3.1]
-- [ ] 4.3 Aislamiento con **dos ejecuciones concurrentes sobre el mismo PostgreSQL** (el caso real
+  *(2026-08-10, las tres verdes y con el mismo recuento —**5 331 pasados + 35 omitidos**, mismo
+  motivo—: **196,61s · 311,83s · 186,50s**. Ni un `attached to a different loop` ni un `another
+  operation is in progress`. Ninguna base desechable huérfana al terminar. La dispersión de la
+  segunda cifra es carga de la máquina, no del cambio: R3.5 pide verde y recuento, y el tiempo que
+  manda para R2.1 es el de CI)*
+- [x] 4.3 Aislamiento con **dos ejecuciones concurrentes sobre el mismo PostgreSQL** (el caso real
   de dos worktrees): lanzar dos suites a la vez con `PYTEST_DB_SUFFIX` distintos y comprobar que
   ambas terminan verdes y que las dos bases desechables desaparecen al cerrar. **Hecho** = `\l`
   (o `make db-clean-test` sin nada que borrar) lo confirma después. [R3.3]
+  *(2026-08-10, `PYTEST_DB_SUFFIX=conc1` y `conc2` a la vez: **5 331 + 35 las dos**, verdes, en
+  191,71s y 192,65s. Ninguna base desechable en pie al terminar y `make db-clean-test` sin nada que
+  borrar. Que dos suites simultáneas tarden lo mismo que una sola (186-196s) dice además que el
+  cuello no es PostgreSQL)*
 
 ## 5. Medición en CI de la fase 1 (R1.1 mitad CI, R2.1)
 
@@ -123,42 +132,65 @@ tres solapados se cancelan entre sí.
   `backend-tests-suite` con
   `gh api /repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs`. Anotar las tres cifras y su
   mediana — **Files:** `sdd/changes/backend-suite-runtime/measurement.md` §4. [R1.1]
-- [ ] 5.2 Misma operación ×3 sobre `sdd/backend-suite-runtime` con la fase 1 aplicada; registrar
+- [x] 5.2 Misma operación ×3 sobre `sdd/backend-suite-runtime` con la fase 1 aplicada; registrar
   las tres cifras, la mediana y el paso dominante identificado — **Files:** `measurement.md` §4.
   [R1.1, R2.1]
-- [ ] 5.3 Contrastar la mediana de 5.2 con el objetivo de **5m 00s**. Si lo cumple, dejarlo
+  *(2026-08-10, commit `ab71ada`, las tres verdes: **246s · 217s · 243s**, mediana **243s
+  (4m 03s)**. Runs `31397418050`, `31397960091`, `31398465326`. El paso dominante sigue siendo el
+  mismo —`Suite completa …`—, que es justo lo que se quería: ya no lo domina el DDL por test)*
+- [x] 5.3 Contrastar la mediana de 5.2 con el objetivo de **5m 00s**. Si lo cumple, dejarlo
   escrito con la fecha. Si **no**, registrar en `measurement.md` §4 el techo medido y su causa y
   **no** dar R2 por cumplido: la cifra objetivo se renegocia con el usuario (entrada en
   `BLOCKED.md` de tipo `decision` si el run no puede resolverlo). [R2.1, R2.3]
+  *(2026-08-10: **se cumple**. Mediana de la rama **243s** frente a los **300s** del objetivo, con
+  57s de margen, y **3,93×** sobre los 954s de `main`. No hace falta renegociar nada ni abrir
+  entrada en `BLOCKED.md`. La cifra se reajusta en 8.1 después de la fase 2)*
 
-## 6. Presupuesto de tiempo en el check (R4, D7)
+## 6. Presupuesto de tiempo en el check (R4, D7) <!-- panel: PASS 2026-08-10 -->
 
 Se hace después de §5 para poder declarar cifras con una medición detrás, y antes de §7 para que
 la fase 2 ya se mida contra el presupuesto.
 
-- [ ] 6.1 Cronometrar el paso de `pytest` y publicar su duración en segundos como **salida del
+- [x] 6.1 Cronometrar el paso de `pytest` y publicar su duración en segundos como **salida del
   job** `backend-tests-suite` — **Files:** `.github/workflows/backend-tests.yml` (paso «Suite
   completa …», bloque `outputs:` del job). El paso captura el código de salida de `pytest`,
   escribe la duración y **solo después** se rinde con ese código: la duración tiene que existir
   aunque la suite falle. [R4.2]
-- [ ] 6.2 Declarar las **dos cifras** como `env:` a nivel de workflow —presupuesto 5m 00s (aviso)
+- [x] 6.2 Declarar las **dos cifras** como `env:` a nivel de workflow —presupuesto 5m 00s (aviso)
   y techo 7m 30s (rojo), ajustables a lo que salga de 5.2— con un comentario que diga por qué son
   dos y no una — **Files:** `.github/workflows/backend-tests.yml`. Dato versionado y revisable en
   el diff, nunca un ajuste de la UI de GitHub (R4.1 y la norma IaC-first de `steering/infra.md`).
   [R4.1]
-- [ ] 6.3 Comparación en el job consolidador `backend-tests` (el que ya corre con `if: always()`):
+- [x] 6.3 Comparación en el job consolidador `backend-tests` (el que ya corre con `if: always()`):
   el resumen nombra **siempre** la duración medida y las dos declaradas; pasar el presupuesto
   emite un aviso destacado; pasar el techo pone el veredicto en `fail`; si la suite se ejecutó
   pero la duración **no llegó**, el resumen lo dice con esas palabras y el veredicto **no** es
   verde; si la suite se saltó por el camino corto no hay duración que comparar y eso **no** es una
   laguna — **Files:** `.github/workflows/backend-tests.yml`, paso «Consolidar el resultado del
   gate». [R4.2, R4.3]
-- [ ] 6.4 Ejercitar la lógica del consolidador en local antes de empujar: extraer el bloque `run:`
+- [x] 6.4 Ejercitar la lógica del consolidador en local antes de empujar: extraer el bloque `run:`
   y ejecutarlo con las combinaciones de entorno —duración por debajo del presupuesto, entre
   presupuesto y techo, por encima del techo, vacía, y camino corto sin suite— comprobando
   veredicto y texto en cada una. **Hecho** = las cinco salidas pegadas en el resumen del run.
   [R4.2, R4.3]
-- [ ] 6.5 Comprobar que **ninguna** ruta nueva impide que el check se publique: las tres ramas que
+  *(hechas **siete**, no cinco: a las cinco pedidas se añaden «suite en rojo con duración» y
+  «detección rota», que son las dos rutas preexistentes que el presupuesto podía estropear. El
+  cuerpo del script se **extrae del propio YAML** en cada pasada en vez de copiarse a mano, porque
+  una copia se queda vieja y entonces la comprobación miente. Resultados: 243s → `pass` sin aviso ·
+  380s → `pass` **con** aviso destacado · 500s → `fail` · duración vacía con suite verde → `fail` y
+  el resumen lo dice con esas palabras · camino corto → `pass` y «no aplica», sin laguna · suite en
+  rojo → `fail` y la duración se sigue nombrando · detección rota → `fail`. **Las siete escriben
+  resumen y veredicto**, que es lo que 6.5 exige.*
+  *Y el panel de QA encontró que esas siete no bastaban: las comparaciones `[ … -gt … ]` van en
+  posición de test de un `if`, **exenta de `set -e`**, así que un valor no numérico hacía fallar la
+  comparación y bash leía el fallo como «no pasa del techo» → verde silencioso, justo lo que R4.3
+  prohíbe. Dos entradas lo disparaban: `SUITE_SECONDS` no numérico, y `BUDGET`/`CEILING` vacíos con
+  una duración realmente por encima del techo. Se cierra validando los tres valores como enteros
+  **antes** de comparar —forma y rango, porque 30 dígitos pasan el filtro de caracteres y luego
+  desbordan la aritmética, que es la misma laguna un paso más adentro—. Comprobado sobre el script
+  extraído del YAML: `abc` → `fail` · `BUDGET=`/`CEILING=` con 500s → `fail` · 34 dígitos → `fail` ·
+  `1000000000` → `fail` · `999999999` → se compara bien · y las siete originales sin cambio)*
+- [x] 6.5 Comprobar que **ninguna** ruta nueva impide que el check se publique: las tres ramas que
   ya existían (detección rota, suite verde, suite omitida legítimamente) siguen produciendo
   resumen y veredicto, y el job `backend-tests` conserva `if: always()` y su nombre —
   **Files:** `.github/workflows/backend-tests.yml`. [R4.4]
