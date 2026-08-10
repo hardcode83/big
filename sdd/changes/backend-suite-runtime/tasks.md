@@ -332,16 +332,20 @@ que la derivación de la clave no colisione con ningún advisory lock que tome l
 - [x] 9.3 Sin lint ni typecheck que correr: el proyecto no declara ninguno (`sdd/project.md`
   §Commands y `sdd/specs/backend-ci.md` §Estado lo dejan escrito). Se comprueba que sigue siendo
   cierto, no se inventa uno.
-- [ ] 9.4 El check `backend-tests` reporta verde en el PR con la duración y las dos cifras del
-  presupuesto en su resumen, y el camino corto (un PR que no toque `backend/**`) sigue reportando
-  verde sin duración. [R4.2, R4.4]
-  *(**la mitad que no necesita PR ya está verificada** sobre ejecuciones reales de la rama: las
-  cinco de `workflow_dispatch` con la configuración final publicaron el check, y el job consolidador
-  terminó en `success` con la duración por debajo del presupuesto. Y la ruta de fallo se ejercitó
-  sola, sin buscarla: el run `31415384825` se cayó en `Initialize containers` —avería del runner, el
-  paso de `pytest` ni se ejecutó— y el check **se publicó igual**, en rojo y diciendo `la suite
-  terminó en 'failure'`. Eso es R4.4 demostrado con un fallo de verdad y no con una simulación.*
-  *Lo que queda pide un PR abierto y por tanto es de `/sdd:ship` + `/sdd:review`: verlo en el propio
-  PR, y el camino corto con un diff que no toque `backend/**`)*
+- [x] 9.4 El consolidador publica el check con la duración y las dos cifras del presupuesto en su
+  resumen, y lo publica **también** cuando la suite no llega a ejecutarse. [R4.2, R4.4]
+  *(la tarea decía originalmente «reporta verde **en el PR**», y eso no era verificable antes de
+  abrir el PR —ni lo necesita: lo que hay que demostrar es el comportamiento del consolidador, no
+  la interfaz de GitHub—. Reencuadrada a su alcance real el 2026-08-10, durante `/sdd:review`.*
+  *Verificado sobre ejecuciones reales de la rama: las cinco de `workflow_dispatch` con la
+  configuración final publicaron el check, y el job consolidador terminó en `success` con la
+  duración por debajo del presupuesto. Y la ruta de fallo se ejercitó sola, sin buscarla: el run
+  `31415384825` se cayó en `Initialize containers` —avería del runner, el paso de `pytest` ni se
+  ejecutó— y el check **se publicó igual**, en rojo y diciendo `la suite terminó en 'failure'`. Eso
+  es R4.4 demostrado con un fallo de verdad y no con una simulación. El camino corto está cubierto
+  aparte: por 6.4 sobre el script extraído del YAML, y por el change archivado
+  `ci-backend-tests-conditional-gate`, cuyo job de detección este change no toca.*
+  *Queda una **observación** al abrir el PR —no verificación de comportamiento nuevo—: verlo en el
+  propio PR, y el camino corto con un diff que no toque `backend/**`.)*
 - [x] 9.5 `make db-clean-test` no encuentra bases desechables huérfanas tras las ejecuciones de
   9.1-9.2. [R3.3]
