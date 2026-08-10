@@ -20,7 +20,10 @@ from app.tenants.infrastructure.models import TenantModel
 
 PASSWORD = "correct horse battery staple"
 
-from tests.conftest import TEST_BCRYPT_ROUNDS
+# Re-export root fixtures for package-level conftest files that historically import them from
+# this module. The canonical definitions live in tests.conftest so they are shared by all
+# domain test packages, but keeping these names available preserves pytest collection imports.
+from tests.conftest import TEST_BCRYPT_ROUNDS, api
 
 
 @pytest.fixture

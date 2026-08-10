@@ -85,6 +85,10 @@ services:
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv
+      # The provenance wiring regression reads the production workflow as an executable
+      # contract. Keep the host workflow visible read-only so the project test command works
+      # both locally and in CI without embedding a duplicate fixture in backend/.
+      - ./.github/workflows/deploy-dev.yml:/workspace/deploy-dev.yml:ro
     ports:
       # Publicado en todas las interfaces A PROPÓSITO, al contrario que `postgres` y
       # `redis`. Vale igual para el `3000` de `frontend`, y es ahí donde está el motivo:
