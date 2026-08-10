@@ -10,8 +10,9 @@ and stay stale in the other.
 
 from datetime import timedelta
 
-#: The four jobs of PRD §8.3 that `celery-jobs` owns, with the PRD's own cadences, plus the
-#: two that `access-notifications` adds.
+#: Every periodic job, with its cadence: the four of PRD §8.3 that `celery-jobs` owns, with
+#: the PRD's own numbers, plus the two that `access-notifications` adds and the one that
+#: `reservations-webhooks` adds.
 #:
 #: The other two of PRD §8.3 are deliberately absent: `generate_price_recommendations`
 #: belongs to `revenue` and `send_checkin_reminders` to `messaging-ai` /
@@ -22,6 +23,14 @@ from datetime import timedelta
 #: must happen — §14 delivers notifications, §15 gives every confirmed reservation an access
 #: record — and says nothing about what triggers either. Both are clock-driven and
 #: idempotent, so beat is where they belong; the four original names are untouched.
+#:
+#: **`process_webhook_events` is not in §8.3 either**, and joins from `reservations-webhooks`
+#: (its D10). Its 60 s is a security parameter, not a tuning knob: rule 12(d) of
+#: `steering/security.md` requires the outbound API traffic to be decoupled from the volume of
+#: incoming webhooks, and what makes that true is that the job coalesces a whole tick's notices
+#: into one call per destination — the cadence IS the ceiling on outbound calls. Making it
+#: shorter raises that ceiling. 60 s leaves room against the measured limit of one cycle every
+#: 30 s per account (`specs/pms-beds24-spike.md`).
 CADENCES: dict[str, timedelta] = {
     "check_checkin_windows": timedelta(minutes=5),
     "process_checkouts": timedelta(minutes=5),
@@ -34,6 +43,7 @@ CADENCES: dict[str, timedelta] = {
     # Every five minutes, like the other reservation-driven jobs. Check-in is days away from
     # the confirmation, so the latency is irrelevant and the reconciliation is cheap.
     "provision_access_records": timedelta(minutes=5),
+    "process_webhook_events": timedelta(seconds=60),
 }
 
 

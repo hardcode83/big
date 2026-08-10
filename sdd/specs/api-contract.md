@@ -194,13 +194,16 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 44 de las 48 operaciones lo
-  referencian. Las cuatro restantes son `login`, `refresh`, `GET /health` y
-  `GET /api/v1/cleaning-photos/{photo_id}` — esta última la única anónima que **sirve datos de un
-  tenant**: no puede exigir token porque un navegador que resuelve un `<img src>` no manda
-  cabecera `Authorization`, y su autorización es la firma HMAC de su query string. Está nombrada
-  con su verbo en el allowlist de `tests/test_route_authorization.py`, que es el diff visible que
-  ese allowlist existe para forzar.
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 46 de las 51 operaciones lo
+  referencian. Las cinco restantes son `login`, `refresh`, `GET /health`,
+  `GET /api/v1/cleaning-photos/{photo_id}` y
+  `POST /api/v1/webhooks/{provider}/{webhook_token}`. Las dos últimas son las anónimas que
+  **tocan datos de un tenant**, y cada una lo resuelve por su lado porque el llamante no puede
+  mandar cabecera `Authorization`: la de fotos, con la firma HMAC de su query string, porque un
+  navegador que resuelve un `<img src>` no la manda; la de webhooks, con el token opaco de la ruta
+  más el secreto de cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es
+  el PMS y no tiene sesión. Las cinco están nombradas con su verbo en el allowlist de
+  `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para forzar.
 
 ## Key files
 

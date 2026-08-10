@@ -28,7 +28,7 @@ leak. CI runs `alembic upgrade head`, `alembic check` and `alembic downgrade bas
 directions are verified on every push.
 
 Revision ID: a7c4e91b2d05
-Revises: f2b9c7a41d38
+Revises: a4d17e83b6c1
 Create Date: 2026-08-09 00:00:00.000000
 
 """
@@ -40,7 +40,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'a7c4e91b2d05'
-down_revision: Union[str, Sequence[str], None] = 'f2b9c7a41d38'
+down_revision: Union[str, Sequence[str], None] = 'a4d17e83b6c1'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

@@ -6,6 +6,30 @@ class TimelineEventValidationError(TimelineDomainError):
     pass
 
 
+class PropertyNotFoundError(TimelineDomainError):
+    """The property whose timeline was asked for is not this tenant's (R4.5).
+
+    Its own class rather than an import from `app/properties/domain/exceptions.py`, which
+    is the convention `cleaning` and `reservations` already follow: each module owns its
+    error hierarchy so that `api/errors.py` maps one base class and nothing leaks in from a
+    neighbour's.
+
+    **Raised identically for "does not exist" and "belongs to another tenant"**, because
+    `PropertyRepository.get` returns `None` for both (design D11) — so the caller cannot
+    tell the two apart from the response, which is the point.
+    """
+
+
+class TimelineFilterValidationError(TimelineDomainError):
+    """The requested filter combination is a contradiction (`dashboard-api` R4.2).
+
+    A domain error and not a router check, for the reason `ReservationFilters` records:
+    `steering/backend.md` says "la lógica nunca vive en el router", so any future caller —
+    a dashboard aggregate, a report — gets the same answer instead of silently receiving
+    zero rows.
+    """
+
+
 class TimelineMetadataNotSerialisableError(TimelineDomainError):
     """`metadata` holds a value the `JSONB` column cannot store (design D2).
 

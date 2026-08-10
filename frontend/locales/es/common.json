@@ -4,5 +4,16 @@
   "version": {
     "label": "Versión desplegada",
     "unknown": "versión desconocida"
+  },
+  "provenance": {
+    "open": "Procedencia del build",
+    "title": "Procedencia del build",
+    "loading": "Cargando…",
+    "error": "La procedencia no está disponible.",
+    "unknown": "Procedencia desconocida.",
+    "repository": "Repositorio",
+    "pullRequest": "Pull request",
+    "commit": "Commit",
+    "actionsRun": "Ejecución de Actions"
   }
 }

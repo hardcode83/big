@@ -49,6 +49,15 @@ ANONYMOUS_ENDPOINTS = {
     # UPDATE (R3.2), and one indistinguishable error for every failure (R3.3).
     ("POST", "/api/v1/auth/reset-password"),
     ("GET", "/api/v1/cleaning-photos/{photo_id}"),
+    # `reservations-webhooks`: anonymous because the route token IS the credential (rule 12(b) of
+    # `steering/security.md`), paired with the provider's static per-tenant header (12(a)). A
+    # provider cannot hold a JWT, and ADR 0006 measured that none of the eleven evaluated
+    # providers signs its webhooks — so there is nothing else to authenticate with.
+    #
+    # It is exempt from declaring a permission, NOT from authenticating: the check moved into the
+    # use case, where `tests/integrations/test_webhook_receipt.py` asserts that an unknown token,
+    # an unknown provider, a missing header and a wrong one are indistinguishable.
+    ("POST", "/api/v1/webhooks/{provider}/{webhook_token}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
@@ -288,9 +297,19 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     and by `cleaning` with the checklist template path (two methods), asserted the same way
     in `tests/cleaning/test_templates_api.py`; by `cleaning-photos-storage` with the photo
     upload path, whose `EXECUTE_CLEANING_TASKS` permission and cleaner-owns-the-task rule are
-    asserted in `tests/cleaning/test_photos_api.py`; and by `access-notifications` with the five
+    asserted in `tests/cleaning/test_photos_api.py`; by `access-notifications` with the five
     access-record paths and the in-app inbox, asserted per role in
-    `tests/access/test_api.py` and `tests/notifications/test_api.py`.
+    `tests/access/test_api.py` and `tests/notifications/test_api.py`; and by
+    `dashboard-api` with four read paths: the timeline, the property state, the dashboard
+    collection and the property aggregate, asserted per role in `tests/timeline/test_api.py`,
+    `tests/properties/test_state_api.py` and `tests/dashboard/test_api.py`.
+
+    `reservations-webhooks` with the two webhook-endpoint paths (one method each), asserted per
+    role in `tests/integrations/test_webhook_endpoints_api.py`.
+
+    The webhook **receiver** of that last change is deliberately not here and will not be: it is
+    anonymous by design (rule 12(b) — the route token is the credential), so it joins
+    `ANONYMOUS_ENDPOINTS` above, which is the visible diff this module exists to force.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -325,12 +344,19 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/integrations/pms/import-csv",
+        "/api/v1/integrations/webhook-endpoints",
+        "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate",
         "/api/v1/users",
         "/api/v1/users/{user_id}",
         "/api/v1/users/{user_id}/reset-password",
         "/api/v1/tenants/{tenant_id}",
         "/api/v1/properties",
         "/api/v1/properties/{property_id}",
+        "/api/v1/properties/{property_id}/state",
+        "/api/v1/timeline/{property_id}",
+        "/api/v1/dashboard/properties",
+        "/api/v1/properties/{property_id}/dashboard",
+        "/api/v1/provenance",
     }
 
 

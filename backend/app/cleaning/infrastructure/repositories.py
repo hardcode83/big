@@ -49,6 +49,7 @@ from app.cleaning.domain.repositories import (
     SignedPhotoLocation,
     TemplatePage,
 )
+from app.cleaning.domain.value_objects import CleaningTaskSummary
 from app.cleaning.infrastructure.models import (
     CleaningChecklistCompletionModel,
     CleaningChecklistTemplateModel,
@@ -169,6 +170,38 @@ class SqlAlchemyCleaningTaskRepository:
             )
         )
         return [_to_task(model) for model in rows.scalars()]
+
+    async def list_live_for_properties(
+        self, tenant_id: uuid.UUID, property_ids: Sequence[uuid.UUID]
+    ) -> Sequence[CleaningTaskSummary]:
+        """One statement for N properties (`dashboard-api` R1.7).
+
+        The `IN` is what keeps the dashboard collection at a fixed query count; the caller
+        groups the result by `property_id`. An empty batch short-circuits rather than
+        emitting `IN ()`, which is neither valid nor meaningful.
+
+        **Selects three columns, not the row.** `select(CleaningTaskModel)` would read
+        `notes` — free text, and the hazard `api/schemas.py:8-13` already names for this
+        entity — plus `assigned_cleaner_id` and `validated_by_user_id`, only for the
+        projection to drop them. Naming the columns means they never leave Postgres.
+        """
+        if not property_ids:
+            return []
+        rows = await self._session.execute(
+            select(
+                CleaningTaskModel.id,
+                CleaningTaskModel.property_id,
+                CleaningTaskModel.status,
+            ).where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningTaskModel.property_id.in_(list(property_ids)),
+                CleaningTaskModel.status.in_(sorted(LIVE_STATUSES, key=lambda s: s.value)),
+            )
+        )
+        return [
+            CleaningTaskSummary(id=row.id, property_id=row.property_id, status=row.status)
+            for row in rows.all()
+        ]
 
     async def list_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID

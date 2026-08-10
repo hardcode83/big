@@ -73,6 +73,17 @@ The frontend is a Next.js App Router application (TypeScript strict) that provid
 - THE SYSTEM SHALL keep authentication tokens out of persistent browser storage and SHALL keep `BACKEND_INTERNAL_URL` server-only; the public runtime configuration may expose only the browser-facing `apiBaseUrl`.
 - THE SYSTEM SHALL treat client-side guards as UX protection only. The frontend SHALL NOT implement business authorization, RBAC or tenant-isolation enforcement; the backend remains authoritative.
 
+### Authenticated build provenance
+
+- WHEN an authenticated workspace operator opens the provenance panel, THE SYSTEM SHALL request
+  `/api/v1/provenance` through the centralized API client and show the public version plus the
+  Pull Request, commit and Actions links only when the backend returns a complete provenance block.
+- THE SYSTEM SHALL keep provenance in memory, fetch it only on panel open, and provide localized
+  loading, error and unknown states without rendering partial links.
+- THE SYSTEM SHALL keep the panel out of `RootLayout`, `PublicShell`, `GuestShell`, field shells,
+  `/login` and `/guest/[token]`; private repository URL, Pull Request number, full SHA and run ID
+  SHALL NOT enter the public runtime snapshot or anonymous artifacts.
+
 ### Testing and documentation
 
 - THE SYSTEM SHALL provide a Vitest + Testing Library + jest-dom + axe test setup, colocated tests, and versioned conventions documentation (`frontend/README.md`).

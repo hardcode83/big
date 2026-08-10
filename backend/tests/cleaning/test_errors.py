@@ -118,10 +118,15 @@ def test_the_storage_failure_is_a_502_and_not_a_500():
 
 def test_subclasses_come_before_their_base():
     """`_MAPPING` is ordered and first match wins, so a base before its subclass would
-    swallow it. Checked structurally rather than by eyeballing the literal."""
+    swallow it: the base's row matches first and the subclass never gets its own status.
+
+    So the forbidden arrangement is a subclass placed *after* its base — for every pair
+    (i, j) with i < j, the later row must not be a subclass of the earlier one. Checked
+    structurally rather than by eyeballing the literal.
+    """
     for index, (error_class, _, _) in enumerate(_MAPPING):
         for later_class, _, _ in _MAPPING[index + 1 :]:
-            assert not issubclass(error_class, later_class) or error_class is later_class
+            assert not issubclass(later_class, error_class) or later_class is error_class
 
 
 def test_an_unmapped_cleaning_error_falls_to_500():

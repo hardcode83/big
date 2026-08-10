@@ -39,13 +39,14 @@ from app.core import crypto
 from app.core.unit_of_work import UnitOfWork
 from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property
-from app.properties.domain.enums import PropertyStatus
+from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.exceptions import PropertyNotFoundError
 from app.properties.domain.repositories import (
     PATCHABLE_PROPERTY_FIELDS,
     Page,
     PropertyFilters,
     PropertyRepository,
+    PropertyStateTransitionRepository,
 )
 
 # Free-text columns whose contents are recorded only as "it changed" (design D7). They are the
@@ -270,6 +271,58 @@ class GetPropertyUseCase:
         if property is None:
             raise PropertyNotFoundError("Property does not exist")
         return property
+
+
+@dataclass(frozen=True)
+class PropertyState:
+    """What `GET /api/v1/properties/{id}/state` answers (`dashboard-api` R3.1).
+
+    Two values that live in two different tables: the state is a column of `properties`,
+    and the instant it began is the `created_at` of the newest
+    `property_state_transitions` row. `last_transition_at` is `None` for a property that
+    has never moved — it was created `VACANT_READY` by the DDL default and creation is not
+    a transition, so there is genuinely no instant to report rather than a missing one.
+    """
+
+    current_operational_state: PropertyOperationalState
+    last_transition_at: datetime | None
+
+
+class GetPropertyStateUseCase:
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        transitions: PropertyStateTransitionRepository,
+    ) -> None:
+        self._properties = properties
+        self._transitions = transitions
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> PropertyState:
+        """The stored state and when it began — **read, never recomputed** (R3.2).
+
+        `steering/backend.md` forbids bypassing `PropertyStateMachine`, and R3.2 spells out
+        the read-side half of that: "SHALL NOT reimplementar la resolución de estado en la
+        capa de lectura". So this reports `properties.current_operational_state` as the
+        machine last left it. It deliberately does NOT consult `ContextualStateResolver`:
+        that answers "what state would this property be in now", which is a different
+        question, and answering it here would make the endpoint disagree with every other
+        reader of the same column.
+
+        The two reads are consistent by construction rather than by luck: every writer of
+        `current_operational_state` persists its transition row in the same transaction
+        (rule 9 of `steering/security.md`).
+        """
+        property = await self._properties.get(tenant_id, property_id)
+        if property is None:
+            raise PropertyNotFoundError("Property does not exist")
+        last = await self._transitions.last_for_property(tenant_id, property_id)
+        return PropertyState(
+            current_operational_state=property.current_operational_state,
+            last_transition_at=last.created_at if last is not None else None,
+        )
 
 
 class UpdatePropertyUseCase:

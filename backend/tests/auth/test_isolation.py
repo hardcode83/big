@@ -42,6 +42,7 @@ from app.auth.infrastructure.repositories import (
 )
 from app.auth.infrastructure.token_codec import JwtTokenCodec
 from app.core.db import TENANT_ID_SESSION_KEY, get_db_session
+from app.core.i18n import Locale
 from app.main import create_app
 from app.tenants.domain.enums import TenantStatus
 from tests.auth.conftest import TEST_BCRYPT_ROUNDS, insert_tenant, insert_user, utc_now
@@ -376,6 +377,40 @@ async def test_the_request_context_takes_the_role_from_the_database(
     assert codec.decode_access(token).role is UserRole.TENANT_OWNER, (
         "the token really did claim a different role, so this test is not vacuous"
     )
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("stored", "expected"),
+    [("es", Locale.ES), ("en", Locale.EN), ("fr", Locale.ES), ("", Locale.ES)],
+)
+async def test_the_request_context_carries_the_users_language(
+    db_session, tenant_a, codec, stored: str, expected: Locale
+) -> None:
+    """`dashboard-api` design D3: the language rides the context, at zero extra queries.
+
+    `users.preferred_language` is `String(5)` with no check constraint, so a value we do
+    not ship must degrade to `es` here rather than reach a renderer.
+    """
+    from app.auth.api.dependencies import get_authenticated_request
+    from fastapi.security import HTTPAuthorizationCredentials
+
+    user = await insert_user(db_session, tenant=tenant_a, preferred_language=stored)
+    token = codec.issue_access(
+        user_id=user.id,
+        tenant_id=tenant_a.id,
+        role=user.role,
+        family_id=uuid.uuid4(),
+        now=utc_now(),
+    )
+
+    authenticated = await get_authenticated_request(
+        session=db_session,
+        codec=codec,
+        credentials=HTTPAuthorizationCredentials(scheme="Bearer", credentials=token),
+    )
+
+    assert authenticated.context.preferred_language is expected
 
 
 @pytest.mark.asyncio

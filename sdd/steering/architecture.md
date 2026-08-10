@@ -4,11 +4,21 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,hexagonal-dominios,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png` y `docs/diagrams/2026-08-10_autohost-er-entidades.png` (regenerado en `auth-account-recovery` al entrar `password_reset_tokens` y `users.must_change_password`: **29 entidades y 72 relaciones**, contando una relación por **columna con clave ajena** — son 70 si se cuentan pares de tablas distintos, porque dos tablas se relacionan por dos columnas en dos casos. La regla de recuento se escribe aquí porque antes no estaba: la cifra anterior decía «28 entidades, 67 relaciones» y con esta regla el esquema de entonces daba 70, así que las dos cifras no eran comparables y no había forma de saber cuál contaba qué. Los PNG anteriores —`2026-08-06_...`, `2026-07-31_...` y `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real— se fueron borrando al sustituirse. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él).
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-09_autohost-er-entidades.png`.
+
+El de entidades se regeneró en `reservations-webhooks` al entrar `webhook_endpoints`: **29 entidades, 71 relaciones**. El anterior, `2026-08-06_...`, se borró; aquel salió de `pms-provider-resolution` con 28 y 67 al entrar `pms_credentials` y `properties.pms_provider`, y a su vez había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
+
+El hexagonal se regeneró en `dashboard-api` (el `2026-07-13_...` se borró). Dibujaba **trece** cajas de dominio y ya le faltaban `reviews` y `audit` desde `domain-foundation-financial`; ahora dibuja **dieciséis**, con `dashboard` marcado aparte porque es el único de solo lectura y sin `infrastructure/` propia.
+
+**Dieciséis cajas y diecisiete dominios no se contradicen**, y conviene decirlo porque la cuenta no cuadra a simple vista (el panel de documentación de `dashboard-api` la encontró sin cuadrar en una redacción anterior de este párrafo): el 17.º es **`integrations`**, que el diagrama sitúa en el anillo de adaptadores y no dentro del hexágono, porque eso es exactamente lo que es — el borde por el que se habla con sistemas externos. El diagrama anterior ya lo dibujaba así. `README.md` cuenta diecisiete porque cuenta directorios bajo `backend/app/`.
+
+Al contrario que el de entidades, éste **no** se genera desde el código: describe una decisión de arquitectura, así que lo actualiza a mano el change que la cambia.
 
 ## Forma del sistema
 
 **Monolito modular** con arquitectura hexagonal, separado por dominios de negocio (PRD §3.2): `auth`, `tenants`, `properties`, `reservations`, `guests`, `cleaning`, `maintenance`, `messaging`, `access`, `pricing`, `statements`, `notifications`, `timeline`, `integrations`. Sin microservicios en MVP; el código debe permitir extraer servicios en el futuro.
+
+`integrations` está en esa lista y es un dominio de pleno derecho en el código —tiene su directorio bajo `backend/app/`, y por eso `README.md` lo cuenta—, pero el diagrama hexagonal lo dibuja **en el anillo de adaptadores y no dentro del hexágono**, porque es el borde por el que se habla con sistemas externos y no una regla de negocio que proteger. Las dos cosas son ciertas y describen ejes distintos: dónde vive el código y qué papel juega. Se dice aquí porque leídas seguidas parecen contradecirse (panel de documentación de `dashboard-api`).
 
 Dos dominios más que **no** están en la lista de PRD §3.2, añadidos en `domain-foundation-financial`: `reviews` (PRD §7.20-7.21) y `audit` (§7.25). Se descartó plegar las reviews en `statements` —mezclaría reporting financiero con contenido de OTAs— y alojar `AuditLog` en `app/core/`, que es infraestructura compartida y no aloja entidades de negocio. La divergencia se justifica en que `audit` es transversal exactamente igual que `timeline`, que el propio §3.2 ya lista como dominio de pleno derecho.
 

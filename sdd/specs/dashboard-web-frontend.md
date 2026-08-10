@@ -7,9 +7,12 @@ property-cards overview (`/dashboard`, §9.1) and the property detail page
 (`/properties/[id]`, §9.2) with its per-property timeline (§10). It renders
 inside the existing WorkspaceShell and consumes all data through a typed
 data-access boundary (`DashboardDataSource`) whose only implementation today is a
-mock with fixed data for the two dev properties (REDES11, PAJARITOS8), because the
-aggregate dashboard backend does not exist yet. The boundary is shaped so that a
-future HTTP implementation replaces the mock without changing the UI.
+mock with fixed data for the two dev properties (REDES11, PAJARITOS8). The
+aggregate backend it was shaped against **now exists** — `dashboard-api` shipped
+the four read endpoints (see `specs/dashboard-api.md`) — so what remains is the
+swap itself: replacing the mock at the composition point with an HTTP
+implementation, which is `dashboard-web`'s half and changes no UI, hook or query
+key.
 
 ## Requirements
 
@@ -74,9 +77,10 @@ future HTTP implementation replaces the mock without changing the UI.
 
 - THE SYSTEM SHALL define a typed `DashboardDataSource` interface whose methods
   return DTOs replicating the real API contract (PRD §23 data envelope, error
-  envelope surfaced as `ApiError`, ISO-8601 UTC dates), aligned with
-  `GET /api/v1/properties`, `/properties/{id}`, `/properties/{id}/dashboard`, and
-  `/timeline/{property_id}`.
+  envelope surfaced as `ApiError`, ISO-8601 UTC dates), aligned with the routes
+  `dashboard-api` now serves: `GET /api/v1/dashboard/properties` (the cards
+  collection), `/api/v1/properties/{id}/dashboard`, `/api/v1/properties/{id}/state`
+  and `/api/v1/timeline/{property_id}`.
 - THE SYSTEM SHALL resolve the data source through a single composition point, so
   that the current `MockDashboardSource` (fixed REDES11/PAJARITOS8 data, isolated
   in a dedicated module) can be replaced by an HTTP implementation without
@@ -112,14 +116,20 @@ future HTTP implementation replaces the mock without changing the UI.
 
 ## Explicit debt (ASSUMPTION)
 
-- The mock is a placeholder for the app's own aggregate dashboard backend
-  (roadmap `dashboard-web`); replacing `MockDashboardSource` with an HTTP
-  implementation at the composition point is tracked debt, marked `ASSUMPTION` in
-  code. This deliberately inverts the API-first norm for this slice.
+- The mock stands in for the app's own aggregate dashboard backend, which
+  `dashboard-api` delivered (roadmap `dashboard-api`, `specs/dashboard-api.md`);
+  replacing `MockDashboardSource` with an HTTP implementation at the composition
+  point is tracked debt owned by roadmap `dashboard-web`, marked `ASSUMPTION` in
+  code. This deliberately inverted the API-first norm for this slice — the
+  inversion is now resolved on the backend side and outstanding only on the
+  frontend's.
 - `tenantId` comes from a single centralized dev constant (`DEV_TENANT_ID`) until
   session-derived tenancy exists (roadmap `auth-tenancy`); it is a non-sensitive
   placeholder, not a credential.
-- The timeline renders fixed data; real-time streaming arrives with the backend.
+- The timeline renders fixed data until the HTTP swap. Real-time streaming is
+  still absent on both sides: `dashboard-api` delivered the timeline as a
+  filtered, paginated **read**, and explicitly left push (WebSocket/SSE) out of
+  scope, so PRD §9.2's "tiempo real" is not met by either half yet.
 
 ## Key files
 

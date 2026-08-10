@@ -110,9 +110,10 @@ describe("build identity contract", () => {
     const compose = readFileSync(join(process.cwd(), "..", "docker-compose.yml"), "utf8");
     const provenanceStep = workflow.match(/id: compose([\s\S]*?)\n\n  # --- Build/)?.[1] ?? "";
 
-    expect(workflow).toContain("run: node frontend/scripts/build-identity.mjs");
-    expect(provenanceStep).not.toMatch(/run:\s*\|/);
-    expect(provenanceStep).not.toMatch(/version=.*GITHUB_SHA|commit_short=.*GITHUB_SHA/);
+    expect(provenanceStep).toContain("node frontend/scripts/build-identity.mjs");
+    expect(provenanceStep).toContain('echo "repository_url=$repository_url"');
+    expect(provenanceStep).toContain("extract-pr.sh");
+    expect(provenanceStep).not.toContain("api.github.com");
     expect(workflow).toContain("NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}");
     expect(workflow).toContain("NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}");
     expect(compose).toContain("NEXT_PUBLIC_APP_VERSION: ${NEXT_PUBLIC_APP_VERSION:-local}");

@@ -130,6 +130,53 @@ def test_only_the_owner_administers_users_or_settings() -> None:
         assert allowed == {UserRole.TENANT_OWNER}
 
 
+def test_only_owner_and_property_manager_read_build_provenance() -> None:
+    allowed = {
+        role for role in UserRole if is_allowed(role, Permission.READ_BUILD_PROVENANCE)
+    }
+
+    assert allowed == {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
+# The permissions that gate, in their own module, facts the timeline also reveals by the
+# mere existence of an entry (`dashboard-api`, security panel of section 2).
+_IMPLIED_BY_READING_A_TIMELINE = (
+    Permission.READ_RESERVATIONS,
+    Permission.READ_CLEANING_TASKS,
+    Permission.READ_ACCESS_RECORDS,
+    Permission.READ_GUEST_DOCUMENTS,
+)
+
+
+@pytest.mark.parametrize(
+    "implied", _IMPLIED_BY_READING_A_TIMELINE, ids=lambda p: p.value
+)
+def test_reading_properties_implies_every_permission_a_timeline_entry_can_reveal(
+    implied: Permission,
+) -> None:
+    """`GET /api/v1/timeline/{property_id}` is gated by `READ_PROPERTIES` alone, and that
+    is only sound while this holds.
+
+    An entry carries no `metadata` (R4.3), but its `event_type` and title do announce that
+    something happened in another domain — "Access instructions delivered", "Legal
+    registration submitted", "Cleaning completed". Reading those same facts through the
+    `access`, `guests` or `cleaning` modules needs a permission of its own, so a role that
+    held `READ_PROPERTIES` *without* one of these would learn through the timeline what it
+    was not granted elsewhere. That is design D10's "agregar no puede conceder" applied to
+    a read that is an aggregate in everything but name.
+
+    Today the alignment holds by construction — `TENANT_OWNER` and `PROPERTY_MANAGER` have
+    all of them, and no other role has `READ_PROPERTIES`. It held **incidentally** until
+    this test, which is the whole point: the security panel found that nothing would have
+    noticed a future "read-only auditor" role scoped to properties. If this test fails,
+    do not delete it — either grant the missing permission or make the timeline omit the
+    entries whose source the caller cannot read.
+    """
+    for role in UserRole:
+        if is_allowed(role, Permission.READ_PROPERTIES):
+            assert is_allowed(role, implied), (
+                f"{role.value} can read a property's timeline but not {implied.value}"
+            )
+
+
 def test_no_permission_is_granted_to_every_role_by_accident() -> None:
     """Catches a future `is_allowed` that always answers True, without a stub.
 

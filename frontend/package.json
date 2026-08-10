@@ -9,6 +9,7 @@
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
+    "test:public-artifacts": "node scripts/test-public-artifacts.mjs",
     "test:entrypoint": "sh devops/test-entrypoint.sh",
     "api:generate": "node scripts/generate-api-types.mjs",
     "api:check": "node scripts/generate-api-types.mjs --check"

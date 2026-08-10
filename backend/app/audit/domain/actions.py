@@ -22,6 +22,12 @@ ENTITY_TENANT_CONFIG = "TENANT_CONFIG"
 # credential spread across property columns would have nothing to point at (ADR 0006, obligation
 # 4, and `pms-provider-resolution` design D4).
 ENTITY_PMS_CREDENTIAL = "PMS_CREDENTIAL"
+# A row of `webhook_endpoints`: the material WE mint for a provider to authenticate itself with,
+# not a credential a provider gave us. A distinct entity type for the same reason it is a distinct
+# table (`reservations-webhooks` design D2) — the two have opposite exposure contracts, and one
+# spelling for both would make "who read a provider credential" and "who minted an endpoint
+# secret" the same audit question over the same index.
+ENTITY_WEBHOOK_ENDPOINT = "WEBHOOK_ENDPOINT"
 # A row of `properties` (`properties-crud` design D7). Rule 9's enumeration names "estados de
 # propiedad" and not the property itself, so creating one or editing its address was invisible
 # until this change. Audited anyway, on the precedent rule 9 already set for `TenantConfig`: the
@@ -89,6 +95,28 @@ TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 PMS_CREDENTIAL_READ = "PMS_CREDENTIAL_READ"
 PMS_CREDENTIAL_ROTATED = "PMS_CREDENTIAL_ROTATED"
 
+# No `WEBHOOK_ENDPOINT_READ` counterpart to `PMS_CREDENTIAL_READ` **today**, and the asymmetry is
+# the point. The credential read is audited because ADR 0006 obligation 4 requires it and because
+# each read decrypts. Here the equivalent "read" happens on **every incoming webhook** — an
+# anonymous, internet-facing request at provider cadence — so auditing it would let an outsider
+# write rows to `audit_logs` at will, which is a denial-of-service dressed as diligence.
+#
+# **This comment is not where that exemption is granted, and it cannot be.** Rule 3(b) of
+# `steering/security.md` requires the read of a provider credential to be audited, and rule 9 says
+# an exception to it arrives "con una entrada nueva y nombrada aquí, aprobada en el design del
+# change que la pida" — steering, not a comment. It went through that route: design D15, approved by
+# Jose on 2026-08-08, and written as the **third named exception of rule 9**, which is where it
+# lives. This comment cites it. The security panel of section 1 caught that the route had been
+# skipped, which is the only reason it exists at all.
+#
+# Its scope is narrow and stays narrow: it covers the **anonymous receiving path only**. Rule 9 is
+# explicit that it "no exime la lectura con actor humano", so a support command or operator tool
+# that reads this material brings its own `WEBHOOK_ENDPOINT_READ` when it lands. Not added now,
+# because an action for an operation nothing performs is the speculative vocabulary this module's
+# docstring argues against — the same reasoning rule 9 applies to `SCHEDULER`.
+WEBHOOK_ENDPOINT_CREATED = "WEBHOOK_ENDPOINT_CREATED"
+WEBHOOK_ENDPOINT_ROTATED = "WEBHOOK_ENDPOINT_ROTATED"
+
 # There is no `PROPERTY_DELETED`: retirement is `status = INACTIVE`, so it arrives as an update
 # (`properties-crud` R3.4, and `domain-foundation-core`: "el PRD modela el borrado vía `status`,
 # nunca `DELETE` real"). An action for an operation the API does not offer would be the
@@ -146,6 +174,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_TENANT,
         ENTITY_TENANT_CONFIG,
         ENTITY_PMS_CREDENTIAL,
+        ENTITY_WEBHOOK_ENDPOINT,
         ENTITY_PROPERTY,
 
         ENTITY_CLEANING_TASK,
@@ -169,6 +198,8 @@ ACTIONS = frozenset(
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,
         PMS_CREDENTIAL_ROTATED,
+        WEBHOOK_ENDPOINT_CREATED,
+        WEBHOOK_ENDPOINT_ROTATED,
         PROPERTY_CREATED,
         PROPERTY_UPDATED,
 

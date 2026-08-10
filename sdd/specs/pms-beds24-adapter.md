@@ -8,8 +8,12 @@ declarada como `BEDS24` sincroniza sus reservas contra la API V2 del proveedor, 
 credencial de cuenta cifrada que resuelve `pms-provider-resolution`.
 
 Es **enteramente de lectura**: el puerto declara `list_reservations` y `get_reservation`, ambos
-`GET`. La mensajería llega con `beds24-messaging-adapter` y la recepción de webhooks con
-`reservations-webhooks`.
+`GET`. La mensajería llega con `beds24-messaging-adapter`. La recepción de webhooks **ya existe**,
+en `specs/reservations-webhooks.md`, y no cambia esa naturaleza: el aviso no es fuente de verdad, así
+que lo que un webhook provoca es exactamente la `list_reservations` de este adapter, coalescida por
+destino. Lo que sigue sin existir es la **suscripción** de webhooks en el proveedor —Beds24 la sirve
+por API (`POST /properties`), medido en `docs/beds24-spike.md`—: es de
+`beds24-webhook-cutover-measurement`.
 
 Operación y runbook: [`docs/beds24-adapter.md`](../../docs/beds24-adapter.md). Las mediciones que
 lo sostienen: [`docs/beds24-spike.md`](../../docs/beds24-spike.md).
@@ -126,12 +130,21 @@ lo sostienen: [`docs/beds24-spike.md`](../../docs/beds24-spike.md).
   por test contra la exportación con nombre del anonimizador, incluida la comprobación de que esa
   lista es la que el anonimizador aplica de verdad.
 
-**Frontera declarada**: el texto libre que un mapeo promueve a un campo **persistido** —hoy las
-peticiones especiales de la reserva— queda **fuera** del alcance del scrubber. No hay ninguna
-observación medida de datos de tarjeta en ese campo, y detectarlos dentro de texto libre exige una
-comprobación con falsos positivos reales sobre un campo que el personal de limpieza lee. **Se
-vuelve exigible** en cuanto exista una escritura no autenticada desde internet sobre esa misma
-columna, que es lo que traen `reservations-webhooks` y `beds24-messaging-adapter`.
+**Frontera declarada, y ya cumplida**: el texto libre que un mapeo promueve a un campo
+**persistido** —las peticiones especiales de la reserva— estuvo **fuera** del alcance del scrubber
+mientras no hubo ninguna observación medida de datos de tarjeta en ese campo, porque detectarlos
+dentro de texto libre exige una comprobación con falsos positivos reales sobre un campo que el
+personal de limpieza lee. La condición que lo hacía exigible —una escritura no autenticada desde
+internet sobre esa misma columna— **se cumplió con `reservations-webhooks`** (2026-08-09), así que
+`special_requests` ya no está fuera:
+
+- WHEN un mapeo de fuente externa —webhook o sondeo del PMS— promueve texto libre a
+  `reservations.special_requests`, THE SYSTEM SHALL redactar las rachas de **13 dígitos o más**,
+  ignorando los separadores Unicode de espacio y guion, antes de persistirlo. El detalle del
+  umbral, los separadores y los bordes aceptados vive en `specs/reservations-webhooks.md`, que es
+  quien lo trajo; aquí solo consta que este mapeo lo aplica.
+- THE SYSTEM SHALL dejar intacto lo que una persona escribe por la API: el alcance es la fuente
+  externa, no la columna.
 
 ### Resolución y auditoría
 

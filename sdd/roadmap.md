@@ -58,9 +58,10 @@ Categorías:
 - [x] frontend-api-contract-consumer — [FE] consumir en el frontend el `openapi.json` versionado producido por `api-contract-export` … → changes/archive/2026-08-03-frontend-api-contract-consumer/
 - [x] ci-backend-tests-conditional-gate — [INFRA] **dejar de pagar 7 minutos por no ejecutar nada**. `backend-tests` tarda ~7m05s por Pull Request y otra vez por push a `main`, y el 89 % es un solo paso (`pytest -q -rs` = 6m15s, medido el 2026-08-03) … → changes/archive/2026-08-03-ci-backend-tests-conditional-gate/
 - [ ] rule11-ownership-single-source — [TECH] **la regla 11 declara que su contrato vive en un solo sitio, pero la *propiedad* de cada sumidero está reafirmada en seis artefactos y cada revisión encuentra uno más desincronizado**.
-- [ ] backend-suite-runtime — [TECH] **atacar los 6m15s de la suite del backend**, que es la única palanca que ayuda en los Pull Request que **sí** tocan backend (el gate condicional de `ci-backend-tests-conditional-gate` solo ahorra en los que no).
+- [x] backend-suite-runtime — [TECH] **atacar los 6m15s de la suite del backend**, que es la única palanca que ayuda en los Pull Request que **sí** tocan backend (el gate condicional de `ci-backend-tests-conditional-gate` solo ahorra en los que no). → changes/archive/2026-08-10-backend-suite-runtime/
 - [x] build-identity-contract — [INFRA] **atar el validador del frontend a lo que el CD compone de verdad**. → changes/archive/2026-08-08-build-identity-contract/
-- [ ] app-version-provenance — [INFRA] **parear lo que se ve en pantalla con el PR que lo produjo**.
+- [x] app-version-provenance — [INFRA] **parear lo que se ve en pantalla con el PR que lo produjo**. → changes/archive/2026-08-10-app-version-provenance/
+  needs: frontend-auth-session, build-identity-contract · size: M · kind: feature
 - [ ] infra-github-iac — [INFRA] gestionar la parte GitHub-side como código con el provider `integrations/github` (Actions secrets/variables, instalación de la App, acceso a packages, ajustes de repo), eliminando los pasos a mano en GitHub que tuvo `app-deploy-dev` …
 - [x] frontend-foundation — [FE] Application Shell de Next.js App Router (layout, navegación responsive, i18n ES/EN, TanStack Query, Zustand limitado a UI, testing y convenciones frontend), sin lógica de negocio ni integración backend (no está en el PRD original) → changes/archive/2026-07-21-frontend-foundation/
 - [x] frontend-docker-deps-autosync — [FE] fix: el contenedor `frontend` en dev sincroniza `node_modules` con el lockfile en cada arranque (entrypoint + `npm ci`), evitando el `Module not found` por volumen nombrado desactualizado al cambiar dependencias (no está en el plan original, añadido tras `frontend-foundation`) → changes/archive/2026-07-21-frontend-docker-deps-autosync/
@@ -75,7 +76,7 @@ Categorías:
 - [x] channex-staging-adapter — [BE] **el primer PMS real contra el que se valida el backend**. → changes/archive/2026-08-03-channex-staging-adapter/
 - [x] pms-beds24-spike — [BE] **medir Beds24 real antes de diseñar contra supuestos**. → changes/archive/2026-08-04-pms-beds24-spike/
 - [x] celery-jobs — [BE] scheduler (checkin windows, checkouts, occupied_estimated) + SLA enforcement (PRD §26.8, §8.3, §14). → changes/archive/2026-08-05-celery-jobs/
-- [ ] reservations-webhooks — [BE] cierra el cuarto ítem de `reservations`, que se entregó sin él …
+- [x] reservations-webhooks — [BE] cierra el cuarto ítem de `reservations`, que se entregó sin él … → changes/archive/2026-08-09-reservations-webhooks/
 - [x] reservations — [BE] CRUD + MockPMSAdapter + import CSV (PRD §26.9, §16, §7.7). → changes/archive/2026-07-31-reservations/
 - [x] properties-crud — [BE] **dar a `properties` una vía de escritura, que hoy no tiene ninguna** … → changes/archive/2026-08-08-properties-crud/
   size: M · kind: feature
@@ -112,7 +113,7 @@ Categorías:
 - [ ] auth-account-recovery — [BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario.
 - [x] frontend-auth-session — [FE] **el login real y la sesión en el frontend**, separado de `dashboard-web` el 2026-08-07 porque no depende de la API agregada y sí bloquea cualquier pantalla real. → changes/archive/2026-08-08-frontend-auth-session/
   needs: api-ingress-routing · size: M · kind: feature
-- [ ] dashboard-api — [BE] **la API agregada del dashboard**: `GET /properties/{id}/dashboard`, `GET /properties/{id}/state` y `GET /timeline/{property_id}` (PRD §26.15-17, §9, §23, §24). Separada de `dashboard-web` el 2026-08-08 por la costura BE/FE …
+- [x] dashboard-api — [BE] **la API agregada del dashboard**: `GET /properties/{id}/dashboard`, `GET /properties/{id}/state` y `GET /timeline/{property_id}` (PRD §26.15-17, §9, §23, §24). Separada de `dashboard-web` el 2026-08-08 por la costura BE/FE … → changes/archive/2026-08-09-dashboard-api/
   needs: properties-crud · size: M · kind: feature
 - [ ] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` …
   needs: dashboard-api, frontend-auth-session · size: S · kind: feature
