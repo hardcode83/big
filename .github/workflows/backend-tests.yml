@@ -13,11 +13,12 @@ name: backend-tests
 #
 # --- Por qué son tres jobs y no uno (change `ci-backend-tests-conditional-gate`) ---
 #
-# La suite tarda **~3m25s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
+# La suite tarda **~2m44s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
 # `sdd/backend-suite-runtime`; el paso dominante sigue siendo el de `pytest`). La misma
 # medición sobre `main` ese día dio **15m30s**: la diferencia es el change
 # `backend-suite-runtime`, que dejó de construir y tirar el esquema de la base de datos en
 # cada test —eso solo ya la bajó a 4m03s— y después la paralelizó con `pytest-xdist`.
+# Son **5,7×** de punta a punta.
 #
 # Esta cifra ha mentido dos veces ya, y las dos por lo mismo —envejeció sin que nada
 # fallara—. Primero afirmó "~1 minuto" y sobre ella se decidió ejecutar la suite en todos
@@ -31,7 +32,7 @@ name: backend-tests
 # cuando el diff toca el backend. Pero el check se sigue reportando SIEMPRE:
 #
 #   backend-tests-detect  decide si el diff toca el área      (siempre corre, ~20s)
-#   backend-tests-suite   la verificación de verdad           (corre si toca, ~4m)
+#   backend-tests-suite   la verificación de verdad           (corre si toca, ~3m30s)
 #   backend-tests         consolida y reporta                 (siempre corre)
 #
 # SIGUE PROHIBIDO poner `paths:` en `on:`, y la razón original no ha cambiado: con un

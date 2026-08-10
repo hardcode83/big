@@ -301,6 +301,56 @@ Dos cosas que la tabla dice y conviene no pasar por alto:
   son la razón de que R2.1 pida mediana de tres y no una sola ejecución, y la razón de que el
   presupuesto tenga dos umbrales en vez de uno.
 
+### Fase 2 en CI, y la premisa que se cayó
+
+D6 eligió `-n 4` proyectando **2-2,5×** sobre la base de que «`ubuntu-latest` tiene 4 vCPU». Al
+medirlo salió **1,06×**, así que se comprobó el dato en vez de seguir suponiéndolo: el paso de la
+suite imprime ahora `runner: 2 vCPU, 7 GB`. Este repositorio es **privado**, y los runners estándar
+de repos privados traen **dos** núcleos, compartidos además con PostgreSQL y Redis.
+
+| Configuración | Duración | vs. fase 1 |
+|---|---|---|
+| Fase 1, en serie | 243s (mediana de 3) | — |
+| Fase 2, `-n 4` | 227s · 233s | 1,06× |
+| Fase 2, `-n 2` | 205s | 1,19× |
+
+Cuatro workers sobre dos núcleos **sobresuscriben** y salen peor que dos. El número declarado pasó a
+`-n 2` por medición, no por proyección (decisión del usuario, 2026-08-10).
+
+### Medición final (R2.1), commit `6f95c57`
+
+Tres `workflow_dispatch` secuenciales con la configuración definitiva:
+
+| Ejecución | Duración |
+|---|---|
+| `31415067811` | 145s |
+| `31415528272` | 164s |
+| `31416101842` | 172s |
+| **Mediana** | **164s (2m 44s)** |
+
+Hubo una cuarta, `31415384825`, **descartada y no sustituida por conveniencia**: falló en
+`Initialize containers`, es decir, los contenedores de servicio del runner no arrancaron y el paso
+de `pytest` ni llegó a ejecutarse. Es avería de infraestructura de GitHub, no del cambio, así que se
+repuso con otra ejecución en vez de contarla. Sirvió de paso como prueba real de R4.4: el
+consolidador publicó igualmente el check, en rojo y diciendo `la suite terminó en 'failure'`.
+
+**El recorrido completo del change**, todo medido el mismo día sobre el mismo runner:
+
+| | Mediana de 3 | Acumulado |
+|---|---|---|
+| `main` (antes) | 930s | — |
+| Fase 1 (esquema una vez) | 243s | 3,83× |
+| Fase 2 (`-n 2`) | **164s** | **5,67×** |
+
+La fase 2 aporta **1,48×** sobre la fase 1, no el 1,19× que sugería la muestra suelta de 205s — otra
+razón para que R2.1 pida mediana de tres y no una cifra. R2.1 (**≤ 300s**) se cumple con **136s de
+margen**.
+
+**Por qué el presupuesto queda en 260s y no más ceñido**: el rango observado con `-n 2` a lo largo
+del día va de **145s a 205s**, así que 260s da margen sobre el **peor** caso medido y no solo sobre
+la mediana. Ceñirlo a la mediana convertiría un día lento del runner en avisos, que es exactamente
+como un presupuesto deja de mirarse.
+
 ### Fase 2 (`-n 4`), medida en local
 
 Pendiente de medir en CI (tarea 8.1). En esta máquina, sobre la suite completa y con los recuentos

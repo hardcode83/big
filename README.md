@@ -244,7 +244,7 @@ El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml
 migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
 `downgrade base`, con Postgres y Redis como services.
 
-La suite tarda ~4 minutos (medido el 2026-08-10), así que **solo se ejecuta cuando el diff
+La suite tarda ~3 minutos (medido el 2026-08-10), así que **solo se ejecuta cuando el diff
 toca `backend/**` o el propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
 no toca el backend termina en verde en segundos, y el resumen de la ejecución dice
 explícitamente que la suite se omitió, para que ese verde no se lea como una suite que pasó.

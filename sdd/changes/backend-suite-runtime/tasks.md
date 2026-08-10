@@ -285,19 +285,19 @@ que la derivación de la clave no colisione con ningún advisory lock que tome l
 
 ## 8. Medición final, presupuesto ajustado y documentación
 
-- [ ] 8.1 Tres `workflow_dispatch` secuenciales sobre la rama con la fase 2, mediana del paso de
+- [x] 8.1 Tres `workflow_dispatch` secuenciales sobre la rama con la fase 2, mediana del paso de
   `pytest`, y contraste con los 5m 00s de R2.1 — **Files:** `measurement.md` §4. Si la mediana lo
   cumple, ajustar presupuesto y techo de 6.2 a la cifra real **con margen sobre la mediana, no
   sobre el mejor caso**; si no lo cumple, aplicar 5.3 (techo medido, causa, y R2 sin dar por
   cumplido). [R2.1, R2.3, R4.1]
-- [ ] 8.2 Actualizar la cabecera del workflow, que hoy afirma «~6m15s la suite, ~7m05s el
+- [x] 8.2 Actualizar la cabecera del workflow, que hoy afirma «~6m15s la suite, ~7m05s el
   workflow (medido el 2026-08-03)» y el reparto de los 49s restantes — **Files:**
   `.github/workflows/backend-tests.yml:14-19`. La cifra nueva va **fechada y con el paso dominante
   identificado**, que es la regla que la propia spec impone. [R2.2]
 - [x] 8.3 Convención de fixtures compartidas al día: el esquema se construye **una vez por
   ejecución** y el aislamiento entre tests es por **vaciado de filas**, no por `create_all`/
   `drop_all` — **Files:** `sdd/steering/testing.md` (§Convenciones, línea 23). [R3.2]
-- [ ] 8.4 README raíz: §Tests menciona el paralelismo disponible en local (`-n auto`) sin cambiar
+- [x] 8.4 README raíz: §Tests menciona el paralelismo disponible en local (`-n auto`) sin cambiar
   el comando canónico — **Files:** `README.md:210-220`. Solo si 7.1 entró; si la fase 2 se
   descartara, esta tarea desaparece con ella. [R2.1]
 - [x] 8.5 Dejar **redactado en este change** el texto que `/sdd:archive` llevará a
@@ -308,22 +308,35 @@ que la derivación de la clave no colisione con ningún advisory lock que tome l
   el modelo de esquema una vez y la base desechable **por worker**; (c) un requisito EARS nuevo
   para el presupuesto de tiempo; (d) §Key files con `Makefile` si 7.3 entró — **Files:**
   `sdd/changes/backend-suite-runtime/spec-updates.md` (nuevo). [R2.2, R4.1]
-- [ ] 8.6 Completar `measurement.md` §4 con lo realmente ejecutado —cifras de 5.1, 5.2 y 8.1, ids
+- [x] 8.6 Completar `measurement.md` §4 con lo realmente ejecutado —cifras de 5.1, 5.2 y 8.1, ids
   de los runs y la mediana de cada tanda— de modo que el procedimiento siga siendo repetible por
   cualquiera con los datos delante — **Files:** `measurement.md`. [R1.1]
 
 ## 9. Verification
 
-- [ ] 9.1 Suite completa del backend en verde desde el stack de este worktree:
+- [x] 9.1 Suite completa del backend en verde desde el stack de este worktree:
   `docker compose exec backend uv run pytest -q -rs`, con **5 329 pasados + 35 omitidos** y los
   mismos motivos de omisión que la línea base de `measurement.md` §1. [R3.1, R3.2]
-- [ ] 9.2 Tres ejecuciones consecutivas verdes en la configuración final (con `-n 4` si la fase 2
-  entró), sin `attached to a different loop` ni `another operation is in progress`. [R3.5]
-- [ ] 9.3 Sin lint ni typecheck que correr: el proyecto no declara ninguno (`sdd/project.md`
+  *(**5 336 pasados + 35 omitidos en 145,70s**, mismo motivo de omisión. Los 5 336 son los 5 329 de
+  la línea base más los 7 tests que añade el propio change: 2 de 3.3 y 5 de 7.4)*
+- [x] 9.2 Tres ejecuciones consecutivas verdes en la configuración final (con `-n 2`, que es la de
+  CI), sin `attached to a different loop` ni `another operation is in progress`. [R3.5]
+  *(93,54s · 98,45s · 106,40s, las tres con 5 336 + 35. Comprobado además sobre la salida completa
+  de una ejecución: **cero apariciones** de las dos cadenas, contadas con `grep -c`, no supuestas
+  por ausencia de rojos)*
+- [x] 9.3 Sin lint ni typecheck que correr: el proyecto no declara ninguno (`sdd/project.md`
   §Commands y `sdd/specs/backend-ci.md` §Estado lo dejan escrito). Se comprueba que sigue siendo
   cierto, no se inventa uno.
 - [ ] 9.4 El check `backend-tests` reporta verde en el PR con la duración y las dos cifras del
   presupuesto en su resumen, y el camino corto (un PR que no toque `backend/**`) sigue reportando
   verde sin duración. [R4.2, R4.4]
-- [ ] 9.5 `make db-clean-test` no encuentra bases desechables huérfanas tras las ejecuciones de
+  *(**la mitad que no necesita PR ya está verificada** sobre ejecuciones reales de la rama: las
+  cinco de `workflow_dispatch` con la configuración final publicaron el check, y el job consolidador
+  terminó en `success` con la duración por debajo del presupuesto. Y la ruta de fallo se ejercitó
+  sola, sin buscarla: el run `31415384825` se cayó en `Initialize containers` —avería del runner, el
+  paso de `pytest` ni se ejecutó— y el check **se publicó igual**, en rojo y diciendo `la suite
+  terminó en 'failure'`. Eso es R4.4 demostrado con un fallo de verdad y no con una simulación.*
+  *Lo que queda pide un PR abierto y por tanto es de `/sdd:ship` + `/sdd:review`: verlo en el propio
+  PR, y el camino corto con un diff que no toque `backend/**`)*
+- [x] 9.5 `make db-clean-test` no encuentra bases desechables huérfanas tras las ejecuciones de
   9.1-9.2. [R3.3]

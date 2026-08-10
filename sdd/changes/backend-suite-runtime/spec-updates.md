@@ -3,9 +3,8 @@
 Las specs vivas solo las escribe el archivado (`steering/documentation.md`), así que este change
 deja el texto listo en vez de tocarlas. Cuatro bloques, cada uno con qué sustituye.
 
-**Las cifras de §Coste son provisionales hasta la tarea 8.1** (medición de la fase 2 en CI). Lo que
-está abajo lleva la medición de la **fase 1**; si 8.1 da otra, se sustituye antes de archivar y se
-ajusta también el presupuesto declarado en el workflow.
+Las cifras son ya las **definitivas** (tarea 8.1 cerrada): mediana de tres ejecuciones sobre el
+commit final, con la fase 2 aplicada.
 
 ---
 
@@ -13,15 +12,20 @@ ajusta también el presupuesto declarado en el workflow.
 
 > ## Coste
 >
-> - **Medido el 2026-08-10**: la suite tarda **~4m03s** y el paso dominante sigue siendo `pytest`.
->   Es la **mediana de tres ejecuciones consecutivas** sobre la misma referencia, no una muestra: el
->   runner varía lo suficiente como para que una sola cifra no signifique nada. El camino corto
->   —diff que no toca el backend— cuesta **segundos**, porque el job de detección no levanta
->   `services:` ni instala dependencias: solo necesita git.
+> - **Medido el 2026-08-10**: la suite tarda **~2m44s** y el paso dominante sigue siendo `pytest`.
+>   Es la **mediana de tres ejecuciones consecutivas** sobre la misma referencia (145s · 164s ·
+>   172s), no una muestra: el runner varía lo suficiente como para que una sola cifra no signifique
+>   nada. El camino corto —diff que no toca el backend— cuesta **segundos**, porque el job de
+>   detección no levanta `services:` ni instala dependencias: solo necesita git.
 > - **De dónde viene esa cifra**: la misma medición sobre `main` el mismo día dio **15m30s**
->   (954s · 930s · 858s). La diferencia es el change `backend-suite-runtime`, que dejó de construir
->   y tirar el esquema de la base de datos en cada test —el 77,6 % del tiempo, medido— y pasó a
->   construirlo una vez por ejecución y vaciar filas entre tests.
+>   (954s · 930s · 858s). Son **5,7×**, en dos mitades: dejar de construir y tirar el esquema de la
+>   base de datos en cada test —el 77,6 % del tiempo, medido— bajó a 4m03s, y paralelizar con
+>   `pytest-xdist` bajó de ahí a 2m44s.
+> - **El runner tiene 2 vCPU, no 4**: es un repositorio privado y los runners estándar de repos
+>   privados traen dos núcleos, compartidos además con PostgreSQL y Redis. Por eso el paralelismo se
+>   declara como `-n 2`: medido, `-n 4` sobresuscribe y sale peor (227-233s frente a 205s). El paso
+>   de la suite imprime el tamaño del runner en el log para que la próxima persona no tenga que
+>   suponerlo.
 > - El procedimiento es repetible y está descrito en el archivo del change: tres
 >   `workflow_dispatch` **secuenciales** sobre la misma referencia, leyendo la duración del paso
 >   `Suite completa …` de `/repos/{owner}/{repo}/actions/runs/{id}/jobs`. Secuenciales por
@@ -44,6 +48,9 @@ trabajo es exactamente lo que hizo este change.
 >   del worker al sufijo (`<db>_test_ci_gw0`), y dar a cada worker su propia **base lógica de
 >   Redis**, con un guardián que falle si el número de workers supera las 16 que Redis sirve por
 >   defecto.
+> - ⚠️ `make db-clean-test` **no distingue una base huérfana de una viva**: lanzado con una suite
+>   corriendo la destroza (medido: 771 errores). Filtrar por conexiones vivas no lo arregla, porque
+>   `NullPool` deja ventanas de cero conexiones en toda base en uso.
 > - El id del worker no es redundante con el pid: en CI `PYTEST_DB_SUFFIX` está **fijada** a `ci`,
 >   así que sin él los cuatro procesos calcularían el mismo nombre y el `DROP DATABASE IF EXISTS`
 >   de la fixture de migraciones borraría la base que otro está usando — el fallo exacto que el
