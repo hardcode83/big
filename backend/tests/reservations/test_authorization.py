@@ -15,6 +15,13 @@ import pytest
 from app.auth.domain.enums import UserRole
 from tests.reservations.conftest import auth_header
 
+# A literal, not `uuid.uuid4()`. Inside `@pytest.mark.parametrize` a random value becomes
+# part of the test id, and under `pytest -n` each worker collects a different one — the
+# suite then aborts with "Different tests were collected between gw0 and gw3" before running
+# anything. It reads better too: what these cases need is an id that resolves to nothing,
+# and any fixed one does that.
+ABSENT_ID = "3f1a6c2e-0000-4000-8000-000000000001"
+
 READERS = {UserRole.PROPERTY_MANAGER, UserRole.TENANT_OWNER}
 MANAGERS = {UserRole.PROPERTY_MANAGER}
 ALL_ROLES = list(UserRole)
@@ -106,9 +113,9 @@ async def test_cancelling_is_allowed_for_managers_only(
     [
         ("GET", "/api/v1/reservations", None),
         ("POST", "/api/v1/reservations", {}),
-        ("GET", f"/api/v1/reservations/{uuid.uuid4()}", None),
-        ("PATCH", f"/api/v1/reservations/{uuid.uuid4()}", {"adults": 2}),
-        ("DELETE", f"/api/v1/reservations/{uuid.uuid4()}", None),
+        ("GET", f"/api/v1/reservations/{ABSENT_ID}", None),
+        ("PATCH", f"/api/v1/reservations/{ABSENT_ID}", {"adults": 2}),
+        ("DELETE", f"/api/v1/reservations/{ABSENT_ID}", None),
     ],
 )
 @pytest.mark.asyncio

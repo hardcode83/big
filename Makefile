@@ -141,12 +141,30 @@ bootstrap:
 openapi:
 	$(COMPOSE) run --rm --no-deps -T backend python -m app.cli.openapi
 
-# Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, ver
-# backend/tests/db_names.py) y la borra al terminar. Una suite matada a lo bruto deja
-# la suya atrás: esto barre las huérfanas sin tocar la base de desarrollo.
+# Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
+# `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y
+# la borra al terminar. Una suite matada a lo bruto deja la suya atrás: esto barre las
+# huérfanas sin tocar la base de desarrollo.
+#
+# El guion bajo de la clase es el del id del worker: sin él, `_test_ci_gw0` no encaja y el
+# barrido dejaría huérfanas justo las bases que el paralelismo crea. La clase es la misma
+# que valida `run_suffix()` en db_names.py, y las dos se ensanchan juntas o ninguna.
+#
+# ⚠️ NO lo ejecutes con una suite corriendo. Borra con `WITH (FORCE)` toda base que encaje el
+# patrón, y no sabe distinguir una huérfana de una viva. Medido a propósito: lanzado a mitad de
+# una ejecución con `-n 4`, convirtió una suite verde en **771 errores** de
+# `InvalidCatalogNameError`, y el síntoma se lee como tests inestables en vez de como lo que es.
+# El paralelismo lo agrava, porque ahora hay cuatro bases por ejecución en vez de una.
+#
+# Filtrar por conexiones vivas (`pg_stat_activity`) **no lo arregla** y se probó: la fixture usa
+# `NullPool` y desecha el engine entre tests, así que toda base viva tiene ventanas de cero
+# conexiones y el barrido cae en una de ellas (medido: 144 errores en vez de 771, que es peor
+# que no filtrar, porque parece seguro y no lo es). Cerrarlo de verdad pide que la ejecución
+# marque su base como en uso de una forma que sobreviva a esas ventanas — trabajo de otro
+# change, no de este.
 db-clean-test:
 	@$(COMPOSE) exec -T postgres psql -U $${POSTGRES_USER:-autohostai} -d postgres -tAc \
-		"select datname from pg_database where datname ~ '_(test|migrations)_[0-9a-z]+$$'" \
+		"select datname from pg_database where datname ~ '_(test|migrations)_[0-9a-z_]+$$'" \
 		| while read -r db; do \
 			[ -n "$$db" ] || continue; \
 			echo "→ borrando $$db"; \

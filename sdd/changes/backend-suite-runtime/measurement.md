@@ -281,16 +281,37 @@ tenant)», leído de `/repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs`.
 
 | Referencia | Ejecuciones | Mediana |
 |---|---|---|
-| `main` (antes) | 954s · *(2ª y 3ª en curso)* | — |
-| `sdd/backend-suite-runtime` (fase 1) | **246s · 217s · 243s** | **243s (4m 03s)** |
+| `main` (antes) | 954s · 930s · 858s | **930s (15m 30s)** |
+| `sdd/backend-suite-runtime` (fase 1) | 246s · 217s · 243s | **243s (4m 03s)** |
 
-Ids: rama `31397418050`, `31397960091`, `31398465326`; `main` `31397414664`. Las cuatro en verde.
+Ids: `main` `31397414664`, `31399030815`, `31400638035`; rama `31397418050`, `31397960091`,
+`31398465326`. Las seis en verde.
 
 **R2.1 se cumple con la fase 1 sola**: 243s frente a los 300s del objetivo, **57s de margen**, y
-**3,93×** sobre los 954s de `main`. El paso dominante del workflow sigue siendo el de `pytest`, que
-es lo que se buscaba: ya no lo domina el DDL por test, sino el trabajo real de los tests.
+**3,83×** sobre la mediana de `main`. El paso dominante del workflow sigue siendo el de `pytest`,
+que es lo que se buscaba: ya no lo domina el DDL por test, sino el trabajo real de los tests.
 
-Nótese que los 954s de `main` son **peores que los 618,51s locales de §1** —el runner de GitHub es
-más lento que esta máquina, la razón medida ronda 1,5×— y también peores que los 15m 34s del
-proposal, porque la suite ha seguido creciendo. Esa es exactamente la deriva que R4 quiere hacer
-visible en el propio check en vez de descubrirla seis días tarde.
+Dos cosas que la tabla dice y conviene no pasar por alto:
+
+- Los 930s de `main` son **peores que los 618,51s locales de §1** —el runner de GitHub es más lento
+  que esta máquina, la razón medida ronda 1,5×— y peores que los 15m 34s que midió el proposal el
+  2026-08-09, porque la suite siguió creciendo entre medias. Esa es exactamente la deriva que R4
+  quiere hacer visible en el propio check en vez de descubrirla seis días tarde.
+- La dispersión de `main` (954s, 930s, 858s: **±5 %**) y la de la rama (246s, 217s, 243s: **±7 %**)
+  son la razón de que R2.1 pida mediana de tres y no una sola ejecución, y la razón de que el
+  presupuesto tenga dos umbrales en vez de uno.
+
+### Fase 2 (`-n 4`), medida en local
+
+Pendiente de medir en CI (tarea 8.1). En esta máquina, sobre la suite completa y con los recuentos
+intactos (5 336 pasados + 35 omitidos, mismo motivo):
+
+| Reparto | Ejecuciones |
+|---|---|
+| serie | ~190s |
+| `-n 4` | **57,39s · 56,11s · 53,16s** |
+| `-n 3` | 63,93s |
+
+**3,5×** sobre la serie de la misma máquina. La proyección honesta para CI sigue siendo la de D6
+—**2-2,5×**, no 3,5×— porque `ubuntu-latest` tiene 4 vCPU y ahí dentro corren también PostgreSQL y
+Redis, mientras esta máquina tiene 12. La cifra que manda la pone 8.1.

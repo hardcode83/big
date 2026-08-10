@@ -1,4 +1,6 @@
 import asyncio
+import os
+from urllib.parse import urlparse, urlunparse
 
 import asyncpg
 import pytest
@@ -19,6 +21,38 @@ import app.core.models_registry  # noqa: F401
 
 from app.core.config import settings
 from app.core.db import Base
+
+# Redis has no per-run namespace the way Postgres has a per-run database, and the suite
+# uses PRODUCTION key names on purpose: `tests/scheduler/test_dispatch_task.py` takes the
+# real `dispatch_notifications` lock, and another test demands to find that same lock free.
+# Run those in two xdist workers against one Redis and they cross.
+#
+# Every client in the suite — and `get_redis()` itself — is built from `settings.redis_url`,
+# so one logical database per worker is enough, and it is rewritten here, before any client
+# can be created.
+_REDIS_LOGICAL_DATABASES = 16  # 0-15: Redis' default `databases 16`
+
+
+def _redis_url_for_this_worker(url: str) -> str:
+    worker = os.environ.get("PYTEST_XDIST_WORKER")
+    if not worker:
+        return url
+    if not (worker.startswith("gw") and worker[2:].isdigit()):
+        raise RuntimeError(f"unexpected pytest-xdist worker id {worker!r}")
+
+    index = int(worker[2:])
+    # Fails in the face rather than wrapping around or silently sharing database 0, which
+    # would put the collision back without saying so.
+    if index >= _REDIS_LOGICAL_DATABASES:
+        raise RuntimeError(
+            f"worker {worker} needs Redis logical database {index}, but Redis serves only "
+            f"{_REDIS_LOGICAL_DATABASES} (0-{_REDIS_LOGICAL_DATABASES - 1}) by default. "
+            f"Run with -n {_REDIS_LOGICAL_DATABASES} or fewer, or raise `databases` in Redis."
+        )
+    return urlunparse(urlparse(url)._replace(path=f"/{index}"))
+
+
+settings.redis_url = _redis_url_for_this_worker(settings.redis_url)
 
 # Tests get their own database, never the one `make up`/`migrate` manage — otherwise
 # the suite wipes the dev stack's schema (tables gone, `alembic_version` still claims

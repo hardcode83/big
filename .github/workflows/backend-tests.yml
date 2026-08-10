@@ -319,6 +319,17 @@ jobs:
       - name: Suite completa (incluye auth, RBAC y aislamiento por tenant)
         id: suite
         working-directory: backend
+        # `-n 4`: número declarado, no `-n auto`. Hoy `auto` daría 4 en `ubuntu-latest`, pero
+        # mañana daría lo que el runner traiga, y el aislamiento de Redis por worker tiene un
+        # techo de 16 bases lógicas (`tests/conftest.py`). El número se declara y se revisa en
+        # el diff, como las dos cifras del presupuesto.
+        #
+        # Cada worker se lleva su propia base de datos desechable (`…_test_ci_gw0`, ver
+        # `tests/db_names.py`) y su propia base lógica de Redis, que es lo que hace que esto
+        # no sea compartir estado entre cuatro procesos.
+        #
+        # En local la suite sigue siendo **en serie** por defecto: quien quiera paralelo pasa
+        # `-n` por la línea de órdenes, y la salida en serie es la legible para `pytest -k`.
         # Cronometrado aquí dentro, y no restando marcas de tiempo de la API de GitHub,
         # porque la duración tiene que existir **aunque `pytest` falle**: el paso captura
         # el código de salida, publica los segundos y solo después se rinde con él.
@@ -334,7 +345,7 @@ jobs:
           started=$(date +%s)
 
           set +e
-          uv run pytest -q -rs
+          uv run pytest -q -rs -n 4
           status=$?
           set -e
 

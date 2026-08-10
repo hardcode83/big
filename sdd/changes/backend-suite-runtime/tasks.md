@@ -127,11 +127,15 @@ Necesita la rama publicada. Los tres disparos son **secuenciales por obligación
 declara `concurrency: backend-tests-${{ github.ref }}` con `cancel-in-progress: true`, así que
 tres solapados se cancelan entre sí.
 
-- [ ] 5.1 Línea base en CI sobre `main`: `gh workflow run backend-tests --ref main` ×3,
+- [x] 5.1 Línea base en CI sobre `main`: `gh workflow run backend-tests --ref main` ×3,
   esperando cada una, y leer la duración del paso `Suite completa …` del job
   `backend-tests-suite` con
   `gh api /repos/autohostai-labs/AutoHostAI/actions/runs/<id>/jobs`. Anotar las tres cifras y su
   mediana — **Files:** `sdd/changes/backend-suite-runtime/measurement.md` §4. [R1.1]
+  *(2026-08-10, las tres verdes: **954s · 930s · 858s**, mediana **930s (15m 30s)**. Runs
+  `31397414664`, `31399030815`, `31400638035`. Ojo a la cifra: la spec declaraba 6m15s el
+  2026-08-03 y el proposal midió 15m34s el 2026-08-09 — la mediana de hoy la confirma y la
+  empeora un poco más. Eso es la deriva de R4, medida)*
 - [x] 5.2 Misma operación ×3 sobre `sdd/backend-suite-runtime` con la fase 1 aplicada; registrar
   las tres cifras, la mediana y el paso dominante identificado — **Files:** `measurement.md` §4.
   [R1.1, R2.1]
@@ -195,23 +199,23 @@ la fase 2 ya se mida contra el presupuesto.
   resumen y veredicto, y el job `backend-tests` conserva `if: always()` y su nombre —
   **Files:** `.github/workflows/backend-tests.yml`. [R4.4]
 
-## 7. Fase 2 — paralelismo con `pytest-xdist` (D6)
+## 7. Fase 2 — paralelismo con `pytest-xdist` (D6) <!-- panel: PASS 2026-08-10 -->
 
 **No empezar hasta que §5 esté cerrada y la fase 1 verde en CI.**
 
-- [ ] 7.1 Añadir `pytest-xdist` al grupo `dev` — **Files:** `backend/pyproject.toml`,
+- [x] 7.1 Añadir `pytest-xdist` al grupo `dev` — **Files:** `backend/pyproject.toml`,
   `backend/uv.lock` (regenerado con `uv lock`, no a mano). [R2.1]
-- [ ] 7.2 Incorporar el id del worker al sufijo de las bases de datos desechables:
+- [x] 7.2 Incorporar el id del worker al sufijo de las bases de datos desechables:
   `run_suffix()` concatena `PYTEST_XDIST_WORKER` cuando existe — **Files:**
   `backend/tests/db_names.py`. Sin esto, con `PYTEST_DB_SUFFIX: ci` fijado en el workflow los
   cuatro procesos calculan el mismo nombre y el `DROP DATABASE IF EXISTS` de la fixture de
   migraciones borra la base que otro está usando. Actualizar el docstring del módulo, que hoy
   explica el sufijo solo como pid. [R3.3, R3.4]
-- [ ] 7.3 Hacer que `make db-clean-test` reconozca los nombres nuevos: su patrón
+- [x] 7.3 Hacer que `make db-clean-test` reconozca los nombres nuevos: su patrón
   `_(test|migrations)_[0-9a-z]+$` no acepta el guion bajo de `autohostai_test_ci_gw0` —
   **Files:** `Makefile:147-155`. **Hecho** = con dos bases `…_test_ci_gw0`/`…_test_ci_gw1`
   creadas a mano, el target las borra. [R3.3]
-- [ ] 7.4 Una base lógica de **Redis por worker**: derivar el índice desde `PYTEST_XDIST_WORKER`
+- [x] 7.4 Una base lógica de **Redis por worker**: derivar el índice desde `PYTEST_XDIST_WORKER`
   sobre `settings.redis_url` en el `conftest` raíz, con un guardián que falle a la cara si el
   índice supera **15** (cuanto tiene Redis por defecto) — **Files:** `backend/tests/conftest.py`.
   Motivo: `backend/tests/scheduler/test_dispatch_task.py:53` toma el nombre de cerradura de
@@ -219,7 +223,7 @@ la fase 2 ya se mida contra el presupuesto.
   encontrarla libre. **Hecho** = un test que compruebe que dos workers distintos resuelven
   índices distintos, y el guardián demostrado en rojo con un id de worker por encima del tope.
   [R3.4]
-- [ ] 7.5 Ids de test **deterministas** en los tres ficheros que hoy hacen abortar la recolección
+- [x] 7.5 Ids de test **deterministas** en los tres ficheros que hoy hacen abortar la recolección
   con `Different tests were collected between gw0 and gw3` — **Files:**
   `backend/tests/reservations/test_authorization.py:109-111`,
   `backend/tests/auth/test_user_admin_authorization.py:111-114`,
@@ -232,15 +236,52 @@ la fase 2 ya se mida contra el presupuesto.
   el orden de iteración de un `set` de enums varía entre procesos; si es eso, el arreglo es
   ordenar de forma estable, no sustituir UUIDs. **Hecho** = `pytest --collect-only -q` sobre los
   tres ficheros da una lista **byte a byte idéntica** en dos procesos distintos. [R3.1, R3.4]
-- [ ] 7.6 Declarar el paralelismo en CI: `-n 4` en el paso de la suite (número declarado, no
+  *(la causa del tercero se confirmó antes de tocar, y la sospecha del diseño era la correcta pero
+  **no completa**. Se comprobó que el `md5sum` de la recolección difería entre dos procesos
+  mientras que el conjunto **ordenado** de ids era idéntico: luego lo que bailaba era el orden, no
+  los ids — descarta `uuid4()` y señala a los conjuntos. Las fuentes reales eran **dos**:
+  (a) `DECLARED_POLICY_RELATIONS`, que recorre los conjuntos de enums de `EXPECTED_POLICY`; y
+  (b) `ContextualStateResolver.CONTEXTUAL_STATES`, un `frozenset` de **código de producción** que
+  dos `parametrize` convertían en lista — esta segunda no estaba identificada en el diseño y solo
+  apareció al repetir la comprobación. `INVALID_DESTINATIONS_FOR_DECLARED_PAIRS`, que el diseño
+  también señalaba, resultó ser determinista: itera la clase enum y solo usa el conjunto para
+  pertenencia. Se ordena en el test, no en producción: el conjunto de producción no tiene por qué
+  estar ordenado y el requisito es del test. De paso se ordenaron dos `next(iter(...))` que elegían
+  un destino distinto por proceso —no afectan a los ids, pero harían que el mismo test ejercitara
+  un caso distinto en cada worker—. **Comprobado**: recolección idéntica byte a byte sobre los tres
+  ficheros y, además, sobre la **suite entera** (5 371 ids; solo difiere la línea del tiempo))*
+- [x] 7.6 Declarar el paralelismo en CI: `-n 4` en el paso de la suite (número declarado, no
   `-n auto`: hoy daría 4 y mañana lo que el runner traiga, y 7.4 tiene un techo de 15) —
   **Files:** `.github/workflows/backend-tests.yml`. La ejecución en serie sigue siendo la de
   local por defecto; quien quiera paralelo lo pasa por la línea de órdenes. [R2.1]
-- [ ] 7.7 Verificación de la fase 2 en local: **tres ejecuciones consecutivas verdes** con `-n 4`
+- [x] 7.7 Verificación de la fase 2 en local: **tres ejecuciones consecutivas verdes** con `-n 4`
   **más una con un `-n` distinto** (un reparto diferente prueba independencia del worker mejor que
   repetir el mismo), todas con los recuentos de 3.4 y sin `attached to a different loop` ni
   `another operation is in progress`; y comprobar que no quedan bases desechables huérfanas al
   terminar. [R3.1, R3.4, R3.5]
+  *(2026-08-10, las cuatro verdes con **5 336 pasados + 35 omitidos** y el mismo motivo de omisión:
+  `-n 4` → **57,39s · 56,11s · 53,16s**, y `-n 3` → **63,93s**. Ni un `attached to a different
+  loop` ni un `another operation is in progress`, y ninguna base desechable en pie al terminar.
+  Los 5 336 son los 5 331 de la fase 1 más los **5 tests de 7.4**. Contra los ~190s en serie de
+  esta misma máquina, `-n 4` da **3,5×**)*
+
+## Candidato para un change futuro (fuera de alcance aquí)
+
+**`make db-clean-test` no distingue una base huérfana de una viva.** Borra con `WITH (FORCE)` toda
+base que encaje el patrón, así que lanzarlo con una suite corriendo la destroza: medido a propósito
+durante el panel de la §7 —una ejecución verde con `-n 4` convertida en **771 errores** de
+`InvalidCatalogNameError`—. Es preexistente (una suite en serie también caía), pero el paralelismo
+lo agrava: cuatro bases por ejecución en vez de una. Aquí solo se ha dejado el peligro escrito en el
+propio target.
+
+Filtrar por `pg_stat_activity` **no vale y está medido**: bajó el daño a 144 errores sin cerrarlo,
+porque `NullPool` desecha el engine entre tests y toda base viva tiene ventanas de cero conexiones.
+La salida que propuso el revisor de tenancy, y que parece la buena: que `_the_run_database` abra
+**una conexión larga aparte** de las de `test_engine` y tome sobre ella un `pg_advisory_lock` de
+sesión con el nombre de la base; el barrido intenta `pg_try_advisory_lock` sobre cada candidata y se
+salta las que no consigue. Sobrevive a los huecos porque no pregunta «¿hay alguien conectado ahora?»
+sino «¿sigue viva la conexión que representa la ejecución?». Antes de construirlo hay que comprobar
+que la derivación de la clave no colisione con ningún advisory lock que tome la aplicación.
 
 ## 8. Medición final, presupuesto ajustado y documentación
 
@@ -253,13 +294,13 @@ la fase 2 ya se mida contra el presupuesto.
   workflow (medido el 2026-08-03)» y el reparto de los 49s restantes — **Files:**
   `.github/workflows/backend-tests.yml:14-19`. La cifra nueva va **fechada y con el paso dominante
   identificado**, que es la regla que la propia spec impone. [R2.2]
-- [ ] 8.3 Convención de fixtures compartidas al día: el esquema se construye **una vez por
+- [x] 8.3 Convención de fixtures compartidas al día: el esquema se construye **una vez por
   ejecución** y el aislamiento entre tests es por **vaciado de filas**, no por `create_all`/
   `drop_all` — **Files:** `sdd/steering/testing.md` (§Convenciones, línea 23). [R3.2]
 - [ ] 8.4 README raíz: §Tests menciona el paralelismo disponible en local (`-n auto`) sin cambiar
   el comando canónico — **Files:** `README.md:210-220`. Solo si 7.1 entró; si la fase 2 se
   descartara, esta tarea desaparece con ella. [R2.1]
-- [ ] 8.5 Dejar **redactado en este change** el texto que `/sdd:archive` llevará a
+- [x] 8.5 Dejar **redactado en este change** el texto que `/sdd:archive` llevará a
   `sdd/specs/backend-ci.md` —las specs vivas solo las escribe el archivado
   (`steering/documentation.md`)—: (a) §Coste con la medición fechada nueva, su mediana de tres
   ejecuciones y el procedimiento, sustituyendo la de 2026-08-03 y retirando el párrafo «Reducir
