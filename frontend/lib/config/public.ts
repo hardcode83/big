@@ -3,7 +3,7 @@ import identityContract from "./build-identity-contract.json";
 
 /**
  * The public runtime configuration is the ONLY configuration object allowed to
- * cross to the browser (design D15). It is assembled from an explicit allowlist
+ * cross to the browser. It is assembled from an explicit allowlist
  * of non-sensitive sources — never by spreading `process.env`. Adding a field
  * here is a deliberate act, which is what keeps server-only values (e.g.
  * `BACKEND_INTERNAL_URL`) and secrets out of the client bundle.
@@ -17,7 +17,7 @@ export interface PublicRuntimeConfig {
   defaultLocale: Locale;
   /**
    * Server-evaluated, allowlisted boolean feature flags. Empty in this change:
-   * the boundary exists, but no flags are defined or activated yet (design D15).
+   * the boundary exists, but no flags are defined or activated yet.
    */
   featureFlags: Readonly<Record<string, boolean>>;
   /**
@@ -31,11 +31,11 @@ export interface PublicRuntimeConfig {
    *
    * These two are the ONLY build identity this snapshot carries. The full SHA, the Pull
    * Request number, the Actions run id and the repository URL do not enter the frontend
-   * snapshot or bundle — the full SHA remains available only in the OCI revision label, while
-   * the other provenance fields live in the `app-version-provenance` roadmap entry, blocked
-   * until the frontend has authentication. This snapshot reaches the browser on EVERY surface,
+   * snapshot or bundle — the full SHA remains available only in the OCI revision label.
+   * The other provenance fields are delivered only by the authenticated backend endpoint;
+   * they must never enter this object. This snapshot reaches the browser on EVERY surface,
    * including `/login` and the guest portal
-   * (app-version-visibility D3, R2.4).
+   * (app-version-visibility public identity contract).
    */
   buildCommitShort: string;
 }

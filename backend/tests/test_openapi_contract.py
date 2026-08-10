@@ -82,9 +82,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         "properties",
         # `cleaning`: templates plus the ten task routes of PRD §23 minus the two photo ones,
         # which belong to `cleaning-photos-storage`.
-        "cleaning-checklist-templates",
-        "cleaning-tasks",
-    }
+            "cleaning-checklist-templates",
+            "cleaning-tasks",
+            "provenance",
+        }
 
 
 def test_every_api_route_declares_a_response_model() -> None:

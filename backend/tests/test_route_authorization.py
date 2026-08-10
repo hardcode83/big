@@ -289,5 +289,6 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/users/{user_id}/reset-password",
         "/api/v1/tenants/{tenant_id}",
         "/api/v1/properties",
-        "/api/v1/properties/{property_id}",
-    }
+            "/api/v1/properties/{property_id}",
+            "/api/v1/provenance",
+        }

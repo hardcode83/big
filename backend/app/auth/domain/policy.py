@@ -39,6 +39,7 @@ class Permission(str, enum.Enum):
     # manager operates it.
     READ_PROPERTIES = "READ_PROPERTIES"
     MANAGE_PROPERTIES = "MANAGE_PROPERTIES"
+    READ_BUILD_PROVENANCE = "READ_BUILD_PROVENANCE"
 
     # Added by `cleaning` (design D7). Five and not two, because three different
     # capabilities meet on these tables and PRD §6 gives them to different people:
@@ -67,6 +68,7 @@ _TENANT_SETTINGS_MANAGE = frozenset(
 )
 _PROPERTY_READ = frozenset({Permission.READ_PROPERTIES})
 _PROPERTY_MANAGE = frozenset({Permission.READ_PROPERTIES, Permission.MANAGE_PROPERTIES})
+_BUILD_PROVENANCE_READ = frozenset({Permission.READ_BUILD_PROVENANCE})
 
 _CLEANING_TEMPLATE_MANAGE = frozenset(
     {Permission.READ_CLEANING_TEMPLATES, Permission.MANAGE_CLEANING_TEMPLATES}
@@ -100,6 +102,7 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         _SELF_SERVICE
         | _RESERVATION_READ
         | _PROPERTY_READ
+        | _BUILD_PROVENANCE_READ
         | _USER_MANAGE
         | _TENANT_SETTINGS_MANAGE
         # Reads the work and owns the standard the tenant cleans to; does not operate it.
@@ -110,6 +113,7 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         _SELF_SERVICE
         | _RESERVATION_MANAGE
         | _PROPERTY_MANAGE
+        | _BUILD_PROVENANCE_READ
         | _USER_READ
         | _TENANT_SETTINGS_READ
         | _CLEANING_MANAGE

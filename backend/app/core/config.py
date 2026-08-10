@@ -90,6 +90,14 @@ class Settings(BaseSettings):
     # three orders of magnitude of headroom over a real request.
     request_max_bytes: int = 1024 * 1024
 
+    # Build provenance is private backend configuration. These remain strings so an absent
+    # value in the deploy `.env` is an unavailable provenance block, not a boot-time failure;
+    # `PrivateProvenance.from_settings` validates the four values atomically before exposure.
+    app_provenance_repository_url: str = ""
+    app_provenance_pull_request_number: str = ""
+    app_provenance_commit_sha: str = ""
+    app_provenance_actions_run_id: str = ""
+
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.
     #

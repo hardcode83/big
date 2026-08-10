@@ -32,6 +32,31 @@
         "title": "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post",
         "type": "object"
       },
+      "BuildProvenanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "app_version": {
+            "title": "App Version",
+            "type": "string"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrivateProvenanceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "app_version",
+          "provenance"
+        ],
+        "title": "BuildProvenanceResponse",
+        "type": "object"
+      },
       "ChecklistItemPayload": {
         "additionalProperties": false,
         "properties": {
@@ -1270,6 +1295,43 @@
         ],
         "title": "PaymentStatus",
         "type": "string"
+      },
+      "PrivateProvenanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions_run_id": {
+            "description": "Positive GitHub Actions run ID.",
+            "minimum": 1.0,
+            "title": "Actions Run Id",
+            "type": "integer"
+          },
+          "commit_sha": {
+            "description": "The complete 40-character lowercase hexadecimal commit SHA.",
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Commit Sha",
+            "type": "string"
+          },
+          "pull_request_number": {
+            "description": "Positive Pull Request number.",
+            "minimum": 1.0,
+            "title": "Pull Request Number",
+            "type": "integer"
+          },
+          "repository_url": {
+            "description": "HTTPS URL of the GitHub repository that produced the build.",
+            "pattern": "^https://github\\.com/[^/\\s]+/[^/\\s]+$",
+            "title": "Repository Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_url",
+          "pull_request_number",
+          "commit_sha",
+          "actions_run_id"
+        ],
+        "title": "PrivateProvenanceResponse",
+        "type": "object"
       },
       "PropertyOperationalState": {
         "enum": [
@@ -4806,6 +4868,53 @@
         "summary": "Update a property partially",
         "tags": [
           "properties"
+        ]
+      }
+    },
+    "/api/v1/provenance": {
+      "get": {
+        "description": "Returns build provenance to authorized operational users only. The public app_version may exist independently; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.",
+        "operationId": "get_provenance_api_v1_provenance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildProvenanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authenticated build provenance",
+        "tags": [
+          "provenance"
         ]
       }
     },

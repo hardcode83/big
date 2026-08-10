@@ -149,6 +149,13 @@ export interface paths {
      */
     patch: operations["update_property_api_v1_properties__property_id__patch"];
   };
+  "/api/v1/provenance": {
+    /**
+     * Read the authenticated build provenance
+     * @description Returns build provenance to authorized operational users only. The public app_version may exist independently; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+     */
+    get: operations["get_provenance_api_v1_provenance_get"];
+  };
   "/api/v1/reservations": {
     /**
      * List the tenant's reservations
@@ -258,6 +265,12 @@ export interface components {
        * @description UTF-8 CSV with the documented columns
        */
       file: string;
+    };
+    /** BuildProvenanceResponse */
+    BuildProvenanceResponse: {
+      /** App Version */
+      app_version: string;
+      provenance: components["schemas"]["PrivateProvenanceResponse"] | null;
     };
     /** ChecklistItemPayload */
     ChecklistItemPayload: {
@@ -751,6 +764,29 @@ export interface components {
      * @enum {string}
      */
     PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /** PrivateProvenanceResponse */
+    PrivateProvenanceResponse: {
+      /**
+       * Actions Run Id
+       * @description Positive GitHub Actions run ID.
+       */
+      actions_run_id: number;
+      /**
+       * Commit Sha
+       * @description The complete 40-character lowercase hexadecimal commit SHA.
+       */
+      commit_sha: string;
+      /**
+       * Pull Request Number
+       * @description Positive Pull Request number.
+       */
+      pull_request_number: number;
+      /**
+       * Repository Url
+       * @description HTTPS URL of the GitHub repository that produced the build.
+       */
+      repository_url: string;
+    };
     /**
      * PropertyOperationalState
      * @enum {string}
@@ -2158,6 +2194,32 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read the authenticated build provenance
+   * @description Returns build provenance to authorized operational users only. The public app_version may exist independently; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+   */
+  get_provenance_api_v1_provenance_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BuildProvenanceResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

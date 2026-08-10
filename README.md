@@ -25,6 +25,7 @@ Al cabo de unos segundos:
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make openapi           # regenera el contrato de API (ver abajo)
+make check-version-parity # comprueba VERSION, backend y frontend
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -170,6 +171,11 @@ continúa comprobando por separado que `backend/openapi.json` corresponde al có
 
 La documentación interactiva sigue disponible en http://localhost:8000/docs con el stack
 levantado.
+
+La procedencia privada del build y sus verificaciones operativas están descritas en
+[`docs/app-version-provenance.md`](docs/app-version-provenance.md). El módulo backend vive en
+`backend/app/provenance/`; sus metadatos no se publican en la configuración ni en el HTML del
+frontend.
 
 ## Variables de entorno
 

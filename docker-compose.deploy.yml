@@ -184,6 +184,10 @@ services:
       DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY}
+      APP_PROVENANCE_REPOSITORY_URL: ${APP_PROVENANCE_REPOSITORY_URL:-}
+      APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
+      APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
+      APP_PROVENANCE_ACTIONS_RUN_ID: ${APP_PROVENANCE_ACTIONS_RUN_ID:-}
     # Publicado SOLO en loopback de la VM (R4.3): no es alcanzable desde internet ni desde la VCN,
     # pero un operador con SSH puede llegar con `ssh -L 8000:localhost:8000` (ver RUNBOOK §7.4).
     # Sin el prefijo 127.0.0.1 Docker publicaría en 0.0.0.0 y crearía una vía alternativa al túnel.

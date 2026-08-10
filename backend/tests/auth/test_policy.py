@@ -130,6 +130,14 @@ def test_only_the_owner_administers_users_or_settings() -> None:
         assert allowed == {UserRole.TENANT_OWNER}
 
 
+def test_only_owner_and_property_manager_read_build_provenance() -> None:
+    allowed = {
+        role for role in UserRole if is_allowed(role, Permission.READ_BUILD_PROVENANCE)
+    }
+
+    assert allowed == {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
+
+
 def test_no_permission_is_granted_to_every_role_by_accident() -> None:
     """Catches a future `is_allowed` that always answers True, without a stub.
 
