@@ -27,6 +27,18 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - THE SYSTEM SHALL fijar todas las GitHub Actions por SHA de commit.
 - WHERE falla el build de una de las dos imágenes, THE SYSTEM SHALL abortar el deploy (el job `deploy` tiene `needs` de ambos builds); nunca se despliega un commit a medias.
 
+### Procedencia privada del despliegue
+
+- THE SYSTEM SHALL publish `repository_url`, `pull_request_number`, `commit_sha` and
+  `actions_run_id` as outputs of the `provenance` job, together with the canonical `version`.
+- THE SYSTEM SHALL derive the repository URL from `GITHUB_SERVER_URL/GITHUB_REPOSITORY` and
+  extract the Pull Request number only from the supported merge-subject formats; unsupported or
+  ambiguous subjects SHALL produce unknown provenance.
+- THE SYSTEM SHALL write `APP_VERSION` and `APP_PROVENANCE_*` to the private VM `.env` without
+  logging their values, and `docker-compose.deploy.yml` SHALL inject them only into `backend`.
+- THE SYSTEM SHALL validate all four private fields in the backend as an atomic unit; incomplete
+  or invalid configuration SHALL be exposed as unavailable provenance, never as partial values.
+
 ### Compose de deploy (`docker-compose.deploy.yml`)
 
 - THE SYSTEM SHALL declarar `backend`/`worker`/`frontend` con `image:` de GHCR pineada por `${IMAGE_TAG}` (sin sección `build`, sin bind-mounts de código) y mantener `postgres:16`/`redis:7` con volúmenes nombrados persistentes.

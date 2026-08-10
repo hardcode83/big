@@ -54,6 +54,17 @@ sin duplicar la construcción de imágenes ni las responsabilidades de despliegu
 - WHILE el repositorio no disponga de protección de rama compatible, THE SYSTEM SHALL
   ejecutar y reportar `frontend-tests` sin configurarlo como check obligatorio para fusionar.
 
+### Contrato de identidad y paridad
+
+- THE SYSTEM SHALL execute `make check-version-parity` as a separate CI signal and SHALL fail
+  when `VERSION`, `backend/pyproject.toml` and `frontend/package.json` are missing, empty or
+  divergent.
+- WHEN a Pull Request changes the provenance producer or public consumer, THE SYSTEM SHALL run
+  the versioned producer/consumer congruence check, including the rejection of repository URL,
+  Pull Request number, full SHA and Actions run ID in the public frontend contract.
+- THE SYSTEM SHALL keep `.github/scripts/extract-pr.sh --self-test` and the congruence gate
+  executable from a clean checkout with diagnostic failure messages.
+
 ## Key files
 
 - `.github/workflows/frontend-tests.yml` — workflow, políticas y consolidación de resultados.
