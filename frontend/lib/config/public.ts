@@ -31,7 +31,8 @@ export interface PublicRuntimeConfig {
    *
    * These two are the ONLY build identity this snapshot carries. The full SHA, the Pull
    * Request number, the Actions run id and the repository URL do not enter the frontend
-   * snapshot or bundle — the full SHA remains available only in the OCI revision label.
+   * snapshot or bundle. The backend-only OCI label may retain the full SHA; the frontend label
+   * uses only the public short commit identity.
    * The other provenance fields are delivered only by the authenticated backend endpoint;
    * they must never enter this object. This snapshot reaches the browser on EVERY surface,
    * including `/login` and the guest portal

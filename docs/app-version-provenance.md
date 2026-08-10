@@ -6,9 +6,12 @@ full commit SHA, and Actions run, but only as one complete block.
 
 The deployment workflow derives that identity in CI from `GITHUB_SERVER_URL`,
 `GITHUB_REPOSITORY`, `GITHUB_SHA`, the commit message, and `GITHUB_RUN_ID`. It writes the
-`APP_PROVENANCE_*` values to the private deployment `.env` and injects them only into FastAPI.
+`APP_VERSION` and the `APP_PROVENANCE_*` values to the private deployment `.env` and injects
+them only into FastAPI. `APP_VERSION` is exactly the same output used as
+`NEXT_PUBLIC_APP_VERSION`; there is no second build-version source.
 The backend validates all four values atomically. If one is absent or malformed, provenance is
-unknown and no private value or link is returned. `app_version` remains independently available.
+unknown and no private value or link is returned. `app_version` remains available from that
+shared build identity, including when the private provenance block is unknown.
 
 `TENANT_OWNER` and `PROPERTY_MANAGER` may read the protected endpoint. `CLEANER`, `TECHNICIAN`,
 and anonymous callers are denied by backend RBAC. The frontend request is made only when an
@@ -47,4 +50,6 @@ bash .github/scripts/extract-pr.sh --self-test
 make openapi
 cd frontend && npm run api:check
 npm test -- --run features/provenance
+npm run build
+npm run test:public-artifacts
 ```

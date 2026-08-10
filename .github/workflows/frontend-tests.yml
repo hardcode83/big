@@ -49,6 +49,16 @@ jobs:
       - name: Generated API contract and provenance disclosure tests
         working-directory: frontend
         run: npm run api:check && npm test -- --run features/provenance
+      - name: Production build and public artifact disclosure gate
+        working-directory: frontend
+        run: |
+          set -euo pipefail
+          export APP_PROVENANCE_REPOSITORY_URL='https://github.com/private-sentinel/repository'
+          export APP_PROVENANCE_PULL_REQUEST_NUMBER='987654321'
+          export APP_PROVENANCE_COMMIT_SHA='dddddddddddddddddddddddddddddddddddddddd'
+          export APP_PROVENANCE_ACTIONS_RUN_ID='876543210'
+          npm run build
+          npm run test:public-artifacts
 
   frontend-tests:
     runs-on: ubuntu-latest

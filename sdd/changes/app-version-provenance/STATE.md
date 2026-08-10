@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: PR_OPEN
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
-implementation_sha: 
-pr_number: 
-pr_url: 
-pr_state: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/app-version-provenance
+implementation_sha: 528c954a2ed937789ea201691c1c7fe68a6b4a39
+pr_number: 76
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/76
+pr_state: OPEN
 merge_evidence: 
 merge_sha: 
 ---

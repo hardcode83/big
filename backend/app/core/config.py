@@ -97,6 +97,9 @@ class Settings(BaseSettings):
     app_provenance_pull_request_number: str = ""
     app_provenance_commit_sha: str = ""
     app_provenance_actions_run_id: str = ""
+    # Produced by the same build-identity-contract output consumed by the frontend.
+    # Empty is only a local-development fallback; deploy writes the full build identity.
+    app_version: str = ""
 
     # Channex staging (change `channex-staging-adapter`, design D3/D4). Only
     # `cli/pms_sync.py --provider channex` reads these; the application never does.

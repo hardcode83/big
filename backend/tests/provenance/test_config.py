@@ -1,3 +1,5 @@
+import pytest
+
 from app.core.config import Settings
 from app.provenance.application.provenance import PrivateProvenance
 
@@ -48,3 +50,19 @@ def test_private_provenance_disappears_when_any_field_is_invalid() -> None:
 
     for field, value in invalid.items():
         assert PrivateProvenance.from_settings(_settings(**{field: value})) is None
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://github.com:443/autohostai-labs/AutoHostAI",
+        "https://user@github.com/autohostai-labs/AutoHostAI",
+        "https://github.com/autohostai-labs/AutoHostAI/",
+        "https://github.com/autohostai-labs/AutoHostAI?query=private",
+        "https://gitlab.com/autohostai-labs/AutoHostAI",
+    ],
+)
+def test_repository_url_uses_canonical_contract_and_fails_closed(url: str) -> None:
+    assert PrivateProvenance.from_settings(
+        _settings(app_provenance_repository_url=url)
+    ) is None

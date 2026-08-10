@@ -12,10 +12,22 @@ type ContractField = {
 
 const root = resolve(import.meta.dirname, "../..");
 const contract = JSON.parse(
-  readFileSync(resolve(root, "../scripts/provenance-contract.json"), "utf8"),
+  readFileSync(resolve(root, "../backend/app/provenance/provenance-contract.json"), "utf8"),
 ) as {
   fields: ContractField[];
   public_forbidden_fields: string[];
+};
+const buildIdentityContract = JSON.parse(
+  readFileSync(resolve(root, "lib/config/build-identity-contract.json"), "utf8"),
+) as { basePattern: string; datePattern: string; commitShortPattern: string };
+const deployFixture = JSON.parse(
+  readFileSync(resolve(root, "../backend/tests/fixtures/build-identity-provenance.json"), "utf8"),
+) as {
+  app_version: string;
+  repository_url: string;
+  pull_request_number: number;
+  commit_sha: string;
+  actions_run_id: number;
 };
 const workflow = readFileSync(resolve(root, "../.github/workflows/deploy-dev.yml"), "utf8");
 const frontendWorkflow = readFileSync(
@@ -32,6 +44,30 @@ function serviceBlock(service: string, nextService: string): string {
   const end = compose.indexOf(`  ${nextService}:`, start);
   expect(start, `missing compose service ${service}`).toBeGreaterThanOrEqual(0);
   return compose.slice(start, end < 0 ? undefined : end);
+}
+
+function jobBlocks(): Map<string, string> {
+  const jobsStart = workflow.indexOf("jobs:\n") + "jobs:\n".length;
+  const jobs = workflow.slice(jobsStart);
+  const blocks = new Map<string, string>();
+  const matches = [...jobs.matchAll(/^  ([a-z-]+):\n/gm)];
+  for (let index = 0; index < matches.length; index += 1) {
+    const match = matches[index];
+    const start = match.index ?? 0;
+    const end = matches[index + 1]?.index ?? jobs.length;
+    blocks.set(match[1], jobs.slice(start, end));
+  }
+  return blocks;
+}
+
+function declaredNeeds(block: string): Set<string> {
+  const match = block.match(/^    needs:\s*(.+)$/m);
+  if (!match) return new Set();
+  const value = match[1].trim();
+  if (value.startsWith("[")) {
+    return new Set(value.slice(1, -1).split(",").map((item) => item.trim()));
+  }
+  return new Set([value]);
 }
 
 describe("producer/consumer provenance contract", () => {
@@ -55,6 +91,20 @@ describe("producer/consumer provenance contract", () => {
     }
   });
 
+  it("requires a direct needs edge for every needs output reference", () => {
+    const blocks = jobBlocks();
+    for (const [job, block] of blocks) {
+      const needs = declaredNeeds(block);
+      for (const match of block.matchAll(/needs\.([a-z-]+)\.outputs\.([a-z_]+)/g)) {
+        expect(needs, `${job} must directly need ${match[1]}`).toContain(match[1]);
+      }
+    }
+    const deploy = blocks.get("deploy");
+    expect(deploy).toBeDefined();
+    expect(declaredNeeds(deploy ?? "")).toContain("provenance");
+    expect(deploy).not.toMatch(/needs\.provenance\.outputs\.[a-z_]+:-/);
+  });
+
   it("wires every canonical field through the real workflow and backend-only deploy path", () => {
     const backend = serviceBlock("backend", "worker");
     const frontend = serviceBlock("frontend", "cloudflared");
@@ -71,12 +121,104 @@ describe("producer/consumer provenance contract", () => {
       expect(workflow).toContain(
         `${field.environment}=$` + `{{ needs.provenance.outputs.${field.name} }}`,
       );
+      const deploy = jobBlocks().get("deploy") ?? "";
+      expect(deploy, field.name).toContain(
+        `APP_PROVENANCE_${field.name.toUpperCase()}=` + `\${{ needs.provenance.outputs.${field.name} }}`,
+      );
       expect(backend).toContain(
         `${field.environment}: $` + `{${field.environment}:-}`,
       );
       for (const publicService of [frontend, worker, beat, migrate, cloudflared]) {
         expect(publicService).not.toContain(field.environment);
       }
+    }
+    expect(frontend).not.toContain("repository_url");
+    expect(frontend).not.toContain("APP_PROVENANCE_");
+    expect(frontend).not.toContain("org.opencontainers.image.source");
+    expect(frontend).not.toContain("org.opencontainers.image.revision=${{ github.sha }}");
+    expect(frontend).not.toContain("${{ needs.provenance.outputs.repository_url }}");
+    expect(frontend).not.toContain("${{ needs.provenance.outputs.commit_sha }}");
+    expect(readFileSync(resolve(root, "app/(workspace)/layout.tsx"), "utf8"))
+      .toMatch(/<AuthGuard><WorkspaceShell>/);
+  });
+
+  it("protects the frontend image boundary in the build-frontend job itself", () => {
+    const frontendBuild = jobBlocks().get("build-frontend");
+    expect(frontendBuild).toBeDefined();
+    const job = frontendBuild ?? "";
+
+    expect(job).toContain("org.opencontainers.image.revision=${{ needs.provenance.outputs.commit_short }}");
+    expect(job).toContain("org.opencontainers.image.version=${{ needs.provenance.outputs.version }}");
+    expect(job).toContain("org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}");
+    expect(job).toContain("NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}");
+    expect(job).toContain("NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}");
+
+    const labels = job.match(/labels: \|\n([\s\S]*?)\n\s+tags:/)?.[1] ?? "";
+    const buildArgs = job.match(/build-args: \|\n([\s\S]*?)\n\s+labels:/)?.[1] ?? "";
+    const environment = job.match(/^\s{8}env:\n([\s\S]*?)(?=^\s{8}\S|$)/m)?.[1] ?? "";
+    for (const [surfaceName, surface] of Object.entries({ labels, buildArgs, environment })) {
+      expect(surface, `${surfaceName} must not contain private repository URL`).not.toMatch(
+        /repository_url|org\.opencontainers\.image\.source/,
+      );
+      expect(surface, `${surfaceName} must not contain private provenance env`).not.toMatch(
+        /APP_PROVENANCE_|pull_request_number|actions_run_id|GITHUB_RUN_ID/,
+      );
+      expect(surface, `${surfaceName} must not contain private SHA`).not.toMatch(
+        /commit_sha|org\.opencontainers\.image\.revision=.*github\.sha|NEXT_PUBLIC_COMMIT_SHA/,
+      );
+    }
+    expect(job).not.toMatch(/NEXT_PUBLIC_(?:REPOSITORY_URL|PROVENANCE|PULL_REQUEST|RUN_ID)/);
+  });
+
+  it("keeps the public build identity congruent with the authenticated response", () => {
+    expect(deployFixture.app_version).toMatch(
+      new RegExp(
+        `^${buildIdentityContract.basePattern}\\+${buildIdentityContract.datePattern}\\.${buildIdentityContract.commitShortPattern}$`,
+      ),
+    );
+    const producerOutput = { version: deployFixture.app_version };
+    const resolveOutput = (expression: string): string => {
+      const match = expression.match(/needs\.provenance\.outputs\.([a-z_]+)/);
+      expect(match).not.toBeNull();
+      const value = producerOutput[match?.[1] as keyof typeof producerOutput];
+      expect(value).toBeDefined();
+      return value;
+    };
+    const frontendBuild = jobBlocks().get("build-frontend") ?? "";
+    const frontendVersion = resolveOutput(
+      frontendBuild.match(/NEXT_PUBLIC_APP_VERSION=\$\{\{ ([^}]+) \}\}/)?.[1] ?? "",
+    );
+    const deploy = jobBlocks().get("deploy") ?? "";
+    const backendVersion = resolveOutput(
+      deploy.match(/echo "APP_VERSION=\$\{\{ ([^}]+) \}\}"/)?.[1] ?? "",
+    );
+    expect(frontendVersion).toBe(producerOutput.version);
+    expect(backendVersion).toBe(producerOutput.version);
+    expect(frontendVersion).toBe(deployFixture.app_version);
+    expect(backendVersion).toBe(deployFixture.app_version);
+    expect(compose).toContain("APP_VERSION: ${APP_VERSION:?Falta APP_VERSION}");
+    expect(readFileSync(resolve(root, "../backend/app/provenance/api/router.py"), "utf8")).toContain(
+      "settings.app_version.strip() or package_version()",
+    );
+  });
+
+  it("resolves every private workflow output from the shared deploy fixture", () => {
+    const fixtureByField = {
+      repository_url: deployFixture.repository_url,
+      pull_request_number: String(deployFixture.pull_request_number),
+      commit_sha: deployFixture.commit_sha,
+      actions_run_id: String(deployFixture.actions_run_id),
+    };
+    const deploy = jobBlocks().get("deploy") ?? "";
+    for (const [field, expected] of Object.entries(fixtureByField)) {
+      expect(workflow).toContain(
+        `${field}: $` + `{{ steps.compose.outputs.${field} }}`,
+      );
+      expect(deploy).toContain(
+        `APP_PROVENANCE_${field.toUpperCase()}=$` +
+          `{{ needs.provenance.outputs.${field} }}`,
+      );
+      expect(expected).toBe(fixtureByField[field as keyof typeof fixtureByField]);
     }
   });
 

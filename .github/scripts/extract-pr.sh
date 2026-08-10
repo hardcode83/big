@@ -3,6 +3,8 @@ set -euo pipefail
 
 extract_pr() {
   local message=${1-}
+  # GitHub's commit message includes the body; provenance is defined from the subject.
+  message=${message%%$'\n'*}
   local number
   local suffix_count
   suffix_count="$(printf '%s' "$message" | grep -oE '\(#[1-9][0-9]*\)' | wc -l | tr -d ' ' || true)"
@@ -29,6 +31,7 @@ self_test() {
   [[ -z $(extract_pr 'Title (#46) extra (#47)') ]]
   [[ -z $(extract_pr 'Merge pull request #42 from example/feature (#43)') ]]
   [[ -z $(extract_pr 'Merge pull request #0 from example/feature') ]]
+  [[ $(extract_pr $'Ship provenance metadata (#47)\n\nbody text') == 47 ]]
   printf 'extract-pr self-test: ok\n'
 }
 

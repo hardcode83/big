@@ -4,41 +4,16 @@
 from __future__ import annotations
 
 import argparse
-import json
 import os
-import re
 import sys
 from pathlib import Path
 
-
-CONTRACT = json.loads(
-    (Path(__file__).with_name("provenance-contract.json")).read_text(encoding="utf-8")
-)
+sys.path.insert(0, str(Path(__file__).parents[1] / "backend"))
+from app.provenance.contract import _CONTRACT, validate_contract_values  # noqa: E402
 
 
 def validate(values: dict[str, str]) -> list[str]:
-    problems: list[str] = []
-    for field in CONTRACT["fields"]:
-        name = field["name"]
-        value = values.get(field["environment"], "").strip()
-        # An empty producer value is the supported absence case. The backend's
-        # atomic schema turns any incomplete combination into provenance=null.
-        if not value:
-            continue
-        pattern = field.get("pattern")
-        if pattern and re.fullmatch(pattern, value) is None:
-            problems.append(f"{name}: value does not match the canonical format")
-            continue
-        minimum = field.get("minimum")
-        if minimum is not None:
-            try:
-                number = int(value)
-            except ValueError:
-                problems.append(f"{name}: value is not an integer")
-                continue
-            if number < minimum:
-                problems.append(f"{name}: value must be >= {minimum}")
-    return problems
+    return validate_contract_values(values, allow_partial_absence=True)
 
 
 def self_test() -> None:
@@ -51,6 +26,7 @@ def self_test() -> None:
     assert validate(valid) == []
     assert validate({**valid, "APP_PROVENANCE_PULL_REQUEST_NUMBER": ""}) == []
     assert validate({**valid, "APP_PROVENANCE_REPOSITORY_URL": "https://gitlab.com/example/project"})
+    assert validate({**valid, "APP_PROVENANCE_REPOSITORY_URL": "https://github.com/example/project?query=private"})
     assert validate({**valid, "APP_PROVENANCE_COMMIT_SHA": "A" * 40})
     assert validate({**valid, "APP_PROVENANCE_ACTIONS_RUN_ID": "0"})
     print("provenance contract self-test: ok")
@@ -64,7 +40,7 @@ def main() -> int:
         self_test()
         return 0
     problems = validate(
-        {field["environment"]: os.environ.get(field["environment"], "") for field in CONTRACT["fields"]}
+        {field["environment"]: os.environ.get(field["environment"], "") for field in _CONTRACT["fields"]}
     )
     if problems:
         for problem in problems:

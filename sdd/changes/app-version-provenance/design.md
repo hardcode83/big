@@ -48,6 +48,11 @@ configuración pública del frontend. Son identificadores y una URL, no secretos
 tokens ni credenciales; no se añade ninguna autorización de GitHub ni ninguna
 consulta externa en runtime.
 
+El mismo output `version` que alimenta `NEXT_PUBLIC_APP_VERSION` se escribe como
+`APP_VERSION` únicamente en el `.env` privado del backend. El endpoint devuelve
+esa identidad exacta, sin crear una segunda versión ni incluir la URL privada en
+labels, build args o entorno de la imagen frontend.
+
 `APP_PROVENANCE_REPOSITORY_URL` se deriva determinísticamente en CD como
 `GITHUB_SERVER_URL/GITHUB_REPOSITORY` y después se valida antes de publicarse como
 output. El backend vuelve a validar el valor recibido; ninguna de las dos
@@ -70,8 +75,9 @@ el bloque privado utilizable si todos están presentes y tienen forma válida. S
 cualquiera falta o falla, el backend considera el bloque privado
 `unavailable/unknown`, no devuelve ningún valor privado parcial y deja que el
 frontend muestre la procedencia desconocida sin construir enlaces. `app_version`
-puede seguir devolviéndose independientemente porque pertenece al contrato público
-existente.
+se entrega desde `APP_VERSION`, que es la misma identidad pública producida por
+`build-identity-contract`; solo en desarrollo local sin ese valor se usa la
+versión base del paquete como fallback.
 
 El esquema OpenAPI será explícito, con enteros para PR/run ID, SHA completo de 40
 hexadecimales y URL HTTPS de GitHub. El endpoint responderá con

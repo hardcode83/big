@@ -152,7 +152,7 @@ export interface paths {
   "/api/v1/provenance": {
     /**
      * Read the authenticated build provenance
-     * @description Returns build provenance to authorized operational users only. The public app_version may exist independently; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+     * @description Returns build provenance to authorized operational users only. The public app_version is the same build identity produced by CD; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
      */
     get: operations["get_provenance_api_v1_provenance_get"];
   };
@@ -2202,7 +2202,7 @@ export interface operations {
   };
   /**
    * Read the authenticated build provenance
-   * @description Returns build provenance to authorized operational users only. The public app_version may exist independently; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+   * @description Returns build provenance to authorized operational users only. The public app_version is the same build identity produced by CD; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
    */
   get_provenance_api_v1_provenance_get: {
     responses: {

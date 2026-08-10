@@ -28,7 +28,7 @@ ReadProvenanceDep = Annotated[
     summary="Read the authenticated build provenance",
     description=(
         "Returns build provenance to authorized operational users only. "
-        "The public app_version may exist independently; the private provenance "
+        "The public app_version is the same build identity produced by CD; the private provenance "
         "block is atomic and may be unavailable when any field is missing or invalid. "
         "The response is produced from deployment configuration and does not query GitHub at runtime."
     ),
@@ -39,7 +39,7 @@ async def get_provenance(
     response.headers["Cache-Control"] = "private, no-store"
     provenance = PrivateProvenance.from_settings(settings)
     return BuildProvenanceResponse(
-        app_version=package_version(),
+        app_version=settings.app_version.strip() or package_version(),
         provenance=(
             PrivateProvenanceResponse(**provenance.__dict__) if provenance is not None else None
         ),

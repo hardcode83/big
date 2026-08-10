@@ -67,6 +67,7 @@ describe("ProvenancePanel", () => {
     renderPanel();
     screen.getByRole("button", { name: "Build provenance" }).click();
     await waitFor(() => expect(screen.getByText("Unknown provenance.")).toBeInTheDocument());
+    expect(screen.getByText("0.1.0")).toBeInTheDocument();
     expect(screen.queryByRole("link")).not.toBeInTheDocument();
   });
 });

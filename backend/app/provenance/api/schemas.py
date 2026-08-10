@@ -2,10 +2,12 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field, StringConstraints
 
+from app.provenance.contract import FIELDS
+
 
 RepositoryUrl = Annotated[
     str,
-    StringConstraints(pattern=r"^https://github\.com/[^/\s]+/[^/\s]+$"),
+    StringConstraints(pattern=FIELDS["APP_PROVENANCE_REPOSITORY_URL"]["pattern"]),
 ]
 CommitSha = Annotated[str, StringConstraints(pattern=r"^[0-9a-f]{40}$")]
 

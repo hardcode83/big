@@ -97,7 +97,12 @@ export function ProvenancePanel() {
           <p className="font-medium">{t("provenance.title")}</p>
           {state === "loading" && <p>{t("provenance.loading")}</p>}
           {state === "error" && <p>{t("provenance.error")}</p>}
-          {state === "unknown" && <p>{t("provenance.unknown")}</p>}
+          {state === "unknown" && (
+            <>
+              {appVersion && <p className="mt-1">{appVersion}</p>}
+              <p>{t("provenance.unknown")}</p>
+            </>
+          )}
           {state === "ready" && (
             <>
               <p className="mt-1">{appVersion}</p>

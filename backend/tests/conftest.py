@@ -18,6 +18,10 @@ import app.core.models_registry  # noqa: F401
 
 from app.core.config import settings
 from app.core.db import Base
+from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
+
+# Cheap rounds on purpose: the real default of 12 would dominate the suite runtime.
+TEST_BCRYPT_ROUNDS = 4
 
 # Tests get their own database, never the one `make up`/`migrate` manage — otherwise
 # `Base.metadata.drop_all` wipes the dev stack's schema (tables gone,
@@ -100,3 +104,39 @@ async def test_engine():
 async def db_session(test_engine):
     async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
+
+
+# Shared API fixture for integration tests across all domain directories. Keeping it in the
+# root conftest lets pytest discover it once for both `tests/provenance` and `tests/auth`.
+@pytest_asyncio.fixture
+async def api(db_session):
+    """The real app with only the outermost adapters swapped for test ones."""
+    from httpx import ASGITransport, AsyncClient
+
+    from app.auth.api.dependencies import (
+        get_login_throttle,
+        get_password_hasher,
+        get_token_codec,
+    )
+    from app.auth.infrastructure.token_codec import JwtTokenCodec
+    from app.core.db import get_db_session
+    from app.main import create_app
+    from tests.auth.doubles import UnlimitedLoginThrottle
+
+    app = create_app()
+    codec = JwtTokenCodec(secret="u" * 64, access_minutes=15, refresh_days=7)
+
+    async def _session_override():
+        yield db_session
+
+    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_token_codec] = lambda: codec
+    app.dependency_overrides[get_login_throttle] = lambda: UnlimitedLoginThrottle()
+    app.dependency_overrides[get_password_hasher] = lambda: BcryptPasswordHasher(
+        rounds=TEST_BCRYPT_ROUNDS
+    )
+
+    transport = ASGITransport(app=app)
+    async with AsyncClient(transport=transport, base_url="http://test") as client:
+        client.codec = codec  # type: ignore[attr-defined]
+        yield client

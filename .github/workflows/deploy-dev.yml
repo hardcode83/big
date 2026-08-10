@@ -61,7 +61,12 @@ jobs:
   # --- Build & push a GHCR (runners GitHub-hosted, salida a GHCR) [R1] ---
   build-backend:
     needs: provenance
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: build-backend-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -95,7 +100,12 @@ jobs:
 
   build-frontend:
     needs: provenance
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 20
+    concurrency:
+      group: build-frontend-${{ github.ref }}
+      cancel-in-progress: true
     permissions:
       contents: read
       packages: write
@@ -125,8 +135,7 @@ jobs:
             NEXT_PUBLIC_APP_VERSION=${{ needs.provenance.outputs.version }}
             NEXT_PUBLIC_BUILD_COMMIT_SHORT=${{ needs.provenance.outputs.commit_short }}
           labels: |
-            org.opencontainers.image.source=${{ needs.provenance.outputs.repository_url }}
-            org.opencontainers.image.revision=${{ github.sha }}
+            org.opencontainers.image.revision=${{ needs.provenance.outputs.commit_short }}
             org.opencontainers.image.version=${{ needs.provenance.outputs.version }}
             org.opencontainers.image.created=${{ needs.provenance.outputs.built_at }}
           tags: |
@@ -135,7 +144,7 @@ jobs:
 
   # --- Deploy LOCAL en la VM (runner self-hosted); sin SSH ni puertos entrantes [R3, R4, R5] ---
   deploy:
-    needs: [build-backend, build-frontend]
+    needs: [provenance, build-backend, build-frontend]
     if: github.ref == 'refs/heads/main'
     runs-on: [self-hosted, dev]
     permissions:
@@ -193,6 +202,7 @@ jobs:
             echo "ENCRYPTION_KEY=${ENC_KEY}"
             echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
             echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
+            echo "APP_VERSION=${{ needs.provenance.outputs.version }}"
             echo "APP_PROVENANCE_REPOSITORY_URL=${{ needs.provenance.outputs.repository_url }}"
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"
             echo "APP_PROVENANCE_COMMIT_SHA=${{ needs.provenance.outputs.commit_sha }}"

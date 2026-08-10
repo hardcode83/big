@@ -54,3 +54,11 @@
 - [x] 7.3 Actualizar la documentación de identidad pública frente a provenance privada, endpoint/RBAC/configuración, estados unknown/unavailable, lookup runtime y procedimiento de rollback, sin valores privados [R1, R3, R4]
 - [x] 7.4 Verificar la metadata de planificación del roadmap (`needs`, `size`, `kind`) contra el formato soportado, conservarla sin cambios y retirar de `BLOCKED.md` el finding descartado [steering SDD]
 - [x] 7.5 Ejecutar las verificaciones dirigidas y completas de esta remediación, incluido `/sdd:doctor`, y retirar `BLOCKED.md` solo si todos los findings pasan revisión [R1, R3, R4]
+
+## 8. Cierre exhaustivo de review
+
+- [x] 8.1 Corregir el DAG CD→deploy, bloquear pushes manuales fuera de `main` y añadir la regresión de dependencias directas/output wiring [R1, R2, R3]
+- [x] 8.2 Unificar runtime/backend/tooling en el JSON canónico de provenance y probar URLs divergentes como `unknown`, nunca 500 [R1, R3]
+- [x] 8.3 Propagar la identidad `version` de build como `APP_VERSION` solo al backend y probar congruencia con `NEXT_PUBLIC_APP_VERSION` [R1, R3]
+- [x] 8.4 Eliminar la URL privada de la imagen frontend y añadir el gate reproducible sobre `.next`/standalone/static y rutas públicas [R1, R3]
+- [x] 8.5 Auditar y corregir shell/auth, extractor subject, workflows, documentación y lifecycle; ejecutar toda la validación de cierre [R1, R2, R3, R4, steering SDD]

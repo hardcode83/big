@@ -19,7 +19,11 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - WHEN la forma producida por el CD deje de ser aceptada por el contrato público vigente del
   frontend, THE SYSTEM SHALL hacer fallar la verificación de congruencia en los checks de CI
   aplicables al Pull Request.
-- THE SYSTEM SHALL emitir en ambas imágenes los labels `org.opencontainers.image.{source,revision,version,created}` con los valores de ese job.
+- THE SYSTEM SHALL emitir en la imagen backend los labels OCI `source`, `revision`, `version` y
+  `created`, incluyendo la URL y el SHA completo porque esa imagen queda dentro de la frontera
+  backend/autenticada. La imagen frontend SHALL emitir únicamente `revision` con el SHA corto,
+  `version` y `created`; SHALL NOT incluir `source`, la URL privada del repositorio, el SHA
+  completo ni ningún campo `APP_PROVENANCE_*` en labels, build args, environment o artefactos.
 - THE SYSTEM SHALL fijar todas las GitHub Actions por SHA de commit.
 - WHERE falla el build de una de las dos imágenes, THE SYSTEM SHALL abortar el deploy (el job `deploy` tiene `needs` de ambos builds); nunca se despliega un commit a medias.
 

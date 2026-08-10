@@ -284,6 +284,7 @@ npm run typecheck   # TypeScript strict, sin emitir
 npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
 npm test            # Vitest + Testing Library
 npm run build       # build de producción
+npm run test:public-artifacts # escanea .next/static, server/standalone y rutas públicas
 npm run test:entrypoint  # test del entrypoint de dev (sincronización de node_modules)
 ```
 

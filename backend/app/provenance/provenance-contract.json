@@ -3,7 +3,7 @@
     {
       "name": "repository_url",
       "environment": "APP_PROVENANCE_REPOSITORY_URL",
-      "pattern": "^https://github\\.com/[^/\\s]+/[^/\\s]+$"
+      "pattern": "^https://github\\.com/[^/\\s?#]+/[^/\\s?#]+$"
     },
     {
       "name": "pull_request_number",
@@ -24,7 +24,7 @@
   "public_forbidden_fields": [
     "repository_url",
     "pull_request_number",
-    "commit_sha",
-    "actions_run_id"
+    "actions_run_id",
+    "commit_sha"
   ]
 }
