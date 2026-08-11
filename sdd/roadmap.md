@@ -115,7 +115,7 @@ Categorías:
   needs: api-ingress-routing · size: M · kind: feature
 - [x] dashboard-api — [BE] **la API agregada del dashboard**: `GET /properties/{id}/dashboard`, `GET /properties/{id}/state` y `GET /timeline/{property_id}` (PRD §26.15-17, §9, §23, §24). Separada de `dashboard-web` el 2026-08-08 por la costura BE/FE … → changes/archive/2026-08-09-dashboard-api/
   needs: properties-crud · size: M · kind: feature
-- [ ] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` …
+- [x] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` … → changes/archive/2026-08-11-dashboard-web/
   needs: dashboard-api, frontend-auth-session · size: S · kind: feature
 - [x] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal). → changes/archive/2026-08-08-api-ingress-routing/
   size: S · kind: infra
