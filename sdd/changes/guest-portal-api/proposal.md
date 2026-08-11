@@ -299,8 +299,28 @@ Acceptance criteria:
   hasta que este change se mergee la frase sigue siendo verdad de `main`.
   Encontrada por el panel de seguridad de §2, que la localizó después de que un
   grep mío la dejara pasar por acotar los términos de búsqueda.
-- `sdd/specs/auth-tenancy.md` — referencia de la exclusión del huésped; no debería
-  modificarse salvo que el diseño revele una contradicción.
+- `sdd/specs/auth-tenancy.md` — referencia de la exclusión del huésped. La premisa
+  original («no debería modificarse salvo que el diseño revele una contradicción») **se
+  cumplió al revés de lo esperado**: no hay contradicción de diseño, pero sí dos frases
+  que este change vuelve falsas, y hay que actualizarlas al archivar.
+
+  Las dos afirman el **recuento de consultas sin scope de tenant**, que es el control de
+  auditoría de la regla 1 de `steering/security.md`:
+
+  - línea 35: *«`find_by_email_globally` —la **primera** de las dos consultas sin scope de
+    tenant del sistema»*
+  - línea 398: *«sigue siendo una de las **dos** del sistema»*
+
+  Son **tres** desde este change: entra
+  `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`, y —esto es lo que rompe
+  más que el número— **no se llama `*_globally`**, así que la auditoría por grep del sufijo
+  que esas frases describen deja de ser exhaustiva. Al reescribirlas, **citar** la
+  enumeración de `SqlAlchemyUserRepository.find_by_email_globally` en vez de repetir el
+  recuento: el panel de arquitectura del merge encontró **seis** copias de este dato en el
+  árbol y solo una corregida, que es el mismo fallo que la regla 11 documenta de sí misma.
+
+  No se tocan ahora a propósito: `sdd/specs/` describe el sistema desplegado, y hasta que
+  este change se mergee las dos frases siguen siendo verdad de `main`.
 - `sdd/specs/domain-foundation-ops.md` — dueña de `Incident` y de la regla de
   reparto de la línea 12 (*el `application/` lo añade quien primero persiste la
   entidad*); se actualizará para dejar de decir que `maintenance` «sigue sin»

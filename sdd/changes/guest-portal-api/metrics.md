@@ -5,3 +5,4 @@
 | 2026-08-09 | new | claude-opus-5 | 43386 | 28780 | 3543926 | 4.6351 | incl. subagents |
 | 2026-08-09 | design | claude-haiku-4-5-20251001 claude-opus-5 | 870 | 45562 | 6760075 | 6.6640 |  |
 | 2026-08-10 | tasks | claude-opus-5 | 36 | 15764 | 1470415 | 2.0675 |  |
+| 2026-08-11 | run | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 746981 | 2049455 | 630849397 | 400.0176 | incl. subagents |

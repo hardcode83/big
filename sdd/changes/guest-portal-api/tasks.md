@@ -503,7 +503,7 @@
 
 ## 8. Contrato y documentación
 
-- [ ] 8.1 Regenerar y commitear las **dos mitades del puente**: `make openapi`
+- [x] 8.1 Regenerar y commitear las **dos mitades del puente**: `make openapi`
   (`backend/openapi.json`) y `cd frontend && npm run api:generate`
   (`frontend/lib/api/generated/openapi.d.ts`). Comprobar que
   `backend/tests/test_openapi_contract.py` pasa y que ningún código de error
@@ -521,7 +521,13 @@
   No vale lanzarlo dentro del contenedor `frontend`: solo monta `./frontend`, así que
   el script no encuentra `backend/openapi.json`, que resuelve desde la raíz del repo.
   `node_modules/` está en `.gitignore`, así que instalarlo en el host no ensucia el árbol.
-- [ ] 8.2 `docs/guest-portal.md` (nuevo): cómo se opera la capability — emisión y
+
+  **HECHO 2026-08-11, y la pasada final se hizo después de mergear `main`**, que es lo que
+  ahorró hacerla dos veces: `main` traía 48 commits con `dashboard-api`, `auth-account-recovery`
+  y `provenance`, y los dos artefactos generados eran dos de los diez conflictos. Se resolvieron
+  regenerando, no editando. Verificado además que `app/core/error_codes.py` no cambia respecto a
+  `main` (`git diff origin/main...HEAD` vacío) y que `test_openapi_contract.py` pasa.
+- [x] 8.2 `docs/guest-portal.md` (nuevo): cómo se opera la capability — emisión y
   revocación del token desde la ruta de operador, qué ve el huésped, y la
   **advertencia explícita de OQ2** de que `properties.access_notes` se le muestra
   tal cual, así que no debe contener códigos de puerta en claro. Enlazar a la
@@ -533,31 +539,114 @@
   enmascarar, así que una incidencia puede contener lo que el huésped decidiera
   escribir —incluido su propio documento—. El steering nombra este fichero como el
   sitio donde consta; citarlo, no reenunciar el contrato.
-- [ ] 8.3 Regenerar el ER (29 → 30 entidades, entra `guest_access_tokens`) en
+- [x] 8.3 Regenerar el ER (~~29 → 30~~ **30 → 31** entidades, entra `guest_access_tokens`) en
   `docs/diagrams/<YYYY-MM-DD>_autohost-er-entidades.png` con `/sdd:diagram`,
   actualizar las referencias y **borrar el anterior**. (steering/documentation,
   steering/architecture)
-- [ ] 8.4 Revisar el `README.md` de raíz: si la sección de estructura enumera las
+
+  **La aritmética de la tarea la movió el merge, y se recontó en vez de arrastrarla.** Cuando se
+  escribió esta tarea el esquema tenía 29 tablas; `auth-account-recovery` entró en `main` con
+  `password_reset_tokens`, así que la base era 30 y con `guest_access_tokens` son **31**, contadas
+  desde `Base.metadata` y no a mano. El anterior era `2026-08-10_...` (ya regenerado por ese
+  change, también tras mergear `main`), y es el que se borra; la referencia viva estaba solo en
+  `sdd/steering/architecture.md`.
+
+  Generado desde la metadata de SQLAlchemy —31 entidades, 414 columnas, 74 relaciones— y
+  renderizado con `mmdc`. Se mantiene `.png` a propósito aunque el skill recomiende SVG para
+  ficheros de repositorio: el nombrado `{YYYY-MM-DD}_{slug}.png` está fijado en
+  `steering/documentation.md` y los otros cinco diagramas son PNG, así que cambiar de formato
+  aquí sería una decisión de convención y no una tarea de este change.
+- [x] 8.4 Revisar el `README.md` de raíz: si la sección de estructura enumera las
   capas por módulo, reflejar que `maintenance` ya tiene `application/`; si no lo
   hace, dejarlo intacto y anotarlo así en la tarea. (steering/documentation)
 
+  **Sí las enumera, así que se editó** — y el caso no encaja en la frase que había.
+  `maintenance` no pasa a «tener las cuatro»: gana `application/` e
+  `infrastructure/` pero D15 le niega `api/` a propósito, porque la ruta es del
+  portal. Queda descrito como el **caso simétrico de `dashboard`**, que es el único
+  con `api/` y sin `infrastructure/`. La frase también dice quién traerá su `api/`,
+  para que la ausencia se lea como una decisión y no como un olvido.
+
 ## 9. Verificación
 
-- [ ] 9.1 Suite completa verde desde este worktree:
+- [x] 9.1 Suite completa verde desde este worktree:
   `docker compose exec backend uv run pytest` (o
   `docker compose run --rm backend uv run pytest` con el stack parado).
-- [ ] 9.2 Migración limpia en los dos sentidos, como hace CI:
+
+  **6089 pasan, 0 fallan, 35 skipped** — con un reencuadre que el merge de `main` obligó a
+  hacer y que conviene que quede escrito, porque afecta a cómo se corre la suite aquí:
+  **un test no puede pasar dentro del contenedor**.
+  `tests/provenance/test_workflow_to_endpoint_wiring.py` lee el workflow **real**
+  `.github/workflows/deploy-dev.yml` a propósito —en vez de modelarlo en Python—, y el
+  compose monta solo `./backend:/app`, así que el fichero no existe en el contenedor y el
+  test hace `pytest.fail`. CI no tiene el problema: le pasa la ruta en
+  `PROVENANCE_WORKFLOW_PATH`. Llegó con `provenance` en `main`; no lo introduce ni lo rompe
+  este change, y se comprobó que pasa en cuanto se le da el fichero.
+
+  La invocación honesta desde un worktree es por tanto la de CI:
+
+  ```
+  docker compose cp .github/workflows/deploy-dev.yml backend:/tmp/deploy-dev.yml
+  docker compose exec -T -e PROVENANCE_WORKFLOW_PATH=/tmp/deploy-dev.yml backend uv run pytest
+  ```
+
+  Sin eso son 6088 verdes y ese 1 rojo, que es el mismo resultado que daría `main` a solas.
+- [x] 9.2 Migración limpia en los dos sentidos, como hace CI:
   `docker compose exec backend uv run alembic upgrade head`,
   `uv run alembic check` (sin deriva de modelos) y
   `uv run alembic downgrade base`.
-- [ ] 9.3 Los guardias transversales pasan sin excepción añadida a mano:
+
+  Verificado el ciclo entero —`upgrade head`, `check` («No new upgrade operations detected»),
+  `downgrade base` hasta la revisión baseline, y `upgrade head` otra vez— **sobre la cadena
+  reencadenada** tras el merge, que es lo que había que probar: la revisión de este change pasó
+  a colgar de `a7c4e91b2d05` (`auth-account-recovery`) para no dejar dos cabezas.
+
+  **Y una lección que no estaba en la tarea: reencadenar invalida cualquier base de datos que
+  ya hubiera aplicado la revisión.** La de dev decía estar en `e7a3c419d82b` sin haber aplicado
+  nunca la de `main`, así que `upgrade head` no hacía nada y `downgrade base` fallaba
+  intentando desaplicar una columna que no existía. Se reconstruyó el esquema desde cero. Es
+  estado local y no afecta a ningún entorno desplegado —ninguno tiene aún esta revisión—, pero
+  quien reencadene una migración con la BD ya migrada se va a encontrar exactamente esto.
+- [x] 9.3 Los guardias transversales pasan sin excepción añadida a mano:
   `test_route_authorization.py` (las cuatro rutas anónimas declaradas),
   `test_layering.py`, `test_models_registry.py`, `test_tenant_filter.py`,
   `test_session_marking.py` y `test_openapi_contract.py`.
-- [ ] 9.4 Recorrido manual end-to-end **desde dentro de la red de compose** (un
+
+  1451 pasan. Ninguno lleva excepción a mano: la única entrada añadida es la cuarta ruta
+  anónima en `ANONYMOUS_ENDPOINTS`, que es el diff visible que esa lista existe para forzar.
+  `incidents` no necesitó entrada nueva en el censo de tenant —`IncidentModel` ya llevaba
+  `TenantScopedMixin` desde `domain-foundation-ops` y su módulo ya estaba en
+  `models_registry`—, lo cual verificó el reviewer de tenancy explícitamente en vez de darlo
+  por hecho.
+- [x] 9.4 Recorrido manual end-to-end **desde dentro de la red de compose** (un
   worktree no publica puertos, `sdd/project.md` § Worktree bootstrap): emitir un
   token con la ruta de operador, y con él recorrer `GET /guest/info`,
   `GET /guest/checkin`, `POST /guest/checkin` y `POST /guest/incident`; después
   revocar y comprobar que las cuatro devuelven el mismo `404`. Verificar en
   `docker compose logs backend` que **ninguna** línea del log de acceso contiene
   el token en claro. [R1.2, R1.4, R2.2]
+
+  **Hecho el 2026-08-11, todo por HTTP contra `backend:8000` por nombre de servicio.** Dos
+  detalles prácticos para quien lo repita: **el contenedor no tiene `curl`** (sí `httpx`, que
+  usa la suite), y crear la propiedad es de `PROPERTY_MANAGER` — el `TENANT_OWNER` recibe un
+  `403`, así que el recorrido entero se hace con el manager, que también tiene
+  `MANAGE_GUEST_ACCESS_TOKENS`.
+
+  Resultado, comprobación por comprobación: token de 43 caracteres devuelto una vez (`201`);
+  `info` `200` con `property_name`, `city` y `arrival_notes`, y **ninguno** de los campos
+  prohibidos de R3.2 presente en la respuesta; `checkin` `200` listando los **seis** campos
+  que faltan —los dos del calendario no, porque son de la reserva—; `POST checkin` `200` con
+  `document_status: PROVIDED` y **sin eco** del número; `POST incident` `201` con exactamente
+  `{id, status: OPEN, created_at}`; revocación `204`; y las cuatro rutas después de revocar
+  devolviendo `404` con **un único cuerpo idéntico** (comprobado comparando los cuatro, no
+  solo los códigos).
+
+  Dos cosas que el recorrido ejercitó sin que la tarea las pidiera, y que salieron bien:
+  la reserva se creó **sin huésped**, así que el `POST checkin` pasó por la rama de **OQ3** y
+  creó el `Guest` con el nombre tecleado; y su `legal_registration_status` era `NOT_REQUIRED`,
+  de modo que se vio en vivo la mitad de **R4.3** que dice devolver *sin tocar* cualquier
+  estado que no sea `PENDING_GUEST_DATA` o `READY_TO_SUBMIT`.
+
+  **El log**: ocho líneas del portal, las ocho con el último segmento redactado
+  (`GET /api/v1/guest/info/*** 200 OK`), conservando la acción. Cero líneas con el token en
+  claro y cero con el número de documento — buscados literalmente sobre el log capturado.
