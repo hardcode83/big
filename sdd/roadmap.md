@@ -110,7 +110,7 @@ Categorías:
   needs: access-notifications · size: M · kind: feature
 - [ ] guest-portal-web — [FE] página `/guest/[token]`, instrucciones, formulario de check-in, soporte, estados accesibles e i18n ES/EN (PRD §§23-24; capability original `guest-portal`)
   needs: guest-portal-api · size: M · kind: feature
-- [ ] auth-account-recovery — [BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario.
+- [x] auth-account-recovery — [BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario. → changes/archive/2026-08-11-auth-account-recovery/
 - [x] frontend-auth-session — [FE] **el login real y la sesión en el frontend**, separado de `dashboard-web` el 2026-08-07 porque no depende de la API agregada y sí bloquea cualquier pantalla real. → changes/archive/2026-08-08-frontend-auth-session/
   needs: api-ingress-routing · size: M · kind: feature
 - [x] dashboard-api — [BE] **la API agregada del dashboard**: `GET /properties/{id}/dashboard`, `GET /properties/{id}/state` y `GET /timeline/{property_id}` (PRD §26.15-17, §9, §23, §24). Separada de `dashboard-web` el 2026-08-08 por la costura BE/FE … → changes/archive/2026-08-09-dashboard-api/

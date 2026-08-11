@@ -11,8 +11,13 @@ del backend: establece el patrón de capas (`api/` → `application/` → `domai
 No incluye alta ni administración de usuarios —eso es `user-management`
 (`specs/user-management.md`), que también añadió al enum de revocación las dos razones
 administrativas y los cuatro permisos de administración al catálogo de esta capacidad— ni
-recuperación de contraseña por el propio usuario ni acceso de huéspedes. El comando de
-bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
+acceso de huéspedes. Tampoco el autoservicio de credenciales: el cambio de contraseña por el
+propio usuario y la recuperación anónima son `auth-account-recovery`
+(`specs/auth-account-recovery.md`), que se apoya en los mecanismos de aquí —el hasher, el
+throttle, la revocación de familias de refresh— y aporta además la política de contraseña que
+esta capacidad nunca fijó. El comando de bootstrap sigue siendo la única forma de **crear la
+primera cuenta** de un entorno recién levantado; recuperar una cuenta existente ya no exige
+tocar la base de datos a mano.
 
 ## Requirements
 
@@ -26,11 +31,16 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   `lower()` dentro de la consulta.
 - IF una escritura introduciría una dirección que ya existe bajo cualquier tenant,
   incluso con distinta caja, THEN THE SYSTEM SHALL rechazarla en la base de datos.
-- Es una desviación deliberada de PRD §7.3, que define `UNIQUE(tenant_id, email)`, y la
-  única consulta sin scope de tenant del sistema (`find_by_email_globally`) depende de
-  ella: con unicidad por tenant, el email no identificaría la cuenta y quien pudiera
-  crear usuarios en otro tenant dejaría fuera del producto a una cuenta existente. Motivo
-  completo y alternativas descartadas en ADR 0005.
+- Es una desviación deliberada de PRD §7.3, que define `UNIQUE(tenant_id, email)`, y
+  `find_by_email_globally` —la **primera** de las dos consultas sin scope de tenant del
+  sistema— depende de ella: con unicidad por tenant, el email no identificaría la cuenta y
+  quien pudiera crear usuarios en otro tenant dejaría fuera del producto a una cuenta
+  existente. Motivo completo y alternativas descartadas en ADR 0005.
+- La **segunda y última** es `PasswordResetTokenRepository.consume_globally`, que
+  `auth-account-recovery` añadió por el mismo motivo estructural: quien presenta un token de
+  recuperación no está autenticado y no puede aportar un tenant, así que el scope se **deriva**
+  de la fila encontrada. Ambas se nombran aquí para que la auditoría por `grep` siga siendo
+  exhaustiva.
 - WHERE en el futuro una misma identidad deba pertenecer a varios tenants, THE SYSTEM
   SHALL modelarlo como identidad global más memberships separadas, nunca repitiendo la
   dirección.
@@ -64,6 +74,11 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   pasa de ese límite, así que aceptarla haría equivalentes dos contraseñas distintas. El
   atajo es simétrico entre la verificación y el señuelo, para no invertir el oráculo de
   latencia.
+- Esta capacidad **no fija política de contraseña alguna**: el tope de 72 bytes es una
+  propiedad de bcrypt, no una política. La política —mínimo de 12 caracteres, tope de 72 bytes
+  y ninguna regla de composición— la aporta `auth-account-recovery` en
+  `app/auth/domain/password_policy.py`, y se aplica en los bordes que aceptan una contraseña
+  elegida por una persona; el login se limita a verificar la que ya existe.
 
 ### El hash de contraseña no bloquea el event loop
 
@@ -190,8 +205,10 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   evento `do_orm_execute` de SQLAlchemy, activo **solo** en sesiones marcadas con el tenant
   de la petición. Tiene cinco límites documentados en `app/core/db.py` y por eso no
   sustituye al parámetro explícito: cubre solo SELECT/UPDATE/DELETE del ORM; no actúa en
-  sesiones sin marcar (bootstrap, el login anónimo —que lo necesita— y
-  `POST /auth/refresh`; **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
+  sesiones sin marcar (bootstrap, el login anónimo —que lo necesita—, `POST /auth/refresh` y
+  los dos endpoints anónimos de `auth-account-recovery`, `POST /auth/forgot-password` y
+  `POST /auth/reset-password`, que resuelven la cuenta antes de conocer su tenant;
+  **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
   una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
@@ -215,7 +232,8 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
 - **Alcance declarado**: el `404` frente a `403` al referenciar un recurso de otro tenant y
   la matriz completa de autorización por endpoint de negocio y por rol **no** pertenecen a
   esta capacidad. Ninguno de sus cuatro endpoints recibe un identificador de recurso —
-  `login`, `refresh`, `logout` y `me` son autorreferenciales—, así que no son verificables
+  `login`, `refresh`, `logout` y `me` son autorreferenciales, y los tres que añadió
+  `auth-account-recovery` también—, así que no son verificables
   aquí sin inventar un endpoint de negocio. Cada capacidad con endpoints de negocio
   demuestra esos dos criterios sobre **sus** endpoints: los demostraron `reservations`
   (`specs/reservations.md`) y `user-management` (`specs/user-management.md`), en ese orden —
@@ -224,8 +242,8 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
 
 ### Protección de los endpoints de autenticación
 
-- WHILE una misma dirección IP ha realizado 10 o más intentos de login en el último minuto,
-  THE SYSTEM SHALL responder `429` con `{"error": {"code": "RATE_LIMITED", ...}}` sin
+- WHILE una misma dirección IP ha consumido 10 o más peticiones del presupuesto en el último
+  minuto, THE SYSTEM SHALL responder `429` con `{"error": {"code": "RATE_LIMITED", ...}}` sin
   comprobar las credenciales.
 - WHEN una cuenta acumula 10 intentos fallidos consecutivos, THE SYSTEM SHALL bloquear los
   siguientes intentos sobre esa cuenta durante 15 minutos (configurable) respondiendo el
@@ -235,6 +253,14 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   prueba y dejaría de estar acotado a 15 minutos.
 - WHEN un login tiene éxito, THE SYSTEM SHALL poner a cero el contador de fallos de esa
   cuenta.
+- El contador por cuenta (`login:fail:<uid>`) y su bloqueo (`login:lock:<uid>`) **no son
+  exclusivos del login**: `auth-account-recovery` los alimenta también desde
+  `POST /api/v1/auth/change-password`, que verifica una contraseña igual que el login y sin
+  ellos sería una vía de probarla más barata que él. Y `POST /api/v1/auth/reset-password`
+  **los borra** al completar una recuperación, porque 10 fallos son justo lo que precede a un
+  «he perdido la contraseña» y el bloqueo seguiría rechazando el login inmediatamente
+  posterior. La regla 7 de `steering/security.md` se aplica a **todo** camino que verifica una
+  contraseña, no solo al anónimo.
 - THE SYSTEM SHALL mantener los contadores en Redis, el único almacén compartido entre los
   procesos `backend` y `worker`, de forma que el límite se respete con varios workers.
 - **De qué depende esta garantía, y no es del código**: los contadores viven en un Redis que
@@ -260,11 +286,16 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   token presentado, respondiendo `429` con `code` `RATE_LIMITED`. El endpoint es anónimo por
   diseño —el refresh token es la credencial— y acuña access tokens, así que publicarlo sin
   medir dejaría una operación de credenciales con un molinillo ilimitado.
-- THE SYSTEM SHALL contabilizar `login` y `refresh` en **un solo** contador por IP
-  (`login:ip:<ip>`), y THE SYSTEM SHALL NOT darle a `refresh` un presupuesto propio:
-  partirlo permitiría gastar dos presupuestos desde una dirección. Coste aceptado: un
-  refresh legítimo puede recibir `429` si ese cliente ya gastó el presupuesto — con access
-  tokens de 15 minutos, unos pocos refresh por hora contra un techo de diez por minuto.
+- THE SYSTEM SHALL contabilizar en **un solo** contador por IP (`login:ip:<ip>`) los **cuatro**
+  endpoints anónimos de credenciales: `login`, `refresh` y —desde `auth-account-recovery`—
+  `POST /auth/forgot-password` y `POST /auth/reset-password`; y THE SYSTEM SHALL NOT dar a
+  ninguno un presupuesto propio: partirlo permitiría gastar cuatro presupuestos desde una
+  dirección. Coste aceptado: un refresh legítimo puede recibir `429` si ese cliente ya gastó el
+  presupuesto — con access tokens de 15 minutos, unos pocos refresh por hora contra un techo de
+  diez por minuto.
+- `POST /auth/change-password` es la excepción, y por la razón contraria: su llamante está
+  autenticado, así que se contabiliza por `user_id` y no por IP (arriba), que es una clave más
+  precisa.
 - **Residual conocido**: el contador es **por IP y global**, no por tenant. Con la API
   alcanzable desde internet, usuarios de **tenants distintos** detrás de un mismo NAT o
   CGNAT comparten presupuesto de login, un escenario que no era alcanzable mientras el
@@ -363,8 +394,9 @@ bootstrap sigue siendo la única forma de entrar a un entorno recién levantado.
   accionable en lugar de un `IntegrityError` sobre un índice. Hace falta porque la
   idempotencia se apoya en el nombre del tenant y `tenants` no tiene unicidad en `name`:
   un typo crearía un segundo tenant y reintentaría las mismas direcciones.
-- La comprobación pasa por el puerto `find_by_email_globally`, de modo que sigue siendo la
-  única consulta sin scope del sistema y la auditoría por `grep` sigue siendo exhaustiva.
+- La comprobación pasa por el puerto `find_by_email_globally`, de modo que no introduce una
+  consulta sin scope nueva: sigue siendo una de las **dos** del sistema (§Identidad) y la
+  auditoría por `grep` sigue siendo exhaustiva.
 - No es una migración de datos de Alembic (mezclaría esquema con contenido y no se puede
   reejecutar con seguridad) ni está enganchado a `make up`, que sigue arrancando sin pasos
   manuales.

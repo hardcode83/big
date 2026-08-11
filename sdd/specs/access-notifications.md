@@ -203,6 +203,17 @@ El adapter cableado es una sola línea de DI, señalada como tal.
   nombre de tarea, con TTL de tres veces la cadencia, sin un estado `SENDING` intermedio y sin
   bloqueo de filas.
 
+**El despachador no es el único camino de entrega.** `auth-account-recovery` es el segundo
+escritor vivo de `notification_logs` y **no pasa por aquí**: invoca el adapter de canal `EMAIL`
+de forma síncrona dentro de su propia petición HTTP y escribe la fila ya en `SENT` o `FAILED`,
+con `attempts = 1`, **nunca en `PENDING`**. No es una excepción de conveniencia sino la única
+forma de cumplir la regla 11 de `steering/security.md`: el despachador entrega *leyendo*
+`subject`/`body`, y lo que esa notificación tiene que entregar es un enlace de recuperación, que
+no puede quedar escrito ahí. Consecuencias que conviene conocer al leer una de esas filas:
+guarda constantes sin enlace, así que registra **que se envió un aviso, no su contenido**; y un
+fallo del adapter **no se reintenta**, porque un reintento del despachador entregaría el cuerpo
+guardado, que no lleva enlace. El usuario vuelve a solicitar.
+
 **Semántica declarada: at-least-once acotado.** Un proceso que muera entre la llamada al adapter
 y la escritura del resultado puede reenviar esa fila en el siguiente tick, pero `attempts` ya
 está persistido, así que el tope de reintentos **acota** los duplicados en vez de dejarlos sin
@@ -356,6 +367,13 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
+El enum `NotificationType` ya no tiene dieciséis miembros sino **diecisiete**:
+`auth-account-recovery` añadió `PASSWORD_RESET_REQUESTED`, declarándolo como divergencia
+explícita de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de
+PRD §8.3. Ese decimoséptimo tampoco tiene escalado, y en su caso **no es deuda**: una
+recuperación de contraseña no tiene plazo que incumplir, así que su fila se escribe sin
+`sla_deadline_at` a propósito.
+
 ### Protección del dato de documento
 
 - THE SYSTEM SHALL persistir `document_number` cifrado en reposo con Fernet, con IV aleatorio por
@@ -387,7 +405,8 @@ resuelve a nada: una presentación fallida avisa a los managers y no escala a na
 
 **Dónde acaba la garantía estructural.** En `last_error` y en la auditoría el tipo lo impide. En
 `notification_logs.subject`/`body` no: son cadenas libres, y lo que sostiene la regla aquí es que
-el único escritor nuevo fija un asunto constante y un cuerpo que solo lleva el identificador de la
+el escritor que añadió esta capacidad fija un asunto constante y un cuerpo que solo lleva el
+identificador de la
 reserva, cubierto por un test que comprueba la ausencia del número y de la fecha de nacimiento —un
 test que estuvo **vacío** hasta que el panel de QA vio que solo ejercitaba el camino de éxito, que
 no encola ninguna notificación. En los logs de aplicación la garantía es igualmente convención más
@@ -480,7 +499,12 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 
 - **No hay adapters reales de envío.** `ConsoleEmailAdapter` registra en el log y
   `MockWhatsAppAdapter` es un mock marcado `EXTERNAL_DEPENDENCY`; SMTP y WhatsApp reales llegan con
-  `hardening-release`.
+  `hardening-release`. **Desde `auth-account-recovery` esto ya no solo retrasa avisos operativos:
+  deja sin entregar una credencial.** Los enlaces de recuperación salen por el canal `EMAIL`, que
+  resuelve a `ConsoleEmailAdapter`, y la regla de arriba le prohíbe registrar contenido y
+  destinatario — así que el enlace no puede leerse del log **ni siquiera en desarrollo**. Hasta
+  que llegue el adapter SMTP real, la vía que de verdad recupera una cuenta es el comando
+  `python -m app.cli.reset_password`.
 - **`sent_at` es la marca de tiempo de la ejecución**, no el instante exacto del envío: el job toma
   un único `now` para todo el recorrido del tenant.
 - **Un fallo de presentación legal no escala a nadie**, porque su tipo de notificación queda fuera
@@ -488,7 +512,9 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 - **No hay `PhoneAdapter`** ni la rama `TECHNICIAN_ASSIGNED + CRITICAL` de PRD §14: no existe puerto
   ni implementación, `escalation.py:44` deja constancia, y sigue escalando al manager.
 - **Catorce tipos de notificación siguen sin escalado definido**. Cada uno recibe el suyo en el
-  change que le da un `sla_deadline_at`, no aquí.
+  change que le da un `sla_deadline_at`, no aquí. El decimoséptimo miembro del enum
+  (`PASSWORD_RESET_REQUESTED`, de `auth-account-recovery`) no cuenta entre ellos: no tener plazo
+  es su comportamiento correcto, no una pieza pendiente.
 - **Valores de enum sin escritor**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.
