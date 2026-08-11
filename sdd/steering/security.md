@@ -71,11 +71,13 @@ PII de huéspedes (documento de identidad, fecha de nacimiento — requeridos po
 
 ## Sumideros de texto en claro (regla 11)
 
-Siete columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
+Nueve columnas del esquema son texto o JSON libre por el que puede colarse un valor de la regla 3 sin que la columna lo anuncie. El contrato lo hereda el change que primero escribe en cada una, con su propio test.
 
 **La séptima se añadió tarde, y por qué importa cómo se encontró**: `webhook_events.event_type` no estaba en esta lista porque no *parece* texto libre — se llama "tipo" y uno espera un enum. Pero se rellenaba con lo que el cuerpo del webhook trajera bajo `event`/`type`/`action`, así que era una columna de 200 caracteres escrita desde fuera, y la enumeración de esta tabla es justo lo que decide si alguien la mira. La lección es que el censo se hace por **quién escribe la columna**, no por lo que su nombre promete.
 
-**Las siete están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA), `notification_logs.last_error` desde `access-notifications` (2026-08-08) y las **tres** de `webhook_events` —`payload`, `error` y `event_type`— desde `reservations-webhooks` (2026-08-09). La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
+**Las dos últimas se añadieron aplicando esa lección, no repitiendo el olvido**: `incidents.title` y `incidents.description` llevaban en el esquema desde `domain-foundation-ops` **sin escritor**, y `guest-portal-api` es el primero — con un **anónimo de internet** al teclado, que es el escritor menos gobernable de los nueve. Las levantó su propio panel de seguridad (sección 7, 2026-08-11) y las declara aquí, en la misma sección en la que se estrenan, en vez de dejar la columna viva y el censo corto.
+
+**Las nueve están vivas**: `audit_logs.changes` desde `user-management` (2026-08-01, con `ChangeSet` y `AuditLogFactory` haciéndola cumplir por construcción), `notification_logs.subject`/`body` desde `celery-jobs` (2026-08-04, escaladas de SLA), `notification_logs.last_error` desde `access-notifications` (2026-08-08), las **tres** de `webhook_events` —`payload`, `error` y `event_type`— desde `reservations-webhooks` (2026-08-09) y las **dos** de `incidents` —`title` y `description`— desde `guest-portal-api` (2026-08-11). La tabla dice quién escribe cada una **hoy** y quién la heredará — y para las vivas, el contrato ya no está por definir: quien escriba después se atiene al que hay, no deriva uno nuevo.
 
 **La forma estructurada es el defecto: el valor no sobrevive en absoluto**, ni siquiera enmascarado — `{"changed": true}`, o se elimina la clave.
 
@@ -86,13 +88,28 @@ Siete columnas del esquema son texto o JSON libre por el que puede colarse un va
 | `webhook_events.error` | estructurada | **`reservations-webhooks`** (escritor vivo; código + campo, nunca el cuerpo recibido) |
 | `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | **`reservations-webhooks`** (escritor vivo; lo que no encaja degrada a `UNKNOWN_EVENT_TYPE`) |
 | `notification_logs.last_error` | estructurada | **`access-notifications`** (escritor vivo; el tipo de retorno del adapter no admite texto libre, así que lo hace cumplir por construcción) |
-| `notification_logs.subject` / `body` | **excepción** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
+| `notification_logs.subject` / `body` | **excepción 1** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
+| `incidents.title` / `description` | **excepción 2** | **`guest-portal-api`** (primer escritor, la incidencia que abre el huésped) y quien traiga las demás vías de alta de incidencias (`maintenance`) |
 
-**La excepción es una y solo una**: `subject`/`body` admiten la forma enmascarada `****XX` de un **código de acceso**, porque renderizan un mensaje que el huésped debe recibir.
+**Las excepciones son dos, y cada una concede una cosa distinta.**
+
+**Excepción 1 — `notification_logs.subject`/`body`**: admiten la forma enmascarada `****XX` de un **código de acceso**, porque renderizan un mensaje que el huésped debe recibir.
 
 **Lo que concede no es el propósito de la columna, es la regla 4** — y la regla 4 concede exactamente eso. Que el huésped necesite ver la contraseña WiFi no la autoriza: la regla 4 no le da forma enmascarada, así que el cuerpo persiste una plantilla o una referencia, nunca la credencial renderizada. Al `document_number` la regla 4 le exige ausencia de los listados, no una máscara.
 
-Dos redacciones anteriores de este contrato fallaron y consta por qué: la primera dijo "cualquier valor de la regla 3", autorizando un `document_number` enmascarado; la segunda usó "¿el propósito exige enseñárselo a una persona?" como criterio autónomo, que responde *sí* para el WiFi. Origen: paneles de seguridad de `domain-foundation-financial`.
+**Excepción 2 — `incidents.title`/`description`**: admiten **la prosa que escribió quien reporta**, sin estructurar y sin enmascarar, **porque el valor no es nuestro y no lo hemos ido a buscar** — ningún código nuestro renderiza aquí un valor de la regla 3. Eso, y no que alguien tenga que leerlo, es lo que la concede.
+
+Lo que hace la excepción necesaria en primer lugar es que la forma estructurada aquí no es que sea incómoda: es que no existe. «Se ha roto la caldera y sale agua por debajo» no tiene descomposición en campos que conserve lo que hace falta para mandar a un técnico. Pero ese es el motivo de que la columna sea texto libre, **no** el criterio que autoriza el valor: el criterio es la frase anterior, y la distinción importa porque la segunda redacción fallida de la excepción 1 fue exactamente «¿el propósito exige enseñárselo a una persona?».
+
+**Lo que concede es el texto de un tercero, y nada nuestro.** No hay plantilla, no hay interpolación y no hay lectura de `wifi_password` ni de un código de acceso que acabe aquí. Lo que puede aterrizar es lo que una persona teclee, y ese riesgo se acota como se acota el de cualquier entrada anónima —tipos, longitud máxima, y texto que la base de datos pueda almacenar— no pretendiendo que la columna sea estructurada.
+
+**Lo que esta excepción NO concede**, y es donde se parece a las de la regla 9:
+
+- **No se propaga.** El valor no sale de estas dos columnas: no llega a `audit_logs.changes` (el `AUDITABLE_FIELDS` de `INCIDENT` no nombra ni `title` ni `description`, así que `ChangeSet` lo rechaza por construcción) ni a `timeline_events` (el evento lleva un título constante y solo identificadores en `metadata`). Un change que quiera auditar o cronologiar *lo que dijo el huésped* no está cubierto por esto.
+- **No autoriza a un escritor nuestro.** Una incidencia creada por código —una alerta de cerradura, una clasificación automática, un aviso de un proveedor— que quiera meter un código, una contraseña o un número de documento en estos campos cae bajo la forma estructurada por defecto, no bajo esta excepción. El censo se hace por quién escribe: aquí el escritor declarado es quien reporta, y solo él.
+- **No convierte la columna en un sitio seguro para PII.** Si el huésped teclea su propio número de documento, ahí queda: es texto que él eligió enviar, no un dato que el sistema haya ido a buscar. Lo que sí obliga es a decírselo al operador, que es la cara simétrica de la advertencia de OQ2 sobre `properties.access_notes` —lo que el operador escribe se le enseña al huésped tal cual, y lo que el huésped escribe se le enseña al operador tal cual—, y las dos viven en `docs/guest-portal.md`.
+
+Dos redacciones anteriores del contrato de la excepción 1 fallaron y consta por qué: la primera dijo "cualquier valor de la regla 3", autorizando un `document_number` enmascarado; la segunda usó "¿el propósito exige enseñárselo a una persona?" como criterio autónomo, que responde *sí* para el WiFi. Origen: paneles de seguridad de `domain-foundation-financial`. **La excepción 2 no reabre ese criterio**: se concede por una propiedad del escritor —el valor no es nuestro y no lo hemos ido a buscar—, no por el propósito de la columna.
 
 ## Triggers de revisión extra
 
