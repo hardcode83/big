@@ -1,13 +1,14 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
+import { notifySessionExpired } from "@/lib/api/authenticated-client";
 import {
   clearSessionTokens,
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
-import { fireEvent, render, screen } from "@/test/render";
+import { act, fireEvent, render, screen } from "@/test/render";
 
 function Probe() {
   const { status, user } = useAuth();
@@ -162,6 +163,67 @@ describe("AuthProvider", () => {
 
     expect(await screen.findByTestId("status")).toHaveTextContent("error");
     expect(getSessionTokens()).toBeNull();
+  });
+
+  it("invalidates provider state when a shared client reports session expiration", async () => {
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "user-1",
+            email: "user@example.com",
+            name: "User",
+            preferred_language: "es",
+            role: "TENANT_OWNER",
+            tenant_id: "tenant-1",
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function LoginProbe() {
+      const { login } = useAuth();
+      return <button onClick={() => void login("user@example.com", "secret")}>login</button>;
+    }
+
+    render(
+      <RuntimeConfigProvider
+        config={{
+          apiBaseUrl: "",
+          appEnv: "test",
+          defaultLocale: "es",
+          featureFlags: {},
+          appVersion: "",
+          buildCommitShort: "",
+        }}
+      >
+        <AuthProvider>
+          <LoginProbe />
+          <Probe />
+        </AuthProvider>
+      </RuntimeConfigProvider>,
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: "login" }));
+    expect(await screen.findByTestId("status")).toHaveTextContent("authenticated");
+
+    act(() => notifySessionExpired());
+
+    expect(screen.getByTestId("status")).toHaveTextContent("expired");
+    expect(screen.getByTestId("user")).toHaveTextContent("none");
   });
 
   it("logs out locally even when the backend logout is unavailable", async () => {

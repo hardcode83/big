@@ -26,6 +26,7 @@ Al cabo de unos segundos:
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make openapi           # regenera el contrato de API (ver abajo)
+make check-version-parity # comprueba VERSION, backend y frontend
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -123,6 +124,17 @@ Endpoints de auth: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`,
 `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`. Operación, configuración del límite de
 intentos y las cosas que sorprenden: [`docs/auth-tenancy.md`](docs/auth-tenancy.md).
 
+Autoservicio de contraseña: `POST /api/v1/auth/change-password` (con sesión),
+`POST /api/v1/auth/forgot-password` y `POST /api/v1/auth/reset-password` (anónimos). Quien
+recibe una contraseña temporal —del bootstrap, de `POST /api/v1/users` o del rescate de abajo—
+queda con `must_change_password`, y hasta que la cambie toda petición autenticada responde
+`403 PASSWORD_CHANGE_REQUIRED` salvo `me`, `logout` y `change-password`. **El aviso de
+recuperación no llega todavía a nadie**: el canal de correo es el adapter de consola, al que se
+le prohíbe registrar el enlace, así que el SMTP real llega con `hardening-release` y hasta
+entonces la vía que recupera una cuenta es el comando de rescate. Política de contraseña, los
+tres endpoints y ese procedimiento:
+[`docs/auth-account-recovery.md`](docs/auth-account-recovery.md).
+
 Administración del tenant: `/api/v1/users` (alta, listado, edición, baja, reset de contraseña)
 y `/api/v1/tenants/{id}` (datos del tenant y sus umbrales, SLAs y ventanas). Quién puede hacer
 qué y qué rastro deja: [`docs/user-management.md`](docs/user-management.md).
@@ -174,6 +186,11 @@ continúa comprobando por separado que `backend/openapi.json` corresponde al có
 La documentación interactiva sigue disponible en http://localhost:8000/docs con el stack
 levantado.
 
+La procedencia privada del build y sus verificaciones operativas están descritas en
+[`docs/app-version-provenance.md`](docs/app-version-provenance.md). El módulo backend vive en
+`backend/app/provenance/`; sus metadatos no se publican en la configuración ni en el HTML del
+frontend.
+
 ## Variables de entorno
 
 Ver `.env.example` — trae valores por defecto funcionales para config local sin sensibilidad real. Lo que hace aceptable ese default de Postgres es que `docker-compose.yml` publica `postgres` y `redis` **solo en `127.0.0.1`**, así que la base de datos no es alcanzable desde otros equipos de tu red. Los secretos reales (credenciales de proveedores externos) nunca llevan valor por defecto ahí — solo el nombre (`security.md` #8).
@@ -187,7 +204,7 @@ A diferencia de la de firma, la de cifrado **no se regenera sola si ya hay un va
 
 ## Estructura
 
-- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 16 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `properties`, `reservations`, `integrations`, `tenants`, `cleaning`, `access`, `guests` y `notifications` son los que tienen las cuatro —`properties` ganó su `api/` con `properties-crud`, y `access`, `guests` y `notifications` con `access-notifications`, que trajo la operación de accesos (PRD §15), el registro legal de huéspedes (§17) y la entrega de notificaciones (§14). El **scheduler** vive en `backend/app/scheduler/` — capa de entrega para el reloj, el equivalente de `api/` para Celery beat: siete tareas —las cuatro de PRD §8.3 más `dispatch_notifications`, `provision_access_records` y `process_webhook_events`, que el PRD no nombra y declaran como divergencia `access-notifications` y `reservations-webhooks`—, su calendario y el lock que evita solapes (ver [`docs/celery-jobs.md`](docs/celery-jobs.md)). Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda las tablas `webhook_endpoints` y `webhook_events`; migraciones en `backend/alembic/`. Dentro de `integrations` vive también **`app/integrations/infrastructure/storage/`** — el almacenamiento de ficheros, con `LocalFileStorage` (escribe en el volumen `/app/media`) y `S3FileStorage` detrás del mismo puerto, y la factoría que elige uno u otro por el `storage_type` del tenant. Está en `integrations` y no en `cleaning` porque el puerto es compartido: las fotos de limpieza son hoy su único llamante, pero `maintenance` y `revenue` servirán sus propios objetos por él (ver [`docs/cleaning.md`](docs/cleaning.md)). **`backend/scripts/`** queda deliberadamente **fuera de `app/`**: son herramientas de un solo uso contra servicios externos (provisión y sondeo del sandbox de Channex — ver [`docs/channex-staging.md`](docs/channex-staging.md)) o de medición puntual (`measure_tenant_filter.py`) que no deben viajar en el paquete desplegado.
+- `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 17 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `properties`, `reservations`, `integrations`, `tenants`, `cleaning`, `access`, `guests`, `notifications` y `timeline` son los que tienen las cuatro —`properties` ganó su `api/` con `properties-crud`; `access`, `guests` y `notifications` con `access-notifications`, que trajo la operación de accesos (PRD §15), el registro legal de huéspedes (§17) y la entrega de notificaciones (§14); y `timeline` con `dashboard-api`, que le añadió `application/` y `api/` de golpe: hasta entonces sus eventos los escribían los casos de uso de *otros* dominios y nadie los leía de vuelta (PRD §10). Ese mismo change añade el dominio **`dashboard`** —el decimoséptimo—, que es el lado de lectura del agregado de PRD §9 y el único con `domain/`, `application/` y `api/` pero **sin `infrastructure/` propia**: no tiene tabla ni entidad, compone los puertos de los otros siete dominios. El **scheduler** vive en `backend/app/scheduler/` — capa de entrega para el reloj, el equivalente de `api/` para Celery beat: siete tareas —las cuatro de PRD §8.3 más `dispatch_notifications`, `provision_access_records` y `process_webhook_events`, que el PRD no nombra y declaran como divergencia `access-notifications` y `reservations-webhooks`—, su calendario y el lock que evita solapes (ver [`docs/celery-jobs.md`](docs/celery-jobs.md)). Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda las tablas `webhook_endpoints` y `webhook_events`; migraciones en `backend/alembic/`. Dentro de `integrations` vive también **`app/integrations/infrastructure/storage/`** — el almacenamiento de ficheros, con `LocalFileStorage` (escribe en el volumen `/app/media`) y `S3FileStorage` detrás del mismo puerto, y la factoría que elige uno u otro por el `storage_type` del tenant. Está en `integrations` y no en `cleaning` porque el puerto es compartido: las fotos de limpieza son hoy su único llamante, pero `maintenance` y `revenue` servirán sus propios objetos por él (ver [`docs/cleaning.md`](docs/cleaning.md)). **`backend/scripts/`** queda deliberadamente **fuera de `app/`**: son herramientas de un solo uso contra servicios externos (provisión y sondeo del sandbox de Channex — ver [`docs/channex-staging.md`](docs/channex-staging.md)) o de medición puntual (`measure_tenant_filter.py`) que no deben viajar en el paquete desplegado.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. En `app/` vive además la **única pieza de servidor del frontend**: `app/api/[...path]/route.ts`, el proxy same-origin que reenvía `/api/` al backend por la red interna — es lo que hace que el navegador alcance la API sin exponer el backend, y su alcance está fijado por `app/proxy-scope.test.ts` ([`docs/ingress-https.md`](docs/ingress-https.md)). Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
 - `docker-compose.worktree.yml` — overlay que **retira la publicación de puertos** en el host. `make up` lo añade solo cuando detecta un worktree enlazado de git, para que varios stacks de desarrollo convivan sin chocar. El worktree principal no lo usa y el CD no lo ve nunca.
@@ -198,6 +215,7 @@ Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 
 - `python -m app.integrations.cli.pms_sync <tenant>` — sincroniza reservas desde el PMS de cada propiedad.
 - `python -m app.integrations.cli.pms_credentials set|rotate|show-providers` — guarda y rota las credenciales de proveedor. El secreto se pasa por `PMS_CREDENTIAL_SECRET`, **nunca como argumento**: un argumento queda en el historial del shell y es visible en `ps`. Ver `docs/pms-credentials.md`.
+- `python -m app.cli.reset_password --email <dirección>` — rescata una cuenta sin acceso: emite una contraseña temporal, la imprime **una sola vez**, revoca las sesiones y levanta el bloqueo por intentos fallidos. Es la única vía de vuelta del único `TENANT_OWNER` de un tenant, y hoy también la única para cualquiera, porque el correo de recuperación no entrega todavía. **A propósito no tiene objetivo de `make`**: es una operación de rescate, no parte del flujo normal. Ver [`docs/auth-account-recovery.md`](docs/auth-account-recovery.md) y [`RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §8.
 
 ## Despliegue a dev (CD)
 
@@ -221,6 +239,12 @@ dentro del contenedor (una versión anterior de este README decía `cd backend &
 no funciona en una máquina limpia). El frontend sí se ejecuta en el host, con las dependencias que
 `npm install` deja en `frontend/node_modules`.
 
+**En paralelo, si tienes prisa**: `docker compose exec backend uv run pytest -n auto` reparte la
+suite entre tantos procesos como núcleos tengas. En una máquina de 12 baja de ~3m a menos de 1m.
+Cada worker se lleva su propia base de datos desechable y su propia base lógica de Redis, así que no
+se pisan; el tope son 16 workers, que es cuanto Redis sirve por defecto. El comando de arriba —en
+serie— sigue siendo el canónico, y es el que conviene con `-k`, porque la salida se lee en orden.
+
 **Desde un worktree enlazado**: la suite habla con `postgres:5432` y `redis:6379` por la red de
 compose, que es el camino que ha usado siempre — los puertos del host nunca estuvieron en esa ruta, así
 que no publicar no le afecta. La primera forma (`exec`) va siempre: no crea ni recrea nada, se engancha
@@ -238,8 +262,8 @@ El backend tiene **gate de CI en cada PR** (`.github/workflows/backend-tests.yml
 migraciones Alembic sobre un PostgreSQL limpio, `alembic check`, la suite completa y
 `downgrade base`, con Postgres y Redis como services.
 
-La suite tarda ~6 minutos, así que **solo se ejecuta cuando el diff toca `backend/**` o el
-propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
+La suite tarda ~3 minutos (medido el 2026-08-10), así que **solo se ejecuta cuando el diff
+toca `backend/**` o el propio workflow**. El check `backend-tests`, en cambio, **se reporta siempre**: en un PR que
 no toca el backend termina en verde en segundos, y el resumen de la ejecución dice
 explícitamente que la suite se omitió, para que ese verde no se lea como una suite que pasó.
 Un `workflow_dispatch` manual la ejecuta entera en cualquier caso.
@@ -290,6 +314,7 @@ npm run typecheck   # TypeScript strict, sin emitir
 npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
 npm test            # Vitest + Testing Library
 npm run build       # build de producción
+npm run test:public-artifacts # escanea .next/static, server/standalone y rutas públicas
 npm run test:entrypoint  # test del entrypoint de dev (sincronización de node_modules)
 ```
 

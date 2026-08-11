@@ -34,6 +34,18 @@ Lo que lo hace posible: Compose ya aísla contenedores, red y volúmenes por nom
 
 Y **sigue sin valer reutilizar el stack del principal**: `backend` y `frontend` montan el código por bind-mount (`./backend:/app`, `./frontend:/app`), así que sus contenedores sirven siempre el árbol desde el que se levantaron. Un `docker compose exec backend uv run pytest` desde el worktree apuntando al proyecto del principal probaría el código del principal, no el del change. Por eso cada worktree levanta el suyo.
 
+**Lo que tampoco funciona tal cual: regenerar el contrato del frontend.** `cd frontend && npm run api:generate` (y su `api:check`) falla en un worktree enlazado, y no por el aislamiento de puertos: el contenedor `frontend` monta **solo** `./frontend` en `/app`, mientras que `frontend/scripts/generate-api-types.mjs` resuelve sus rutas dos niveles por encima de `scripts/` — busca `/backend/openapi.json` y escribe `/frontend/lib/api/generated/openapi.d.ts`, y ninguno de los dos existe ahí dentro. En el host tampoco corre, porque `node_modules` vive en un volumen de Docker y no en el árbol.
+
+La salida mientras nadie lo arregle, usada y verificada en `dashboard-api` (produce un fichero idéntico al del comando documentado, y `api:check` lo confirma):
+
+```bash
+docker compose cp backend/openapi.json frontend:/backend/openapi.json
+docker compose exec -T frontend ln -sfn /app /frontend   # una vez por contenedor
+docker compose exec -T frontend npm run api:generate
+```
+
+El arreglo de verdad es que el script acepte rutas por parámetro o que el contenedor monte la raíz del repo; no se hizo en `dashboard-api` porque es tooling del monorepo y no de esa capacidad. **Ojo**: la sección Verification de cualquier change que toque el contrato manda `cd frontend && npm run api:check`, y ese comando literal no funciona desde aquí.
+
 **Lo que no tendrás en un worktree: navegador.** Sin puertos publicados no hay UI ni API alcanzables desde el host — ni `localhost:3000` ni `localhost:8000` ni un cliente gráfico contra `localhost:5432`. La suite sí corre, porque va por la red de compose (`postgres:5432`, `redis:6379`), que es por donde ha ido siempre. Si algún día hace falta navegar la app desde un worktree, la salida es parametrizar los cuatro puertos con un desplazamiento (`make up PORT_OFFSET=10`); se añadirá cuando haga falta, no antes.
 
 **Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.24 (por `!reset`) y git ≥ 2.31 (por `--path-format`).

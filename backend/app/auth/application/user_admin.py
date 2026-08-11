@@ -128,6 +128,10 @@ class CreateUserUseCase:
             now=now,
             phone=command.phone,
             preferred_language=command.preferred_language,
+            # `auth-account-recovery` R5.2: the password below is temporary and travels by
+            # WhatsApp or by voice. The flag is what stops it from quietly becoming the
+            # account's permanent credential.
+            must_change_password=True,
         )
 
         await self._users.add(tenant_id, user)
@@ -390,10 +394,17 @@ class ResetUserPasswordUseCase:
             raise UserNotFoundError("User does not exist")
 
         temporary_password = generate_temporary_password()
-        user.set_password_hash(await self._hasher.hash(temporary_password))
+        # `auth-account-recovery` R5.2: an assisted reset is the second temporary-password
+        # path, so it raises the flag exactly like creation does.
+        user.set_password_hash(await self._hasher.hash(temporary_password), temporary=True)
 
         await self._users.apply_changes(
-            tenant_id, user_id, {"password_hash": user.password_hash}
+            tenant_id,
+            user_id,
+            {
+                "password_hash": user.password_hash,
+                "must_change_password": user.must_change_password,
+            },
         )
         await self._audit.record(
             tenant_id=tenant_id,

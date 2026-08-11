@@ -11,6 +11,7 @@ docstring), so the check in `add` is the only thing between a bug and a cross-te
 """
 
 import uuid
+from collections.abc import Sequence
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,6 +35,23 @@ class SqlAlchemyGuestRepository:
         )
         model = result.scalar_one_or_none()
         return _to_summary(model) if model is not None else None
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, guest_ids: Sequence[uuid.UUID]
+    ) -> Sequence[GuestSummary]:
+        """One statement for N guests (`dashboard-api` R1.7).
+
+        An empty batch short-circuits rather than emitting `IN ()`.
+        """
+        if not guest_ids:
+            return []
+        rows = await self._session.execute(
+            select(GuestModel).where(
+                GuestModel.tenant_id == tenant_id,
+                GuestModel.id.in_(list(guest_ids)),
+            )
+        )
+        return [_to_summary(model) for model in rows.scalars()]
 
     async def find_by_email(self, tenant_id: uuid.UUID, email: str) -> GuestSummary | None:
         """Deterministic pick when a tenant holds several guests with one address.

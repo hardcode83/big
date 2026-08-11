@@ -1,0 +1,312 @@
+# Dashboard — API agregada de lectura
+
+## Purpose
+
+Da al dashboard del propietario/manager (PRD §9, §10) su backend: cuatro endpoints de
+**lectura pura**, tenant-scoped y autenticados, que responden «¿qué pasa y quién tiene la
+próxima acción?» sin obligar al cliente a componer siete dominios. Son la colección de cards,
+el agregado de detalle de una propiedad, su estado operacional y su timeline filtrable.
+
+No crea ninguna tabla, ninguna columna y ninguna vía de escritura: compone lo que otras
+capacidades ya persisten. El *cómo se opera* está en
+[`docs/dashboard.md`](../../docs/dashboard.md); las pantallas que lo consumirán, en
+[`dashboard-web-frontend.md`](dashboard-web-frontend.md).
+
+**Dónde vive**: un módulo propio `app/dashboard/` con `domain/`, `application/` y `api/` y
+**sin `infrastructure/`** — compone los puertos de los demás dominios en vez de escribir un
+segundo sitio donde se aplica el scope de tenant. El agregado toca siete dominios
+(`properties`, `reservations`, `guests`, `cleaning`, `maintenance`, `statements`, `access`)
+más `timeline`; alojarlo en `properties` habría convertido al dominio que custodia la máquina
+de estados en un hub que importa a los otros siete.
+
+## Requirements
+
+### Reparto de rutas
+
+- THE SYSTEM SHALL servir exactamente estas cuatro rutas de lectura, y ninguna de escritura:
+
+  | Ruta | Router | Por qué ahí |
+  |---|---|---|
+  | `GET /api/v1/dashboard/properties` | `app/dashboard/api/router.py` | agregado multidominio, prefijo propio |
+  | `GET /api/v1/properties/{property_id}/dashboard` | `app/dashboard/api/router.py` | agregado multidominio, con la ruta que fija PRD §23:1943 |
+  | `GET /api/v1/properties/{property_id}/state` | `app/properties/api/router.py` | lectura de un solo dominio, del módulo que posee la columna |
+  | `GET /api/v1/timeline/{property_id}` | `app/timeline/api/router.py` | dominio propio, con la capa `api/` que estrena |
+
+- THE SYSTEM SHALL servir la colección bajo su propio prefijo `/dashboard` y no bajo
+  `/properties`. `/properties/dashboard` y `/properties/{id}` compiten en FastAPI, que resuelve
+  por orden de registro: `dashboard` se parsearía como `{id}` y la ruta respondería `422` en vez
+  de existir. Es la **única** de las cuatro que el PRD no nombra, así que es la única que puede
+  moverse; las dos de §23:1942-1943 se quedan literales.
+- THE SYSTEM SHALL NOT exponer el timeline global `GET /api/v1/timeline` de PRD §23:1951: esta
+  capacidad acota a la variante por propiedad, que es la que consume el detalle.
+
+### Forma del contrato
+
+- THE SYSTEM SHALL nombrar los campos de respuesta en `snake_case`, que es el nombre Python del
+  campo: ningún modelo declara `alias_generator` ni `populate_by_name`.
+
+  **Es una divergencia declarada frente al contrato del frontend**, que los tipa en `camelCase`
+  (`frontend/features/dashboard/data/dto.ts`). El proyecto no tiene camelCase en ninguna
+  respuesta, y `backend/openapi.json` —regenerado— es la fuente de verdad de la que
+  `frontend/lib/api/generated/openapi.d.ts` deriva. La conversión es, por tanto, trabajo de
+  `dashboard-web` al sustituir el mock, no una promesa incumplida aquí.
+- THE SYSTEM SHALL declarar **presentes** todas las claves de cada respuesta, incluidas las que
+  viajan `null`: una clave ausente y una clave nula no son lo mismo para el cliente, y todas
+  figuran como `required` en el contrato publicado.
+- THE SYSTEM SHALL serializar los importes como **string**, nunca como float, para no perder
+  precisión decimal en el JSON.
+- THE SYSTEM SHALL mapear cada campo explícitamente desde el modelo de dominio y SHALL NOT usar
+  `from_attributes`: un campo nuevo en una entidad no debe poder aparecer en una respuesta sin
+  que alguien lo escriba.
+- THE SYSTEM SHALL devolver el envelope de paginación de PRD §23 —`{data, total, page,
+  per_page, total_pages}`— en las dos rutas paginadas, y el envelope de error
+  `{error:{code,message,details}}` en los fallos.
+- THE SYSTEM SHALL mantener `backend/openapi.json` y `frontend/lib/api/generated/openapi.d.ts`
+  regenerados y versionados, de modo que los workflows `api-contract` y `frontend-api-contract`
+  no detecten deriva.
+
+### Colección de cards (`GET /api/v1/dashboard/properties`)
+
+- WHEN un usuario autenticado la solicita, THE SYSTEM SHALL devolver una card por propiedad
+  **de su tenant**, paginada, y ninguna de otro tenant.
+- THE SYSTEM SHALL incluir en cada card exactamente estos campos: `property_id`,
+  `property_code`, `operational_state`, `current_or_next_reservation`, `cleaning_status`,
+  `open_incidents_count`, `next_action`, `last_event_label` y `last_event_at`.
+- THE SYSTEM SHALL emitir `operational_state` como uno de los literales canónicos de
+  `PropertyOperationalState` (PRD §3.1), **sin traducir**, y SHALL NOT calcular ningún color:
+  el mapeo de color es del frontend (PRD §9.1).
+- THE SYSTEM SHALL aceptar `page` (1..100.000) y `per_page` (1..100) con las mismas cotas que
+  `GET /api/v1/properties`, importadas de su módulo para que no puedan divergir, y IF están
+  fuera de rango THEN THE SYSTEM SHALL responder `422` con el envelope de error.
+- WHERE una propiedad no tiene reserva actual ni próxima, THE SYSTEM SHALL devolver
+  `current_or_next_reservation: null` en vez de omitir la clave.
+- WHEN se elige la reserva «actual o próxima», THE SYSTEM SHALL descartar las estancias ya
+  terminadas, ordenar por fecha de entrada con desempate determinista y quedarse con la
+  primera, dentro de un **horizonte de 90 días** (`ASSUMPTION`: ni PRD §9.1 ni el contrato del
+  frontend fijan uno, y sin horizonte la consulta arrastraría toda la agenda futura).
+- WHEN la página de propiedades viene vacía, THE SYSTEM SHALL responder sin emitir ninguna de
+  las consultas de composición.
+
+### Agregado de detalle (`GET /api/v1/properties/{property_id}/dashboard`)
+
+- WHEN un usuario autenticado lo solicita sobre una propiedad de su tenant, THE SYSTEM SHALL
+  devolver las secciones de PRD §9.2 en estos campos: `property_id`, `property_code`,
+  `operational_state`, `current_or_next_reservation`, `guest`, `access`, `cleaning_status`,
+  `last_cleaning_photos`, `open_incidents`, `financial`, `notes` y `pending_approvals`.
+- THE SYSTEM SHALL devolver en `guest` únicamente el nombre, y en `access` únicamente una
+  etiqueta de estado: nunca el número de documento y nunca un código de acceso, ni siquiera
+  enmascarado. El huésped se proyecta con `GuestSummary`, que excluye el documento **por
+  construcción**, y el código en claro no existe en la base de datos —`AccessRecordModel` no
+  tiene columna para él—, así que no hay nada que enmascarar.
+- THE SYSTEM SHALL componer el título de cada incidencia a partir de su **categoría**
+  localizada, y SHALL NOT devolver la columna `incidents.title`, que es texto libre.
+- WHERE el dominio que escribe un bloque todavía no existe, THE SYSTEM SHALL consultar
+  igualmente su tabla real y devolver la lista vacía o `null`, de modo que el contrato no
+  cambie cuando esos changes aterricen: `incidents` y `owner_approvals` esperan a `maintenance`,
+  y los gastos a `revenue`.
+- THE SYSTEM SHALL resolver la moneda del bloque financiero así: la de la reserva, o `EUR` por
+  defecto; con **exactamente una** moneda en los gastos pendientes, ésa y su total, conservando
+  el total de la reserva sólo si coincide la moneda; con cero o dos o más monedas, la de la
+  reserva y `pending_expenses: null` (`ASSUMPTION`: ni el PRD ni el contrato dicen qué hacer con
+  una propiedad que acumula gastos en dos monedas).
+
+### Estado operacional (`GET /api/v1/properties/{property_id}/state`)
+
+- WHEN un usuario autenticado lo solicita sobre una propiedad de su tenant, THE SYSTEM SHALL
+  devolver su `PropertyOperationalState` canónico y el instante ISO-8601 UTC de su última
+  transición.
+- THE SYSTEM SHALL **leer** ese estado, no resolverlo: es el que `PropertyStateMachine` escribió
+  por última vez. THE SYSTEM SHALL NOT reimplementar la resolución contextual en la capa de
+  lectura.
+- WHERE una propiedad nunca ha transicionado, THE SYSTEM SHALL devolver la fecha de última
+  transición como `null`, porque el alta no es una transición.
+
+### Timeline por propiedad (`GET /api/v1/timeline/{property_id}`)
+
+- WHEN un usuario autenticado lo solicita sobre una propiedad de su tenant, THE SYSTEM SHALL
+  devolver sus eventos paginados, **ordenados por instante descendente con desempate
+  determinista por `id`**, de modo que paginar no repita ni omita entradas. El índice existente
+  cubre la primera clave; el desempate ordena en memoria dentro de un mismo instante, que es un
+  puñado de filas, y sin él la paginación es incorrecta.
+- THE SYSTEM SHALL aceptar los filtros de PRD §10 —`event_type`, `severity`, `actor_type`, y el
+  rango temporal con los nombres de contrato `from` y `to`— y SHALL combinarlos con AND, con
+  ambos extremos del rango **inclusivos**.
+- IF el rango es inverso (`to` anterior a `from`), o alguno de sus extremos llega sin zona
+  horaria, THEN THE SYSTEM SHALL rechazarlo con `422` y el envelope de error.
+- THE SYSTEM SHALL incluir en cada entrada exactamente `id`, `occurred_at`, `actor_type`,
+  `event_type`, `severity`, `title` y `description`, y SHALL NOT serializar la columna
+  `metadata`, que es JSON libre y no forma parte del contrato de lectura. La ausencia es
+  **estructural**: el modelo de dominio de la entrada renderizada tampoco tiene ese campo, así
+  que no hay nada que un serializador pudiera alcanzar.
+- THE SYSTEM SHALL contar en `total` el mismo conjunto filtrado que devuelve en `data`, nunca
+  todos los eventos de la propiedad.
+- THE SYSTEM SHALL comprobar que la propiedad existe **antes** de consultar los eventos: la
+  consulta de eventos por sí sola devolvería una página vacía con `200` sobre una propiedad
+  ajena o inexistente, y eso filtraría por el código de estado lo que el 404 oculta.
+
+### Textos legibles en el idioma del usuario
+
+- WHEN el sistema compone una entrada de timeline o una etiqueta de card, THE SYSTEM SHALL
+  renderizarla en el idioma de `preferred_language` del usuario autenticado, que viaja ya
+  resuelto en el `RequestContext` (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta
+  ninguna consulta adicional.
+- THE SYSTEM SHALL derivar el `title` de cada entrada de su `event_type` y de su `metadata`
+  contra un catálogo que cubre **los 45 valores de `TimelineEventType` en ambos idiomas**, y un
+  test SHALL fallar si el enum crece sin que el catálogo lo siga.
+- IF un `event_type` no tiene entrada en el catálogo, o le falta un dato de sustitución, THEN
+  THE SYSTEM SHALL degradar al `title` almacenado en vez de fallar la petición.
+- THE SYSTEM SHALL interpolar en las plantillas **solo** los valores de `metadata` que una
+  lista blanca por tipo de evento autoriza, y sólo si son escalares acotados (texto de hasta 200
+  caracteres, entero o decimal; nunca un booleano). Cualquier otro valor degrada la entrada al
+  título almacenado. `metadata` es JSON libre escrito por cada capacidad que emite eventos, y
+  sin la lista blanca su contenido acabaría en un texto que lee cualquier portador de
+  `READ_PROPERTIES`.
+- THE SYSTEM SHALL entregar `description` **tal cual, sin traducir**. Lo que los escritores
+  guardan ahí es texto humano —el motivo que teclea una persona al bloquear una vivienda o
+  ponerla fuera de servicio—, no texto de sistema: traducirlo sería reescribir lo que dijo un
+  operador, y no hay `metadata` desde la que componerlo. Consecuencia aceptada: una entrada
+  puede llegar con el `title` en el idioma de quien lee y la `description` en el idioma en que
+  la escribió el operador. Un `event_type` cuya `description` sí sea generada por el sistema
+  puede ganar plantilla más adelante sin cambiar el contrato.
+- THE SYSTEM SHALL conservar la columna `title` almacenada **sin modificarla nunca**, como copia
+  de auditoría en inglés, coherente con la norma de que los mensajes de sistema se escriben en
+  inglés. Un test lo verifica releyendo la fila después de la petición HTTP.
+- THE SYSTEM SHALL NOT traducir los literales canónicos —`PropertyOperationalState`,
+  `event_type`, `actor_type`, `severity`—: viajan como valores exactos del PRD y el frontend los
+  mapea.
+- IF `users.preferred_language` contiene un valor no soportado —la columna es `String(5)` y no
+  lo restringe—, THEN THE SYSTEM SHALL degradar al castellano en vez de fallar.
+- THE SYSTEM SHALL alojar el **mecanismo** de localización en `app/core/i18n.py` (el tipo
+  `Locale` y un `Catalog` que resuelve clave+idioma→plantilla) y las **tablas de mensajes** en el
+  `domain/` de quien posee el vocabulario. Son `str` y `dict`, Python puro, sin framework.
+- THE SYSTEM SHALL validar cada plantilla **al construir** el catálogo —rechazando campos
+  posicionales, travesía de atributos o índices, especificadores de formato y conversiones—, de
+  modo que un error de redacción sea un test en rojo y no un `500` en producción.
+
+### Próxima acción
+
+- WHEN se compone una card, THE SYSTEM SHALL derivar `next_action` del estado operacional con
+  esta tabla determinista, exhaustiva sobre `PropertyOperationalState`:
+
+  | Estado | Acción | Responsable |
+  |---|---|---|
+  | `AWAITING_CLEANING` | asignar limpiadora | manager |
+  | `CLEANING_SCHEDULED` | pendiente de aceptar | limpiadora asignada |
+  | `CLEANING_IN_PROGRESS` | limpieza en curso | limpiadora asignada |
+  | `AWAITING_CHECKIN` | entregar acceso | manager |
+  | `MAINTENANCE_REQUIRED` | revisar incidencia | — (hasta `maintenance`) |
+  | `CRITICAL_INCIDENT` | atender incidencia | — (hasta `maintenance`) |
+  | `OCCUPIED_ESTIMATED`, `READY_FOR_NEXT_GUEST`, `VACANT_READY`, `BLOCKED_BY_OWNER`, `OUT_OF_SERVICE` | `next_action: null` | — |
+
+  La tabla es un `ASSUMPTION`: PRD §9.1 pide «próxima acción requerida y responsable» y da un
+  ejemplo, pero no la define. Acordada en el gate de diseño del 2026-08-09.
+- THE SYSTEM SHALL expresar el responsable como un **rol**, no como una persona: resolver el
+  nombre real cuesta una consulta más y «el manager» no está definido cuando un tenant tiene
+  varios, decisión que el PRD no toma.
+- IF se pide la próxima acción de un valor que no es un `PropertyOperationalState`, THEN THE
+  SYSTEM SHALL fallar explícitamente en vez de devolver `null`, de modo que un estado nuevo
+  rompa la suite en lugar de colarse en silencio.
+
+### Permisos: agregar no concede
+
+- THE SYSTEM SHALL declarar `require(Permission.READ_PROPERTIES)` en las cuatro rutas, de modo
+  que `tests/test_route_authorization.py` las recorra.
+- WHERE el rol que llama carece del permiso que protege el **origen** de un bloque, THE SYSTEM
+  SHALL devolver ese bloque como `null` en vez de entregarlo, aunque la ruta se haya superado:
+  `READ_RESERVATIONS` protege la reserva, el huésped y el total de la reserva;
+  `READ_CLEANING_TASKS`, el estado de limpieza; `READ_ACCESS_RECORDS`, el bloque de acceso.
+
+  El motivo es que **agregar no puede conceder**: `require()` acepta un solo permiso, así que
+  una ruta con `READ_PROPERTIES` a secas entregaría en una respuesta lo que cuatro permisos
+  distintos protegen por separado. Hoy no se observa —los dos roles con `READ_PROPERTIES` tienen
+  los cuatro—, y se observaría en el primer rol que se añada, donde ya sería una fuga en
+  producción y no una decisión de diseño.
+- THE SYSTEM SHALL redactar el bloque **anulándolo, no omitiendo la clave**: el `null` de «no
+  puedes verlo» es deliberadamente indistinguible del `null` de «no hay ninguno», y una clave
+  que aparece y desaparece según el rol es en sí misma un canal.
+- WHERE el rol tiene `READ_ACCESS_RECORDS` pero no `READ_RESERVATIONS`, THE SYSTEM SHALL leer
+  igualmente la fila de reserva —porque el estado de acceso es una columna suya— pero SHALL NOT
+  exponer ni la reserva, ni el huésped, ni el total de la reserva en el bloque financiero.
+- THE SYSTEM SHALL decidir la autorización **antes** de consultar el recurso, de modo que un rol
+  sin permiso reciba la misma respuesta para un `id` real y para uno inventado.
+
+### Aislamiento por tenant
+
+- THE SYSTEM SHALL pasar el `tenant_id` explícito a cada método de repositorio, derivado
+  únicamente del token, y SHALL NOT escribir ninguna comprobación de tenant a mano en los
+  routers.
+- IF el `property_id` no existe **o pertenece a otro tenant**, THEN THE SYSTEM SHALL responder
+  `404` con un cuerpo **indistinguible** en ambos casos, en las tres rutas por propiedad.
+- THE SYSTEM SHALL demostrar con tests, con el tenant vecino realmente sembrado, que un usuario
+  del tenant A no lee propiedades, eventos ni agregados del tenant B por esta superficie.
+
+### Composición por lotes, sin N+1
+
+- THE SYSTEM SHALL resolver la colección completa con un **número fijo de consultas**,
+  independiente del número de propiedades, y un test SHALL demostrarlo contando las sentencias
+  emitidas. No es una métrica: es un aserto con techo constante, porque un `for` que llame a un
+  `get` por propiedad es sintácticamente idéntico al código correcto.
+- THE SYSTEM SHALL obtener cada bloque mediante un lector por lotes en el puerto **del dominio
+  que posee el dato**, y agrupar en memoria. THE SYSTEM SHALL NOT crear un repositorio que haga
+  JOIN entre las siete tablas: sería el segundo sitio donde se escribe el scope de tenant.
+- THE SYSTEM SHALL crear en `maintenance` y `statements` **sólo la mitad de lectura** de su
+  primer puerto —sin `add`, sin `save`—: la escritura llega con esos changes, y la firma es
+  donde eso queda dicho.
+- THE SYSTEM SHALL devolver los mapas por lotes **dispersos**: una propiedad sin eventos o sin
+  incidencias está ausente del mapa, no mapeada a `None` o a `0`.
+
+## Deuda declarada
+
+- **`notes` viaja siempre `null`** (`ASSUMPTION`). PRD §9.2 lista «notas», pero ninguna columna
+  las posee: los únicos candidatos —`access_notes`, `cleaning_notes`, `emergency_notes`— están
+  registrados como sumideros de texto en claro donde «un operador puede pegar el código de la
+  puerta o la clave del wifi». Volcar uno en una respuesta que lee cualquier portador de
+  `READ_PROPERTIES` publicaría justo lo que el resto del sistema cifra y enmascara. El campo se
+  queda en el contrato para que `dashboard-web` no cambie de forma dos veces, y lo rellena el
+  change que dé a las notas de operación una columna propia. Un test afirma que el agregado
+  nunca devuelve el contenido de ninguna de las tres columnas.
+- **`last_cleaning_photos` viaja siempre `[]`** (`EXTERNAL_DEPENDENCY`). `cleaning_photos`
+  persiste un `storage_key`, no una URL, y firmarla es `StorageAdapter.get_signed_url`, que
+  entrega `cleaning-photos-storage`. THE SYSTEM SHALL NOT construir ninguna URL de
+  almacenamiento ni exponer el `storage_key`.
+- **`incidents`, `owner_approvals` y los gastos llegan vacíos** hasta que `maintenance` y
+  `revenue` los pueblen: sus tablas se leen, no se escriben aquí.
+- **`check_in` / `check_out` viajan como fecha**, no como instante, aunque el contrato del
+  frontend los tipa como fecha-hora ISO. Es una divergencia deliberada: la columna es una fecha
+  y fabricar una hora sería inventar precisión.
+- **«Abierta» para contar incidencias** es un conjunto de estados elegido aquí (`ASSUMPTION`):
+  el PRD pide el contador sin definir dónde cae la línea.
+- **Sin realtime**: PRD §9.2 dice «timeline en tiempo real» y esta capacidad entrega lectura con
+  filtros y paginación. Empujar cambios al cliente (WebSocket/SSE) no está entregado por ninguna
+  de las dos mitades.
+- **`description` es el primer campo de texto libre que esta capacidad publica.** No está entre
+  las columnas enumeradas como sumideros de texto en claro, pero es de la misma clase. Hoy no
+  hay cruce de privilegio —los dos roles con `READ_PROPERTIES` tienen también
+  `READ_ACCESS_RECORDS`—, así que la decisión de publicarla se toma a sabiendas; **el primer rol
+  de sólo-auditoría que se añada obliga a revisarla.**
+
+## Key files
+
+- `backend/app/dashboard/api/` — `router.py` (las dos rutas del agregado), `schemas.py` (los
+  modelos de respuesta y su `from_domain` explícito), `dependencies.py` (el wiring, que compone
+  adaptadores ajenos).
+- `backend/app/dashboard/application/use_cases.py` — `GetDashboardCardsUseCase` y
+  `GetPropertyDashboardUseCase`: la composición por lotes y la redacción por permiso.
+- `backend/app/dashboard/domain/` — `read_models.py` (proyecciones `frozen`), `labels.py` (los
+  seis catálogos de etiquetas, exhaustivos sobre sus enums), `next_action.py` (la tabla de
+  próxima acción), `financials.py` (la regla de moneda).
+- `backend/app/timeline/api/` — `router.py`, `schemas.py`, `errors.py`, `dependencies.py`: la
+  capa `api/` que el módulo estrena.
+- `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase`.
+- `backend/app/timeline/domain/rendering.py` — el catálogo de 45 tipos × 2 idiomas, la lista
+  blanca de metadata sustituible y `render`.
+- `backend/app/timeline/domain/repositories.py` — `TimelineEventReader`, separado del escritor
+  (ver [`timeline-state-machine.md`](timeline-state-machine.md)).
+- `backend/app/core/i18n.py` — `Locale` y `Catalog`: el mecanismo, sin mensajes.
+- `backend/app/auth/domain/context.py` — `RequestContext.preferred_language`.
+- `backend/app/maintenance/`, `backend/app/statements/`, `backend/app/guests/`,
+  `backend/app/cleaning/`, `backend/app/properties/` — los lectores por lotes que cada dominio
+  aporta a la composición.
+- `backend/tests/dashboard/`, `backend/tests/timeline/`, `backend/tests/test_i18n.py` — el
+  conteo de sentencias, el aislamiento, la matriz de roles, la cobertura del enum y la
+  degradación.

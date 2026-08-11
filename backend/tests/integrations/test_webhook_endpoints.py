@@ -291,8 +291,54 @@ async def test_an_insert_that_loses_the_unique_race_is_a_domain_refusal(
     # The tenant has to be visible to the other two connections, and `db_session` only flushed it.
     await db_session.commit()
 
+    # The overlap is forced, not hoped for. Left to `asyncio.gather`'s scheduling this test is a
+    # coin toss: if the second caller's SELECT runs after the first one's COMMIT it sees the row,
+    # takes the update branch and never reaches the index, so `failures` is empty and the assertion
+    # below fails. That is not hypothetical — it happened in one of the two full runs of this
+    # change's prototype. The per-test DDL that used to sit in `test_engine` made the overlap
+    # overwhelmingly likely and hid the fragility; removing it exposed it.
+    #
+    # The barrier puts both callers past their SELECT and short of their flush, which is the only
+    # state in which one of them can lose the index (design D5).
+    both_have_read = asyncio.Barrier(2)
+
+    class _WaitAfterTheFirstRead:
+        """The session the repository sees: it stops once, right after `upsert`'s SELECT.
+
+        Wrapping the session rather than the repository because `upsert` does not go through
+        `find_for` — it inlines its own `execute`, so the seam is here.
+        """
+
+        def __init__(self, session: AsyncSession) -> None:
+            self._session = session
+            self._has_read = False
+
+        def __getattr__(self, name: str):
+            return getattr(self._session, name)
+
+        async def execute(self, *args, **kwargs):
+            result = await self._session.execute(*args, **kwargs)
+            if not self._has_read:
+                self._has_read = True
+                # Bounded on purpose. A barrier of two parties waits for ever if only one
+                # arrives, and today both always do — `upsert`'s cross-tenant guard is the
+                # one early return before the SELECT, and both callers pass the same tenant.
+                # But "today" is the whole problem: with no bound, an edit that ever made
+                # that return asymmetric would turn this into a CI hang until the job's
+                # 20-minute timeout, and a hang reads as broken infrastructure rather than
+                # as the broken test it would be. The timeout makes it a red instead.
+                #
+                # Note for whoever meets that red: cancelling a `Barrier.wait()` does NOT
+                # break the barrier for the other party — CPython only decrements the count
+                # — so the survivor is saved by its own timeout, not by a `BrokenBarrierError`.
+                # Both callers therefore fail, and the assertion below reports `2 != 1`
+                # rather than naming a timeout. The cause is asymmetric arrival, not domain
+                # logic.
+                await asyncio.wait_for(both_have_read.wait(), timeout=30)
+            return result
+
     async def create(session: AsyncSession) -> None:
-        await SqlAlchemyWebhookEndpointRepository(session).upsert(
+        await SqlAlchemyWebhookEndpointRepository(_WaitAfterTheFirstRead(session)).upsert(
             tenant_a.id, _endpoint(tenant_a.id)
         )
         await session.commit()

@@ -99,6 +99,12 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # under `reservations` by path but on the guests router, so the prefix set already
         # names it.
         "guests",
+        # `dashboard-api`: the read side of PRD §10, and the first `api/` layer the
+        # `timeline` module has had.
+        "timeline",
+        # `dashboard-api`: the aggregate's own prefix. Its second route lives under
+        # `properties`, which the set already names.
+        "dashboard",
         # `reservations-webhooks`: the anonymous receiver. A module prefix of its own rather than
         # a route under `integrations`, because rule 12(b) of `steering/security.md` makes the
         # route token the credential and mixing it into the authenticated router would hide that.
@@ -112,6 +118,7 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # the anonymous one in the singular. That the two prefixes differ by a letter is worth
         # seeing here rather than discovering from a route that ended up on the wrong router.
         "guest",
+        "provenance",
     }
 
 

@@ -40,6 +40,20 @@ export interface paths {
      */
     post: operations["register_manual_code_api_v1_access_records__record_id__manual_code_post"];
   };
+  "/api/v1/auth/change-password": {
+    /**
+     * Change your own password
+     * @description Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.
+     */
+    post: operations["change_password_api_v1_auth_change_password_post"];
+  };
+  "/api/v1/auth/forgot-password": {
+    /**
+     * Ask for a password recovery link
+     * @description Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.
+     */
+    post: operations["forgot_password_api_v1_auth_forgot_password_post"];
+  };
   "/api/v1/auth/login": {
     /**
      * Exchange email and password for a token pair
@@ -67,6 +81,13 @@ export interface paths {
      * @description Anonymous: the refresh token itself is the credential. The presented token is invalidated. Presenting an already-used one revokes the whole session family.
      */
     post: operations["refresh_api_v1_auth_refresh_post"];
+  };
+  "/api/v1/auth/reset-password": {
+    /**
+     * Set a new password using a recovery token
+     * @description Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.
+     */
+    post: operations["reset_password_api_v1_auth_reset_password_post"];
   };
   "/api/v1/cleaning-checklist-templates": {
     /**
@@ -183,6 +204,13 @@ export interface paths {
      */
     post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
   };
+  "/api/v1/dashboard/properties": {
+    /**
+     * The dashboard card of every property
+     * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
+     */
+    get: operations["list_dashboard_cards_api_v1_dashboard_properties_get"];
+  };
   "/api/v1/guest/checkin/{token}": {
     /**
      * What the guest still has to provide
@@ -194,6 +222,13 @@ export interface paths {
      * @description The six fields of PRD §17 the guest supplies; the two dates are the reservation's and are neither asked for nor accepted. The document number is encrypted at rest in the same call and **is not echoed back**. Resending the same form is safe: it converges on the same state and does not add a second timeline entry, though it does leave a second audit row — a repeated submission is exactly what a review would want to see.
      */
     post: operations["submit_checkin_api_v1_guest_checkin__token__post"];
+  };
+  "/api/v1/guest/incident/{token}": {
+    /**
+     * Report an incident during the stay
+     * @description Opens an incident against the guest's own stay, exactly as any other source would: `OPEN`, with no category, severity or classification — those belong to the maintenance flow, and a report made here is indistinguishable to it from any other. A title and a description, both required; nothing else is accepted. The acknowledgement is the id, the status and the instant, and that is the only reading of an incident this surface ever offers: there is no endpoint here to list, read, modify, assign or resolve one. Retrying creates a second incident — the request is not deduplicated — so treat a `429` as 'wait', never as 'it did not arrive'.
+     */
+    post: operations["report_incident_api_v1_guest_incident__token__post"];
   };
   "/api/v1/guest/info/{token}": {
     /**
@@ -266,6 +301,27 @@ export interface paths {
      */
     patch: operations["update_property_api_v1_properties__property_id__patch"];
   };
+  "/api/v1/properties/{property_id}/dashboard": {
+    /**
+     * Everything happening on one property
+     * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+     */
+    get: operations["get_property_dashboard_api_v1_properties__property_id__dashboard_get"];
+  };
+  "/api/v1/properties/{property_id}/state": {
+    /**
+     * A property's operational state
+     * @description The light endpoint of PRD §23:1942, for refreshing an indicator without fetching the aggregate. Returns the canonical `PropertyOperationalState` literal — never translated — and the ISO-8601 UTC instant of the last transition, both **read** and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. `last_transition_at` is `null` for a property that has never moved, because creation is not a transition. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+     */
+    get: operations["get_property_state_api_v1_properties__property_id__state_get"];
+  };
+  "/api/v1/provenance": {
+    /**
+     * Read the authenticated build provenance
+     * @description Returns build provenance to authorized operational users only. The public app_version is the same build identity produced by CD; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+     */
+    get: operations["get_provenance_api_v1_provenance_get"];
+  };
   "/api/v1/reservations": {
     /**
      * List the tenant's reservations
@@ -325,6 +381,13 @@ export interface paths {
      * @description Only the fields present in the body are applied, at either level. Two fields are deliberately absent and answer `422`: the tenant's `status`, because suspending your own tenant locks every user out with no way back through the API, and the configuration's `storage_type`, because switching it points already-uploaded photos at a backend that does not have them. A body that changes nothing writes nothing.
      */
     patch: operations["update_tenant_api_v1_tenants__tenant_id__patch"];
+  };
+  "/api/v1/timeline/{property_id}": {
+    /**
+     * A property's timeline
+     * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
+     */
+    get: operations["get_property_timeline_api_v1_timeline__property_id__get"];
   };
   "/api/v1/users": {
     /**
@@ -452,6 +515,74 @@ export interface components {
      */
     AccessRecordStatus: "PENDING" | "CREATED_EXTERNAL" | "MANUAL_ADDED" | "DELIVERED" | "EXPIRED" | "REVOKED";
     /**
+     * AccessResponse
+     * @description A status label. No code, in any form (R2.5).
+     */
+    AccessResponse: {
+      /** Label */
+      label: string | null;
+    };
+    /**
+     * CleaningPhotoResponse
+     * @description One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
+     *
+     * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
+     * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
+     * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
+     * "the key never appears in a response" a property of this class rather than of everyone who
+     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
+     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
+     * nobody made.
+     *
+     * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
+     * a client uses instead of a path, and it is not stored anywhere.
+     */
+    app__cleaning__api__schemas__CleaningPhotoResponse: {
+      /**
+       * Cleaning Task Id
+       * Format: uuid
+       */
+      cleaning_task_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Photo Type */
+      photo_type: string;
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
+    };
+    /**
+     * CleaningPhotoResponse
+     * @description Always an empty list today (R2.4, `EXTERNAL_DEPENDENCY`) — the signed URL needs
+     * `StorageAdapter.get_signed_url`, which `cleaning-photos-storage` delivers.
+     */
+    app__dashboard__api__schemas__CleaningPhotoResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Taken At
+       * Format: date-time
+       */
+      taken_at: string;
+      /** Url */
+      url: string;
+    };
+    /**
      * AssignCleaningTaskRequest
      * @description `PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.
      *
@@ -480,6 +611,26 @@ export interface components {
       file: string;
       /** Photo Type */
       photo_type: string;
+    };
+    /** BuildProvenanceResponse */
+    BuildProvenanceResponse: {
+      /** App Version */
+      app_version: string;
+      provenance: components["schemas"]["PrivateProvenanceResponse"] | null;
+    };
+    /**
+     * ChangePasswordRequest
+     * @description The current password and the replacement.
+     *
+     * The account is the one the access token belongs to; this body cannot name a user.
+     * A new password that breaks the password policy is answered with `422` saying which
+     * rule it broke.
+     */
+    ChangePasswordRequest: {
+      /** Current Password */
+      current_password: string;
+      /** New Password */
+      new_password: string;
     };
     /**
      * CheckinStatusResponse
@@ -603,48 +754,7 @@ export interface components {
      */
     CleaningPhotoListResponse: {
       /** Data */
-      data: components["schemas"]["CleaningPhotoResponse"][];
-    };
-    /**
-     * CleaningPhotoResponse
-     * @description One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).
-     *
-     * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
-     * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
-     * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
-     * "the key never appears in a response" a property of this class rather than of everyone who
-     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
-     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
-     * nobody made.
-     *
-     * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
-     * a client uses instead of a path, and it is not stored anywhere.
-     */
-    CleaningPhotoResponse: {
-      /**
-       * Cleaning Task Id
-       * Format: uuid
-       */
-      cleaning_task_id: string;
-      /**
-       * Created At
-       * Format: date-time
-       */
-      created_at: string;
-      /**
-       * Id
-       * Format: uuid
-       */
-      id: string;
-      /** Photo Type */
-      photo_type: string;
-      /**
-       * Uploaded By
-       * Format: uuid
-       */
-      uploaded_by: string;
-      /** Url */
-      url: string;
+      data: components["schemas"]["app__cleaning__api__schemas__CleaningPhotoResponse"][];
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -943,6 +1053,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Must Change Password */
+      must_change_password: boolean;
       /** Name */
       name: string;
       /** Preferred Language */
@@ -986,7 +1098,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "NOT_FOUND" | "BAD_GATEWAY";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -998,6 +1110,36 @@ export interface components {
      */
     ErrorEnvelope: {
       error: components["schemas"]["ErrorBody"];
+    };
+    /** FinancialSummaryResponse */
+    FinancialSummaryResponse: {
+      /** Currency */
+      currency: string;
+      /** Pending Expenses */
+      pending_expenses: string | null;
+      /** Reservation Total */
+      reservation_total: string | null;
+    };
+    /**
+     * ForgotPasswordRequest
+     * @description The address to send a recovery link to.
+     */
+    ForgotPasswordRequest: {
+      /** Email */
+      email: string;
+    };
+    /**
+     * ForgotPasswordResponse
+     * @description The same acknowledgement for every request.
+     *
+     * It does not indicate whether the address belongs to an account.
+     */
+    ForgotPasswordResponse: {
+      /**
+       * Detail
+       * @default If the address belongs to an account, a recovery link has been sent.
+       */
+      detail?: string;
     };
     /**
      * GuestAccessTokenIssuedResponse
@@ -1048,6 +1190,14 @@ export interface components {
      */
     GuestDocumentType: "DNI" | "NIE" | "PASSPORT" | "RESIDENCE_CARD" | "OTHER";
     /**
+     * GuestResponse
+     * @description A name. Rule 4 of `steering/security.md` — nothing about the document, ever.
+     */
+    GuestResponse: {
+      /** Name */
+      name: string | null;
+    };
+    /**
      * GuestSummaryResponse
      * @description The guest as a reservation may show it — no document data at all (R1.8, D17).
      */
@@ -1085,6 +1235,61 @@ export interface components {
       /** Updated */
       updated: number;
     };
+    /**
+     * IncidentReportedResponse
+     * @description The acknowledgement, and **only** the acknowledgement (R5.3, D15).
+     *
+     * Three fields: the id of the incident just created, its status and when. R5.3 forbids the
+     * bearer of a token from listing, reading, modifying, assigning, classifying or resolving
+     * incidents — "la única lectura permitida es el acuse de la que acaba de crear" — so this
+     * model is the whole of what the portal may ever say about an incident.
+     *
+     * It carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill
+     * in, and returning their initial values would promise the guest a shape that changes
+     * underneath them.
+     */
+    IncidentReportedResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      status: components["schemas"]["IncidentStatus"];
+    };
+    /**
+     * IncidentSeverity
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Incident.severity) without a named block (§7.13). Not the same enum
+     * as TimelineSeverity (INFO/WARNING/ERROR/CRITICAL) — different values.
+     * @enum {string}
+     */
+    IncidentSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    /**
+     * IncidentStatus
+     * @enum {string}
+     */
+    IncidentStatus: "OPEN" | "CLASSIFIED" | "AWAITING_OWNER_APPROVAL" | "ASSIGNED" | "ACCEPTED" | "IN_PROGRESS" | "WAITING_EXTERNAL_PARTS" | "RESOLVED" | "CANCELLED";
+    /** IncidentSummaryResponse */
+    IncidentSummaryResponse: {
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Opened At
+       * Format: date-time
+       */
+      opened_at: string;
+      severity: components["schemas"]["IncidentSeverity"];
+      /** Title */
+      title: string;
+    };
     /** LegalRegistrationResponse */
     LegalRegistrationResponse: {
       legal_registration_status: components["schemas"]["LegalRegistrationStatus"];
@@ -1114,6 +1319,13 @@ export interface components {
     MarkExternalRequest: {
       /** Notes */
       notes?: string | null;
+    };
+    /** NextActionResponse */
+    NextActionResponse: {
+      /** Label */
+      label: string;
+      /** Responsible */
+      responsible: string | null;
     };
     /**
      * NotificationChannel
@@ -1175,6 +1387,20 @@ export interface components {
      * @enum {string}
      */
     PaymentStatus: "PENDING" | "PAID" | "PARTIALLY_PAID" | "REFUNDED";
+    /** PendingApprovalResponse */
+    PendingApprovalResponse: {
+      /** Amount */
+      amount: string | null;
+      /** Currency */
+      currency: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Label */
+      label: string;
+    };
     /**
      * PMSProvider
      * @description Which PMS a property talks to.
@@ -1199,6 +1425,101 @@ export interface components {
      * @enum {string}
      */
     PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /** PrivateProvenanceResponse */
+    PrivateProvenanceResponse: {
+      /**
+       * Actions Run Id
+       * @description Positive GitHub Actions run ID.
+       */
+      actions_run_id: number;
+      /**
+       * Commit Sha
+       * @description The complete 40-character lowercase hexadecimal commit SHA.
+       */
+      commit_sha: string;
+      /**
+       * Pull Request Number
+       * @description Positive Pull Request number.
+       */
+      pull_request_number: number;
+      /**
+       * Repository Url
+       * @description HTTPS URL of the GitHub repository that produced the build.
+       */
+      repository_url: string;
+    };
+    /**
+     * PropertyDashboardCardResponse
+     * @description One card (`dto.ts:85-96`, R1.2).
+     *
+     * `current_or_next_reservation` is `None` and **present**, never omitted: R1.4 says
+     * "SHALL devolver `currentOrNextReservation: null` en vez de omitir la clave", and pydantic
+     * serialises a `None` field unless told otherwise — which nothing here does.
+     */
+    PropertyDashboardCardResponse: {
+      /** Cleaning Status */
+      cleaning_status: string | null;
+      current_or_next_reservation: components["schemas"]["ReservationSummaryResponse"] | null;
+      /** Last Event At */
+      last_event_at: string | null;
+      /** Last Event Label */
+      last_event_label: string | null;
+      next_action: components["schemas"]["NextActionResponse"] | null;
+      /** Open Incidents Count */
+      open_incidents_count: number;
+      operational_state: components["schemas"]["PropertyOperationalState"];
+      /** Property Code */
+      property_code: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+    };
+    /**
+     * PropertyDashboardPageResponse
+     * @description The pagination envelope of PRD §23.
+     */
+    PropertyDashboardPageResponse: {
+      /** Data */
+      data: components["schemas"]["PropertyDashboardCardResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * PropertyDetailResponse
+     * @description The aggregate of PRD §9.2 (`dto.ts:161-174`, R2.1).
+     */
+    PropertyDetailResponse: {
+      access: components["schemas"]["AccessResponse"] | null;
+      /** Cleaning Status */
+      cleaning_status: string | null;
+      current_or_next_reservation: components["schemas"]["ReservationSummaryResponse"] | null;
+      financial: components["schemas"]["FinancialSummaryResponse"] | null;
+      guest: components["schemas"]["GuestResponse"] | null;
+      /** Last Cleaning Photos */
+      last_cleaning_photos: components["schemas"]["app__dashboard__api__schemas__CleaningPhotoResponse"][];
+      /** Notes */
+      notes: string | null;
+      /** Open Incidents */
+      open_incidents: components["schemas"]["IncidentSummaryResponse"][];
+      operational_state: components["schemas"]["PropertyOperationalState"];
+      /** Pending Approvals */
+      pending_approvals: components["schemas"]["PendingApprovalResponse"][];
+      /** Property Code */
+      property_code: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+    };
     /**
      * PropertyOperationalState
      * @enum {string}
@@ -1295,6 +1616,21 @@ export interface components {
       wifi_name: string | null;
     };
     /**
+     * PropertyStateResponse
+     * @description The light state endpoint of PRD §23:1942 (`dashboard-api` R3.1).
+     *
+     * Exactly the two values R3.1 names, and no more: the client that polls this to refresh an
+     * indicator does not want the property again. `current_operational_state` is the canonical
+     * literal, never translated (R5.5); `last_transition_at` is ISO-8601 UTC and is `null` for
+     * a property that has never moved — creation is not a transition, so there is no instant,
+     * as opposed to one we failed to find.
+     */
+    PropertyStateResponse: {
+      current_operational_state: components["schemas"]["PropertyOperationalState"];
+      /** Last Transition At */
+      last_transition_at: string | null;
+    };
+    /**
      * PropertyStatus
      * @enum {string}
      */
@@ -1316,6 +1652,39 @@ export interface components {
       code: string;
       /** Notes */
       notes?: string | null;
+    };
+    /**
+     * ReportIncidentRequest
+     * @description What `POST /guest/incident/{token}` accepts: a title and a description (R5.2; D15).
+     *
+     * **`title` is required because `incidents.title` is `NOT NULL`**, and deriving it from the
+     * first characters of the description — the tempting alternative — would invent a datum the
+     * guest did not write and put it in a column an operator reads as the guest's own words
+     * (D15).
+     *
+     * Neither field is echoed anywhere it could not be redacted later: `AUDITABLE_FIELDS` leaves
+     * both out of the incident's audit row and the timeline entry carries a constant title, so
+     * what a stranger types here reaches exactly one place — the `incidents` row a manager is
+     * meant to read.
+     *
+     * **Both fields are bounded, and `description`'s bound is not the body ceiling.** D7 —
+     * "el tope de cuerpo ya está puesto; no se añade nada" — is about the middleware that refuses
+     * an oversized *request* before routing, and it stays untouched: no new middleware, no new
+     * setting. What it does not do is bound how much text a legitimate-sized request may store,
+     * and with `MAX_INCIDENT_DESCRIPTION` absent the only limit left was per-request while D6's
+     * budget allows sixty requests a minute. A field-level maximum is not a second ceiling; it is
+     * the thing the ceiling was never doing. Both maxima count characters **after** stripping,
+     * because `str_strip_whitespace=True` runs first.
+     *
+     * `str_strip_whitespace=True` and `min_length=1` together are what make a whitespace-only
+     * report the `422` R5.2 requires — the same pairing `SubmitCheckinRequest` documents, where
+     * the first version counted characters before stripping and let `"   "` through.
+     */
+    ReportIncidentRequest: {
+      /** Description */
+      description: string;
+      /** Title */
+      title: string;
     };
     /** RequiredPhotoPayload */
     RequiredPhotoPayload: {
@@ -1501,6 +1870,38 @@ export interface components {
      * @enum {string}
      */
     ReservationStatus: "PENDING" | "CONFIRMED" | "CANCELLED" | "CHECKED_IN_ESTIMATED" | "CHECKED_OUT_ESTIMATED" | "COMPLETED" | "NO_SHOW";
+    /** ReservationSummaryResponse */
+    ReservationSummaryResponse: {
+      /**
+       * Check In
+       * Format: date
+       */
+      check_in: string;
+      /**
+       * Check Out
+       * Format: date
+       */
+      check_out: string;
+      /** Guest Name */
+      guest_name: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Reference */
+      reference: string | null;
+    };
+    /**
+     * ResetPasswordRequest
+     * @description The recovery token from the emailed link, and the new password.
+     */
+    ResetPasswordRequest: {
+      /** New Password */
+      new_password: string;
+      /** Token */
+      token: string;
+    };
     /**
      * RowErrorResponse
      * @description One row the import could not take, with what a person needs to fix it.
@@ -1748,6 +2149,67 @@ export interface components {
      * @enum {string}
      */
     TenantStatus: "ACTIVE" | "SUSPENDED" | "CANCELLED";
+    /**
+     * TimelineActorType
+     * @enum {string}
+     */
+    TimelineActorType: "SYSTEM" | "USER" | "GUEST" | "SCHEDULER" | "WEBHOOK" | "AI";
+    /**
+     * TimelineEntryResponse
+     * @description One entry — the fields of `TimelineEntry`
+     * (`frontend/features/dashboard/data/dto.ts:99-108`), in this API's snake_case.
+     *
+     * `actor_type`, `event_type` and `severity` travel as the exact canonical literals and
+     * are never translated (R5.5). `title` is the composed, localised text (R5.1).
+     * `description` is **not**: it carries operator-written text — the reason a property was
+     * blocked or taken out of service — and is returned verbatim, in whatever language it was
+     * typed. Declared as an `ASSUMPTION` under R5.1 and reasoned in `domain/rendering.py`.
+     */
+    TimelineEntryResponse: {
+      actor_type: components["schemas"]["TimelineActorType"];
+      /** Description */
+      description: string | null;
+      event_type: components["schemas"]["TimelineEventType"];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Occurred At
+       * Format: date-time
+       */
+      occurred_at: string;
+      severity: components["schemas"]["TimelineSeverity"];
+      /** Title */
+      title: string;
+    };
+    /**
+     * TimelineEventType
+     * @enum {string}
+     */
+    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED";
+    /**
+     * TimelinePageResponse
+     * @description The pagination envelope of PRD §23.
+     */
+    TimelinePageResponse: {
+      /** Data */
+      data: components["schemas"]["TimelineEntryResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * TimelineSeverity
+     * @enum {string}
+     */
+    TimelineSeverity: "INFO" | "WARNING" | "ERROR" | "CRITICAL";
     /** TokenPairResponse */
     TokenPairResponse: {
       /** Access Token */
@@ -2196,6 +2658,66 @@ export interface operations {
     };
   };
   /**
+   * Change your own password
+   * @description Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.
+   */
+  change_password_api_v1_auth_change_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ChangePasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Ask for a password recovery link
+   * @description Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.
+   */
+  forgot_password_api_v1_auth_forgot_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ForgotPasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      202: {
+        content: {
+          "application/json": components["schemas"]["ForgotPasswordResponse"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Exchange email and password for a token pair
    * @description Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.
    */
@@ -2286,6 +2808,29 @@ export interface operations {
         content: {
           "application/json": components["schemas"]["TokenPairResponse"];
         };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Set a new password using a recovery token
+   * @description Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.
+   */
+  reset_password_api_v1_auth_reset_password_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResetPasswordRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
       };
       /** @description Validation Error */
       422: {
@@ -2797,7 +3342,7 @@ export interface operations {
       /** @description Successful Response */
       201: {
         content: {
-          "application/json": components["schemas"]["CleaningPhotoResponse"];
+          "application/json": components["schemas"]["app__cleaning__api__schemas__CleaningPhotoResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
@@ -2961,6 +3506,44 @@ export interface operations {
     };
   };
   /**
+   * The dashboard card of every property
+   * @description One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.
+   */
+  list_dashboard_cards_api_v1_dashboard_properties_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyDashboardPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * What the guest still has to provide
    * @description The names of the fields of PRD §17 that are still missing, plus the document and legal-registration statuses. **Never the values already supplied** — the guest knows what they typed, and echoing it back would put personal data in one more response body for no benefit.
    */
@@ -3023,6 +3606,54 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CheckinSubmittedResponse"];
+        };
+      };
+      /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The request body exceeded the ceiling applied to all of /api/v1/. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Rate limited. Retry in a minute. */
+      429: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Report an incident during the stay
+   * @description Opens an incident against the guest's own stay, exactly as any other source would: `OPEN`, with no category, severity or classification — those belong to the maintenance flow, and a report made here is indistinguishable to it from any other. A title and a description, both required; nothing else is accepted. The acknowledgement is the id, the status and the instant, and that is the only reading of an incident this surface ever offers: there is no endpoint here to list, read, modify, assign or resolve one. Retrying creates a second incident — the request is not deduplicated — so treat a `429` as 'wait', never as 'it did not arrive'.
+   */
+  report_incident_api_v1_guest_incident__token__post: {
+    parameters: {
+      path: {
+        token: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReportIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["IncidentReportedResponse"];
         };
       };
       /** @description This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body. */
@@ -3479,6 +4110,106 @@ export interface operations {
     };
   };
   /**
+   * Everything happening on one property
+   * @description The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+   */
+  get_property_dashboard_api_v1_properties__property_id__dashboard_get: {
+    parameters: {
+      path: {
+        property_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyDetailResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * A property's operational state
+   * @description The light endpoint of PRD §23:1942, for refreshing an indicator without fetching the aggregate. Returns the canonical `PropertyOperationalState` literal — never translated — and the ISO-8601 UTC instant of the last transition, both **read** and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. `last_transition_at` is `null` for a property that has never moved, because creation is not a transition. A property of another tenant answers `404`, indistinguishable from one that does not exist.
+   */
+  get_property_state_api_v1_properties__property_id__state_get: {
+    parameters: {
+      path: {
+        property_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PropertyStateResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read the authenticated build provenance
+   * @description Returns build provenance to authorized operational users only. The public app_version is the same build identity produced by CD; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.
+   */
+  get_provenance_api_v1_provenance_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BuildProvenanceResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's reservations
    * @description Paginated with `page`/`per_page` (PRD §23). Filters combine with AND; the date range matches stays that OVERLAP it, so a guest already in the property when the range opens is included.
    */
@@ -3837,6 +4568,52 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["TenantResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * A property's timeline
+   * @description Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.
+   */
+  get_property_timeline_api_v1_timeline__property_id__get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        event_type?: components["schemas"]["TimelineEventType"] | null;
+        severity?: components["schemas"]["TimelineSeverity"] | null;
+        actor_type?: components["schemas"]["TimelineActorType"] | null;
+        from?: string | null;
+        to?: string | null;
+      };
+      path: {
+        property_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["TimelinePageResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

@@ -25,7 +25,7 @@ from app.guests.domain.portal_token import hash_guest_token
 from app.guests.infrastructure.models import GuestAccessTokenModel
 from app.main import create_app
 from app.properties.infrastructure.models import PropertyModel
-from app.reservations.domain.enums import ReservationStatus
+from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from tests.route_walk import flatten_routes
 from tests.auth.conftest import (  # noqa: F401
@@ -86,7 +86,15 @@ async def _stay(db_session, tenant) -> ReservationModel:
     reservation = ReservationModel(
         tenant_id=tenant.id,
         property_id=prop.id,
-        channel="DIRECT",
+        # The **enum** and not the string `"DIRECT"` that most fixtures in this suite use, and
+        # this is the one file where the difference bites. `test_no_later_read_returns_the_token`
+        # walks every `GET` the application exposes, so it is the only test that drives another
+        # domain's serialiser over this row — and `dashboard-api`'s reservation block reads
+        # `reservation.channel.value`, which is an `AttributeError` when the object still holds
+        # the raw string the fixture assigned. SQLAlchemy coerces on the way back from the
+        # database, so nothing outside a fresh identity map ever sees the string; the sweep does,
+        # because it never reloads. Found when `main` merged the dashboard in.
+        channel=ReservationChannel.DIRECT,
         status=ReservationStatus.CONFIRMED,
         check_in_date=date(2026, 9, 1),
         check_out_date=date(2026, 9, 4),

@@ -1,9 +1,11 @@
 """SQLAlchemy adapters for the auth ports (R4.2, R6.5, design D6/D10).
 
-Every method takes `tenant_id` and filters on it — except
-`find_by_email_globally`, the one deliberate exception (design D16), which is
-therefore the only unscoped query in the system: every other cross-tenant need goes
-through it rather than hand-rolling a second one.
+Every method takes `tenant_id` and filters on it — except the **two** deliberate
+exceptions, `find_by_email_globally` (design D16 of `auth-tenancy`) and
+`consume_globally` (design D3 of `auth-account-recovery`). Those two are therefore
+the only unscoped queries in the system, and they are both named `*_globally` so a
+grep for that suffix enumerates every cross-tenant read that exists. Every other
+cross-tenant need goes through one of them rather than hand-rolling a third.
 No method commits: the transactional boundary is the use case (design D10).
 """
 
@@ -15,12 +17,16 @@ from sqlalchemy import func, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.auth.domain.entities import User, UserSession
+from app.auth.domain.entities import PasswordResetToken, User, UserSession
 from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
 from app.auth.domain.exceptions import EmailAlreadyExistsError
 from app.auth.domain.repositories import UserFilters, UserPage, offset_for
 from app.auth.domain.value_objects import normalize_email
-from app.auth.infrastructure.models import UserModel, UserSessionModel
+from app.auth.infrastructure.models import (
+    PasswordResetTokenModel,
+    UserModel,
+    UserSessionModel,
+)
 from app.core.tenancy import CrossTenantWriteError
 from app.tenants.domain.enums import TenantStatus
 from app.tenants.infrastructure.models import TenantModel
@@ -32,11 +38,27 @@ LOWER_EMAIL_CONSTRAINT = "uq_users_lower_email"
 # Columns `apply_changes` may write. `email` is included — it is the login identity and can be
 # corrected — with the duplicate translation that implies.
 WRITABLE_COLUMNS = frozenset(
-    {"name", "email", "phone", "preferred_language", "role", "status", "password_hash"}
+    {
+        "name",
+        "email",
+        "phone",
+        "preferred_language",
+        "role",
+        "status",
+        "password_hash",
+        # Written alongside `password_hash` and only ever by whoever writes it
+        # (`auth-account-recovery` design D5).
+        "must_change_password",
+    }
 )
 
 # Named separately from "unknown" so the error says WHY, not just "no".
 FORBIDDEN_UPDATE_COLUMNS = frozenset({"tenant_id", "id", "last_login_at", "created_at"})
+
+# Written together or not at all (`auth-account-recovery` design D5). The flag describes the
+# hash beside it, so a write that names one and not the other leaves it describing a password
+# that is no longer there.
+COUPLED_PASSWORD_COLUMNS = frozenset({"password_hash", "must_change_password"})
 
 
 class SqlAlchemyUserRepository:
@@ -63,21 +85,29 @@ class SqlAlchemyUserRepository:
         return _to_user(model) if model is not None else None
 
     async def find_by_email_globally(self, email: str) -> User | None:
-        """One of the two unscoped queries in the system (design D16).
+        """ONE OF THE THREE unscoped queries in the system (design D16).
 
         Its callers are the anonymous login and the bootstrap conflict check; both go
         through here rather than writing their own, so a grep for this method name
         enumerates every cross-tenant read *this* one serves.
 
-        **The second is `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`**
-        (`app/guests/infrastructure/portal_repositories.py`), added by `guest-portal-api`
-        for the same structural reason: an anonymous caller presents a credential and the
-        row is what resolves the tenant, so there is nothing to filter by when it runs.
-        This sentence used to say "THE ONLY", and that enumeration is the audit control
-        for rule 1 of `steering/security.md` — a reviewer trusting it would have missed the
-        portal lookup entirely. Named here rather than left to a grep, exactly as
-        `app/core/db.py`'s second limit names its own cases. Found by that change's
-        section 3 security panel.
+        The other two, both added for the same structural reason — an anonymous caller
+        presents a credential and the row is what resolves the tenant, so there is nothing
+        to filter by when the query runs:
+
+        * `SqlAlchemyPasswordResetTokenRepository.consume_globally`
+          (`auth-account-recovery`), named the same way on purpose;
+        * `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`
+          (`app/guests/infrastructure/portal_repositories.py`, `guest-portal-api`).
+
+        **The count is the audit control for rule 1 of `steering/security.md`, and it has
+        now gone stale twice.** This sentence said "THE ONLY" until the section 3 security
+        panel of `guest-portal-api` found the portal lookup missing from it — and then said
+        "THE TWO" twice over, because that change and `auth-account-recovery` each added a
+        third case and each updated this line to two, in parallel branches. The merge is
+        where that surfaced. A reviewer trusting the number would have audited two of three
+        either way, so: whoever adds an unscoped query updates the number **and** adds a
+        bullet, exactly as `app/core/db.py`'s second limit names its own cases.
 
         Login is anonymous, so there is no tenant yet — the address alone has to
         identify the user, and it does: `uq_users_lower_email` makes a normalised
@@ -164,6 +194,7 @@ class SqlAlchemyUserRepository:
                 phone=user.phone,
                 status=user.status,
                 preferred_language=user.preferred_language,
+                must_change_password=user.must_change_password,
             )
         )
         try:
@@ -204,6 +235,19 @@ class SqlAlchemyUserRepository:
         unknown = set(values) - WRITABLE_COLUMNS
         if unknown:
             raise ValueError(f"Unknown user columns: {sorted(unknown)}")
+        # `auth-account-recovery` design D5: the two columns are written together or not at
+        # all. The entity guarantees it — `set_password_hash` is the sole owner of both — but
+        # this is the second write path, and it takes a `Mapping`, so without this check a
+        # future caller could name one and not the other. D5's own argument for merging the
+        # two entity methods is exactly that "dos métodos que deben llamarse juntos son dos
+        # que alguien llamará por separado"; leaving the pairing to caller discipline here
+        # would reintroduce at the repository what the entity closed.
+        if len(COUPLED_PASSWORD_COLUMNS & set(values)) == 1:
+            raise ValueError(
+                f"{sorted(COUPLED_PASSWORD_COLUMNS)} must be written together: a password "
+                "replaced without deciding whether it is temporary leaves the flag "
+                "describing the wrong hash (auth-account-recovery design D5)"
+            )
 
         try:
             result = await self._session.execute(
@@ -409,6 +453,173 @@ class SqlAlchemySessionRepository:
         return result.rowcount
 
 
+class SqlAlchemyPasswordResetTokenRepository:
+    """Recovery links (`auth-account-recovery` R3, design D1/D3/D7).
+
+    Every method is scoped by tenant EXCEPT `consume_globally`, which is the second and last
+    unscoped query in the system (design D3) — see its docstring on the port.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, token: PasswordResetToken) -> None:
+        if token.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="password_reset_token",
+                entity_tenant_id=token.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            PasswordResetTokenModel(
+                id=token.id,
+                tenant_id=token.tenant_id,
+                user_id=token.user_id,
+                token_hash=token.token_hash,
+                expires_at=token.expires_at,
+                used_at=token.used_at,
+                revoked_at=token.revoked_at,
+                # Persisted from the ENTITY rather than left to the column default, unlike
+                # the other tables here — because `revoke_oldest_beyond` orders by it, and
+                # `now()` in Postgres is transaction-scoped: two tokens inserted in one
+                # transaction would carry the SAME default and "oldest" would fall to the
+                # `id` tiebreaker, i.e. become arbitrary. Production creates each in its own
+                # request, so the values differ anyway; making the domain's `now` the stored
+                # value is what makes the ordering deterministic and testable instead of a
+                # property of transaction timing.
+                created_at=token.created_at,
+            )
+        )
+
+    async def consume_globally(
+        self, token_hash: str, now: datetime
+    ) -> PasswordResetToken | None:
+        """Spend the token in ONE conditional statement (R3.2, design D1).
+
+        Conditional for the same reason `SessionRepository.consume` is: reading the row and
+        then writing it is a read-then-write race, and under READ COMMITTED two concurrent
+        presentations of the same link would both find it usable and both reset the password.
+        Letting the database decide, and reporting which caller won, closes that window.
+
+        EVERY condition that makes a token unspendable is in this WHERE — `used_at`,
+        `revoked_at` and `expires_at` alike. `revoked_at` matters as much as `used_at`: a
+        concurrent recovery on the same account calls `revoke_other_live`, and without the
+        clause this UPDATE would win the tie against a revocation meant to kill it. Postgres
+        re-evaluates the WHERE against the new row version when an UPDATE unblocks, so the
+        condition has to be there to be seen.
+
+        No `tenant_id` clause, deliberately (design D3): the endpoint is anonymous and the
+        unique index on `token_hash` identifies at most one row in the whole installation. The
+        tenant comes back OUT of that row.
+
+        `RETURNING` the whole row rather than a bool: the caller is anonymous and cannot know
+        whose token it just spent until this tells it.
+        """
+        result = await self._session.execute(
+            update(PasswordResetTokenModel)
+            .where(
+                PasswordResetTokenModel.token_hash == token_hash,
+                PasswordResetTokenModel.used_at.is_(None),
+                PasswordResetTokenModel.revoked_at.is_(None),
+                PasswordResetTokenModel.expires_at > now,
+            )
+            .values(used_at=now)
+            .returning(PasswordResetTokenModel)
+        )
+        model = result.scalar_one_or_none()
+        return _to_reset_token(model) if model is not None else None
+
+    async def count_live(self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> int:
+        """The per-account cap of design D7, read off the table rather than a second store."""
+        result = await self._session.execute(
+            select(func.count())
+            .select_from(PasswordResetTokenModel)
+            .where(
+                PasswordResetTokenModel.tenant_id == tenant_id,
+                PasswordResetTokenModel.user_id == user_id,
+                PasswordResetTokenModel.used_at.is_(None),
+                PasswordResetTokenModel.revoked_at.is_(None),
+                PasswordResetTokenModel.expires_at > now,
+            )
+        )
+        return int(result.scalar_one())
+
+    async def revoke_oldest_beyond(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        keep_newest: int,
+        now: datetime,
+        older_than: datetime,
+    ) -> int:
+        """Keep the `keep_newest` most recent live tokens, revoke the rest (R2.5, design D7).
+
+        One statement with a subselect rather than a read followed by writes: the read-then-
+        write shape would let two concurrent requests each decide to revoke the same row and
+        each emit, leaving the account over its cap.
+
+        `ORDER BY created_at DESC, id DESC` — the tiebreaker matters, because two tokens
+        issued inside the same clock tick would otherwise make the window non-deterministic
+        and `OFFSET` could keep one and drop the other arbitrarily.
+        """
+        live = (
+            select(PasswordResetTokenModel.id)
+            .where(
+                PasswordResetTokenModel.tenant_id == tenant_id,
+                PasswordResetTokenModel.user_id == user_id,
+                PasswordResetTokenModel.used_at.is_(None),
+                PasswordResetTokenModel.revoked_at.is_(None),
+                PasswordResetTokenModel.expires_at > now,
+            )
+            .order_by(
+                PasswordResetTokenModel.created_at.desc(),
+                PasswordResetTokenModel.id.desc(),
+            )
+            .offset(max(keep_newest, 0))
+        )
+        result = await self._session.execute(
+            update(PasswordResetTokenModel)
+            .where(
+                PasswordResetTokenModel.id.in_(live.scalar_subquery()),
+                # The grace boundary (R2.5, design D7's grace amendment): a link created after
+                # it is never retired, so the one just mailed survives the window in which its
+                # owner clicks it. Without this, a sustained attacker retired the owner's link
+                # seconds after issuing, and per-account mail volume lost its only bound.
+                PasswordResetTokenModel.created_at <= older_than,
+            )
+            .values(revoked_at=now)
+            # `fetch`, not the default `auto`. The other conditional updates here have plain
+            # WHEREs that SQLAlchemy can evaluate in Python, so it expires the matched objects
+            # by itself; a subquery it cannot evaluate leaves them **stale in the identity
+            # map**, so a later read on this session would still show `revoked_at = None`.
+            # Production never re-reads them in the same session, but a primitive whose
+            # in-session view disagrees with the database is one somebody debugs for an hour.
+            .execution_options(synchronize_session="fetch")
+        )
+        return result.rowcount
+
+    async def revoke_other_live(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, keep_id: uuid.UUID, now: datetime
+    ) -> int:
+        """Invalidate the account's other live links after a completed reset (R3.5b).
+
+        `keep_id` is excluded because that row is `used`, not `revoked`, and overwriting it
+        would erase the difference between a link somebody spent and a link this reset killed.
+        """
+        result = await self._session.execute(
+            update(PasswordResetTokenModel)
+            .where(
+                PasswordResetTokenModel.tenant_id == tenant_id,
+                PasswordResetTokenModel.user_id == user_id,
+                PasswordResetTokenModel.id != keep_id,
+                PasswordResetTokenModel.used_at.is_(None),
+                PasswordResetTokenModel.revoked_at.is_(None),
+            )
+            .values(revoked_at=now)
+        )
+        return result.rowcount
+
+
 def _to_user(model: UserModel) -> User:
     return User(
         id=model.id,
@@ -423,6 +634,21 @@ def _to_user(model: UserModel) -> User:
         status=model.status,
         preferred_language=model.preferred_language,
         last_login_at=model.last_login_at,
+        must_change_password=model.must_change_password,
+    )
+
+
+def _to_reset_token(model: PasswordResetTokenModel) -> PasswordResetToken:
+    return PasswordResetToken(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        user_id=model.user_id,
+        token_hash=model.token_hash,
+        expires_at=model.expires_at,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        used_at=model.used_at,
+        revoked_at=model.revoked_at,
     )
 
 

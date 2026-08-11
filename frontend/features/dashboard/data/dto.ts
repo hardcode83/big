@@ -6,11 +6,10 @@
  * turns into a thrown `ApiError`, so these DTOs model success shapes only. Dates
  * are ISO-8601 UTC strings. Types only — no business logic, no runtime code.
  *
- * DEBT (dashboard-web): these shapes are the contract that `MockDashboardSource`
- * satisfies today and `HttpDashboardSource` must satisfy tomorrow, against
- * GET /api/v1/properties, /properties/{id}, /properties/{id}/dashboard and
- * /timeline/{property_id}. Keep them aligned with the real endpoints; the mock is
- * replaced without changing this file.
+ * These shapes are the feature contract that `HttpDashboardSource` maps from
+ * the three responses consumed by this change: dashboard cards, property
+ * dashboard detail and property timeline. Fields not present in those
+ * responses are not synthesized or fetched from another endpoint.
  */
 
 /** ISO-8601 timestamp with UTC timezone (PRD §23 date convention). */

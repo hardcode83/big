@@ -62,10 +62,13 @@ persona**: sus tokens de refresh quedan revocados con razón `PASSWORD_RESET`, a
 que entrar de nuevo. Un reset que dejara vivas las sesiones anteriores no recuperaría la
 cuenta, solo añadiría una credencial más.
 
-Este endpoint no está en la lista de PRD §23. Es una adición deliberada: la recuperación
-autoservicio (`/forgot-password`) es opcional en PRD §24 y depende del `NotificationAdapter`,
-que llega con `access-notifications`. Sin esto, el MVP no tendría **ninguna** vía de
-recuperación.
+Este endpoint no está en la lista de PRD §23. Fue una adición deliberada: la recuperación
+autoservicio (`/forgot-password`) es opcional en PRD §24, y sin esto el MVP no habría tenido
+**ninguna** vía de recuperación. Desde `auth-account-recovery` ya no es la única, pero sigue
+siendo la **asistida** — la que un administrador controla. Para el caso que no cubre —el único
+`TENANT_OWNER` activo de un tenant, que no puede resetearse a sí mismo por aquí— la salida es el
+comando de rescate documentado en
+[`auth-account-recovery.md`](auth-account-recovery.md#rescate-mientras-no-hay-smtp).
 
 ## Cambiar un rol, suspender, dar de baja
 
@@ -170,17 +173,20 @@ una contraseña aparece como `{"password": {"changed": true}}` y nada más. No e
 
 ## Limitaciones asumidas
 
-Tres cosas que este change **no** hace, con su motivo:
+Dos cosas que este change **no** hace, con su motivo:
 
-1. `ASSUMPTION`: **la contraseña temporal no se fuerza a cambiar en el primer login.** Sobrevive hasta que un
-   administrador la rote. Forzarlo exige una columna nueva (`must_change_password`) y un
-   endpoint de cambio por el propio usuario, que pertenecen a `auth-account-recovery`.
-2. `ASSUMPTION`: **`country` se valida solo de forma** (dos letras ASCII), no contra la lista ISO-3166-1 real:
+1. `ASSUMPTION`: **`country` se valida solo de forma** (dos letras ASCII), no contra la lista ISO-3166-1 real:
    eso exigiría una dependencia nueva. `ZZ` pasa. Lo mismo aplica al formato de los emails, que
    no es RFC 5322 — captura los errores que se cometen al teclear, no todos los posibles.
-3. `EXTERNAL_DEPENDENCY`: **estos endpoints no tienen salida a internet todavía.** El túnel de Cloudflare enruta solo
+2. `EXTERNAL_DEPENDENCY`: **estos endpoints no tienen salida a internet todavía.** El túnel de Cloudflare enruta solo
    al frontend, así que en el entorno dev se verifican por túnel SSH
    (`infra/environments/dev/RUNBOOK.md` §7.4) o en local. Lo cambia `api-ingress-routing`.
+
+La tercera limitación que esta página listaba —que la contraseña temporal no se forzaba a
+cambiar— **ya no existe**: `auth-account-recovery` añadió `users.must_change_password`, que estos
+dos caminos de temporal (alta y reset asistido) dejan en verdadero, y el gate que responde `403
+PASSWORD_CHANGE_REQUIRED` hasta que el usuario la rote. Ver
+[`auth-account-recovery.md`](auth-account-recovery.md).
 
 ## Cómo se prueba en local
 

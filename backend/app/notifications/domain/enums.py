@@ -31,6 +31,19 @@ class NotificationType(str, enum.Enum):
     CHECKOUT_REMINDER = "CHECKOUT_REMINDER"
     PRICE_RECOMMENDATION = "PRICE_RECOMMENDATION"
     SLA_BREACH = "SLA_BREACH"
+    # The SEVENTEENTH, declared as a divergence from the sixteen of PRD §14
+    # (`auth-account-recovery` R6.1). Same kind of divergence `access-notifications` declared
+    # for its two jobs against PRD §8.3's four: the PRD's list is the operational catalogue —
+    # cleanings, incidents, technicians, guests, prices, SLA — and password recovery is not an
+    # operational event, so §14 has no slot for it. It is here rather than reusing a slot
+    # because rule 9 of `steering/security.md` only makes an operation findable by filtering
+    # on its own name.
+    #
+    # EXTERNAL_DEPENDENCY: rows of this type reach nobody until a real SMTP adapter arrives
+    # with `hardening-release`. `EMAIL` resolves to `ConsoleEmailAdapter`, which
+    # `specs/access-notifications.md` forbids from logging content or recipient — so not even
+    # a developer can read the link from the log. See `docs/auth-account-recovery.md`.
+    PASSWORD_RESET_REQUESTED = "PASSWORD_RESET_REQUESTED"
 
 
 class NotificationChannel(str, enum.Enum):

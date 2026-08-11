@@ -6,10 +6,12 @@ The read-only presentation layer of the owner/manager dashboard (PRD §9): the
 property-cards overview (`/dashboard`, §9.1) and the property detail page
 (`/properties/[id]`, §9.2) with its per-property timeline (§10). It renders
 inside the existing WorkspaceShell and consumes all data through a typed
-data-access boundary (`DashboardDataSource`) whose only implementation today is a
-mock with fixed data for the two dev properties (REDES11, PAJARITOS8), because the
-aggregate dashboard backend does not exist yet. The boundary is shaped so that a
-future HTTP implementation replaces the mock without changing the UI.
+data-access boundary (`DashboardDataSource`). The aggregate backend it was shaped
+against **now exists** — `dashboard-api` shipped the four read endpoints (see
+`specs/dashboard-api.md`) — and the runtime uses `HttpDashboardSource` at the
+composition point. It maps the three responses consumed by the UI from their
+generated `snake_case` contract to the feature's `camelCase` DTOs without
+changing the UI, hooks or query keys.
 
 ## Requirements
 
@@ -74,13 +76,22 @@ future HTTP implementation replaces the mock without changing the UI.
 
 - THE SYSTEM SHALL define a typed `DashboardDataSource` interface whose methods
   return DTOs replicating the real API contract (PRD §23 data envelope, error
-  envelope surfaced as `ApiError`, ISO-8601 UTC dates), aligned with
-  `GET /api/v1/properties`, `/properties/{id}`, `/properties/{id}/dashboard`, and
-  `/timeline/{property_id}`.
+  envelope surfaced as `ApiError`, ISO-8601 UTC dates), aligned with the routes
+  `dashboard-api` now serves: `GET /api/v1/dashboard/properties` (the cards
+  collection), `/api/v1/properties/{id}/dashboard`, `/api/v1/properties/{id}/state`
+  and `/api/v1/timeline/{property_id}`.
+- THE SYSTEM SHALL implement the cards, property detail and property timeline
+  methods with the shared authenticated `ApiClient`, preserving pagination
+  metadata and item order, propagating its `ApiError` unchanged, and serializing
+  only defined timeline filters as `event_type`, `severity`, `actor_type`, `from`
+  and `to`.
+- THE SYSTEM SHALL explicitly map generated HTTP response fields to feature DTOs,
+  preserve nullable values and ISO-8601 strings, convert decimal financial values
+  to numbers while preserving `null`, and use photo URLs supplied by the backend
+  without constructing storage URLs in the frontend.
 - THE SYSTEM SHALL resolve the data source through a single composition point, so
-  that the current `MockDashboardSource` (fixed REDES11/PAJARITOS8 data, isolated
-  in a dedicated module) can be replaced by an HTTP implementation without
-  changing the UI, the hooks, or the query keys.
+  that `HttpDashboardSource` is resolved instead of the isolated
+  `MockDashboardSource` without changing the UI, the hooks, or the query keys.
 - THE SYSTEM SHALL keep components and hooks dependent only on the interface and
   the composition point; none imports the mock implementation or its fixtures
   (enforced by a boundary test).
@@ -112,20 +123,23 @@ future HTTP implementation replaces the mock without changing the UI.
 
 ## Explicit debt (ASSUMPTION)
 
-- The mock is a placeholder for the app's own aggregate dashboard backend
-  (roadmap `dashboard-web`); replacing `MockDashboardSource` with an HTTP
-  implementation at the composition point is tracked debt, marked `ASSUMPTION` in
-  code. This deliberately inverts the API-first norm for this slice.
+- `MockDashboardSource` remains available only as isolated test support. The
+  runtime uses the shared authenticated HTTP source; it does not synthesize data,
+  calculate operational state or colors, translate backend data, or call the
+  separate property-state endpoint.
 - `tenantId` comes from a single centralized dev constant (`DEV_TENANT_ID`) until
   session-derived tenancy exists (roadmap `auth-tenancy`); it is a non-sensitive
   placeholder, not a credential.
-- The timeline renders fixed data; real-time streaming arrives with the backend.
+- Real-time streaming is still absent on both sides: `dashboard-api` delivers the
+  timeline as a filtered, paginated **read**, and explicitly leaves push
+  (WebSocket/SSE) out of scope, so PRD §9.2's "tiempo real" is not met yet.
 
 ## Key files
 
 - `frontend/features/dashboard/data/` — `dto.ts` (§23-shaped DTOs),
   `dashboard-source.ts` (the interface), `index.ts` (composition point),
-  `mock/{fixtures,mock-dashboard-source}.ts` (the sole, isolated implementation).
+  `http/http-dashboard-source.ts` (the runtime implementation), and
+  `mock/{fixtures,mock-dashboard-source}.ts` (isolated test support).
 - `frontend/features/dashboard/hooks/` — `query-keys.ts` (tenant-scoped keys),
   `use-dashboard-data.ts` (`useDashboardCards`/`usePropertyDetail`/
   `usePropertyTimeline` + `retryPolicy`).

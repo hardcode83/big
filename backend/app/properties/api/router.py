@@ -1,13 +1,21 @@
-"""Property endpoints (PRD §23:1938-1941, R1, R2, R3, R6).
+"""Property endpoints (PRD §23:1938-1942, R1, R2, R3, R6).
 
-The four operations PRD §23 lists, and only those. There is deliberately **no `DELETE`**: §23
-does not list one, `domain-foundation-core.md` records that the PRD models removal through
-`status`, and the physical delete is impossible anyway because `property_state_transitions`,
-`cleaning_tasks`, `incidents` and `access_records` all reference `properties.id` with
-`ON DELETE RESTRICT`. Retirement is `PATCH {"status": "INACTIVE"}` (R3.4).
+The four operations PRD §23:1938-1941 lists, and only those. There is deliberately **no
+`DELETE`**: §23 does not list one, `domain-foundation-core.md` records that the PRD models
+removal through `status`, and the physical delete is impossible anyway because
+`property_state_transitions`, `cleaning_tasks`, `incidents` and `access_records` all reference
+`properties.id` with `ON DELETE RESTRICT`. Retirement is `PATCH {"status": "INACTIVE"}` (R3.4).
 
-Also absent: `GET /{id}/state` and `GET /{id}/dashboard` from §23:1942-1943. Those are the read
-surface of `dashboard-web`, and fixing their shape from here would pre-empt it.
+Plus `GET /{id}/state` (§23:1942), added by `dashboard-api`. It lives here and not in that
+change's own module because `properties` owns the column it reports and the history it dates
+it from — a read of one domain belongs to that domain (its design D7). The route reads; it
+does not resolve. `steering/backend.md` forbids bypassing `PropertyStateMachine`, and
+recomputing a state in a read layer would be exactly that.
+
+Still absent: `GET /{id}/dashboard` (§23:1943). It is a **multi-domain aggregate** composing
+seven modules, so it is served by `app/dashboard/api/router.py` under this same `/properties`
+prefix — the arrangement `users_router` already uses for `/users`. `dashboard-web` consumes
+it; it does not own it.
 
 Thin by contract: map Pydantic → use case → Pydantic. Every route declares its permission with
 `require(...)`, which is what `tests/test_route_authorization.py` walks — an endpoint added here
@@ -30,6 +38,7 @@ from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.properties.api.dependencies import (
     get_create_property_use_case,
     get_list_properties_use_case,
+    get_property_state_use_case,
     get_property_use_case,
     get_update_property_use_case,
 )
@@ -39,11 +48,13 @@ from app.properties.api.schemas import (
     CreatePropertyRequest,
     PropertyPageResponse,
     PropertyResponse,
+    PropertyStateResponse,
     UpdatePropertyRequest,
 )
 from app.properties.application.property_admin import (
     CreatePropertyCommand,
     CreatePropertyUseCase,
+    GetPropertyStateUseCase,
     GetPropertyUseCase,
     ListPropertiesUseCase,
     UpdatePropertyUseCase,
@@ -164,6 +175,31 @@ async def get_property(
         tenant_id=authenticated.context.tenant_id, property_id=property_id
     )
     return PropertyResponse.from_domain(property)
+
+
+@router.get(
+    "/{property_id}/state",
+    response_model=PropertyStateResponse,
+    summary="A property's operational state",
+    description=(
+        "The light endpoint of PRD §23:1942, for refreshing an indicator without fetching "
+        "the aggregate. Returns the canonical `PropertyOperationalState` literal — never "
+        "translated — and the ISO-8601 UTC instant of the last transition, both **read** "
+        "and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. "
+        "`last_transition_at` is `null` for a property that has never moved, because "
+        "creation is not a transition. A property of another tenant answers `404`, "
+        "indistinguishable from one that does not exist."
+    ),
+)
+async def get_property_state(
+    property_id: uuid.UUID,
+    authenticated: ReadDep,
+    use_case: Annotated[GetPropertyStateUseCase, Depends(get_property_state_use_case)],
+) -> PropertyStateResponse:
+    state = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id, property_id=property_id
+    )
+    return PropertyStateResponse.from_domain(state)
 
 
 @router.patch(

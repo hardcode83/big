@@ -190,6 +190,27 @@
         "title": "AccessRecordStatus",
         "type": "string"
       },
+      "AccessResponse": {
+        "description": "A status label. No code, in any form (R2.5).",
+        "properties": {
+          "label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Label"
+          }
+        },
+        "required": [
+          "label"
+        ],
+        "title": "AccessResponse",
+        "type": "object"
+      },
       "AssignCleaningTaskRequest": {
         "additionalProperties": false,
         "description": "`PATCH /cleaning-tasks/{id}` — assignment is the only mutation it accepts.\n\nNot a general-purpose patch: `status` moves only through the lifecycle endpoints (so\n`PropertyStateMachine` is never bypassed), and `notes` is out of this change's writable\nsurface entirely (design D13).",
@@ -240,6 +261,55 @@
           "file"
         ],
         "title": "Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post",
+        "type": "object"
+      },
+      "BuildProvenanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "app_version": {
+            "title": "App Version",
+            "type": "string"
+          },
+          "provenance": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PrivateProvenanceResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "app_version",
+          "provenance"
+        ],
+        "title": "BuildProvenanceResponse",
+        "type": "object"
+      },
+      "ChangePasswordRequest": {
+        "additionalProperties": false,
+        "description": "The current password and the replacement.\n\nThe account is the one the access token belongs to; this body cannot name a user.\nA new password that breaks the password policy is answered with `422` saying which\nrule it broke.",
+        "properties": {
+          "current_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "Current Password",
+            "type": "string"
+          },
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "current_password",
+          "new_password"
+        ],
+        "title": "ChangePasswordRequest",
         "type": "object"
       },
       "CheckinStatusResponse": {
@@ -491,7 +561,7 @@
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/CleaningPhotoResponse"
+              "$ref": "#/components/schemas/app__cleaning__api__schemas__CleaningPhotoResponse"
             },
             "title": "Data",
             "type": "array"
@@ -501,49 +571,6 @@
           "data"
         ],
         "title": "CleaningPhotoListResponse",
-        "type": "object"
-      },
-      "CleaningPhotoResponse": {
-        "description": "One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).\n\n`CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any\n`model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path\nthe moment somebody reaches for the convenient shape. Enumerating the fields is what makes\n\"the key never appears in a response\" a property of this class rather than of everyone who\never touches it. `ai_validation_result` is out for a different reason: nothing writes it\nyet (proposal §Out of scope), and a field that is always `null` is a contract promise\nnobody made.\n\n`url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what\na client uses instead of a path, and it is not stored anywhere.",
-        "properties": {
-          "cleaning_task_id": {
-            "format": "uuid",
-            "title": "Cleaning Task Id",
-            "type": "string"
-          },
-          "created_at": {
-            "format": "date-time",
-            "title": "Created At",
-            "type": "string"
-          },
-          "id": {
-            "format": "uuid",
-            "title": "Id",
-            "type": "string"
-          },
-          "photo_type": {
-            "title": "Photo Type",
-            "type": "string"
-          },
-          "uploaded_by": {
-            "format": "uuid",
-            "title": "Uploaded By",
-            "type": "string"
-          },
-          "url": {
-            "title": "Url",
-            "type": "string"
-          }
-        },
-        "required": [
-          "id",
-          "cleaning_task_id",
-          "photo_type",
-          "uploaded_by",
-          "created_at",
-          "url"
-        ],
-        "title": "CleaningPhotoResponse",
         "type": "object"
       },
       "CleaningTaskPageResponse": {
@@ -1365,6 +1392,10 @@
             "title": "Id",
             "type": "string"
           },
+          "must_change_password": {
+            "title": "Must Change Password",
+            "type": "boolean"
+          },
           "name": {
             "title": "Name",
             "type": "string"
@@ -1388,7 +1419,8 @@
           "name",
           "email",
           "role",
-          "preferred_language"
+          "preferred_language",
+          "must_change_password"
         ],
         "title": "CurrentUserResponse",
         "type": "object"
@@ -1447,6 +1479,7 @@
           "INVALID_TOKEN",
           "FORBIDDEN",
           "RATE_LIMITED",
+          "PASSWORD_CHANGE_REQUIRED",
           "NOT_FOUND",
           "BAD_GATEWAY"
         ],
@@ -1464,6 +1497,72 @@
           "error"
         ],
         "title": "ErrorEnvelope",
+        "type": "object"
+      },
+      "FinancialSummaryResponse": {
+        "properties": {
+          "currency": {
+            "title": "Currency",
+            "type": "string"
+          },
+          "pending_expenses": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pending Expenses"
+          },
+          "reservation_total": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Total"
+          }
+        },
+        "required": [
+          "currency",
+          "reservation_total",
+          "pending_expenses"
+        ],
+        "title": "FinancialSummaryResponse",
+        "type": "object"
+      },
+      "ForgotPasswordRequest": {
+        "additionalProperties": false,
+        "description": "The address to send a recovery link to.",
+        "properties": {
+          "email": {
+            "maxLength": 255,
+            "minLength": 3,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ForgotPasswordRequest",
+        "type": "object"
+      },
+      "ForgotPasswordResponse": {
+        "description": "The same acknowledgement for every request.\n\nIt does not indicate whether the address belongs to an account.",
+        "properties": {
+          "detail": {
+            "default": "If the address belongs to an account, a recovery link has been sent.",
+            "title": "Detail",
+            "type": "string"
+          }
+        },
+        "title": "ForgotPasswordResponse",
         "type": "object"
       },
       "GuestAccessTokenIssuedResponse": {
@@ -1579,6 +1678,27 @@
         "title": "GuestDocumentType",
         "type": "string"
       },
+      "GuestResponse": {
+        "description": "A name. Rule 4 of `steering/security.md` — nothing about the document, ever.",
+        "properties": {
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "GuestResponse",
+        "type": "object"
+      },
       "GuestSummaryResponse": {
         "description": "The guest as a reservation may show it — no document data at all (R1.8, D17).",
         "properties": {
@@ -1693,6 +1813,17 @@
         "title": "IncidentReportedResponse",
         "type": "object"
       },
+      "IncidentSeverity": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Incident.severity) without a named block (§7.13). Not the same enum\nas TimelineSeverity (INFO/WARNING/ERROR/CRITICAL) — different values.",
+        "enum": [
+          "LOW",
+          "MEDIUM",
+          "HIGH",
+          "CRITICAL"
+        ],
+        "title": "IncidentSeverity",
+        "type": "string"
+      },
       "IncidentStatus": {
         "enum": [
           "OPEN",
@@ -1707,6 +1838,35 @@
         ],
         "title": "IncidentStatus",
         "type": "string"
+      },
+      "IncidentSummaryResponse": {
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "opened_at": {
+            "format": "date-time",
+            "title": "Opened At",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/IncidentSeverity"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "title",
+          "severity",
+          "opened_at"
+        ],
+        "title": "IncidentSummaryResponse",
+        "type": "object"
       },
       "LegalRegistrationResponse": {
         "properties": {
@@ -1779,6 +1939,31 @@
           }
         },
         "title": "MarkExternalRequest",
+        "type": "object"
+      },
+      "NextActionResponse": {
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "responsible": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Responsible"
+          }
+        },
+        "required": [
+          "label",
+          "responsible"
+        ],
+        "title": "NextActionResponse",
         "type": "object"
       },
       "NotificationChannel": {
@@ -1954,6 +2139,327 @@
         ],
         "title": "PaymentStatus",
         "type": "string"
+      },
+      "PendingApprovalResponse": {
+        "properties": {
+          "amount": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Amount"
+          },
+          "currency": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Currency"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "label": {
+            "title": "Label",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "label",
+          "amount",
+          "currency"
+        ],
+        "title": "PendingApprovalResponse",
+        "type": "object"
+      },
+      "PrivateProvenanceResponse": {
+        "additionalProperties": false,
+        "properties": {
+          "actions_run_id": {
+            "description": "Positive GitHub Actions run ID.",
+            "minimum": 1.0,
+            "title": "Actions Run Id",
+            "type": "integer"
+          },
+          "commit_sha": {
+            "description": "The complete 40-character lowercase hexadecimal commit SHA.",
+            "pattern": "^[0-9a-f]{40}$",
+            "title": "Commit Sha",
+            "type": "string"
+          },
+          "pull_request_number": {
+            "description": "Positive Pull Request number.",
+            "minimum": 1.0,
+            "title": "Pull Request Number",
+            "type": "integer"
+          },
+          "repository_url": {
+            "description": "HTTPS URL of the GitHub repository that produced the build.",
+            "pattern": "^https://github\\.com/[^/\\s?#]+/[^/\\s?#]+$",
+            "title": "Repository Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "repository_url",
+          "pull_request_number",
+          "commit_sha",
+          "actions_run_id"
+        ],
+        "title": "PrivateProvenanceResponse",
+        "type": "object"
+      },
+      "PropertyDashboardCardResponse": {
+        "description": "One card (`dto.ts:85-96`, R1.2).\n\n`current_or_next_reservation` is `None` and **present**, never omitted: R1.4 says\n\"SHALL devolver `currentOrNextReservation: null` en vez de omitir la clave\", and pydantic\nserialises a `None` field unless told otherwise — which nothing here does.",
+        "properties": {
+          "cleaning_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Status"
+          },
+          "current_or_next_reservation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReservationSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_event_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event At"
+          },
+          "last_event_label": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Event Label"
+          },
+          "next_action": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NextActionResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "open_incidents_count": {
+            "title": "Open Incidents Count",
+            "type": "integer"
+          },
+          "operational_state": {
+            "$ref": "#/components/schemas/PropertyOperationalState"
+          },
+          "property_code": {
+            "title": "Property Code",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "property_code",
+          "operational_state",
+          "current_or_next_reservation",
+          "cleaning_status",
+          "open_incidents_count",
+          "next_action",
+          "last_event_label",
+          "last_event_at"
+        ],
+        "title": "PropertyDashboardCardResponse",
+        "type": "object"
+      },
+      "PropertyDashboardPageResponse": {
+        "description": "The pagination envelope of PRD §23.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PropertyDashboardCardResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "PropertyDashboardPageResponse",
+        "type": "object"
+      },
+      "PropertyDetailResponse": {
+        "description": "The aggregate of PRD §9.2 (`dto.ts:161-174`, R2.1).",
+        "properties": {
+          "access": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/AccessResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "cleaning_status": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Status"
+          },
+          "current_or_next_reservation": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReservationSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "financial": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FinancialSummaryResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "guest": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/GuestResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "last_cleaning_photos": {
+            "items": {
+              "$ref": "#/components/schemas/app__dashboard__api__schemas__CleaningPhotoResponse"
+            },
+            "title": "Last Cleaning Photos",
+            "type": "array"
+          },
+          "notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Notes"
+          },
+          "open_incidents": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentSummaryResponse"
+            },
+            "title": "Open Incidents",
+            "type": "array"
+          },
+          "operational_state": {
+            "$ref": "#/components/schemas/PropertyOperationalState"
+          },
+          "pending_approvals": {
+            "items": {
+              "$ref": "#/components/schemas/PendingApprovalResponse"
+            },
+            "title": "Pending Approvals",
+            "type": "array"
+          },
+          "property_code": {
+            "title": "Property Code",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "property_code",
+          "operational_state",
+          "current_or_next_reservation",
+          "guest",
+          "access",
+          "cleaning_status",
+          "last_cleaning_photos",
+          "open_incidents",
+          "financial",
+          "notes",
+          "pending_approvals"
+        ],
+        "title": "PropertyDetailResponse",
+        "type": "object"
       },
       "PropertyOperationalState": {
         "enum": [
@@ -2225,6 +2731,32 @@
           "updated_at"
         ],
         "title": "PropertyResponse",
+        "type": "object"
+      },
+      "PropertyStateResponse": {
+        "description": "The light state endpoint of PRD §23:1942 (`dashboard-api` R3.1).\n\nExactly the two values R3.1 names, and no more: the client that polls this to refresh an\nindicator does not want the property again. `current_operational_state` is the canonical\nliteral, never translated (R5.5); `last_transition_at` is ISO-8601 UTC and is `null` for\na property that has never moved — creation is not a transition, so there is no instant,\nas opposed to one we failed to find.",
+        "properties": {
+          "current_operational_state": {
+            "$ref": "#/components/schemas/PropertyOperationalState"
+          },
+          "last_transition_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Transition At"
+          }
+        },
+        "required": [
+          "current_operational_state",
+          "last_transition_at"
+        ],
+        "title": "PropertyStateResponse",
         "type": "object"
       },
       "PropertyStatus": {
@@ -2855,6 +3387,80 @@
         "title": "ReservationStatus",
         "type": "string"
       },
+      "ReservationSummaryResponse": {
+        "properties": {
+          "check_in": {
+            "format": "date",
+            "title": "Check In",
+            "type": "string"
+          },
+          "check_out": {
+            "format": "date",
+            "title": "Check Out",
+            "type": "string"
+          },
+          "guest_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "reference": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reference"
+          }
+        },
+        "required": [
+          "id",
+          "reference",
+          "guest_name",
+          "check_in",
+          "check_out"
+        ],
+        "title": "ReservationSummaryResponse",
+        "type": "object"
+      },
+      "ResetPasswordRequest": {
+        "additionalProperties": false,
+        "description": "The recovery token from the emailed link, and the new password.",
+        "properties": {
+          "new_password": {
+            "maxLength": 1024,
+            "minLength": 1,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "maxLength": 512,
+            "minLength": 1,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest",
+        "type": "object"
+      },
       "RowErrorResponse": {
         "description": "One row the import could not take, with what a person needs to fix it.",
         "properties": {
@@ -3443,6 +4049,167 @@
           "CANCELLED"
         ],
         "title": "TenantStatus",
+        "type": "string"
+      },
+      "TimelineActorType": {
+        "enum": [
+          "SYSTEM",
+          "USER",
+          "GUEST",
+          "SCHEDULER",
+          "WEBHOOK",
+          "AI"
+        ],
+        "title": "TimelineActorType",
+        "type": "string"
+      },
+      "TimelineEntryResponse": {
+        "description": "One entry — the fields of `TimelineEntry`\n(`frontend/features/dashboard/data/dto.ts:99-108`), in this API's snake_case.\n\n`actor_type`, `event_type` and `severity` travel as the exact canonical literals and\nare never translated (R5.5). `title` is the composed, localised text (R5.1).\n`description` is **not**: it carries operator-written text — the reason a property was\nblocked or taken out of service — and is returned verbatim, in whatever language it was\ntyped. Declared as an `ASSUMPTION` under R5.1 and reasoned in `domain/rendering.py`.",
+        "properties": {
+          "actor_type": {
+            "$ref": "#/components/schemas/TimelineActorType"
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "event_type": {
+            "$ref": "#/components/schemas/TimelineEventType"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "occurred_at": {
+            "format": "date-time",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/TimelineSeverity"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "occurred_at",
+          "actor_type",
+          "event_type",
+          "severity",
+          "title",
+          "description"
+        ],
+        "title": "TimelineEntryResponse",
+        "type": "object"
+      },
+      "TimelineEventType": {
+        "enum": [
+          "RESERVATION_IMPORTED",
+          "RESERVATION_CREATED_MANUAL",
+          "RESERVATION_UPDATED",
+          "RESERVATION_CANCELLED",
+          "CHECKIN_WINDOW_OPENED",
+          "CHECKOUT_WINDOW_REACHED",
+          "PROPERTY_STATE_CHANGED",
+          "ACCESS_CODE_PENDING",
+          "ACCESS_CODE_CREATED_EXTERNAL",
+          "ACCESS_CODE_MANUAL_ADDED",
+          "ACCESS_CODE_DELIVERED",
+          "GUEST_MESSAGE_RECEIVED",
+          "AI_RESPONSE_SENT",
+          "AI_ESCALATED_TO_HUMAN",
+          "HUMAN_RESPONSE_SENT",
+          "CLEANING_TASK_CREATED",
+          "CLEANER_ASSIGNED",
+          "CLEANER_ACCEPTED",
+          "CLEANER_REJECTED",
+          "CLEANING_STARTED",
+          "CLEANING_PHOTO_UPLOADED",
+          "CLEANING_COMPLETED",
+          "CLEANING_FAILED_VALIDATION",
+          "INCIDENT_CREATED",
+          "INCIDENT_CLASSIFIED",
+          "TECHNICIAN_ASSIGNED",
+          "TECHNICIAN_ACCEPTED",
+          "TECHNICIAN_EN_ROUTE",
+          "TECHNICIAN_STARTED",
+          "INCIDENT_RESOLVED",
+          "INCIDENT_CANCELLED",
+          "OWNER_APPROVAL_REQUIRED",
+          "OWNER_APPROVED_EXPENSE",
+          "OWNER_REJECTED_EXPENSE",
+          "LOCK_ALERT_RECEIVED",
+          "PRICE_RECOMMENDATION_CREATED",
+          "PRICE_UPDATED_EXTERNAL",
+          "LEGAL_REGISTRATION_SUBMITTED",
+          "REVIEW_IMPORTED",
+          "REVIEW_RESPONSE_DRAFTED",
+          "REVIEW_RESPONSE_APPROVED",
+          "SLA_BREACH_WARNING",
+          "NOTIFICATION_SENT",
+          "NOTIFICATION_FAILED",
+          "WEBHOOK_RECEIVED",
+          "GUEST_CHECKIN_COMPLETED"
+        ],
+        "title": "TimelineEventType",
+        "type": "string"
+      },
+      "TimelinePageResponse": {
+        "description": "The pagination envelope of PRD §23.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/TimelineEntryResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "TimelinePageResponse",
+        "type": "object"
+      },
+      "TimelineSeverity": {
+        "enum": [
+          "INFO",
+          "WARNING",
+          "ERROR",
+          "CRITICAL"
+        ],
+        "title": "TimelineSeverity",
         "type": "string"
       },
       "TokenPairResponse": {
@@ -4291,6 +5058,75 @@
         ],
         "title": "WebhookEndpointMaterialResponse",
         "type": "object"
+      },
+      "app__cleaning__api__schemas__CleaningPhotoResponse": {
+        "description": "One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).\n\n`CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any\n`model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path\nthe moment somebody reaches for the convenient shape. Enumerating the fields is what makes\n\"the key never appears in a response\" a property of this class rather than of everyone who\never touches it. `ai_validation_result` is out for a different reason: nothing writes it\nyet (proposal §Out of scope), and a field that is always `null` is a contract promise\nnobody made.\n\n`url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what\na client uses instead of a path, and it is not stored anywhere.",
+        "properties": {
+          "cleaning_task_id": {
+            "format": "uuid",
+            "title": "Cleaning Task Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "photo_type": {
+            "title": "Photo Type",
+            "type": "string"
+          },
+          "uploaded_by": {
+            "format": "uuid",
+            "title": "Uploaded By",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "cleaning_task_id",
+          "photo_type",
+          "uploaded_by",
+          "created_at",
+          "url"
+        ],
+        "title": "CleaningPhotoResponse",
+        "type": "object"
+      },
+      "app__dashboard__api__schemas__CleaningPhotoResponse": {
+        "description": "Always an empty list today (R2.4, `EXTERNAL_DEPENDENCY`) — the signed URL needs\n`StorageAdapter.get_signed_url`, which `cleaning-photos-storage` delivers.",
+        "properties": {
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "taken_at": {
+            "format": "date-time",
+            "title": "Taken At",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "url",
+          "taken_at"
+        ],
+        "title": "CleaningPhotoResponse",
+        "type": "object"
       }
     },
     "securitySchemes": {
@@ -4735,6 +5571,108 @@
         ]
       }
     },
+    "/api/v1/auth/change-password": {
+      "post": {
+        "description": "Self-service, for any role that can authenticate. The subject is the holder of the access token — the body cannot name another user. On success EVERY refresh family of the account is revoked, including the one that made this call, so the caller must log in again: a change that left the old sessions alive would add a credential rather than rotate one.",
+        "operationId": "change_password_api_v1_auth_change_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ChangePasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Change your own password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/forgot-password": {
+      "post": {
+        "description": "Anonymous. Always answers the same 202 with the same body, whether or not the address belongs to an account — otherwise it would be a user-enumerator open to the internet. Shares the per-IP rate limit with login and refresh.",
+        "operationId": "forgot_password_api_v1_auth_forgot_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ForgotPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "202": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ForgotPasswordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Ask for a password recovery link",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/api/v1/auth/login": {
       "post": {
         "description": "Anonymous. Rate limited per client IP, and an account is temporarily locked after too many consecutive failures. Every failure answers the same 401, whatever the cause.",
@@ -4901,6 +5839,41 @@
           }
         },
         "summary": "Rotate a refresh token",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/api/v1/auth/reset-password": {
+      "post": {
+        "description": "Anonymous: the token from the emailed link is the credential, and it is single use. Every reason it can fail — unknown, already used, expired, revoked, or an account that is no longer active — answers the same 401. On success every session of the account is revoked and any other outstanding recovery link is invalidated; no session is returned, so log in afterwards. Shares the per-IP rate limit with login and refresh.",
+        "operationId": "reset_password_api_v1_auth_reset_password_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Set a new password using a recovery token",
         "tags": [
           "auth"
         ]
@@ -5861,7 +6834,7 @@
             "content": {
               "application/json": {
                 "schema": {
-                  "$ref": "#/components/schemas/CleaningPhotoResponse"
+                  "$ref": "#/components/schemas/app__cleaning__api__schemas__CleaningPhotoResponse"
                 }
               }
             },
@@ -6163,6 +7136,89 @@
         "summary": "Record a manager's verdict on a finished cleaning",
         "tags": [
           "cleaning"
+        ]
+      }
+    },
+    "/api/v1/dashboard/properties": {
+      "get": {
+        "description": "One card per property of the caller's tenant (PRD §9.1), in the pagination envelope of PRD §23, with the same `page`/`per_page` bounds as `GET /api/v1/properties`. Resolved in a fixed number of queries whatever the page size — never one per property. `operational_state` is the canonical literal and carries no colour: the colour mapping belongs to the client. `cleaning_status`, `next_action.label` and `last_event_label` arrive already composed in the authenticated user's language. A block whose source the caller's role may not read comes back `null`, indistinguishable from having none — `current_or_next_reservation` is always present as a key, `null` included. Amounts are decimal strings so no cent is lost to a float. This route is not in PRD §23; it is an explicit extension, which is why it sits under `/dashboard` rather than under `/properties`.",
+        "operationId": "list_dashboard_cards_api_v1_dashboard_properties_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyDashboardPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The dashboard card of every property",
+        "tags": [
+          "dashboard"
         ]
       }
     },
@@ -7234,6 +8290,191 @@
         ]
       }
     },
+    "/api/v1/properties/{property_id}/dashboard": {
+      "get": {
+        "description": "The aggregate of PRD §9.2: reservation, guest, access, cleaning, incidents, financial, notes and pending approvals in one call. The guest is a name and the access a status label — never a document number, never an access code in any form, masked included. `last_cleaning_photos` is always empty until signed URLs exist; the blocks whose writing domain has not shipped yet (`incidents`, `owner_approvals`, `expenses`) query their real tables and come back empty, so the contract will not change when those changes land. `notes` is always `null` for now and deliberately so — no column owns it, and the candidates are free text an operator can paste a door code into. A property of another tenant answers `404`, indistinguishable from one that does not exist.",
+        "operationId": "get_property_dashboard_api_v1_properties__property_id__dashboard_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyDetailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Everything happening on one property",
+        "tags": [
+          "dashboard"
+        ]
+      }
+    },
+    "/api/v1/properties/{property_id}/state": {
+      "get": {
+        "description": "The light endpoint of PRD §23:1942, for refreshing an indicator without fetching the aggregate. Returns the canonical `PropertyOperationalState` literal — never translated — and the ISO-8601 UTC instant of the last transition, both **read** and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. `last_transition_at` is `null` for a property that has never moved, because creation is not a transition. A property of another tenant answers `404`, indistinguishable from one that does not exist.",
+        "operationId": "get_property_state_api_v1_properties__property_id__state_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PropertyStateResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "A property's operational state",
+        "tags": [
+          "properties"
+        ]
+      }
+    },
+    "/api/v1/provenance": {
+      "get": {
+        "description": "Returns build provenance to authorized operational users only. The public app_version is the same build identity produced by CD; the private provenance block is atomic and may be unavailable when any field is missing or invalid. The response is produced from deployment configuration and does not query GitHub at runtime.",
+        "operationId": "get_provenance_api_v1_provenance_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BuildProvenanceResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the authenticated build provenance",
+        "tags": [
+          "provenance"
+        ]
+      }
+    },
     "/api/v1/reservations": {
       "get": {
         "description": "Paginated with `page`/`per_page` (PRD §23). Filters combine with AND; the date range matches stays that OVERLAP it, so a guest already in the property when the range opens is included.",
@@ -7996,6 +9237,181 @@
         "summary": "Update the tenant and its configuration",
         "tags": [
           "tenants"
+        ]
+      }
+    },
+    "/api/v1/timeline/{property_id}": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23) and ordered by occurrence descending, with the entry id as tiebreaker so paging neither repeats an entry nor skips one when several share an instant. Filters combine with AND; `from`/`to` are inclusive on both ends. `title` arrives already composed in the authenticated user's language (PRD §10); `description` does not — it carries operator-written text, such as the reason a property was blocked, and is returned verbatim in whatever language it was typed. The `event_type`, `actor_type` and `severity` literals are never translated. The `metadata` column is not part of this contract and is never serialised. A property of another tenant answers `404`, with a body indistinguishable from one that does not exist.",
+        "operationId": "get_property_timeline_api_v1_timeline__property_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "event_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineEventType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Event Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineSeverity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          },
+          {
+            "in": "query",
+            "name": "actor_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TimelineActorType"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Actor Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date-time",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TimelinePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "A property's timeline",
+        "tags": [
+          "timeline"
         ]
       }
     },

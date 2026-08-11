@@ -88,12 +88,14 @@ Nueve columnas del esquema son texto o JSON libre por el que puede colarse un va
 | `webhook_events.error` | estructurada | **`reservations-webhooks`** (escritor vivo; código + campo, nunca el cuerpo recibido) |
 | `webhook_events.event_type` | estructurada (forma cerrada: nombre que empieza por letra) | **`reservations-webhooks`** (escritor vivo; lo que no encaja degrada a `UNKNOWN_EVENT_TYPE`) |
 | `notification_logs.last_error` | estructurada | **`access-notifications`** (escritor vivo; el tipo de retorno del adapter no admite texto libre, así que lo hace cumplir por construcción) |
-| `notification_logs.subject` / `body` | **excepción 1** | **`celery-jobs`** (primer escritor, escalados de SLA) y **`access-notifications`** (aviso de presentación legal fallida) |
+| `notification_logs.subject` / `body` | **excepción 1** | **`celery-jobs`** (primer escritor, escalados de SLA), **`access-notifications`** (aviso de presentación legal fallida) y **`auth-account-recovery`** (aviso de recuperación: escribe **constantes sin enlace**, ver abajo) |
 | `incidents.title` / `description` | **excepción 2** | **`guest-portal-api`** (primer escritor, la incidencia que abre el huésped) y quien traiga las demás vías de alta de incidencias (`maintenance`) |
 
 **Las excepciones son dos, y cada una concede una cosa distinta.**
 
 **Excepción 1 — `notification_logs.subject`/`body`**: admiten la forma enmascarada `****XX` de un **código de acceso**, porque renderizan un mensaje que el huésped debe recibir.
+
+**`auth-account-recovery` es el tercer escritor vivo y NO usa la excepción, que es lo que le permite escribir ahí.** Un enlace de recuperación es una credencial viva y no un código enmascarado, así que la fila guarda dos **constantes sin enlace** (`STORED_RECOVERY_SUBJECT`/`STORED_RECOVERY_BODY`) mientras el enlace se entrega al adapter dentro de la misma petición y no sobrevive a ella (su design D2). Consecuencia que conviene saber al leer una de esas filas: para ese único `notification_type` la fila registra **que se envió un aviso**, no su contenido. Se anota aquí porque esta tabla dice quién escribe cada columna **hoy**, y quien escriba después se atiene al contrato que hay.
 
 **Lo que concede no es el propósito de la columna, es la regla 4** — y la regla 4 concede exactamente eso. Que el huésped necesite ver la contraseña WiFi no la autoriza: la regla 4 no le da forma enmascarada, así que el cuerpo persiste una plantilla o una referencia, nunca la credencial renderizada. Al `document_number` la regla 4 le exige ausencia de los listados, no una máscara.
 

@@ -17,6 +17,7 @@ repository instance cannot disagree with its caller about which tenant it serves
 """
 
 import uuid
+from collections.abc import Sequence
 from typing import Protocol
 
 from app.guests.domain.entities import Guest
@@ -26,6 +27,24 @@ from app.guests.domain.value_objects import GuestSummary
 class GuestRepository(Protocol):
     async def get(self, tenant_id: uuid.UUID, guest_id: uuid.UUID) -> GuestSummary | None:
         """The linked guest of a reservation detail (R1.8), without any document data."""
+        ...
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, guest_ids: Sequence[uuid.UUID]
+    ) -> Sequence[GuestSummary]:
+        """The guests of a batch of reservations, in ONE query (`dashboard-api` R1.7).
+
+        The dashboard collection puts a guest name on every card, and one `get` per card is
+        the N+1 that R1.7 forbids. Same shape as the batch readers that change adds to
+        `cleaning`, `maintenance` and `timeline`.
+
+        Returns `GuestSummary` like its siblings here, so the document fields are out of
+        reach by construction rather than by the caller's restraint — `get_full` remains the
+        one narrow exception, and it is not this.
+
+        An empty `guest_ids` returns an empty sequence without querying. Ids that do not
+        resolve within the tenant are simply absent; the caller keys by `id`.
+        """
         ...
 
     async def find_by_email(self, tenant_id: uuid.UUID, email: str) -> GuestSummary | None:

@@ -110,7 +110,17 @@ async def test_me_never_exposes_the_password_hash(api, db_session, tenant_a) -> 
         )
     ).json()
 
-    assert set(body) == {"id", "tenant_id", "name", "email", "role", "preferred_language"}
+    assert set(body) == {
+        "id",
+        "tenant_id",
+        "name",
+        "email",
+        "role",
+        "preferred_language",
+        # `auth-account-recovery` R5.6: the frontend needs it here to redirect to the
+        # change-password screen rather than discovering the state from a `403` elsewhere.
+        "must_change_password",
+    }
     assert "password_hash" not in body
     assert "status" not in body
 

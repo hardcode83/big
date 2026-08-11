@@ -195,3 +195,79 @@ async def test_the_in_memory_double_matches_the_adapter_contract() -> None:
     assert await double.is_account_locked(user_id) is False
     await double.record_failure(user_id)
     assert await double.is_account_locked(user_id) is True
+
+
+# --- lifting the lock after a recovery (`auth-account-recovery` R3.5c, design D8) ---
+
+
+@pytest.mark.asyncio
+async def test_clearing_the_account_lock_removes_both_keys(redis_client) -> None:
+    """R3.5c: a completed recovery must actually let the next login through.
+
+    Ten failures are what usually precede "I've lost my password", so the lock is the
+    normal state of an account being recovered, not an edge case.
+    """
+    throttle = _throttle(redis_client, max_failures=1)
+    user_id = uuid.uuid4()
+    await throttle.record_failure(user_id)
+    assert await throttle.is_account_locked(user_id) is True
+
+    await throttle.clear_account_lock(user_id)
+
+    assert await throttle.is_account_locked(user_id) is False
+    assert await redis_client.exists(f"login:lock:{user_id}") == 0
+    assert await redis_client.exists(f"login:fail:{user_id}") == 0
+
+
+@pytest.mark.asyncio
+async def test_reset_failures_alone_would_leave_the_account_locked(redis_client) -> None:
+    """The precise failure design D8 rejects, pinned so nobody 'simplifies' back to it.
+
+    `reset_failures` only deletes the counter. Reusing it for R3.5c would leave
+    `login:lock:<uid>` standing, and the recovered user would be refused by the very next
+    login with the same generic `401` for the rest of the lockout window.
+    """
+    throttle = _throttle(redis_client, max_failures=1)
+    user_id = uuid.uuid4()
+    await throttle.record_failure(user_id)
+
+    await throttle.reset_failures(user_id)
+
+    assert await throttle.is_account_locked(user_id) is True
+
+
+@pytest.mark.asyncio
+async def test_clearing_an_unlocked_account_is_harmless(redis_client) -> None:
+    """Idempotent: most recoveries happen on accounts that were never locked."""
+    throttle = _throttle(redis_client)
+    user_id = uuid.uuid4()
+
+    await throttle.clear_account_lock(user_id)
+
+    assert await throttle.is_account_locked(user_id) is False
+
+
+@pytest.mark.asyncio
+async def test_clearing_one_account_does_not_unlock_another(redis_client) -> None:
+    throttle = _throttle(redis_client, max_failures=1)
+    recovered, other = uuid.uuid4(), uuid.uuid4()
+    await throttle.record_failure(recovered)
+    await throttle.record_failure(other)
+
+    await throttle.clear_account_lock(recovered)
+
+    assert await throttle.is_account_locked(recovered) is False
+    assert await throttle.is_account_locked(other) is True
+
+
+@pytest.mark.asyncio
+async def test_the_double_clears_the_lock_like_the_adapter_does() -> None:
+    """A double that only dropped the counter would let a broken use case pass."""
+    double = InMemoryLoginThrottle(max_failures=1)
+    user_id = uuid.uuid4()
+    await double.record_failure(user_id)
+    assert await double.is_account_locked(user_id) is True
+
+    await double.clear_account_lock(user_id)
+
+    assert await double.is_account_locked(user_id) is False

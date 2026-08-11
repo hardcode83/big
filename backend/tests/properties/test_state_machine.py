@@ -241,10 +241,16 @@ EXPECTED_POLICY = {
     (S.OUT_OF_SERVICE, T.PROPERTY_REACTIVATED): {S.VACANT_READY},
 }
 
+# `sorted` and not bare iteration, because the values of `EXPECTED_POLICY` are **sets** of
+# enum members. Enum members hash by identity, so a set of them iterates in an order that
+# varies between processes — and these tuples become `@pytest.mark.parametrize` ids. Under
+# `pytest -n` each worker would then collect the same tests in a different order and the run
+# would abort with "Different tests were collected between gw0 and gw3" before executing
+# anything. Sorting by `.value` (a string) makes the order a property of the data.
 DECLARED_POLICY_RELATIONS = [
     (state, trigger, destination)
     for (state, trigger), destinations in EXPECTED_POLICY.items()
-    for destination in destinations
+    for destination in sorted(destinations, key=lambda destination: destination.value)
 ]
 
 REMOVED_CONTEXTUAL_SUPERSET_RELATIONS = [
@@ -272,7 +278,10 @@ def test_original_66_policy_candidates_are_explicitly_classified():
 @pytest.mark.parametrize("state,trigger,destination", REMOVED_CONTEXTUAL_SUPERSET_RELATIONS)
 def test_non_transitions_are_not_declared_as_valid_policy_relations(state, trigger, destination):
     assert destination not in PropertyStateMachine._POLICY[(state, trigger)]
-    valid_destination = next(iter(EXPECTED_POLICY[(state, trigger)]))
+    # Smallest by value, not `next(iter(...))`: picking from a set of enum members chooses
+    # a different destination per process, so this test would exercise a different case in
+    # each xdist worker — green here and red there, for no reason a reader could see.
+    valid_destination = min(EXPECTED_POLICY[(state, trigger)], key=lambda s: s.value)
     request = valid_case(state, trigger, destination if destination is state else valid_destination)
     if destination is not state:
         request = replace(request, requested_state=destination)
@@ -298,6 +307,14 @@ def test_every_undeclared_state_trigger_pair_is_rejected(state, trigger) -> None
         PropertyStateMachine.evaluate(valid_case(state, trigger))
 
 
+# `CONTEXTUAL_STATES` is a `frozenset` in production code, so listing it yields a different
+# order in every process and the parametrize ids below would not match between xdist workers.
+# Sorted here rather than in `state_resolution.py`: the production set has no reason to be
+# ordered, and the requirement is the test's.
+CONTEXTUAL_STATES_IN_A_STABLE_ORDER = sorted(
+    ContextualStateResolver.CONTEXTUAL_STATES, key=lambda state: state.value
+)
+
 INVALID_DESTINATIONS_FOR_DECLARED_PAIRS = [
     (state, trigger, destination)
     for (state, trigger), allowed in EXPECTED_POLICY.items()
@@ -315,7 +332,10 @@ def test_every_invalid_destination_for_declared_pair_is_rejected(
     trigger,
     invalid_destination,
 ):
-    valid_destination = next(iter(EXPECTED_POLICY[(state, trigger)]))
+    # Smallest by value, not `next(iter(...))`: picking from a set of enum members chooses
+    # a different destination per process, so this test would exercise a different case in
+    # each xdist worker — green here and red there, for no reason a reader could see.
+    valid_destination = min(EXPECTED_POLICY[(state, trigger)], key=lambda s: s.value)
     request = replace(
         valid_case(state, trigger, valid_destination),
         requested_state=invalid_destination,
@@ -362,7 +382,7 @@ def test_unblock_requires_actor_reason_and_explicit_destination() -> None:
         PropertyStateMachine.evaluate(make_request(prop, PropertyStateTrigger.OWNER_MANAGER_UNBLOCKED, actor=TransitionActor(StateTransitionTriggeredBy.USER, uuid.uuid4()), reason=""))
 
 
-@pytest.mark.parametrize("destination", list(ContextualStateResolver.CONTEXTUAL_STATES))
+@pytest.mark.parametrize("destination", CONTEXTUAL_STATES_IN_A_STABLE_ORDER)
 def test_unblock_rejects_every_contextual_destination_when_context_derives_another_state(destination):
     prop = make_property(PropertyOperationalState.BLOCKED_BY_OWNER)
     actor = TransitionActor(StateTransitionTriggeredBy.USER, uuid.uuid4())
@@ -384,7 +404,7 @@ def test_unblock_rejects_every_contextual_destination_when_context_derives_anoth
         )
 
 
-@pytest.mark.parametrize("destination", list(ContextualStateResolver.CONTEXTUAL_STATES))
+@pytest.mark.parametrize("destination", CONTEXTUAL_STATES_IN_A_STABLE_ORDER)
 def test_unblock_accepts_every_contextual_destination_only_with_matching_context(destination):
     request = valid_case(
         PropertyOperationalState.BLOCKED_BY_OWNER,

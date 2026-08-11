@@ -14,8 +14,12 @@ import pytest
 from app.auth.domain.exceptions import (
     AuthDomainError,
     InvalidCredentialsError,
+    InvalidRecoveryTokenError,
     InvalidTokenError,
+    PasswordChangeRequiredError,
+    PasswordPolicyError,
     PasswordTooLongError,
+    PasswordUnchangedError,
     SessionReuseDetectedError,
     TokenTypeMismatchError,
     TooManyAttemptsError,
@@ -31,6 +35,10 @@ from app.auth.domain.exceptions import (
         SessionReuseDetectedError,
         PasswordTooLongError,
         TooManyAttemptsError,
+        PasswordPolicyError,
+        PasswordUnchangedError,
+        InvalidRecoveryTokenError,
+        PasswordChangeRequiredError,
     ],
 )
 def test_every_auth_error_belongs_to_the_family(error_class: type[Exception]) -> None:
@@ -46,3 +54,13 @@ def test_token_type_mismatch_is_a_kind_of_invalid_token() -> None:
 
 def test_errors_carry_their_message() -> None:
     assert str(InvalidCredentialsError("Invalid email or password")) == "Invalid email or password"
+
+
+def test_a_bad_recovery_token_is_not_a_kind_of_invalid_jwt() -> None:
+    """`InvalidTokenError` is about the JWTs of `auth-tenancy` (`auth-account-recovery` R3.3).
+
+    Kept apart on purpose: a caller catching "not a usable JWT" should not silently start
+    catching a spent recovery link, which answers on a different endpoint for a different
+    reason. The `401 INVALID_TOKEN` they share is a mapping decision, not a kinship.
+    """
+    assert not issubclass(InvalidRecoveryTokenError, InvalidTokenError)

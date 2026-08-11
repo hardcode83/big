@@ -1,10 +1,8 @@
 /**
- * ASSUMPTION / DEBT (dashboard-web): fixed, in-memory dashboard data for the two
- * real dev properties (REDES11, PAJARITOS8). This is the *only* place business
- * data is invented in this change; it exists solely because the aggregate
- * dashboard backend (GET /api/v1/properties/{id}/dashboard) does not exist yet.
- * When dashboard-web ships, `HttpDashboardSource` replaces `MockDashboardSource`
- * and this module is deleted.
+ * Fixed, in-memory dashboard data for the two real dev properties (REDES11,
+ * PAJARITOS8). This is the *only* place business data is invented in this
+ * change; it is retained solely for tests and local reference fixtures. Runtime
+ * data is provided by `HttpDashboardSource`.
  *
  * Dynamic human-readable text (`LocalizedText`) is written in Spanish here: the
  * real backend localizes per authenticated user, but this mock is not

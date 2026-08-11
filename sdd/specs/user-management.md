@@ -13,10 +13,10 @@ Es además el **primer escritor real de `audit_logs`**, cuya entidad llegó con
 sus propios endpoints los dos criterios que `auth-tenancy` declaró fuera de su alcance por
 tener endpoints autorreferenciales: el `404` cross-tenant y la matriz de autorización completa.
 
-No incluye frontend (`dashboard-web`, `hardening-release`), ni forzar el cambio de la
-contraseña temporal en el primer login ni el cambio por el propio usuario
-(`auth-account-recovery`), ni alta o baja de tenants, ni salida de la API a internet
-(`api-ingress-routing`).
+No incluye frontend (`dashboard-web`, `hardening-release`), ni el autoservicio de contraseña
+—el cambio por el propio usuario, la recuperación anónima y el gate que obliga a rotar la
+temporal son `auth-account-recovery` (`specs/auth-account-recovery.md`)—, ni alta o baja de
+tenants, ni salida de la API a internet (`api-ingress-routing`).
 
 ## Requirements
 
@@ -25,11 +25,15 @@ contraseña temporal en el primer login ni el cambio por el propio usuario
 - WHEN se solicita `POST /api/v1/users` con datos válidos, THE SYSTEM SHALL crear el usuario en
   el tenant del token con estado `ACTIVE` y responder `201` con el recurso creado y la
   contraseña temporal generada.
+- WHEN se crea el usuario, THE SYSTEM SHALL dejar `must_change_password` en verdadero, de modo
+  que la temporal solo sirva para entrar y cambiarla: el gate y su `403
+  PASSWORD_CHANGE_REQUIRED` los define `auth-account-recovery`.
 - THE SYSTEM SHALL generar la contraseña temporal con `secrets` sobre un alfabeto **sin
   caracteres ambiguos** (sin `0`/`O` ni `1`/`l`/`I`), de 16 caracteres, garantizando al menos
   uno de cada clase (dígito, mayúscula, minúscula). La garantía de clases no responde a ninguna
-  política actual: existe para que `auth-account-recovery` no acabe rechazando contraseñas que
-  este sistema generó.
+  política de composición —`auth-account-recovery` no impone ninguna—, pero la longitud sí
+  está atada: un test fija que 16 caracteres nunca bajen del mínimo de 12 de aquella política,
+  para que este sistema no emita una contraseña que aquel rechazaría.
 - THE SYSTEM SHALL devolver la temporal **exactamente una vez**, en el cuerpo del `201`, y no
   SHALL persistirla en claro, escribirla en el log de la aplicación, en `audit_logs.changes` ni
   en ningún `TimelineEvent`.
@@ -125,14 +129,21 @@ contraseña temporal en el primer login ni el cambio por el propio usuario
 - WHEN se solicita `POST /api/v1/users/{id}/reset-password` sobre un usuario del tenant, THE
   SYSTEM SHALL generar una temporal nueva con las mismas garantías del alta, reemplazar el hash
   almacenado y responder con la temporal una sola vez.
+- WHEN se completa un reset asistido, THE SYSTEM SHALL dejar `must_change_password` en verdadero:
+  es el segundo de los dos caminos de contraseña temporal de esta capacidad, y una temporal que
+  no hay que cambiar es una contraseña permanente que viajó por WhatsApp.
 - WHEN se completa un reset, THE SYSTEM SHALL revocar todas las familias de refresh del usuario
   afectado con razón `PASSWORD_RESET`: un reset que deja vivas las sesiones anteriores no
   recupera la cuenta, solo añade una credencial más.
 - THE SYSTEM SHALL registrar el reset en `AuditLog` sin la contraseña, sin el hash y sin ninguna
   forma reversible de ellos.
-- Este endpoint **no** está en la lista de PRD §23: es una adición deliberada, porque
-  `auth-account-recovery` es opcional en PRD §24 y depende del `NotificationAdapter` de
-  `access-notifications`, así que sin él el MVP no tendría ninguna vía de recuperación.
+- Este endpoint **no** está en la lista de PRD §23: fue una adición deliberada, porque
+  `auth-account-recovery` es opcional en PRD §24 y sin él el MVP no habría tenido ninguna vía de
+  recuperación. Ya no es la única —el autoservicio anónimo existe desde entonces—, pero **sigue
+  siendo la vía asistida**, y también la única que un administrador controla. Lo que ya no
+  sostiene es el caso que la justificó: el único `TENANT_OWNER` activo de un tenant no puede
+  resetearse por aquí, y para ese caso la salida es el comando de rescate de
+  `auth-account-recovery`.
 
 ### Configuración del tenant
 
@@ -243,9 +254,12 @@ contraseña temporal en el primer login ni el cambio por el propio usuario
   garantiza a nivel HTTP es la propiedad que importa: **ninguna secuencia de llamadas deja el
   tenant sin administrador**. La regla es lo que salvaría al tenant el día que `MANAGE_USERS` se
   conceda a otro rol o se permita el autoservicio.
-- **La contraseña temporal no se fuerza a cambiar en el primer login** y sobrevive hasta que un
-  administrador la rote. Exige una columna `must_change_password` y un endpoint de autoservicio,
-  que pertenecen a `auth-account-recovery`.
+- ~~**La contraseña temporal no se fuerza a cambiar en el primer login**~~ — **cerrado por
+  `auth-account-recovery`**: la columna `users.must_change_password` y el endpoint de
+  autoservicio existen, esta capacidad deja el flag en verdadero en sus dos caminos de temporal
+  (alta y reset asistido), y mientras esté puesto toda petición autenticada recibe `403
+  PASSWORD_CHANGE_REQUIRED` salvo `GET /auth/me`, `POST /auth/logout` y
+  `POST /auth/change-password`.
 - **Sin `AuditLog` retroactivo de `reservations`/`integrations`**: esta capacidad monta el
   escritor y deja accionable la deuda que `specs/reservations.md` anota para sus seis casos de
   uso mutadores, pero no vuelve a ellos.

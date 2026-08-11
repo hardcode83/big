@@ -41,7 +41,7 @@ IP = "198.51.100.7"
 
 
 class FlushingUnitOfWork:
-    """Commits for real; the test database is dropped after each test anyway."""
+    """Commits for real; every table is emptied before the next test anyway."""
 
     def __init__(self, session) -> None:
         self._session = session

@@ -1,5 +1,9 @@
 import type { DashboardDataSource } from "./dashboard-source";
-import { MockDashboardSource } from "./mock/mock-dashboard-source";
+import {
+  createAuthenticatedClients,
+  notifySessionExpired,
+} from "@/lib/api/authenticated-client";
+import { HttpDashboardSource } from "./http/http-dashboard-source";
 
 export type { DashboardDataSource } from "./dashboard-source";
 export type * from "./dto";
@@ -9,11 +13,17 @@ export type * from "./dto";
  * UI and hooks resolve their source ONLY through here, so swapping the
  * implementation is a one-line change confined to this file.
  *
- * DEBT (dashboard-web): today it returns `MockDashboardSource`. When the
- * aggregate dashboard backend exists, return `HttpDashboardSource` (routed
- * through `lib/api`) here — no UI, hook, or query-key change required.
+ * The client uses the same-origin API proxy by default; authentication headers
+ * and one-shot refresh are shared with the auth provider through the session
+ * client factory.
  */
-const dashboardDataSource: DashboardDataSource = new MockDashboardSource();
+const { apiClient: dashboardApiClient } = createAuthenticatedClients({
+  apiBaseUrl: "",
+  onSessionExpired: notifySessionExpired,
+});
+const dashboardDataSource: DashboardDataSource = new HttpDashboardSource(
+  dashboardApiClient,
+);
 
 export function getDashboardDataSource(): DashboardDataSource {
   return dashboardDataSource;

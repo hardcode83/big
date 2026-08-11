@@ -45,8 +45,17 @@ label costs nothing, and `alembic downgrade base` (which CI runs) drops the whol
 the revision that created it anyway. The table and the column *are* dropped.
 
 Revision ID: e7a3c419d82b
-Revises: a4d17e83b6c1
+Revises: a7c4e91b2d05
 Create Date: 2026-08-10 00:00:00.000000
+
+**Re-chained during the merge of `main`, and deliberately not with a merge revision.** This
+revision was written on top of `a4d17e83b6c1`, and `auth-account-recovery` landed
+`a7c4e91b2d05` on the same parent while this change was in flight — two heads. The project's
+chain is strictly linear (twelve revisions, no merge revision anywhere), and
+`tests/test_migrations.py` walks it revision by revision in both directions, so the repair
+that keeps that property is to move this one behind the other rather than to fork and merge.
+Nothing here depends on what that revision does: it touches `password_reset_tokens` and
+`users`, and this one touches `guest_access_tokens`, `audit_logs` and one enum label.
 
 """
 from typing import Sequence, Union
@@ -57,7 +66,7 @@ import sqlalchemy as sa
 
 # revision identifiers, used by Alembic.
 revision: str = 'e7a3c419d82b'
-down_revision: Union[str, Sequence[str], None] = 'a4d17e83b6c1'
+down_revision: Union[str, Sequence[str], None] = 'a7c4e91b2d05'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

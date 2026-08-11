@@ -45,6 +45,12 @@ class ErrorCode(StrEnum):
     INVALID_TOKEN = "INVALID_TOKEN"
     FORBIDDEN = "FORBIDDEN"
     RATE_LIMITED = "RATE_LIMITED"
+    # The account authenticated fine but still carries a temporary password
+    # (`auth-account-recovery` R5.4). Distinct from `FORBIDDEN` on purpose: this one is
+    # actionable and self-service — the frontend can send the user straight to the
+    # change-password screen instead of showing "you are not allowed", which would be both
+    # wrong and a dead end.
+    PASSWORD_CHANGE_REQUIRED = "PASSWORD_CHANGE_REQUIRED"
 
     # Absence. Also the answer for a resource of another tenant, which must not reveal
     # that it exists (`steering/security.md` rule 1).
