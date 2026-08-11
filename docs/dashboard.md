@@ -6,12 +6,12 @@ Cómo se usa y se opera el dashboard del propietario/manager, **API y pantalla**
 [`sdd/specs/dashboard-web-frontend.md`](../sdd/specs/dashboard-web-frontend.md) para
 las pantallas —; aquí va el *cómo se trabaja con ello*.
 
-> **Estado: la API agregada existe; la pantalla todavía consume el mock.** El change
-> `dashboard-api` entregó los cuatro endpoints de lectura (abajo). La UI sigue
-> leyendo datos fijos de REDES11 y PAJARITOS8 hasta que `dashboard-web` cambie
-> `MockDashboardSource` por la implementación HTTP — un solo punto de composición,
-> `frontend/features/dashboard/data/index.ts`. No hay acciones de escritura por
-> ninguna de las dos vías: los cuatro endpoints son de lectura pura.
+> **Estado: la pantalla consume la API agregada mediante `HttpDashboardSource`.** El
+> change `dashboard-api` entregó los cuatro endpoints de lectura (abajo) y el runtime
+> del dashboard los utiliza desde el único punto de composición,
+> `frontend/features/dashboard/data/index.ts`. `MockDashboardSource` y sus fixtures
+> quedan únicamente como soporte de tests. No hay acciones de escritura por ninguna
+> de las dos vías: los cuatro endpoints son de lectura pura.
 
 ## La API (`dashboard-api`)
 
@@ -108,15 +108,8 @@ make up SERVICE=frontend   # o: cd frontend && npm run dev
 - `http://localhost:3000/properties/redes11` — detalle + cronología.
 - `http://localhost:3000/properties/<id-inexistente>` — estado "no encontrado".
 
-## Deuda / lo que falta por conectar
+## Deuda pendiente
 
-- **Sustituir el mock por HTTP**: la UI consume una interfaz `DashboardDataSource`
-  con un único punto de composición (`frontend/features/dashboard/data/index.ts`).
-  Los endpoints contra los que hacerlo **ya existen** (arriba); es `dashboard-web`
-  quien cambia ahí la implementación mock por una HTTP — sin tocar la UI ni los hooks.
-- **`tenantId` real**: hoy se usa un `DEV_TENANT_ID` centralizado; se sustituirá
-  por el contexto de sesión de `auth-tenancy`. La API no lo necesita: el tenant sale
-  del token y ningún endpoint lo acepta como parámetro.
 - **Tiempo real**: la API entrega lectura con filtros y paginación. Empujar cambios
   al cliente (WebSocket/SSE) no lo cubre `dashboard-api` y no tiene todavía entrada
   propia.
