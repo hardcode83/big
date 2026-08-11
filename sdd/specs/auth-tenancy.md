@@ -32,15 +32,23 @@ tocar la base de datos a mano.
 - IF una escritura introduciría una dirección que ya existe bajo cualquier tenant,
   incluso con distinta caja, THEN THE SYSTEM SHALL rechazarla en la base de datos.
 - Es una desviación deliberada de PRD §7.3, que define `UNIQUE(tenant_id, email)`, y
-  `find_by_email_globally` —la **primera** de las dos consultas sin scope de tenant del
-  sistema— depende de ella: con unicidad por tenant, el email no identificaría la cuenta y
-  quien pudiera crear usuarios en otro tenant dejaría fuera del producto a una cuenta
-  existente. Motivo completo y alternativas descartadas en ADR 0005.
-- La **segunda y última** es `PasswordResetTokenRepository.consume_globally`, que
-  `auth-account-recovery` añadió por el mismo motivo estructural: quien presenta un token de
-  recuperación no está autenticado y no puede aportar un tenant, así que el scope se **deriva**
-  de la fila encontrada. Ambas se nombran aquí para que la auditoría por `grep` siga siendo
-  exhaustiva.
+  `find_by_email_globally` —una de las consultas sin scope de tenant del sistema— depende de
+  ella: con unicidad por tenant, el email no identificaría la cuenta y quien pudiera crear
+  usuarios en otro tenant dejaría fuera del producto a una cuenta existente. Motivo completo y
+  alternativas descartadas en ADR 0005.
+- Todas comparten el mismo motivo estructural: quien presenta la credencial no está autenticado
+  y no puede aportar un tenant, así que el scope se **deriva** de la fila encontrada.
+  `PasswordResetTokenRepository.consume_globally` lo hace desde `auth-account-recovery`, y
+  `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash` desde
+  [`guest-portal-api.md`](guest-portal-api.md).
+- THE SYSTEM SHALL mantener su **enumeración en un solo sitio** —el docstring de
+  `SqlAlchemyUserRepository.find_by_email_globally`—, y todo lo demás la cita en vez de repetir
+  el recuento. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
+  quedó obsoleta dos veces por estar copiada: `auth-account-recovery` y `guest-portal-api`
+  añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que
+  el merge dejó tres consultas y un número que decía dos. **La auditoría por `grep` del sufijo
+  `*_globally` dejó además de ser exhaustiva**: la del portal no lleva el sufijo ni vive en ese
+  módulo. Quien añada una consulta sin scope actualiza la enumeración y añade su viñeta.
 - WHERE en el futuro una misma identidad deba pertenecer a varios tenants, THE SYSTEM
   SHALL modelarlo como identidad global más memberships separadas, nunca repitiendo la
   dirección.
@@ -395,8 +403,7 @@ tocar la base de datos a mano.
   idempotencia se apoya en el nombre del tenant y `tenants` no tiene unicidad en `name`:
   un typo crearía un segundo tenant y reintentaría las mismas direcciones.
 - La comprobación pasa por el puerto `find_by_email_globally`, de modo que no introduce una
-  consulta sin scope nueva: sigue siendo una de las **dos** del sistema (§Identidad) y la
-  auditoría por `grep` sigue siendo exhaustiva.
+  consulta sin scope nueva: reutiliza una ya enumerada (§Identidad) en vez de escribir otra.
 - No es una migración de datos de Alembic (mezclaría esquema con contenido y no se puede
   reejecutar con seguridad) ni está enganchado a `make up`, que sigue arrancando sin pasos
   manuales.

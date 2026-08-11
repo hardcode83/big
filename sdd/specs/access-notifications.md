@@ -316,9 +316,11 @@ todavía y que complica el despliegue detrás del ingress.
   `reservations.legal_registration_status`, porque el flujo de PRD §17 es **por estancia**.
 - THE SYSTEM SHALL dejar `guests.legal_registration_status` en `NOT_REQUIRED` y **no escribirlo**:
   un huésped con dos estancias tendría dos valores y una sola columna. Lo que sí describe al
-  huésped es `guests.document_status`, que este change mueve de `NOT_PROVIDED` a `PROVIDED` al
-  recibir los datos. Se declara explícitamente para que el siguiente no lo lea como olvido;
-  `guest-portal-api` puede revisarlo cuando traiga la captura por el huésped.
+  huésped es `guests.document_status`, que pasa de `NOT_PROVIDED` a `PROVIDED` al recibir los
+  datos. Se declara explícitamente para que no se lea como olvido. La revisión que quedaba
+  pendiente ya ocurrió: [`guest-portal-api.md`](guest-portal-api.md) trajo la captura por el
+  propio huésped y **no cambió este reparto** — escribe `document_status` por el mismo escritor
+  único y deja `guests.legal_registration_status` sin tocar.
 - WHEN el reconciliador de accesos ve una reserva confirmada y no cancelada, THE SYSTEM SHALL
   fijar su estado legal a `PENDING_GUEST_DATA` a través del puerto `LegalRegistrationInitialiser`,
   de un solo método, para que el barrido no importe el módulo de huéspedes. La escritura lleva
@@ -410,8 +412,14 @@ identificador de la
 reserva, cubierto por un test que comprueba la ausencia del número y de la fecha de nacimiento —un
 test que estuvo **vacío** hasta que el panel de QA vio que solo ejercitaba el camino de éxito, que
 no encola ninguna notificación. En los logs de aplicación la garantía es igualmente convención más
-revisión. Y `nationality` no está denegada: la frase de steering nombra el documento y la fecha de
-nacimiento y ahí se detiene, así que su redacción es disciplina del caso de uso.
+revisión.
+
+Donde sí acabó siendo estructural es en la auditoría, y **por encima de lo que esta capacidad
+dejó**: `full_name` y `nationality` entraron después en la lista de campos redactados con
+[`guest-portal-api.md`](guest-portal-api.md), así que la auditoría del huésped es hoy construcción
+en los cinco campos y no disciplina en tres. La premisa que dejaba `nationality` fuera —que solo la
+escribía un operador— es justo la que rompe el `POST` anónimo de check-in. El contrato vive en
+`steering/security.md` y esta frase lo cita: no lo reenuncia, ni enumera la lista.
 
 ### Aislamiento, RBAC y contrato de API
 
@@ -523,8 +531,9 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 - **No hay lógica basada en apertura de puerta** (`DoorSensorAdapter`, `DOOR_OPENED_SENSOR`): PRD
   §15 y §29 la excluyen, y `steering/architecture.md` la lista entre los anti-patrones.
 - **La captura de los datos del huésped por el propio huésped** —token web, formulario de check-in—
-  es `guest-portal-api`, que declara `needs: access-notifications` precisamente por esto. Aquí los
-  datos los introduce el operador o llegan del PMS.
+  no es de esta capacidad: la trajo [`guest-portal-api.md`](guest-portal-api.md), que declaraba
+  `needs: access-notifications` precisamente por esto. Por esta vía los datos los introduce el
+  operador o llegan del PMS.
 - **No hay frontend**: las pantallas de accesos, la bandeja de notificaciones y los formularios de
   registro legal son `field-apps` y `dashboard-web`.
 - **No hay endpoints de listado de huéspedes**: las tres rutas legales son de entidad única.

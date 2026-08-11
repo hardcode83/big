@@ -325,11 +325,14 @@ garantiza el sistema.
 - THE SYSTEM SHALL derivar el `tenant_id` de la fila resuelta en las dos vías anónimas y SHALL
   NOT aceptarlo del cliente en ninguna forma, tampoco embebido en el propio token: el scope lo
   aportaría el atacante.
-- THE SYSTEM SHALL mantener `consume_globally` como la **segunda y última** consulta sin scope de
-  tenant del sistema, junto a `UserRepository.find_by_email_globally` (ADR 0005). Las demás
-  operaciones sobre `password_reset_tokens` —`add`, `count_live`, `revoke_other_live`,
-  `revoke_oldest_beyond`— **sí** llevan `tenant_id`, y `add` rechaza con `CrossTenantWriteError`
-  una fila cuyo tenant no coincide.
+- THE SYSTEM SHALL mantener `consume_globally` como la **única** consulta sin scope de tenant de
+  este módulo, y SHALL declararla en la enumeración que el sistema guarda en un solo sitio —el
+  docstring de `UserRepository.find_by_email_globally` (ADR 0005)— en lugar de reenunciar aquí
+  cuántas hay. No es «la última»: [`guest-portal-api.md`](guest-portal-api.md) añadió después la
+  del portal del huésped, por el mismo motivo estructural. Las demás operaciones sobre
+  `password_reset_tokens` —`add`, `count_live`, `revoke_other_live`, `revoke_oldest_beyond`—
+  **sí** llevan `tenant_id`, y `add` rechaza con `CrossTenantWriteError` una fila cuyo tenant no
+  coincide.
 
 ### Configuración
 

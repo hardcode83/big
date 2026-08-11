@@ -2,9 +2,9 @@
 
 Cómo se opera lo que trajo el change `guest-portal-api`: el enlace que se le da al huésped
 para que consulte su estancia, complete el check-in legal de PRD §17 y abra una incidencia,
-**sin cuenta y sin JWT** (PRD §§6, 7.6, 7.7, 17, 22, 23). El *qué hace* estará en
-`sdd/specs/guest-portal-api.md` al archivar; esta página es el *cómo se usa, se opera y se
-diagnostica*.
+**sin cuenta y sin JWT** (PRD §§6, 7.6, 7.7, 17, 22, 23). El *qué hace* está en
+[`sdd/specs/guest-portal-api.md`](../sdd/specs/guest-portal-api.md); esta página es el *cómo se
+usa, se opera y se diagnostica*.
 
 **Lo que este change NO trae: la página.** La ruta `frontend/app/(guest)/guest/[token]/`
 existe reservada, pero la interfaz —estados de carga, formulario, i18n— es `guest-portal-web`.
