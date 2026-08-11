@@ -242,6 +242,48 @@
         "title": "Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post",
         "type": "object"
       },
+      "CheckinStatusResponse": {
+        "description": "What `GET /guest/checkin/{token}` returns: **what is missing**, never what was given.\n\nR4.1 asks for the absent fields \"sin devolver los ya aportados que sean sensibles\", and\nthis returns names only — which the guest already knows, since they are the boxes they\nleft empty. R3.3 makes the document number binding even for the guest who supplied it.",
+        "properties": {
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "legal_registration_status": {
+            "$ref": "#/components/schemas/LegalRegistrationStatus"
+          },
+          "missing_fields": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing Fields",
+            "type": "array"
+          }
+        },
+        "required": [
+          "missing_fields",
+          "document_status",
+          "legal_registration_status"
+        ],
+        "title": "CheckinStatusResponse",
+        "type": "object"
+      },
+      "CheckinSubmittedResponse": {
+        "description": "Two statuses, and **no echo of the document** (R3.3, D10).\n\nThe guest just sent the number; returning it would put it in one more response body, one\nmore proxy log and one more browser cache. Same contract `DocumentStoredResponse` already\nholds on the authenticated side.",
+        "properties": {
+          "document_status": {
+            "$ref": "#/components/schemas/GuestDocumentStatus"
+          },
+          "legal_registration_status": {
+            "$ref": "#/components/schemas/LegalRegistrationStatus"
+          }
+        },
+        "required": [
+          "document_status",
+          "legal_registration_status"
+        ],
+        "title": "CheckinSubmittedResponse",
+        "type": "object"
+      },
       "ChecklistItemPayload": {
         "additionalProperties": false,
         "properties": {
@@ -1424,6 +1466,20 @@
         "title": "ErrorEnvelope",
         "type": "object"
       },
+      "GuestAccessTokenIssuedResponse": {
+        "description": "The **only** place the cleartext guest token ever appears (`guest-portal-api` D14).\n\nRule 3(a) of `steering/security.md` names this exception in so many words: a secret we\nmint for a third party to authenticate with \"se puede devolver **una sola vez en el\nmomento de generarlo y en cada rotación, nunca en una lectura posterior**\". There is no\nlater read to worry about — `GuestAccessTokenRepository` offers none, and the row stores\nonly a digest — so the exception is bounded by the schema rather than by discipline.\n\nNo `id`, no `token_hash`, no `reservation_id`: the operator needs the value and the\nstay's identity is already in the path they called. Every field here is one more thing a\nproxy log or a browser cache can keep.",
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "GuestAccessTokenIssuedResponse",
+        "type": "object"
+      },
       "GuestDocumentResponse": {
         "properties": {
           "date_of_birth": {
@@ -1611,6 +1667,46 @@
         ],
         "title": "ImportReportResponse",
         "type": "object"
+      },
+      "IncidentReportedResponse": {
+        "description": "The acknowledgement, and **only** the acknowledgement (R5.3, D15).\n\nThree fields: the id of the incident just created, its status and when. R5.3 forbids the\nbearer of a token from listing, reading, modifying, assigning, classifying or resolving\nincidents — \"la única lectura permitida es el acuse de la que acaba de crear\" — so this\nmodel is the whole of what the portal may ever say about an incident.\n\nIt carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill\nin, and returning their initial values would promise the guest a shape that changes\nunderneath them.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IncidentStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "IncidentReportedResponse",
+        "type": "object"
+      },
+      "IncidentStatus": {
+        "enum": [
+          "OPEN",
+          "CLASSIFIED",
+          "AWAITING_OWNER_APPROVAL",
+          "ASSIGNED",
+          "ACCEPTED",
+          "IN_PROGRESS",
+          "WAITING_EXTERNAL_PARTS",
+          "RESOLVED",
+          "CANCELLED"
+        ],
+        "title": "IncidentStatus",
+        "type": "string"
       },
       "LegalRegistrationResponse": {
         "properties": {
@@ -2181,6 +2277,30 @@
           "code"
         ],
         "title": "RegisterCodeRequest",
+        "type": "object"
+      },
+      "ReportIncidentRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /guest/incident/{token}` accepts: a title and a description (R5.2; D15).\n\n**`title` is required because `incidents.title` is `NOT NULL`**, and deriving it from the\nfirst characters of the description — the tempting alternative — would invent a datum the\nguest did not write and put it in a column an operator reads as the guest's own words\n(D15).\n\nNeither field is echoed anywhere it could not be redacted later: `AUDITABLE_FIELDS` leaves\nboth out of the incident's audit row and the timeline entry carries a constant title, so\nwhat a stranger types here reaches exactly one place — the `incidents` row a manager is\nmeant to read.\n\n**Both fields are bounded, and `description`'s bound is not the body ceiling.** D7 —\n\"el tope de cuerpo ya está puesto; no se añade nada\" — is about the middleware that refuses\nan oversized *request* before routing, and it stays untouched: no new middleware, no new\nsetting. What it does not do is bound how much text a legitimate-sized request may store,\nand with `MAX_INCIDENT_DESCRIPTION` absent the only limit left was per-request while D6's\nbudget allows sixty requests a minute. A field-level maximum is not a second ceiling; it is\nthe thing the ceiling was never doing. Both maxima count characters **after** stripping,\nbecause `str_strip_whitespace=True` runs first.\n\n`str_strip_whitespace=True` and `min_length=1` together are what make a whitespace-only\nreport the `422` R5.2 requires — the same pairing `SubmitCheckinRequest` documents, where\nthe first version counted characters before stripping and let `\"   \"` through.",
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description"
+        ],
+        "title": "ReportIncidentRequest",
         "type": "object"
       },
       "RequiredPhotoPayload": {
@@ -2823,6 +2943,162 @@
         "title": "SetDocumentRequest",
         "type": "object"
       },
+      "StayInfoResponse": {
+        "description": "What `GET /guest/info/{token}` returns — exactly `StayInfo` (D9).\n\nA field-for-field mirror on purpose. The projection is where R3.2 is enforced\nstructurally, so this model earning its own opinion about which fields to include would\nreintroduce the very decision `StayInfo` exists to remove. `tests/guests/test_portal_ports.py`\npins the projection's field set; the contract test pins this one against the code.",
+        "properties": {
+          "access_code_masked": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Code Masked"
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "arrival_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Arrival Notes"
+          },
+          "check_in_date": {
+            "format": "date",
+            "title": "Check In Date",
+            "type": "string"
+          },
+          "check_in_time": {
+            "format": "time",
+            "title": "Check In Time",
+            "type": "string"
+          },
+          "check_out_date": {
+            "format": "date",
+            "title": "Check Out Date",
+            "type": "string"
+          },
+          "check_out_time": {
+            "format": "time",
+            "title": "Check Out Time",
+            "type": "string"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "property_name": {
+            "title": "Property Name",
+            "type": "string"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "support_channel": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Support Channel"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "wifi_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Name"
+          }
+        },
+        "required": [
+          "check_in_date",
+          "check_out_date",
+          "check_in_time",
+          "check_out_time",
+          "property_name",
+          "address_line1",
+          "address_line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "timezone",
+          "wifi_name",
+          "arrival_notes",
+          "access_code_masked",
+          "support_channel"
+        ],
+        "title": "StayInfoResponse",
+        "type": "object"
+      },
       "StorageType": {
         "enum": [
           "LOCAL",
@@ -2830,6 +3106,53 @@
         ],
         "title": "StorageType",
         "type": "string"
+      },
+      "SubmitCheckinRequest": {
+        "additionalProperties": false,
+        "description": "The six fields of PRD §17 the guest supplies (R4.1, R4.4; D10, D16).\n\nSix and not eight: `check_in_date` and `check_out_date` are the reservation's, and the\nguest is not asked for them — nor allowed to send them, since `extra=\"forbid\"` rejects\nanything not declared here. That is R2.1 at the boundary.\n\nAll six required together, like the manager's `SetDocumentRequest`: PRD §17 needs the\nset, and a guest who sends a number without an expiry date looks documented and cannot be\nreported.\n\n**`str_strip_whitespace=True` is load-bearing, not tidiness.** `min_length=1` counts\ncharacters, so `\"   \"` satisfied it in the first version, and the consequences diverged\nby branch: on a stay that already had a `Guest` the write landed and replaced the legal\nname with whitespace — after which `missing_fields`, which *does* normalise, kept the\nstay in `PENDING_GUEST_DATA` for ever with no error anywhere; on a stay with no guest it\ncame back as the `404` reserved for \"your link does not work\". Both found by the QA panel\nof section 6. Stripping first makes a blank name the `422` R4.4 asks for, in one place,\nfor every field of the form.\n\n**The types are the guard the audit sink depends on.** `document_type` is an enum,\n`date_of_birth` and `document_expiry_date` are `date`s, `nationality` is bounded to two\ncharacters. After section 2 denylisted `full_name` and `nationality`, the fields still\nrecorded as real diffs are exactly the enum and the dates — so declaring any of them\n`str` here, for a friendlier error message, would put guest-typed text into\n`audit_logs.changes`. Carried from the security panel of section 2 into task 6.6.",
+        "properties": {
+          "date_of_birth": {
+            "format": "date",
+            "title": "Date Of Birth",
+            "type": "string"
+          },
+          "document_expiry_date": {
+            "format": "date",
+            "title": "Document Expiry Date",
+            "type": "string"
+          },
+          "document_number": {
+            "maxLength": 100,
+            "minLength": 1,
+            "title": "Document Number",
+            "type": "string"
+          },
+          "document_type": {
+            "$ref": "#/components/schemas/GuestDocumentType"
+          },
+          "full_name": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Full Name",
+            "type": "string"
+          },
+          "nationality": {
+            "maxLength": 2,
+            "minLength": 2,
+            "title": "Nationality",
+            "type": "string"
+          }
+        },
+        "required": [
+          "full_name",
+          "nationality",
+          "date_of_birth",
+          "document_type",
+          "document_number",
+          "document_expiry_date"
+        ],
+        "title": "SubmitCheckinRequest",
+        "type": "object"
       },
       "TenantConfigPatch": {
         "additionalProperties": false,
@@ -5843,6 +6166,316 @@
         ]
       }
     },
+    "/api/v1/guest/checkin/{token}": {
+      "get": {
+        "description": "The names of the fields of PRD §17 that are still missing, plus the document and legal-registration statuses. **Never the values already supplied** — the guest knows what they typed, and echoing it back would put personal data in one more response body for no benefit.",
+        "operationId": "read_checkin_status_api_v1_guest_checkin__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckinStatusResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "What the guest still has to provide",
+        "tags": [
+          "guest-portal"
+        ]
+      },
+      "post": {
+        "description": "The six fields of PRD §17 the guest supplies; the two dates are the reservation's and are neither asked for nor accepted. The document number is encrypted at rest in the same call and **is not echoed back**. Resending the same form is safe: it converges on the same state and does not add a second timeline entry, though it does leave a second audit row — a repeated submission is exactly what a review would want to see.",
+        "operationId": "submit_checkin_api_v1_guest_checkin__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SubmitCheckinRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CheckinSubmittedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "Submit the guest's legal check-in data",
+        "tags": [
+          "guest-portal"
+        ]
+      }
+    },
+    "/api/v1/guest/incident/{token}": {
+      "post": {
+        "description": "Opens an incident against the guest's own stay, exactly as any other source would: `OPEN`, with no category, severity or classification — those belong to the maintenance flow, and a report made here is indistinguishable to it from any other. A title and a description, both required; nothing else is accepted. The acknowledgement is the id, the status and the instant, and that is the only reading of an incident this surface ever offers: there is no endpoint here to list, read, modify, assign or resolve one. Retrying creates a second incident — the request is not deduplicated — so treat a `429` as 'wait', never as 'it did not arrive'.",
+        "operationId": "report_incident_api_v1_guest_incident__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportIncidentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentReportedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "Report an incident during the stay",
+        "tags": [
+          "guest-portal"
+        ]
+      }
+    },
+    "/api/v1/guest/info/{token}": {
+      "get": {
+        "description": "Everything the guest needs in order to arrive: dates and times, the property's public details, the arrival instructions and the support channel. Never the reservation's internal notes, its amounts, its external PMS or channel ids, another guest's data, or any credential — those are not fields of the projection, so no serialiser can reach them. Never a document number either, not even for the guest who supplied it.",
+        "operationId": "read_stay_info_api_v1_guest_info__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/StayInfoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "The guest's stay information",
+        "tags": [
+          "guest-portal"
+        ]
+      }
+    },
     "/api/v1/guests/{guest_id}/document": {
       "get": {
         "description": "The only endpoint that returns a document number. Restricted to the roles PRD §17 names, and **audited**: the `AuditLog` row is written before the response is built, so a read that could not be recorded does not happen. Responds `404` for a guest of another tenant with a body identical to the one for an id that does not exist.",
@@ -7019,6 +7652,135 @@
         "summary": "Update a reservation partially",
         "tags": [
           "reservations"
+        ]
+      }
+    },
+    "/api/v1/reservations/{reservation_id}/guest-access-token": {
+      "delete": {
+        "description": "Withdraws the stay's live token, if it has one. Idempotent: revoking twice answers `204` both times and leaves the first revocation's instant untouched, because that timestamp is what records *when* access was withdrawn. Always permitted — a withdrawal does not depend on the stay's state. Responds `404` for a stay of another tenant.",
+        "operationId": "revoke_guest_access_token_api_v1_reservations__reservation_id__guest_access_token_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Revoke the guest's portal token for a stay",
+        "tags": [
+          "legal"
+        ]
+      },
+      "post": {
+        "description": "Returns the token **in clear, once and only once** — the single named exception of rule 3(a) of the security steering, because an operator has to be able to hand the link to the guest and only its digest is stored. No later call returns it, and no endpoint reads it back. If the stay already had a live token this **replaces** it: the previous one is revoked in the same transaction, so a guest holding the old link stops being authorised the moment the new one is minted. Responds `404` for a stay of another tenant with a body identical to the one for an id that does not exist.",
+        "operationId": "issue_guest_access_token_api_v1_reservations__reservation_id__guest_access_token_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "reservation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Reservation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestAccessTokenIssuedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Mint the guest's portal token for a stay",
+        "tags": [
+          "legal"
         ]
       }
     },

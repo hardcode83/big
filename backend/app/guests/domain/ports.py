@@ -125,3 +125,30 @@ class LegalRegistrationStayStore(Protocol):
         status: LegalRegistrationStatus,
     ) -> None:
         ...
+
+    async def set_guest(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID, guest_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        """Claim a stay that had **no** guest, and answer who holds it afterwards (R4.2, OQ3).
+
+        `POST /reservations` allows a booking with no guest, so the portal's check-in has to
+        cope: OQ3 decided it creates the `Guest` from the submitted `full_name` and links it
+        here, rather than refusing and leaving a stay that can never complete its legal
+        registration with no signal to the operator.
+
+        **A second narrow method rather than widening this port to the reservation**, which
+        is the whole reason the port is narrow: the class docstring above says it is
+        deliberately not `ReservationRepository` because that one's `save` writes the whole
+        row. Reaching one more column keeps that boundary; reaching the aggregate would erase
+        it. This writes `reservations.guest_id` and nothing else — not the dates, not the
+        status, not the legal state.
+
+        **A claim, not an assignment**, and the return type is what says so. Two concurrent
+        submissions of the same form — the retry R4.5 names — must not both link a `Guest`,
+        because the loser's row would be orphaned with the encrypted document already inside
+        it. So an implementation writes only where there is no guest yet and returns whoever
+        holds the stay: the caller's id on a win, the winner's on a loss, `None` when the
+        stay does not exist in this tenant. The caller writes the document to whatever comes
+        back, never to what it passed in.
+        """
+        ...

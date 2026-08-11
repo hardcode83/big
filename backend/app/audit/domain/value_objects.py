@@ -44,10 +44,28 @@ REDACTED_FIELDS = frozenset(
         #
         # It belongs here on the steering's own words: §"Datos sensibles" reads "PII de
         # huéspedes (documento de identidad, **fecha de nacimiento** — requeridos por
-        # SES.Hospedajes)". `nationality` is deliberately NOT added: the same sentence does
-        # not name it, and a denylist that quietly grows past what the rule says is one
-        # nobody can reason about — the exact failure this list's own comment warns against.
+        # SES.Hospedajes)".
         "date_of_birth",
+        # `full_name` and `nationality`, added by `guest-portal-api` after its section 2
+        # panel — where the security and QA reviewers independently demonstrated that
+        # `diff("full_name", ...)` was legal and would store the value verbatim.
+        #
+        # **`nationality` was deliberately excluded until now, and the premise that justified
+        # excluding it is what changed.** `access-notifications` argued that §"Datos
+        # sensibles" does not name it and that a denylist growing past what the rule says is
+        # one nobody can reason about — which was right *while an operator was the only
+        # writer*. The guest portal makes both fields the free text of an **anonymous
+        # internet caller**: `POST /api/v1/guest/checkin/{token}` takes `full_name` and
+        # `nationality` straight from a form nobody authenticates. That is the same property
+        # that disqualified `incidents.title`/`description` in the very same change, and
+        # treating the two cases differently is what the panel objected to.
+        #
+        # This is therefore not the denylist quietly growing: it is the same criterion
+        # applied to a writer that did not exist when the earlier decision was made. Nothing
+        # is lost — both stay on the `GUEST` allowlist, so `redacted()` still records that
+        # they changed, which is all the use cases ever did with them.
+        "full_name",
+        "nationality",
         "wifi_password",
         "wifi_password_encrypted",
         "access_code",
@@ -228,12 +246,33 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # rule 11's own paragraph describes, found by the panel's re-review. Nothing here restates
     # the reasoning any more; it cites.
     #
-    # `nationality` is the one that IS auditable as a diff, deliberately: §"Datos sensibles"
-    # names the document and the birth date and stops. The use cases record it with
-    # `redacted()` anyway (design D11) — that discipline lives in the caller, like
-    # `properties-crud` design D7 does for its note columns.
+    # `nationality` and `full_name` are listed here AND denylisted above, since
+    # `guest-portal-api` — see the entry there for why the premise changed. This comment used
+    # to say `nationality` "IS auditable as a diff, deliberately"; that was true while an
+    # operator was its only writer, and the guest portal is what stopped it being true.
+    #
+    # `full_name` arrives with the same change (design D10): the portal's check-in is the
+    # first path that WRITES it, because a stay whose `reservations.guest_id` is NULL creates
+    # the `Guest` from the name the guest typed (OQ3).
+    #
+    # Four of these eight are also on the denylist above, which is the usual pairing and not
+    # a contradiction: the allowlist says the field may appear in a guest's audit row at all,
+    # the denylist says only as `{"changed": true}`. Removing any of them from here would
+    # make `redacted()` fail too, and the change would leave no trace whatsoever.
+    #
+    # What stays diffable is `document_type`, `document_status`, `legal_registration_status`
+    # and `document_expiry_date` — three closed enumerations and a date, none of them a field
+    # a caller composes freely.
+    #
+    # **That bound is the caller's, not this module's**, and saying so matters because an
+    # earlier draft of this comment claimed otherwise: `_storable` accepts any `str` for any
+    # of the four, so what actually stops composed text is `app/guests/api/schemas.py` typing
+    # the boundary as Pydantic `date`/enum fields, and the use cases passing `.value` off real
+    # enum instances. It is the same boundary the `ASSUMPTION` note above already describes
+    # for every allowlisted field; the guest portal is what made it load-bearing here.
     "GUEST": frozenset(
         {
+            "full_name",
             "nationality",
             "date_of_birth",
             "document_type",
@@ -246,6 +285,20 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # `access-notifications`. The legal registration of a stay (PRD §17) moves on the
     # reservation, not on the guest (design D10), so its audit rows point at a reservation.
     "RESERVATION": frozenset({"legal_registration_status", "access_status"}),
+    # `guest-portal-api` D11. `token_hash` is already on the denylist above, so the only
+    # reachable form is `{"changed": true}` — which is all an issue or a rotation needs to
+    # record, and is exactly what rule 11 demands. It is listed here anyway for the reason
+    # `secret_encrypted` is listed under `PMS_CREDENTIAL`: removing it would make
+    # `redacted()` fail too, leaving the minting of a portal credential untraceable.
+    #
+    # `revoked_at` is a plain timestamp and carries no secret, so it is a real diff.
+    "GUEST_ACCESS_TOKEN": frozenset({"token_hash", "revoked_at"}),
+    # `guest-portal-api` D11. Deliberately **without `title` and `description`**: both are
+    # free text written from outside by an anonymous guest, and `audit_logs.changes` is a
+    # rule-11 sink. What the audit row needs is that an incident was opened, by whom and
+    # against which stay — `source`, `status` and `reservation_id` say that without carrying
+    # a word the guest typed into an append-only column.
+    "INCIDENT": frozenset({"source", "status", "reservation_id"}),
 }
 
 _REDACTED_MARKER = {"changed": True}

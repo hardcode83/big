@@ -488,8 +488,9 @@ async def test_a_rejected_submission_fails_the_stay_and_alerts_the_managers(
 async def test_no_notification_carries_the_document(
     api, db_session, tenant_a, users_by_role_a
 ) -> None:
-    """Rule 11 over `notification_logs.subject`/`body`: its one exception is a masked access
-    code, and a document number is not one.
+    """Rule 11 over `notification_logs.subject`/`body`: the exception these two columns carry
+    — the first of the rule's two — admits a masked access code, and a document number is not
+    one.
 
     **This test used to be vacuous** and the QA panel proved it: it drove only the success
     path, which queues no notification at all, so the loop below iterated over zero rows and

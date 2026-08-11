@@ -63,6 +63,18 @@ ENTITY_GUEST = "GUEST"
 # still owe their `AuditLog`, and this change does not pay that debt — it audits the one
 # operation it introduces.
 ENTITY_RESERVATION = "RESERVATION"
+# A row of `incidents` (`guest-portal-api`). Rule 9 of `sdd/steering/security.md` names
+# `Incident` in its enumeration explicitly, so unlike `PROPERTY` this needs no argument
+# beyond the citation. Only the guest-reported creation is audited here; classifying,
+# assigning and resolving belong to `maintenance` and bring their own actions when they land.
+ENTITY_INCIDENT = "INCIDENT"
+# A row of `guest_access_tokens` (`guest-portal-api` D2, D11). Its own entity type rather
+# than auditing against the reservation, for the reason `ENTITY_CLEANING_PHOTO` exists:
+# `entity_id` is what `ix_audit_logs_tenant_id_entity_type_entity_id` indexes, so pointing
+# several tokens of one stay at the reservation id would turn "who minted THIS token" into a
+# scan over `changes`. It is also the same distinction `ENTITY_WEBHOOK_ENDPOINT` draws — a
+# credential *we* mint is not the entity it grants access to.
+ENTITY_GUEST_ACCESS_TOKEN = "GUEST_ACCESS_TOKEN"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -160,6 +172,29 @@ GUEST_DOCUMENT_READ = "GUEST_DOCUMENT_READ"
 LEGAL_REGISTRATION_SUBMITTED = "LEGAL_REGISTRATION_SUBMITTED"
 LEGAL_REGISTRATION_FAILED = "LEGAL_REGISTRATION_FAILED"
 
+# The guest portal (`guest-portal-api` D11, D15).
+#
+# **There is deliberately no `GUEST_CHECKIN_SUBMITTED`**, and the absence is the decision.
+# When a guest completes their own check-in the operation *is* `GUEST_DOCUMENT_UPDATED` —
+# "modificación de documentos de Guest" in rule 9's words — and who did it is said by the
+# actor (`actor_guest_token_hash`), not by a second verb. Inventing one would split the
+# question "who touched this guest's document" across two actions, which is exactly what
+# this module's docstring says the closed vocabulary exists to prevent.
+#
+# The two token actions are minted and revoked by an **operator** through the JWT routes of
+# D14, so they are ordinary human actions with RBAC behind them. `AUDITABLE_FIELDS` gives
+# them `token_hash` and `revoked_at`, and `token_hash` is already on rule 11's denylist —
+# so `redacted()` is the only reachable form, exactly as for `WEBHOOK_ENDPOINT`.
+GUEST_ACCESS_TOKEN_ISSUED = "GUEST_ACCESS_TOKEN_ISSUED"
+GUEST_ACCESS_TOKEN_REVOKED = "GUEST_ACCESS_TOKEN_REVOKED"
+
+# Incidents (`guest-portal-api` D15). Only the creation, and only the guest-reported one:
+# it is the first writer of `incidents`, and rule 9 names the entity. There is no
+# `INCIDENT_CLASSIFIED`/`_ASSIGNED`/`_RESOLVED` here because nothing performs those yet, and
+# pre-authorising an operation no code exercises is what rule 9 refuses to do for
+# `SCHEDULER`.
+INCIDENT_CREATED = "INCIDENT_CREATED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -174,6 +209,8 @@ ENTITY_TYPES = frozenset(
         ENTITY_ACCESS_RECORD,
         ENTITY_GUEST,
         ENTITY_RESERVATION,
+        ENTITY_INCIDENT,
+        ENTITY_GUEST_ACCESS_TOKEN,
     }
 )
 
@@ -211,5 +248,8 @@ ACTIONS = frozenset(
         GUEST_DOCUMENT_READ,
         LEGAL_REGISTRATION_SUBMITTED,
         LEGAL_REGISTRATION_FAILED,
+        GUEST_ACCESS_TOKEN_ISSUED,
+        GUEST_ACCESS_TOKEN_REVOKED,
+        INCIDENT_CREATED,
     }
 )

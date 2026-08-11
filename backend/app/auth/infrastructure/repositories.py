@@ -63,11 +63,21 @@ class SqlAlchemyUserRepository:
         return _to_user(model) if model is not None else None
 
     async def find_by_email_globally(self, email: str) -> User | None:
-        """THE ONLY unscoped query in the system (design D16).
+        """One of the two unscoped queries in the system (design D16).
 
         Its callers are the anonymous login and the bootstrap conflict check; both go
         through here rather than writing their own, so a grep for this method name
-        enumerates every cross-tenant read that exists.
+        enumerates every cross-tenant read *this* one serves.
+
+        **The second is `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`**
+        (`app/guests/infrastructure/portal_repositories.py`), added by `guest-portal-api`
+        for the same structural reason: an anonymous caller presents a credential and the
+        row is what resolves the tenant, so there is nothing to filter by when it runs.
+        This sentence used to say "THE ONLY", and that enumeration is the audit control
+        for rule 1 of `steering/security.md` — a reviewer trusting it would have missed the
+        portal lookup entirely. Named here rather than left to a grep, exactly as
+        `app/core/db.py`'s second limit names its own cases. Found by that change's
+        section 3 security panel.
 
         Login is anonymous, so there is no tenant yet — the address alone has to
         identify the user, and it does: `uq_users_lower_email` makes a normalised

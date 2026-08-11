@@ -1,4 +1,16 @@
-"""Keeps the webhook route token out of the access log (`reservations-webhooks`, rule 12(b)).
+"""Keeps route tokens out of the access log (`reservations-webhooks` rule 12(b);
+`guest-portal-api` R1.2, D8).
+
+**Two credentials travel in a URL path in this system, and both are covered here.** The
+webhook route token came first and is what this module was written for; `guest-portal-api`
+added `/api/v1/guest/{action}/{token}`, whose token is the *whole* credential — that surface
+has no header secret behind it — so the leak this closes is strictly worse there. The filter
+and its installer are named for the shape rather than for either caller because of that:
+`PathTokenRedactingFilter`, not `WebhookTokenRedactingFilter`.
+
+Deliberately one filter and not two. Two filters on the same logger doing the same job is how
+one of them quietly stops being installed, and neither would know it.
+
 
 **The problem is structural, not a slip.** Design D1 puts the token in the URL *path*, which is
 what makes the route non-guessable per tenant — and a path is the one part of a request that every
@@ -34,17 +46,37 @@ import re
 # would be leaking). Found by the security panel of section 2 on re-review.
 _WEBHOOK_PATH = re.compile(r"(/api/v1/webhooks/[^/\s]+/)[^\s?]+", re.IGNORECASE)
 
+# The guest portal, `/api/v1/guest/{action}/{token}` (`guest-portal-api` D8). The pattern
+# matches the URL *shape*, so it covers the four routes of PRD §23 without naming any of them
+# — which is the point of matching a shape and not a census: the fourth,
+# `POST /guest/incident/{token}`, was mounted later and needed no change here.
+# Same shape and same reasoning as the webhook one above: the token is the credential and it
+# travels in the path, so uvicorn writes it on every request. Without this, anyone with read
+# access to the log recovers every live stay — and unlike the webhook case there is no second
+# factor behind it, because the guest surface has no header secret (D2).
+#
+# The **action** is kept, exactly as the provider is kept above: `info`, `checkin` or
+# `incident` is not a secret and it is what an operator needs to read the log at all.
+#
+# Anchored on `/api/v1/guest/` plus one segment, so a **fifth** action added later is covered
+# without touching this file — the residual risk the design's own Risks section names.
+_GUEST_PORTAL_PATH = re.compile(r"(/api/v1/guest/[^/\s]+/)[^\s?]+", re.IGNORECASE)
+
 REDACTED = "***"
 
-_PREFIX = "/api/v1/webhooks/"
+_PREFIXES = ("/api/v1/webhooks/", "/api/v1/guest/")
+
+_PATTERNS = (_WEBHOOK_PATH, _GUEST_PORTAL_PATH)
 
 
-def redact_webhook_token(message: str) -> str:
-    """The request line with the route token replaced. Pure, so it is testable on its own."""
-    return _WEBHOOK_PATH.sub(rf"\1{REDACTED}", message)
+def redact_path_tokens(message: str) -> str:
+    """The request line with any route token replaced. Pure, so it is testable on its own."""
+    for pattern in _PATTERNS:
+        message = pattern.sub(rf"\1{REDACTED}", message)
+    return message
 
 
-class WebhookTokenRedactingFilter(logging.Filter):
+class PathTokenRedactingFilter(logging.Filter):
     """Rewrites the path argument of a uvicorn access record before it is formatted.
 
     Operates on `record.args`, not on the final string, because that is where uvicorn keeps the
@@ -62,27 +94,33 @@ class WebhookTokenRedactingFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         args = record.args
         if isinstance(args, tuple) and len(args) >= 3 and isinstance(args[2], str):
-            if _mentions_webhook_path(args[2]):
+            if _mentions_token_path(args[2]):
                 redacted = list(args)
-                redacted[2] = redact_webhook_token(args[2])
+                redacted[2] = redact_path_tokens(args[2])
                 record.args = tuple(redacted)
             return True
 
-        if isinstance(record.msg, str) and _mentions_webhook_path(record.msg):
-            record.msg = redact_webhook_token(record.msg)
+        if isinstance(record.msg, str) and _mentions_token_path(record.msg):
+            record.msg = redact_path_tokens(record.msg)
         return True
 
 
-def _mentions_webhook_path(value: str) -> bool:
-    """The cheap pre-check, and it has to agree with the regex about case.
+def _mentions_token_path(value: str) -> bool:
+    """The cheap pre-check, and it has to agree with the regexes about case.
 
-    A case-SENSITIVE `in` here would gate a case-insensitive pattern, so a mis-cased path would
+    A case-SENSITIVE `in` here would gate case-insensitive patterns, so a mis-cased path would
     never reach the substitution and the `re.IGNORECASE` above would be decoration.
+
+    It also has to agree with them about **coverage**: every pattern needs its prefix listed,
+    or that pattern silently never runs. That is why both live in module constants next to
+    each other rather than being inlined — a second credential-bearing path was always coming,
+    and `guest-portal-api` is it.
     """
-    return _PREFIX in value.lower()
+    lowered = value.lower()
+    return any(prefix in lowered for prefix in _PREFIXES)
 
 
-def install_webhook_token_redaction() -> None:
+def install_path_token_redaction() -> None:
     """Attach the filter to uvicorn's access logger, at most once.
 
     Called from `create_app()` rather than from a logging config file, because this project has
@@ -93,6 +131,6 @@ def install_webhook_token_redaction() -> None:
     session, and a filter added on every call would be run once per copy on every log line.
     """
     access_logger = logging.getLogger("uvicorn.access")
-    if any(isinstance(existing, WebhookTokenRedactingFilter) for existing in access_logger.filters):
+    if any(isinstance(existing, PathTokenRedactingFilter) for existing in access_logger.filters):
         return
-    access_logger.addFilter(WebhookTokenRedactingFilter())
+    access_logger.addFilter(PathTokenRedactingFilter())

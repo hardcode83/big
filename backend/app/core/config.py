@@ -139,6 +139,51 @@ class Settings(BaseSettings):
     webhook_rate_limit_per_minute: int = 120
     webhook_probe_limit_per_minute: int = 20
 
+    # The guest portal (`guest-portal-api` design D3, D6, D9). Four tunables, none of them a
+    # secret, so all four carry a default (rule 8 of `steering/security.md`).
+    #
+    # `guest_portal_token_grace_days` is the whole of R1.3: there is no `expires_at` column,
+    # so the window is derived at authorisation time as "up to midnight UTC of
+    # `check_out_date` + this many days" (D3). Deriving it rather than storing it is what
+    # makes a stay that moves — or is cancelled — take effect immediately instead of on the
+    # next sweep. ASSUMPTION: the window closes at midnight **UTC**, not in the property's
+    # timezone; at two days of grace the worst-case skew is two hours out of forty-eight,
+    # and using the property's zone would mean reading it before a tenant is known.
+    guest_portal_token_grace_days: int = 2
+    # Two limits, asymmetric on purpose, and the reasoning is NOT the webhook one above even
+    # though the shape is (D6). The per-token limit is generous and charged **after** a
+    # successful authorisation. It bounds the four routes of PRD §23 — and for
+    # `POST /guest/incident`, which is deliberately not idempotent (D13), it is the only thing
+    # bounding how many `incidents` rows one stay can produce.
+    guest_portal_rate_limit_per_minute: int = 60
+    # The per-IP limit is strict and counted **only over failed authorisations**, asked
+    # before any lookup — that is what makes guessing a token cost something (R2.4). Keyed by
+    # IP rather than by token because a failed authorisation has no token to key on; and a
+    # single shared limit over all traffic was rejected because a hotel's WiFi puts every
+    # one of its guests behind one address.
+    #
+    # "Before any lookup" and not "before any work": on `POST /guest/checkin` the body is
+    # parsed and validated before the route function runs at all, so a malformed one is a
+    # `422` that spends nothing. Bounded by the body ceiling and identical whatever the
+    # token — measured by the security panel of section 6, which found the docstrings
+    # claiming the stronger thing.
+    #
+    # KNOWN LIMIT, measured by the security panel of section 6: the *counter* is only fed by
+    # failures, as R2.4 requires, but the *gate* is consulted on every request. So once an
+    # address has spent this budget, a guest holding a perfectly good token from behind the
+    # same NAT is refused for the rest of the window. Kept deliberately — it is the order the
+    # section 5 panel made binding and the one `webhooks_router.py` already ships — and
+    # recorded in `design.md` D6 as a roadmap candidate rather than left to be rediscovered.
+    guest_portal_probe_limit_per_minute: int = 20
+    # Where a guest is told to ask for help (R3.1, D9). A configuration constant and not a
+    # row: reading a support contact from the database would be one join away from exposing
+    # whoever staffs it, and this is served to the open internet. Free text, because what
+    # goes in it — a phone number, an address, a URL — is the operator's decision and the
+    # portal only renders it. `None` means the field is served as `null` and the frontend
+    # shows no help card; it is the honest default for an installation that has not chosen
+    # one, not a placeholder.
+    guest_portal_support_channel: str | None = None
+
     # Notification delivery (change `access-notifications`, design D4). No credential here:
     # the MVP adapters are a console logger and two mocks (PRD §14's channel table), and the
     # real WhatsApp/SMTP keys are already reserved by rule 8 of `steering/security.md`.

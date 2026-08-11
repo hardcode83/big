@@ -103,6 +103,15 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # a route under `integrations`, because rule 12(b) of `steering/security.md` makes the
         # route token the credential and mixing it into the authenticated router would hide that.
         "webhooks",
+        # `guest-portal-api`: the four anonymous routes of PRD §23, singular because the prefix
+        # is the guest being served rather than the collection. A prefix of its own for the same
+        # reason `webhooks` has one — the token in the path is the credential, and hanging these
+        # off `guests` would put them on a router that declares `AUTHENTICATED_RESPONSES`.
+        #
+        # Note it is `guest`, not `guests`: the two are different surfaces, and PRD §23 spells
+        # the anonymous one in the singular. That the two prefixes differ by a letter is worth
+        # seeing here rather than discovering from a route that ended up on the wrong router.
+        "guest",
     }
 
 

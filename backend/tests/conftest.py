@@ -18,6 +18,7 @@ import app.core.models_registry  # noqa: F401
 
 from app.core.config import settings
 from app.core.db import Base
+from app.core.redis import close_redis
 
 # Tests get their own database, never the one `make up`/`migrate` manage — otherwise
 # `Base.metadata.drop_all` wipes the dev stack's schema (tables gone,
@@ -100,3 +101,28 @@ async def test_engine():
 async def db_session(test_engine):
     async with AsyncSession(test_engine, expire_on_commit=False) as session:
         yield session
+
+
+@pytest_asyncio.fixture(autouse=True)
+async def _close_the_redis_client_between_tests():
+    """`app/core/redis.py::get_redis` caches one client in a module global; loops are per-test.
+
+    So whichever test builds it first leaves a client bound to **its** event loop in the
+    global, and the next test to reuse it dies with "Event loop is closed" from inside
+    `redis.asyncio`. The failure is order-dependent and lands on an innocent file: measured
+    twice on `guest-portal-api`, once as `tests/guests` poisoning
+    `tests/integrations/test_webhook_receiver_api.py`, and once the other way round —
+    `pytest tests/integrations tests/guests` was red while `tests/guests tests/integrations`
+    was green, purely because collection order decided who built the client.
+
+    It lives here rather than beside either test because the global belongs to neither: seven
+    suites reach Redis, and a per-file teardown protects that file's successors while leaving
+    the file itself at the mercy of whoever ran before it. Recorded as a roadmap candidate in
+    that change's `proposal.md` while it looked like a local nuisance; promoted to a fix when
+    the QA panel of section 6 showed it as a real red under an ordinary invocation.
+
+    `close_redis()` no-ops when nothing built a client, which is the overwhelming majority of
+    tests, so the cost is one attribute check per test.
+    """
+    yield
+    await close_redis()

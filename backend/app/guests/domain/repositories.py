@@ -68,9 +68,22 @@ class GuestRepository(Protocol):
         """Write the identity-document fields of one guest (R7.1).
 
         Narrow like `NotificationLogRepository.mark_breached`, and for the same reason: this
-        path exists to store a document, and a port that also let it rewrite `full_name`,
-        `email` or `preferred_language` would be an open door for the change that comes next.
-        Persists `nationality`, `date_of_birth`, `document_type`,
-        `document_number_encrypted`, `document_expiry_date` and `document_status`.
+        path exists to store a document, and a port that also let it rewrite `email` or
+        `preferred_language` would be an open door for the change that comes next. Persists
+        `nationality`, `date_of_birth`, `document_type`, `document_number_encrypted`,
+        `document_expiry_date`, `document_status` — and `full_name`.
+
+        **`full_name` was added by `guest-portal-api` (design D10), and it does widen this
+        port by one column.** The reason it is not the open door the paragraph above warns
+        about: the portal's check-in may be creating the `Guest` record itself (OQ3), and a
+        stay whose guest has no usable name can never complete its legal registration — PRD
+        §17 counts `full_name` among its eight required fields, so the document group is
+        incomplete without it. What stays out is everything that is *not* part of reporting a
+        stay to the police.
+
+        The column is `NOT NULL`, so this always writes a name; whether it writes a
+        **different** one is `SetGuestDocumentUseCase`'s decision, and it only assigns when
+        the caller supplied `DocumentInput.full_name`. The manager's `PATCH` does not, so a
+        typo in a document form cannot rename somebody.
         """
         ...

@@ -2,6 +2,7 @@ import uuid
 
 import pytest
 from sqlalchemy import select, text
+from sqlalchemy.exc import IntegrityError
 
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.infrastructure.models import UserModel
@@ -100,3 +101,106 @@ async def test_audit_log_index_keeps_the_descending_order(db_session) -> None:
         )
     ).scalar_one()
     assert "entity_type" in lookup and "entity_id" in lookup
+
+
+# --- The guest-portal actor column (`guest-portal-api` R6.1, design D11) --------------
+
+
+@pytest.mark.asyncio
+async def test_a_guest_portal_row_records_its_bearer_and_no_user(db_session) -> None:
+    """R6.1. The two actor columns are alternatives, and this is the anonymous one."""
+    tenant = await _tenant(db_session)
+    token_hash = "b" * 64
+
+    entry = AuditLogModel(
+        tenant_id=tenant.id,
+        actor_guest_token_hash=token_hash,
+        actor_ip="203.0.113.9",
+        action="GUEST_DOCUMENT_UPDATED",
+        entity_type="GUEST",
+        entity_id=uuid.uuid4(),
+    )
+    db_session.add(entry)
+    await db_session.commit()
+
+    fetched = (
+        await db_session.execute(select(AuditLogModel).where(AuditLogModel.id == entry.id))
+    ).scalar_one()
+    assert fetched.actor_guest_token_hash == token_hash
+    assert fetched.actor_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_the_guest_actor_column_is_nullable_and_sixty_four_wide() -> None:
+    """Every pre-existing writer leaves it NULL, so it cannot be `NOT NULL`."""
+    column = AuditLogModel.__table__.c.actor_guest_token_hash
+
+    assert column.nullable is True
+    assert column.type.length == 64
+
+
+@pytest.mark.asyncio
+async def test_the_actor_index_still_covers_only_the_user_actor(db_session) -> None:
+    """D11 leaves `ix_audit_logs_tenant_id_actor_user_id_created_at` alone, deliberately.
+
+    Guest-portal rows fall in that index's NULL bucket, and the question it exists to answer
+    — "everything this person did", cheaply, across entities — is about users. Widening it to
+    a second actor column would double its size to serve a query nobody asks.
+    """
+    definition = (
+        await db_session.execute(
+            text(
+                "SELECT indexdef FROM pg_indexes "
+                "WHERE indexname = 'ix_audit_logs_tenant_id_actor_user_id_created_at'"
+            )
+        )
+    ).scalar_one()
+
+    assert "actor_guest_token_hash" not in definition
+
+
+@pytest.mark.asyncio
+async def test_the_database_itself_refuses_a_cleartext_guest_token(db_session) -> None:
+    """R1.2/R6.4 of `guest-portal-api`, enforced below the application.
+
+    `AuditLogFactory` rejects it too, and with a better message — but `AuditLog` is a plain
+    mutable dataclass, so a caller can build one directly or mutate the field after the
+    factory returned. The security panel of section 1 made the point that the guarantee must
+    not depend on every future writer remembering the factory. A `secrets.token_urlsafe(32)`
+    value is 43 characters, so `VARCHAR(64)` would take it without complaint.
+    """
+    tenant = await _tenant(db_session)
+
+    db_session.add(
+        AuditLogModel(
+            tenant_id=tenant.id,
+            actor_guest_token_hash="not-a-digest",
+            action="GUEST_DOCUMENT_UPDATED",
+            entity_type="GUEST",
+            entity_id=uuid.uuid4(),
+        )
+    )
+
+    with pytest.raises(
+        IntegrityError, match="ck_audit_logs_actor_guest_token_hash_is_a_digest"
+    ):
+        await db_session.flush()
+
+
+@pytest.mark.asyncio
+async def test_the_check_still_allows_the_column_to_be_absent(db_session) -> None:
+    """Every pre-existing writer leaves it NULL; the CHECK must not break them.
+
+    The positive half, so the test above cannot pass by rejecting everything.
+    """
+    tenant = await _tenant(db_session)
+
+    db_session.add(
+        AuditLogModel(
+            tenant_id=tenant.id,
+            action="USER_UPDATED",
+            entity_type="USER",
+            entity_id=uuid.uuid4(),
+        )
+    )
+    await db_session.flush()  # must not raise

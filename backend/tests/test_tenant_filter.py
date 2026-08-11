@@ -20,6 +20,7 @@ from app.core.db import (
     bind_session_to_tenant,
     tenant_scoped_classes,
 )
+from app.guests.infrastructure.models import GuestAccessTokenModel
 from app.integrations.infrastructure.models import WebhookEventModel
 from app.maintenance.domain.enums import OwnerApprovalRelatedType
 from app.maintenance.infrastructure.models import OwnerApprovalModel
@@ -27,6 +28,7 @@ from app.notifications.domain.enums import NotificationChannel
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.pricing.infrastructure.models import PriceRecommendationModel, PricingRuleModel
 from app.properties.infrastructure.models import PropertyModel
+from app.reservations.infrastructure.models import ReservationModel
 from app.reviews.domain.enums import ReviewChannel
 from app.reviews.infrastructure.models import ReviewModel
 from app.statements.domain.enums import ExpenseCategory
@@ -254,6 +256,44 @@ async def _owner_approval(session: AsyncSession, tenant) -> OwnerApprovalModel:
     return approval
 
 
+async def _guest_access_token(session: AsyncSession, tenant) -> GuestAccessTokenModel:
+    """A token needs a property and a reservation of the same tenant to hang off.
+
+    The composite FK on `(tenant_id, reservation_id)` is why the reservation cannot be
+    shared between the two tenants this test builds — which is the point of the constraint.
+    """
+    prop = PropertyModel(
+        tenant_id=tenant.id,
+        name=f"Property {tenant.name}",
+        internal_code=f"CODE-{uuid.uuid4().hex[:8]}",
+        pms_external_id=f"PMS-{uuid.uuid4().hex[:8]}",
+        max_guests=4,
+    )
+    session.add(prop)
+    await session.flush()
+
+    reservation = ReservationModel(
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        channel="DIRECT",
+        status="CONFIRMED",
+        check_in_date=date(2026, 9, 1),
+        check_out_date=date(2026, 9, 3),
+        nights=2,
+    )
+    session.add(reservation)
+    await session.flush()
+
+    token = GuestAccessTokenModel(
+        tenant_id=tenant.id,
+        reservation_id=reservation.id,
+        token_hash=uuid.uuid4().hex + uuid.uuid4().hex,
+    )
+    session.add(token)
+    await session.flush()
+    return token
+
+
 async def _webhook_event(session: AsyncSession, tenant) -> WebhookEventModel:
     event = WebhookEventModel(
         tenant_id=tenant.id,
@@ -281,6 +321,13 @@ async def _webhook_event(session: AsyncSession, tenant) -> WebhookEventModel:
         # The one table whose tenant scoping is hand-assembled rather than inherited
         # from TenantScopedMixin (D4) — so the one that most needs the generic proof.
         (WebhookEventModel, _webhook_event),
+        # `guest-portal-api`. Added here because rule 1 of steering/security.md makes a
+        # behavioural isolation test mandatory per module, and its tenancy panel found this
+        # table had only a static `in tenant_scoped_classes()` assertion while every sibling
+        # was proven against real rows. It earns the proof more than most: a scoping failure
+        # on a credential table does not disclose data, it lets one tenant's stay be
+        # authorised as another's (rule 3(c)).
+        (GuestAccessTokenModel, _guest_access_token),
     ],
     ids=lambda value: getattr(value, "__tablename__", ""),
 )

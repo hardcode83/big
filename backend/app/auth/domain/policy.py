@@ -79,6 +79,22 @@ class Permission(str, enum.Enum):
     # being shown the number.
     SUBMIT_LEGAL_REGISTRATION = "SUBMIT_LEGAL_REGISTRATION"
 
+    # Added by `guest-portal-api` (design D14). Minting and revoking the token that lets a
+    # guest reach the portal, through the two JWT routes on
+    # `/api/v1/reservations/{id}/guest-access-token`.
+    #
+    # **One permission, not a read/manage pair**, unlike almost every entry above. There is
+    # nothing to read: the row stores only a hash, and rule 3(a)'s named exception lets the
+    # cleartext value be returned exactly once at issue time and never in a later read — so a
+    # `READ_GUEST_ACCESS_TOKENS` would grant the ability to see a digest, which is not a
+    # capability anyone reasons about separately.
+    #
+    # **Not folded into `MANAGE_RESERVATIONS`**, for the reason `READ_GUEST_DOCUMENTS` is not
+    # folded into `READ_RESERVATIONS`: this hands out a credential to an anonymous surface
+    # that writes guest PII, and every future holder of "can edit bookings" would inherit it
+    # by accident.
+    MANAGE_GUEST_ACCESS_TOKENS = "MANAGE_GUEST_ACCESS_TOKENS"
+
 
 _SELF_SERVICE = frozenset(
     {
@@ -124,6 +140,13 @@ _LEGAL_MANAGE = frozenset(
         Permission.SUBMIT_LEGAL_REGISTRATION,
     }
 )
+# `guest-portal-api` D14. Given to `TENANT_OWNER` and `PROPERTY_MANAGER` and to nobody else:
+# minting one of these lets whoever holds the resulting link submit the guest's identity
+# document, so it belongs with the two administrative roles that PRD §17 already trusts with
+# that document. `CLEANER` and `TECHNICIAN` get nothing here — a door code and a cleaning are
+# not a reason to hand out a portal credential — and `SUPER_ADMIN` stays out for the same
+# reason it holds no other operational permission inside a tenant (see the note below).
+_GUEST_ACCESS_TOKEN_MANAGE = frozenset({Permission.MANAGE_GUEST_ACCESS_TOKENS})
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -165,6 +188,12 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # submitting to SES.Hospedajes is operation, which PRD §6 gives to the manager.
         | _ACCESS_READ
         | _LEGAL_READ
+        # Issues the guest's portal link. Unlike `_ACCESS_MANAGE` and `_LEGAL_MANAGE`, which
+        # the owner does NOT get, this one she does: R1.1 asks for the token to be mintable
+        # by the tenant's administrative roles, and an owner operating a small portfolio
+        # without a manager (PRD §1's scale) would otherwise have no way to let a guest
+        # check in at all.
+        | _GUEST_ACCESS_TOKEN_MANAGE
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -184,6 +213,7 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # code, and PRD §17 step 4 has "manager puede hacer submit".
         | _ACCESS_MANAGE
         | _LEGAL_MANAGE
+        | _GUEST_ACCESS_TOKEN_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     UserRole.TECHNICIAN: _SELF_SERVICE,

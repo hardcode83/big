@@ -315,3 +315,60 @@ def test_bootstrap_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch)
 def test_jwt_algorithm_is_a_constant_not_a_setting() -> None:
     assert JWT_ALGORITHM == "HS256"
     assert "jwt_algorithm" not in Settings.model_fields
+
+
+# --- The guest portal (`guest-portal-api` R1.3, R2.4, design D3, D6) ------------------
+
+
+def test_the_guest_portal_has_its_documented_defaults() -> None:
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.guest_portal_token_grace_days == 2
+    assert settings.guest_portal_rate_limit_per_minute == 60
+    assert settings.guest_portal_probe_limit_per_minute == 20
+    # `None`, and deliberately not a placeholder string (D9, R3.1): an installation that has
+    # not chosen a support channel serves the field as `null` and the portal shows no help
+    # card, which is honest. A default like "support@example.com" would be published to every
+    # guest of every tenant that forgot to set it.
+    assert settings.guest_portal_support_channel is None
+
+
+@pytest.mark.parametrize(
+    ("env_var", "field_name", "value"),
+    [
+        ("GUEST_PORTAL_TOKEN_GRACE_DAYS", "guest_portal_token_grace_days", 7),
+        ("GUEST_PORTAL_RATE_LIMIT_PER_MINUTE", "guest_portal_rate_limit_per_minute", 5),
+        ("GUEST_PORTAL_PROBE_LIMIT_PER_MINUTE", "guest_portal_probe_limit_per_minute", 3),
+        ("GUEST_PORTAL_SUPPORT_CHANNEL", "guest_portal_support_channel", "+34 600 000 000"),
+    ],
+)
+def test_the_guest_portal_is_configurable_per_environment(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, field_name: str, value: int | str
+) -> None:
+    monkeypatch.setenv(env_var, str(value))
+
+    assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
+
+
+def test_the_probe_limit_is_stricter_than_the_authorised_one_by_default() -> None:
+    """D6: the two limits are asymmetric, and the direction is the design.
+
+    Probing has to cost more than using the portal legitimately. Asserting the relation and
+    not just the two numbers is what catches someone "harmonising" them later.
+    """
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.guest_portal_probe_limit_per_minute < settings.guest_portal_rate_limit_per_minute
+
+
+def test_there_is_no_expiry_setting_for_a_guest_token() -> None:
+    """D3, asserted as an absence.
+
+    The window is derived from the stay at authorisation time — check-out plus the grace —
+    so an absolute lifetime setting would be a second, contradictory answer to "when does
+    this token stop working", and the one that goes stale when the booking moves.
+    """
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert not hasattr(settings, "guest_portal_token_ttl_minutes")
+    assert not hasattr(settings, "guest_portal_token_expiry_days")

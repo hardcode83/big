@@ -50,3 +50,26 @@ class ReservationNotFoundError(GuestDomainError):
 
     def __init__(self) -> None:
         super().__init__("Reservation does not exist")
+
+
+class GuestPortalUnauthorised(GuestDomainError):
+    """The presented portal token does not authorise anything (`guest-portal-api` R2.2, D5).
+
+    **One exception for five causes, and that is the entire design.** R2.2 requires a code
+    that "no distinga entre esas condiciones" — non-existent, malformed, revoked, outside the
+    window, or belonging to a cancelled stay — so that an anonymous caller cannot learn
+    whether a reservation exists. A hierarchy of causes here would put that guarantee in the
+    hands of everyone who catches it.
+
+    It carries **no detail and no cause**: no `__cause__` chained, no reservation id, no
+    reason. `str(exc)` is a constant, and every portal route answers it through the single
+    helper that emits one constant `404` body — the four routes of PRD §23 go through it, none
+    of them able to drift from the others.
+
+    The same reasoning as `GuestNotFoundError` one class up, applied where it matters more:
+    that one protects an identity document from an authenticated operator of another tenant;
+    this one protects the existence of a booking from the whole internet.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Not found")

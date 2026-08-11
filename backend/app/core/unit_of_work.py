@@ -36,3 +36,30 @@ class SqlAlchemyUnitOfWork:
 
     async def commit(self) -> None:
         await self._session.commit()
+
+
+class CallerOwnedUnitOfWork:
+    """A boundary for a use case that another use case composes: `commit()` does nothing.
+
+    One use case is one transaction — until one of them is reused *inside* another, and then
+    exactly one of the two may end it. Handing the inner one this instead of
+    `SqlAlchemyUnitOfWork` is how the outer one says "the boundary is mine", in the wiring,
+    where both are visible side by side.
+
+    It exists because `guest-portal-api` needed it and got it wrong first. `POST
+    /guest/checkin` composes `SetGuestDocumentUseCase` (the codebase's single writer of
+    `guests.document_number_encrypted`) inside `SubmitGuestCheckinUseCase`, and the first
+    wiring gave both a real unit of work on the same session. The inner `commit()` therefore
+    landed the encrypted document, its `AuditLog`, the `Guest` that OQ3 had just created and
+    the new `legal_registration_status` **before** the outer one wrote the
+    `GUEST_CHECKIN_COMPLETED` milestone — so a failure in between left the check-in done, the
+    milestone lost for ever (the retry sees no status transition and writes nothing), and a
+    `500` for the guest. Four of the five reviewers of that section found it independently,
+    each pointing at a docstring that claimed "one transaction with one commit".
+
+    Nothing about it is guest-specific: any composition of two use cases over one session has
+    the same question to answer, which is why it lives here beside the real one.
+    """
+
+    async def commit(self) -> None:
+        """Deliberately empty. The composing use case commits, once, at the end."""

@@ -144,6 +144,75 @@ def test_no_permission_is_granted_to_every_role_by_accident() -> None:
         assert not all(is_allowed(role, permission) for role in UserRole)
 
 
+# --- The guest portal token (`guest-portal-api` R1.1, R1.4, design D14) ----------------
+
+
+def test_only_the_two_administrative_roles_may_mint_a_guest_access_token() -> None:
+    """D14: `TENANT_OWNER` and `PROPERTY_MANAGER`, and nobody else.
+
+    The whole matrix in one assertion, because the interesting content is the **exclusions**.
+    Minting one of these hands out a link whose bearer can submit the guest's identity
+    document, so it belongs with the two roles PRD §17 already trusts with that document.
+    """
+    allowed = {
+        role for role in UserRole if is_allowed(role, Permission.MANAGE_GUEST_ACCESS_TOKENS)
+    }
+
+    assert allowed == {UserRole.TENANT_OWNER, UserRole.PROPERTY_MANAGER}
+
+
+def test_neither_the_cleaner_nor_the_technician_may_mint_a_guest_access_token() -> None:
+    """Stated separately from the matrix above because it is the exclusion that could
+    plausibly be argued the other way: both roles are physically at the property. Doing a
+    cleaning or a repair is still not a reason to hand out a credential to a surface that
+    writes guest PII."""
+    assert not is_allowed(UserRole.CLEANER, Permission.MANAGE_GUEST_ACCESS_TOKENS)
+    assert not is_allowed(UserRole.TECHNICIAN, Permission.MANAGE_GUEST_ACCESS_TOKENS)
+
+
+def test_the_super_admin_may_not_mint_a_guest_access_token() -> None:
+    """Consistent with every other operational permission inside a tenant.
+
+    PRD §6 gives `SUPER_ADMIN` global powers — tenants, global configuration, integrations —
+    not the operation of one tenant, and cross-tenant access is deferred to the
+    `saas-cross-tenant` roadmap entry. Granting it here would pre-empt that decision on a
+    credential that reaches identity documents, which is the worst place to do so.
+    """
+    assert not is_allowed(UserRole.SUPER_ADMIN, Permission.MANAGE_GUEST_ACCESS_TOKENS)
+
+
+def test_minting_a_token_is_not_implied_by_managing_reservations() -> None:
+    """D14 keeps this out of `MANAGE_RESERVATIONS` on purpose.
+
+    Folding it in would grant it to every future holder of "can edit bookings" by accident —
+    the same reasoning that keeps `READ_GUEST_DOCUMENTS` separate from `READ_RESERVATIONS`.
+    Pinned as a property rather than a role list so it survives the matrix changing.
+    """
+    assert Permission.MANAGE_GUEST_ACCESS_TOKENS is not Permission.MANAGE_RESERVATIONS
+
+    reservation_managers = {
+        role for role in UserRole if is_allowed(role, Permission.MANAGE_RESERVATIONS)
+    }
+    token_minters = {
+        role for role in UserRole if is_allowed(role, Permission.MANAGE_GUEST_ACCESS_TOKENS)
+    }
+
+    assert reservation_managers != token_minters
+
+
+def test_there_is_no_read_permission_for_guest_access_tokens() -> None:
+    """D14, asserted as an absence.
+
+    There is nothing to read: the row stores only a hash, and rule 3(a)'s named exception
+    returns the cleartext value exactly once at issue time and never afterwards. A read
+    permission would grant the ability to see a digest, which is not a capability anyone
+    reasons about separately.
+    """
+    assert not any(
+        permission.value.startswith("READ_GUEST_ACCESS_TOKEN") for permission in Permission
+    )
+
+
 def test_is_allowed_denies_when_the_permission_is_not_granted(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
