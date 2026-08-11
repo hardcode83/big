@@ -81,6 +81,7 @@ vi.mock("@/lib/api/authenticated-client", () => ({
     },
     refreshTokens: async () => ({ accessToken: "access", refreshToken: "refresh" }),
   }),
+  notifySessionExpired: vi.fn(),
 }));
 
 function wrapper() {

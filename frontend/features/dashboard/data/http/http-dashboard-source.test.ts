@@ -166,6 +166,9 @@ describe("HttpDashboardSource", () => {
       source.getPropertyTimeline("tenant-1", "property-1", {
         eventType: "INCIDENT_CREATED",
         severity: "WARNING",
+        actorType: "USER",
+        from: "2026-08-01T00:00:00Z",
+        to: "2026-08-31T23:59:59Z",
       }),
     ).resolves.toMatchObject({
       data: [
@@ -177,9 +180,41 @@ describe("HttpDashboardSource", () => {
       "/api/v1/timeline/{property_id}",
       {
         pathParams: { property_id: "property-1" },
-        query: { event_type: "INCIDENT_CREATED", severity: "WARNING" },
+        query: {
+          event_type: "INCIDENT_CREATED",
+          severity: "WARNING",
+          actor_type: "USER",
+          from: "2026-08-01T00:00:00Z",
+          to: "2026-08-31T23:59:59Z",
+        },
       },
     );
+  });
+
+  it("omits undefined timeline filters and never calls out-of-scope routes", async () => {
+    const { source, request } = sourceWith({
+      data: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      total_pages: 0,
+    });
+
+    await source.getPropertyTimeline("tenant-1", "property-1", {
+      eventType: undefined,
+      severity: undefined,
+      actorType: undefined,
+      from: undefined,
+      to: undefined,
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/timeline/{property_id}",
+      { pathParams: { property_id: "property-1" }, query: {} },
+    );
+    const requestedPaths = request.mock.calls.map(([path]) => path);
+    expect(requestedPaths).not.toContain("/api/v1/timeline");
+    expect(requestedPaths).not.toContain("/api/v1/properties/{property_id}/state");
   });
 
   it.each([
@@ -200,6 +235,32 @@ describe("HttpDashboardSource", () => {
 
       await expect(source.getPropertyDetail("tenant-1", "missing")).rejects.toBe(error);
       expect(request).toHaveBeenCalledTimes(1);
+    },
+  );
+
+  it.each([
+    [404, "NOT_FOUND"],
+    [422, "VALIDATION_ERROR"],
+    [500, "INTERNAL_SERVER_ERROR"],
+  ] as const)(
+    "propagates timeline ApiError status %s without retrying",
+    async (status, code) => {
+      const error = new ApiError({
+        code,
+        message: `API error ${status}`,
+        status,
+      });
+      const request = vi.fn().mockRejectedValue(error);
+      const source = new HttpDashboardSource({ request } as unknown as ApiClient);
+
+      await expect(
+        source.getPropertyTimeline("tenant-1", "property-1"),
+      ).rejects.toBe(error);
+      expect(request).toHaveBeenCalledTimes(1);
+      expect(request).toHaveBeenCalledWith(
+        "/api/v1/timeline/{property_id}",
+        { pathParams: { property_id: "property-1" }, query: {} },
+      );
     },
   );
 });

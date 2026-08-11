@@ -1,5 +1,8 @@
 import type { DashboardDataSource } from "./dashboard-source";
-import { createAuthenticatedClients } from "@/lib/api/authenticated-client";
+import {
+  createAuthenticatedClients,
+  notifySessionExpired,
+} from "@/lib/api/authenticated-client";
 import { HttpDashboardSource } from "./http/http-dashboard-source";
 
 export type { DashboardDataSource } from "./dashboard-source";
@@ -16,6 +19,7 @@ export type * from "./dto";
  */
 const { apiClient: dashboardApiClient } = createAuthenticatedClients({
   apiBaseUrl: "",
+  onSessionExpired: notifySessionExpired,
 });
 const dashboardDataSource: DashboardDataSource = new HttpDashboardSource(
   dashboardApiClient,

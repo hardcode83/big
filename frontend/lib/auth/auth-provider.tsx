@@ -4,12 +4,16 @@ import {
   createContext,
   useCallback,
   useContext,
+  useEffect,
   useMemo,
   useState,
   type ReactNode,
 } from "react";
 
-import { createAuthenticatedClients } from "@/lib/api/authenticated-client";
+import {
+  createAuthenticatedClients,
+  subscribeToSessionExpired,
+} from "@/lib/api/authenticated-client";
 import type { components } from "@/lib/api/generated/openapi";
 import { useRuntimeConfig } from "@/lib/config/runtime-config-provider";
 import { refreshSession } from "./refresh-coordinator";
@@ -54,6 +58,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       },
     });
   }, [apiBaseUrl]);
+
+  useEffect(() => {
+    return subscribeToSessionExpired(() => {
+      setUser(null);
+      setStatus("expired");
+    });
+  }, []);
 
   const login = useCallback(
     async (email: string, password: string) => {
