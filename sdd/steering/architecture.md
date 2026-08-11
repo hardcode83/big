@@ -4,7 +4,7 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-10_autohost-er-entidades.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-11_autohost-er-entidades.png`.
 
 El de entidades se regeneró en `auth-account-recovery` al entrar `password_reset_tokens` y `users.must_change_password`: **30 entidades, 73 relaciones**. El anterior, `2026-08-09_...`, se borró; aquel salió de `reservations-webhooks` con 29 y 71 al entrar `webhook_endpoints`, y a su vez había sustituido al `2026-08-06_...` de `pms-provider-resolution` (28 y 67), que había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
 
