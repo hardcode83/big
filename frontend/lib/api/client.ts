@@ -15,6 +15,22 @@ type OperationFor<
   Method extends string,
 > = paths[Path][Lowercase<Method> & keyof paths[Path]];
 
+type ParametersFor<Operation> = Operation extends { parameters?: infer Parameters }
+  ? Parameters
+  : never;
+
+type QueryFor<Operation> = ParametersFor<Operation> extends {
+  query?: infer Query;
+}
+  ? Query
+  : never;
+
+type PathFor<Operation> = ParametersFor<Operation> extends {
+  path: infer Path;
+}
+  ? Path
+  : never;
+
 type RequestBodyFor<Operation> = Operation extends {
   requestBody?: infer RequestBody;
 }
@@ -66,6 +82,8 @@ export interface RequestOptions<Body, Method extends string> {
   method?: Method;
   body?: Body;
   headers?: HeadersInit;
+  pathParams?: Record<string, string | number>;
+  query?: Record<string, string | number | null | undefined>;
   signal?: AbortSignal;
 }
 
@@ -73,10 +91,23 @@ type RequestArguments<
   Path extends keyof paths,
   Method extends Uppercase<MethodForPath<Path>>,
 > = "get" extends MethodForPath<Path>
-  ? [options?: RequestOptions<RequestBodyFor<OperationFor<Path, Method>>, Method>]
+  ? [
+      options?: RequestOptions<
+        RequestBodyFor<OperationFor<Path, Method>>,
+        Method
+      > & {
+        pathParams?: PathFor<OperationFor<Path, Method>>;
+        query?: QueryFor<OperationFor<Path, Method>>;
+      },
+    ]
   : [
-      options: RequestOptions<RequestBodyFor<OperationFor<Path, Method>>, Method> & {
+      options: RequestOptions<
+        RequestBodyFor<OperationFor<Path, Method>>,
+        Method
+      > & {
         method: Method;
+        pathParams?: PathFor<OperationFor<Path, Method>>;
+        query?: QueryFor<OperationFor<Path, Method>>;
       },
     ];
 
@@ -96,6 +127,30 @@ function joinUrl(baseUrl: string, path: string): string {
   return `${trimmedBase}/${trimmedPath}`;
 }
 
+function resolvePath(path: string, pathParams: Record<string, string | number> = {}): string {
+  return path.replace(/\{([^}]+)\}/g, (_, name: string) => {
+    const value = pathParams[name];
+    if (value === undefined) {
+      throw new Error(`Missing path parameter: ${name}`);
+    }
+    return encodeURIComponent(String(value));
+  });
+}
+
+function appendQuery(
+  path: string,
+  query: Record<string, string | number | null | undefined> = {},
+): string {
+  const params = new URLSearchParams();
+  for (const [key, value] of Object.entries(query)) {
+    if (value !== undefined && value !== null) {
+      params.set(key, String(value));
+    }
+  }
+  const encoded = params.toString();
+  return encoded ? `${path}?${encoded}` : path;
+}
+
 export function createApiClient(options: ApiClientOptions): ApiClient {
   const doFetch = options.fetchImpl ?? fetch;
 
@@ -106,7 +161,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     path: Path,
     ...requestArguments: RequestArguments<Path, Method>
   ): Promise<ResponseFor<OperationFor<Path, Method>>> {
-    const { method, body, headers, signal } = requestArguments[0] ?? {};
+    const { method, body, headers, pathParams, query, signal } =
+      requestArguments[0] ?? {};
     let retryCount = 0;
 
     while (true) {
@@ -122,7 +178,8 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
         finalHeaders.set("Content-Type", "application/json");
       }
 
-      const response = await doFetch(joinUrl(options.baseUrl, String(path)), {
+      const resolvedPath = appendQuery(resolvePath(String(path), pathParams), query);
+      const response = await doFetch(joinUrl(options.baseUrl, resolvedPath), {
         method: method ?? "GET",
         headers: finalHeaders,
         body: hasBody ? JSON.stringify(body) : undefined,

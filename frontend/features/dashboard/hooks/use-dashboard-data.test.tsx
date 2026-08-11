@@ -16,6 +16,74 @@ vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
 }));
 
+vi.mock("@/lib/api/authenticated-client", () => ({
+  createAuthenticatedClients: () => ({
+    apiClient: {
+      request: async (path: string, options?: { pathParams?: { property_id?: string } }) => {
+        if (path === "/api/v1/dashboard/properties") {
+          return {
+            data: [{
+              property_id: "property-1",
+              property_code: "REDES11",
+              operational_state: "AWAITING_CLEANING",
+              current_or_next_reservation: null,
+              cleaning_status: null,
+              open_incidents_count: 0,
+              next_action: null,
+              last_event_label: null,
+              last_event_at: null,
+            }],
+            total: 1,
+            page: 1,
+            per_page: 20,
+            total_pages: 1,
+          };
+        }
+        if (path === "/api/v1/properties/{property_id}/dashboard") {
+          if (options?.pathParams?.property_id === "unknown") {
+            throw new ApiError({
+              code: "NOT_FOUND",
+              message: "not found",
+              status: 404,
+            });
+          }
+          return {
+            property_id: "property-1",
+            property_code: "REDES11",
+            operational_state: "AWAITING_CLEANING",
+            current_or_next_reservation: null,
+            guest: null,
+            access: null,
+            cleaning_status: null,
+            last_cleaning_photos: [],
+            open_incidents: [],
+            financial: null,
+            notes: null,
+            pending_approvals: [],
+          };
+        }
+        return {
+          data: [{
+            id: "event-1",
+            occurred_at: "2026-08-10T09:00:00Z",
+            actor_type: "GUEST",
+            event_type: "GUEST_MESSAGE_RECEIVED",
+            severity: "INFO",
+            title: "Guest message",
+            description: null,
+          }],
+          total: 1,
+          page: 1,
+          per_page: 20,
+          total_pages: 1,
+        };
+      },
+    },
+    refreshTokens: async () => ({ accessToken: "access", refreshToken: "refresh" }),
+  }),
+  notifySessionExpired: vi.fn(),
+}));
+
 function wrapper() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -45,7 +113,7 @@ describe("retryPolicy (R2.3)", () => {
 });
 
 describe("dashboard data hooks (R4)", () => {
-  it("useDashboardCards resolves the mock cards through the composition point", async () => {
+  it("useDashboardCards resolves HTTP cards through the composition point", async () => {
     const { result } = renderHook(() => useDashboardCards(), {
       wrapper: wrapper(),
     });
