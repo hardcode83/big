@@ -9,7 +9,7 @@ import {
   type ReactNode,
 } from "react";
 
-import { createApiClient } from "@/lib/api/client";
+import { createAuthenticatedClients } from "@/lib/api/authenticated-client";
 import type { components } from "@/lib/api/generated/openapi";
 import { useRuntimeConfig } from "@/lib/config/runtime-config-provider";
 import { refreshSession } from "./refresh-coordinator";
@@ -44,43 +44,15 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const [status, setStatus] = useState<AuthStatus>("anonymous");
 
   const clients = useMemo(() => {
-    const authClient = createApiClient({ baseUrl: apiBaseUrl });
-    const refreshTokens = async (refreshToken: string) => {
-      const response = await authClient.request("/api/v1/auth/refresh", {
-        method: "POST",
-        body: { refresh_token: refreshToken },
-      });
-      return {
-        accessToken: response.access_token,
-        refreshToken: response.refresh_token,
-      };
-    };
-
-    const apiClient = createApiClient({
-      baseUrl: apiBaseUrl,
-      getHeaders: () => {
-        const tokens = getSessionTokens();
-        const headers: HeadersInit = {};
-        if (tokens) {
-          headers.Authorization = `Bearer ${tokens.accessToken}`;
-        }
-        return headers;
+    return createAuthenticatedClients({
+      apiBaseUrl,
+      onStatusChange: (nextStatus) => {
+        setStatus(nextStatus);
       },
-      onUnauthorized: async () => {
-        setStatus("refreshing");
-        try {
-          await refreshSession(refreshTokens);
-          setStatus("authenticated");
-          return true;
-        } catch {
-          setUser(null);
-          setStatus("expired");
-          return false;
-        }
+      onSessionExpired: () => {
+        setUser(null);
       },
     });
-
-    return { apiClient, refreshTokens };
   }, [apiBaseUrl]);
 
   const login = useCallback(

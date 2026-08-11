@@ -43,6 +43,25 @@ describe("createApiClient (D12)", () => {
     expect(result).toEqual({ ok: 1 });
   });
 
+  it("resolves typed path parameters and omits undefined query parameters", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ data: [] }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await client.request("/api/v1/timeline/{property_id}", {
+      pathParams: { property_id: "property/1" },
+      query: {
+        event_type: "INCIDENT_CREATED",
+        severity: undefined,
+        page: 1,
+      },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api/api/v1/timeline/property%2F1?event_type=INCIDENT_CREATED&page=1",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("serializes a JSON body and sets Content-Type", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });
