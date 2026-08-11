@@ -977,7 +977,10 @@ async def test_an_unknown_token_hash_consumes_nothing(db_session, tenant_a) -> N
 async def test_consuming_is_unscoped_and_finds_a_token_of_any_tenant(
     db_session, tenant_a, tenant_b
 ) -> None:
-    """Design D3: the second and last unscoped query. No caller supplies the tenant.
+    """Design D3: an unscoped query. No caller supplies the tenant.
+
+    Said "the second and last" until `guest-portal-api` added a third; the count lives in
+    `SqlAlchemyUserRepository.find_by_email_globally`'s docstring and nowhere else.
 
     The token of tenant B resolves without anyone naming B, and the row is what reveals it.
     """

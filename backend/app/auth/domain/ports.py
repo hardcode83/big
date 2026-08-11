@@ -27,9 +27,12 @@ class UserRepository(Protocol):
     async def find_by_email_globally(self, email: str) -> User | None:
         """The only unscoped query behind THIS port (design D16).
 
-        The system's other one is `PasswordResetTokenRepository.consume_globally`
-        (`auth-account-recovery` design D3), on a different port for a different anonymous
-        endpoint. Two in total; both named `*_globally`.
+        There are others elsewhere, and **their enumeration lives in one place**:
+        `SqlAlchemyUserRepository.find_by_email_globally`'s docstring in
+        `app/auth/infrastructure/repositories.py`. This sentence used to say "two in total; both
+        named `*_globally`" — `guest-portal-api` added a third that carries neither this port nor
+        that suffix, so counting here was one of six copies of a fact that then had to be
+        corrected in six places.
 
         Login is anonymous: there is no tenant yet, so the address has to identify
         the user on its own. It can, because a normalised email is unique across the
@@ -197,9 +200,11 @@ class PasswordResetTokenRepository(Protocol):
     ) -> "PasswordResetToken | None":
         """Spend a token if it is still spendable; return the row, or None (R3.2, design D1).
 
-        **THE SECOND unscoped query in the system**, and named so a grep for the two
-        `*_globally` methods still enumerates every cross-tenant read that exists — the first
-        is `UserRepository.find_by_email_globally`. Unscoped because the endpoint is anonymous:
+        **One of the system's unscoped queries** — they are enumerated in one place, the
+        docstring of `SqlAlchemyUserRepository.find_by_email_globally`. This said "THE SECOND …
+        so a grep for the two `*_globally` methods still enumerates every cross-tenant read that
+        exists"; `guest-portal-api` added a third that is not named that way, so neither the
+        count nor the grep held. Unscoped because the endpoint is anonymous:
         there is no tenant yet, and the token IS the credential. Its unique index identifies it
         across the whole installation, so the `tenant_id` comes OUT of the row found, never in
         from the request — which is why the request schema has no field for one. Embedding the

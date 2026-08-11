@@ -1,11 +1,22 @@
 """SQLAlchemy adapters for the auth ports (R4.2, R6.5, design D6/D10).
 
-Every method takes `tenant_id` and filters on it — except the **two** deliberate
-exceptions, `find_by_email_globally` (design D16 of `auth-tenancy`) and
-`consume_globally` (design D3 of `auth-account-recovery`). Those two are therefore
-the only unscoped queries in the system, and they are both named `*_globally` so a
-grep for that suffix enumerates every cross-tenant read that exists. Every other
-cross-tenant need goes through one of them rather than hand-rolling a third.
+Every method takes `tenant_id` and filters on it — except two deliberate exceptions,
+`find_by_email_globally` (design D16 of `auth-tenancy`) and `consume_globally` (design
+D3 of `auth-account-recovery`). Every other cross-tenant need goes through one of them
+rather than hand-rolling another.
+
+**The system-wide count of unscoped queries is asserted in exactly one place**, the
+docstring of `find_by_email_globally` below, and everything else cites it. It used to be
+stated here too, as "the only unscoped queries in the system... both named `*_globally`,
+so a grep for that suffix enumerates every cross-tenant read that exists" — and both
+halves of that are now false: `guest-portal-api` added a third,
+`SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`, which is not in this
+module and does not carry the suffix. Three copies of the count lived in this one file
+and the merge that created the third only corrected one of them; the architecture panel
+found the other two. That enumeration is the audit control for rule 1 of
+`steering/security.md`, so it gets the treatment rule 11 of the same document prescribes
+for its own contract: one formulation, everyone else cites it.
+
 No method commits: the transactional boundary is the use case (design D10).
 """
 
@@ -456,8 +467,11 @@ class SqlAlchemySessionRepository:
 class SqlAlchemyPasswordResetTokenRepository:
     """Recovery links (`auth-account-recovery` R3, design D1/D3/D7).
 
-    Every method is scoped by tenant EXCEPT `consume_globally`, which is the second and last
-    unscoped query in the system (design D3) — see its docstring on the port.
+    Every method is scoped by tenant EXCEPT `consume_globally`, which is one of the system's
+    unscoped queries (design D3) — see its docstring on the port for why, and
+    `find_by_email_globally` above for the enumeration of all of them, which is the one place
+    that count is stated. This docstring said "the second and last" until `guest-portal-api`
+    added a third and the architecture panel of that change's merge caught the claim.
     """
 
     def __init__(self, session: AsyncSession) -> None:
