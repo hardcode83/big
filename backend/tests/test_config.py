@@ -254,6 +254,153 @@ def test_lifetimes_and_throttle_are_configurable_per_environment(
     assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
 
 
+def test_password_recovery_has_its_documented_defaults() -> None:
+    """Change `auth-account-recovery`, design D13."""
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.password_reset_token_minutes == 30
+    assert settings.password_reset_max_live_tokens == 3
+    assert settings.frontend_base_url == "http://localhost:3000"
+
+
+@pytest.mark.parametrize(
+    ("env_var", "field_name", "value"),
+    [
+        ("PASSWORD_RESET_TOKEN_MINUTES", "password_reset_token_minutes", 15),
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "password_reset_max_live_tokens", 5),
+    ],
+)
+def test_password_recovery_is_configurable_per_environment(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, field_name: str, value: int
+) -> None:
+    # R3.4 says the token lifetime is configurable; asserting only the default would not
+    # catch a refactor that hardcoded it.
+    monkeypatch.setenv(env_var, str(value))
+
+    assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
+
+
+@pytest.mark.parametrize(
+    ("env_var", "value"),
+    [
+        # R3.4 says the system SHALL *fijar* a short lifetime. Unbounded, "short" would be a
+        # property of the default rather than of the system: 43200 minutes is 30 days.
+        ("PASSWORD_RESET_TOKEN_MINUTES", "43200"),
+        ("PASSWORD_RESET_TOKEN_MINUTES", "0"),
+        ("PASSWORD_RESET_TOKEN_MINUTES", "-1"),
+        # 0 or negative does not tighten D7's cap, it changes what it means — refusing every
+        # recovery, or wrapping to unlimited, depending on how the comparison is written.
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "0"),
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "-3"),
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "1000"),
+    ],
+)
+def test_a_recovery_setting_outside_its_bounds_is_refused(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, value: str
+) -> None:
+    monkeypatch.setenv(env_var, value)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **_REQUIRED)
+
+
+@pytest.mark.parametrize(
+    ("env_var", "value"),
+    [
+        # NOT 1: the grace period must be strictly shorter than the lifetime and its own
+        # floor is 1, so 2 is the smallest coherent lifetime. Asserted below.
+        ("PASSWORD_RESET_TOKEN_MINUTES", "720"),
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "1"),
+        ("PASSWORD_RESET_MAX_LIVE_TOKENS", "10"),
+        ("PASSWORD_RESET_GRACE_MINUTES", "1"),
+        ("PASSWORD_RESET_GRACE_MINUTES", "29"),
+    ],
+)
+def test_the_bounds_are_inclusive_at_their_edges(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, value: str
+) -> None:
+    """The bound must not make a legitimate tuning value unreachable."""
+    monkeypatch.setenv(env_var, value)
+
+    assert Settings(_env_file=None, **_REQUIRED)
+
+
+def test_the_shortest_coherent_token_lifetime_is_two_minutes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The consequence of the grace coupling, stated rather than discovered.
+
+    `PASSWORD_RESET_TOKEN_MINUTES=1` used to be accepted and is now impossible: the grace
+    must be strictly shorter and its floor is 1. Pinned because an operator reading only the
+    field bounds would expect 1 to work.
+    """
+    monkeypatch.setenv("PASSWORD_RESET_TOKEN_MINUTES", "2")
+    monkeypatch.setenv("PASSWORD_RESET_GRACE_MINUTES", "1")
+
+    assert Settings(_env_file=None, **_REQUIRED).password_reset_token_minutes == 2
+
+
+@pytest.mark.parametrize(
+    ("token_minutes", "grace_minutes"),
+    [("30", "30"), ("30", "45"), ("2", "2"), ("1", "1")],
+)
+def test_a_grace_at_or_above_the_token_lifetime_is_refused(
+    monkeypatch: pytest.MonkeyPatch, token_minutes: str, grace_minutes: str
+) -> None:
+    """R2.5 / design D7's grace amendment, as a coupling the suite refuses to let drift.
+
+    A grace at or above the lifetime makes NOTHING old enough to retire, which silently turns
+    the per-account cap back into a permanent discard — the suppression vector the amendment
+    exists to close. Same shape as D4's coupling between the password minimum and the
+    temporary-password generator: a relationship between two values, so neither field's own
+    bounds can express it.
+    """
+    monkeypatch.setenv("PASSWORD_RESET_TOKEN_MINUTES", token_minutes)
+    monkeypatch.setenv("PASSWORD_RESET_GRACE_MINUTES", grace_minutes)
+
+    with pytest.raises(ValidationError):
+        Settings(_env_file=None, **_REQUIRED)
+
+
+def test_password_recovery_grace_has_its_documented_default() -> None:
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.password_reset_grace_minutes == 2
+    assert settings.password_reset_grace_minutes < settings.password_reset_token_minutes
+
+
+def test_the_frontend_base_url_is_configurable_per_environment(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("FRONTEND_BASE_URL", "https://app.autohost.example")
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.frontend_base_url == "https://app.autohost.example"
+
+
+def test_there_is_no_password_minimum_length_setting() -> None:
+    """Design D4, asserted as an absence.
+
+    R1.6 obliges the policy to accept every password `generate_temporary_password()` emits,
+    so a deployment that raised the minimum above `TEMPORARY_PASSWORD_LENGTH` would make the
+    system reject the credentials it hands out itself. The minimum is a domain constant, and
+    turning it into a setting must be a decision, not a drive-by.
+    """
+    assert not [name for name in Settings.model_fields if "password_min" in name]
+
+
+def test_no_smtp_setting_is_declared_before_it_is_used() -> None:
+    """Design D13 and rule 8 of `steering/security.md`, asserted as an absence.
+
+    The six `SMTP_*` names are reserved by name and without value in `.env.example` for
+    `hardening-release`. Rule 8 requires a secret IN USE to fail fast when it is missing;
+    declaring these now would make the application demand credentials no code reads, which
+    is how a fail-fast rule gets a reputation for crying wolf.
+    """
+    assert not [name for name in Settings.model_fields if name.startswith("smtp_")]
+
+
 def test_notification_delivery_has_its_documented_defaults() -> None:
     """Change `access-notifications`, design D4."""
     settings = Settings(_env_file=None, **_REQUIRED)

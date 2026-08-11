@@ -47,6 +47,7 @@ class User:
     status: UserStatus = UserStatus.ACTIVE
     preferred_language: str = "es"
     last_login_at: datetime | None = None
+    must_change_password: bool = False
 
     @classmethod
     def create(
@@ -60,8 +61,14 @@ class User:
         now: datetime,
         phone: str | None = None,
         preferred_language: str = "es",
+        must_change_password: bool = False,
     ) -> "User":
-        """A new ACTIVE account (R1.1). `email` must arrive already normalised."""
+        """A new ACTIVE account (R1.1). `email` must arrive already normalised.
+
+        `must_change_password` defaults to False so the bootstrap path — whose passwords a
+        person chooses — keeps today's behaviour. Administrative creation passes True
+        (`auth-account-recovery` R5.2): the password it hands out is temporary.
+        """
         if role not in GRANTABLE_ROLES:
             raise UnassignableRoleError(
                 f"Role {role.value} cannot be granted through the API"
@@ -78,6 +85,7 @@ class User:
             phone=phone,
             status=UserStatus.ACTIVE,
             preferred_language=preferred_language,
+            must_change_password=must_change_password,
         )
 
     def update_profile(
@@ -198,9 +206,28 @@ class User:
         """
         return self.change_status(UserStatus.INACTIVE, actor_user_id=actor_user_id)
 
-    def set_password_hash(self, password_hash: str) -> None:
-        """Replace the stored hash (R4.1). Takes the hash, never a cleartext password."""
+    def set_password_hash(self, password_hash: str, *, temporary: bool) -> None:
+        """Replace the stored hash (R4.1). Takes the hash, never a cleartext password.
+
+        Writes `must_change_password` in the same call, and that is the whole point
+        (`auth-account-recovery` design D5): one method for both fields means no path
+        **through this entity or its repository** replaces a password without deciding
+        whether it is temporary. Two methods that must be called together are two that
+        somebody will call separately, and the failure is silent — a temporary password that
+        never has to be changed, which is the deficiency R5 exists to close.
+        `SqlAlchemyUserRepository.apply_changes` enforces the same pairing, because it takes
+        a mapping of column names and is the second write path.
+
+        The scope of that claim is deliberate. `app/cli/bootstrap.py` builds `UserModel`
+        directly and never comes through here, so its accounts keep the column's `false`
+        server default — which design D5 names explicitly and calls correct: bootstrap
+        passwords are chosen by a person, not handed out as temporaries.
+
+        `temporary` is keyword-only and has no default on purpose: a default would make
+        forgetting it look like a decision.
+        """
         self.password_hash = password_hash
+        self.must_change_password = temporary
 
 
 @dataclass
@@ -250,6 +277,39 @@ class UserSession:
             return
         self.revoked_at = now
         self.revoked_reason = reason
+
+
+@dataclass
+class PasswordResetToken:
+    """One recovery link's server-side state (`auth-account-recovery` R3.1, design D1).
+
+    `token_hash` is a SHA-256 digest, never the token: the row must not let anyone
+    reconstruct the credential (R4.1). Deterministic rather than salted because that is what
+    makes the single conditional `UPDATE` of R3.2 possible — see
+    `app/auth/domain/recovery_tokens.py`.
+
+    Deliberately thin. `is_usable` states the invariant for readers and for the in-memory
+    double, but it is NOT what decides who spends a token: that is the database's job,
+    through one conditional statement (design D1/R3.2). Checking usability here and writing
+    afterwards would be exactly the read-then-write race the design forbids.
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    user_id: uuid.UUID
+    token_hash: str
+    expires_at: datetime
+    created_at: datetime
+    updated_at: datetime
+    used_at: datetime | None = None
+    revoked_at: datetime | None = None
+
+    def __post_init__(self) -> None:
+        _require_aware(self.expires_at, "expires_at")
+
+    def is_usable(self, now: datetime) -> bool:
+        _require_aware(now, "now")
+        return self.used_at is None and self.revoked_at is None and self.expires_at > now
 
 
 def _require_aware(value: datetime, field_name: str) -> None:

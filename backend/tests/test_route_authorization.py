@@ -38,6 +38,16 @@ ANONYMOUS_ENDPOINTS = {
     ("GET", "/health"),
     ("POST", "/api/v1/auth/login"),
     ("POST", "/api/v1/auth/refresh"),
+    # `auth-account-recovery` R2.1: anonymous by necessity — somebody who has lost their
+    # password cannot authenticate to ask for a link. Its protections are the shared per-IP
+    # budget (R2.4) and a response that is identical whatever the address resolves to (R2.2),
+    # not a permission.
+    ("POST", "/api/v1/auth/forgot-password"),
+    # `auth-account-recovery` R3.1: anonymous for the same reason — the token IS the
+    # credential, and somebody who lost their password cannot authenticate to spend it. Its
+    # protections are the shared per-IP budget (R3.7), single use enforced by one conditional
+    # UPDATE (R3.2), and one indistinguishable error for every failure (R3.3).
+    ("POST", "/api/v1/auth/reset-password"),
     ("GET", "/api/v1/cleaning-photos/{photo_id}"),
     # `reservations-webhooks`: anonymous because the route token IS the credential (rule 12(b) of
     # `steering/security.md`), paired with the provider's static per-tenant header (12(a)). A
@@ -315,6 +325,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/reservations/{reservation_id}/legal-registration/submit",
         "/api/v1/auth/logout",
         "/api/v1/auth/me",
+        # `auth-account-recovery` R1.4: self-service, so `MANAGE_OWN_SESSION` — the permission
+        # PRD §6 grants to every role that can authenticate. Asserted per role in
+        # `tests/auth/test_recovery_api.py`. The change's other two endpoints are anonymous
+        # and live in `ANONYMOUS_ENDPOINTS` instead.
+        "/api/v1/auth/change-password",
         "/api/v1/cleaning-checklist-templates",
         "/api/v1/cleaning-tasks",
         "/api/v1/cleaning-tasks/{task_id}",
@@ -343,3 +358,205 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/properties/{property_id}/dashboard",
         "/api/v1/provenance",
     }
+
+
+# --- the password-change gate's exempt list (`auth-account-recovery` R5.4, design D6) ---
+
+
+def test_every_password_change_exemption_names_a_real_route() -> None:
+    """An exemption pointing at nothing is a route that is NOT exempt, and the failure is
+    silent: the account is simply trapped on a path nobody tested.
+
+    Derived from the registered routes rather than hand-compared, so renaming
+    `/auth/change-password` breaks the suite here instead of turning the flag into a
+    permanent lockout with no endpoint back.
+    """
+    from app.auth.api.dependencies import PASSWORD_CHANGE_EXEMPT
+
+    routes, _ = _api_routes(create_app())
+    registered = {
+        (verb, path)
+        for path, route in routes
+        for verb in (route.methods or set())
+        if verb != "HEAD"
+    }
+
+    unknown = PASSWORD_CHANGE_EXEMPT - registered
+    assert not unknown, (
+        f"exempt entries that match no registered route: {sorted(unknown)}. An exemption "
+        "that points nowhere leaves the account fenced on that path."
+    )
+
+
+def test_the_way_out_of_the_password_change_state_is_exempt() -> None:
+    """The one entry whose absence is unrecoverable (R5.4).
+
+    Without it a temporary password becomes a permanent lockout: the holder can authenticate
+    and can reach nothing, including the endpoint that would fix it.
+    """
+    from app.auth.api.dependencies import PASSWORD_CHANGE_EXEMPT
+
+    assert ("POST", "/api/v1/auth/change-password") in PASSWORD_CHANGE_EXEMPT
+
+
+def test_the_exempt_list_is_no_wider_than_the_requirement() -> None:
+    """R5.4 names exactly three routes. A fourth would be an endpoint reachable with a
+    temporary password, which is what the gate exists to prevent — so the list is pinned as
+    a snapshot and any addition has to show up in this diff."""
+    from app.auth.api.dependencies import PASSWORD_CHANGE_EXEMPT
+
+    assert PASSWORD_CHANGE_EXEMPT == {
+        ("GET", "/api/v1/auth/me"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/change-password"),
+    }
+
+
+def test_no_password_change_exemption_uses_a_path_parameter() -> None:
+    """The constraint `password_change_exempt_key` imposes, enforced rather than trusted.
+
+    The gate matches the path the client requested, so a pattern like `/users/{id}` would
+    never equal it and the exemption would silently never fire. Failing loudly here is the
+    difference between "this route is not exempt" and "somebody thinks it is".
+    """
+    from app.auth.api.dependencies import PASSWORD_CHANGE_EXEMPT
+
+    parameterised = [path for _verb, path in PASSWORD_CHANGE_EXEMPT if "{" in path]
+    assert not parameterised, (
+        f"exempt entries with a path parameter: {sorted(parameterised)}. The gate compares "
+        "against the requested path, so these could never match."
+    )
+
+
+def test_the_exempt_key_uses_the_routed_path() -> None:
+    """The one structural test that CAN catch this bug, pinned against BOTH wrong formulas.
+
+    Two guards before this were vacuous (see `test_where_the_exempt_list_is_actually_enforced`),
+    and then a third formula was found wrong by review. The scope below reproduces both traps
+    at once: `route.path` is mount-relative AND a `root_path` prefix is present, as it would
+    be behind an ingress.
+
+      - `get_route_path(scope)`         -> "/api/v1/auth/me"      matches the list
+      - `scope["route"].path`           -> "/auth/me"             does NOT  (shipped broken)
+      - `request.url.path`              -> "/gw/api/v1/auth/me"   does NOT  (root_path trap)
+
+    The last two assertions are what make the first load-bearing instead of a restatement of
+    the constant.
+    """
+    from fastapi import Request
+
+    from app.auth.api.dependencies import (
+        PASSWORD_CHANGE_EXEMPT,
+        password_change_exempt_key,
+    )
+
+    class _MountRelativeRoute:
+        path = "/auth/me"
+
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "GET",
+            "path": "/gw/api/v1/auth/me",
+            "root_path": "/gw",
+            "query_string": b"",
+            "headers": [],
+            "route": _MountRelativeRoute(),
+        }
+    )
+
+    key = password_change_exempt_key(request)
+
+    assert key == ("GET", "/api/v1/auth/me")
+    assert key in PASSWORD_CHANGE_EXEMPT
+    # Both rejected formulas would have fenced this request.
+    assert ("GET", _MountRelativeRoute.path) not in PASSWORD_CHANGE_EXEMPT
+    assert ("GET", request.url.path) not in PASSWORD_CHANGE_EXEMPT
+
+
+def test_the_exempt_key_is_unaffected_by_the_absence_of_a_root_path() -> None:
+    """The ordinary deployment, so the fix is not only correct behind an ingress."""
+    from fastapi import Request
+
+    from app.auth.api.dependencies import (
+        PASSWORD_CHANGE_EXEMPT,
+        password_change_exempt_key,
+    )
+
+    request = Request(
+        scope={
+            "type": "http",
+            "method": "POST",
+            "path": "/api/v1/auth/change-password",
+            "root_path": "",
+            "query_string": b"",
+            "headers": [],
+        }
+    )
+
+    assert password_change_exempt_key(request) in PASSWORD_CHANGE_EXEMPT
+
+
+def test_where_the_exempt_list_is_actually_enforced() -> None:
+    """A signpost, not a guarantee — and the docstring is the point.
+
+    Two structural guards were written for the exempt list and BOTH were vacuous, so this
+    records the outcome rather than pretending a third one works:
+
+    1. The first compared the list against paths reconstructed by `_api_routes`. The gate
+       read `request.scope["route"].path`, which is mount-relative (`/auth/me`), so nothing
+       matched at runtime while the guard compared two full paths and passed.
+    2. The second drove real requests and captured the key from an `@app.middleware("http")`.
+       Middleware runs BEFORE routing, so `scope["route"]` is unset there and the buggy
+       formula falls back to `request.url.path` — the same value as the fixed one. Measured:
+       both formulas "MATCH" from middleware, so the guard could not tell them apart.
+
+    A third guard, `test_the_exempt_key_uses_the_routed_path`, IS non-vacuous — but only
+    because it constructs a scope carrying both traps at once (a mount-relative `route.path`
+    AND a non-empty `root_path`), so neither rejected formula can satisfy it. A guard that
+    merely reads the list still proves nothing.
+
+    What caught the bug, and what holds the property, is BEHAVIOURAL — four tests in
+    `tests/auth/test_recovery_api.py` that put an account in the must-change state and check
+    it can still reach each escape route:
+      - `test_the_whole_escape_route_works_end_to_end`
+      - `test_me_is_reachable_while_fenced_and_reports_the_flag`
+      - `test_logout_is_reachable_while_fenced`
+      - `test_refresh_works_while_fenced`
+    Those failed loudly with `403 PASSWORD_CHANGE_REQUIRED` on all three exempt routes.
+
+    The lesson for whoever edits the list: a test that inspects the list proves nothing about
+    the gate. Add a behavioural test for the new entry.
+    """
+    from app.auth.api.dependencies import PASSWORD_CHANGE_EXEMPT
+
+    assert len(PASSWORD_CHANGE_EXEMPT) == 3
+
+
+def test_refresh_is_not_exempt_and_does_not_need_to_be() -> None:
+    """R5.5: `POST /auth/refresh` must keep working for an account owing a change, and it
+    does so by not passing through the gate at all rather than by being listed.
+
+    Pinned because "add it to the exempt list" is the obvious wrong fix if somebody later
+    believes refresh is blocked: listing it would be harmless but misleading, and the real
+    property is that the dependency is not in its path.
+    """
+    from app.auth.api.dependencies import (
+        PASSWORD_CHANGE_EXEMPT,
+        get_authenticated_request,
+    )
+
+    assert ("POST", "/api/v1/auth/refresh") not in PASSWORD_CHANGE_EXEMPT
+
+    routes, _ = _api_routes(create_app())
+    refresh = [
+        route
+        for path, route in routes
+        if path == "/api/v1/auth/refresh" and "POST" in (route.methods or set())
+    ]
+    assert len(refresh) == 1
+    dependencies = {
+        getattr(dependant.call, "__name__", None)
+        for dependant in refresh[0].dependant.dependencies
+    }
+    assert get_authenticated_request.__name__ not in dependencies

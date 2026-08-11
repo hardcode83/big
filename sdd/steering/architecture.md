@@ -4,9 +4,11 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-09_autohost-er-entidades.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-10_autohost-er-entidades.png`.
 
-El de entidades se regeneró en `reservations-webhooks` al entrar `webhook_endpoints`: **29 entidades, 71 relaciones**. El anterior, `2026-08-06_...`, se borró; aquel salió de `pms-provider-resolution` con 28 y 67 al entrar `pms_credentials` y `properties.pms_provider`, y a su vez había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
+El de entidades se regeneró en `auth-account-recovery` al entrar `password_reset_tokens` y `users.must_change_password`: **30 entidades, 73 relaciones**. El anterior, `2026-08-09_...`, se borró; aquel salió de `reservations-webhooks` con 29 y 71 al entrar `webhook_endpoints`, y a su vez había sustituido al `2026-08-06_...` de `pms-provider-resolution` (28 y 67), que había sustituido a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
+
+**Qué cuenta «relaciones», que hasta ahora no estaba escrito**: una por **columna con clave ajena**. Conviene fijarlo porque la cifra se venía arrastrando sin regla y no había forma de saber si dos cifras eran comparables. Bajo esta regla la serie sí lo es —71 de `reservations-webhooks` más las dos claves ajenas de `password_reset_tokens` son las 73 de ahora— y sólo la de `pms-provider-resolution` queda fuera: aquel «67» contaba otra cosa, porque su propio esquema daba 70 con esta regla. Si se cuentan **pares de tablas distintos** en vez de columnas, hoy son **71**, no 73: hay dos pares que se relacionan por dos columnas cada uno.
 
 El hexagonal se regeneró en `dashboard-api` (el `2026-07-13_...` se borró). Dibujaba **trece** cajas de dominio y ya le faltaban `reviews` y `audit` desde `domain-foundation-financial`; ahora dibuja **dieciséis**, con `dashboard` marcado aparte porque es el único de solo lectura y sin `infrastructure/` propia.
 

@@ -9,7 +9,14 @@ from typing import Annotated
 from fastapi import Depends, Request
 from fastapi.security import HTTPAuthorizationCredentials, HTTPBearer
 from sqlalchemy.ext.asyncio import AsyncSession
+from starlette.routing import get_route_path
 
+from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.auth.application.recovery import (
+    ChangeOwnPasswordUseCase,
+    ConsumePasswordResetUseCase,
+    RequestPasswordResetUseCase,
+)
 from app.auth.application.use_cases import (
     GetCurrentUserUseCase,
     LoginUseCase,
@@ -17,13 +24,18 @@ from app.auth.application.use_cases import (
     RefreshTokenUseCase,
 )
 from app.auth.domain.context import RequestContext
-from app.auth.domain.exceptions import InvalidTokenError
+from app.auth.domain.exceptions import InvalidTokenError, PasswordChangeRequiredError
 from app.auth.domain.policy import Permission, is_allowed
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import (
+    SqlAlchemyPasswordResetTokenRepository,
     SqlAlchemySessionRepository,
     SqlAlchemyTenantStatusReader,
     SqlAlchemyUserRepository,
+)
+from app.notifications.infrastructure.adapters import adapter_registry
+from app.notifications.infrastructure.repositories import (
+    SqlAlchemyNotificationLogRepository,
 )
 from app.auth.infrastructure.throttle import RedisLoginThrottle
 from app.auth.infrastructure.token_codec import JwtTokenCodec
@@ -196,6 +208,77 @@ def get_current_user_use_case(session: SessionDep) -> GetCurrentUserUseCase:
     return GetCurrentUserUseCase(users=SqlAlchemyUserRepository(session))
 
 
+def get_change_own_password_use_case(
+    session: SessionDep,
+    hasher: Annotated[BcryptPasswordHasher, Depends(get_password_hasher)],
+    throttle: Annotated[RedisLoginThrottle, Depends(get_login_throttle)],
+) -> ChangeOwnPasswordUseCase:
+    """`auth-account-recovery` R1, R1.8.
+
+    The throttle is here for the per-ACCOUNT half only — the failure counter and the lockout
+    `login` already owns (design D14). It gets no per-IP budget: the caller is authenticated,
+    so `user_id` is both available and a sharper key than the address.
+
+    An earlier version of this factory passed no throttle at all, on the reasoning that an
+    authenticated caller is outside the anonymous endpoints' budget. The security panel of
+    section 4 showed that was the right observation and the wrong conclusion: this endpoint
+    verifies a credential exactly as `login` does, so without the counter it becomes the
+    CHEAPER place to guess one — no lockout, no record, no trace — and a wrong-password loop
+    holds the bcrypt limiter that `login` shares.
+    """
+    return ChangeOwnPasswordUseCase(
+        users=SqlAlchemyUserRepository(session),
+        sessions=SqlAlchemySessionRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        hasher=hasher,
+        throttle=throttle,
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_request_password_reset_use_case(
+    session: SessionDep,
+    throttle: Annotated[RedisLoginThrottle, Depends(get_login_throttle)],
+) -> RequestPasswordResetUseCase:
+    """`auth-account-recovery` R2. Anonymous, so it takes the per-IP budget (R2.4).
+
+    The adapter registry is the shared one: `EMAIL` resolves to `ConsoleEmailAdapter` today,
+    which means the notice reaches nobody until SMTP arrives with `hardening-release`
+    (R6.4, EXTERNAL_DEPENDENCY). The flow is exercised by the suite, where the adapter is a
+    double that captures what was sent.
+    """
+    return RequestPasswordResetUseCase(
+        users=SqlAlchemyUserRepository(session),
+        tokens=SqlAlchemyPasswordResetTokenRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        adapters=adapter_registry(),
+        throttle=throttle,
+        uow=SqlAlchemyUnitOfWork(session),
+        token_minutes=settings.password_reset_token_minutes,
+        max_live_tokens=settings.password_reset_max_live_tokens,
+        grace_minutes=settings.password_reset_grace_minutes,
+        frontend_base_url=settings.frontend_base_url,
+    )
+
+
+def get_consume_password_reset_use_case(
+    session: SessionDep,
+    hasher: Annotated[BcryptPasswordHasher, Depends(get_password_hasher)],
+    throttle: Annotated[RedisLoginThrottle, Depends(get_login_throttle)],
+) -> ConsumePasswordResetUseCase:
+    """`auth-account-recovery` R3. Anonymous, so it takes the per-IP budget (R3.7), and the
+    throttle again for R3.5(c) — the same object clears the account lock after the commit."""
+    return ConsumePasswordResetUseCase(
+        users=SqlAlchemyUserRepository(session),
+        tokens=SqlAlchemyPasswordResetTokenRepository(session),
+        sessions=SqlAlchemySessionRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        hasher=hasher,
+        throttle=throttle,
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
 class AuthenticatedRequest:
     """What an authenticated endpoint gets: the context plus its token's family."""
 
@@ -204,7 +287,80 @@ class AuthenticatedRequest:
         self.family_id = family_id
 
 
+# The only authenticated routes an account still owing a password change may reach
+# (`auth-account-recovery` R5.4, design D6). Pairs of (method, path), NOT bare paths: a
+# `GET` would otherwise inherit the exemption of a `POST` of the same name, which is the
+# same reasoning `tests/test_route_authorization.py` applies to its anonymous list.
+#
+# Each entry is here because without it the account would be trapped:
+#   - `POST /auth/change-password` is the way OUT of the state. Losing this one turns the
+#     flag into a permanent lockout with no endpoint back.
+#   - `GET /auth/me` is how the frontend learns to redirect there (R5.6).
+#   - `POST /auth/logout` is how somebody who cannot change it right now walks away
+#     cleanly instead of leaving a live session behind.
+#
+# `POST /auth/refresh` is deliberately ABSENT and still works: it does not depend on this
+# function at all, which is what R5.5 requires — a temporary password must still yield a
+# usable session, or the account is dead rather than merely fenced.
+PASSWORD_CHANGE_EXEMPT: frozenset[tuple[str, str]] = frozenset(
+    {
+        ("GET", "/api/v1/auth/me"),
+        ("POST", "/api/v1/auth/logout"),
+        ("POST", "/api/v1/auth/change-password"),
+    }
+)
+
+
+def password_change_exempt_key(request: Request) -> tuple[str, str]:
+    """The `(method, path)` pair the gate matches: the method and the **routed** path.
+
+    `starlette.routing.Route.matches` computes `get_route_path(scope)` and regexes the route
+    against it, so using the same function here makes the key by construction the path the
+    routing decision was made on. That property is the whole point: both bugs below were the
+    key disagreeing with what actually routed.
+
+    Exported so `test_the_exempt_key_uses_the_routed_path` pins this function directly rather
+    than re-deriving a path of its own.
+
+    **Two formulas were tried and both are wrong**, each having produced or threatened the
+    same failure — an account owing a password change refused on all three of its escape
+    routes, i.e. a permanent lockout with no endpoint back:
+
+    - `request.scope["route"].path` returns `/auth/me`, not `/api/v1/auth/me`. This version
+      shipped and fenced everything. The reason is not a `Mount`: this FastAPI version
+      composes `include_router(prefix=...)` **lazily** through `_IncludedRouter` rather than
+      flattening child routes' `.path`, so the object in the scope carries the path as the
+      child router declared it, prefix excluded — and it does so at dependency-resolution
+      time too, not only in middleware. Diagnosed by the QA panel of section 5.
+    - `request.url.path` is `scope["path"]` unstripped, so whenever the server leaves the
+      prefix in it — the case an ingress produces — it reads `root_path + routed path` and
+      the key becomes `/gw/api/v1/auth/me`, matching nothing. Not universal: some ASGI
+      servers strip `root_path` before the app sees it, which is why `get_route_path` carries
+      its own `startswith` guard. But the project already routes through an ingress
+      (`api-ingress-routing`), so the breaking case was live rather than hypothetical. Found
+      by the security panel of section 5.
+
+    `get_route_path` strips `root_path` and returns the app-relative path, which is what
+    `PASSWORD_CHANGE_EXEMPT` holds and what stays true wherever the app is mounted.
+
+    **Constraint this imposes on the exempt list**: every entry must be a literal,
+    parameterless path, because a route pattern like `/users/{id}` would never equal a
+    routed path. All three entries are, and R5.4 names no others;
+    `test_no_password_change_exemption_uses_a_path_parameter` enforces it so a future
+    parameterised exemption fails loudly instead of silently never matching.
+
+    **Do not trust a test that merely inspects the exempt list.** Two such guards were
+    written for this and both were vacuous — the measurements are recorded in
+    `test_where_the_exempt_list_is_actually_enforced`. What holds the property is the four
+    behavioural tests in `tests/auth/test_recovery_api.py` that fence an account and walk
+    each escape route, plus `test_the_exempt_key_uses_the_routed_path`, which is non-vacuous
+    only because it constructs a scope carrying both rejected formulas' traps at once.
+    """
+    return request.method, get_route_path(request.scope)
+
+
 async def get_authenticated_request(
+    request: Request,
     session: SessionDep,
     codec: CodecDep,
     credentials: Annotated[HTTPAuthorizationCredentials | None, Depends(bearer_scheme)],
@@ -215,6 +371,12 @@ async def get_authenticated_request(
     must be ACTIVE, and the effective role is the one stored now — so suspending an
     account or demoting a role takes effect immediately instead of waiting up to 15
     minutes for the access token to expire.
+
+    Also the gate of R5.4 (design D6): this is the single point every authenticated
+    request passes through, and it already holds the reloaded `User`, so the
+    `must_change_password` check costs no extra query. Putting it in `require(...)`
+    instead would miss any future endpoint written with the public `AuthenticatedDep`,
+    which is the hole that function's own docstring documents.
     """
     if credentials is None or credentials.scheme.lower() != "bearer":
         raise InvalidTokenError("Bearer token required")
@@ -235,6 +397,15 @@ async def get_authenticated_request(
         # to `user-management`, the first change with endpoints that take one, where it
         # is a blocking acceptance criterion (design D15).
         raise InvalidTokenError("Token is not valid")
+
+    # R5.4: a temporary password authenticates, but it does not operate.
+    if (
+        user.must_change_password
+        and password_change_exempt_key(request) not in PASSWORD_CHANGE_EXEMPT
+    ):
+        raise PasswordChangeRequiredError(
+            "This account must change its password before performing this action"
+        )
 
     # `preferred_language` costs no query: the user row was just reloaded above, and
     # discarding it here is what `dashboard-api` design D3 changed. `Locale.resolve`

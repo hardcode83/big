@@ -1,9 +1,11 @@
 """Ports owned by the auth domain (R6.5, design D6/D16).
 
 Every port speaks in domain entities, never ORM models, and every method that
-touches a tenant-scoped entity takes `tenant_id` explicitly — with one deliberate
-exception, `find_by_email_globally`, named so it is impossible to mistake for an
-oversight (design D16).
+touches a tenant-scoped entity takes `tenant_id` explicitly — with **two** deliberate
+exceptions, `find_by_email_globally` (design D16 of `auth-tenancy`) and
+`consume_globally` (design D3 of `auth-account-recovery`). Both serve an anonymous
+endpoint, where there is no tenant yet, and both are named `*_globally` so a grep for
+that suffix enumerates every cross-tenant read — impossible to mistake for oversights.
 """
 
 import uuid
@@ -11,7 +13,7 @@ from collections.abc import Mapping
 from datetime import datetime, timedelta
 from typing import Protocol
 
-from app.auth.domain.entities import User, UserSession
+from app.auth.domain.entities import PasswordResetToken, User, UserSession
 from app.auth.domain.enums import SessionRevokedReason, UserRole
 from app.auth.domain.repositories import UserFilters, UserPage
 from app.auth.domain.value_objects import AccessTokenClaims, RefreshTokenClaims
@@ -23,7 +25,11 @@ class UserRepository(Protocol):
         ...
 
     async def find_by_email_globally(self, email: str) -> User | None:
-        """The only unscoped query behind this port (design D16).
+        """The only unscoped query behind THIS port (design D16).
+
+        The system's other one is `PasswordResetTokenRepository.consume_globally`
+        (`auth-account-recovery` design D3), on a different port for a different anonymous
+        endpoint. Two in total; both named `*_globally`.
 
         Login is anonymous: there is no tenant yet, so the address has to identify
         the user on its own. It can, because a normalised email is unique across the
@@ -175,6 +181,87 @@ class SessionRepository(Protocol):
         ...
 
 
+class PasswordResetTokenRepository(Protocol):
+    """Recovery links (`auth-account-recovery` R3, design D1/D3/D7).
+
+    No unconditional `save`, for the same reason `SessionRepository` refuses one: the only
+    mutation that decides anything is `consume_globally`, and it is conditional.
+    """
+
+    async def add(self, tenant_id: uuid.UUID, token: "PasswordResetToken") -> None:
+        """`tenant_id` is the acting tenant; a token for another one is refused."""
+        ...
+
+    async def consume_globally(
+        self, token_hash: str, now: datetime
+    ) -> "PasswordResetToken | None":
+        """Spend a token if it is still spendable; return the row, or None (R3.2, design D1).
+
+        **THE SECOND unscoped query in the system**, and named so a grep for the two
+        `*_globally` methods still enumerates every cross-tenant read that exists — the first
+        is `UserRepository.find_by_email_globally`. Unscoped because the endpoint is anonymous:
+        there is no tenant yet, and the token IS the credential. Its unique index identifies it
+        across the whole installation, so the `tenant_id` comes OUT of the row found, never in
+        from the request — which is why the request schema has no field for one. Embedding the
+        tenant in the token was rejected in design D3 precisely because the scope would then be
+        supplied by the attacker.
+
+        The check and the write must be ONE statement testing every condition that makes a
+        token unspendable — used, revoked, expired. Splitting them lets two concurrent
+        presentations of the same link both reset the password, which is the whole point of
+        R3.2. Returning the row rather than a bool is what lets the caller learn the
+        `user_id`/`tenant_id` it could not know beforehand.
+        """
+        ...
+
+    async def count_live(self, tenant_id: uuid.UUID, user_id: uuid.UUID, now: datetime) -> int:
+        """How many unspent, unrevoked, unexpired tokens this account already has (R2.5, D7).
+
+        Scoped by tenant, unlike `consume_globally`: by the time this runs the account has
+        been resolved, so the tenant is known and there is no reason to go without it.
+        """
+        ...
+
+    async def revoke_oldest_beyond(
+        self,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        keep_newest: int,
+        now: datetime,
+        older_than: datetime,
+    ) -> int:
+        """Revoke this account's live tokens except the `keep_newest` most recent; count them.
+
+        What makes the per-account cap of R2.5 a bound rather than a suppression tool
+        (design D7, amended). Discarding a request once the cap was reached let anyone who
+        knew an address silence the real owner's recovery for the token lifetime, with no
+        signal to them. Revoking the oldest instead means a legitimate request always wins
+        while the number of coexisting valid links stays capped.
+
+        Takes `keep_newest` rather than revoking exactly one, so lowering
+        `PASSWORD_RESET_MAX_LIVE_TOKENS` in configuration also converges instead of leaving
+        an account permanently over its new cap.
+
+        `older_than` is the grace boundary: a token created after it is NEVER retired, so a
+        freshly issued link survives the window in which its owner clicks it. Returning 0 is
+        therefore meaningful — it says every live token is inside the grace and the caller
+        should drop the request rather than emit, which is what keeps per-account mail bounded
+        across IPs (R2.5, design D7's grace amendment).
+        """
+        ...
+
+    async def revoke_other_live(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, keep_id: uuid.UUID, now: datetime
+    ) -> int:
+        """Revoke every live token of this account except `keep_id`; returns how many (R3.5b).
+
+        `keep_id` is the token just consumed. Excluding it keeps the row honest: it is
+        `used`, not `revoked`, and relabelling it would lose the distinction between a link
+        somebody spent and a link this reset invalidated.
+        """
+        ...
+
+
 class PasswordHasher(Protocol):
     """Async on purpose, even though hashing is pure computation (design D21).
 
@@ -256,3 +343,15 @@ class LoginThrottle(Protocol):
         ...
 
     async def reset_failures(self, user_id: uuid.UUID) -> None: ...
+
+    async def clear_account_lock(self, user_id: uuid.UUID) -> None:
+        """Drop BOTH the failure counter and the lock (`auth-account-recovery` R3.5c, D8).
+
+        Distinct from `reset_failures`, which only deletes the counter. That is enough for the
+        login path — a successful login implies the account was not locked — but not here:
+        ten failed attempts are exactly what precedes "I've lost my password", so a completed
+        recovery that left `login:lock:<uid>` standing would have the user rejected by the
+        very next login with the same generic `401`, for up to fifteen minutes. Recovering
+        without this recovers nothing.
+        """
+        ...

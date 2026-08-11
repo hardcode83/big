@@ -630,3 +630,45 @@ sudo iptables -L INPUT -n --line-numbers | head
 
 > **Tras el primer deploy con las dos redes**, un `docker network ls` puede seguir mostrando la vieja `autohostai_default` huérfana: compose no siempre la elimina en un `up`. Es inocua —ya no hay contenedores en ella— pero conviene retirarla con `docker network prune` para que la topología que ves sea la que hay.
 
+## 8. Rescatar una cuenta sin acceso (change `auth-account-recovery`)
+
+**Cuándo**: alguien no puede entrar y la recuperación por correo no le sirve. Hoy eso es
+**siempre**, porque el aviso de recuperación no llega a nadie: el canal `EMAIL` resuelve a
+`ConsoleEmailAdapter`, al que `specs/access-notifications.md` prohíbe registrar el contenido y el
+destinatario, así que el enlace no se puede leer ni del log. El adapter SMTP real llega con
+`hardening-release`.
+
+El caso que **no tiene otra salida** es el único `TENANT_OWNER` activo de un tenant: solo
+`TENANT_OWNER` tiene `MANAGE_USERS`, así que nadie más puede resetearlo, y él tendría que
+autenticarse para resetearse a sí mismo. El bootstrap tampoco vale: es idempotente y no modifica
+un usuario que ya existe.
+
+```bash
+# En la VM, desde el directorio del compose de deploy.
+docker compose exec backend python -m app.cli.reset_password --email <dirección>
+```
+
+Imprime la contraseña temporal **una sola vez** por salida estándar. No queda en ningún log ni en
+la fila de auditoría — solo en tu terminal y en tu portapapeles, así que entrégala por un canal
+que te fíes y no la pegues en un ticket.
+
+Lo que hace, y por lo que existe en lugar de un `UPDATE` a mano:
+
+1. Escribe la contraseña **por la entidad**, así que la cuenta queda obligada a cambiarla antes
+   de poder operar (recibe `403 PASSWORD_CHANGE_REQUIRED` en todo salvo `GET /auth/me`,
+   `POST /auth/logout` y `POST /auth/change-password`).
+2. **Revoca todas las sesiones** del usuario. Un rescate que las dejara vivas no habría
+   recuperado la cuenta, le habría añadido una credencial.
+3. **Levanta el bloqueo por fallos de login**. Diez intentos fallidos son justo lo que precede a
+   una llamada de soporte, y sin esto el login inmediatamente posterior seguiría rechazado.
+4. Deja **fila de auditoría** (`USER_PASSWORD_RESET`, sin actor: una línea de comandos no tiene
+   identidad que registrar).
+
+**Si avisa de que no pudo levantar el bloqueo** (Redis inalcanzable), la contraseña **sí se
+cambió**: el bloqueo caduca por su cuenta dentro de la ventana de lockout. Reintentar el comando
+es inocuo, pero genera otra contraseña.
+
+No hay objetivo de `make` para esto a propósito: es una operación de rescate, no parte del flujo
+normal. Detalle completo de los tres endpoints y de la política de contraseña en
+`docs/auth-account-recovery.md`.
+

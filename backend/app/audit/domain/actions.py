@@ -70,6 +70,14 @@ USER_UPDATED = "USER_UPDATED"
 USER_ROLE_CHANGED = "USER_ROLE_CHANGED"
 USER_DEACTIVATED = "USER_DEACTIVATED"
 USER_PASSWORD_RESET = "USER_PASSWORD_RESET"
+# `auth-account-recovery` design D9. Three password actions and not one, because rule 9 of
+# `steering/security.md` only makes an operation auditable if it can be FOUND by filtering on
+# `action` — and "an administrator reset somebody's password", "the holder changed their own"
+# and "the holder recovered the account through a mailed link" are exactly the three a review
+# of an incident needs to tell apart. Collapsing them would leave the trail unable to answer
+# the question it exists for.
+USER_PASSWORD_CHANGED = "USER_PASSWORD_CHANGED"
+USER_PASSWORD_RECOVERED = "USER_PASSWORD_RECOVERED"
 TENANT_UPDATED = "TENANT_UPDATED"
 TENANT_CONFIG_UPDATED = "TENANT_CONFIG_UPDATED"
 
@@ -184,6 +192,8 @@ ACTIONS = frozenset(
         USER_ROLE_CHANGED,
         USER_DEACTIVATED,
         USER_PASSWORD_RESET,
+        USER_PASSWORD_CHANGED,
+        USER_PASSWORD_RECOVERED,
         TENANT_UPDATED,
         TENANT_CONFIG_UPDATED,
         PMS_CREDENTIAL_READ,

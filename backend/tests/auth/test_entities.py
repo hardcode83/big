@@ -1,9 +1,9 @@
 import uuid
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
-from app.auth.domain.entities import User
+from app.auth.domain.entities import PasswordResetToken, User
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.exceptions import SelfRoleChangeError, UnassignableRoleError
 
@@ -160,9 +160,61 @@ def test_update_profile_can_clear_an_optional_field() -> None:
 def test_set_password_hash_replaces_it() -> None:
     user = _user(password_hash="old")
 
-    user.set_password_hash("new")
+    user.set_password_hash("new", temporary=False)
 
     assert user.password_hash == "new"
+
+
+# --- the temporary-password flag (`auth-account-recovery` R5.1-R5.3, design D5) -----
+
+
+def test_a_new_user_does_not_have_to_change_its_password_by_default() -> None:
+    """The bootstrap path chooses its own passwords, so the default must stay False."""
+    assert _user().must_change_password is False
+
+
+def test_setting_a_temporary_hash_raises_the_flag() -> None:
+    user = _user()
+
+    user.set_password_hash("temp-hash", temporary=True)
+
+    assert user.password_hash == "temp-hash"
+    assert user.must_change_password is True
+
+
+def test_setting_a_chosen_hash_clears_the_flag() -> None:
+    """R5.3: completing a change or a recovery is what takes the account out of the state."""
+    user = _user(must_change_password=True)
+
+    user.set_password_hash("chosen-hash", temporary=False)
+
+    assert user.must_change_password is False
+
+
+def test_the_hash_and_the_flag_cannot_be_written_apart() -> None:
+    """Design D5: one method owns both fields, so no path replaces a password without
+    deciding whether it is temporary. `temporary` is keyword-only and has no default."""
+    user = _user()
+
+    with pytest.raises(TypeError):
+        user.set_password_hash("new")  # type: ignore[call-arg]
+
+
+def test_create_can_start_an_account_owing_a_password_change() -> None:
+    """R5.2: administrative creation hands out a temporary password."""
+    now = datetime.now(timezone.utc)
+
+    user = User.create(
+        tenant_id=uuid.uuid4(),
+        name="Ana",
+        email="ana@example.com",
+        password_hash="hashed",
+        role=UserRole.CLEANER,
+        now=now,
+        must_change_password=True,
+    )
+
+    assert user.must_change_password is True
 
 
 def test_create_starts_active_with_the_given_role() -> None:
@@ -295,6 +347,9 @@ FIELD_OWNERS = {
     "role": "change_role",
     "status": "change_status",
     "password_hash": "set_password_hash",
+    # Same owner as `password_hash`, and that IS the design (`auth-account-recovery` D5):
+    # one method writes both, so the flag cannot drift away from the hash it describes.
+    "must_change_password": "set_password_hash",
     "name": "update_profile",
     "phone": "update_profile",
     "preferred_language": "update_profile",
@@ -329,3 +384,57 @@ def test_every_mutable_field_of_the_user_has_a_method_that_owns_it() -> None:
 def test_the_immutable_list_only_names_real_fields() -> None:
     """Stops a renamed field from silently becoming "immutable" and escaping the check above."""
     assert IMMUTABLE_AFTER_CREATION <= set(User.__dataclass_fields__)
+
+
+# --- the recovery token (`auth-account-recovery` R3.1, R3.3, design D1) -------------
+
+
+def _token(**overrides) -> PasswordResetToken:
+    now = datetime.now(timezone.utc)
+    values = {
+        "id": uuid.uuid4(),
+        "tenant_id": uuid.uuid4(),
+        "user_id": uuid.uuid4(),
+        "token_hash": "a" * 64,
+        "expires_at": now + timedelta(minutes=30),
+        "created_at": now,
+        "updated_at": now,
+    }
+    values.update(overrides)
+    return PasswordResetToken(**values)
+
+
+def test_a_fresh_token_is_usable() -> None:
+    assert _token().is_usable(datetime.now(timezone.utc)) is True
+
+
+def test_a_used_token_is_not_usable() -> None:
+    now = datetime.now(timezone.utc)
+    assert _token(used_at=now).is_usable(now) is False
+
+
+def test_a_revoked_token_is_not_usable() -> None:
+    now = datetime.now(timezone.utc)
+    assert _token(revoked_at=now).is_usable(now) is False
+
+
+def test_an_expired_token_is_not_usable() -> None:
+    now = datetime.now(timezone.utc)
+    assert _token(expires_at=now - timedelta(seconds=1)).is_usable(now) is False
+
+
+def test_a_token_expiring_exactly_now_is_not_usable() -> None:
+    """The bound is strict, matching the `expires_at > :now` of the consuming UPDATE (D1)."""
+    now = datetime.now(timezone.utc)
+    assert _token(expires_at=now).is_usable(now) is False
+
+
+def test_a_naive_expiry_is_refused() -> None:
+    """Same guard as `UserSession`: a naive datetime compares wrongly against an aware one."""
+    with pytest.raises(ValueError):
+        _token(expires_at=datetime.now())
+
+
+def test_a_naive_now_is_refused() -> None:
+    with pytest.raises(ValueError):
+        _token().is_usable(datetime.now())

@@ -36,3 +36,4 @@
 | reservations-webhooks | new, design, tasks, run, review, ship, archive | 553657 | 1839411 | 395009670 | 262.6137 | 2026-08-08 | 2026-08-09 |
 | dashboard-api | new, design, tasks, run, review, ship, archive | 425934 | 1251691 | 309988498 | 198.8594 | 2026-08-09 | 2026-08-09 |
 | backend-suite-runtime | new, design, tasks, run, review, ship, archive | 425400 | 1073789 | 237164785 | 163.5965 | 2026-08-09 | 2026-08-10 |
+| auth-account-recovery | new, design, tasks, run, review, ship | 536444 | 1725479 | 536245695 | 344.6867 | 2026-08-09 | — |

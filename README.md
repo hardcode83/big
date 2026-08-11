@@ -124,6 +124,17 @@ Endpoints de auth: `POST /api/v1/auth/login`, `POST /api/v1/auth/refresh`,
 `POST /api/v1/auth/logout`, `GET /api/v1/auth/me`. Operación, configuración del límite de
 intentos y las cosas que sorprenden: [`docs/auth-tenancy.md`](docs/auth-tenancy.md).
 
+Autoservicio de contraseña: `POST /api/v1/auth/change-password` (con sesión),
+`POST /api/v1/auth/forgot-password` y `POST /api/v1/auth/reset-password` (anónimos). Quien
+recibe una contraseña temporal —del bootstrap, de `POST /api/v1/users` o del rescate de abajo—
+queda con `must_change_password`, y hasta que la cambie toda petición autenticada responde
+`403 PASSWORD_CHANGE_REQUIRED` salvo `me`, `logout` y `change-password`. **El aviso de
+recuperación no llega todavía a nadie**: el canal de correo es el adapter de consola, al que se
+le prohíbe registrar el enlace, así que el SMTP real llega con `hardening-release` y hasta
+entonces la vía que recupera una cuenta es el comando de rescate. Política de contraseña, los
+tres endpoints y ese procedimiento:
+[`docs/auth-account-recovery.md`](docs/auth-account-recovery.md).
+
 Administración del tenant: `/api/v1/users` (alta, listado, edición, baja, reset de contraseña)
 y `/api/v1/tenants/{id}` (datos del tenant y sus umbrales, SLAs y ventanas). Quién puede hacer
 qué y qué rastro deja: [`docs/user-management.md`](docs/user-management.md).
@@ -204,6 +215,7 @@ Comandos de consola del backend (no hay endpoint para ninguno, a propósito):
 
 - `python -m app.integrations.cli.pms_sync <tenant>` — sincroniza reservas desde el PMS de cada propiedad.
 - `python -m app.integrations.cli.pms_credentials set|rotate|show-providers` — guarda y rota las credenciales de proveedor. El secreto se pasa por `PMS_CREDENTIAL_SECRET`, **nunca como argumento**: un argumento queda en el historial del shell y es visible en `ps`. Ver `docs/pms-credentials.md`.
+- `python -m app.cli.reset_password --email <dirección>` — rescata una cuenta sin acceso: emite una contraseña temporal, la imprime **una sola vez**, revoca las sesiones y levanta el bloqueo por intentos fallidos. Es la única vía de vuelta del único `TENANT_OWNER` de un tenant, y hoy también la única para cualquiera, porque el correo de recuperación no entrega todavía. **A propósito no tiene objetivo de `make`**: es una operación de rescate, no parte del flujo normal. Ver [`docs/auth-account-recovery.md`](docs/auth-account-recovery.md) y [`RUNBOOK.md`](infra/environments/dev/RUNBOOK.md) §8.
 
 ## Despliegue a dev (CD)
 

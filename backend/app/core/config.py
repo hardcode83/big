@@ -66,6 +66,55 @@ class Settings(BaseSettings):
     login_max_failed_attempts: int = 10
     login_lockout_minutes: int = 15
 
+    # Password recovery. Design D13 named three; `password_reset_grace_minutes` below is the
+    # fourth, added by D7's grace amendment during `run`, so **four** settings live here. None
+    # of them is a secret, so each carries a working default and none belongs in the
+    # `${VAR:?}` fail-fast list of rule 8 of `steering/security.md`.
+    #
+    # 30 minutes is R3.4's "del orden de los minutos, no de los días", with enough margin for
+    # somebody to read the mail on a phone.
+    #
+    # Bounded, not merely defaulted: R3.4 says the system SHALL **fijar** a short lifetime,
+    # and an unbounded int makes "short" a property of the default rather than of the system
+    # — `PASSWORD_RESET_TOKEN_MINUTES=43200` would silently buy 30-day recovery links. The
+    # ceiling is 12 hours: comfortably under "días" whichever way that is read, and still far
+    # more room than any legitimate tuning needs.
+    password_reset_token_minutes: int = Field(default=30, gt=0, le=720)
+    # How many live links one account may accumulate (design D7). Bounds two things with one
+    # mechanism: how much mail an attacker can provoke from different IPs, and how many valid
+    # links coexist for one account — a security property in its own right.
+    #
+    # `ge=1` because 0 or a negative value does not tighten the cap, it changes what the cap
+    # MEANS: depending on how the comparison is written it either refuses every recovery
+    # outright or wraps around to unlimited, and both are silent. `le=10` keeps the setting a
+    # tuning knob rather than a way to switch D7 off.
+    password_reset_max_live_tokens: int = Field(default=3, ge=1, le=10)
+    # How long a freshly issued link is protected from being retired by the cap (R2.5, design
+    # D7's grace amendment). Without it, revoking the oldest let a sustained attacker retire
+    # the owner's link seconds after it was sent, and removed the only per-account bound on
+    # mail volume — a per-IP budget cannot bound a per-account total across IPs.
+    #
+    # Must stay well under `password_reset_token_minutes`; the validator below enforces it,
+    # because a grace at or above the lifetime would make nothing revocable and turn the cap
+    # back into a permanent discard.
+    password_reset_grace_minutes: int = Field(default=2, ge=1, le=60)
+    # What the recovery link is built on: `{base}/reset-password?token=…`. The page it opens
+    # arrives with `dashboard-web`/`hardening-release`, so until then the link is valid and
+    # the page is not — the same truth R6.4 declares about the mail itself.
+    frontend_base_url: str = "http://localhost:3000"
+
+    # NO `password_min_length` setting, deliberately (design D4). R1.6 obliges the policy to
+    # accept every password `app/auth/domain/passwords.py` emits, so a deployment that raised
+    # the minimum above `TEMPORARY_PASSWORD_LENGTH` would make the system reject the
+    # credentials it hands out itself. It is a domain constant in
+    # `app/auth/domain/password_policy.py`, pinned to the generator by a test.
+    #
+    # NO `SMTP_*` settings either, and that is also design D13: the six names are reserved by
+    # name and without value in `.env.example` for `hardening-release`. Rule 8 of
+    # `steering/security.md` requires a secret IN USE to fail fast when absent, and none of
+    # these is in use yet — declaring them here would make the app demand credentials no code
+    # reads.
+
     # No setting for the real-client-IP header, deliberately (change
     # `api-ingress-routing`, design D3). Resolving it is uvicorn's job:
     # `ProxyHeadersMiddleware` rewrites `scope["client"]` from `X-Forwarded-For`, but
@@ -269,6 +318,28 @@ class Settings(BaseSettings):
             self.database_url = (
                 f"postgresql+asyncpg://{self.postgres_user}:{self.postgres_password}"
                 f"@localhost:5432/{self.postgres_db}"
+            )
+        return self
+
+    @model_validator(mode="after")
+    def _grace_must_be_shorter_than_the_token(self) -> "Settings":
+        """`auth-account-recovery` R2.5 / design D7's grace amendment.
+
+        A grace at or above the token lifetime makes NOTHING revocable, which silently turns
+        the per-account cap back into a permanent discard — the suppression vector the
+        amendment exists to close. A `model_validator` and not two independent `Field`
+        bounds, because the constraint is between the two values: either alone can be
+        perfectly reasonable.
+
+        Same shape as D4's coupling between the password minimum and the temporary-password
+        generator: a relationship the suite refuses to let drift, rather than a comment
+        asking the next reader to remember it.
+        """
+        if self.password_reset_grace_minutes >= self.password_reset_token_minutes:
+            raise ValueError(
+                "PASSWORD_RESET_GRACE_MINUTES must be shorter than "
+                "PASSWORD_RESET_TOKEN_MINUTES, or no recovery link is ever old enough to be "
+                "retired and the per-account cap becomes a permanent discard"
             )
         return self
 
