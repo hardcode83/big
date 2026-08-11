@@ -37,3 +37,4 @@
 | dashboard-api | new, design, tasks, run, review, ship, archive | 425934 | 1251691 | 309988498 | 198.8594 | 2026-08-09 | 2026-08-09 |
 | backend-suite-runtime | new, design, tasks, run, review, ship, archive | 425400 | 1073789 | 237164785 | 163.5965 | 2026-08-09 | 2026-08-10 |
 | auth-account-recovery | new, design, tasks, run, review, ship, archive | 634046 | 1824328 | 549403100 | 360.6465 | 2026-08-09 | 2026-08-11 |
+| guest-portal-api | new, design, tasks, run, review | 878304 | 2344477 | 677736354 | 437.0075 | 2026-08-09 | — |

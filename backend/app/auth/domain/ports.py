@@ -1,11 +1,19 @@
 """Ports owned by the auth domain (R6.5, design D6/D16).
 
 Every port speaks in domain entities, never ORM models, and every method that
-touches a tenant-scoped entity takes `tenant_id` explicitly — with **two** deliberate
-exceptions, `find_by_email_globally` (design D16 of `auth-tenancy`) and
-`consume_globally` (design D3 of `auth-account-recovery`). Both serve an anonymous
-endpoint, where there is no tenant yet, and both are named `*_globally` so a grep for
-that suffix enumerates every cross-tenant read — impossible to mistake for oversights.
+touches a tenant-scoped entity takes `tenant_id` explicitly — with deliberate
+exceptions that serve anonymous endpoints, where there is no tenant yet. Two of them
+live on this port: `find_by_email_globally` (design D16 of `auth-tenancy`) and
+`consume_globally` (design D3 of `auth-account-recovery`).
+
+**Their enumeration is not here.** It lives in one place, the docstring of
+`SqlAlchemyUserRepository.find_by_email_globally` in
+`app/auth/infrastructure/repositories.py`, and that is the only copy to trust. This
+paragraph used to say "two deliberate exceptions… both named `*_globally` so a grep for
+that suffix enumerates every cross-tenant read": `guest-portal-api` added a third that
+lives on another port and is **not** named that way, so neither the count nor the
+suffix-grep held. Counting here was one of the copies that then had to be corrected
+everywhere — the failure mode rule 11 of `steering/security.md` documents about itself.
 """
 
 import uuid

@@ -94,8 +94,13 @@ entregaría todas las estancias vivas.
 **Divergencia declarada del PRD §7**: no declara esta tabla. Pero §23 declara los
 cuatro endpoints con `{token}` y §7.13 declara `incidents.reported_by_guest_token`,
 así que el PRD **presupone** el token y nunca le da casa. Misma clase que
-`webhook_endpoints`. El ER pasa de 29 a 30 entidades y hay que regenerarlo
-(`steering/documentation.md`).
+`webhook_endpoints`. El ER hay que regenerarlo (`steering/documentation.md`). La
+aritmética **la movió el merge de `main`** y la cifra viva no vive aquí: cuando se
+escribió esta decisión el esquema tenía 29 tablas, pero `auth-account-recovery` entró
+antes con `password_reset_tokens`, así que la base era 30 y con `guest_access_tokens`
+son **31**. El recuento verificado —31 entidades, 414 columnas, 75 relaciones, contadas
+desde `Base.metadata`— está en la tarea 8.3 y en `steering/architecture.md`; aquí se
+cita para no dejar una tercera copia que corregir.
 
 ### D3 — La vigencia **se deriva en la verificación**, no se almacena
 
@@ -627,7 +632,7 @@ se commitean en el mismo PR — las dos mitades del puente de
 | Montaje | `backend/app/main.py`, `backend/tests/test_route_authorization.py` | router nuevo + cuatro entradas en `ANONYMOUS_ENDPOINTS` |
 | Migración | `backend/alembic/versions/<rev>_guest_portal_api.py` **(nuevo)** | tabla, columna de `audit_logs`, valor de enum |
 | Contrato | `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts` | regenerados |
-| Docs | `docs/guest-portal.md` **(nuevo)**, `docs/diagrams/<fecha>_autohost-er-entidades.png` | capability nueva; ER de 29 → 30 entidades |
+| Docs | `docs/guest-portal.md` **(nuevo)**, `docs/diagrams/<fecha>_autohost-er-entidades.png`, `README.md`, `docs/README.md` | capability nueva; ER regenerado (cifra en la tarea 8.3); `maintenance` gana `application/` en la estructura del README |
 
 ## Data & interfaces
 
@@ -713,8 +718,9 @@ es secreta, así que las tres llevan defecto):
   Es el precio correcto: `steering/domain-foundation-ops.md:12` dice que el
   `application/` lo pone quien primero persiste la entidad, y un puerto de un
   método es más fácil de ensanchar que uno especulativo de diez.
-- **El ER queda obsoleto.** 29 → 30 entidades; se regenera desde la metadata de
-  SQLAlchemy y se borra el anterior, como manda `steering/architecture.md`.
+- **El ER queda obsoleto.** Se regenera desde la metadata de SQLAlchemy y se borra el
+  anterior, como manda `steering/architecture.md`. La cifra resultante vive en la tarea
+  8.3 y en ese steering, no aquí.
 
 ## Open questions
 

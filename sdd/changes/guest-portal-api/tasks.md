@@ -551,8 +551,18 @@
   change, también tras mergear `main`), y es el que se borra; la referencia viva estaba solo en
   `sdd/steering/architecture.md`.
 
-  Generado desde la metadata de SQLAlchemy —31 entidades, 414 columnas, 74 relaciones— y
-  renderizado con `mmdc`. Se mantiene `.png` a propósito aunque el skill recomiende SVG para
+  Generado desde la metadata de SQLAlchemy —31 entidades, 414 columnas, 75 relaciones— y
+  renderizado con `mmdc`.
+
+  **La cifra de relaciones se corrigió en `review` (era 74).** Las entidades y las columnas
+  cuadraban; las relaciones no cuadraban con ninguna definición contable. Recontado desde
+  `Base.metadata`: **75** columnas con clave ajena —que es la regla que fija
+  `steering/architecture.md:11`—, 75 objetos `ForeignKeyConstraint` y 73 pares de tablas
+  distintos. Ninguna daba 74. Con 75 la serie de ese steering vuelve a cerrar: 73 de
+  `auth-account-recovery` más las dos claves ajenas de `guest_access_tokens`. Y las
+  referencias de ese fichero —el párrafo que atribuye el diagrama vivo y el que hace la
+  aritmética— se actualizaron entonces: esta tarea había cambiado **solo** el nombre del
+  fichero en la lista de arriba, dejando los dos de debajo describiendo el diagrama anterior. Se mantiene `.png` a propósito aunque el skill recomiende SVG para
   ficheros de repositorio: el nombrado `{YYYY-MM-DD}_{slug}.png` está fijado en
   `steering/documentation.md` y los otros cinco diagramas son PNG, así que cambiar de formato
   aquí sería una decisión de convención y no una tarea de este change.

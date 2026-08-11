@@ -201,32 +201,39 @@ class CheckinStatusResponse(BaseModel):
         )
 
 
+# Why this model looks the way it does — a comment and not the docstring, because a model
+# docstring becomes the schema's `description` in `/openapi.json`, which is itself in
+# `ANONYMOUS_ENDPOINTS`: the rule `portal_router.py` states for the response descriptions, and
+# none of what follows is a consumer's business. `ReportIncidentRequest` below carries the same
+# note.
+#
+# Six and not eight: `check_in_date` and `check_out_date` are the reservation's, and the guest is
+# not asked for them — nor allowed to send them, since `extra="forbid"` rejects anything not
+# declared here. That is R2.1 at the boundary.
+#
+# All six required together, like the manager's `SetDocumentRequest`: PRD §17 needs the set, and a
+# guest who sends a number without an expiry date looks documented and cannot be reported.
+#
+# **`str_strip_whitespace=True` is load-bearing, not tidiness.** `min_length=1` counts characters,
+# so `"   "` satisfied it in the first version, and the consequences diverged by branch: on a stay
+# that already had a `Guest` the write landed and replaced the legal name with whitespace — after
+# which `missing_fields`, which *does* normalise, kept the stay in `PENDING_GUEST_DATA` for ever
+# with no error anywhere; on a stay with no guest it came back as the `404` reserved for "your link
+# does not work". Both found by the QA panel of section 6. Stripping first makes a blank name the
+# `422` R4.4 asks for, in one place, for every field of the form.
+#
+# **The types are the guard the audit sink depends on.** `document_type` is an enum,
+# `date_of_birth` and `document_expiry_date` are `date`s, `nationality` is bounded to two
+# characters. After section 2 denylisted `full_name` and `nationality`, the fields still recorded
+# as real diffs are exactly the enum and the dates — so declaring any of them `str` here, for a
+# friendlier error message, would put guest-typed text into `audit_logs.changes`. Carried from the
+# security panel of section 2 into task 6.6.
 class SubmitCheckinRequest(BaseModel):
-    """The six fields of PRD §17 the guest supplies (R4.1, R4.4; D10, D16).
+    """The six fields of PRD §17 the guest supplies.
 
-    Six and not eight: `check_in_date` and `check_out_date` are the reservation's, and the
-    guest is not asked for them — nor allowed to send them, since `extra="forbid"` rejects
-    anything not declared here. That is R2.1 at the boundary.
-
-    All six required together, like the manager's `SetDocumentRequest`: PRD §17 needs the
-    set, and a guest who sends a number without an expiry date looks documented and cannot be
-    reported.
-
-    **`str_strip_whitespace=True` is load-bearing, not tidiness.** `min_length=1` counts
-    characters, so `"   "` satisfied it in the first version, and the consequences diverged
-    by branch: on a stay that already had a `Guest` the write landed and replaced the legal
-    name with whitespace — after which `missing_fields`, which *does* normalise, kept the
-    stay in `PENDING_GUEST_DATA` for ever with no error anywhere; on a stay with no guest it
-    came back as the `404` reserved for "your link does not work". Both found by the QA panel
-    of section 6. Stripping first makes a blank name the `422` R4.4 asks for, in one place,
-    for every field of the form.
-
-    **The types are the guard the audit sink depends on.** `document_type` is an enum,
-    `date_of_birth` and `document_expiry_date` are `date`s, `nationality` is bounded to two
-    characters. After section 2 denylisted `full_name` and `nationality`, the fields still
-    recorded as real diffs are exactly the enum and the dates — so declaring any of them
-    `str` here, for a friendlier error message, would put guest-typed text into
-    `audit_logs.changes`. Carried from the security panel of section 2 into task 6.6.
+    All six are required together. `check_in_date` and `check_out_date` are the
+    reservation's and are neither asked for nor accepted here. Surrounding whitespace is
+    stripped before validation.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
@@ -272,31 +279,36 @@ class CheckinSubmittedResponse(BaseModel):
         )
 
 
+# Why this model looks the way it does. Deliberately a comment and not the docstring: a model
+# docstring becomes the schema's `description` in `/openapi.json`, which is itself in
+# `ANONYMOUS_ENDPOINTS`, so anything written there is published to the same caller D5 defends
+# against — the rule `portal_router.py` states for the response descriptions. The reasoning is
+# identical; only its home is safe.
+#
+# **`title` is required because `incidents.title` is `NOT NULL`**, and deriving it from the first
+# characters of the description — the tempting alternative — would invent a datum the guest did
+# not write and put it in a column an operator reads as the guest's own words (D15).
+#
+# Neither field is echoed anywhere it could not be redacted later: `AUDITABLE_FIELDS` leaves both
+# out of the incident's audit row and the timeline entry carries a constant title, so what a
+# stranger types here reaches exactly one place — the `incidents` row a manager is meant to read.
+#
+# **Both fields are bounded, and `description`'s bound is not the body ceiling.** D7 — "el tope de
+# cuerpo ya está puesto; no se añade nada" — is about the middleware that refuses an oversized
+# *request* before routing, and it stays untouched: no new middleware, no new setting. What it does
+# not do is bound how much text a legitimate-sized request may store, and with
+# `MAX_INCIDENT_DESCRIPTION` absent the only limit left was per-request, while the per-token budget
+# of D6 allows many requests a minute. A field-level maximum is not a second ceiling; it is the
+# thing the ceiling was never doing. The budget's actual value stays in `design.md`,
+# `app/core/config.py` and `.env.example`, none of which are served over HTTP.
+#
+# `str_strip_whitespace=True` and `min_length=1` together are what make a whitespace-only report
+# the `422` R5.2 requires — the same pairing `SubmitCheckinRequest` documents.
 class ReportIncidentRequest(BaseModel):
-    """What `POST /guest/incident/{token}` accepts: a title and a description (R5.2; D15).
+    """What `POST /guest/incident/{token}` accepts: a title and a description.
 
-    **`title` is required because `incidents.title` is `NOT NULL`**, and deriving it from the
-    first characters of the description — the tempting alternative — would invent a datum the
-    guest did not write and put it in a column an operator reads as the guest's own words
-    (D15).
-
-    Neither field is echoed anywhere it could not be redacted later: `AUDITABLE_FIELDS` leaves
-    both out of the incident's audit row and the timeline entry carries a constant title, so
-    what a stranger types here reaches exactly one place — the `incidents` row a manager is
-    meant to read.
-
-    **Both fields are bounded, and `description`'s bound is not the body ceiling.** D7 —
-    "el tope de cuerpo ya está puesto; no se añade nada" — is about the middleware that refuses
-    an oversized *request* before routing, and it stays untouched: no new middleware, no new
-    setting. What it does not do is bound how much text a legitimate-sized request may store,
-    and with `MAX_INCIDENT_DESCRIPTION` absent the only limit left was per-request while D6's
-    budget allows sixty requests a minute. A field-level maximum is not a second ceiling; it is
-    the thing the ceiling was never doing. Both maxima count characters **after** stripping,
-    because `str_strip_whitespace=True` runs first.
-
-    `str_strip_whitespace=True` and `min_length=1` together are what make a whitespace-only
-    report the `422` R5.2 requires — the same pairing `SubmitCheckinRequest` documents, where
-    the first version counted characters before stripping and let `"   "` through.
+    `title` is required. Both fields are bounded and must be non-empty; surrounding
+    whitespace is stripped first, so the maxima count characters after stripping.
     """
 
     model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)

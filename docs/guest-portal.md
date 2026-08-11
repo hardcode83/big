@@ -147,9 +147,21 @@ FROM guest_access_tokens WHERE reservation_id = '…';
 - Sin fila → nunca se emitió, o se emitió y se sustituyó.
 - Fila viva y sigue fallando → mira `reservations.status` y `check_out_date` contra la ventana.
 
-**El token no aparece en los logs.** El log de acceso redacta el último segmento de
-`/api/v1/guest/{acción}/{token}`, así que verás la acción y no la credencial. Si alguna vez lo
-ves en claro en un log, es un incidente: rota el token de esa estancia.
+**El token no aparece en los logs de la aplicación.** El log de acceso de la API redacta el
+último segmento de `/api/v1/guest/{acción}/{token}`, así que verás la acción y no la
+credencial. Si alguna vez lo ves en claro en un log **de la aplicación**, es un incidente:
+rota el token de esa estancia.
+
+**Y hasta dónde llega esa garantía, porque el token viaja en la URL.** La redacción se instala
+sobre el logger `uvicorn.access` y sobre nada más. Cualquier intermediario que registre la
+línea de petición guarda la URL entera, y aquí la URL **es** toda la credencial —no hay un
+secreto de cabecera detrás, como sí lo hay en los webhooks—. En el despliegue de dev el
+público termina en un túnel de Cloudflare (`docker-compose.deploy.yml`), cuyo registro de
+peticiones **no lo configura ni lo desactiva nada de este repositorio**: si lo consultas ahí,
+verás tokens en claro **por diseño del intermediario**, y eso no es el incidente que describe
+el párrafo anterior. Confirmar la retención del URI completo en esa cuenta es requisito previo
+de `guest-portal-web`, que es el change que hace la superficie realmente navegable; hoy
+ninguna página ni cliente la ejerce.
 
 **Quién tocó qué**: cada escritura del huésped deja una fila en `audit_logs` con
 `actor_guest_token_hash` (el hash, nunca el token), la IP y los campos afectados.

@@ -250,6 +250,49 @@ Acceptance criteria:
   del operador). Lo que sí era problema de este change está cerrado: nada de lo que el huésped
   escriba puede tumbar la petición ni salir de sus dos columnas.
 
+- **Los `description` de las respuestas del portal publican referentes internos** — candidato
+  a entrada propia de roadmap, medido en `review` y acotado deliberadamente aquí.
+
+  Un docstring de modelo Pydantic **es** el `description` del esquema en `/openapi.json`, que es
+  anónimo. El hallazgo bloqueante de `review` —el presupuesto por token publicado en el contrato—
+  se cerró moviendo el razonamiento de los dos esquemas de **petición** a comentarios `#`, que no
+  se publican. Lo que queda, medido y no arreglado: varios esquemas de **respuesta** siguen
+  publicando referentes internos —`StayInfoResponse` nombra `tests/guests/test_portal_ports.py`, y
+  `CheckinStatusResponse`, `CheckinSubmittedResponse` e `IncidentReportedResponse` llevan ids R#/D#
+  y una cita de requisito en castellano.
+
+  Por qué no se cierra aquí: ninguno cae en las categorías que sí importan —no hay presupuesto, ni
+  enumeración de causas de rechazo, ni oráculo—, así que lo que se filtra es estructura del
+  repositorio y vocabulario de proceso, de valor nulo para quien ataca. Y arreglar uno obliga a
+  arreglar los cuatro por consistencia, que es una pasada de convención sobre todos los esquemas
+  publicados del backend y no una tarea de esta capacidad. La regla que lo gobierna ya está escrita
+  donde toca (`backend/app/guests/api/portal_router.py`, y ahora también sobre los dos esquemas de
+  petición): quien haga la pasada la tiene enunciada.
+
+- **El registro de peticiones del intermediario guarda el token en claro** — requisito
+  previo de `guest-portal-web`, localizado en `review` y acotado deliberadamente aquí.
+
+  La restricción 9 de la tarea 6.1 exigía «confirmar el log de acceso del ingress antes de
+  exponerla» y se cerró sobre una premisa que resultó falsa: *«el panel no localizó esa
+  configuración en `infra/`»*. Sí hay ingress, y está fuera de `infra/` —
+  `docker-compose.deploy.yml` corre `cloudflare/cloudflared … tunnel run`.
+
+  Lo que la revisión sí estableció, contra la lectura más alarmista: cloudflared enruta
+  **solo** a `http://frontend:3000` (`infra/environments/dev/main.tf`) y `backend` está fuera
+  de la red `ingress` a propósito, así que **ningún componente de este repositorio** escribe
+  el token en un log. La redacción de D8 cubre el único que podría. Pero el token viaja en el
+  URI que termina en el edge de Cloudflare, y nada del repositorio configura ni desactiva ese
+  registro (`grep -rn "logpush|logging" infra/` → vacío).
+
+  Por qué no se cierra aquí: la comprobación es contra la cuenta de Cloudflare, que está
+  fuera de la IaC de este repositorio, y **hoy no hay nada que ejerza la superficie** —
+  `frontend/app/(guest)/guest/[token]/` son tres ficheros de relleno y cero llamantes de
+  `guest/info|checkin|incident`. La puerta está abierta y aún no se ha cruzado; se cruza con
+  `guest-portal-web`, que es donde este requisito previo tiene que morder. Lo que sí era
+  problema de este change está cerrado: `docs/guest-portal.md` ya no afirma un absoluto que
+  D8 solo garantiza para uvicorn, y nombra el residual del intermediario para que un operador
+  que vea el token en el panel de Cloudflare no lo lea como una brecha.
+
 - **El cliente de Redis cacheado en un global cruza bucles de eventos** — candidato
   a entrada propia de roadmap, medido en §6 y acotado deliberadamente aquí.
 
