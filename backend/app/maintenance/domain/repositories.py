@@ -1,21 +1,31 @@
-"""Ports owned by the maintenance domain (`dashboard-api` R2, design D2).
+"""Ports owned by the maintenance domain (`dashboard-api` R2 design D2; `guest-portal-api` R5.5 design D15).
 
-**The first port this module has ever had, and it is read-only on purpose.** `maintenance`
-has been "solo estructura de datos" — `domain/entities.py` plus `infrastructure/models.py`,
-no `application/`, no ports — which is the shape `steering/backend-architecture.md`
-prescribes for a domain without a use case yet: "Un módulo cuyas entidades existen pero que
-aún no tiene ningún caso de uso nace con `domain/` + `infrastructure/` a secas".
+**Two changes met here, and the split between them is the interesting part.** `maintenance` was
+"solo estructura de datos" — `domain/entities.py` plus `infrastructure/models.py`, no
+`application/`, no ports — which is the shape `steering/backend-architecture.md` prescribes for a
+domain without a use case yet: "Un módulo cuyas entidades existen pero que aún no tiene ningún
+caso de uso nace con `domain/` + `infrastructure/` a secas".
 
-`dashboard-api` gives it a reason to be read (PRD §9.1 wants an open-incident count on every
-card, §9.2 the list on the detail) and no reason to be written. So this port has **no `add`,
-no `save`, no `update`, no `delete`**, and that is the same device `TimelineEventRepository`
-uses: the signature is where the boundary lives. Incident creation, classification,
-assignment and resolution arrive with the `maintenance` change, which owns the writers and
-the invariants that go with them — this file must not pre-empt any of it.
+* `dashboard-api` gave it a reason to be **read** (PRD §9.1 wants an open-incident count on every
+  card, §9.2 the list on the detail) and no reason to be written, so it added `IncidentReader` and
+  `OwnerApprovalReader` with **no `add`, no `save`, no `update`, no `delete`** — the same device
+  `TimelineEventRepository` uses, where the signature is the boundary. Its docstring said the
+  writers "arrive with the `maintenance` change".
+* `guest-portal-api` needed exactly **one** of those writers first, because a guest reporting a
+  fault is the first thing in the system that persists an `Incident`, and
+  `sdd/specs/domain-foundation-ops.md:12` assigns the `application/` of an entity to "el change que
+  primero persiste/expone la entidad". So `IncidentRepository` below is that one method and nothing
+  more; the classification, assignment and resolution flows still belong to `maintenance`.
+
+The two arrived on parallel branches and the reader half landed first, which is why the sentence
+"the first port this module has ever had" is gone: it was true of each in isolation and false of
+the file.
 
 `OwnerApproval` gets its own port for the same reason `steering/backend-architecture.md`
 gives — "No repositorio 'Dios' con métodos de varios agregados; un repositorio por agregado
-raíz" — even though both are read by the same use case today.
+raíz" — even though both are read by the same use case today. `IncidentRepository` is separate
+from `IncidentReader` for a sharper version of it: reading and writing this aggregate are owned by
+different changes, and one Protocol carrying both would have made that invisible.
 
 Every method takes `tenant_id` explicitly and returns nothing outside it, the contract the
 rest of the project uses: the parameter is the authoritative mechanism and the global loader
@@ -26,6 +36,7 @@ import uuid
 from collections.abc import Sequence
 from typing import Protocol
 
+from app.maintenance.domain.entities import Incident
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
 
 
@@ -83,5 +94,35 @@ class OwnerApprovalReader(Protocol):
 
         Oldest first and not newest: this is a to-do list, so the one that has been waiting
         longest is the one that matters. The timeline is the surface that reads newest-first.
+        """
+        ...
+
+
+class IncidentRepository(Protocol):
+    """The write side, and deliberately one method (`guest-portal-api` R5.5, design D15).
+
+    Listing, assigning, classifying and resolving are `maintenance`'s own flow — and reading is
+    `IncidentReader` above — so this port declares `add` and nothing else. A port that declared
+    the rest would be an open door for the next caller: interface segregation means dividing by
+    the real consumer, and the real consumer here reports one incident and never reads one back.
+    `steering/backend-architecture.md` puts it as "puertos pequeños y por rol".
+
+    The cost is named in that change's design Risks: whoever brings AI classification may find a
+    port that does not serve it. A one-method port is cheaper to widen than a speculative
+    ten-method one is to narrow.
+    """
+
+    async def add(self, tenant_id: uuid.UUID, incident: Incident) -> None:
+        """Append an incident for the acting tenant. Never commits — the use case owns the
+        transaction, which is what makes the incident and its audit row atomic (R6.2).
+
+        **Precondition the caller must honour**: `property_id` and `reservation_id` must
+        already have been resolved *within* `tenant_id`. The foreign keys of `incidents` are
+        global rather than composite with `tenant_id`, so the database would accept an
+        incident of tenant A anchored to a property of tenant B, and this port cannot detect
+        it without a query of its own — the same precondition `TimelineEventRepository`
+        states, for the same schema reason. The one caller today satisfies it structurally:
+        both ids come from the `GuestSession` the portal's authoriser resolved from the token,
+        never from the request (R2.1).
         """
         ...

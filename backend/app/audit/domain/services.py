@@ -21,6 +21,22 @@ from app.audit.domain.value_objects import ChangeSet
 # index is the longest thing that legitimately fits.
 MAX_ACTOR_IP_LENGTH = 45
 
+# `audit_logs.actor_guest_token_hash` is VARCHAR(64): a SHA-256 hex digest and nothing else.
+GUEST_TOKEN_HASH_LENGTH = 64
+_HEX_DIGITS = frozenset("0123456789abcdef")
+
+
+def is_guest_token_digest(value: str) -> bool:
+    """Whether `value` is the only thing `actor_guest_token_hash` may hold.
+
+    Public because the guarantee has three layers and they must agree on one predicate:
+    this factory, `SqlAlchemyAuditLogRepository.add`, and the column's own CHECK constraint
+    (`ck_audit_logs_actor_guest_token_hash_is_a_digest`). Lower-case only — `hexdigest()`
+    never produces anything else, so accepting upper case would only widen what a mistake
+    can look like.
+    """
+    return len(value) == GUEST_TOKEN_HASH_LENGTH and set(value) <= _HEX_DIGITS
+
 
 class AuditLogFactory:
     @staticmethod
@@ -34,6 +50,7 @@ class AuditLogFactory:
         actor_ip: str | None,
         changes: ChangeSet,
         now: datetime,
+        actor_guest_token_hash: str | None = None,
     ) -> AuditLog:
         if action not in ACTIONS:
             raise AuditContractError(
@@ -60,6 +77,30 @@ class AuditLogFactory:
                 f"actor_ip is longer than the {MAX_ACTOR_IP_LENGTH} characters the column "
                 "holds; it would fail at the driver and abort the whole transaction."
             )
+        if actor_user_id is not None and actor_guest_token_hash is not None:
+            # One act, one actor. A row claiming both a logged-in user and the bearer of an
+            # anonymous portal link describes something that cannot have happened, and this
+            # table is append-only, so nobody can later decide which half was true.
+            #
+            # `GuestActor.__post_init__` refuses the same pair, and that is not redundant:
+            # that dataclass belongs to `guests`, while this factory is the chokepoint every
+            # module writes through — the architecture panel of section 1 pointed out that a
+            # caller assembling these fields by hand would bypass the dataclass entirely.
+            raise AuditContractError(
+                "An audit row has one actor: either a user or a guest-portal token bearer, "
+                "never both."
+            )
+        if actor_guest_token_hash is not None and not is_guest_token_digest(
+            actor_guest_token_hash
+        ):
+            # The realistic accident is passing the **token** instead of its hash, which
+            # `String(64)` would not notice for a value of the right length. R1.2 and R6.4 of
+            # `guest-portal-api` forbid the cleartext token in `AuditLog`, and this is the
+            # chokepoint where that stops being a convention every writer must remember.
+            raise AuditContractError(
+                "actor_guest_token_hash must be a SHA-256 hex digest, not the token itself: "
+                "R6.4 keeps the cleartext guest token out of audit_logs entirely."
+            )
 
         return AuditLog(
             id=uuid.uuid4(),
@@ -69,6 +110,7 @@ class AuditLogFactory:
             entity_id=entity_id,
             created_at=now,
             actor_user_id=actor_user_id,
+            actor_guest_token_hash=actor_guest_token_hash,
             actor_ip=actor_ip,
             # NULL rather than `{}` when there is nothing to record: two representations of
             # "no diff" would make every future query on this column check for both.

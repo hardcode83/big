@@ -20,9 +20,10 @@ from app.core.config import settings
 from app.dashboard.api.router import router as dashboard_router
 from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
-from app.core.log_redaction import install_webhook_token_redaction
+from app.core.log_redaction import install_path_token_redaction
 from app.core.openapi import install_openapi
 from app.guests.api.errors import register_guest_error_handlers
+from app.guests.api.portal_router import router as guest_portal_router
 from app.guests.api.router import router as guests_router
 from app.provenance.api.router import router as provenance_router
 from app.integrations.api.errors import register_integration_error_handlers
@@ -62,9 +63,10 @@ def create_app() -> FastAPI:
     # file is unreachable because containers mount only their own directory.
     app = FastAPI(title="AutoHostAI backend", version=_package_version())
     # Before any route exists, because the leak it closes is in the access log rather than in a
-    # handler: the webhook route token travels as a path segment (design D1), and uvicorn logs
-    # paths by default. See `app/core/log_redaction.py`.
-    install_webhook_token_redaction()
+    # handler: both the webhook route token and the guest portal token travel as path segments
+    # (`reservations-webhooks` D1, `guest-portal-api` D8), and uvicorn logs paths by default.
+    # See `app/core/log_redaction.py`.
+    install_path_token_redaction()
     register_error_handlers(app)
     register_auth_error_handlers(app)
     register_reservation_error_handlers(app)
@@ -119,6 +121,13 @@ def create_app() -> FastAPI:
     # One router for everything that touches an identity document, which is the file a
     # reviewer opens when a real provider arrives.
     app.include_router(guests_router, prefix=API_V1_PREFIX)
+    # The anonymous half of `guests`, mounted separately on purpose (`guest-portal-api` D1):
+    # its routes carry no `Authorization` header and declare no permission, because the token
+    # in the path is the credential. Keeping them off `guests_router` — which declares
+    # `AUTHENTICATED_RESPONSES` — is what stops an unauthenticated route from hiding inside a
+    # shape that says otherwise, and forces an entry per route in `ANONYMOUS_ENDPOINTS`:
+    # four, one per route of PRD §23.
+    app.include_router(guest_portal_router, prefix=API_V1_PREFIX)
     # `dashboard-api`: the read side of PRD §10. `timeline` had `domain/` and
     # `infrastructure/` since `timeline-state-machine` and no way to read an event back —
     # its port said so, and said this was the change that would add one.

@@ -1,11 +1,27 @@
-"""SQLAlchemy adapters for the maintenance read ports (`dashboard-api` R1, R2).
+"""SQLAlchemy adapters for the maintenance ports (`dashboard-api` R1 R2; `guest-portal-api` R5.1 R5.4).
 
-First readers of `incidents` and `owner_approvals`. There are no writers here and the ports
-declare none — see `app/maintenance/domain/repositories.py` for why.
+The readers came first (`dashboard-api`) and the single writer second (`guest-portal-api`) —
+`app/maintenance/domain/repositories.py` records why the two halves belong to different changes.
+
+**What the writer has to get right, and it is not obvious.** R5.4 requires an incident opened by
+a guest to be indistinguishable, for the classification flow, from any other one in `OPEN`. So
+nothing here is special-cased for the guest: the entity's fields are mapped as they come, and
+`Incident`'s defaults for the four columns that flow owns (`category`, `severity`, `ai_summary`,
+`ai_classification`) are the same values the columns default to on their own.
+`tests/maintenance/test_repositories.py` pins that equality against the DDL, so the two cannot
+drift apart into a row the classifier — or the reader above — could spot.
+
+Every field is mapped rather than letting the server defaults fill the four: an adapter that
+dropped columns it currently expects to be default would silently discard a category the day
+`maintenance` passes one.
+
+The writer never commits — the use case owns the transaction (R6.2, so the audit row and the
+incident land together or not at all).
 
 Every statement filters `tenant_id` explicitly. The session listener of `app/core/db.py`
 also covers both tables (they carry `TenantScopedMixin`), but it is the net and never the
-mechanism.
+mechanism — and for the INSERT it is not even the net, because the listener does not cover
+INSERTs at all (limit 3 of that module), which is why the writer checks the tenant itself.
 """
 
 import uuid
@@ -14,7 +30,8 @@ from collections.abc import Sequence
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from app.maintenance.domain.entities import OPEN_INCIDENT_STATUSES
+from app.core.tenancy import CrossTenantWriteError
+from app.maintenance.domain.entities import OPEN_INCIDENT_STATUSES, Incident
 from app.maintenance.domain.enums import OwnerApprovalStatus
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
@@ -110,3 +127,54 @@ class SqlAlchemyOwnerApprovalReader:
             )
             for row in rows.all()
         ]
+
+
+class SqlAlchemyIncidentRepository:
+    """`IncidentRepository` — the one writer of `incidents` (`guest-portal-api` design D15)."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, incident: Incident) -> None:
+        if incident.tenant_id != tenant_id:
+            # `app/core/db.py`'s third limit: the session's global filter does not cover
+            # INSERTs, so this check is the only thing standing between a wiring mistake and
+            # a row of another tenant — exactly as `SqlAlchemyAuditLogRepository.add` and
+            # `SqlAlchemyTimelineEventRepository.add` document for the same reason.
+            raise CrossTenantWriteError(
+                entity="incident",
+                entity_tenant_id=incident.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            IncidentModel(
+                id=incident.id,
+                tenant_id=incident.tenant_id,
+                property_id=incident.property_id,
+                reservation_id=incident.reservation_id,
+                reported_by_user_id=incident.reported_by_user_id,
+                # The digest, never the token (R5.1). Nothing here can tell the difference —
+                # the column is a `VARCHAR(200)` that would hold either — so the guarantee
+                # lives where the value is produced: `GuestSession.token_hash` is what the
+                # authoriser resolved, and `tests/guests/test_portal_incident_api.py` pins
+                # that the persisted value is the hash of the presented token.
+                reported_by_guest_token=incident.reported_by_guest_token,
+                source=incident.source,
+                category=incident.category,
+                severity=incident.severity,
+                status=incident.status,
+                title=incident.title,
+                description=incident.description,
+                ai_summary=incident.ai_summary,
+                ai_classification=incident.ai_classification,
+                assigned_technician_id=incident.assigned_technician_id,
+                owner_approval_required=incident.owner_approval_required,
+                estimated_cost=incident.estimated_cost,
+                approved_cost=incident.approved_cost,
+                final_cost=incident.final_cost,
+                resolved_at=incident.resolved_at,
+                created_at=incident.created_at,
+                updated_at=incident.updated_at,
+            )
+        )
+        await self._session.flush()

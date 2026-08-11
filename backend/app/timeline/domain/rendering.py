@@ -220,6 +220,19 @@ TIMELINE_TITLE_TEMPLATES: dict[TimelineEventType, dict[Locale, str]] = {
         Locale.ES: "Registro legal enviado",
         Locale.EN: "Legal registration submitted",
     },
+    # `guest-portal-api` D12. Next to the legal registration and NOT next to
+    # `CHECKIN_WINDOW_OPENED` on purpose: that one is the clock opening the window, this one is
+    # the guest having actually filled in the eight fields of PRD §17, which is the step the
+    # submission above waits for.
+    #
+    # A static title, with no placeholder: `metadata` carries only `reservation_id`, because the
+    # timeline is append-only and the operation this event records is the one flow in the system
+    # that handles an identity document — so nothing about the person may land in a row that can
+    # never be redacted.
+    TimelineEventType.GUEST_CHECKIN_COMPLETED: {
+        Locale.ES: "El huésped ha completado el check-in",
+        Locale.EN: "Guest completed check-in",
+    },
     TimelineEventType.REVIEW_IMPORTED: {
         Locale.ES: "Reseña importada",
         Locale.EN: "Review imported",

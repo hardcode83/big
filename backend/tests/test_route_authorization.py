@@ -58,6 +58,27 @@ ANONYMOUS_ENDPOINTS = {
     # use case, where `tests/integrations/test_webhook_receipt.py` asserts that an unknown token,
     # an unknown provider, a missing header and a wrong one are indistinguishable.
     ("POST", "/api/v1/webhooks/{provider}/{webhook_token}"),
+    # `guest-portal-api`: the guest portal of PRD §23. Anonymous for the same structural
+    # reason as the webhook receiver above — the token in the path IS the credential — with
+    # one difference that makes them stricter rather than looser: a webhook endpoint has a
+    # second factor in its static header (rule 12(a)), and these have none.
+    #
+    # Exempt from declaring a permission, NOT from authorising. The check is
+    # `GuestPortalAuthenticator` (design D4), and `tests/guests/test_portal_authenticator.py`
+    # asserts that a token which does not exist, is malformed, has been revoked, is past its
+    # window, or belongs to a cancelled stay are all indistinguishable.
+    #
+    # Four entries, over three paths: `/checkin/{token}` answers both `GET` (what is still
+    # missing) and `POST` (the submission). That is the whole of PRD §23's guest surface, and
+    # the count is the point of the census — a fifth route under `/api/v1/guest/` would have to
+    # be added here, in a diff a reviewer sees.
+    ("GET", "/api/v1/guest/info/{token}"),
+    ("GET", "/api/v1/guest/checkin/{token}"),
+    ("POST", "/api/v1/guest/checkin/{token}"),
+    # The only one of the four that creates a row from a stranger's free text. It authorises
+    # through the same `GuestPortalAuthenticator`, and R5.3 is structural: no route here reads
+    # an incident back, so there is nothing to restrict.
+    ("POST", "/api/v1/guest/incident/{token}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
@@ -310,6 +331,12 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     The webhook **receiver** of that last change is deliberately not here and will not be: it is
     anonymous by design (rule 12(b) — the route token is the credential), so it joins
     `ANONYMOUS_ENDPOINTS` above, which is the visible diff this module exists to force.
+
+    And by `guest-portal-api` with the guest-access-token path (`POST` and `DELETE`, both
+    `MANAGE_GUEST_ACCESS_TOKENS`), asserted per role in `tests/guests/test_api.py`. Its four
+    **anonymous** portal routes are the same case as the webhook receiver and join
+    `ANONYMOUS_ENDPOINTS` instead — the token in the path is the credential, so there is no
+    permission to declare.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -343,6 +370,7 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/validate",
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
+        "/api/v1/reservations/{reservation_id}/guest-access-token",
         "/api/v1/integrations/pms/import-csv",
         "/api/v1/integrations/webhook-endpoints",
         "/api/v1/integrations/webhook-endpoints/{endpoint_id}/rotate",

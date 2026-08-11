@@ -68,7 +68,13 @@ def test_every_event_type_has_a_template_in_both_locales() -> None:
 
 def test_the_catalogue_covers_the_whole_enum_and_nothing_else() -> None:
     assert set(TIMELINE_TITLE_TEMPLATES) == set(TimelineEventType)
-    assert len(TimelineEventType) == 45, "R5.4 counts 45 values; update it deliberately"
+    # 45 when `dashboard-api` wrote R5.4; the 46th is `GUEST_CHECKIN_COMPLETED`, added by
+    # `guest-portal-api` D12 because R6.3 needs a milestone for the guest filling in their own
+    # legal data and none of the 45 said it — `CHECKIN_WINDOW_OPENED` is the clock, and reusing
+    # `LEGAL_REGISTRATION_SUBMITTED` would have asserted for ever that a police submission
+    # happened when it had not. Updated deliberately, which is what this assertion asks for: a
+    # new value with no template is a timeline entry that silently degrades to a stored title.
+    assert len(TimelineEventType) == 46, "counts every value; update it deliberately"
 
 
 # --- one case per type, in both languages ---------------------------------------------

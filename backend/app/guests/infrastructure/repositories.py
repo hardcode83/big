@@ -133,10 +133,18 @@ class SqlAlchemyGuestRepository:
         result = await self._session.execute(
             update(GuestModel)
             .where(GuestModel.tenant_id == tenant_id, GuestModel.id == guest.id)
-            # Six columns and no others. The port says why it is narrow; this is what makes
-            # it true — a caller cannot reach `full_name` or `email` through this method
-            # however it mutates the entity it passes in.
+            # Seven columns and no others. The port says why it is narrow; this is what makes
+            # it true — a caller cannot reach `email`, `phone` or `preferred_language`
+            # through this method however it mutates the entity it passes in.
+            #
+            # `full_name` joined the six in `guest-portal-api` (design D10), because the
+            # portal's check-in may be the thing that fills a guest's record in (OQ3). It is
+            # written unconditionally: the column is `NOT NULL`, so the entity always carries
+            # a name, and whether that name *changed* is decided by `SetGuestDocumentUseCase`
+            # — which only assigns it when the caller supplied one. Gating it here on
+            # truthiness would have been dead code.
             .values(
+                full_name=guest.full_name,
                 nationality=guest.nationality,
                 date_of_birth=guest.date_of_birth,
                 document_type=guest.document_type,

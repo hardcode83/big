@@ -73,16 +73,29 @@ def test_a_guests_birth_date_cannot_be_recorded_as_a_diff() -> None:
     }
 
 
-def test_nationality_is_deliberately_not_denylisted() -> None:
-    """Asserted as an absence, so growing the denylist stays a decision.
+def test_nationality_is_denylisted_since_a_guest_became_its_writer() -> None:
+    """This test asserted the opposite until `guest-portal-api`, and the premise is why.
 
-    §"Datos sensibles" names the document and the birth date and not the nationality, and the
-    list's own comment warns against a denylist that quietly covers more than it says. The
-    guest use case records it with `redacted()` anyway — that discipline lives in the caller,
-    like `properties-crud` design D7 does for its note columns.
+    `access-notifications` left `nationality` diffable on the grounds that §"Datos sensibles"
+    names the document and the birth date and not the nationality, and that a denylist
+    quietly covering more than it says is one nobody can reason about. That reasoning held
+    **while an operator was the only writer**.
+
+    `guest-portal-api` made `POST /api/v1/guest/checkin/{token}` an anonymous endpoint that
+    takes `nationality` and `full_name` from a form nobody authenticates, so both became free
+    text chosen by an internet caller landing in a rule-11 sink — the same property that
+    disqualified `incidents.title`/`description` in that same change. Its section 2 panel had
+    two reviewers demonstrate the gap independently.
+
+    So this is not the denylist growing quietly: it is the same criterion applied after the
+    set of writers changed. Nothing is lost, because the caller already recorded it with
+    `redacted()`.
     """
-    assert ChangeSet("GUEST").diff("nationality", None, "ES").as_dict() == {
-        "nationality": {"old": None, "new": "ES"}
+    with pytest.raises(AuditContractError):
+        ChangeSet("GUEST").diff("nationality", None, "ES")
+
+    assert ChangeSet("GUEST").redacted("nationality").as_dict() == {
+        "nationality": {"changed": True}
     }
 
 
@@ -195,21 +208,23 @@ def test_each_entity_has_its_own_field_allowlist() -> None:
 
 
 def test_an_unknown_entity_type_cannot_have_a_change_set() -> None:
-    """`INCIDENT` is the example on purpose: a real table with no audit trail yet.
+    """`OWNER_APPROVAL` is the example on purpose: a real table with no audit trail yet.
 
-    The name has now moved twice, and each move is the test working as designed. It was
-    `PROPERTY` until `properties-crud` registered it, then `RESERVATION` until
+    The name has now moved three times, and each move is the test working as designed. It
+    was `PROPERTY` until `properties-crud` registered it, then `RESERVATION` until
     `access-notifications` registered *that* — for the legal-registration and access
     projections of PRD §17 and §15, not for the module's own mutations, which
-    `specs/reservations.md` still records as owed.
+    `specs/reservations.md` still records as owed — then `INCIDENT` until `guest-portal-api`
+    registered it, because the guest portal is the first thing that persists an `Incident`
+    (its design D15, and the reparto rule of `specs/domain-foundation-ops.md:12`).
 
-    `INCIDENT` is next in rule 9's enumeration with no writer at all (`maintenance` brings
-    it). Whoever audits it will trip on this line, which is the intended behaviour:
-    registering an entity type is a decision, so a test asserting the opposite should demand
-    a conscious edit rather than pass silently.
+    `OWNER_APPROVAL` is next in rule 9's enumeration with no writer at all (`maintenance`
+    brings it, with the expense-approval flow). Whoever audits it will trip on this line,
+    which is the intended behaviour: registering an entity type is a decision, so a test
+    asserting the opposite should demand a conscious edit rather than pass silently.
     """
     with pytest.raises(AuditContractError):
-        ChangeSet("INCIDENT")
+        ChangeSet("OWNER_APPROVAL")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

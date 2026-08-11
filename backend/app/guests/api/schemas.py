@@ -47,6 +47,23 @@ class SetDocumentRequest(BaseModel):
     reservation_id: uuid.UUID | None = None
 
 
+class GuestAccessTokenIssuedResponse(BaseModel):
+    """The **only** place the cleartext guest token ever appears (`guest-portal-api` D14).
+
+    Rule 3(a) of `steering/security.md` names this exception in so many words: a secret we
+    mint for a third party to authenticate with "se puede devolver **una sola vez en el
+    momento de generarlo y en cada rotación, nunca en una lectura posterior**". There is no
+    later read to worry about — `GuestAccessTokenRepository` offers none, and the row stores
+    only a digest — so the exception is bounded by the schema rather than by discipline.
+
+    No `id`, no `token_hash`, no `reservation_id`: the operator needs the value and the
+    stay's identity is already in the path they called. Every field here is one more thing a
+    proxy log or a browser cache can keep.
+    """
+
+    token: str
+
+
 class DocumentStoredResponse(BaseModel):
     """What a successful write returns: **no document number**.
 

@@ -63,3 +63,10 @@ class TimelineEventType(str, enum.Enum):
     NOTIFICATION_SENT = "NOTIFICATION_SENT"
     NOTIFICATION_FAILED = "NOTIFICATION_FAILED"
     WEBHOOK_RECEIVED = "WEBHOOK_RECEIVED"
+    # The guest completed their own check-in through the portal (`guest-portal-api` R6.3,
+    # design D12). None of the values above says it: `CHECKIN_WINDOW_OPENED` is the clock,
+    # not the guest, and reusing `LEGAL_REGISTRATION_SUBMITTED` would be a permanent claim
+    # — the timeline is append-only — that a filing with the police happened when it did
+    # not. Written only when the legal status actually transitions (D13), so a resent form
+    # does not add a second row to an immutable table.
+    GUEST_CHECKIN_COMPLETED = "GUEST_CHECKIN_COMPLETED"

@@ -14,6 +14,10 @@ from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.guests.application.portal import (
+    IssueGuestAccessTokenUseCase,
+    RevokeGuestAccessTokenUseCase,
+)
 from app.guests.application.use_cases import (
     ReadGuestDocumentUseCase,
     SetGuestDocumentUseCase,
@@ -21,6 +25,10 @@ from app.guests.application.use_cases import (
 )
 from app.guests.infrastructure.adapters import MockSESHospedajesAdapter
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationStayStore
+from app.guests.infrastructure.portal_repositories import (
+    SqlAlchemyGuestAccessTokenRepository,
+    SqlAlchemyPortalStayLocator,
+)
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
@@ -40,6 +48,28 @@ def get_set_guest_document_use_case(session: SessionDep) -> SetGuestDocumentUseC
 def get_read_guest_document_use_case(session: SessionDep) -> ReadGuestDocumentUseCase:
     return ReadGuestDocumentUseCase(
         guests=SqlAlchemyGuestRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_issue_guest_access_token_use_case(
+    session: SessionDep,
+) -> IssueGuestAccessTokenUseCase:
+    return IssueGuestAccessTokenUseCase(
+        tokens=SqlAlchemyGuestAccessTokenRepository(session),
+        stays=SqlAlchemyPortalStayLocator(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+
+
+def get_revoke_guest_access_token_use_case(
+    session: SessionDep,
+) -> RevokeGuestAccessTokenUseCase:
+    return RevokeGuestAccessTokenUseCase(
+        tokens=SqlAlchemyGuestAccessTokenRepository(session),
+        stays=SqlAlchemyPortalStayLocator(session),
         audit=SqlAlchemyAuditLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )

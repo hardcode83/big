@@ -1,8 +1,12 @@
-"""The first ports of `maintenance` (`dashboard-api` R1, R2, task 4.2).
+"""The **read** ports of `maintenance` (`dashboard-api` R1, R2, task 4.2).
 
-Read-only by construction: there is no writer to test because the ports declare none. What
-matters here is that the counts are right with the table empty — which is every tenant
-today — and right once rows exist, so the contract does not change when `maintenance` lands.
+Read-only by construction: `IncidentReader` and `OwnerApprovalReader` declare no writer, so
+there is none to test here. That sentence used to say there was no writer *in the system* and
+that `incidents` was empty for every tenant — `guest-portal-api` made both false by giving the
+module `IncidentRepository` and a route that fills the table from the guest portal. Its tests
+live in `test_incident_writer.py`; what still matters here is unchanged, and is now load-bearing
+rather than hypothetical: the counts are right with the table empty **and** right once rows
+exist, because rows now do exist.
 """
 
 import uuid

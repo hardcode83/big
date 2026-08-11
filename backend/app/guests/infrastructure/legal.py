@@ -100,3 +100,60 @@ class SqlAlchemyLegalRegistrationStayStore:
             )
             .values(legal_registration_status=status)
         )
+
+    async def set_guest(
+        self, tenant_id: uuid.UUID, reservation_id: uuid.UUID, guest_id: uuid.UUID
+    ) -> uuid.UUID | None:
+        """Claim a stay that has **no** guest yet, and report who holds it afterwards.
+
+        One column, like its two siblings (`guest-portal-api` R4.2, OQ3): `guest_id` and
+        nothing else — the portal's check-in has a name and a stay, and no business rewriting
+        the booking's dates, status or legal state. The `tenant_id` filter is what makes a
+        stay of another tenant simply not there, so this matches nothing rather than writing
+        across the boundary.
+
+        **`WHERE guest_id IS NULL` is the whole of the concurrency story**, and it is why
+        this returns a value instead of `None`. R4.5 names the case that breaks the plain
+        `UPDATE`: a guest whose network drops resends the form, and two requests read
+        `guest_id IS NULL` at the same time. With an unconditional write both insert a
+        `Guest`, the second overwrites the link, and the first row is left orphaned **with
+        the encrypted document already written into it** — an identity document no route can
+        reach and no ordinary flow can delete. Found by the QA panel of that change's
+        section 6, as code analysis rather than a measured failure: the test fixture holds a
+        single connection, so the interleaving cannot be produced there.
+
+        Making the write conditional turns the race into a claim with one winner. The
+        returned id is whoever holds the stay now — the caller's own on a win, the winner's
+        on a loss — so the loser writes its document to the row that is actually linked. What
+        it can still leave behind is a `Guest` carrying **only a name**, which is inert.
+
+        Returns `None` when nobody holds the stay after all this — almost always because it
+        does not exist in this tenant, and in principle because the winner's transaction
+        rolled back between the two statements. The caller answers both the same way, with
+        the constant refusal, and the second case cures itself on a retry. Saying only "the
+        stay does not exist" would be more definite than the code (security panel, section 6,
+        round 2).
+        """
+        claimed = await self._session.execute(
+            update(ReservationModel)
+            .where(
+                ReservationModel.tenant_id == tenant_id,
+                ReservationModel.id == reservation_id,
+                ReservationModel.guest_id.is_(None),
+            )
+            .values(guest_id=guest_id)
+            .returning(ReservationModel.guest_id)
+        )
+        won = claimed.scalar_one_or_none()
+        if won is not None:
+            return won
+
+        # Either somebody else claimed it first, or the stay is not ours. One more read tells
+        # the two apart, and it is only ever reached on the losing side of a race.
+        holder = await self._session.execute(
+            select(ReservationModel.guest_id).where(
+                ReservationModel.tenant_id == tenant_id,
+                ReservationModel.id == reservation_id,
+            )
+        )
+        return holder.scalar_one_or_none()

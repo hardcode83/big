@@ -73,19 +73,51 @@ _MAX_RECIPIENTS = 100
 
 @dataclass(frozen=True)
 class GuestActor:
-    """Who is acting, and from where (rule 9)."""
+    """Who is acting, and from where (rule 9; `guest-portal-api` R6.1, design D10).
 
-    user_id: uuid.UUID
+    **Exactly one of the two identities**, enforced in `__post_init__`. Widening this from a
+    required `user_id` to a choice is what let the guest portal audit its own writes, and it
+    loosened an invariant in the process: a caller could now construct an actor with neither.
+    The check makes the type *stricter* than it was rather than looser — an empty actor stops
+    being constructible at all, which it was not before either but only by accident of
+    `user_id` being required.
+
+    Both at once is refused for the same reason: a row claiming a write was made by a logged-in
+    manager **and** by the bearer of a portal link describes something that cannot have
+    happened, and `audit_logs` is append-only, so nobody can go back and decide which half was
+    true.
+
+    The chokepoint is doubled deliberately — `AuditLogFactory.build` refuses the same pair.
+    This dataclass is the guests module's; the factory is every module's, and the architecture
+    panel of section 1 pointed out that a caller assembling the audit fields by hand would
+    bypass this one entirely.
+    """
+
+    user_id: uuid.UUID | None = None
+    token_hash: str | None = None
     ip: str | None = None
+
+    def __post_init__(self) -> None:
+        if (self.user_id is None) == (self.token_hash is None):
+            raise ValueError(
+                "a GuestActor is exactly one of a user or a portal token bearer: "
+                f"got user_id={self.user_id!r}, token_hash={'set' if self.token_hash else None}"
+            )
 
 
 @dataclass(frozen=True)
 class DocumentInput:
     """What `PATCH /guests/{id}/document` accepts (R7.1).
 
-    All six together, not a partial patch: PRD §17 requires the set, and letting a caller
+    All of them together, not a partial patch: PRD §17 requires the set, and letting a caller
     send `document_number` without `document_expiry_date` produces a guest who looks
     documented and cannot be reported.
+
+    **`full_name` joined them in `guest-portal-api` (design D10)**, and is optional here for
+    a reason worth stating: the manager's `PATCH /guests/{id}/document` edits a guest who
+    already has a name, and overwriting it from a document form would let a typo in the
+    document flow rename somebody. The portal's check-in **does** send it, because there the
+    guest may be the one creating the record (OQ3). `None` means "leave the name alone".
     """
 
     nationality: str
@@ -93,6 +125,7 @@ class DocumentInput:
     document_type: GuestDocumentType
     document_number: str
     document_expiry_date: date
+    full_name: str | None = None
 
 
 @dataclass(frozen=True)
@@ -109,8 +142,15 @@ class GuestDocument:
     document_status: GuestDocumentStatus
 
 
-class _AuditWriter:
-    """Builds and appends an audit entry, so no use case constructs one by hand."""
+class GuestAuditWriter:
+    """Builds and appends an audit entry, so no use case constructs one by hand.
+
+    Public since `guest-portal-api`, which added a second module of guest use cases
+    (`application/portal.py`) that needs the same guarantee. It was `_AuditWriter` while this
+    file was the only caller; importing a private across modules would have been the shortcut
+    that quietly turns one writer into two, which is the exact thing this class exists to
+    prevent.
+    """
 
     def __init__(self, audit: AuditLogRepository) -> None:
         self._audit = audit
@@ -134,6 +174,7 @@ class _AuditWriter:
                 entity_type=entity_type,
                 entity_id=entity_id,
                 actor_user_id=actor.user_id,
+                actor_guest_token_hash=actor.token_hash,
                 actor_ip=actor.ip,
                 changes=changes,
                 now=now,
@@ -160,7 +201,7 @@ class SetGuestDocumentUseCase:
     ) -> None:
         self._guests = guests
         self._stays = stays
-        self._audit = _AuditWriter(audit)
+        self._audit = GuestAuditWriter(audit)
         self._uow = uow
 
     async def execute(
@@ -178,6 +219,12 @@ class SetGuestDocumentUseCase:
             raise GuestNotFoundError(guest_id)
 
         had_document = guest.document_number_encrypted is not None
+        # Only when the caller supplied one (D10). The manager's `PATCH` does not, so its
+        # form cannot rename a guest; the portal's check-in does, because there the record
+        # may be the one it just created (OQ3).
+        renamed = bool(document.full_name) and document.full_name != guest.full_name
+        if document.full_name:
+            guest.full_name = document.full_name
         guest.nationality = document.nationality
         guest.date_of_birth = document.date_of_birth
         guest.document_type = document.document_type
@@ -192,10 +239,38 @@ class SetGuestDocumentUseCase:
             entity_type=audit_actions.ENTITY_GUEST,
             entity_id=guest.id,
             actor=actor,
-            # `redacted()` for the number — the only form rule 11 leaves — and for the two
-            # other fields of the document group. Recording *which* changed is the point;
-            # recording a birth date in an append-only trail is not.
-            changes=ChangeSet(audit_actions.ENTITY_GUEST)
+            changes=self._document_changes(document, had_document, renamed),
+            now=now,
+        )
+
+        # R6.3 — the stay may now be ready to report. Only the one named, if any: a guest can
+        # have several stays and recomputing all of them from here would make one document
+        # edit fan out across bookings a caller never mentioned.
+        if reservation_id is not None:
+            await self._refresh_readiness(tenant_id, reservation_id, guest)
+
+        await self._uow.commit()
+        return guest
+
+    @staticmethod
+    def _document_changes(
+        document: DocumentInput, had_document: bool, renamed: bool
+    ) -> ChangeSet:
+        """What the audit row records: **which** fields moved, never their values.
+
+        `redacted()` for the number — the only form rule 11 leaves — and for the two other
+        fields of the document group. Recording *which* changed is the point; recording a
+        birth date in an append-only trail is not. Since `guest-portal-api` section 2 all
+        three are denylisted, so this is no longer the caller choosing well: `diff()` on any
+        of them raises.
+
+        `full_name` appears **only when it actually changed**, so the manager's edits do not
+        report a rename that did not happen — and it is `redacted()` for the same reason as
+        the rest, since section 2 put it on the denylist once an anonymous caller became one
+        of its writers.
+        """
+        changes = (
+            ChangeSet(audit_actions.ENTITY_GUEST)
             .redacted("document_number_encrypted")
             .redacted("date_of_birth")
             .redacted("nationality")
@@ -208,18 +283,9 @@ class SetGuestDocumentUseCase:
                     else GuestDocumentStatus.NOT_PROVIDED.value
                 ),
                 GuestDocumentStatus.PROVIDED.value,
-            ),
-            now=now,
+            )
         )
-
-        # R6.3 — the stay may now be ready to report. Only the one named, if any: a guest can
-        # have several stays and recomputing all of them from here would make one document
-        # edit fan out across bookings a caller never mentioned.
-        if reservation_id is not None:
-            await self._refresh_readiness(tenant_id, reservation_id, guest)
-
-        await self._uow.commit()
-        return guest
+        return changes.redacted("full_name") if renamed else changes
 
     async def _refresh_readiness(
         self, tenant_id: uuid.UUID, reservation_id: uuid.UUID, guest: Guest
@@ -257,7 +323,7 @@ class ReadGuestDocumentUseCase:
         uow: UnitOfWork,
     ) -> None:
         self._guests = guests
-        self._audit = _AuditWriter(audit)
+        self._audit = GuestAuditWriter(audit)
         self._uow = uow
 
     async def execute(
@@ -328,7 +394,7 @@ class SubmitLegalRegistrationUseCase:
         self._users = users
         self._timeline = timeline
         self._notifications = notifications
-        self._audit = _AuditWriter(audit)
+        self._audit = GuestAuditWriter(audit)
         self._uow = uow
 
     async def execute(
