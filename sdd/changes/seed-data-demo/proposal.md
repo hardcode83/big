@@ -45,7 +45,9 @@ Criterios de aceptación:
 
 Criterios de aceptación:
 
-1. WHEN el seed corre, THE SYSTEM SHALL asegurar la existencia de cuatro cuentas en el tenant con los correos de PRD §27, una por cada rol: `TENANT_OWNER`, `PROPERTY_MANAGER`, `CLEANER`, `TECHNICIAN`.
+1. WHEN el seed corre, THE SYSTEM SHALL asegurar la existencia de cuatro cuentas en el tenant, una por cada rol: `TENANT_OWNER`, `PROPERTY_MANAGER`, `CLEANER`, `TECHNICIAN`.
+
+   > **Enmienda del 2026-08-12** (panel de `/sdd:review`). Este criterio decía «cuatro cuentas en el tenant **con los correos de PRD §27**», y el diseño lo cumplió a sabiendas de otra manera: el owner y el manager se resuelven **por rol** (D4), porque sus direcciones las eligió quien bootstrapeó el entorno en `BOOTSTRAP_OWNER_EMAIL`/`BOOTSTRAP_MANAGER_EMAIL`, y sembrar `owner@adamar.test` a ciegas crearía una quinta cuenta y un segundo `TENANT_OWNER` en cuanto esos valores no coincidieran con los del PRD. Las otras dos salen de `SEED_CLEANER_EMAIL`/`SEED_TECHNICIAN_EMAIL`. Lo que este criterio pide, y sigue pidiendo, son **los cuatro roles presentes y operativos**: los correos de §27 son un ejemplo de configuración y no parte del contrato — que es exactamente lo que `README.md` y `docs/seed-demo.md` dicen en voz alta. La letra anterior describía algo que el código no hacía ni debía hacer, igual que pasó con R4.5.
 2. THE SYSTEM SHALL tomar la contraseña de cada cuenta de una variable de entorno **obligatoria**, y el árbol de código SHALL NOT contener ningún valor por defecto para ellas — `.env.example` las declara vacías, igual que las `BOOTSTRAP_*_PASSWORD` existentes.
 3. IF falta alguna de esas variables, THEN THE SYSTEM SHALL abortar antes de abrir transacción listando todas las ausentes (R1.5), en lugar de sembrar una contraseña conocida.
 4. WHEN una de las cuatro cuentas queda creada, THE SYSTEM SHALL dejarla en condiciones de operar inmediatamente — sin cambio de contraseña forzado (`must_change_password` en falso) — porque una demo que exige rotar cuatro contraseñas antes del primer clic no es una demo.
@@ -67,7 +69,9 @@ Criterios de aceptación:
 5. THE SYSTEM SHALL registrar los tres huéspedes de §27 (nombre y correo donde §27 lo da) por la vía canónica de su dominio, **nunca escribiendo el modelo ORM de `guests`**.
 
    > **Enmienda del 2026-08-12** (panel de seguridad de las secciones 4-6). Este criterio decía «por la misma vía que crea la reserva, sin escribir `guests` por su cuenta», y para la reserva `DIRECT` eso es **inexpresable**: `CreateReservationUseCase` sólo comprueba que el `guest_id` exista, no crea huéspedes. D8 ya lo resolvió bajando un escalón —`Guest(...)` + `SqlAlchemyGuestRepository.add`, la misma forma que usa `ReservationIngestor._link_guest`— pero la letra del criterio seguía describiendo algo que el código no hacía ni podía hacer. Lo que la redacción quería prohibir, y sigue prohibiendo, es un `session.add(GuestModel(...))`: por el puerto se conservan el scope de tenant y `CrossTenantWriteError`. Los dos huéspedes de OTA sí entran por `_link_guest`, dentro del ingestor.
-6. WHERE una reserva equivalente ya existe para esa propiedad y esas fechas, THE SYSTEM SHALL no crear un duplicado (R1.2).
+6. WHERE una reserva sembrada por este comando ya existe —identificada por el identificador estable que él mismo acuña— THE SYSTEM SHALL no crear un duplicado (R1.2).
+
+   > **Enmienda del 2026-08-12** (panel de `/sdd:review`). Decía «para esa propiedad y esas fechas», y esa clave es inservible precisamente aquí: las fechas son relativas al día de ejecución (R4.3), así que identificar por propiedad+fechas crearía un duplicado nuevo **cada día**, que es lo contrario de lo que el criterio quiere. D9 lo resolvió con identidad estable (`SEED-DIRECT-1`, `SEED-AIRBNB-1`, `SEED-BOOKING-1`) y dejó la letra fuera de lo alcanzable. Consecuencia aceptada, ahora explícita en vez de tácita: una estancia creada **a mano** en la misma propiedad y con las mismas fechas, sin `external_channel_id`, no impide que el seed cree la suya. Eso es cirugía manual sobre la base, fuera del «segunda ejecución sobre la misma base de datos» que R1.2 gobierna, y en una base de demo el daño es una fila de más.
 
 ### R5 — La plantilla de checklist del tenant
 

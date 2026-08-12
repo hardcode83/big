@@ -235,11 +235,18 @@ decisiones que citan las tareas están en `design.md`.
   [R1.3, R1.5]
 - [x] 9.5 Confirmar que el esquema no cambió: `docker compose exec backend uv run alembic check`
   no propone ninguna migración.
-- [ ] 9.6 `make down` al terminar el change, **antes** de borrar el worktree — **única casilla
-  deliberadamente sin marcar**: el stack sigue arriba y sembrado porque `/sdd:review` lo necesita
-  para correr la suite y para comprobar el comando contra la base real. Se baja **después** del
-  merge y antes de borrar el worktree, no ahora.
-  (`sdd/project.md` §«Stacks huérfanos»), y borrar la entrada resuelta de `BLOCKED.md`.
+**El `make down` no es una tarea de este change, y aquí está por qué.** En este sitio vivía la
+casilla 9.6, descrita por este mismo documento como «única casilla deliberadamente sin marcar»:
+el stack tenía que seguir arriba y sembrado para que `/sdd:review` comprobara el comando contra
+la base real, así que se bajaría después del merge. El `/sdd:review` del 2026-08-12 la sacó,
+porque las dos reglas que la rodean no dejan pasar juntas: `ensure_local_gates` rechaza
+**cualquier** tarea sin marcar antes de `LOCAL_VERIFIED`
+(`ERROR: Change has 1 incomplete task(s) at tasks.md line(s) 238`), y la casilla existía
+precisamente para no marcarse todavía. Marcarla habría afirmado un comando no ejecutado y habría
+tirado el stack que la verificación aún usaba; dejarla habría bloqueado el hito para siempre.
+Bajar el stack es ciclo de vida del **worktree**, no alcance del change: se hace al retirarlo en
+`/sdd:archive` (`sdd/project.md` §«Stacks huérfanos»). Decisión de Jose en el gate del
+2026-08-12, registrada en design.md como OQ4.
 
 **Lo que esta sección deliberadamente no incluye**, para que su ausencia no se lea como un
 olvido: no hay `make openapi` ni `cd frontend && npm run api:check` porque el change no añade

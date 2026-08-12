@@ -439,8 +439,9 @@ mirar una imagen cuesta ~140k de contexto).
 
 ## Open questions
 
-Ninguna abierta. Las tres que este diseño levantó las resolvió Jose en el gate del 2026-08-12, y
-quedan cerradas aquí para que el registro no dependa de la conversación:
+Ninguna abierta. Las cuatro las resolvió Jose en el gate del 2026-08-12 —las tres primeras las
+levantó este diseño, la cuarta la levantó el panel de `/sdd:review` al chocar con el gate de ciclo
+de vida— y quedan cerradas aquí para que el registro no dependa de la conversación:
 
 **OQ1 — ¿`Redes 11` nace con `pms_external_id = "PMS-REDES11"`, el identificador del
 `MockPMSAdapter`? → NO.** El seed produce el dataset de §27 y nada más. Ponerlo habría hecho
@@ -458,3 +459,16 @@ entrada de roadmap con verbo propio (`make reseed-demo`), nunca un efecto latera
 atribución imprecisa al owner (D5) ya es inevitable en propiedades y reservas —sus casos de uso
 escriben la fila de todos modos—, así que no escribirlas sólo conseguiría dejar sin rastro la única
 asignación de rol de la ejecución. D6 queda como está redactada.
+
+**OQ4 — ¿Dónde vive el `make down` del worktree, si el gate de ciclo de vida no admite una casilla
+sin marcar? → EN `/sdd:archive`, y la casilla 9.6 se elimina.** La levantó el panel de
+`/sdd:review` el 2026-08-12 al intentar marcar el hito: `mark-local-verified` llama a
+`ensure_local_gates`, que rechaza **cualquier** tarea sin marcar, y 9.6 era la que `tasks.md`
+declaraba deliberadamente sin marcar porque el stack tenía que seguir arriba y sembrado para que
+review comprobara el comando contra la base real. Las dos reglas son razonables por separado y
+juntas no dejan pasar. Marcarla habría afirmado un comando no ejecutado; dejarla habría bloqueado
+el hito indefinidamente. Se resuelve reconociendo de quién es la acción: **bajar el stack es ciclo
+de vida del worktree, no alcance del change**, y su sitio es el cierre de `/sdd:archive`, que es
+donde el worktree se retira de verdad. Consecuencia asumida: cambia el contrato de la sección
+Verification para cualquier change que copie este patrón — una tarea que sólo puede completarse
+después del merge no es una tarea, y ponerla como casilla es lo que crea la contradicción.
