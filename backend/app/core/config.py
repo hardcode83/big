@@ -304,6 +304,22 @@ class Settings(BaseSettings):
     bootstrap_manager_email: str = ""
     bootstrap_manager_password: str = ""
 
+    # Demo dataset (`make seed-demo`, change `seed-data-demo` design D4). Only the two
+    # operational accounts: the owner and the manager are whoever BOOTSTRAP_* already named,
+    # resolved by role, so re-declaring them here would let the two declarations disagree.
+    # Neither password can be echoed by a validation failure, and that holds whatever these
+    # fields are named: `_load_settings` formats `errors(include_input=False)`, so no
+    # submitted value reaches the message. There is no `*_password` pattern anywhere in this
+    # module, and reading the protection off the field name would be worth nothing twice over
+    # — it would make a future `seed_*_secret` look unprotected, and make renaming a field
+    # look like a fix.
+    seed_cleaner_name: str = ""
+    seed_cleaner_email: str = ""
+    seed_cleaner_password: str = ""
+    seed_technician_name: str = ""
+    seed_technician_email: str = ""
+    seed_technician_password: str = ""
+
     # Both secret checks are FIELD validators, not model validators, and that is a security
     # property rather than a style choice. A `model_validator(mode="after")` reports the whole
     # settings input as the offending value, so any one failure printed every other secret in

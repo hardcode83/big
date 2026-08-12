@@ -459,6 +459,38 @@ def test_bootstrap_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch)
     assert settings.bootstrap_manager_password == ""
 
 
+def test_seed_demo_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Same reasoning as the BOOTSTRAP_* test above: the absence of a DEFAULT is the property
+    # under test, and a developer who filled these in their own .env to run `make seed-demo`
+    # would otherwise pass this for the wrong reason.
+    for name in ("SEED_CLEANER_PASSWORD", "SEED_TECHNICIAN_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.seed_cleaner_password == ""
+    assert settings.seed_technician_password == ""
+
+
+def test_the_boot_path_also_withholds_the_seed_demo_passwords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Design D4 claims these two stay inside the protection `_load_settings` already gives the
+    # `bootstrap_*_password` fields. That claim is about the boot path, not about their names,
+    # so it is asserted the way the sibling tests above assert theirs: make an unrelated field
+    # fail and check the message carries no password.
+    monkeypatch.setenv("JWT_SECRET_KEY", "too-short-but-still-a-secret")
+    monkeypatch.setenv("SEED_CLEANER_PASSWORD", "cleaner-s3cr3t")
+    monkeypatch.setenv("SEED_TECHNICIAN_PASSWORD", "technician-s3cr3t")
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        _load_settings()
+
+    message = str(excinfo.value)
+    assert "cleaner-s3cr3t" not in message
+    assert "technician-s3cr3t" not in message
+
+
 def test_jwt_algorithm_is_a_constant_not_a_setting() -> None:
     assert JWT_ALGORITHM == "HS256"
     assert "jwt_algorithm" not in Settings.model_fields
