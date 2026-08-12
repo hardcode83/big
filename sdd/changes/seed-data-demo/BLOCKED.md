@@ -87,7 +87,32 @@ pasarlo a SQL crudo se volvió ciego a las filas pendientes sin flush.
 - **resume**: entrada de roadmap junto a la entrada 2 (es la misma decisión vista desde el otro
   extremo), o un cambio de `cleaning` que reemplace los dos enunciados por una remisión
 
-## 4. Dos notas de comportamiento acotado, deliberadamente sin arreglar
+## 4. La casilla 9.6 y el gate de ciclo de vida se contradicen
+
+- **phase**: review
+- **type**: decision
+- **what & why**: descubierto al intentar marcar el hito. `mark-local-verified` llama a
+  `ensure_local_gates`, que **rechaza cualquier tarea sin marcar**, y devuelve:
+  `ERROR: Change has 1 incomplete task(s) at tasks.md line(s) 238`. Esa línea es la 9.6, que
+  `tasks.md` describe como **«única casilla deliberadamente sin marcar»**: el `make down` se
+  hace *después* del merge y antes de borrar el worktree, porque el stack tiene que seguir
+  arriba y sembrado para que `/sdd:review` compruebe el comando contra la base real — cosa que
+  esta sesión efectivamente hizo.
+  Las dos reglas son razonables por separado y juntas no dejan pasar: una acción de limpieza
+  post-merge no es una tarea de implementación, pero mientras viva como casilla en `tasks.md`
+  el gate la cuenta. Marcarla ahora sería afirmar que `make down` se ejecutó, y además tiraría
+  el stack que `/sdd:ship` y la verificación posterior pueden querer. Ninguna de las dos cosas
+  es aceptable, así que la casilla se queda como está y el hito no se marca.
+  Salidas posibles, y ninguna es mía: (a) sacar 9.6 de `tasks.md` y tratar el `make down` como
+  cierre de `/sdd:archive`, que es donde el worktree se retira de verdad; (b) ejecutar
+  `make down` al final de ship, cuando ya no hace falta el stack, y marcarla entonces; (c)
+  aceptar que el gate se sortea a mano en este change. La (a) parece la forma correcta, porque
+  «bajar el stack» no es alcance del change sino del ciclo de vida del worktree — pero cambia
+  el contrato de `tasks.md` para todos los changes, no sólo para éste.
+- **resume**: decidir (a), (b) o (c); después `/sdd:review seed-data-demo` para marcar los
+  hitos, o directamente `mark-local-verified` + `mark-ready` si no hace falta re-revisar
+
+## 5. Dos notas de comportamiento acotado, deliberadamente sin arreglar
 
 - **phase**: review
 - **type**: deferred
