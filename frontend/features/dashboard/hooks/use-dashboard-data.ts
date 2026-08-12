@@ -2,8 +2,8 @@
 
 import { useQuery, type UseQueryResult } from "@tanstack/react-query";
 
-import { ApiError } from "@/lib/api";
 import { useAuth } from "@/lib/auth";
+import { retryPolicy } from "@/lib/api/retry-policy";
 
 import {
   getDashboardDataSource,
@@ -37,12 +37,7 @@ function useTenantId(): string {
  * delays the localized error/not-found state behind TanStack Query's default
  * backoff. Retry only transient (5xx / network) failures, and only briefly.
  */
-export function retryPolicy(failureCount: number, error: Error): boolean {
-  if (error instanceof ApiError && error.status >= 400 && error.status < 500) {
-    return false;
-  }
-  return failureCount < 2;
-}
+export { retryPolicy } from "@/lib/api/retry-policy";
 
 export function useDashboardCards(): UseQueryResult<
   PaginatedResponse<PropertyDashboardCard>

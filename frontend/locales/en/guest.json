@@ -1,0 +1,11 @@
+{
+  "loading": "Loading…", "retry": "Retry", "unavailable": "Not available", "listSeparator": ", ",
+  "invalid": { "title": "This link is not valid", "description": "Please ask your host for a new link." },
+  "errors": { "title": "Something went wrong", "generic": "We couldn't complete the operation.", "rateLimit": "Please wait before trying again. We do not know whether the report was received.", "tooLarge": "The content is too large.", "validation": "Check the highlighted fields.", "required": "This field is required.", "invalidField": "Please check this field." },
+  "stay": { "title": "Your stay", "dates": "Dates", "address": "Address", "wifi": "WiFi", "instructions": "Arrival instructions", "accessCode": "Access code", "support": "Support" },
+  "checkin": { "title": "Check-in", "missing": "Status: {{fields}}", "none": "No missing fields", "sending": "Sending…", "success": "Check-in submitted.", "submit": "Submit check-in" },
+  "fields": { "fullName": "Full name", "nationality": "Nationality", "birthDate": "Date of birth", "documentType": "Document type", "documentNumber": "Document number", "expiryDate": "Document expiry date" },
+  "documentTypes": { "DNI": "DNI", "NIE": "NIE", "PASSPORT": "Passport", "RESIDENCE_CARD": "Residence card", "OTHER": "Other" },
+  "status": { "NOT_PROVIDED": "Not provided", "PENDING": "Pending", "PROVIDED": "Provided", "VERIFIED": "Verified", "REJECTED": "Rejected", "NOT_REQUIRED": "Not required", "PENDING_GUEST_DATA": "Pending guest data", "READY_TO_SUBMIT": "Ready to submit", "SUBMITTED": "Submitted", "FAILED": "Failed", "MANUAL_REVIEW": "Manual review" },
+  "incident": { "title": "Report an incident", "titleField": "Title", "description": "Description", "sending": "Sending…", "success": "Incident reported.", "submit": "Send report", "status": { "OPEN": "Open", "CLASSIFIED": "Classified", "AWAITING_OWNER_APPROVAL": "Awaiting approval", "ASSIGNED": "Assigned", "ACCEPTED": "Accepted", "IN_PROGRESS": "In progress", "WAITING_EXTERNAL_PARTS": "Waiting for parts", "RESOLVED": "Resolved", "CANCELLED": "Cancelled" } }
+}
