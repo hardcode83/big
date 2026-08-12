@@ -25,6 +25,7 @@ Al cabo de unos segundos:
 
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
+make seed-demo         # llena ese tenant con el dataset de demo (ver abajo); exige bootstrap antes
 make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make down              # para y elimina los contenedores del stack
@@ -115,6 +116,23 @@ make bootstrap   # crea el tenant, su config y dos usuarios: TENANT_OWNER y PROP
 
 Es idempotente y falla antes de escribir nada si falta alguna variable. No está
 enganchado a `make up` para que el arranque siga sin pasos manuales.
+
+Con eso ya se puede entrar, pero el producto está vacío: ni viviendas, ni reservas, ni
+plantilla de limpieza. El tercer paso lo llena con el dataset de demo de PRD §27:
+
+```bash
+make seed-demo   # dos viviendas, dos cuentas más (CLEANER y TECHNICIAN), tres reservas y la plantilla de limpieza
+```
+
+**Exige un tenant ya creado**: completa el que `make bootstrap` dejó, y si no lo encuentra sale
+con error nombrando ese comando, sin escribir nada. Necesita sus propias variables
+(`SEED_CLEANER_*`, `SEED_TECHNICIAN_*`), también vacías en `.env.example` y sin valor por
+defecto en ninguna parte.
+
+Ojo con una cosa que sorprende: los correos que PRD §27 publica para la propietaria y la
+manager (`owner@adamar.test`, `manager@adamar.test`) **son los que tú pusiste en tu `.env`**,
+no algo que el comando imponga — los busca por rol. Todo lo demás, incluida la receta para
+refrescar un dataset que ha envejecido: [`docs/seed-demo.md`](docs/seed-demo.md).
 
 A partir de ahí **el resto de las cuentas se dan de alta por API**, sin volver a tocar la
 máquina: `POST /api/v1/users` crea el usuario y devuelve una contraseña temporal una sola vez.
