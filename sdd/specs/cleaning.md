@@ -31,9 +31,17 @@ El *cómo se opera* está en [`docs/cleaning.md`](../../docs/cleaning.md); aquí
 - IF la `property_id` indicada no existe en el tenant del token, THEN THE SYSTEM SHALL responder
   `404`.
 
-**Desviación registrada (`ASSUMPTION`)**: PRD §23 no declara endpoints de plantilla y PRD §27 no
-siembra ninguna, pero `cleaning_tasks.checklist_template_id` es `NOT NULL`. Sin estas rutas el
-alta automática no tendría a qué apuntar. Convención de desviación de ADR 0005.
+**Desviación registrada (`ASSUMPTION`)**: PRD §23 no declara endpoints de plantilla, pero
+`cleaning_tasks.checklist_template_id` es `NOT NULL`, así que sin estas rutas el alta automática no
+tendría a qué apuntar. Convención de desviación de ADR 0005.
+
+Esta nota decía además que «PRD §27 no siembra ninguna», y **era falso**: §27 sí cierra con un
+bloque `CleaningChecklistTemplate (una por tenant, para ambas propiedades)` que remite a la
+plantilla por defecto de §7.10. Lo corrige `seed-data-demo`, que la crea invocando
+`CreateChecklistTemplateUseCase` —sin pasar por el router, sin peticionario y sin comprobación de
+rol, con la transacción en manos del comando—, así que estos endpoints **ya no son lo único** que
+separa el `NOT NULL` de un entorno inutilizable. Lo que sigue en pie de la desviación es que el PRD
+no declara las rutas.
 
 ### Alta automática al cerrar el checkout
 
@@ -275,6 +283,8 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
   ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
 - `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
   almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
+- `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con
+  la plantilla por defecto de PRD §7.10 (spec `seed-data-demo`).
 - `backend/app/main.py` — el montaje del router anónimo y la rama del tope de subida en
   `MaxBodySizeMiddleware`.
 - `backend/app/properties/application/use_cases.py` — el punto donde el provisioner se compone

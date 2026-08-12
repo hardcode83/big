@@ -4,7 +4,10 @@
 
 Esta capacidad gestiona el ciclo de vida de una reserva —alta manual, consulta, edición y
 cancelación— y la trae desde el exterior por dos vías: sincronización con el PMS a través
-de un adapter sustituible e importación manual por CSV. Es la primera capacidad de negocio
+de un adapter sustituible e importación manual por CSV. Desde `seed-data-demo` hay un tercer
+llamante que no viene del exterior: `make seed-demo` compone las dos vías —el caso de uso de alta
+para su estancia `DIRECT` y el ingestor para las dos de canal OTA— sin dejar de pasar por ellas
+(spec `seed-data-demo`). Es la primera capacidad de negocio
 con API del producto y el dato del que cuelga la operación: la máquina de estados de la
 propiedad resuelve su precedencia a partir de "reserva activa" y "próxima reserva", y
 limpieza, accesos, mensajería y statements se disparan desde el ciclo de una reserva.
@@ -93,9 +96,11 @@ no las dispara; aporta el dato del que cuelgan.
 reservas confirmadas sin `AccessRecord` para darles uno en `PENDING` y fijarles
 `legal_registration_status = PENDING_GUEST_DATA` (PRD §17 paso 1), y revoca el registro de las
 canceladas. No hay enganche en el camino de confirmación **a propósito**: hay reservas ya
-confirmadas en la base de datos que un hook nunca cubriría, y las confirmaciones entran por tres
-vías —`PATCH`, import CSV y sync PMS, las dos últimas vía `ReservationStatus.parse_ingested`, que
-por defecto confirma—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
+confirmadas en la base de datos que un hook nunca cubriría, y las confirmaciones entran por cuatro
+vías —`PATCH`, import CSV, sync PMS y `make seed-demo`, las tres últimas vía
+`ReservationStatus.parse_ingested`, que por defecto confirma; el seed deja `status` en `None` a
+propósito (R4.4 de `seed-data-demo`), así que sus dos estancias OTA nacen confirmadas por ese
+default y `provision_access_records` también las recoge—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
 está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo junto al revocado.
 
 ### Timeline: evidencia de cada mutación, en la misma transacción
@@ -112,6 +117,11 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
 - WHEN una reserva se crea por importación CSV, THE SYSTEM SHALL persistir un
   `RESERVATION_IMPORTED` con `actor_type` `USER` y el `actor_user_id` de quien subió el
   fichero.
+- WHEN una reserva se crea por `make seed-demo`, THE SYSTEM SHALL persistir un
+  `RESERVATION_IMPORTED` con `actor_type` `USER`, el `actor_user_id` del `TENANT_OWNER` y
+  `source = "seed"` — la tercera procedencia de ese evento, y la única en la que nadie subió
+  ningún fichero. Ni `"csv"` ni `"pms"`: las dos serían falsas, y el evento es lo que lee una
+  persona cuando pregunta de dónde salió una reserva (spec `seed-data-demo`).
 - WHILE se escribe una mutación, THE SYSTEM SHALL persistir la reserva y su evento en una
   única transacción, de modo que un fallo al escribir el evento deje la reserva sin cambiar.
 - WHEN una edición no cambia nada —cuerpo vacío o campos con el valor que ya tenían— THE
@@ -207,7 +217,8 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
 - THE SYSTEM SHALL nombrar la propiedad por su `internal_code` y resolverla dentro del
   tenant, de modo que un CSV no pueda referenciar la propiedad de otro tenant.
 - IF la propiedad resuelta tiene `status = INACTIVE`, THEN THE SYSTEM SHALL saltar la fila con
-  su motivo, igual que hace el sync: las dos vías de lote comparten ese punto de decisión.
+  su motivo, igual que hace el sync: las vías de lote comparten ese punto de decisión, y desde
+  `seed-data-demo` son **tres** las que lo hacen.
 - IF una fila es inválida —por cualquier motivo, sea de parseo o de dominio— THEN THE
   SYSTEM SHALL omitirla, continuar con el resto e incluir en el informe **su número de
   línea** y el motivo, contando la cabecera como línea 1.
@@ -303,6 +314,9 @@ está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo jun
   (`ReservationIngestor`, la única ruta de upsert), `application/use_cases.py`,
   `infrastructure/{mock_pms,csv_parser}.py`,
   `infrastructure/channex/{client,mapping,adapter}.py`, `api/`, `cli/pms_sync.py`.
+- `backend/app/cli/seed_demo.py` — el tercer llamante de `ReservationIngestor` (con su propio
+  `resolve_property` por `internal_code`) y un llamante de `CreateReservationUseCase` fuera del API
+  (spec `seed-data-demo`).
 - `backend/app/timeline/{domain,infrastructure}/repositories.py` — persistencia del
   timeline.
 - `backend/app/{properties,guests}/{domain,infrastructure}/repositories.py` — resolución

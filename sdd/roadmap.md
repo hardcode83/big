@@ -80,9 +80,9 @@ Categorías:
 - [x] reservations — [BE] CRUD + MockPMSAdapter + import CSV (PRD §26.9, §16, §7.7). → changes/archive/2026-07-31-reservations/
 - [x] properties-crud — [BE] **dar a `properties` una vía de escritura, que hoy no tiene ninguna** … → changes/archive/2026-08-08-properties-crud/
   size: M · kind: feature
-- [ ] seed-data-demo — [CROSS] **el seed completo de PRD §27**, para poder recorrer y demostrar el producto sin escribir SQL a mano …
+- [x] seed-data-demo — [CROSS] **el seed completo de PRD §27**, para poder recorrer y demostrar el producto sin escribir SQL a mano … → changes/archive/2026-08-12-seed-data-demo/
   needs: properties-crud · size: S · kind: feature
-- [ ] seed-data-demo-extension — [CROSS] **lo que falta del dataset de PRD §27, que sólo puede sembrarse cuando existan sus dueños**: las tres incidencias —hoy el único escritor de `Incident` es el portal del huésped, que deliberadamente no fija categoría, severidad ni asignación— y los estados que no se asignan sino que se alcanzan (`CHECKED_IN_ESTIMATED`, `COMPLETED`, una limpieza cerrada con fotos), que R4.4 excluyó porque sembrarlos a mano falsificaría el recorrido que la demo existe para enseñar. Arrastra dos notas acotadas del propio comando que su panel dejó sin arreglar …
+- [ ] seed-data-demo-extension — [CROSS] **lo que falta del dataset de PRD §27, que sólo puede sembrarse cuando existan sus dueños**: las tres incidencias —hoy el único escritor de `Incident` es el portal del huésped, que deliberadamente no fija categoría, severidad ni asignación— y los estados que no se asignan sino que se alcanzan (`CHECKED_IN_ESTIMATED`, `COMPLETED`, una limpieza cerrada con fotos), que R4.4 excluyó porque sembrarlos a mano falsificaría el recorrido que la demo existe para enseñar. Arrastra tres notas acotadas del propio comando que su panel dejó sin arreglar —la tercera, el docstring de `ReservationIngestor`, que sigue diciendo que sus rutas son dos cuando ya son tres— …
   completes: seed-data-demo · needs: maintenance · size: S · kind: feature
 - [x] cleaning — [BE] CleaningTask + checklist + fotos + StorageAdapter + validación (PRD §26.10, §11). → changes/archive/2026-08-08-cleaning/
 - [x] cleaning-photos-storage — [BE] **las fotos de limpieza y el puerto de almacenamiento que no existe**. → changes/archive/2026-08-09-cleaning-photos-storage/

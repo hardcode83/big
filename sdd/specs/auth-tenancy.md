@@ -217,7 +217,11 @@ tocar la base de datos a mano.
   los dos endpoints anónimos de `auth-account-recovery`, `POST /auth/forgot-password` y
   `POST /auth/reset-password`, que resuelven la cuenta antes de conocer su tenant;
   **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
-  una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
+  una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca; y
+  `make seed-demo`, el primer llamante que **lee sin marcar y marca a media ejecución** — resuelve
+  el tenant por nombre y comprueba el conflicto global de correos con la sesión aún limpia, y sólo
+  entonces la marca, porque «sin scope» es una propiedad de la sentencia y no del método: marcada,
+  el listener añade la cláusula de tenant también a `find_by_email_globally`); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
 - WHEN un comando o job resuelve credenciales de PMS propiedad a propiedad, THE SYSTEM SHALL
@@ -407,6 +411,16 @@ tocar la base de datos a mano.
 - No es una migración de datos de Alembic (mezclaría esquema con contenido y no se puede
   reejecutar con seguridad) ni está enganchado a `make up`, que sigue arrancando sin pasos
   manuales.
+- El bootstrap crea **dos** cuentas y nada más. WHERE haga falta un tenant recorrible, THE SYSTEM
+  SHALL completarlo con `make seed-demo`, que añade una `CLEANER` y una `TECHNICIAN` desde las seis
+  variables `SEED_*` —obligatorias y sin default en el árbol, como las `BOOTSTRAP_*_PASSWORD`— y
+  resuelve al owner y al manager **por rol**, no por correo, para no crear un segundo
+  `TENANT_OWNER`. Esas dos cuentas nacen **operativas**, con `must_change_password` en falso: no
+  pasan por `CreateUserUseCase` —que genera la contraseña y por eso marca el flag— sino por
+  `User.create` y el puerto, que es lo que el default `False` de la entidad existe para permitir.
+  Comportamiento completo en la spec `seed-data-demo`.
+- A partir de esas cuatro cuentas, el alta de usuarios es por API (`POST /api/v1/users`, spec
+  `user-management`): ni el bootstrap ni el seed son la vía normal de crear gente.
 
 ### Secretos y configuración
 
@@ -445,7 +459,8 @@ tocar la base de datos a mano.
   (`get_authenticated_request`, `require(permission)`, `get_client_ip`).
 - Núcleo compartido: `backend/app/core/` — `config.py`, `db.py` (filtro global por tenant),
   `errors.py` (sobre de error), `redis.py`, `models_registry.py`.
-- Bootstrap: `backend/app/cli/bootstrap.py`.
+- Bootstrap: `backend/app/cli/bootstrap.py`. El seed que lo completa vive en
+  `backend/app/cli/seed_demo.py` y es capacidad aparte (`specs/seed-data-demo.md`).
 - Migraciones: `backend/alembic/versions/8ff62a7cb50c_auth_sessions.py`,
   `e1eed2e039ee_globally_unique_lower_email.py`.
 - Tests: `backend/tests/auth/`, `backend/tests/test_layering.py`,

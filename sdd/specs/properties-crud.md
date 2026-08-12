@@ -7,6 +7,12 @@ edición parcial, con los cuatro endpoints que declara PRD §23. Es el paso prev
 reserva, porque las tres vías de entrada de reservas —el alta manual, el import CSV y el sync del
 PMS— resuelven primero la propiedad, y ninguna puede resolver lo que no existe.
 
+**El API no es el único llamante de `CreatePropertyUseCase`**: `make seed-demo` lo invoca en
+proceso, sin HTTP, para crear las dos viviendas de PRD §27 (spec `seed-data-demo`). No es una vía
+de escritura nueva —es un cliente más del mismo caso de uso, que es justo lo que evita un segundo
+escritor con invariantes duplicados—, pero sí significa que las filas de `properties` y sus
+`audit_logs` pueden existir sin que nadie haya llamado al endpoint.
+
 **El módulo ya no expone sólo esos cuatro**: `dashboard-api` añadió al mismo router la lectura
 ligera `GET /api/v1/properties/{id}/state` (PRD §23:1942), que vive aquí porque `properties` posee
 la columna que reporta y el historial del que la data. Es lectura pura y no resuelve nada: el
@@ -115,9 +121,11 @@ ninguna capability la pide todavía, así que el proveedor se elige al crear y n
 - WHEN el import CSV o el sync del PMS encuentran una fila cuya propiedad está retirada, THE SYSTEM
   SHALL **saltar esa fila y continuar con el resto del lote**, anotando en el informe un motivo
   propio que la distingue de «la propiedad no existe».
-- THE SYSTEM SHALL aplicar la regla en las **tres** vías de entrada. Las dos de lote difieren solo
-  en cómo resuelven la propiedad —por `internal_code` el CSV, por `pms_external_id` el sync— y
-  ambas entregan el resultado al mismo punto del ingestor, así que la regla vive ahí una sola vez.
+- THE SYSTEM SHALL aplicar la regla en las **tres** vías de entrada. Las de lote difieren solo en
+  cómo resuelven la propiedad —por `internal_code` el CSV, por `pms_external_id` el sync— y todas
+  entregan el resultado al mismo punto del ingestor, así que la regla vive ahí una sola vez. Los
+  llamantes de ese punto son **tres** desde `seed-data-demo`: el seed le pasa un tercer
+  `resolve_property`, también por `internal_code`, y hereda la regla sin repetirla.
 
 El `409` y no `404` en la vía manual es deliberado: a diferencia de una propiedad de otro tenant,
 esta el llamante ya la ve, la lista y puede reactivarla, así que esconderla convertiría un
@@ -188,6 +196,11 @@ no le concede forma enmascarada.
   en claro bajo la regla 11 de `steering/security.md`.
 - THE SYSTEM SHALL registrar `actor_user_id` del token y `actor_ip` resuelta con el mismo
   mecanismo que el resto de la API.
+- WHERE el alta la hace `make seed-demo` en lugar de una petición, THE SYSTEM SHALL registrar el
+  `actor_user_id` del `TENANT_OWNER` del tenant y `actor_ip` **nula**: un comando no tiene token ni
+  IP de cliente, y el caso de uso acepta la IP como opcional precisamente porque no todo llamante
+  tiene una. Así que un entorno sembrado tiene filas `PROPERTY_CREATED` atribuidas al owner y sin
+  IP (spec `seed-data-demo`).
 - THE SYSTEM SHALL NOT declarar acción de borrado: la retirada es `status = INACTIVE` y llega como
   una actualización.
 
@@ -232,6 +245,8 @@ PRD §6 divergen, resuelto a favor del PRD.
   comprobación de estado en el alta y la traducción de las constraints.
 - `backend/app/properties/domain/exceptions.py` — `PropertyNotFoundError`,
   `DuplicateInternalCodeError`, `DuplicatePmsExternalIdError`, `PropertyValidationError`.
+- `backend/app/cli/seed_demo.py` — llamante de `CreatePropertyUseCase` fuera del API, y de
+  `find_by_internal_code` como clave de idempotencia (spec `seed-data-demo`).
 - `backend/app/reservations/application/use_cases.py` y
   `backend/app/integrations/application/ingest.py` — las dos guardas de propiedad retirada.
 - `backend/alembic/versions/f2b9c7a41d38_properties_pms_external_id_unique.py` — el índice parcial

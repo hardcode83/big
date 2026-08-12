@@ -65,6 +65,13 @@ usuarios con esas direcciones: revisa el nombre del tenant.
 
 No está enganchado a `make up`, que sigue arrancando sin pasos manuales.
 
+Con esas dos cuentas ya puedes entrar, pero el entorno sigue sin propiedades ni reservas. El
+tercer paso, `make seed-demo`, lo llena con el dataset de demo y añade una `CLEANER` y una
+`TECHNICIAN` desde sus propias variables `SEED_*` — a diferencia de las que crea
+`POST /api/v1/users`, esas dos nacen **sin cambio de contraseña forzado**, porque una demo que
+exige rotar cuatro contraseñas antes del primer clic no es una demo. Ver
+[`seed-demo.md`](seed-demo.md).
+
 ### En el entorno desplegado
 
 El mismo comando, pero contra el compose de deploy y con los valores en un **env-file
