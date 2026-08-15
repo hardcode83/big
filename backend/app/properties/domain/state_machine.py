@@ -27,6 +27,11 @@ class PropertyStateMachine:
         (PropertyOperationalState.VACANT_READY, PropertyStateTrigger.OWNER_BLOCKED): {PropertyOperationalState.BLOCKED_BY_OWNER},
         (PropertyOperationalState.VACANT_READY, PropertyStateTrigger.PROPERTY_MARKED_OUT_OF_SERVICE): {PropertyOperationalState.OUT_OF_SERVICE},
         (PropertyOperationalState.VACANT_READY, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
+        # Added by `maintenance` (design D8). Until then a CRITICAL fault in an empty, ready
+        # flat left it in `VACANT_READY` — that is, bookable — while every other state
+        # already routed `INCIDENT_CRITICAL` to `CRITICAL_INCIDENT`. An omission of the
+        # matrix, not a decision: `VACANT_READY` accepted `INCIDENT_HIGH` all along.
+        (PropertyOperationalState.VACANT_READY, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
         (PropertyOperationalState.AWAITING_CHECKIN, PropertyStateTrigger.CHECKIN_TIME_REACHED): {PropertyOperationalState.OCCUPIED_ESTIMATED},
         (PropertyOperationalState.AWAITING_CHECKIN, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.AWAITING_CHECKIN, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
@@ -43,6 +48,10 @@ class PropertyStateMachine:
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANER_REJECTED): {PropertyOperationalState.AWAITING_CLEANING},
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED): {PropertyOperationalState.AWAITING_CLEANING},
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
+        # Added by `maintenance` (design D8), the second of the same pair of omissions:
+        # `CLEANING_SCHEDULED` admitted `INCIDENT_CRITICAL` and not `INCIDENT_HIGH`, while
+        # `AWAITING_CLEANING` and `CLEANING_IN_PROGRESS` both admitted the two.
+        (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.CLEANING_COMPLETED): {PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyOperationalState.AWAITING_CHECKIN, PropertyOperationalState.VACANT_READY},
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
@@ -244,8 +253,14 @@ class PropertyStateMachine:
                 raise IncompatibleTransitionContextError("HIGH incident trigger requires HIGH severity")
             if trigger is PropertyStateTrigger.INCIDENT_CRITICAL and incident.severity is not IncidentSeverity.CRITICAL:
                 raise IncompatibleTransitionContextError("CRITICAL incident trigger requires CRITICAL severity")
-            if trigger is PropertyStateTrigger.INCIDENT_RESOLVED and incident.status is not IncidentStatus.RESOLVED:
-                raise IncompatibleTransitionContextError("Resolution trigger requires RESOLVED incident")
+            # `CANCELLED` counts as resolved here (`maintenance` design D9), and this is not
+            # a licence that change took: `ContextualStateResolver.after_incident_resolution`
+            # already filters active incidents with `status not in (RESOLVED, CANCELLED)`,
+            # so the resolver treats the two alike and only this guard did not. Without it
+            # R2.5 strands the property: an owner rejecting the budget cancels the incident,
+            # and nothing else fires to bring the property back out of `CRITICAL_INCIDENT`.
+            if trigger is PropertyStateTrigger.INCIDENT_RESOLVED and incident.status not in (IncidentStatus.RESOLVED, IncidentStatus.CANCELLED):
+                raise IncompatibleTransitionContextError("Resolution trigger requires a RESOLVED or CANCELLED incident")
 
     @staticmethod
     def _source_reservation(request: PropertyStateChangeRequest):

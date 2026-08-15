@@ -92,13 +92,14 @@ def test_it_rejects_an_action_outside_the_vocabulary(action: str) -> None:
         )
 
 
-# `OWNER_APPROVAL` stands for "a real table that is not in the vocabulary yet"; it replaced
+# `PRICING_RULE` stands for "a real table that is not in the vocabulary yet"; it replaced
 # `PROPERTY`, which `properties-crud` registered. See the twin note in `test_change_set.py`.
 # `INCIDENT` replaced `RESERVATION` when `access-notifications` registered the latter
-# (PRD §17/§15 projections), and `OWNER_APPROVAL` replaced `INCIDENT` when
-# `guest-portal-api` registered it — the guest portal is the first writer of `incidents`.
+# (PRD §17/§15 projections), `OWNER_APPROVAL` replaced `INCIDENT` when `guest-portal-api`
+# registered it — the guest portal is the first writer of `incidents` — and `PRICING_RULE`
+# replaced `OWNER_APPROVAL` when `maintenance` registered it with its approval flow (D6).
 # It is the next name rule 9 enumerates with no writer at all.
-@pytest.mark.parametrize("entity_type", ["User", "users", "OWNER_APPROVAL", ""])
+@pytest.mark.parametrize("entity_type", ["User", "users", "PRICING_RULE", ""])
 def test_it_rejects_an_entity_type_outside_the_vocabulary(entity_type: str) -> None:
     with pytest.raises(AuditContractError):
         AuditLogFactory.build(

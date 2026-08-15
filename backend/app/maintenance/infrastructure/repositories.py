@@ -27,18 +27,57 @@ INSERTs at all (limit 3 of that module), which is why the writer checks the tena
 import uuid
 from collections.abc import Sequence
 
-from sqlalchemy import func, select
+from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from app.cleaning.domain.entities import CleaningTask
+from app.cleaning.infrastructure.repositories import SqlAlchemyLiveCleaningTaskReader
 from app.core.tenancy import CrossTenantWriteError
-from app.maintenance.domain.entities import OPEN_INCIDENT_STATUSES, Incident
-from app.maintenance.domain.enums import OwnerApprovalStatus
+from app.maintenance.domain.entities import (
+    CLOSED_INCIDENT_STATUSES,
+    OPEN_INCIDENT_STATUSES,
+    Incident,
+    OwnerApproval,
+)
+from app.maintenance.domain.enums import IncidentStatus, OwnerApprovalStatus
+from app.maintenance.domain.exceptions import MaintenanceValidationError
+from app.maintenance.domain.repositories import IncidentFilters, IncidentPage
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 
 # Sorted so the emitted `IN` is stable across runs, which keeps query logs and the
 # statement-count test of R1.7 comparable. Same device the cleaning adapter uses.
 _OPEN_STATUSES = sorted(OPEN_INCIDENT_STATUSES, key=lambda status: status.value)
+_CLOSED_STATUSES = sorted(CLOSED_INCIDENT_STATUSES, key=lambda status: status.value)
+
+#: The columns `Incident`'s own methods may change. Named rather than writing the whole row,
+#: for the reason `cleaning` gives its `_MUTABLE_TASK_COLUMNS`: an UPDATE that also set
+#: `tenant_id`, `property_id` or `created_at` would let a wiring mistake move a row between
+#: tenants through a method whose name says it only saves.
+_MUTABLE_INCIDENT_COLUMNS = (
+    "category",
+    "severity",
+    "status",
+    "ai_summary",
+    "ai_classification",
+    "assigned_technician_id",
+    "owner_approval_required",
+    "estimated_cost",
+    "approved_cost",
+    "final_cost",
+    "resolved_at",
+    "updated_at",
+)
+
+#: Same device for the approval. `requested_at`, `amount`, `reason` and the polymorphic pair
+#: are written once by `add` and never again — an approval whose amount could change after
+#: the owner answered it would make `approved_cost` meaningless.
+_MUTABLE_APPROVAL_COLUMNS = (
+    "status",
+    "responded_at",
+    "responded_by",
+    "response_notes",
+)
 
 
 class SqlAlchemyIncidentReader:
@@ -92,6 +131,86 @@ class SqlAlchemyIncidentReader:
             )
             for row in rows.all()
         ]
+
+    async def list(
+        self,
+        tenant_id: uuid.UUID,
+        filters: IncidentFilters,
+        *,
+        page: int,
+        per_page: int,
+    ) -> IncidentPage:
+        """`GET /incidents` (R5.1). Whole rows, unlike the two projections above.
+
+        `filters.assigned_technician_id` is where R5.3 lands: the use case sets it from the
+        actor's role, so a `TECHNICIAN` gets a `WHERE` clause rather than a router that has
+        to remember to filter.
+        """
+        if page < 1 or per_page < 1:
+            # `offset((page - 1) * per_page)` goes negative for `page = 0`, and Postgres
+            # answers that with `OFFSET must not be negative` — a `DBAPIError` that reaches
+            # the caller as a 500 instead of the 422 a bad query parameter deserves. The
+            # route of D14 declares `ge=1` on both, so this is the second line of defence
+            # and the one that holds for a caller that is not a route: the job, a command,
+            # a test.
+            raise MaintenanceValidationError(
+                f"page and per_page must be positive, got page={page}, per_page={per_page}"
+            )
+
+        conditions = _incident_conditions(tenant_id, filters)
+        total = await self._session.scalar(
+            select(func.count()).select_from(IncidentModel).where(*conditions)
+        )
+        rows = await self._session.execute(
+            select(IncidentModel)
+            .where(*conditions)
+            # Newest first — an operator reads this as a queue of what just broke. `id`
+            # breaks a shared instant so the order is total and the pages do not overlap.
+            .order_by(IncidentModel.created_at.desc(), IncidentModel.id.desc())
+            .limit(per_page)
+            .offset((page - 1) * per_page)
+        )
+        return IncidentPage(
+            items=tuple(_to_incident(model) for model in rows.scalars()),
+            total=int(total or 0),
+        )
+
+    async def list_pending_classification(
+        self, tenant_id: uuid.UUID, *, limit: int
+    ) -> Sequence[Incident]:
+        """The candidate rule of D3, as one `WHERE`: `OPEN` and never looked at."""
+        rows = await self._session.execute(
+            select(IncidentModel)
+            .where(
+                IncidentModel.tenant_id == tenant_id,
+                IncidentModel.status == IncidentStatus.OPEN,
+                IncidentModel.ai_classification.is_(None),
+            )
+            .order_by(IncidentModel.created_at, IncidentModel.id)
+            .limit(limit)
+        )
+        return [_to_incident(model) for model in rows.scalars()]
+
+    async def list_active_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> Sequence[Incident]:
+        """Every non-terminal incident of the property (D7), as entities.
+
+        Excludes by terminal status rather than selecting the open ones one by one, so a
+        status added to the enum later counts as active until somebody decides otherwise —
+        the same direction `OPEN_INCIDENT_STATUSES` chose, and the safe one for a machine
+        that decides whether a flat can be let.
+        """
+        rows = await self._session.execute(
+            select(IncidentModel)
+            .where(
+                IncidentModel.tenant_id == tenant_id,
+                IncidentModel.property_id == property_id,
+                IncidentModel.status.notin_(_CLOSED_STATUSES),
+            )
+            .order_by(IncidentModel.created_at, IncidentModel.id)
+        )
+        return [_to_incident(model) for model in rows.scalars()]
 
 
 class SqlAlchemyOwnerApprovalReader:
@@ -178,3 +297,216 @@ class SqlAlchemyIncidentRepository:
             )
         )
         await self._session.flush()
+
+    async def get(self, tenant_id: uuid.UUID, incident_id: uuid.UUID) -> Incident | None:
+        result = await self._session.execute(
+            select(IncidentModel).where(
+                IncidentModel.tenant_id == tenant_id, IncidentModel.id == incident_id
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_incident(model) if model is not None else None
+
+    async def save(self, tenant_id: uuid.UUID, incident: Incident) -> None:
+        _require_same_tenant(incident.tenant_id, tenant_id, "incident")
+        await self._session.execute(
+            update(IncidentModel)
+            .where(
+                IncidentModel.tenant_id == incident.tenant_id,
+                IncidentModel.id == incident.id,
+            )
+            .values(
+                **{
+                    column: getattr(incident, column)
+                    for column in _MUTABLE_INCIDENT_COLUMNS
+                }
+            )
+        )
+        await self._session.flush()
+
+
+class SqlAlchemyOwnerApprovalRepository:
+    """`OwnerApprovalRepository` — the first writer `owner_approvals` has ever had."""
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def get(
+        self, tenant_id: uuid.UUID, approval_id: uuid.UUID
+    ) -> OwnerApproval | None:
+        result = await self._session.execute(
+            select(OwnerApprovalModel).where(
+                OwnerApprovalModel.tenant_id == tenant_id,
+                OwnerApprovalModel.id == approval_id,
+            )
+        )
+        model = result.scalar_one_or_none()
+        return _to_approval(model) if model is not None else None
+
+    async def add(self, tenant_id: uuid.UUID, approval: OwnerApproval) -> None:
+        _require_same_tenant(approval.tenant_id, tenant_id, "owner approval")
+        self._session.add(
+            OwnerApprovalModel(
+                id=approval.id,
+                tenant_id=approval.tenant_id,
+                property_id=approval.property_id,
+                related_type=approval.related_type,
+                related_id=approval.related_id,
+                amount=approval.amount,
+                reason=approval.reason,
+                status=approval.status,
+                requested_at=approval.requested_at,
+                responded_at=approval.responded_at,
+                responded_by=approval.responded_by,
+                response_notes=approval.response_notes,
+            )
+        )
+        await self._session.flush()
+
+    async def save(self, tenant_id: uuid.UUID, approval: OwnerApproval) -> None:
+        _require_same_tenant(approval.tenant_id, tenant_id, "owner approval")
+        await self._session.execute(
+            update(OwnerApprovalModel)
+            .where(
+                OwnerApprovalModel.tenant_id == approval.tenant_id,
+                OwnerApprovalModel.id == approval.id,
+            )
+            .values(
+                **{
+                    column: getattr(approval, column)
+                    for column in _MUTABLE_APPROVAL_COLUMNS
+                }
+            )
+        )
+        await self._session.flush()
+
+    async def find_approved_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID
+    ) -> Sequence[OwnerApproval]:
+        """Both gates of D11 point at the incident through the polymorphic pair, so
+        `related_id` is the whole filter and `related_type` is not — the budget gate writes
+        `INCIDENT` and the real-cost gate `MAINTENANCE_COST`, and the caller wants either."""
+        rows = await self._session.execute(
+            select(OwnerApprovalModel)
+            .where(
+                OwnerApprovalModel.tenant_id == tenant_id,
+                OwnerApprovalModel.related_id == incident_id,
+                OwnerApprovalModel.status == OwnerApprovalStatus.APPROVED,
+            )
+            # `NULLS LAST` explicitly: Postgres puts nulls **first** under `DESC`, so an
+            # `APPROVED` row with no `responded_at` would sort ahead of every real answer.
+            # `OwnerApproval.answer` always writes the two together, so such a row is not
+            # reachable through the domain — but a backfill could make one, and the caller
+            # of this port is deciding whether a cost was authorised.
+            .order_by(
+                OwnerApprovalModel.responded_at.desc().nullslast(),
+                OwnerApprovalModel.id.desc(),
+            )
+        )
+        return [_to_approval(model) for model in rows.scalars()]
+
+
+class SqlAlchemyLiveCleaningTaskQuery:
+    """`LiveCleaningTaskQuery` — the third collection `PropertyStateMachine` needs (D7).
+
+    **Composes `cleaning`'s one-method reader, not its repository.** The mirror image —
+    `cleaning`'s `SqlAlchemyBlockingIncidentQuery` reads `incidents` directly — is not
+    available to us as-is: that one returns a boolean, so nothing of the `Incident`
+    aggregate crosses, while this must return `CleaningTask` entities, and mapping them here
+    would be a second copy of something that belongs to `cleaning`.
+
+    The first version of this class composed `SqlAlchemyCleaningTaskRepository` whole, which
+    is the alternative D7 rejected — "repositorio de otro agregado raíz, y `maintenance`
+    sólo necesita un método de lectura" — reached by composition rather than by import, and
+    it also filtered `is_live` in Python after loading every task of the property. Both were
+    raised by the architecture panel of section 5. `SqlAlchemyLiveCleaningTaskReader` is the
+    narrow, read-only, SQL-filtered surface that rejection asks for.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._tasks = SqlAlchemyLiveCleaningTaskReader(session)
+
+    async def list_live_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> Sequence[CleaningTask]:
+        return await self._tasks.list_live_for_property(tenant_id, property_id)
+
+
+def _require_same_tenant(
+    entity_tenant_id: uuid.UUID, tenant_id: uuid.UUID, entity: str
+) -> None:
+    if entity_tenant_id != tenant_id:
+        raise CrossTenantWriteError(
+            entity=entity, entity_tenant_id=entity_tenant_id, acting_tenant_id=tenant_id
+        )
+
+
+def _incident_conditions(tenant_id: uuid.UUID, filters: IncidentFilters) -> list:
+    conditions = [IncidentModel.tenant_id == tenant_id]
+    if filters.property_id is not None:
+        conditions.append(IncidentModel.property_id == filters.property_id)
+    if filters.status is not None:
+        conditions.append(IncidentModel.status == filters.status)
+    if filters.severity is not None:
+        conditions.append(IncidentModel.severity == filters.severity)
+    if filters.assigned_technician_id is not None:
+        conditions.append(
+            IncidentModel.assigned_technician_id == filters.assigned_technician_id
+        )
+    return conditions
+
+
+def _to_incident(model: IncidentModel) -> Incident:
+    """Hydrate the entity **without `reported_by_guest_token`**, deliberately.
+
+    Nothing in this module's flow reads it: R1-R4 classify, price, assign and resolve, and
+    none of those asks who reported the fault. Carrying it anyway would hand every read path
+    — and therefore every serialiser downstream of one — a stable unsalted digest that
+    correlates one guest's stay across properties and reservations, which is precisely the
+    field `IncidentSummary`'s docstring names when it explains why the dashboard got a
+    projection instead of the entity.
+
+    Dropping it here is safe rather than lossy: `_MUTABLE_INCIDENT_COLUMNS` does not include
+    the column, so a hydrated-then-saved incident cannot erase what the guest portal wrote.
+    Raised by the security panel of section 5.
+    """
+    return Incident(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        property_id=model.property_id,
+        source=model.source,
+        title=model.title,
+        description=model.description,
+        created_at=model.created_at,
+        updated_at=model.updated_at,
+        reservation_id=model.reservation_id,
+        reported_by_user_id=model.reported_by_user_id,
+        category=model.category,
+        severity=model.severity,
+        status=model.status,
+        ai_summary=model.ai_summary,
+        ai_classification=model.ai_classification,
+        assigned_technician_id=model.assigned_technician_id,
+        owner_approval_required=model.owner_approval_required,
+        estimated_cost=model.estimated_cost,
+        approved_cost=model.approved_cost,
+        final_cost=model.final_cost,
+        resolved_at=model.resolved_at,
+    )
+
+
+def _to_approval(model: OwnerApprovalModel) -> OwnerApproval:
+    return OwnerApproval(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        property_id=model.property_id,
+        related_type=model.related_type,
+        related_id=model.related_id,
+        amount=model.amount,
+        reason=model.reason,
+        requested_at=model.requested_at,
+        status=model.status,
+        responded_at=model.responded_at,
+        responded_by=model.responded_by,
+        response_notes=model.response_notes,
+    )

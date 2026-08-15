@@ -38,6 +38,30 @@ from app.maintenance.domain.enums import (
     IncidentSeverity,
     OwnerApprovalRelatedType,
 )
+from app.maintenance.domain.exceptions import MaintenanceValidationError
+
+
+@dataclass(frozen=True)
+class IncidentClassification:
+    """What an `IncidentClassifier` returns about one incident (R1.1, design D1).
+
+    `summary` is the adapter's own words and **never an echo of `title`/`description`** —
+    the contract rule 11 of `steering/security.md` gets for `incidents.ai_summary` (D4).
+    `confidence` is compared against `TenantConfig.ai_confidence_threshold`, which is a
+    `0..1` fraction, so a value outside that range is a broken adapter rather than a low
+    score and is refused here instead of silently never classifying anything.
+    """
+
+    category: IncidentCategory
+    severity: IncidentSeverity
+    summary: str
+    confidence: Decimal
+
+    def __post_init__(self) -> None:
+        if not Decimal(0) <= self.confidence <= Decimal(1):
+            raise MaintenanceValidationError(
+                f"Classification confidence must be within 0..1, got {self.confidence}"
+            )
 
 
 @dataclass(frozen=True)

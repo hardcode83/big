@@ -11,10 +11,21 @@ exist, because rows now do exist.
 
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 
-from app.maintenance.domain.entities import OPEN_INCIDENT_STATUSES
+from app.cleaning.domain.enums import CleaningTaskStatus
+from app.cleaning.infrastructure.models import (
+    CleaningChecklistTemplateModel,
+    CleaningTaskModel,
+)
+from app.core.tenancy import CrossTenantWriteError
+from app.maintenance.domain.entities import (
+    OPEN_INCIDENT_STATUSES,
+    Incident,
+    OwnerApproval,
+)
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentSeverity,
@@ -23,12 +34,24 @@ from app.maintenance.domain.enums import (
     OwnerApprovalRelatedType,
     OwnerApprovalStatus,
 )
-from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
+from app.maintenance.domain.exceptions import MaintenanceValidationError
+from app.maintenance.domain.repositories import IncidentFilters
+from app.maintenance.domain.value_objects import (
+    IncidentClassification,
+    IncidentSummary,
+    OwnerApprovalSummary,
+)
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 from app.maintenance.infrastructure.repositories import (
     SqlAlchemyIncidentReader,
+    SqlAlchemyIncidentRepository,
+    SqlAlchemyLiveCleaningTaskQuery,
     SqlAlchemyOwnerApprovalReader,
+    SqlAlchemyOwnerApprovalRepository,
 )
+from sqlalchemy import text
+
+from app.auth.infrastructure.models import UserModel
 from app.properties.infrastructure.models import PropertyModel
 from app.tenants.infrastructure.models import TenantModel
 from tests.sql_counter import count_statements
@@ -415,6 +438,595 @@ async def test_the_pending_approvals_never_cross_a_tenant_boundary(db_session) -
     await _approval(db_session, tenant_b, theirs)
 
     found = await SqlAlchemyOwnerApprovalReader(db_session).list_pending_for_property(
+        tenant_a.id, theirs.id
+    )
+
+    assert found == []
+
+
+# --- The ports `maintenance` adds (R2, R4, R5; design D7, D11, D15) ---------------------
+#
+# These run on `db_session`, which is **not** bound to a tenant. That is deliberate, and it
+# is what makes the isolation tests at the end of this file able to fail at all: on a marked
+# session the global loader of `app/core/db.py` filters every statement, so a repository that
+# forgot its own `WHERE tenant_id` would still return nothing from a neighbour and the test
+# would pass while the code was wrong (design D15).
+
+
+def _reader(db_session) -> SqlAlchemyIncidentReader:
+    return SqlAlchemyIncidentReader(db_session)
+
+
+def _incidents(db_session) -> SqlAlchemyIncidentRepository:
+    return SqlAlchemyIncidentRepository(db_session)
+
+
+def _approvals(db_session) -> SqlAlchemyOwnerApprovalRepository:
+    return SqlAlchemyOwnerApprovalRepository(db_session)
+
+
+async def _user(db_session, tenant: TenantModel, role: str) -> UserModel:
+    """A real row, because `incidents.assigned_technician_id` and
+    `owner_approvals.responded_by` are foreign keys into `users`."""
+    user = UserModel(
+        tenant_id=tenant.id,
+        name=f"{role.title()} {uuid.uuid4().hex[:6]}",
+        email=f"{uuid.uuid4().hex[:12]}@example.com",
+        password_hash="hash",
+        role=role,
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+async def _cleaning_task(
+    db_session, tenant: TenantModel, prop: PropertyModel, status: CleaningTaskStatus
+) -> CleaningTaskModel:
+    template = CleaningChecklistTemplateModel(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        name=f"Standard {uuid.uuid4().hex[:6]}",
+        items=[{"id": "kitchen", "label": "Kitchen", "required": True}],
+        required_photos=[],
+    )
+    db_session.add(template)
+    await db_session.flush()
+    task = CleaningTaskModel(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        checklist_template_id=template.id,
+        status=status,
+        scheduled_start=NOW,
+        scheduled_end=NOW + timedelta(hours=2),
+    )
+    db_session.add(task)
+    await db_session.flush()
+    return task
+
+
+@pytest.mark.asyncio
+async def test_get_returns_the_incident_as_an_entity(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop)
+
+    found = await _incidents(db_session).get(tenant.id, row.id)
+
+    assert found is not None
+    assert found.id == row.id
+    assert found.status is IncidentStatus.OPEN
+    assert found.severity is IncidentSeverity.HIGH
+    # The whole entity, unlike the dashboard projections above: this is the surface a
+    # technician works from, and the description is what tells them what to bring.
+    assert found.description.startswith("No hot water")
+
+
+@pytest.mark.asyncio
+async def test_no_read_path_hydrates_the_reporter_token(db_session) -> None:
+    """The digest correlates one guest's stay across properties, and nothing in this flow
+    reads it — so it does not leave Postgres. Raised by the security panel of section 5.
+
+    Dropping it is safe and not lossy, which the second half of this test pins: the column
+    is not in `_MUTABLE_INCIDENT_COLUMNS`, so hydrating and saving cannot erase what the
+    guest portal wrote.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop)
+    repository = _incidents(db_session)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    assert incident.reported_by_guest_token is None
+
+    page = await _reader(db_session).list(tenant.id, IncidentFilters(), page=1, per_page=20)
+    assert all(item.reported_by_guest_token is None for item in page.items)
+
+    active = await _reader(db_session).list_active_for_property(tenant.id, prop.id)
+    assert all(item.reported_by_guest_token is None for item in active)
+
+    incident.set_triage(severity=IncidentSeverity.CRITICAL, now=NOW + timedelta(hours=1))
+    await repository.save(tenant.id, incident)
+    db_session.expunge_all()
+
+    stored = await db_session.get(IncidentModel, row.id)
+    assert stored is not None
+    assert stored.reported_by_guest_token == "guest-token-abc123"
+
+
+@pytest.mark.asyncio
+async def test_an_incident_written_by_the_real_writer_is_a_classification_candidate(
+    db_session,
+) -> None:
+    """D3's candidate rule, against a row **the writer produced** and not a fixture.
+
+    This is the test the whole suite was missing, and the gap was not academic: every
+    fixture in this file builds `IncidentModel(...)` without naming `ai_classification`, so
+    the column default gave them SQL `NULL` and the rule matched. The writer names every
+    field explicitly, and SQLAlchemy's JSON types turn an assigned Python `None` into JSON
+    `'null'` — which `IS NULL` does not match. The job therefore saw zero candidates for
+    every incident a real caller had opened, with the suite fully green. Found by the manual
+    end-to-end check of task 10.5.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        source=IncidentSource.GUEST,
+        title="Fuga de agua",
+        description="Sale agua por debajo del lavabo.",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    await SqlAlchemyIncidentRepository(db_session).add(tenant.id, incident)
+
+    stored_is_sql_null = await db_session.scalar(
+        text("SELECT ai_classification IS NULL FROM incidents WHERE id = :id"),
+        {"id": incident.id},
+    )
+    assert stored_is_sql_null is True
+
+    found = await _reader(db_session).list_pending_classification(tenant.id, limit=10)
+    assert [candidate.id for candidate in found] == [incident.id]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "closed", [IncidentStatus.CANCELLED, IncidentStatus.RESOLVED]
+)
+async def test_a_closed_incident_is_not_a_candidate_however_unclassified(
+    db_session, closed: IncidentStatus
+) -> None:
+    """The `status = OPEN` half of D3's rule, at the query.
+
+    A manager can cancel a guest-reported incident before the job ever looks at it, so
+    "terminal **and** never classified" is a real row and not a contrived one. Without this
+    half the job would hand a closed incident to `Incident.classify`, which refuses it — and
+    the refusal escapes the use case's `try`, so the whole tenant's tick dies rather than
+    that one row. Raised by the QA panel of sections 7-8, which found every other test in
+    the pair green under exactly that mutation.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    await _incident(db_session, tenant, prop, status=closed)
+
+    found = await _reader(db_session).list_pending_classification(tenant.id, limit=10)
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_a_classified_incident_stops_being_a_candidate(db_session) -> None:
+    """The other half of D3: a verdict written — even a low-confidence one — takes the
+    incident out of the job's reach, which is what stops it spinning."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop)
+    row.ai_classification = {"category": "OTHER", "confidence": "0.30"}
+    await db_session.flush()
+
+    found = await _reader(db_session).list_pending_classification(tenant.id, limit=10)
+
+    assert found == []
+
+
+@pytest.mark.asyncio
+async def test_get_is_none_for_an_unknown_incident(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+
+    assert await _incidents(db_session).get(tenant.id, uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_save_persists_what_the_entity_changed(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop)
+    repository = _incidents(db_session)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    incident.classify(
+        IncidentClassification(
+            category=IncidentCategory.HVAC,
+            severity=IncidentSeverity.CRITICAL,
+            summary="Heating problem reported at the property",
+            confidence=Decimal("0.95"),
+        ),
+        confidence_threshold=Decimal("0.75"),
+        adapter="RuleBasedIncidentClassifier",
+        now=NOW + timedelta(hours=1),
+    )
+    await repository.save(tenant.id, incident)
+    # Detach, so the next `get` builds a fresh entity from the row instead of handing back
+    # the instance already in the identity map — `save` writes with an UPDATE statement, and
+    # a stale object would make this assert nothing.
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.status is IncidentStatus.CLASSIFIED
+    assert stored.category is IncidentCategory.HVAC
+    assert stored.ai_classification is not None
+    assert stored.ai_classification["adapter"] == "RuleBasedIncidentClassifier"
+
+
+@pytest.mark.asyncio
+async def test_save_never_moves_a_row_between_tenants(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    prop = await _property(db_session, tenant_a, "REDES11")
+    row = await _incident(db_session, tenant_a, prop)
+
+    incident = await _incidents(db_session).get(tenant_a.id, row.id)
+    assert incident is not None
+
+    with pytest.raises(CrossTenantWriteError):
+        await _incidents(db_session).save(tenant_b.id, incident)
+
+
+@pytest.mark.asyncio
+async def test_list_active_for_property_excludes_the_terminal_statuses(db_session) -> None:
+    """D7: the machine decides from what is **still** open, so a closed one must not count."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    live = await _incident(db_session, tenant, prop, status=IncidentStatus.IN_PROGRESS)
+    await _incident(db_session, tenant, prop, status=IncidentStatus.RESOLVED)
+    await _incident(db_session, tenant, prop, status=IncidentStatus.CANCELLED)
+
+    found = await _reader(db_session).list_active_for_property(tenant.id, prop.id)
+
+    assert [incident.id for incident in found] == [live.id]
+
+
+@pytest.mark.asyncio
+async def test_list_active_for_property_returns_every_open_one(db_session) -> None:
+    """Not only the one being changed — that is the failure D7 names as its main risk."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    first = await _incident(db_session, tenant, prop, created_at=NOW)
+    second = await _incident(
+        db_session,
+        tenant,
+        prop,
+        status=IncidentStatus.ASSIGNED,
+        created_at=NOW + timedelta(hours=1),
+    )
+
+    found = await _reader(db_session).list_active_for_property(tenant.id, prop.id)
+
+    assert [incident.id for incident in found] == [first.id, second.id]
+
+
+@pytest.mark.asyncio
+async def test_the_listing_paginates_newest_first(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    oldest = await _incident(db_session, tenant, prop, created_at=NOW)
+    middle = await _incident(db_session, tenant, prop, created_at=NOW + timedelta(hours=1))
+    newest = await _incident(db_session, tenant, prop, created_at=NOW + timedelta(hours=2))
+
+    first_page = await _reader(db_session).list(
+        tenant.id, IncidentFilters(), page=1, per_page=2
+    )
+    second_page = await _reader(db_session).list(
+        tenant.id, IncidentFilters(), page=2, per_page=2
+    )
+
+    assert first_page.total == 3
+    assert [incident.id for incident in first_page.items] == [newest.id, middle.id]
+    assert [incident.id for incident in second_page.items] == [oldest.id]
+
+
+@pytest.mark.parametrize(
+    ("page", "per_page"), [(0, 20), (-1, 20), (1, 0), (1, -5)]
+)
+@pytest.mark.asyncio
+async def test_the_listing_refuses_a_non_positive_page(
+    db_session, page: int, per_page: int
+) -> None:
+    """`offset((page - 1) * per_page)` goes negative and Postgres answers with a
+    `DBAPIError`, which reaches a caller as a 500 rather than as the 422 a bad query
+    parameter deserves. The route declares `ge=1`; this is what holds for callers that are
+    not routes."""
+    tenant = await _tenant(db_session, "TenantA")
+
+    with pytest.raises(MaintenanceValidationError):
+        await _reader(db_session).list(
+            tenant.id, IncidentFilters(), page=page, per_page=per_page
+        )
+
+
+@pytest.mark.asyncio
+async def test_the_listing_filters_are_combined_with_and(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    here = await _property(db_session, tenant, "REDES11")
+    elsewhere = await _property(db_session, tenant, "PAJARITOS8")
+    technician = (await _user(db_session, tenant, "TECHNICIAN")).id
+    other_technician = (await _user(db_session, tenant, "TECHNICIAN")).id
+    wanted = await _incident(db_session, tenant, here, status=IncidentStatus.ASSIGNED)
+    wanted.assigned_technician_id = technician
+    # One near-miss per filter, so a condition dropped on the floor shows up as a longer
+    # list rather than as the same answer: same technician but another property, same
+    # property but another status, same everything but another technician.
+    other_property = await _incident(
+        db_session, tenant, elsewhere, status=IncidentStatus.ASSIGNED
+    )
+    other_property.assigned_technician_id = technician
+    await _incident(db_session, tenant, here, status=IncidentStatus.OPEN)
+    someone_else = await _incident(db_session, tenant, here, status=IncidentStatus.ASSIGNED)
+    someone_else.assigned_technician_id = other_technician
+    await db_session.flush()
+
+    page = await _reader(db_session).list(
+        tenant.id,
+        IncidentFilters(
+            property_id=here.id,
+            status=IncidentStatus.ASSIGNED,
+            assigned_technician_id=technician,
+        ),
+        page=1,
+        per_page=20,
+    )
+
+    assert [incident.id for incident in page.items] == [wanted.id]
+    assert page.total == 1
+
+
+@pytest.mark.asyncio
+async def test_the_severity_filter_narrows_the_listing(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    high = await _incident(db_session, tenant, prop)
+    low = await _incident(db_session, tenant, prop)
+    low.severity = IncidentSeverity.LOW
+    await db_session.flush()
+
+    page = await _reader(db_session).list(
+        tenant.id, IncidentFilters(severity=IncidentSeverity.HIGH), page=1, per_page=20
+    )
+
+    assert [incident.id for incident in page.items] == [high.id]
+
+
+@pytest.mark.asyncio
+async def test_an_approval_round_trips(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    repository = _approvals(db_session)
+    approval = OwnerApproval(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        related_type=OwnerApprovalRelatedType.INCIDENT,
+        related_id=uuid.uuid4(),
+        amount=Decimal("450.00"),
+        reason="Boiler replacement quoted by the technician.",
+        requested_at=NOW,
+    )
+
+    await repository.add(tenant.id, approval)
+    stored = await repository.get(tenant.id, approval.id)
+
+    assert stored is not None
+    assert stored.status is OwnerApprovalStatus.PENDING
+    assert stored.amount == Decimal("450.00")
+
+
+@pytest.mark.asyncio
+async def test_adding_an_approval_never_crosses_a_tenant(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    prop = await _property(db_session, tenant_a, "REDES11")
+
+    with pytest.raises(CrossTenantWriteError):
+        await _approvals(db_session).add(
+            tenant_b.id,
+            OwnerApproval(
+                id=uuid.uuid4(),
+                tenant_id=tenant_a.id,
+                property_id=prop.id,
+                related_type=OwnerApprovalRelatedType.INCIDENT,
+                related_id=uuid.uuid4(),
+                amount=Decimal("450.00"),
+                reason="Boiler replacement quoted by the technician.",
+                requested_at=NOW,
+            ),
+        )
+
+
+@pytest.mark.asyncio
+async def test_saving_an_answer_persists_it(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _approval(db_session, tenant, prop)
+    repository = _approvals(db_session)
+    responder = (await _user(db_session, tenant, "TENANT_OWNER")).id
+
+    approval = await repository.get(tenant.id, row.id)
+    assert approval is not None
+    applied = approval.answer(
+        status=OwnerApprovalStatus.APPROVED,
+        responded_by=responder,
+        response_notes="Go ahead.",
+        now=NOW + timedelta(hours=1),
+    )
+    await repository.save(tenant.id, approval)
+    # Detach, so the next `get` builds a fresh entity from the row instead of handing back
+    # the instance already in the identity map — `save` writes with an UPDATE statement, and
+    # a stale object would make this assert nothing.
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.status is OwnerApprovalStatus.APPROVED
+    assert stored.responded_by == responder
+    assert applied == Decimal("180.00")
+
+
+@pytest.mark.asyncio
+async def test_saving_an_answer_never_crosses_a_tenant(db_session) -> None:
+    """R2.6: "ni responder una de otro tenant" — the write half of it.
+
+    Its siblings `IncidentRepository.save` and `OwnerApprovalRepository.add` each have this
+    test; this one did not, and it guards exactly the path R2.6's rejection lands on.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    prop = await _property(db_session, tenant_a, "REDES11")
+    row = await _approval(db_session, tenant_a, prop)
+
+    approval = await _approvals(db_session).get(tenant_a.id, row.id)
+    assert approval is not None
+
+    with pytest.raises(CrossTenantWriteError):
+        await _approvals(db_session).save(tenant_b.id, approval)
+
+
+@pytest.mark.asyncio
+async def test_find_approved_for_incident_ignores_the_unanswered_and_the_rejected(
+    db_session,
+) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident_id = uuid.uuid4()
+    approved = await _approval(
+        db_session, tenant, prop, status=OwnerApprovalStatus.APPROVED
+    )
+    approved.related_id = incident_id
+    pending = await _approval(db_session, tenant, prop)
+    pending.related_id = incident_id
+    rejected = await _approval(
+        db_session, tenant, prop, status=OwnerApprovalStatus.REJECTED
+    )
+    rejected.related_id = incident_id
+    await db_session.flush()
+
+    found = await _approvals(db_session).find_approved_for_incident(tenant.id, incident_id)
+
+    assert [approval.id for approval in found] == [approved.id]
+
+
+@pytest.mark.asyncio
+async def test_find_approved_for_incident_covers_both_gates(db_session) -> None:
+    """D11: the budget gate writes `INCIDENT` and the real-cost gate `MAINTENANCE_COST`, and
+    the caller wants either — so `related_type` is not part of the filter."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident_id = uuid.uuid4()
+    budget = await _approval(db_session, tenant, prop, status=OwnerApprovalStatus.APPROVED)
+    budget.related_id = incident_id
+    real_cost = await _approval(
+        db_session, tenant, prop, status=OwnerApprovalStatus.APPROVED
+    )
+    real_cost.related_id = incident_id
+    real_cost.related_type = OwnerApprovalRelatedType.MAINTENANCE_COST
+    await db_session.flush()
+
+    found = await _approvals(db_session).find_approved_for_incident(tenant.id, incident_id)
+
+    assert {approval.id for approval in found} == {budget.id, real_cost.id}
+
+
+@pytest.mark.asyncio
+async def test_the_live_cleaning_task_query_sees_only_the_live_ones(db_session) -> None:
+    """D7's third collection. "Live" is `cleaning`'s own `LIVE_STATUSES`, asked through that
+    module's adapter rather than restated here."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    live = await _cleaning_task(db_session, tenant, prop, CleaningTaskStatus.IN_PROGRESS)
+    await _cleaning_task(db_session, tenant, prop, CleaningTaskStatus.COMPLETED)
+
+    found = await SqlAlchemyLiveCleaningTaskQuery(db_session).list_live_for_property(
+        tenant.id, prop.id
+    )
+
+    assert [task.id for task in found] == [live.id]
+
+
+# --- Tenant isolation of the new ports (R5.4, DoD §28.18, design D15) -------------------
+#
+# On an **unmarked** session, so a repository that forgot its own `WHERE tenant_id` fails
+# here instead of being covered by the global loader criteria of `app/core/db.py`. That is a
+# known trap of this codebase: on a marked session the listener filters down to the `select`
+# of a single column, and the test cannot fail however wrong the code is.
+
+
+@pytest.mark.asyncio
+async def test_no_new_read_port_crosses_a_tenant_boundary(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, "THEIRS")
+    their_incident = await _incident(db_session, tenant_b, theirs)
+    their_approval = await _approval(
+        db_session, tenant_b, theirs, status=OwnerApprovalStatus.APPROVED
+    )
+    their_approval.related_id = their_incident.id
+    await db_session.flush()
+
+    reader = _reader(db_session)
+
+    assert await _incidents(db_session).get(tenant_a.id, their_incident.id) is None
+    assert await _approvals(db_session).get(tenant_a.id, their_approval.id) is None
+    assert await reader.list_active_for_property(tenant_a.id, theirs.id) == []
+    assert (await reader.list(tenant_a.id, IncidentFilters(), page=1, per_page=20)).items == ()
+    assert (
+        await _approvals(db_session).find_approved_for_incident(
+            tenant_a.id, their_incident.id
+        )
+        == []
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_listing_filters_cannot_reach_across_a_tenant(db_session) -> None:
+    """The filters are AND-ed onto the tenant condition, never instead of it: naming the
+    neighbour's property explicitly still returns nothing."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, "THEIRS")
+    await _incident(db_session, tenant_b, theirs)
+
+    page = await _reader(db_session).list(
+        tenant_a.id, IncidentFilters(property_id=theirs.id), page=1, per_page=20
+    )
+
+    assert page.items == ()
+    assert page.total == 0
+
+
+@pytest.mark.asyncio
+async def test_the_live_cleaning_task_query_does_not_cross_a_tenant(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, "THEIRS")
+    await _cleaning_task(db_session, tenant_b, theirs, CleaningTaskStatus.IN_PROGRESS)
+
+    found = await SqlAlchemyLiveCleaningTaskQuery(db_session).list_live_for_property(
         tenant_a.id, theirs.id
     )
 

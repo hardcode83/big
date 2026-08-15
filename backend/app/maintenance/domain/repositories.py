@@ -34,10 +34,37 @@ criteria of `app/core/db.py` are only the net.
 
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import Protocol
 
-from app.maintenance.domain.entities import Incident
+from app.maintenance.domain.entities import Incident, OwnerApproval
+from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
+
+
+@dataclass(frozen=True)
+class IncidentFilters:
+    """The filters of `GET /incidents`, combined with AND (R5.1, D14).
+
+    `assigned_technician_id` is **not** a client-supplied filter dressed up as one: the use
+    case sets it from the authenticated role when that role is `TECHNICIAN`
+    (`IncidentActor.restrict_to_technician_id`, D13), so the row-level restriction of R5.3
+    cannot be dropped by omitting a query parameter. Same construction `cleaning` uses for
+    `CleaningTaskFilters.assigned_cleaner_id`, and for the same reason.
+    """
+
+    property_id: uuid.UUID | None = None
+    status: IncidentStatus | None = None
+    severity: IncidentSeverity | None = None
+    assigned_technician_id: uuid.UUID | None = None
+
+
+@dataclass(frozen=True)
+class IncidentPage:
+    """One page of results plus the total the client needs for `total_pages` (PRD §23)."""
+
+    items: tuple[Incident, ...]
+    total: int
 
 
 class IncidentReader(Protocol):
@@ -82,6 +109,77 @@ class IncidentReader(Protocol):
         ...
 
 
+class IncidentQuery(Protocol):
+    """The reads that return **entities**, for the consumers inside `maintenance`.
+
+    Separate from `IncidentReader` above, and the separation is the point:
+    `steering/backend-architecture.md` asks for "puertos pequeños y por rol… divide por
+    consumidor real", and these two have different real consumers. `IncidentReader` serves
+    the dashboard, which by `dashboard-api`'s own security decision may only ever see
+    projections; this one serves this module's `api/` and the state machine, which need the
+    aggregate. One Protocol carrying both would have made the dashboard's structural
+    guarantee an accident of which method a caller happened to pick.
+
+    The adapter implements both, because one class over one table is not two adapters —
+    what is split is the contract, which is where the rule bites. Raised by the architecture
+    panel of section 5.
+    """
+
+    async def list(
+        self,
+        tenant_id: uuid.UUID,
+        filters: IncidentFilters,
+        *,
+        page: int,
+        per_page: int,
+    ) -> IncidentPage:
+        """The paginated listing of `GET /incidents` (`maintenance` R5.1).
+
+        **Returns whole `Incident` entities and not `IncidentSummary`**, which is the
+        difference `value_objects.py` predicted: the dashboard may know only what is wrong
+        and how badly, while this module owns the surface a technician works from, and a
+        technician has to read the description of the fault. The redaction that goes with
+        owning that surface lives in `api/schemas.py`, where the audience is known.
+
+        **`reported_by_guest_token` is never hydrated by any reader of this module** — see
+        `IncidentRepository.get`.
+        """
+        ...
+
+    async def list_pending_classification(
+        self, tenant_id: uuid.UUID, *, limit: int
+    ) -> Sequence[Incident]:
+        """The candidates of the classification job (design D2, D3).
+
+        **`status = OPEN AND ai_classification IS NULL`, and that pair is the whole rule.**
+        It gives the two properties D3 needs at once: an incident whose adapter failed comes
+        back on the next tick, because nothing was written; and one the adapter did look at
+        and was unsure about does **not**, because `ai_classification` is set even below the
+        threshold. Without the second half a deterministic adapter would be asked the same
+        question for ever and answer the same way.
+
+        Oldest first, and `limit`ed: a tenant whose classifier was down all night must not
+        turn one tick into an unbounded run.
+        """
+        ...
+
+    async def list_active_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> Sequence[Incident]:
+        """Every non-terminal incident of the property (design D7).
+
+        Entities, because `PropertyStateMachine` reads `severity`, `status`, `tenant_id` and
+        `property_id` off them — a projection would have to guess which fields the machine
+        will need next.
+
+        **All of them, not just the one being changed**: `after_incident_resolution`
+        decides between `CRITICAL_INCIDENT`, `MAINTENANCE_REQUIRED` and the contextual
+        states by looking at what is *still* open, so a caller that passed only the incident
+        it just resolved would release a property that still has a critical fault.
+        """
+        ...
+
+
 class OwnerApprovalReader(Protocol):
     async def list_pending_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID
@@ -99,17 +197,16 @@ class OwnerApprovalReader(Protocol):
 
 
 class IncidentRepository(Protocol):
-    """The write side, and deliberately one method (`guest-portal-api` R5.5, design D15).
+    """The write side (`guest-portal-api` R5.5 design D15, widened by `maintenance` D5).
 
-    Listing, assigning, classifying and resolving are `maintenance`'s own flow — and reading is
-    `IncidentReader` above — so this port declares `add` and nothing else. A port that declared
-    the rest would be an open door for the next caller: interface segregation means dividing by
-    the real consumer, and the real consumer here reports one incident and never reads one back.
-    `steering/backend-architecture.md` puts it as "puertos pequeños y por rol".
+    It was one method — `add` — for as long as reporting a fault was the only thing that
+    wrote `incidents`. `guest-portal-api` named the cost in its own design Risks ("whoever
+    brings AI classification may find a port that does not serve it") and chose it
+    deliberately: "a one-method port is cheaper to widen than a speculative ten-method one
+    is to narrow". This is that widening, and it is still small — `get` and `save`, because
+    the flow reads one incident, mutates it through its own methods and writes it back.
 
-    The cost is named in that change's design Risks: whoever brings AI classification may find a
-    port that does not serve it. A one-method port is cheaper to widen than a speculative
-    ten-method one is to narrow.
+    Reading *collections* stays on `IncidentReader`: the split is by role, not by table.
     """
 
     async def add(self, tenant_id: uuid.UUID, incident: Incident) -> None:
@@ -124,5 +221,71 @@ class IncidentRepository(Protocol):
         states, for the same schema reason. The one caller today satisfies it structurally:
         both ids come from the `GuestSession` the portal's authoriser resolved from the token,
         never from the request (R2.1).
+        """
+        ...
+
+    async def get(self, tenant_id: uuid.UUID, incident_id: uuid.UUID) -> Incident | None:
+        """The incident, or `None` when it does not exist **within this tenant**.
+
+        Returning `None` rather than raising keeps the 404 decision in the use case, which
+        is also where the row-level restriction of R5.3 applies — and R5.3 needs the two to
+        be indistinguishable, so the port must not answer differently for "unknown" and
+        "not yours".
+
+        **`reported_by_guest_token` is never hydrated**, by this method or by any read of
+        `IncidentQuery`: nothing in this flow reads it, and it is a stable unsalted digest
+        that correlates one guest's stay across properties — the field
+        `IncidentSummary`'s docstring names when it explains why the dashboard was given a
+        projection. It comes back `None` however the row is stored, and that is not lossy:
+        no writer of this port touches the column, so what the guest portal wrote survives.
+        Stated here rather than only in the adapter, because a contract a caller cannot read
+        is not a contract. Raised by the architecture panel of section 5.
+        """
+        ...
+
+    async def save(self, tenant_id: uuid.UUID, incident: Incident) -> None:
+        """Persist the mutations the entity's own methods made. Never commits.
+
+        The whole flow of R1-R4 goes through here, so this is the one write path that has
+        to stay atomic with the `AuditLog` and the `TimelineEvent` of R6.1 — which is
+        exactly why it does not commit.
+        """
+        ...
+
+
+class OwnerApprovalRepository(Protocol):
+    """Its own port, not a method on the incident's (design D6, D11).
+
+    "No repositorio 'Dios' con métodos de varios agregados; un repositorio por agregado
+    raíz" (`steering/backend-architecture.md`) — and here the separation is load-bearing
+    rather than tidy: one incident can raise two approvals, D11's budget gate and its
+    real-cost gate, so the approval has an identity the incident cannot stand in for.
+    """
+
+    async def get(
+        self, tenant_id: uuid.UUID, approval_id: uuid.UUID
+    ) -> OwnerApproval | None:
+        """The approval, or `None` outside this tenant (R2.6, "ni responder una de otro
+        tenant")."""
+        ...
+
+    async def add(self, tenant_id: uuid.UUID, approval: OwnerApproval) -> None:
+        """Open a gate. Never commits — the approval, the incident's new status, the audit
+        row and the owner's notification are one transaction (R6.1)."""
+        ...
+
+    async def save(self, tenant_id: uuid.UUID, approval: OwnerApproval) -> None:
+        """Record the answer. Never commits, for the reason `add` gives."""
+        ...
+
+    async def find_approved_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID
+    ) -> Sequence[OwnerApproval]:
+        """Every `APPROVED` approval raised against that incident, newest answer first.
+
+        What D11's "cubierto por una aprobación aprobada" is checked against when the
+        technician closes with a `final_cost`. A sequence and not one row: the budget gate
+        and the real-cost gate can both have been approved, and which one covers the bill
+        is the caller's arithmetic, not this port's.
         """
         ...

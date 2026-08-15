@@ -227,6 +227,21 @@
         "title": "AssignCleaningTaskRequest",
         "type": "object"
       },
+      "AssignIncidentRequest": {
+        "additionalProperties": false,
+        "properties": {
+          "technician_id": {
+            "format": "uuid",
+            "title": "Technician Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "technician_id"
+        ],
+        "title": "AssignIncidentRequest",
+        "type": "object"
+      },
       "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post": {
         "properties": {
           "file": {
@@ -1788,6 +1803,56 @@
         "title": "ImportReportResponse",
         "type": "object"
       },
+      "IncidentCategory": {
+        "enum": [
+          "ACCESS",
+          "LOCK",
+          "WIFI",
+          "ELECTRICITY",
+          "WATER",
+          "PLUMBING",
+          "HVAC",
+          "APPLIANCE",
+          "NOISE",
+          "CLEANING",
+          "DAMAGE",
+          "SAFETY",
+          "OTHER"
+        ],
+        "title": "IncidentCategory",
+        "type": "string"
+      },
+      "IncidentPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "IncidentPageResponse",
+        "type": "object"
+      },
       "IncidentReportedResponse": {
         "description": "The acknowledgement, and **only** the acknowledgement (R5.3, D15).\n\nThree fields: the id of the incident just created, its status and when. R5.3 forbids the\nbearer of a token from listing, reading, modifying, assigning, classifying or resolving\nincidents — \"la única lectura permitida es el acuse de la que acaba de crear\" — so this\nmodel is the whole of what the portal may ever say about an incident.\n\nIt carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill\nin, and returning their initial values would promise the guest a shape that changes\nunderneath them.",
         "properties": {
@@ -1813,6 +1878,160 @@
         "title": "IncidentReportedResponse",
         "type": "object"
       },
+      "IncidentResponse": {
+        "description": "What an authenticated operator may see about one incident.\n\n`description` **is** here, unlike in the dashboard's `IncidentSummary`: this is the\nsurface a technician works from and the fault is what they have to read. What is not\nhere is everything that identifies who reported it (`reported_by_guest_token`,\n`reported_by_user_id`) and the raw classifier verdict (`ai_classification`) — the first\nis a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink\nwhose audience is the flow, not a client. `ai_summary` stays: it is our own closed\nvocabulary, and it is what tells an operator the incident was looked at.",
+        "properties": {
+          "ai_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Summary"
+          },
+          "approved_cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved Cost"
+          },
+          "assigned_technician_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Technician Id"
+          },
+          "category": {
+            "$ref": "#/components/schemas/IncidentCategory"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "description": {
+            "title": "Description",
+            "type": "string"
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "final_cost": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Final Cost"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "owner_approval_required": {
+            "title": "Owner Approval Required",
+            "type": "boolean"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "resolved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Resolved At"
+          },
+          "severity": {
+            "$ref": "#/components/schemas/IncidentSeverity"
+          },
+          "source": {
+            "$ref": "#/components/schemas/IncidentSource"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IncidentStatus"
+          },
+          "title": {
+            "title": "Title",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "source",
+          "category",
+          "severity",
+          "status",
+          "title",
+          "description",
+          "ai_summary",
+          "assigned_technician_id",
+          "owner_approval_required",
+          "estimated_cost",
+          "approved_cost",
+          "final_cost",
+          "resolved_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "IncidentResponse",
+        "type": "object"
+      },
       "IncidentSeverity": {
         "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Incident.severity) without a named block (§7.13). Not the same enum\nas TimelineSeverity (INFO/WARNING/ERROR/CRITICAL) — different values.",
         "enum": [
@@ -1822,6 +2041,19 @@
           "CRITICAL"
         ],
         "title": "IncidentSeverity",
+        "type": "string"
+      },
+      "IncidentSource": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Incident.source) without a named block (§7.13).",
+        "enum": [
+          "GUEST",
+          "CLEANER",
+          "OWNER",
+          "SYSTEM",
+          "PMS",
+          "LOCK_ALERT"
+        ],
+        "title": "IncidentSource",
         "type": "string"
       },
       "IncidentStatus": {
@@ -2118,6 +2350,17 @@
           "SKIPPED"
         ],
         "title": "NotificationStatus",
+        "type": "string"
+      },
+      "OwnerApprovalStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerApproval.status) without a named block (§7.19).",
+        "enum": [
+          "PENDING",
+          "APPROVED",
+          "REJECTED",
+          "EXPIRED"
+        ],
+        "title": "OwnerApprovalStatus",
         "type": "string"
       },
       "PMSProvider": {
@@ -3461,6 +3704,57 @@
         "title": "ResetPasswordRequest",
         "type": "object"
       },
+      "ResolveIncidentRequest": {
+        "additionalProperties": false,
+        "description": "R4.2 — `final_cost` is required, which is where \"SHALL exigir `final_cost`\" lands for\nan HTTP caller. The entity requires it too, for callers that are not HTTP.",
+        "properties": {
+          "final_cost": {
+            "anyOf": [
+              {
+                "maximum": 99999999.99,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
+                "type": "string"
+              }
+            ],
+            "title": "Final Cost"
+          }
+        },
+        "required": [
+          "final_cost"
+        ],
+        "title": "ResolveIncidentRequest",
+        "type": "object"
+      },
+      "RespondOwnerApprovalRequest": {
+        "additionalProperties": false,
+        "description": "`POST /owner-approvals/{id}/respond` (R2.4, R2.5).\n\n`status` is the enum, and the entity refuses anything but `APPROVED`/`REJECTED` — the\ntwo an owner can give. `response_notes` is free text the owner types, bounded here and\nkept out of `audit_logs.changes` by the allowlist (D6).",
+        "properties": {
+          "response_notes": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Response Notes"
+          },
+          "status": {
+            "$ref": "#/components/schemas/OwnerApprovalStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "RespondOwnerApprovalRequest",
+        "type": "object"
+      },
       "RowErrorResponse": {
         "description": "One row the import could not take, with what a person needs to fix it.",
         "properties": {
@@ -4238,6 +4532,51 @@
           "expires_in"
         ],
         "title": "TokenPairResponse",
+        "type": "object"
+      },
+      "TriageIncidentRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /incidents/{id}` (R1.4, R2.1).\n\nEvery field is optional because a triage may correct only one of them; sending none is\na no-op the entity accepts, and refusing it here would be a rule this schema invented.",
+        "properties": {
+          "category": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncidentCategory"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "estimated_cost": {
+            "anyOf": [
+              {
+                "maximum": 99999999.99,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d{0,2}0*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Estimated Cost"
+          },
+          "severity": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/IncidentSeverity"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "title": "TriageIncidentRequest",
         "type": "object"
       },
       "UpdatePropertyRequest": {
@@ -7678,6 +8017,854 @@
         ]
       }
     },
+    "/api/v1/incidents": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.",
+        "operationId": "list_incidents_api_v1_incidents_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/IncidentStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "severity",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/IncidentSeverity"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Severity"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's incidents",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}": {
+      "get": {
+        "description": "A `TECHNICIAN` who is not the assignee receives the same `404` as for an incident that does not exist, and so does an incident of another tenant (R5.3, R5.4).",
+        "operationId": "get_incident_api_v1_incidents__incident_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read one incident",
+        "tags": [
+          "maintenance"
+        ]
+      },
+      "patch": {
+        "description": "Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).",
+        "operationId": "triage_incident_api_v1_incidents__incident_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/TriageIncidentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Triage an incident",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/accept": {
+      "post": {
+        "description": "Cancels the SLA deadline the assignment opened (R3.3).",
+        "operationId": "accept_incident_api_v1_incidents__incident_id__accept_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The technician takes the job",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/assign": {
+      "post": {
+        "description": "`POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).",
+        "operationId": "assign_incident_api_v1_incidents__incident_id__assign_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AssignIncidentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Assign or reassign a technician",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/cancel": {
+      "post": {
+        "description": "Terminal from anywhere that is not already terminal. The property's operational state is recomposed from what is left (R4.4, R4.6).",
+        "operationId": "cancel_incident_api_v1_incidents__incident_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Cancel an incident",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/classify": {
+      "post": {
+        "description": "The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).",
+        "operationId": "classify_incident_api_v1_incidents__incident_id__classify_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Force the classifier over one incident",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/resolve": {
+      "post": {
+        "description": "`final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).",
+        "operationId": "resolve_incident_api_v1_incidents__incident_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResolveIncidentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Close the incident with its real cost",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/resume": {
+      "post": {
+        "operationId": "resume_work_api_v1_incidents__incident_id__resume_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Work resumes after the part arrived",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/start": {
+      "post": {
+        "operationId": "start_incident_api_v1_incidents__incident_id__start_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The technician starts work",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/wait-parts": {
+      "post": {
+        "description": "The incident stays **open** — `WAITING_EXTERNAL_PARTS` counts as open, because the flat still has a broken thing in it.",
+        "operationId": "wait_for_parts_api_v1_incidents__incident_id__wait_parts_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The job is waiting for an external part",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
     "/api/v1/integrations/pms/import-csv": {
       "post": {
         "description": "Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).",
@@ -7961,6 +9148,85 @@
         "summary": "List the caller's own notifications",
         "tags": [
           "notifications"
+        ]
+      }
+    },
+    "/api/v1/owner-approvals/{approval_id}/respond": {
+      "post": {
+        "description": "`TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).\n\nReturns the **incident**, not the approval: what the caller does next depends on where the incident ended up.",
+        "operationId": "respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "approval_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Approval Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RespondOwnerApprovalRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The owner answers a pending approval",
+        "tags": [
+          "maintenance"
         ]
       }
     },

@@ -563,6 +563,43 @@ class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
         return SignedPhotoLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)
 
 
+class SqlAlchemyLiveCleaningTaskReader:
+    """The live tasks of one property — one method, read-only (`maintenance` design D7).
+
+    It lives here and not in `maintenance/infrastructure/` because the mapping from
+    `CleaningTaskModel` to `CleaningTask` belongs to this module: a second copy of it over
+    there would drift the first time a column of `cleaning_tasks` changes. What lives in
+    `maintenance` is the adapter that implements *its* port, and it composes this.
+
+    **One method and no writers, which is the point.** The first version of that adapter
+    composed `SqlAlchemyCleaningTaskRepository` whole — `add`, `save` and all — which is the
+    alternative `maintenance`'s D7 explicitly rejected ("repositorio de otro agregado raíz,
+    y `maintenance` sólo necesita un método de lectura"), reached by composition instead of
+    by import. This is the narrow surface that rejection asks for, and it is the same shape
+    `BlockingIncidentQuery` below has in the other direction.
+
+    The status filter is in the `WHERE` rather than in the caller, like every other query in
+    this file.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def list_live_for_property(
+        self, tenant_id: uuid.UUID, property_id: uuid.UUID
+    ) -> Sequence[CleaningTask]:
+        rows = await self._session.execute(
+            select(CleaningTaskModel)
+            .where(
+                CleaningTaskModel.tenant_id == tenant_id,
+                CleaningTaskModel.property_id == property_id,
+                CleaningTaskModel.status.in_(sorted(LIVE_STATUSES, key=lambda s: s.value)),
+            )
+            .order_by(CleaningTaskModel.created_at, CleaningTaskModel.id)
+        )
+        return [_to_task(model) for model in rows.scalars()]
+
+
 class SqlAlchemyBlockingIncidentQuery:
     """R5.2 — is a `CRITICAL` incident of this property still open?
 

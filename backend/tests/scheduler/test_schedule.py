@@ -28,10 +28,15 @@ PRD_8_3 = {
 #: stops "the PRD says so" ever being claimed for a cadence the PRD has never heard of.
 #:   process_webhook_events | 60 s | the cadence is the ceiling on outbound provider calls
 #:                                   (rule 12(d)), not a tuning knob
+#:   classify_incidents     | 5 min | `maintenance` D2. §12 says an incident must arrive
+#:                                   classified and is silent on what triggers it; the
+#:                                   cadence is the ceiling on what the classifier is asked,
+#:                                   which matters the day a real AI provider is behind it
 BEYOND_PRD_8_3 = {
     "dispatch_notifications": timedelta(minutes=1),
     "provision_access_records": timedelta(minutes=5),
     "process_webhook_events": timedelta(seconds=60),
+    "classify_incidents": timedelta(minutes=5),
 }
 
 ALL_CADENCES = PRD_8_3 | BEYOND_PRD_8_3
