@@ -207,9 +207,58 @@ async def test_a_technician_cannot_drive_an_incident_that_is_not_theirs(
     assert response.status_code == 404
 
 
+async def test_the_api_scopes_the_lookup_to_the_callers_own_tenant(
+    api, world, db_session, monkeypatch
+) -> None:
+    """R5.4, asserted on the API's **own** scoping rather than on the session-wide net.
+
+    The 404 test below cannot fail, and it is worth saying why in full because the shape
+    recurs. Its first authenticated call makes `get_authenticated_request` run
+    `bind_session_to_tenant` (`app/auth/api/dependencies.py`), which installs a
+    `with_loader_criteria(entity, entity.tenant_id == tenant_id)` on the shared session for
+    **every** ORM `SELECT` for the rest of the test. From that moment the neighbour's row is
+    invisible no matter what the router, the use case or the repository do with `tenant_id` —
+    so a regression that dropped the argument between them would still 404, and still pass.
+    That test pins `_scope_statement_to_tenant`; it does not pin this module.
+
+    This one does, by watching the value that actually arrives at the repository. It is the
+    assertion that goes red if the wiring regresses, which is what rule 1 of
+    `sdd/steering/security.md` asks for when it demands tests that *demuestran* the isolation.
+    """
+    from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentRepository
+
+    seen: list[uuid.UUID] = []
+    original = SqlAlchemyIncidentRepository.get
+
+    async def _spy(self, tenant_id, incident_id):
+        seen.append(tenant_id)
+        return await original(self, tenant_id, incident_id)
+
+    monkeypatch.setattr(SqlAlchemyIncidentRepository, "get", _spy)
+
+    mine = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.get(
+        f"{INCIDENTS}/{mine.id}", headers=auth_header(api, world.manager)
+    )
+
+    assert response.status_code == 200
+    assert seen, "the request never reached SqlAlchemyIncidentRepository.get"
+    assert seen == [world.tenant.id], (
+        "the repository was asked for a tenant other than the caller's own: "
+        f"{seen!r} != [{world.tenant.id!r}]"
+    )
+
+
 async def test_an_incident_of_another_tenant_is_a_404(api, world, db_session) -> None:
-    """R5.4: "NEVER SHALL devolver una incidencia de otro tenant", through the marked
-    session the API actually uses."""
+    """R5.4: "NEVER SHALL devolver una incidencia de otro tenant".
+
+    Note what this proves and what it does not: by the time it asserts, the shared session is
+    already bound to the caller's tenant, so the 404 is guaranteed by the session-level
+    listener alone. It is kept because that net is itself worth pinning end-to-end through the
+    real app; the module's own scoping is asserted in
+    `test_the_api_scopes_the_lookup_to_the_callers_own_tenant` above, which can actually fail.
+    """
     from app.properties.infrastructure.models import PropertyModel
     from app.tenants.infrastructure.models import TenantModel
     from tests.maintenance.conftest import World

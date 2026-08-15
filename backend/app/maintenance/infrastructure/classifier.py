@@ -127,6 +127,18 @@ _SUMMARIES: dict[IncidentCategory, str] = {
     IncidentCategory.OTHER: "Unclassified problem reported at the property",
 }
 
+#: **The admission condition of rule 11, declared where a test can read it.** Every
+#: `IncidentClassifier` adapter must publish the closed set its `summary` is drawn from;
+#: `tests/maintenance/test_classifier_vocabulary_contract.py` refuses an adapter module that
+#: does not, and drives the ones that do to prove no other string escapes.
+#:
+#: It exists because the obligation was previously satisfied *by construction* of this one
+#: adapter and by prose on the port — neither of which survives a second implementation.
+#: `IncidentClassification.summary` is an unrestricted `str`, so without this declaration a
+#: real provider could paraphrase the guest's description into a rule-11 sink and nothing
+#: would stop it.
+SUMMARY_VOCABULARY: frozenset[str] = frozenset(_SUMMARIES.values())
+
 #: Confidence by how much evidence was found. Two matched keywords is a text that says the
 #: same thing twice; one is a plausible guess; none is not a verdict at all.
 #:

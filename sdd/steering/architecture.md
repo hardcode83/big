@@ -4,7 +4,9 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza,secuencia-mantenimiento}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png` y `docs/diagrams/2026-08-11_autohost-er-entidades.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png`, `docs/diagrams/2026-08-11_autohost-er-entidades.png` y `docs/diagrams/2026-08-15_autohost-secuencia-mantenimiento.png`.
+
+El de secuencia de mantenimiento se regeneró en `maintenance` y el `2026-07-13_...` se borró. No era una actualización cosmética: aquél dibujaba un participante `AIAdapter` clasificando **dentro de la petición que crea la incidencia**, y este change decidió lo contrario en sus dos decisiones de cabecera — D1 declara un puerto propio de `maintenance` (`IncidentClassifier`) para no colgar del `MockAIAdapter` que el repo ya asignó a `messaging-ai`, y D2 saca la clasificación a un job de Celery. Mostraba además «subir fotos», que el change deja fuera de alcance, y le faltaban el SLA, `WAITING_EXTERNAL_PARTS` y la segunda puerta de aprobación sobre `final_cost`. Un diagrama que enseña la arquitectura rechazada es peor que no tenerlo, porque nadie sospecha de él.
 
 El de entidades se regeneró en `guest-portal-api` al entrar `guest_access_tokens`: **31 entidades, 75 relaciones**. El anterior, `2026-08-10_...`, se borró; aquel salió de `auth-account-recovery` con 30 y 73 al entrar `password_reset_tokens` y `users.must_change_password`, y a su vez había sustituido al `2026-08-09_...` de `reservations-webhooks` (29 y 71, al entrar `webhook_endpoints`), que había sustituido al `2026-08-06_...` de `pms-provider-resolution` (28 y 67), y ése a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
 
