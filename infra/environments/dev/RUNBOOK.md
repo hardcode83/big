@@ -352,7 +352,7 @@ Cómo mirar la app y diagnosticar cuando algo va mal, sabiendo que **no hay ning
 #### Requisitos previos
 
 1. Tener la clave privada de la VM en `~/.ssh/autohostai_dev_vm` (recuperable del Vault, §2).
-2. Que **tu IP pública esté en `allowed_ssh_cidrs`**. Si cambió de casa/oficina, actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev` (§0). Compruébala con `curl -s ifconfig.me`.
+2. Que **tu IP pública esté en `allowed_ssh_cidrs`**. Si cambió de casa/oficina, actualiza el secret `ALLOWED_SSH_CIDRS` —el array JSON, `["1.2.3.4/32", ...]`— y aplica `infra-dev` (§0). Compruébala con `curl -s ifconfig.me`, y ponla como `/32`: la validación de `variables.tf` rechaza cualquier prefijo menor de `/24`, así que el bloque entero de tu ISP no vale. **No la añadas por la consola de OCI**: sobrevive hasta el siguiente `apply` y entonces desaparece.
 3. Saber la IP pública de la VM. Es **reservada**, así que no cambia:
 
    ```bash
@@ -542,7 +542,7 @@ Este es el árbol de decisión. Compara lo que ves **por HTTPS público** con lo
 
 SSH es la red de seguridad y **nunca se cierra**. Si tampoco entra por SSH:
 
-1. Tu IP pública ha cambiado y ya no está en `allowed_ssh_cidrs` → actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev`.
+1. Tu IP pública ha cambiado y ya no está en `allowed_ssh_cidrs` → actualiza el secret `ALLOWED_SSH_CIDRS` (array JSON) y aplica `infra-dev`. Si antes entrabas por una regla puesta a mano en la consola, el síntoma es el mismo y la causa otra: el último `apply` la borró.
 2. Si eso no fuera posible, queda la **consola serie de OCI** (Compute → Instance → Console connection), que no depende de la red de la VM.
 
 ### 7.4.6 Comprobar que el túnel sigue aislado de los datos

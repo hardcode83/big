@@ -73,10 +73,16 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 | `OCI_PRIVATE_KEY` | Contenido del `.pem` privado. El workflow lo escribe a un fichero en `$RUNNER_TEMP` y pasa la **ruta** (`private_key_path`) a Terraform — nunca el contenido inline en un string/heredoc HCL (más frágil, ver `design.md` D2). |
 | `OCI_COMPARTMENT_OCID` | Compartment donde se crean los recursos. |
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
-| `ALLOWED_SSH_CIDR` | CIDR IPv4 de operador (`>= /24`, nunca abierto) permitido para SSH/app — el workflow lo envuelve en lista JSON para `TF_VAR_allowed_ssh_cidrs`. Si tu IP cambia, actualiza el secret y re-aplica. |
-| `SSH_PUBLIC_KEY` | Contenido de la clave **pública** SSH de la VM — el workflow lo envuelve en lista JSON para `TF_VAR_ssh_authorized_keys`. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
+| `ALLOWED_SSH_CIDRS` | **Varios operadores.** Array JSON de CIDRs IPv4 (`>= /24`, nunca abierto) permitidos para SSH, tal cual: `["1.2.3.4/32","5.6.7.8/32"]`. Es el que hay que usar. |
+| `ALLOWED_SSH_CIDR` | *(histórico, un solo operador)* CIDR suelto que el workflow envuelve en lista. Solo se lee **si `ALLOWED_SSH_CIDRS` está vacío o no existe**. |
+| `SSH_PUBLIC_KEYS` | **Varios operadores.** Array JSON con las claves **públicas** SSH, una por operador. |
+| `SSH_PUBLIC_KEY` | *(histórico, una sola clave)* Igual que arriba: solo se lee si el plural está vacío. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
 
-> Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`). Para varios operadores, convierte `ALLOWED_SSH_CIDR`/`SSH_PUBLIC_KEY` en arrays JSON y pásalos tal cual.
+> **Añadir un operador se hace SIEMPRE por el secret plural, nunca por la consola de OCI.** Una regla de ingress añadida a mano sobrevive hasta el siguiente `apply` y entonces desaparece sin avisar: el `plan` del 2026-08-15 destapó dos (`Marta`, `SSH HOTEL AMA`) que llevaban tiempo puestas y que ningún fichero de este repositorio explicaba. Si tu IP cambia, actualiza el secret y re-aplica (RUNBOOK §0).
+>
+> Se conservan las dos formas —singular y plural— a propósito: migrar de golpe habría dejado una ventana en la que el `apply` falla porque el plural aún no existe y el singular ya no se lee, con un JSON inválido en un `TF_VAR` como único síntoma.
+
+> Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`).
 
 ## Ejecutar el pipeline
 
