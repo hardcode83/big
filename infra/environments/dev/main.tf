@@ -38,8 +38,12 @@ locals {
   # después cerrar, nunca al revés). El 22 se mantiene acotado a los CIDRs de operadores y es la
   # única vía de entrada a la máquina; ningún 0.0.0.0/0. Producto cartesiano CIDR × puerto.
   ingress_ports = [22]
+  # `allowed_ssh_cidrs` (mínimo /24) + `allowed_ssh_cidrs_wide` (excepción nombrada, mínimo /16).
+  # Se concatenan aquí y no en una sola variable a propósito: cada lista tiene su propia validación,
+  # así que un rango ancho no puede colarse por la puerta de la estrecha. Ver `variables.tf`.
+  ingress_cidrs = concat(var.allowed_ssh_cidrs, var.allowed_ssh_cidrs_wide)
   ingress_rules = flatten([
-    for cidr in var.allowed_ssh_cidrs : [
+    for cidr in local.ingress_cidrs : [
       for port in local.ingress_ports : { cidr = cidr, port = port }
     ]
   ])
