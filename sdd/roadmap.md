@@ -93,7 +93,7 @@ Categorías:
   completes: cleaning-photos-storage · size: S · kind: tech
 - [ ] cleaning-completion-evidence-gatherer — [TECH] **extraer la orquestación de lectura del cierre de limpieza**, que hoy hace de `CompleteCleaningTaskUseCase` un caso de uso con 11 colaboradores. No toca D8: mueve la lectura, no la decisión, que sigue dentro de `CleaningTask.complete()` …
   completes: cleaning-photos-storage · size: S · kind: tech
-- [ ] maintenance — [BE] Incident + clasificación IA + OwnerApproval + flujo técnico (PRD §26.11, §12)
+- [x] maintenance — [BE] Incident + clasificación IA + OwnerApproval + flujo técnico (PRD §26.11, §12) → changes/archive/2026-08-15-maintenance/
 - [x] pms-provider-resolution — [BE] **la fundación que ADR 0006 pide construir antes del adapter real**: fijar `PMSMessagingPort` como puerto propio frente a `PMSAdapter` (decisión 3) y resolver **proveedor y credenciales por propiedad** (decisión 7). → changes/archive/2026-08-06-pms-provider-resolution/
   completes: channex-staging-adapter · size: L · kind: feature
 - [x] pms-beds24-adapter — [BE] sustituir `MockPMSAdapter` por la integración real con Beds24 (ADR 0006) … → changes/archive/2026-08-07-pms-beds24-adapter/

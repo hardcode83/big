@@ -70,6 +70,26 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
 - WHEN se desbloquee `BLOCKED_BY_OWNER`, THE SYSTEM SHALL exigir destino explícito
   y validar ese destino contra el contexto actual; no SHALL restaurar un estado
   histórico automáticamente.
+- **Los tres triggers de incidencia dejaron de ser código inalcanzable el 2026-08-15**: hasta
+  `maintenance` nadie los disparaba, y por eso `MAINTENANCE_REQUIRED` y `CRITICAL_INCIDENT` eran
+  estados inalcanzables en producción. Quien los dispara ahora es el flujo de incidencias
+  ([`maintenance.md`](maintenance.md)), y ejercitarlos con datos reales destapó **dos omisiones
+  de la matriz**, corregidas en el mismo change:
+  - `VACANT_READY` admitía `INCIDENT_HIGH` pero no `INCIDENT_CRITICAL`, así que una avería
+    crítica en un piso vacío y listo lo dejaba **reservable**. THE SYSTEM SHALL producir
+    `CRITICAL_INCIDENT` desde `VACANT_READY` ante `INCIDENT_CRITICAL`.
+  - `CLEANING_SCHEDULED` admitía `INCIDENT_CRITICAL` pero no `INCIDENT_HIGH`, mientras
+    `AWAITING_CLEANING` y `CLEANING_IN_PROGRESS` admitían los dos. THE SYSTEM SHALL producir
+    `MAINTENANCE_REQUIRED` desde `CLEANING_SCHEDULED` ante `INCIDENT_HIGH`.
+- IF el trigger es `INCIDENT_RESOLVED`, THEN THE SYSTEM SHALL exigir que la incidencia fuente esté
+  `RESOLVED` **o `CANCELLED`**, y NEVER SHALL tratar la cancelación como un contexto incompatible.
+  `ContextualStateResolver.after_incident_resolution` ya filtraba las activas por
+  `status not in (RESOLVED, CANCELLED)`, así que sólo esta guarda distinguía las dos; sin la
+  corrección, una propietaria que rechaza el presupuesto cancela la incidencia y **deja la
+  propiedad varada** en `CRITICAL_INCIDENT`, porque no queda nada que la saque.
+- WHERE la propiedad está en `BLOCKED_BY_OWNER` o `OUT_OF_SERVICE`, THE SYSTEM SHALL rechazar
+  todo trigger de incidencia: no existe fila de política desde esos dos estados, y esa negativa
+  es deliberada — un piso retirado no cambia de estado porque alguien reporte una avería.
 
 ### Resolución contextual y precedencia
 

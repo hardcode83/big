@@ -194,16 +194,23 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 46 de las 51 operaciones lo
-  referencian. Las cinco restantes son `login`, `refresh`, `GET /health`,
-  `GET /api/v1/cleaning-photos/{photo_id}` y
-  `POST /api/v1/webhooks/{provider}/{webhook_token}`. Las dos últimas son las anónimas que
-  **tocan datos de un tenant**, y cada una lo resuelve por su lado porque el llamante no puede
-  mandar cabecera `Authorization`: la de fotos, con la firma HMAC de su query string, porque un
-  navegador que resuelve un `<img src>` no la manda; la de webhooks, con el token opaco de la ruta
-  más el secreto de cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es
-  el PMS y no tiene sesión. Las cinco están nombradas con su verbo en el allowlist de
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 66 de las 77 operaciones lo
+  referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
+  `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
+  `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
+  `POST /api/v1/webhooks/{provider}/{webhook_token}` y las cuatro del portal del huésped
+  (`GET /api/v1/guest/info/{token}`, `GET` y `POST /api/v1/guest/checkin/{token}`,
+  `POST /api/v1/guest/incident/{token}`). Las seis últimas son las anónimas que **tocan datos de
+  un tenant**, y cada una lo resuelve por su lado porque el llamante no puede mandar cabecera
+  `Authorization`: la de fotos, con la firma HMAC de su query string, porque un navegador que
+  resuelve un `<img src>` no la manda; la de webhooks, con el token opaco de la ruta más el
+  secreto de cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es el PMS
+  y no tiene sesión; las cuatro del portal, con `GuestPortalAuthenticator` sobre el token de la
+  ruta (`specs/guest-portal-api.md`). Las once están nombradas **con su verbo** en el allowlist de
   `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para forzar.
+- **Las doce rutas de `maintenance` entraron todas autenticadas y con permiso declarado**: once
+  bajo `/api/v1/incidents` y `POST /api/v1/owner-approvals/{approval_id}/respond`. Ninguna tocó
+  el allowlist anónimo, que sigue teniendo las once entradas de arriba.
 
 ## Key files
 

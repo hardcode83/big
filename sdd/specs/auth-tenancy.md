@@ -163,13 +163,26 @@ tocar la base de datos a mano.
 
 - THE SYSTEM SHALL materializar la política de PRD §6 como un enum `Permission` y un mapa
   de rol a permisos en `app/auth/domain/policy.py`, sin permisos especulativos: cada
-  capacidad añade los que sus endpoints declaran. Además de los dos de autoservicio
-  (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`), que PRD §6 concede a todo rol que puede
-  autenticarse, el catálogo contiene hoy los que añadió `reservations`
+  capacidad añade los que sus endpoints declaran. Además de los de autoservicio
+  (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION` y `READ_OWN_NOTIFICATIONS`), que PRD §6 concede a
+  todo rol que puede autenticarse, el catálogo contiene hoy los que añadió `reservations`
   (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
-  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`) y los cinco de `cleaning`, todos
-  diferenciados por rol.
+  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning` y los
+  cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
+  `RESPOND_OWNER_APPROVALS`), todos diferenciados por rol.
+- **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
+  autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
+  `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder
+  clasificar, triar, asignar, cancelar ni responder aprobaciones, que son de
+  `PROPERTY_MANAGER` y `TENANT_OWNER` ([`maintenance.md`](maintenance.md)). Es el mismo reparto
+  que `CLEANER` tiene con `_CLEANING_EXECUTE`, con una diferencia deliberada: el manager
+  **también** puede conducir el ciclo del técnico, para desatascar.
+- WHERE un rol sólo puede ver una parte de las filas de una capacidad, THE SYSTEM SHALL derivar
+  esa restricción del **rol del token** y NEVER SHALL aceptarla como parámetro de la petición.
+  `TECHNICIAN` es el caso vivo: sólo ve las incidencias que tiene asignadas, la ruta no expone
+  filtro por técnico, y una incidencia de otro devuelve el **mismo `404`** que una inexistente,
+  para que el endpoint no sirva de sonda de existencia.
 - **`properties-crud` es el único reparto que no se puede citar de PRD §6**, y por eso su razón
   queda registrada en lugar de referenciada: §6 no nombra capacidad de crear ni editar
   propiedades para ningún rol. Da a `TENANT_OWNER` «ver sus propiedades y reservas» —una
