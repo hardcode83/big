@@ -89,6 +89,27 @@ variable "allowed_ssh_cidrs_wide" {
   }
 }
 
+variable "media_user_email" {
+  description = <<-EOT
+    Email primario del usuario de servicio del bucket de medios. **No es opcional**: esta tenancy usa
+    Identity Domains (IDCS), que rechaza crear un usuario sin él aunque sea de servicio y no vaya a
+    iniciar sesión nunca.
+
+    No es un secreto y por eso lleva default versionado, igual que `budget_alert_recipients`. El
+    default usa **plus-addressing** (`+autohostai-media`) sobre un buzón que ya existe: IDCS quiere
+    una dirección única por usuario, y así se consigue sin dar de alta un buzón nuevo ni reutilizar
+    tal cual la del usuario humano —que colisionaría—, y además cualquier aviso de IDCS llega a
+    alguien en vez de perderse.
+  EOT
+  type        = string
+  default     = "josegascon+autohostai-media@gmail.com"
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+$", var.media_user_email))
+    error_message = "media_user_email debe ser una dirección de correo válida."
+  }
+}
+
 variable "ssh_authorized_keys" {
   description = "Lista de claves públicas SSH autorizadas (una por operador), inyectadas vía cloud-init al usuario por defecto de la imagen (ubuntu). Cada par dedicado a esta VM — distinto de la API key de OCI del provider/backend, nunca reutilizar. Por ahora solo la de Jose; añadir más no requiere recrear."
   type        = list(string)
