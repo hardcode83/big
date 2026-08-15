@@ -23,6 +23,7 @@ def make_classification(confidence: Decimal) -> IncidentClassification:
         severity=IncidentSeverity.HIGH,
         summary="Air conditioning fault reported",
         confidence=confidence,
+        vocabulary=frozenset({"Air conditioning fault reported"}),
     )
 
 
@@ -40,6 +41,36 @@ def test_confidence_outside_the_unit_interval_is_refused(confidence: str) -> Non
     """
     with pytest.raises(MaintenanceValidationError):
         make_classification(Decimal(confidence))
+
+
+def test_a_summary_outside_the_declared_vocabulary_is_refused() -> None:
+    """Rule 11 / D4, made a property of the type instead of of one adapter.
+
+    This is the assertion that reaches an adapter living in `app/integrations/` or holding a
+    constructor argument — the two shapes the test sweep over
+    `maintenance/infrastructure/` structurally cannot see, and which the review panel found
+    after the first fix.
+    """
+    with pytest.raises(MaintenanceValidationError):
+        IncidentClassification(
+            category=IncidentCategory.HVAC,
+            severity=IncidentSeverity.HIGH,
+            summary="El huésped dice: mi DNI es 12345678Z",
+            confidence=Decimal("0.95"),
+            vocabulary=frozenset({"Air conditioning fault reported"}),
+        )
+
+
+def test_a_classifier_must_declare_some_vocabulary() -> None:
+    """An empty set would satisfy "declare the closed set" while constraining nothing."""
+    with pytest.raises(MaintenanceValidationError):
+        IncidentClassification(
+            category=IncidentCategory.HVAC,
+            severity=IncidentSeverity.HIGH,
+            summary="Air conditioning fault reported",
+            confidence=Decimal("0.95"),
+            vocabulary=frozenset(),
+        )
 
 
 def test_classification_is_frozen() -> None:

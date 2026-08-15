@@ -50,17 +50,44 @@ class IncidentClassification:
     `confidence` is compared against `TenantConfig.ai_confidence_threshold`, which is a
     `0..1` fraction, so a value outside that range is a broken adapter rather than a low
     score and is refused here instead of silently never classifying anything.
+
+    **`vocabulary` is what makes D4 a property of the type rather than of one adapter.**
+    An adapter declares, in the value it returns, the closed set its `summary` was drawn
+    from, and this class refuses a `summary` outside it. That inversion is the whole point:
+    the obligation used to live in prose on the port and in the construction of the single
+    deterministic adapter, so it was satisfied by accident of who had written the code so
+    far, and a second implementation inherited nothing. The review panel found the two ways
+    that failed — a test sweep rooted at one directory cannot see an adapter in
+    `app/integrations/`, which is exactly where `classifier.py` says a real provider goes,
+    and a behavioural check that constructs adapters with no arguments silently skips the
+    one shape a real provider has (an HTTP client, a model name, a key).
+
+    Enforcing it here reaches all of them, because there is no way to produce the value the
+    port is typed to return without going through this check. A paraphrase of the guest's
+    description is not in any declared vocabulary, so it raises instead of reaching
+    `incidents.ai_summary`.
     """
 
     category: IncidentCategory
     severity: IncidentSeverity
     summary: str
     confidence: Decimal
+    vocabulary: frozenset[str]
 
     def __post_init__(self) -> None:
         if not Decimal(0) <= self.confidence <= Decimal(1):
             raise MaintenanceValidationError(
                 f"Classification confidence must be within 0..1, got {self.confidence}"
+            )
+        if not self.vocabulary:
+            raise MaintenanceValidationError(
+                "A classifier must declare the closed vocabulary its summary comes from "
+                "(rule 11 of steering/security.md, design D4)"
+            )
+        if self.summary not in self.vocabulary:
+            raise MaintenanceValidationError(
+                "Classification summary is not in the adapter's declared vocabulary, so it "
+                "may carry reported text into incidents.ai_summary, a rule-11 free-text sink"
             )
 
 

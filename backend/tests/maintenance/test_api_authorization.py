@@ -250,6 +250,45 @@ async def test_the_api_scopes_the_lookup_to_the_callers_own_tenant(
     )
 
 
+async def test_the_transition_routes_scope_the_lookup_to_the_callers_own_tenant(
+    api, world, db_session, monkeypatch
+) -> None:
+    """The same assertion for the OTHER call site, which the test above does not reach.
+
+    The detail route resolves through `GetIncidentUseCase.execute`; every mutating route —
+    accept, start, wait-parts, resume, resolve, triage, assign, cancel — resolves through
+    `_IncidentTransitionMixin._load_incident` instead. They are separate `incidents.get(...)`
+    calls with separate wiring, so a spy on one proves nothing about the other. Found the
+    hard way: a probe that broke `_load_incident`'s `tenant_id` left the whole suite green,
+    including the spy above.
+    """
+    from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentRepository
+
+    seen: list[uuid.UUID] = []
+    original = SqlAlchemyIncidentRepository.get
+
+    async def _spy(self, tenant_id, incident_id):
+        seen.append(tenant_id)
+        return await original(self, tenant_id, incident_id)
+
+    mine = await make_incident(db_session, world, status=IncidentStatus.ASSIGNED)
+    mine.assigned_technician_id = world.technician.id
+    await db_session.flush()
+
+    monkeypatch.setattr(SqlAlchemyIncidentRepository, "get", _spy)
+
+    response = await api.post(
+        f"{INCIDENTS}/{mine.id}/accept", headers=auth_header(api, world.technician)
+    )
+
+    assert response.status_code == 200, response.text
+    assert seen, "the request never reached SqlAlchemyIncidentRepository.get"
+    assert set(seen) == {world.tenant.id}, (
+        "a transition asked the repository for a tenant other than the caller's own: "
+        f"{seen!r}"
+    )
+
+
 async def test_an_incident_of_another_tenant_is_a_404(api, world, db_session) -> None:
     """R5.4: "NEVER SHALL devolver una incidencia de otro tenant".
 

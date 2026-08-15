@@ -656,6 +656,7 @@ async def test_save_persists_what_the_entity_changed(db_session) -> None:
             severity=IncidentSeverity.CRITICAL,
             summary="Heating problem reported at the property",
             confidence=Decimal("0.95"),
+            vocabulary=frozenset({"Heating problem reported at the property"}),
         ),
         confidence_threshold=Decimal("0.75"),
         adapter="RuleBasedIncidentClassifier",

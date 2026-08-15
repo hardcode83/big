@@ -69,6 +69,7 @@ def classification(
         severity=severity,
         summary="Air conditioning fault reported",
         confidence=Decimal(confidence),
+        vocabulary=frozenset({"Air conditioning fault reported"}),
     )
 
 

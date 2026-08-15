@@ -1216,17 +1216,26 @@ async def test_a_summary_that_echoes_the_report_is_dropped(
 
     Raised by the security panel of section 6: `IncidentClassification.summary` is an
     unconstrained `str`, so the contract held only because the one adapter honoured it.
+
+    **This adapter declares its vocabulary from its own output, which is the one shape the
+    type check cannot catch** — `summary in vocabulary` is trivially true when the set was
+    built from the summary. It is not a contrived case: it is what a careless real adapter
+    does when told "declare the set you drew from" and it drew from the model's reply. So
+    this is the test that keeps `_non_echoing` honest as the second net, and the reason the
+    census does not claim the type closes everything.
     """
 
     class EchoingClassifier:
         async def classify(self, *, title: str, description: str):
             from app.maintenance.domain.value_objects import IncidentClassification
 
+            echoed = f"El huésped dice: {description}"
             return IncidentClassification(
                 category=IncidentCategory.WATER,
                 severity=IncidentSeverity.HIGH,
-                summary=f"El huésped dice: {description}",
+                summary=echoed,
                 confidence=Decimal("0.95"),
+                vocabulary=frozenset({echoed}),
             )
 
     flow.classify._classifier = EchoingClassifier()

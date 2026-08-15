@@ -36,7 +36,11 @@ class IncidentClassifier(Protocol):
         "**No autoriza a un escritor nuestro**". A classifier is our writer, working from
         text an anonymous guest typed, so an adapter that paraphrases the description
         copies whatever the guest put in it — a document number, a code — into a column
-        nobody declared. Draw the summary from a closed vocabulary.
+        nobody declared.
+
+        **This is enforced, not requested**: declare the closed set in the returned
+        `IncidentClassification.vocabulary`, which refuses a `summary` outside it. Prose here
+        used to be the whole obligation, and prose does not survive a second implementation.
 
         `confidence` is a `0..1` fraction compared against
         `TenantConfig.ai_confidence_threshold`; `IncidentClassification` refuses anything

@@ -127,16 +127,17 @@ _SUMMARIES: dict[IncidentCategory, str] = {
     IncidentCategory.OTHER: "Unclassified problem reported at the property",
 }
 
-#: **The admission condition of rule 11, declared where a test can read it.** Every
-#: `IncidentClassifier` adapter must publish the closed set its `summary` is drawn from;
-#: `tests/maintenance/test_classifier_vocabulary_contract.py` refuses an adapter module that
-#: does not, and drives the ones that do to prove no other string escapes.
+#: **The admission condition of rule 11, as this adapter satisfies it.** Every
+#: `IncidentClassifier` adapter must declare the closed set its `summary` is drawn from, and
+#: it declares it *in the value it returns* — `IncidentClassification` refuses a `summary`
+#: outside its own `vocabulary`, so the guarantee holds wherever the adapter lives and
+#: whatever its constructor needs.
 #:
-#: It exists because the obligation was previously satisfied *by construction* of this one
-#: adapter and by prose on the port — neither of which survives a second implementation.
-#: `IncidentClassification.summary` is an unrestricted `str`, so without this declaration a
-#: real provider could paraphrase the guest's description into a rule-11 sink and nothing
-#: would stop it.
+#: Publishing it as a module constant as well is a convenience for
+#: `tests/maintenance/test_classifier_vocabulary_contract.py`, which sweeps this package; the
+#: sweep is a second net, not the guarantee. The distinction cost a review round: a sweep
+#: rooted at one directory cannot see the real provider that the module docstring above says
+#: belongs in `app/integrations/`.
 SUMMARY_VOCABULARY: frozenset[str] = frozenset(_SUMMARIES.values())
 
 #: Confidence by how much evidence was found. Two matched keywords is a text that says the
@@ -200,4 +201,5 @@ class RuleBasedIncidentClassifier:
             severity=_SEVERITIES[best_category],
             summary=_summary_for(best_category),
             confidence=confidence,
+            vocabulary=SUMMARY_VOCABULARY,
         )
