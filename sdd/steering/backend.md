@@ -24,3 +24,4 @@ Reglas de diseño dentro de cada capa (DDD + SOLID + regla de dependencia, con e
 - No saltarse `PropertyStateMachine` para cambiar estados.
 - No acceder a un proveedor externo fuera de su adapter.
 - No queries sin tenant scope.
+- No presentar una comprobación de tamaño dentro del endpoint como si rechazara el cuerpo antes de leerlo: regla 14 de `steering/security.md`.

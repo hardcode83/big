@@ -1434,20 +1434,15 @@ class UploadCleaningPhotoUseCase(_TaskTransitionMixin):
         """Consume the upload in chunks, counting, and abort the moment it is too big (D11).
 
         **What this does NOT do, despite an earlier comment here saying it did: it does not
-        protect against a lying `Content-Length` or a chunked upload.** It cannot, and the
-        reason is mechanical. `app/core/http_limits.py` documents it: FastAPI calls
-        `await request.form()` inside its route wrapper *before* it solves dependencies, and
-        Starlette's multipart parser spools the file part to a `SpooledTemporaryFile` that has
-        no size ceiling of its own. So by the time this loop asks for its first chunk, the file
-        has already been received in full and written to the container's disk. Counting it
-        afterwards cannot un-receive it.
+        protect against a lying `Content-Length` or a chunked upload, and it does not satisfy
+        "reject before reading the body".** By the time this loop asks for its first chunk the
+        upload has already been received in full and spooled. Why that is mechanically the
+        case is **rule 14 of `sdd/steering/security.md`**, the single home of that contract —
+        do not re-derive it here.
 
         The check that genuinely stops an oversized or dishonest body is
         `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
-        (`http_limits.py:116-129`), which tallies bytes as they arrive and cuts the stream the
-        moment the total passes the ceiling — that is the half covering a client that
-        understates `Content-Length` or sends `Transfer-Encoding: chunked` with none at all.
-        The `Content-Length` refusal before it is only the cheap fast path.
+        (`app/core/http_limits.py`).
 
         **So do not "simplify" the middleware branch on the grounds that the use case already
         counts.** Deleting the middleware's counter would leave an anonymous caller able to

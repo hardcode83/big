@@ -91,8 +91,12 @@ async def import_reservations_csv(
         )
 
     # The byte ceiling is enforced by `MaxBodySizeMiddleware` BEFORE the body is read — see
-    # `app/core/http_limits.py`. Reading here with a ceiling as well is defence in depth for a
-    # request whose body arrived in one chunk under a lying `Content-Length`.
+    # `app/core/http_limits.py`. This bounded read does NOT repeat that guarantee: by the time
+    # it runs the upload has already been received in full. Why that is so is rule 14 of
+    # `sdd/steering/security.md`, the single home of that contract; do not re-derive it here.
+    # What this read buys is the **in-memory copy** — the peak here is the ceiling plus one
+    # byte, whatever the spooled file weighs — and a ceiling for a caller with no middleware
+    # in front.
     limit = settings.csv_import_max_bytes
     raw = await file.read(limit + 1)
     if len(raw) > limit:
