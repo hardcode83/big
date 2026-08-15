@@ -3337,7 +3337,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
-      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware` before the body is read, and again by the use case while it consumes the stream. */
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`. */
       413: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];

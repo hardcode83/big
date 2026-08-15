@@ -20,15 +20,22 @@ Four properties of this module are not stylistic and must survive any edit:
 2. **The `Content-Type` comes only from `content_type_for_extension`, and every response *this
    module builds* — the bytes and all three refusals — carries `X-Content-Type-Options:
    nosniff`** (task 4.3c). See `_respond`, which is the single exit of this module and the only
-   place that stamps it. The promise stops at the four exits below, and deliberately: a request
-   that never reaches this router — a `photo_id` that is not a UUID, or a missing `exp`/`sig`,
-   both answered `422` by the global `RequestValidationError` handler in `app/core/errors.py`,
-   and a wrong method answered `405` by Starlette — goes out without the header. Neither
-   reflects attacker input today (the handler prunes each error to `loc`/`type`/`msg`), so
-   nothing is sniffable there now. Closing that gap means a response header middleware, which
-   is a posture decision for the whole backend — the twelve authenticated routes have no
-   `nosniff` either — and no requirement of this change asks for one; it is tracked as a
-   separate candidate rather than smuggled in here.
+   place here that stamps it. **The gap this block used to describe is closed**: the requests
+   that never reach this router — a `photo_id` that is not a UUID or a missing `exp`/`sig`,
+   both answered `422` by the global `RequestValidationError` handler, and a wrong method
+   answered `405` by Starlette — now carry the header too, because
+   `app/core/response_headers.py` stamps every response the application emits
+   (`backend-response-hardening` R1). What it took was exactly the response header middleware
+   this paragraph said it would take; it is a posture of the whole backend, so it is not this
+   module's to describe.
+
+   **`_respond` keeps its own stamp anyway, and that is deliberate** (that change's D5). This
+   is the single exit of an anonymous route, reachable from the internet, returning bytes
+   chosen by whoever uploaded the photo — the one place where `nosniff` is not hygiene but
+   half of the stored-XSS defence whose other half is `content_type_for_extension`
+   (`app/integrations/domain/storage.py`). Deleting the line would make that defence depend on
+   the mounting order of two `add_middleware` calls. The global middleware writes the header
+   rather than appending it, so the response still carries exactly one value.
 3. **No response outlives the signature that bought it.** See `_photo_response`.
 4. **Nothing in the response depends on anything the client sent** other than which bytes come
    back — no echoed id, no file name, no key.

@@ -39,10 +39,16 @@ Y **sigue sin valer reutilizar el stack del principal**: `backend` y `frontend` 
 La salida mientras nadie lo arregle, usada y verificada en `dashboard-api` (produce un fichero idéntico al del comando documentado, y `api:check` lo confirma):
 
 ```bash
+docker compose exec -T frontend mkdir -p /backend        # una vez por contenedor
 docker compose cp backend/openapi.json frontend:/backend/openapi.json
-docker compose exec -T frontend ln -sfn /app /frontend   # una vez por contenedor
+docker compose exec -T frontend ln -sfn /app /frontend    # una vez por contenedor
 docker compose exec -T frontend npm run api:generate
 ```
+
+El `mkdir` de la primera línea no estaba y hace falta: `docker compose cp` **no** crea el
+directorio padre en el destino, así que sin él la copia falla con *«Could not find the file
+/backend in container …»* (visto en `backend-response-hardening`, 2026-08-15). En
+`dashboard-api` no se notó porque aquel contenedor ya lo tenía creado a mano.
 
 El arreglo de verdad es que el script acepte rutas por parámetro o que el contenedor monte la raíz del repo; no se hizo en `dashboard-api` porque es tooling del monorepo y no de esa capacidad. **Ojo**: la sección Verification de cualquier change que toque el contrato manda `cd frontend && npm run api:check`, y ese comando literal no funciona desde aquí.
 

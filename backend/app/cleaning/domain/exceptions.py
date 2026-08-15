@@ -197,9 +197,9 @@ class PhotoTooLargeError(CleaningDomainError):
     `Transfer-Encoding: chunked`. This one bounds the in-process copy and covers callers with
     no middleware in front. Two checks, one number (`settings.photo_upload_max_bytes`).
 
-    Do not restate the reasoning here: it lives in one place, the docstring of
-    `UploadCleaningPhotoUseCase._read_within_limit`. It was previously duplicated across five
-    files and four of them drifted into claiming the opposite.
+    Do not restate the reasoning here: it lives in one place, rule 14 of
+    `sdd/steering/security.md`. It was previously duplicated across five files and four of
+    them drifted into claiming the opposite.
     """
 
 
