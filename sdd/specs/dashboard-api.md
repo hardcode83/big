@@ -209,7 +209,7 @@ de estados en un hub que importa a los otros siete.
   `assigned_technician_id` y un rol `TECHNICIAN` con permisos— **y este read model no se
   revisó**: `Responsible` sigue teniendo dos miembros (`MANAGER`, `ASSIGNED_CLEANER`) y las dos
   entradas de `NEXT_ACTION_BY_STATE` siguen dando `None`
-  (`backend/app/dashboard/domain/next_action.py:80-81`). Es deuda con dueño, no una decisión
+  (`backend/app/dashboard/domain/next_action.py`). Es deuda con dueño, no una decisión
   vigente: quien la cierre tiene que decidir si el responsable es el técnico asignado —y qué
   responde una incidencia sin asignar todavía—, y eso es una pregunta de producto, no una
   consulta más.
