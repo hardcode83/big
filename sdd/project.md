@@ -22,6 +22,23 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 
+teardown: docker compose down --volumes --remove-orphans --rmi local
+
+Lo que `/sdd:archive` corre **dentro** del worktree antes de borrarlo. Se lee entero, porque
+cada trozo está elegido:
+
+- `--volumes` **borra el `postgres_data` de ese worktree**, y eso es deliberado: el stack de un
+  worktree es desechable por diseño (`worktree-parallel-stack`), y sin esta bandera cada worktree
+  retirado deja ~8 volúmenes que, una vez borrado el directorio, ya no son atribuibles a nadie.
+  No aplica nunca al stack del worktree principal, que `retire` no toca.
+- `--rmi local` borra las 5 imágenes que compose construye para el proyecto y **conserva
+  `postgres:16` y `redis:7`**, que son de Docker Hub y las comparten los stacks vivos de los
+  demás worktrees. Un `--rmi all` se los llevaría por delante.
+
+Declarado el 2026-08-15 al archivar `backend-response-hardening`: sin esta línea `retire` se
+niega —correctamente— a adivinar un `down --volumes` sobre la base de datos de alguien, y el
+worktree sobrevive al archivado con 4,1 GB colgando.
+
 ## Worktree bootstrap
 
 Un worktree levanta **su propio stack**, en paralelo con el del principal y con el de cualquier otro worktree (change `worktree-parallel-stack`). No hay que apagar nada de nadie:
