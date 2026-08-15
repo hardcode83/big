@@ -75,12 +75,21 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
 | `ALLOWED_SSH_CIDRS` | **Varios operadores.** Array JSON de CIDRs IPv4 (`>= /24`, nunca abierto) permitidos para SSH, tal cual: `["1.2.3.4/32","5.6.7.8/32"]`. Es el que hay que usar. |
 | `ALLOWED_SSH_CIDR` | *(histórico, un solo operador)* CIDR suelto que el workflow envuelve en lista. Solo se lee **si `ALLOWED_SSH_CIDRS` está vacío o no existe**. |
+| `ALLOWED_SSH_CIDRS_WIDE` | **Excepción nombrada** al mínimo de `/24`: array JSON de rangos anchos (mínimo `/16`) para operadores con IP dinámica sin rango estrecho. Vacío si no existe. Cada entrada exige justificación en el PR que la añade. |
 | `SSH_PUBLIC_KEYS` | **Varios operadores.** Array JSON con las claves **públicas** SSH, una por operador. |
 | `SSH_PUBLIC_KEY` | *(histórico, una sola clave)* Igual que arriba: solo se lee si el plural está vacío. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
 
 > **Añadir un operador se hace SIEMPRE por el secret plural, nunca por la consola de OCI.** Una regla de ingress añadida a mano sobrevive hasta el siguiente `apply` y entonces desaparece sin avisar: el `plan` del 2026-08-15 destapó dos (`Marta`, `SSH HOTEL AMA`) que llevaban tiempo puestas y que ningún fichero de este repositorio explicaba. Si tu IP cambia, actualiza el secret y re-aplica (RUNBOOK §0).
 >
 > Se conservan las dos formas —singular y plural— a propósito: migrar de golpe habría dejado una ventana en la que el `apply` falla porque el plural aún no existe y el singular ya no se lee, con un JSON inválido en un `TF_VAR` como único síntoma.
+
+### Rangos anchos: excepción nombrada, no relajación general
+
+`allowed_ssh_cidrs` exige prefijo **`>= /24`** (`variables.tf`), y eso no se toca. Un operador con IP dinámica cuyo ISP no da un rango estrecho va en **`ALLOWED_SSH_CIDRS_WIDE`**, una lista aparte con su propio suelo (`>= /16`, que sigue rechazando `/8` y `0.0.0.0/0`).
+
+Está separada a propósito: si el rango ancho pudiera ir en la lista normal, «excepción» acabaría significando «sin límite», y abrir la única puerta de entrada a la VM dejaría de requerir una decisión. **El 22 es la única vía de entrada** — el resto del tráfico llega por el túnel de Cloudflare — así que ensanchar esto ensancha lo único que hay.
+
+**Uso actual (2026-08-15):** `79.116.0.0/16`, la operadora Marta. La regla llevaba tiempo puesta **a mano en la consola de OCI**, sin que ningún fichero de este repositorio la explicara; el primer `plan` que corrió después proponía borrarla. Traerla aquí no ensancha la exposición real —ya estaba abierta—, la hace visible y revisable. Se sustituye por un `/32` en `ALLOWED_SSH_CIDRS` en cuanto se conozca su IP fija.
 
 > Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`).
 

@@ -108,6 +108,9 @@ jobs:
           # el siguiente apply los borraba sin avisar: `terraform plan` lo destapó el 2026-08-15 con
           # dos reglas de SSH que nadie había escrito en código.
           TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          # Excepción nombrada al mínimo de /24 (ver `variables.tf`). Vacía si el secret no existe:
+          # abrir un rango ancho tiene que costar crear un secret aparte, no heredarse por defecto.
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
           TF_VAR_ssh_authorized_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
           # GitHub App del runner self-hosted (change app-deploy-dev). ids no sensibles → vars;
@@ -186,6 +189,9 @@ jobs:
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
           # Mismas dos formas que en el job `plan` — ver el comentario largo de allí.
           TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          # Excepción nombrada al mínimo de /24 (ver `variables.tf`). Vacía si el secret no existe:
+          # abrir un rango ancho tiene que costar crear un secret aparte, no heredarse por defecto.
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
           TF_VAR_ssh_authorized_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
           TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
