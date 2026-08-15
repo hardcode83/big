@@ -24,6 +24,7 @@ from app.integrations.infrastructure.storage.local import LocalFileStorage
 from app.integrations.infrastructure.storage.s3 import S3FileStorage, build_s3_client
 
 BUCKET = "autohostai-media"
+OCI_ENDPOINT = "https://ns.compat.objectstorage.eu-frankfurt-1.oraclecloud.com"
 KEY = "tenants/11111111-1111-1111-1111-111111111111/cleaning-tasks/t/p.jpg"
 JPEG = b"\xff\xd8\xff\xe0 pretend this is a photo"
 
@@ -95,6 +96,40 @@ class TestTheDependencyLanded:
         is how an EXTERNAL_DEPENDENCY ends up with tests at all."""
         assert callable(build_s3_client)
         S3FileStorage(bucket=BUCKET, client=_StubS3Client())  # no credentials involved
+
+
+class TestAddressingStyle:
+    """`object-storage-provisioning` design D3 / R3.4 — path-style, and only with an endpoint.
+
+    No network here either: `boto3.client` resolves its configuration locally and makes no
+    request, so the resolved value can be read straight off the client it returns.
+    """
+
+    def test_a_custom_endpoint_forces_path_style(self) -> None:
+        """Without this, botocore addresses `<bucket>.<namespace>.compat.objectstorage…`, a host
+        that does not exist — and every call and every presigned URL fails on DNS at the first
+        upload rather than at boot."""
+        client = build_s3_client(
+            region_name="eu-frankfurt-1",
+            endpoint_url=OCI_ENDPOINT,
+        )
+
+        assert client.meta.config.s3["addressing_style"] == "path"
+        assert client.meta.endpoint_url == OCI_ENDPOINT
+
+    def test_without_an_endpoint_boto3_keeps_its_own_default(self) -> None:
+        """R3.4 keeps AWS at *configure nothing*, so pinning path-style unconditionally would
+        change behaviour for the one provider that needs no configuration at all."""
+        client = build_s3_client(region_name="eu-west-1")
+
+        assert client.meta.config.s3 is None
+        assert client.meta.endpoint_url == "https://s3.eu-west-1.amazonaws.com"
+
+    def test_both_clients_still_sign_with_sigv4(self) -> None:
+        """The property the config existed for before D3 touched it: some regions reject a
+        presigned URL signed any other way, and OCI's S3-compatible API requires SigV4."""
+        assert build_s3_client(endpoint_url=OCI_ENDPOINT).meta.config.signature_version == "s3v4"
+        assert build_s3_client().meta.config.signature_version == "s3v4"
 
 
 class TestS3Adapter:

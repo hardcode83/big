@@ -222,7 +222,10 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
         }
     ),
     # `cleaning-photos-storage`. Three fields, and what is **absent** is the point:
-    # `storage_key` is not auditable. R3.2 keeps the internal key out of every API response,
+    # `storage_key` is not auditable. R3.2 keeps the internal key out of every API response
+    # **field** — the one accepted exception is that it appears inside the *value* of an `S3`
+    # presigned URL, which is part of the signing protocol and cannot be removed
+    # (`docs/adr/0008-object-storage-provider-dev.md`) —
     # and `audit_logs.changes` is a rule-11 sink whose whole contract is that a value cannot
     # arrive through it without the column announcing it — writing the key here would put the
     # one string the design works to keep private into the one column designed to be dumped.

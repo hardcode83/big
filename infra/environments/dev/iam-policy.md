@@ -17,6 +17,10 @@ Allow group autohostai-dev-terraform to manage instance-family in tenancy
 Allow group autohostai-dev-terraform to manage volume-family in tenancy
 Allow group autohostai-dev-terraform to read instance-images in tenancy
 Allow group autohostai-dev-terraform to manage object-family in tenancy where target.bucket.name='autohostai-tfstate-dev'
+Allow group autohostai-dev-terraform to manage buckets in tenancy where target.bucket.name='autohostai-dev-media'
+Allow group autohostai-dev-terraform to read objectstorage-namespaces in tenancy
+Allow group autohostai-dev-terraform to manage users in tenancy
+Allow group autohostai-dev-terraform to manage groups in tenancy
 Allow group autohostai-dev-terraform to manage usage-budgets in tenancy
 Allow group autohostai-dev-terraform to manage vaults in tenancy
 Allow group autohostai-dev-terraform to manage keys in tenancy
@@ -30,6 +34,23 @@ Allow group autohostai-dev-terraform to manage policies in tenancy
 
 **Ampliación 2026-07-29 (change `app-deploy-dev`):** las dos últimas sentencias (`manage dynamic-groups` + `manage policies`) se añadieron para que el **pipeline** cree como IaC el instance-principal del runner self-hosted (el `oci_identity_dynamic_group` + `oci_identity_policy` de `main.tf`, que leen del Vault la clave de la GitHub App y los secrets de runtime). **Es una relajación consciente del mínimo privilegio**: `svc-terraform-dev` gana gestión de identidad a nivel tenancy (podría crear dynamic-groups que matcheen cualquier recurso → superficie de escalada). Decisión del usuario, priorizando "todo como código, cero pasos manuales por entorno" sobre acotar ese verbo. Alternativa rechazada: aplicar esos dos recursos a mano por un admin (mantendría el mínimo privilegio, a costa de un paso manual por entorno).
 
+**Ampliación 2026-08-15 (change `object-storage-provisioning`) — SEGUNDA relajación consciente del mínimo privilegio.** El change aprovisiona el bucket de fotos, su usuario IAM y su Customer Secret Key **por Terraform** (R2.2), y eso obliga a cuatro cambios en esta policy:
+
+| Sentencia | Para qué | ¿Acotable? |
+|---|---|---|
+| `manage buckets … target.bucket.name='autohostai-dev-media'` (sentencia **nueva y aparte**) | crear y gestionar el bucket de medios | **Sí** — por nombre de bucket, igual que el del state |
+| `read objectstorage-namespaces in tenancy` | el `data "oci_objectstorage_namespace"` del que se deriva el endpoint compatible (R1.1: el namespace nunca se escribe a mano) | No hace falta: solo lee un identificador de la tenancy, sin acceso a ningún dato |
+| `manage users in tenancy` | crear `autohostai-dev-media` y su Customer Secret Key | **No.** OCI no expone `target.user.name` entre las variables de policy |
+| `manage groups in tenancy` | crear el grupo al que se dirige la policy del bucket | **No.** Tampoco existe `target.group.name` |
+
+**Sentencia aparte y `manage buckets`, no `manage object-family`, y el motivo importa**: añadir el bucket de medios a la condición de la sentencia del state habría sido una línea menos, pero `object-family` incluye `OBJECT_READ` y `OBJECT_DELETE` — le habría dado a `svc-terraform-dev`, cuya credencial es un secret de GitHub Actions, lectura y borrado de **todas las fotos de todos los tenants**. Terraform solo declara el bucket (`oci_objectstorage_bucket.media`), nunca un objeto, así que `manage buckets` es todo lo que necesita.
+
+**Las dos últimas son la relajación, y hay que decir qué concede: `manage users` permite acuñar una API key a cualquier usuario de la tenancy, incluido un administrador.** Lo que evita que esto mueva la frontera de confianza *en clase* es que ya estaba cruzada por la primera relajación: `manage dynamic-groups` + `manage policies in tenancy` ya permiten a `svc-terraform-dev` fabricarse un dynamic-group y una policy de `manage all-resources`. Esto amplía la **comodidad** de la escalada, no su posibilidad.
+
+Decisión del usuario en el gate de diseño (OQ1, 2026-08-15), con la misma prioridad que la primera: *todo como código, cero pasos manuales por entorno* — y aquí compra además que la rotación de la clave sea `terraform apply -replace` en vez de un humano copiando de una consola. **Ámbito dev/test, y revisión pendiente antes de staging/prod**, igual que la primera.
+
+Alternativa rechazada, descrita entera porque es la que habría que retomar si la revisión decide lo contrario: crear el usuario y su Customer Secret Key **fuera de Terraform** (procedimiento en el RUNBOOK) e inyectar el par como variables sensibles desde GitHub Secrets, tal como ya se hace con `github_app_private_key`. Mantiene `svc-terraform-dev` sin `manage users`, a cambio de un paso manual por entorno y de una rotación que deja de ser código.
+
 **Sin cambios por el change `ingress-https-dev` (2026-07-29):** el ingress HTTPS añade recursos de **Cloudflare** (otro provider, otra API) más un `oci_vault_secret` y una ampliación de la policy del runner. Ambas cosas caen en verbos que `svc-terraform-dev` ya tiene (`manage secret-family`, `manage policies`), así que **no hace falta ampliar esta policy**.
 
 ## Policy del runner (creada por Terraform, no por un admin)
@@ -42,10 +63,16 @@ Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment 
              target.secret.id = '<postgres-password>',
              target.secret.id = '<jwt-secret-key>',
              target.secret.id = '<encryption-key>',
-             target.secret.id = '<cloudflare-tunnel-token>'}
+             target.secret.id = '<cloudflare-tunnel-token>',
+             target.secret.id = '<media-access-key-id>',
+             target.secret.id = '<media-secret-access-key>',
+             target.secret.id = '<media-s3-endpoint>',
+             target.secret.id = '<media-region>'}
 ```
 
-**Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Tres cosas a tener presentes al añadir secretos en el futuro:
+**Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Los cuatro últimos entraron con `object-storage-provisioning` (2026-08-15), en el mismo `apply` que crea los secretos — que es la mitigación del punto 1 de abajo. **Este bloque es el espejo de `oci_identity_policy.dev_runner_read_secrets` en `main.tf` y tiene que contarlos igual**: si al auditar ves una enumeración viva con más entradas que esta, lo primero que hay que descartar es que este documento se quedó atrás, no que alguien ensanchó el acceso.
+
+Tres cosas a tener presentes al añadir secretos en el futuro:
 
 1. **Es una enumeración explícita de OCID.** Un secreto nuevo es **invisible** para el runner hasta que se añade a esa lista — es la causa de fallo más probable al sumar secretos, y se manifiesta como un deploy que falla en el paso "Render .env" nombrando la clave. Se mantiene así a propósito: un `read secret-bundles` sin condición daría acceso a todo secreto presente y futuro — y como el compartment es la **raíz de la tenancy** y la concesión se hereda, eso significa de toda la tenancy, no de un compartment acotado.
 2. **Por qué la condición NO va por nombre, aunque el deploy lea por nombre.** Es tentador añadir `target.secret.name` para cubrir el `get-secret-bundle-by-name`, y se descartó por una razón de **ámbito**: `compartment_ocid` es hoy la **raíz de la tenancy** (ver §"Mejora futura" abajo), una concesión en la raíz la heredan todos los compartments descendientes, y los nombres de secreto son únicos **por vault**, no por compartment. Una condición por nombre concedería lectura de **contenido** a cualquier secreto que se llamara igual en cualquier vault de la tenancy — es decir, rompería el invariante del punto 1 para ese nombre, reproducible sin más que recrear el vault o levantar un segundo stack con `env = "dev"`. Y además no hace falta: ver el apartado siguiente.
