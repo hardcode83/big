@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.tenants.domain.enums import StorageType
+
 REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 # A Fernet key is base64url of exactly this many bytes (16 for signing + 16 for AES).
@@ -295,6 +297,38 @@ class Settings(BaseSettings):
     beds24_page_limit: int = 100
     beds24_timeout_seconds: float = 30.0
 
+    # Object storage for the `S3` adapter (change `object-storage-provisioning`, design D4).
+    # Three settings and no credentials: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` travel by
+    # boto3's standard chain (environment, instance role), which is what rule 8 of
+    # `steering/security.md` and `sdd/specs/file-storage.md` already require — reading them as
+    # fields would put the secret inside an object any debug `repr` prints.
+    #
+    # All three default to empty, and that default is what makes merging this change inert
+    # (R3.1): `LOCAL` is untouched and an `S3` tenant keeps failing loudly with
+    # `StorageWriteError` instead of silently falling back (R3.3).
+    #
+    # An empty `s3_endpoint_url` means "let boto3 resolve the AWS endpoint" (R3.4), so pointing
+    # at AWS is *configuring nothing* and pointing at OCI, R2 or MinIO is configuring a URL.
+    # The provider active in `dev` and the value each setting takes per provider are in
+    # `docs/adr/0008-object-storage-provider-dev.md`.
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_endpoint_url: str = ""
+
+    # Which storage the bootstrap CLI converges the tenant's `TenantConfig` onto
+    # (`object-storage-provisioning` design D10, R6.1). It is the **seed** route into `S3`, and
+    # deliberately the only one: R5.4 of `user-management` keeps `storage_type` out of the
+    # `PATCH` of `TenantConfig`, because moving a tenant that already has photos would point it
+    # at a store where those photos are not.
+    #
+    # `LOCAL` by default, which is what keeps R6.5 true by construction: the column default and
+    # this default agree, so a tenant created by any route is born `LOCAL`.
+    #
+    # Only `app/cli/bootstrap.py` reads it, and the deploy passes it inline
+    # (`docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 …`) rather than through the `.env`,
+    # which the deploy truncates on every run.
+    bootstrap_storage_type: str = "LOCAL"
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""
@@ -368,6 +402,24 @@ class Settings(BaseSettings):
                 "(generate with: openssl rand 32 | base64 | tr '+/' '-_')"
             )
         return value
+
+    @field_validator("bootstrap_storage_type")
+    @classmethod
+    def _reject_unknown_storage_type(cls, value: str) -> str:
+        """R6.1 — refuse at boot, not at the `INSERT`.
+
+        An unknown value would otherwise reach `TenantConfigModel.storage_type` and fail inside
+        the driver, after the bootstrap transaction has already created a tenant and hashed two
+        passwords. Validated against the enum itself rather than a copied list, so adding a
+        storage type never leaves a second, stale enumeration behind.
+        """
+        candidate = value.strip().upper()
+        allowed = [member.value for member in StorageType]
+        if candidate not in allowed:
+            raise ValueError(
+                f"bootstrap_storage_type must be one of {', '.join(allowed)}; got {candidate!r}"
+            )
+        return candidate
 
     @model_validator(mode="after")
     def _default_database_url(self) -> "Settings":

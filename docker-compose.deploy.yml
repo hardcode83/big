@@ -189,6 +189,27 @@ services:
       APP_PROVENANCE_PULL_REQUEST_NUMBER: ${APP_PROVENANCE_PULL_REQUEST_NUMBER:-}
       APP_PROVENANCE_COMMIT_SHA: ${APP_PROVENANCE_COMMIT_SHA:-}
       APP_PROVENANCE_ACTIONS_RUN_ID: ${APP_PROVENANCE_ACTIONS_RUN_ID:-}
+      # Almacén de objetos (change `object-storage-provisioning`). Las cinco **solo aquí**, como el
+      # volumen de abajo y por el mismo motivo: `backend` es el único servicio que escribe y sirve
+      # ficheros — `worker` y `beat` comparten imagen pero no tocan almacenamiento.
+      #
+      # Sin `:?`, deliberadamente, y aquí el motivo NO es el de `docker-compose.yml` (que es no
+      # romper `make up` en local): es la **ventana en la VM** entre el merge y el primer deploy que
+      # rellena el `.env`. Ese fichero lo trunca y reescribe cada ejecución del paso «Render .env»,
+      # así que hasta entonces no tiene ninguna de las cinco — y con `:?` un `up` o un `exec` a mano
+      # en esa ventana se negaría a arrancar el backend. Es justo la inercia que el change promete.
+      #
+      # Lo que sustituye al fail-fast del arranque, y es más estricto: con `S3_BUCKET` vacío
+      # `ConfiguredFileStorageFactory.storage_for(S3)` lanza `StorageWriteError` y **nunca** cae a
+      # `LOCAL`. Excepción registrada en la regla 8 de `sdd/steering/security.md`.
+      #
+      # Las dos credenciales NO son ajustes de la aplicación: las lee boto3 de su cadena estándar
+      # (`docs/adr/0008-object-storage-provider-dev.md`).
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Aquí la imagen no lleva bind mount del código, pero el volumen sigue siendo obligatorio

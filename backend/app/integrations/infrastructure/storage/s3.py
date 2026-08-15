@@ -1,15 +1,19 @@
 """`S3` file storage: objects in a bucket, read straight from the provider by presigned URL.
 
-`S3` is the **protocol**; which S3-compatible store sits behind it is not decided (design D2b,
-and see `S3FileStorage`).
+`S3` is the **protocol**; which S3-compatible store sits behind it is configuration, not code.
+The store active in `dev` is OCI Object Storage, chosen in
+`docs/adr/0008-object-storage-provider-dev.md`, which also carries the matrix of what each
+setting takes on AWS S3, Cloudflare R2 and MinIO.
 
-EXTERNAL_DEPENDENCY: no object store account is provisioned for this project, so this adapter
-cannot be validated against a real service. What IS validated is the two things that matter and
-that a credentialled test would not check any better — the **contract** of `FileStoragePort` and the
-**substitutability** SOLID's L demands (`steering/backend-architecture.md`): the contract test
-in `tests/integrations/test_s3_file_storage.py` runs the same assertions against this adapter
-and `LocalFileStorage`, over a stub client that answers the way botocore does. `LOCAL` is what
-the MVP runs on (`TenantConfig.storage_type` defaults to it), which is why that is enough.
+Nothing in the automated suite talks to a real store, and that is by design rather than by
+lack of an account: constructing a client reads a credential chain, so a credentialled test
+would buy nothing the stub does not already give. What IS validated is the two things that
+matter — the **contract** of `FileStoragePort` and the **substitutability** SOLID's L demands
+(`steering/backend-architecture.md`): the contract test in
+`tests/integrations/test_s3_file_storage.py` runs the same assertions against this adapter and
+`LocalFileStorage`, over a stub client that answers the way botocore does. The real store is
+exercised once, end to end, in `dev` — that is requirement R6 of `object-storage-provisioning`,
+and it is what a stub can never stand in for.
 
 Implements `FileStoragePort` and **not** `LocalFileReadPort`, which is the point of design D1:
 with `S3` the browser fetches the object directly from the provider using the presigned URL, so
@@ -35,6 +39,10 @@ from app.integrations.domain.storage import (
 #: one machine verifies on every other.
 _CLIENT_CONFIG = Config(signature_version="s3v4")
 
+#: The same, plus **path-style** addressing, used only when an `endpoint_url` is configured
+#: (`object-storage-provisioning` design D3). See `build_s3_client` for why it is conditional.
+_CUSTOM_ENDPOINT_CONFIG = Config(signature_version="s3v4", s3={"addressing_style": "path"})
+
 
 def build_s3_client(*, region_name: str | None = None, endpoint_url: str | None = None) -> Any:
     """A boto3 S3 client. Separate from the adapter so tests never construct one.
@@ -44,25 +52,37 @@ def build_s3_client(*, region_name: str | None = None, endpoint_url: str | None 
     Storage, Cloudflare R2 or MinIO endpoint it talks to that instead, with no change to
     `S3FileStorage`.
 
+    **With an endpoint it also switches to path-style addressing, and that is forced by the
+    provider rather than preferred** (`object-storage-provisioning` design D3). On OCI the
+    virtual-hosted style lives on a *different* host (`<bucket>.vhcompat.objectstorage…`) and
+    works only for buckets created through the S3 API itself, which a Terraform-created bucket
+    is not. Left on botocore's `auto`, every call and every presigned URL would be addressed at
+    `<bucket>.<namespace>.compat.objectstorage…`, a host that does not resolve — and the
+    failure appears at the first upload, not at boot. MinIO and R2 want path-style too, so
+    "custom endpoint ⇒ path" is right for all three non-AWS providers of the matrix in
+    `docs/adr/0008-object-storage-provider-dev.md`. Without an endpoint the default is left
+    alone, because AWS is exactly the case R3.4 wants to keep at *configure nothing*.
+
     Credentials come from the standard boto3 chain (environment, instance role), which is why
     none of them are settings here: rule 8 of `steering/security.md` keeps secrets out of the
     repository, and the provider's own chain is the mechanism that already does that. Every
     S3-compatible store above authenticates with the same access-key/secret pair, so the chain
     carries over unchanged.
     """
-    return boto3.client(
-        "s3", region_name=region_name, endpoint_url=endpoint_url, config=_CLIENT_CONFIG
-    )
+    config = _CUSTOM_ENDPOINT_CONFIG if endpoint_url else _CLIENT_CONFIG
+    return boto3.client("s3", region_name=region_name, endpoint_url=endpoint_url, config=config)
 
 
 class S3FileStorage:
     """Implements `FileStoragePort` over one bucket of an **S3-compatible** object store.
 
-    **`S3` here is the protocol, not the provider, and the provider is not decided** (design
-    D2b). The PRD says so in as many words — *"Producción futura: S3-compatible (Cloudflare R2
-    o AWS S3)"* (line 196) — and no ADR, spec or steering doc narrows it further. The class
-    name mirrors the value of `StorageType.S3` (`app/tenants/domain/enums.py`) and is kept for
-    that reason: renaming it would put the code out of step with the column.
+    **`S3` here is the protocol, not the provider.** The provider IS decided for `dev` —
+    OCI Object Storage, `docs/adr/0008-object-storage-provider-dev.md` — but that decision is
+    configuration and does not reach this class: staging and production are deliberately left
+    unchosen, and the PRD's own wording (*"Producción futura: S3-compatible (Cloudflare R2 o
+    AWS S3)"*, line 196) still stands for them. The class name mirrors the value of
+    `StorageType.S3` (`app/tenants/domain/enums.py`) and is kept for that reason: renaming it
+    would put the code out of step with the column.
 
     Two seams keep that choice open, and they are why this is a real commitment rather than a
     comforting sentence:
@@ -73,16 +93,16 @@ class S3FileStorage:
       whatever built it — with whatever endpoint and credentials — is none of this adapter's
       business.
 
-    The natural candidate for this project is **OCI Object Storage**, not AWS: the `dev`
-    environment already runs on Oracle Cloud (ADR 0001) and OCI exposes an S3-compatible API,
-    so the photos can live where the VM already lives, with no AWS account and no new provider
-    to onboard. Cloudflare R2 — which the PRD names first — and MinIO come in through the same
-    door.
+    What `dev` runs on, and why, is **OCI Object Storage**: the environment already lives on
+    Oracle Cloud (ADR 0001) and OCI exposes an S3-compatible API, so the photos sit where the
+    VM already sits, with no AWS account and no new provider to onboard. Cloudflare R2 — which
+    the PRD names first — and MinIO come in through the same door, and what each of them takes
+    for bucket, region, endpoint and credentials is tabulated in ADR 0008.
 
     The client is injected rather than built here for a second reason too: constructing it
     reads the credential chain, and an adapter that does that in its constructor cannot be
-    instantiated in a test without a cloud environment — which is exactly how an
-    EXTERNAL_DEPENDENCY ends up untested.
+    instantiated in a test without a cloud environment — which is exactly how an adapter with
+    an external dependency ends up untested.
 
     **Known limitation, accepted:** unlike `LocalFileStorage`, this adapter's signed URL
     exposes the bucket name and the full object key — see `signed_url`.
@@ -118,9 +138,12 @@ class S3FileStorage:
         store. What it does disclose is the tenant's UUID — already known to the recipient,
         since it is their own — and the layout of the bucket.
 
-        Closing it properly needs a CDN or a route of ours in front of the bucket, i.e. an
-        infrastructure decision this change does not get to make (the provider is not even
-        chosen — see the class docstring and design D2b). Rewriting the adapter cannot do it.
+        **This is accepted, in writing, and not merely tolerated**:
+        `docs/adr/0008-object-storage-provider-dev.md` records the decision, its reason and the
+        two alternatives it rejects. Closing it properly needs a CDN or a route of ours in
+        front of the bucket — an infrastructure component with its own domain, TLS, cache and
+        cost, which is why it is a change of its own and not something rewriting this adapter
+        could do.
 
         Capped by `clamp_expires_in` before it reaches botocore, for the same reason and by the
         same rule as `LocalFileStorage.signed_url` — and here the cap is the *only* enforcement

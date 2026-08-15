@@ -225,8 +225,13 @@ resource "oci_identity_policy" "dev_runner_read_secrets" {
   # nunca fue necesario: `read secrets` concede SECRET_INSPECT + SECRET_READ, es decir ListSecrets y
   # GetSecret, que el deploy no invoca en ningún momento. Tabla de permisos y razonamiento en
   # `iam-policy.md`; referencia: docs.oracle.com/en-us/iaas/Content/Identity/Reference/keypolicyreference.htm
+  #
+  # Los cuatro secretos de medios (change object-storage-provisioning) entran aquí en el MISMO
+  # apply que los crea, que es la mitigación del riesgo que el design declara: olvidarlos haría
+  # fallar el paso «Render .env» del deploy nombrando la clave — el comportamiento correcto, pero
+  # un viaje de ida y vuelta evitable.
   statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}'}",
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}'}",
   ]
 }
 
@@ -467,6 +472,152 @@ resource "cloudflare_zone_setting" "always_use_https" {
 # TLS moderno con los navegadores. Decisión del 2026-07-29, ver design D7 y R3.2.
 # Si algún día se sube, es un cambio de una línea aquí — y de alcance de zona, así que merece su
 # propia decisión y su propia ventana de verificación.
+
+# --- Almacén de objetos para las fotos (change object-storage-provisioning) ---
+# El backend le habla por la API **compatible con S3** de OCI, con boto3 apuntado por endpoint_url
+# y sin SDK de OCI en ninguna parte (R4.2). Elección de proveedor y matriz de alternativas en
+# `docs/adr/0008-object-storage-provider-dev.md`.
+
+# El namespace de Object Storage es propio de la tenancy y NO se escribe a mano (R1.1): es la
+# primera etiqueta del host compatible y cambiarlo a mano es exactamente el desajuste que un data
+# source no puede tener.
+data "oci_objectstorage_namespace" "dev" {
+  compartment_id = var.compartment_ocid
+}
+
+locals {
+  # El endpoint compatible se DERIVA del namespace y de la región (D2), así que el mismo código
+  # sirve en otro entorno sin editar ninguna URL. `oraclecloud.com` es el sufijo histórico y sigue
+  # siendo válido; Oracle publica hoy también `oci.customer-oci.com`. Si algún día dejara de
+  # resolver, corregirlo es esta línea y un `apply` — el valor viaja por el Vault, no por la imagen.
+  media_s3_endpoint = "https://${data.oci_objectstorage_namespace.dev.namespace}.compat.objectstorage.${var.region}.oraclecloud.com"
+  media_bucket_name = "autohostai-${var.env}-media"
+}
+
+# Bucket PRIVADO (R1.2): todo objeto se entrega por URL prefirmada de caducidad acotada, así que un
+# bucket público anularía el esquema de firma entero.
+#
+# Sin `prevent_destroy` a propósito (D6): bloquearía el `terraform destroy` del entorno, que es la
+# propiedad «reproducible desde cero» que dev quiere conservar. El borrado accidental ya tiene su
+# guarda natural — OCI rechaza eliminar un bucket no vacío, así que un destroy sobre un bucket con
+# fotos falla en vez de tragárselas.
+#
+# Sin versioning: es una decisión de RETENCIÓN, y la retención está fuera de alcance del change.
+# R1.3 (converger sin recrear ni vaciar) sale de que name, namespace y compartment son estables
+# entre applies: el recurso queda `no changes`.
+resource "oci_objectstorage_bucket" "media" {
+  compartment_id = var.compartment_ocid
+  namespace      = data.oci_objectstorage_namespace.dev.namespace
+  name           = local.media_bucket_name
+  access_type    = "NoPublicAccess"
+  storage_tier   = "Standard"
+}
+
+# --- Identidad del usuario del bucket (D7 / R2.2) ---
+# Usuario propio, NO `svc-terraform-dev`: reutilizarlo le daría a la aplicación la credencial que
+# gobierna toda la infraestructura. Y no vale un instance principal: la API compatible con S3 de OCI
+# **solo** autentica con Customer Secret Key.
+#
+# El precio está declarado en `iam-policy.md`: `svc-terraform-dev` necesita `manage users` y
+# `manage groups` a nivel de tenancy, que OCI no permite acotar. Es la segunda relajación consciente
+# del mínimo privilegio, con ámbito dev/test y revisión antes de staging/prod (OQ1).
+resource "oci_identity_user" "media" {
+  compartment_id = var.tenancy_ocid
+  name           = "autohostai-${var.env}-media"
+  description    = "Usuario de servicio que el backend de ${var.env} usa para leer y escribir fotos en el bucket de medios por la API compatible con S3. Sin login de consola; su única credencial es la Customer Secret Key de abajo."
+}
+
+resource "oci_identity_group" "media" {
+  compartment_id = var.tenancy_ocid
+  name           = "autohostai-${var.env}-media"
+  description    = "Grupo del usuario de medios de ${var.env}. Existe porque las policies de OCI se dirigen a grupos, no a usuarios."
+}
+
+resource "oci_identity_user_group_membership" "media" {
+  user_id  = oci_identity_user.media.id
+  group_id = oci_identity_group.media.id
+}
+
+# Policy acotada al bucket y a cuatro permisos (D8). `read buckets` es lo que permite resolver el
+# bucket; los cuatro permisos de objeto son exactamente los que invoca `S3FileStorage`:
+# `put_object` (OBJECT_CREATE + OBJECT_OVERWRITE), `get_object` (OBJECT_READ, que es lo que honra la
+# URL prefirmada) y `delete_object` (OBJECT_DELETE).
+#
+# `manage objects` a secas añadiría OBJECT_INSPECT sin llamante, así que se enumera.
+# `manage object-family` se descartó: concede además gestión de buckets, incluido borrarlos.
+resource "oci_identity_policy" "media_bucket_access" {
+  compartment_id = var.compartment_ocid
+  name           = "autohostai-${var.env}-media-bucket-access"
+  description    = "Permite al usuario de medios de ${var.env} operar SOLO sobre los objetos de su propio bucket (mínimo privilegio: ni gestión de buckets, ni otros buckets del compartment)."
+  statements = [
+    "Allow group ${oci_identity_group.media.name} to read buckets in compartment id ${var.compartment_ocid} where target.bucket.name = '${local.media_bucket_name}'",
+    "Allow group ${oci_identity_group.media.name} to manage objects in compartment id ${var.compartment_ocid} where all {target.bucket.name = '${local.media_bucket_name}', any {request.permission='OBJECT_CREATE', request.permission='OBJECT_READ', request.permission='OBJECT_DELETE', request.permission='OBJECT_OVERWRITE'}}",
+  ]
+}
+
+# La credencial de la API compatible con S3. Se rota con `terraform apply -replace` (procedimiento
+# en el RUNBOOK), no con un humano copiando de una consola.
+#
+# Su valor acaba en el tfstate, igual que POSTGRES_PASSWORD, JWT_SECRET_KEY y ENCRYPTION_KEY:
+# cubierto por la excepción dev/test de `steering/security.md` §8, que se apoya en que el bucket del
+# state es privado, versionado y con IAM mínima.
+resource "oci_identity_customer_secret_key" "media" {
+  user_id      = oci_identity_user.media.id
+  display_name = "autohostai-${var.env}-media-s3"
+}
+
+# --- Los cuatro valores que la VM necesita, por el Vault (D9) ---
+# El Vault leído por nombre es el ÚNICO canal Terraform → VM que existe hoy:
+# /etc/autohostai-deploy.env lo escribe cloud-init y `metadata` es ForceNew con `ignore_changes`,
+# así que Terraform no puede reescribirlo en la máquina viva (design D3 de ingress-https-dev).
+#
+# Dos de los cuatro NO son secretos, y conviene decirlo en voz alta: el endpoint y la región van al
+# Vault porque es el único canal, no porque haga falta cifrarlos. La alternativa —variables de repo
+# de GitHub, como OCI_VAULT_ID— funciona y hay precedente, pero son dos pasos manuales por entorno
+# justo en el punto que `steering/infra.md` señala como lección de app-deploy-dev.
+resource "oci_vault_secret" "media_access_key_id" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-media-access-key-id"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(oci_identity_customer_secret_key.media.id)
+  }
+}
+
+resource "oci_vault_secret" "media_secret_access_key" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-media-secret-access-key"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(oci_identity_customer_secret_key.media.key)
+  }
+}
+
+resource "oci_vault_secret" "media_s3_endpoint" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-media-s3-endpoint"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(local.media_s3_endpoint)
+  }
+}
+
+resource "oci_vault_secret" "media_region" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-media-region"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(var.region)
+  }
+}
 
 # Clave privada de la GitHub App: la escribe Terraform al Vault desde UN secret del pipeline
 # (var.github_app_private_key). Así un entorno nuevo no requiere subirla a mano en OCI (D14/D13).

@@ -191,6 +191,18 @@ jobs:
           # El nombre es determinista (lo fija Terraform como autohostai-<env>-...), así que se
           # deriva de ENV en vez de necesitar otra variable de repo.
           TUNNEL_TOKEN="$(read_secret_by_name "autohostai-${ENV}-cloudflare-tunnel-token" TUNNEL_TOKEN)"
+          # Almacén de objetos (change object-storage-provisioning). Los cuatro se leen POR NOMBRE
+          # por el mismo motivo que el token del túnel: los nombres son deterministas a partir de
+          # ENV, así que no hace falta ninguna variable de repo nueva. Y el nombre del bucket se
+          # deriva de ENV igual que Terraform lo compone, sin quinto secreto.
+          #
+          # Dos de los cuatro no son secretos (el endpoint y la región): van por el Vault porque es
+          # el único canal Terraform → VM que existe, no porque haya que cifrarlos.
+          MEDIA_ACCESS_KEY_ID="$(read_secret_by_name "autohostai-${ENV}-media-access-key-id" AWS_ACCESS_KEY_ID)"
+          MEDIA_SECRET_ACCESS_KEY="$(read_secret_by_name "autohostai-${ENV}-media-secret-access-key" AWS_SECRET_ACCESS_KEY)"
+          MEDIA_S3_ENDPOINT="$(read_secret_by_name "autohostai-${ENV}-media-s3-endpoint" S3_ENDPOINT_URL)"
+          MEDIA_REGION="$(read_secret_by_name "autohostai-${ENV}-media-region" S3_REGION)"
+          MEDIA_BUCKET="autohostai-${ENV}-media"
           umask 077
           {
             echo "IMAGE_TAG=sha-${GITHUB_SHA}"
@@ -202,6 +214,11 @@ jobs:
             echo "ENCRYPTION_KEY=${ENC_KEY}"
             echo "BACKEND_INTERNAL_URL=${BACKEND_INTERNAL_URL:-http://backend:8000}"
             echo "TUNNEL_TOKEN=${TUNNEL_TOKEN}"
+            echo "S3_BUCKET=${MEDIA_BUCKET}"
+            echo "S3_REGION=${MEDIA_REGION}"
+            echo "S3_ENDPOINT_URL=${MEDIA_S3_ENDPOINT}"
+            echo "AWS_ACCESS_KEY_ID=${MEDIA_ACCESS_KEY_ID}"
+            echo "AWS_SECRET_ACCESS_KEY=${MEDIA_SECRET_ACCESS_KEY}"
             echo "APP_VERSION=${{ needs.provenance.outputs.version }}"
             echo "APP_PROVENANCE_REPOSITORY_URL=${{ needs.provenance.outputs.repository_url }}"
             echo "APP_PROVENANCE_PULL_REQUEST_NUMBER=${{ needs.provenance.outputs.pull_request_number }}"

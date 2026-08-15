@@ -466,7 +466,11 @@ class _AuditWriter:
         arguments whose only legal combinations are these two.
 
         **`storage_key` is not in the diff, and its absence is the design.** R3.2 keeps the
-        internal key out of every API response, and `audit_logs.changes` is a rule-11 sink —
+        internal key out of every API response **field** — the one accepted exception being
+        that it appears inside the *value* of an `S3` presigned URL, which is part of the
+        signing protocol and cannot be removed
+        (`docs/adr/0008-object-storage-provider-dev.md`) — and `audit_logs.changes` is a
+        rule-11 sink —
         the one column whose contract is that nothing arrives through it unannounced. What the
         row records is who uploaded which kind of evidence against which cleaning.
         """
@@ -1282,8 +1286,11 @@ class UploadedCleaningPhoto:
 
     Two fields rather than one entity because the URL is not a property of the row: it is
     minted per request, expires in 3600 s, and depends on the tenant's storage backend. The
-    entity carries `storage_key`, which R3.2 forbids in any response — enumerating the
-    response fields at the schema, never dumping this, is what keeps that true.
+    entity carries `storage_key`, which R3.2 forbids as a **field** of any response —
+    enumerating the response fields at the schema, never dumping this, is what keeps that
+    true. With `S3` the key does travel inside the `url` above, because a presigned URL is an
+    address the store itself honours; that exception is accepted, with its reasoning, in
+    `docs/adr/0008-object-storage-provider-dev.md`.
     """
 
     photo: CleaningPhoto

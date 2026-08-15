@@ -282,7 +282,7 @@ def derive_signing_key(secret: str) -> bytes:
 
     Derived and **not reused**: the same key for two purposes means that if a signing oracle
     ever leaks, it contaminates authentication. Derivation gives that separation without
-    introducing a secret that would have to be provisioned in Terraform, in the OCI vault, in
+    introducing a secret that would have to be provisioned in Terraform, in the secret vault, in
     `docker-compose` and in `.env.example` — which is the trade design Q2 records, with the
     versioned payload prefix (`SIGNATURE_VERSION`, currently `v2`) left in place so a dedicated
     `MEDIA_SIGNING_KEY` can replace this without invalidating anything by surprise.

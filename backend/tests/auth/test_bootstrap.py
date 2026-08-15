@@ -1,6 +1,9 @@
 """Bootstrap of the initial tenant and users (R7.1-R7.4, design D14/D19)."""
 
+import base64
+
 import pytest
+from pydantic import ValidationError
 from sqlalchemy import func, select
 
 from app.auth.domain.enums import UserRole
@@ -12,9 +15,12 @@ from app.cli.bootstrap import (
     apply_plan,
     build_plan,
 )
-from app.core.config import settings
+from app.core.config import FERNET_KEY_BYTES, Settings, settings
+from app.tenants.domain.enums import StorageType
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 from tests.auth.conftest import TEST_BCRYPT_ROUNDS
+
+_VALID_FERNET_KEY = base64.urlsafe_b64encode(b"0" * FERNET_KEY_BYTES).decode()
 
 COMPLETE_ENV = {
     "BOOTSTRAP_TENANT_NAME": "AutoHostAI Madrid",
@@ -32,6 +38,11 @@ COMPLETE_ENV = {
 def complete_env(monkeypatch: pytest.MonkeyPatch):
     for name, value in COMPLETE_ENV.items():
         monkeypatch.setattr(settings, name.lower(), value)
+    # Pinned rather than inherited from the container's environment, and deliberately NOT a
+    # member of COMPLETE_ENV: unlike the eight above it ships a working default, so it is not
+    # one of the variables `build_plan` requires — see
+    # `test_the_required_variables_are_exactly_the_ones_documented`.
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.LOCAL.value)
     return COMPLETE_ENV
 
 
@@ -105,7 +116,12 @@ async def test_it_creates_the_tenant_its_config_and_both_users(
 ) -> None:
     created = await apply_plan(db_session, build_plan(), hasher)
 
-    assert created == {"tenants": 1, "tenant_configs": 1, "users": 2}
+    assert created == {
+        "tenants": 1,
+        "tenant_configs": 1,
+        "tenant_configs_converged": 0,
+        "users": 2,
+    }
     tenant = (
         await db_session.execute(
             select(TenantModel).where(TenantModel.name == COMPLETE_ENV["BOOTSTRAP_TENANT_NAME"])
@@ -127,11 +143,18 @@ async def test_it_creates_the_tenant_its_config_and_both_users(
 
 @pytest.mark.asyncio
 async def test_running_it_twice_changes_nothing(db_session, complete_env, hasher) -> None:
+    """Convergence (D10) did not cost idempotency: with the configuration unchanged, a second
+    run is still a no-op — including the `storage_type` it now converges."""
     await apply_plan(db_session, build_plan(), hasher)
 
     created = await apply_plan(db_session, build_plan(), hasher)
 
-    assert created == {"tenants": 0, "tenant_configs": 0, "users": 0}
+    assert created == {
+        "tenants": 0,
+        "tenant_configs": 0,
+        "tenant_configs_converged": 0,
+        "users": 0,
+    }
     assert await db_session.scalar(select(func.count()).select_from(TenantModel)) == 1
     assert await db_session.scalar(select(func.count()).select_from(UserModel)) == 2
 
@@ -224,6 +247,108 @@ async def test_it_refuses_when_the_address_already_exists_under_another_tenant(
         COMPLETE_ENV["BOOTSTRAP_OWNER_EMAIL"]
     )
     assert still_there is not None, "the owner must still be able to log in"
+
+
+# --- `storage_type` by the seed route (`object-storage-provisioning` R6.1/R6.5, D10) ---
+
+
+@pytest.mark.asyncio
+async def test_the_configured_storage_type_is_applied_when_the_config_is_created(
+    db_session, monkeypatch: pytest.MonkeyPatch, complete_env, hasher
+) -> None:
+    """R6.1 — the seed is the route into `S3`, and the only one.
+
+    `storage_type` stays out of the `PATCH` of `TenantConfig` (R5.4 of `user-management`), so a
+    deployment moves a tenant by configuring the bootstrap CLI and re-running it.
+    """
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.S3.value)
+
+    await apply_plan(db_session, build_plan(), hasher)
+
+    assert await _stored_storage_type(db_session) is StorageType.S3
+
+
+@pytest.mark.asyncio
+async def test_a_re_run_converges_a_config_that_already_exists(
+    db_session, monkeypatch: pytest.MonkeyPatch, complete_env, hasher
+) -> None:
+    """D10, and the whole reason `apply_plan` stopped being create-only.
+
+    In `dev` the tenant and its config were seeded long before this setting existed. Create-only
+    would leave `BOOTSTRAP_STORAGE_TYPE` unable to ever reach that environment without a
+    hand-written `UPDATE` — which is what the IaC-first norm and R1.5 refuse.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+    assert await _stored_storage_type(db_session) is StorageType.LOCAL
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.S3.value)
+
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert await _stored_storage_type(db_session) is StorageType.S3
+    assert created["tenant_configs"] == 0, "nothing was created — it converged"
+    assert created["tenant_configs_converged"] == 1
+
+
+@pytest.mark.asyncio
+async def test_convergence_goes_back_the_other_way_too(
+    db_session, monkeypatch: pytest.MonkeyPatch, complete_env, hasher
+) -> None:
+    """Convergence means "the state the configuration declares", not "a one-way upgrade": an
+    environment that has to be rolled back to `LOCAL` must be able to say so the same way."""
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.S3.value)
+    await apply_plan(db_session, build_plan(), hasher)
+    monkeypatch.setattr(settings, "bootstrap_storage_type", StorageType.LOCAL.value)
+
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert await _stored_storage_type(db_session) is StorageType.LOCAL
+    assert created["tenant_configs_converged"] == 1
+
+
+@pytest.mark.asyncio
+async def test_a_new_tenant_is_born_local_when_nothing_is_configured(
+    db_session, complete_env, hasher
+) -> None:
+    """R6.5 — held by construction: the column default and the setting default agree.
+
+    The fixture pins the setting to its shipped default rather than clearing it, because the
+    property under test is what an unconfigured deployment gets, and the deployed `.env` of a
+    real environment may well say otherwise.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    assert await _stored_storage_type(db_session) is StorageType.LOCAL
+
+
+def test_an_unknown_storage_type_is_refused_at_configuration_time(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R6.1 — refused while building `Settings`, not at the `INSERT`.
+
+    Reaching the driver would mean failing after a tenant had been created and two passwords
+    hashed, inside a transaction the operator then has to reason about.
+    """
+    with pytest.raises(ValidationError):
+        Settings(
+            _env_file=None,
+            jwt_secret_key="0" * 64,
+            encryption_key=_VALID_FERNET_KEY,
+            bootstrap_storage_type="GLACIER",
+        )
+
+
+async def _stored_storage_type(db_session) -> StorageType:
+    tenant = (
+        await db_session.execute(
+            select(TenantModel).where(TenantModel.name == COMPLETE_ENV["BOOTSTRAP_TENANT_NAME"])
+        )
+    ).scalar_one()
+    config = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant.id)
+        )
+    ).scalar_one()
+    return config.storage_type
 
 
 def test_the_required_variables_are_exactly_the_ones_documented(

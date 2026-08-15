@@ -529,13 +529,21 @@ export interface components {
      * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
      * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
      * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
-     * "the key never appears in a response" a property of this class rather than of everyone who
-     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
-     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
-     * nobody made.
+     * "the key never appears as a **field** of a response" a property of this class rather than of
+     * everyone who ever touches it. `ai_validation_result` is out for a different reason: nothing
+     * writes it yet (proposal §Out of scope), and a field that is always `null` is a contract
+     * promise nobody made.
      *
      * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
      * a client uses instead of a path, and it is not stored anywhere.
+     *
+     * **And it is where the one accepted exception lives**, so the sentence above says "field" and
+     * not "response": for an `S3` tenant this URL is minted by the object store and carries the
+     * bucket and the full key inside its own value, because that is what makes a presigned URL
+     * presigned. Accepted, with its reasoning and its two rejected alternatives, in
+     * `docs/adr/0008-object-storage-provider-dev.md`. For `LOCAL` the URL carries only the photo's
+     * UUID, and the prohibition stays absolute everywhere else — body, headers, and every other
+     * field of this class.
      */
     app__cleaning__api__schemas__CleaningPhotoResponse: {
       /**
