@@ -190,7 +190,14 @@ def test_whitespace_only_settings_are_absence_too_and_not_a_crash(
 def test_a_whitespace_only_bucket_still_fails_loudly(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """R3.3 for the same typo: a blank bucket is no bucket, and never a quiet `LOCAL`."""
+    """R3.3 for the same typo: a blank bucket is no bucket, and never a quiet `LOCAL`.
+
+    Honest about what this does and does not pin: the bucket has **always** been read as
+    `s3_bucket.strip()` in `ConfiguredFileStorageFactory`, so this passes with or without the
+    region/endpoint fix above — it is not a regression test for it. What it adds is the first
+    pass of a whitespace-only bucket through the **real** `get_file_storage_factory` wiring;
+    `test_s3_without_a_configured_bucket_fails_loudly` only ever covered the hand-built factory.
+    """
     monkeypatch.setattr(settings, "s3_bucket", "   ")
 
     factory = get_file_storage_factory(derive_signing_key("s" * 64))
