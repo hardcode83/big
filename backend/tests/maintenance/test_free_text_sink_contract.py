@@ -192,6 +192,24 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
     assert set(offenders) == {
         "maintenance/application/use_cases.py",
         "maintenance/infrastructure/repositories.py",
+        # The three `maintenance` adds are the false positives this docstring predicts, and
+        # each is named rather than waved through:
+        #
+        # * `api/schemas.py` declares `title` and `description` as **response** fields and
+        #   fills them in `IncidentResponse.from_domain` — a read of the columns, on the way
+        #   out. It cannot write them: a Pydantic DTO has no session, and the only writer of
+        #   the row is the adapter above, whose `_MUTABLE_INCIDENT_COLUMNS` excludes both.
+        # * The two routers match on FastAPI's own `description=` route metadata — the
+        #   documented reason `properties/api/router.py` forced the raw-SQL clause of this
+        #   census to be quote-aware in the first place.
+        #
+        # What the entries cost is real and bounded: a genuine write appearing in one of
+        # these three would no longer be reported. It would still have to reach the database
+        # through the adapter, which is still gated, still allowlisted, and still the only
+        # module with an `IncidentModel(...)` in it.
+        "maintenance/api/schemas.py",
+        "maintenance/api/incidents_router.py",
+        "maintenance/api/approvals_router.py",
     }, (
         "a module names incidents.title/description in a writing position: rule 11's second "
         "exception is declared for the reporter's own prose and no other producer, so a new "

@@ -71,6 +71,15 @@ class AuditLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
     # Polymorphic pair (§7.25): entity_id points at whatever table entity_type names,
     # so it deliberately carries no ForeignKey. Not an oversight.
     entity_id: Mapped[uuid.UUID] = mapped_column(Uuid)
+    # **The same trap `incidents.ai_classification` fell into is dormant here**, and it is
+    # written down rather than fixed because nothing triggers it today (found by the QA panel
+    # of `maintenance`, 2026-08-15). Without `none_as_null=True`, SQLAlchemy stores a Python
+    # `None` **assigned to the attribute** as JSON `'null'`, not as SQL `NULL`; only an
+    # attribute nobody sets falls through to this default. Every reader of this column today
+    # checks `entry.changes is None` in Python, which deserialises either form the same way,
+    # so no behaviour depends on the difference. The day something filters `audit_logs` by
+    # `changes IS NULL` **in SQL**, it will silently match none of the rows a writer that
+    # passes the field explicitly produced. Change the flag then, with that query's test.
     changes: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
     # No TimestampMixin: §7.25 declares created_at only — an audit row is immutable.
     created_at: Mapped[datetime] = mapped_column(

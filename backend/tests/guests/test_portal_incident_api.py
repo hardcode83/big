@@ -577,15 +577,25 @@ def test_the_portal_offers_no_way_to_read_or_change_an_incident() -> None:
     to close: an included router is a single object there, so walking it directly finds **zero**
     endpoints and the assertion passes while inspecting nothing. This test was written the
     wrong way first and caught by its own red — the third time that walk has claimed somebody.
+
+    **Scoped to the portal's own surface, and it did not start that way.** It asserted that
+    the portal's `POST` was the only incident route *in the whole application*, which was
+    true while nothing else could reach an incident. `maintenance` is what makes it false:
+    that change gives the module the `api/` it never had, with eleven authenticated routes.
+    Widening the assertion to list them would make this test fail every time that surface
+    grows, for a reason that has nothing to do with the guest portal. What R5.3 actually
+    promises is about **this** surface — an anonymous bearer of a stay link cannot read or
+    change an incident — so that is what is asserted: among the routes reachable without a
+    session, exactly one touches an incident and it only creates one.
     """
     routes, _ = flatten_routes(create_app())
 
-    incident_routes = {
+    portal_incident_routes = {
         (method, path)
         for path, route in routes
-        if "incident" in path
+        if "incident" in path and path.startswith("/api/v1/guest/")
         for method in route.methods or set()
         if method != "HEAD"
     }
 
-    assert incident_routes == {("POST", "/api/v1/guest/incident/{token}")}
+    assert portal_incident_routes == {("POST", "/api/v1/guest/incident/{token}")}

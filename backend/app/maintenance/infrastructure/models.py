@@ -52,7 +52,22 @@ class IncidentModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
     title: Mapped[str] = mapped_column(String(300))
     description: Mapped[str] = mapped_column()
     ai_summary: Mapped[str | None] = mapped_column(default=None)
-    ai_classification: Mapped[dict[str, Any] | None] = mapped_column(JSONB, default=None)
+    # `none_as_null=True` is load-bearing and was missing (found by the manual end-to-end
+    # check of the `maintenance` change, task 10.5). SQLAlchemy's JSON types render a Python
+    # `None` **assigned to the attribute** as JSON `'null'`, not as SQL `NULL`; only an
+    # attribute nobody sets falls through to the column default. The writer sets every field
+    # explicitly — on purpose, so a column it currently expects to be default is not
+    # silently dropped — so every incident created through `SqlAlchemyIncidentRepository.add`
+    # was stored with `'null'::jsonb`.
+    #
+    # That is not cosmetic: design D3 makes `status = OPEN AND ai_classification IS NULL` the
+    # candidate rule of the classification job, and `'null'::jsonb IS NULL` is false. The job
+    # therefore considered **zero** incidents for every incident a real caller had created,
+    # while every test passed — the fixtures build the model without the keyword, so they got
+    # SQL NULL. No migration: this is a Python-side flag and the DDL is unchanged.
+    ai_classification: Mapped[dict[str, Any] | None] = mapped_column(
+        JSONB(none_as_null=True), default=None
+    )
     assigned_technician_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), default=None
     )

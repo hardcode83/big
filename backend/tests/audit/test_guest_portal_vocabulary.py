@@ -10,6 +10,8 @@ Design D11 and D15 are what this file pins, including two deliberate absences: t
 check-in action, and there is no incident action beyond creation.
 """
 
+import inspect
+import re
 import uuid
 from datetime import UTC, datetime
 
@@ -20,6 +22,7 @@ from app.audit.domain.exceptions import AuditContractError
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import AUDITABLE_FIELDS, REDACTED_FIELDS, ChangeSet
 from app.guests.domain.portal_token import hash_guest_token
+from app.maintenance.application.use_cases import ReportGuestIncidentUseCase
 
 
 def _now() -> datetime:
@@ -167,22 +170,35 @@ def test_the_free_text_a_guest_typed_cannot_be_audited(field: str) -> None:
         ChangeSet(actions.ENTITY_INCIDENT).redacted(field)
 
 
-def test_the_incident_allowlist_is_exactly_the_three_structural_fields() -> None:
-    assert AUDITABLE_FIELDS["INCIDENT"] == frozenset({"source", "status", "reservation_id"})
+def test_the_three_structural_fields_of_the_portal_are_still_auditable() -> None:
+    """What `guest-portal-api` needs, which `maintenance` widened around rather than over.
 
-
-def test_there_is_no_incident_action_beyond_creation() -> None:
-    """D15: classifying, assigning and resolving belong to `maintenance`.
-
-    Pre-authorising an operation no code performs is what rule 9 refuses to do for
-    `SCHEDULER`, and a vocabulary entry with no writer is exactly what `actions.py`'s own
-    docstring argues against.
+    This used to assert the allowlist was *exactly* these three. It is no longer, because
+    `maintenance` added the fields its own flow mutates (its D6), and that is the widening
+    `guest-portal-api` itself said would come. What stays true — and is what this test is
+    for — is that the portal's row can still be written, and that the two columns the guest
+    types remain out (the test above).
     """
-    incident_actions = {
-        action for action in actions.ACTIONS if action.startswith("INCIDENT_")
-    }
+    assert {"source", "status", "reservation_id"} <= AUDITABLE_FIELDS["INCIDENT"]
 
-    assert incident_actions == {"INCIDENT_CREATED"}
+
+def test_creation_is_still_the_only_incident_action_the_portal_writes() -> None:
+    """D15 said classifying, assigning and resolving belong to `maintenance`, and they do.
+
+    Those nine actions exist now because that change landed and each has a use case
+    performing it — which is the same rule that kept them out while nothing did. So the
+    guard can no longer be "no other `INCIDENT_*` action exists"; what it has to be is the
+    portal's own half: **the anonymous surface names one action, and it is the creation.**
+
+    Read off the use case's source rather than its behaviour, because behaviour would only
+    prove the happy path took that branch — `tests/maintenance/test_report_guest_incident.py`
+    already pins that. And off **the class**, not its module: `maintenance`'s own use cases
+    live beside it and legitimately name the other nine actions.
+    """
+    source = inspect.getsource(ReportGuestIncidentUseCase)
+    referenced = set(re.findall(r"audit_actions\.(INCIDENT_[A-Z_]+)", source))
+
+    assert referenced == {"INCIDENT_CREATED"}
 
 
 # --- The guest's name (D10) ------------------------------------------------------------

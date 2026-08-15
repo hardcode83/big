@@ -66,6 +66,16 @@ from app.scheduler.runner import (
     worker_session_factory,
 )
 from app.scheduler.schedule import CADENCES
+from app.maintenance.application.use_cases import (
+    ClassifyIncidentUseCase,
+    ClassifyPendingIncidentsUseCase,
+)
+from app.maintenance.infrastructure.classifier import RuleBasedIncidentClassifier
+from app.maintenance.infrastructure.repositories import (
+    SqlAlchemyIncidentReader,
+    SqlAlchemyIncidentRepository,
+    SqlAlchemyLiveCleaningTaskQuery,
+)
 from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 from app.worker import celery_app
@@ -137,6 +147,27 @@ async def _dispatch(session: AsyncSession, tenant_id, now: datetime):
         adapters=adapter_registry(),
         uow=SqlAlchemyUnitOfWork(session),
         max_attempts=settings.notification_max_attempts,
+        batch_size=settings.notification_batch_size,
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now)
+
+
+async def _classify_incidents(session: AsyncSession, tenant_id, now: datetime):
+    use_case = ClassifyPendingIncidentsUseCase(
+        reader=SqlAlchemyIncidentReader(session),
+        classify=ClassifyIncidentUseCase(
+            classifier=RuleBasedIncidentClassifier(),
+            configs=SqlAlchemyTenantConfigRepository(session),
+            incidents=SqlAlchemyIncidentRepository(session),
+            reader=SqlAlchemyIncidentReader(session),
+            properties=SqlAlchemyPropertyRepository(session),
+            transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            reservations=SqlAlchemyReservationRepository(session),
+            cleaning_tasks=SqlAlchemyLiveCleaningTaskQuery(session),
+            audit=SqlAlchemyAuditLogRepository(session),
+            uow=SqlAlchemyUnitOfWork(session),
+        ),
         batch_size=settings.notification_batch_size,
     )
     return await use_case.execute(tenant_id=tenant_id, now=now)
@@ -319,6 +350,26 @@ def dispatch_notifications() -> dict:
     """
     return run_sync(
         _guarded("dispatch_notifications", CADENCES["dispatch_notifications"], _dispatch)
+    )
+
+
+@celery_app.task(name="classify_incidents")
+def classify_incidents() -> dict:
+    """PRD §12, every 5 min: put every unlooked-at `OPEN` incident through the classifier.
+
+    Not one of PRD §8.3's four — see the divergence note in `schedule.py`. It is a job and
+    not part of the request that opens the incident, and `maintenance`'s design D2 gives
+    three reasons, of which the first is security: the only writer of `incidents` in `OPEN`
+    today is **an anonymous request from the internet** (the guest portal), so hanging the
+    classifier off that request is the shape rule 12(d) of `steering/security.md` forbids —
+    "la re-lectura por API desacoplada del volumen de peticiones" — and with a real AI
+    provider behind the port it would be a per-request cost a third party decides.
+
+    The second reason is R1.6: "never lose it" is free for a job that re-reads whatever is
+    still `OPEN`, and expensive for a `try/except` inline.
+    """
+    return run_sync(
+        _guarded("classify_incidents", CADENCES["classify_incidents"], _classify_incidents)
     )
 
 

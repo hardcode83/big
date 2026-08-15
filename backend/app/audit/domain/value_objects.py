@@ -309,12 +309,56 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     #
     # `revoked_at` is a plain timestamp and carries no secret, so it is a real diff.
     "GUEST_ACCESS_TOKEN": frozenset({"token_hash", "revoked_at"}),
-    # `guest-portal-api` D11. Deliberately **without `title` and `description`**: both are
-    # free text written from outside by an anonymous guest, and `audit_logs.changes` is a
-    # rule-11 sink. What the audit row needs is that an incident was opened, by whom and
-    # against which stay — `source`, `status` and `reservation_id` say that without carrying
-    # a word the guest typed into an append-only column.
-    "INCIDENT": frozenset({"source", "status", "reservation_id"}),
+    # `guest-portal-api` D11, widened by `maintenance` D6. Deliberately **without `title`
+    # and `description`**: both are free text written from outside by an anonymous guest, and
+    # `audit_logs.changes` is a rule-11 sink. What the audit row needs is that an incident
+    # was opened, by whom and against which stay — `source`, `status` and `reservation_id`
+    # say that without carrying a word the guest typed into an append-only column.
+    #
+    # `maintenance` adds the fields its flow mutates, and **`ai_summary` and
+    # `ai_classification` are absent for the same reason `title` and `description` are**:
+    # excepción 2 of rule 11 says of itself that it does not propagate and does not
+    # authorise a writer of ours, so a classifier's output does not enter this column
+    # either. What an audit trail of an incident needs is what changed operationally — its
+    # category, its severity, who it went to, and the three costs.
+    "INCIDENT": frozenset(
+        {
+            "source",
+            "status",
+            "reservation_id",
+            "category",
+            "severity",
+            "assigned_technician_id",
+            "owner_approval_required",
+            "estimated_cost",
+            "approved_cost",
+            "final_cost",
+            "resolved_at",
+        }
+    ),
+    # `maintenance` D6. **Without `reason` and `response_notes`**, the two free-text columns
+    # of `owner_approvals`: the first is written by our code and the second typed by the
+    # owner, and neither has any business in a rule-11 sink on an append-only table.
+    #
+    # **And without `approved_cost_applied`, which D6 listed and this does not implement.**
+    # That name is not a column of `owner_approvals` — it was meant to record the fact that
+    # the approved amount reached the incident (R2.4) — and `_check_auditable` says what an
+    # allowlist entry is for: "an audited diff may only name a real, non-sensitive column of
+    # the entity: an invented name is how a caller writes an arbitrary payload — including a
+    # secret — into audit_logs.changes under a harmless-looking key". A slot with no column
+    # has no type behind it, so `.diff("approved_cost_applied", None, approval.reason)` would
+    # have carried the owner's free text past the only defence this module has. The fact
+    # itself is not lost: it is `INCIDENT.approved_cost`, one entity over and on a real
+    # column. Raised by the security panel of section 4; recorded in the change's D6.
+    "OWNER_APPROVAL": frozenset(
+        {
+            "status",
+            "amount",
+            "related_type",
+            "responded_by",
+            "responded_at",
+        }
+    ),
 }
 
 _REDACTED_MARKER = {"changed": True}

@@ -249,6 +249,75 @@ export interface paths {
      */
     patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
   };
+  "/api/v1/incidents": {
+    /**
+     * List the tenant's incidents
+     * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
+     */
+    get: operations["list_incidents_api_v1_incidents_get"];
+  };
+  "/api/v1/incidents/{incident_id}": {
+    /**
+     * Read one incident
+     * @description A `TECHNICIAN` who is not the assignee receives the same `404` as for an incident that does not exist, and so does an incident of another tenant (R5.3, R5.4).
+     */
+    get: operations["get_incident_api_v1_incidents__incident_id__get"];
+    /**
+     * Triage an incident
+     * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+     */
+    patch: operations["triage_incident_api_v1_incidents__incident_id__patch"];
+  };
+  "/api/v1/incidents/{incident_id}/accept": {
+    /**
+     * The technician takes the job
+     * @description Cancels the SLA deadline the assignment opened (R3.3).
+     */
+    post: operations["accept_incident_api_v1_incidents__incident_id__accept_post"];
+  };
+  "/api/v1/incidents/{incident_id}/assign": {
+    /**
+     * Assign or reassign a technician
+     * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+     */
+    post: operations["assign_incident_api_v1_incidents__incident_id__assign_post"];
+  };
+  "/api/v1/incidents/{incident_id}/cancel": {
+    /**
+     * Cancel an incident
+     * @description Terminal from anywhere that is not already terminal. The property's operational state is recomposed from what is left (R4.4, R4.6).
+     */
+    post: operations["cancel_incident_api_v1_incidents__incident_id__cancel_post"];
+  };
+  "/api/v1/incidents/{incident_id}/classify": {
+    /**
+     * Force the classifier over one incident
+     * @description The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).
+     */
+    post: operations["classify_incident_api_v1_incidents__incident_id__classify_post"];
+  };
+  "/api/v1/incidents/{incident_id}/resolve": {
+    /**
+     * Close the incident with its real cost
+     * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+     */
+    post: operations["resolve_incident_api_v1_incidents__incident_id__resolve_post"];
+  };
+  "/api/v1/incidents/{incident_id}/resume": {
+    /** Work resumes after the part arrived */
+    post: operations["resume_work_api_v1_incidents__incident_id__resume_post"];
+  };
+  "/api/v1/incidents/{incident_id}/start": {
+    /** The technician starts work */
+    post: operations["start_incident_api_v1_incidents__incident_id__start_post"];
+  };
+  "/api/v1/incidents/{incident_id}/wait-parts": {
+    /**
+     * The job is waiting for an external part
+     * @description The incident stays **open** — `WAITING_EXTERNAL_PARTS` counts as open, because the flat still has a broken thing in it.
+     */
+    post: operations["wait_for_parts_api_v1_incidents__incident_id__wait_parts_post"];
+  };
   "/api/v1/integrations/pms/import-csv": {
     /**
      * Import reservations from a CSV file
@@ -276,6 +345,15 @@ export interface paths {
      * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
      */
     get: operations["list_own_notifications_api_v1_notifications_get"];
+  };
+  "/api/v1/owner-approvals/{approval_id}/respond": {
+    /**
+     * The owner answers a pending approval
+     * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
+     *
+     * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+     */
+    post: operations["respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post"];
   };
   "/api/v1/properties": {
     /**
@@ -604,6 +682,14 @@ export interface components {
        * Format: uuid
        */
       assigned_cleaner_id: string;
+    };
+    /** AssignIncidentRequest */
+    AssignIncidentRequest: {
+      /**
+       * Technician Id
+       * Format: uuid
+       */
+      technician_id: string;
     };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
@@ -1244,6 +1330,22 @@ export interface components {
       updated: number;
     };
     /**
+     * IncidentCategory
+     * @enum {string}
+     */
+    IncidentCategory: "ACCESS" | "LOCK" | "WIFI" | "ELECTRICITY" | "WATER" | "PLUMBING" | "HVAC" | "APPLIANCE" | "NOISE" | "CLEANING" | "DAMAGE" | "SAFETY" | "OTHER";
+    /** IncidentPageResponse */
+    IncidentPageResponse: {
+      /** Items */
+      items: components["schemas"]["IncidentResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
      * IncidentReportedResponse
      * @description The acknowledgement, and **only** the acknowledgement (R5.3, D15).
      *
@@ -1270,6 +1372,64 @@ export interface components {
       status: components["schemas"]["IncidentStatus"];
     };
     /**
+     * IncidentResponse
+     * @description What an authenticated operator may see about one incident.
+     *
+     * `description` **is** here, unlike in the dashboard's `IncidentSummary`: this is the
+     * surface a technician works from and the fault is what they have to read. What is not
+     * here is everything that identifies who reported it (`reported_by_guest_token`,
+     * `reported_by_user_id`) and the raw classifier verdict (`ai_classification`) — the first
+     * is a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink
+     * whose audience is the flow, not a client. `ai_summary` stays: it is our own closed
+     * vocabulary, and it is what tells an operator the incident was looked at.
+     */
+    IncidentResponse: {
+      /** Ai Summary */
+      ai_summary: string | null;
+      /** Approved Cost */
+      approved_cost: string | null;
+      /** Assigned Technician Id */
+      assigned_technician_id: string | null;
+      category: components["schemas"]["IncidentCategory"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Description */
+      description: string;
+      /** Estimated Cost */
+      estimated_cost: string | null;
+      /** Final Cost */
+      final_cost: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Owner Approval Required */
+      owner_approval_required: boolean;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Resolved At */
+      resolved_at: string | null;
+      severity: components["schemas"]["IncidentSeverity"];
+      source: components["schemas"]["IncidentSource"];
+      status: components["schemas"]["IncidentStatus"];
+      /** Title */
+      title: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * IncidentSeverity
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
      * (Incident.severity) without a named block (§7.13). Not the same enum
@@ -1277,6 +1437,13 @@ export interface components {
      * @enum {string}
      */
     IncidentSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    /**
+     * IncidentSource
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Incident.source) without a named block (§7.13).
+     * @enum {string}
+     */
+    IncidentSource: "GUEST" | "CLEANER" | "OWNER" | "SYSTEM" | "PMS" | "LOCK_ALERT";
     /**
      * IncidentStatus
      * @enum {string}
@@ -1390,6 +1557,13 @@ export interface components {
      * @enum {string}
      */
     NotificationStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+    /**
+     * OwnerApprovalStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (OwnerApproval.status) without a named block (§7.19).
+     * @enum {string}
+     */
+    OwnerApprovalStatus: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
     /**
      * PaymentStatus
      * @enum {string}
@@ -1891,6 +2065,28 @@ export interface components {
       token: string;
     };
     /**
+     * ResolveIncidentRequest
+     * @description R4.2 — `final_cost` is required, which is where "SHALL exigir `final_cost`" lands for
+     * an HTTP caller. The entity requires it too, for callers that are not HTTP.
+     */
+    ResolveIncidentRequest: {
+      /** Final Cost */
+      final_cost: number | string;
+    };
+    /**
+     * RespondOwnerApprovalRequest
+     * @description `POST /owner-approvals/{id}/respond` (R2.4, R2.5).
+     *
+     * `status` is the enum, and the entity refuses anything but `APPROVED`/`REJECTED` — the
+     * two an owner can give. `response_notes` is free text the owner types, bounded here and
+     * kept out of `audit_logs.changes` by the allowlist (D6).
+     */
+    RespondOwnerApprovalRequest: {
+      /** Response Notes */
+      response_notes?: string | null;
+      status: components["schemas"]["OwnerApprovalStatus"];
+    };
+    /**
      * RowErrorResponse
      * @description One row the import could not take, with what a person needs to fix it.
      */
@@ -2188,6 +2384,19 @@ export interface components {
       refresh_token: string;
       /** Token Type */
       token_type: string;
+    };
+    /**
+     * TriageIncidentRequest
+     * @description `PATCH /incidents/{id}` (R1.4, R2.1).
+     *
+     * Every field is optional because a triage may correct only one of them; sending none is
+     * a no-op the entity accepts, and refusing it here would be a rule this schema invented.
+     */
+    TriageIncidentRequest: {
+      category?: components["schemas"]["IncidentCategory"] | null;
+      /** Estimated Cost */
+      estimated_cost?: number | string | null;
+      severity?: components["schemas"]["IncidentSeverity"] | null;
     };
     /**
      * UpdatePropertyRequest
@@ -3773,6 +3982,426 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's incidents
+   * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
+   */
+  list_incidents_api_v1_incidents_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        status?: components["schemas"]["IncidentStatus"] | null;
+        severity?: components["schemas"]["IncidentSeverity"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one incident
+   * @description A `TECHNICIAN` who is not the assignee receives the same `404` as for an incident that does not exist, and so does an incident of another tenant (R5.3, R5.4).
+   */
+  get_incident_api_v1_incidents__incident_id__get: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Triage an incident
+   * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+   */
+  triage_incident_api_v1_incidents__incident_id__patch: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TriageIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The technician takes the job
+   * @description Cancels the SLA deadline the assignment opened (R3.3).
+   */
+  accept_incident_api_v1_incidents__incident_id__accept_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Assign or reassign a technician
+   * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+   */
+  assign_incident_api_v1_incidents__incident_id__assign_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssignIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel an incident
+   * @description Terminal from anywhere that is not already terminal. The property's operational state is recomposed from what is left (R4.4, R4.6).
+   */
+  cancel_incident_api_v1_incidents__incident_id__cancel_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Force the classifier over one incident
+   * @description The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).
+   */
+  classify_incident_api_v1_incidents__incident_id__classify_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Close the incident with its real cost
+   * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+   */
+  resolve_incident_api_v1_incidents__incident_id__resolve_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResolveIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /** Work resumes after the part arrived */
+  resume_work_api_v1_incidents__incident_id__resume_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /** The technician starts work */
+  start_incident_api_v1_incidents__incident_id__start_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The job is waiting for an external part
+   * @description The incident stays **open** — `WAITING_EXTERNAL_PARTS` counts as open, because the flat still has a broken thing in it.
+   */
+  wait_for_parts_api_v1_incidents__incident_id__wait_parts_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Import reservations from a CSV file
    * @description Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).
    */
@@ -3899,6 +4528,50 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["NotificationPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The owner answers a pending approval
+   * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
+   *
+   * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+   */
+  respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post: {
+    parameters: {
+      path: {
+        approval_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RespondOwnerApprovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

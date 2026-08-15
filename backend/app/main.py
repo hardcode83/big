@@ -13,6 +13,9 @@ from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
+from app.maintenance.api.approvals_router import router as owner_approvals_router
+from app.maintenance.api.errors import register_maintenance_error_handlers
+from app.maintenance.api.incidents_router import router as incidents_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
@@ -75,6 +78,7 @@ def create_app() -> FastAPI:
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
+    register_maintenance_error_handlers(app)
     register_access_error_handlers(app)
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
@@ -111,6 +115,13 @@ def create_app() -> FastAPI:
     # authorisation, and `tests/test_route_authorization.py` names it in `ANONYMOUS_ENDPOINTS`,
     # which is a visible diff by construction.
     app.include_router(cleaning_photos_router, prefix=API_V1_PREFIX)
+    # `maintenance`: the `api/` layer that module never had. Two routers because they are two
+    # aggregates — one incident can raise two owner approvals, so the approval has an
+    # identity the incident cannot stand in for (design D14). Both are fully authenticated:
+    # there is no anonymous door into this module, and the one surface that creates an
+    # incident anonymously is the guest portal's, mounted below.
+    app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    app.include_router(owner_approvals_router, prefix=API_V1_PREFIX)
     # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).

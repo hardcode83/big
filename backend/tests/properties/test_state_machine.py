@@ -177,6 +177,9 @@ EXPECTED_POLICY = {
     (S.VACANT_READY, T.OWNER_BLOCKED): {S.BLOCKED_BY_OWNER},
     (S.VACANT_READY, T.PROPERTY_MARKED_OUT_OF_SERVICE): {S.OUT_OF_SERVICE},
     (S.VACANT_READY, T.INCIDENT_HIGH): {S.MAINTENANCE_REQUIRED},
+    # Added by `maintenance` (design D8): a critical fault in an empty, ready flat used to
+    # leave it in `VACANT_READY`, i.e. bookable.
+    (S.VACANT_READY, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
     (S.AWAITING_CHECKIN, T.CHECKIN_TIME_REACHED): {S.OCCUPIED_ESTIMATED},
     (S.AWAITING_CHECKIN, T.INCIDENT_HIGH): {S.MAINTENANCE_REQUIRED},
     (S.AWAITING_CHECKIN, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
@@ -193,6 +196,9 @@ EXPECTED_POLICY = {
     (S.CLEANING_SCHEDULED, T.CLEANER_REJECTED): {S.AWAITING_CLEANING},
     (S.CLEANING_SCHEDULED, T.CLEANING_ASSIGNMENT_EXPIRED): {S.AWAITING_CLEANING},
     (S.CLEANING_SCHEDULED, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
+    # Added by `maintenance` (design D8): `CLEANING_SCHEDULED` admitted `INCIDENT_CRITICAL`
+    # and not `INCIDENT_HIGH`, while every other cleaning state admitted both.
+    (S.CLEANING_SCHEDULED, T.INCIDENT_HIGH): {S.MAINTENANCE_REQUIRED},
     (S.CLEANING_IN_PROGRESS, T.CLEANING_COMPLETED): {
         S.READY_FOR_NEXT_GUEST,
         S.AWAITING_CHECKIN,
@@ -269,10 +275,17 @@ REMOVED_CONTEXTUAL_SUPERSET_RELATIONS = [
 
 
 def test_original_66_policy_candidates_are_explicitly_classified():
+    """The original 66 candidates, plus what later changes added on purpose.
+
+    `maintenance` (design D8) closed two omissions of the matrix — `VACANT_READY` +
+    `INCIDENT_CRITICAL` and `CLEANING_SCHEDULED` + `INCIDENT_HIGH` — so the declared
+    relations went from 58 to 60. The 66 stays as the reference point it always was: it is
+    the size of the space this test enumerated, not a budget.
+    """
     assert PropertyStateMachine._POLICY == EXPECTED_POLICY
-    assert len(DECLARED_POLICY_RELATIONS) == 58
+    assert len(DECLARED_POLICY_RELATIONS) == 60
     assert len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 8
-    assert len(DECLARED_POLICY_RELATIONS) + len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 66
+    assert len(DECLARED_POLICY_RELATIONS) + len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 68
 
 
 @pytest.mark.parametrize("state,trigger,destination", REMOVED_CONTEXTUAL_SUPERSET_RELATIONS)
@@ -494,6 +507,15 @@ def test_cleaning_trigger_preconditions_reject_incompatible_statuses(trigger, st
     (PropertyStateTrigger.INCIDENT_CRITICAL, IncidentSeverity.HIGH, IncidentStatus.OPEN),
     (PropertyStateTrigger.INCIDENT_HIGH, IncidentSeverity.HIGH, IncidentStatus.RESOLVED),
     (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.OPEN),
+    # `maintenance` design D9 widened this guard from `RESOLVED` to `{RESOLVED, CANCELLED}`
+    # and no further: everything else the incident can be is still incompatible evidence
+    # for a resolution.
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.CLASSIFIED),
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.IN_PROGRESS),
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.AWAITING_OWNER_APPROVAL),
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.ASSIGNED),
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.ACCEPTED),
+    (PropertyStateTrigger.INCIDENT_RESOLVED, IncidentSeverity.HIGH, IncidentStatus.WAITING_EXTERNAL_PARTS),
 ])
 def test_incident_trigger_preconditions_reject_incompatible_evidence(trigger, severity, status):
     state = {
@@ -505,6 +527,83 @@ def test_incident_trigger_preconditions_reject_incompatible_evidence(trigger, se
     item = make_incident(p, severity, status)
     with pytest.raises(IncompatibleTransitionContextError):
         PropertyStateMachine.evaluate(make_request(p, trigger, context=PropertyTransitionContext(incidents=(item,)), source=item.id))
+
+
+@pytest.mark.parametrize("state", [
+    PropertyOperationalState.MAINTENANCE_REQUIRED,
+    PropertyOperationalState.CRITICAL_INCIDENT,
+])
+def test_incident_resolved_accepts_a_cancelled_incident(state):
+    """`maintenance` design D9, which R2.5 depends on.
+
+    An owner rejecting the budget cancels the incident. Before this, the guard demanded
+    `RESOLVED` and the property stayed in `CRITICAL_INCIDENT` with nothing left to fire —
+    `OWNER_MANAGER_UNBLOCKED` leaves `BLOCKED_BY_OWNER`, not this. And it is not new
+    criterion: `after_incident_resolution` already filters active incidents with
+    `status not in (RESOLVED, CANCELLED)`.
+    """
+    prop = make_property(state)
+    cancelled = make_incident(prop, IncidentSeverity.CRITICAL, IncidentStatus.CANCELLED)
+
+    result = PropertyStateMachine.evaluate(
+        make_request(
+            prop,
+            PropertyStateTrigger.INCIDENT_RESOLVED,
+            context=PropertyTransitionContext(incidents=(cancelled,)),
+            source=cancelled.id,
+        )
+    )
+
+    assert result.transition.from_state is state
+    assert result.transition.to_state is PropertyOperationalState.VACANT_READY
+
+
+def test_a_cancelled_incident_does_not_release_a_property_with_an_active_critical():
+    """The bound on `maintenance` design D9: it widens the evidence, not the destination.
+
+    The destination is not derived from the source incident — `after_incident_resolution`
+    recomputes from **every** incident in context — so cancelling one while another
+    CRITICAL is still open leaves the property where it is.
+    """
+    prop = make_property(PropertyOperationalState.CRITICAL_INCIDENT)
+    cancelled = make_incident(prop, IncidentSeverity.CRITICAL, IncidentStatus.CANCELLED)
+    still_open = make_incident(prop, IncidentSeverity.CRITICAL, IncidentStatus.IN_PROGRESS)
+
+    with pytest.raises(NoOperationalStateChangeError):
+        PropertyStateMachine.evaluate(
+            make_request(
+                prop,
+                PropertyStateTrigger.INCIDENT_RESOLVED,
+                context=PropertyTransitionContext(incidents=(cancelled, still_open)),
+                source=cancelled.id,
+            )
+        )
+
+
+@pytest.mark.parametrize("state", [
+    PropertyOperationalState.MAINTENANCE_REQUIRED,
+    PropertyOperationalState.CRITICAL_INCIDENT,
+    PropertyOperationalState.BLOCKED_BY_OWNER,
+    PropertyOperationalState.OUT_OF_SERVICE,
+])
+@pytest.mark.parametrize("trigger", [
+    PropertyStateTrigger.INCIDENT_HIGH,
+    PropertyStateTrigger.INCIDENT_CRITICAL,
+])
+def test_severity_triggers_the_matrix_still_omits_are_refused_by_the_machine(state, trigger):
+    """The tolerance of `maintenance` design D8 lives in the use-case mixin, not here.
+
+    D8 closes the two omissions it identified and says of the rest: "cierra los huecos
+    conocidos, no promete que no queden otros". Three of these four are correct as they
+    are — `MAINTENANCE_REQUIRED` + HIGH and `CRITICAL_INCIDENT` + CRITICAL are no-ops,
+    and `BLOCKED_BY_OWNER` / `OUT_OF_SERVICE` already stop everything by a human
+    decision. So the machine keeps raising, and what changes is that the caller logs and
+    carries on instead of failing the operation.
+    """
+    if (state, trigger) in PropertyStateMachine._POLICY:
+        pytest.skip("declared policy pair")
+    with pytest.raises(PropertyDomainError):
+        PropertyStateMachine.evaluate(valid_case(state, trigger))
 
 
 def test_critical_to_high_uses_all_active_incidents():
