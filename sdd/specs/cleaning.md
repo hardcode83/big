@@ -185,10 +185,14 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - WHERE el `storage_type` del tenant es `S3`, THE SYSTEM SHALL responder `404` en esa ruta: el
   navegador va directo al proveedor y aquí no hay nada que servir. Solo es alcanzable **tras** una
   firma válida, así que no revela nada.
-- THE SYSTEM SHALL sellar **toda** respuesta de esa ruta —los bytes y las tres negativas— con
-  `X-Content-Type-Options: nosniff`, y derivar el `Content-Type` únicamente de la extensión de la
-  clave. Sin ello, un polyglot que empiece por `FF D8 FF` y lleve HTML sería XSS almacenado sobre
-  el origen de la API, que `api-ingress-routing` dejó alcanzable desde internet.
+- THE SYSTEM SHALL derivar el `Content-Type` de esa ruta únicamente de la extensión de la clave
+  almacenada. Sin eso —y sin el `nosniff` que el backend sella globalmente— un polyglot que empiece
+  por `FF D8 FF` y lleve HTML sería XSS almacenado sobre el origen de la API, que
+  `api-ingress-routing` dejó alcanzable desde internet.
+- THE SYSTEM SHALL emitir `X-Content-Type-Options: nosniff` en toda respuesta de esa ruta —los bytes
+  y las tres negativas— con **un solo valor**. La ruta lo sella por su cuenta y el middleware global
+  lo sobrescribe con el mismo valor; el contrato es de
+  [`specs/backend-http-posture.md`](backend-http-posture.md), no de esta capability.
 - THE SYSTEM SHALL responder los bytes con `Cache-Control: private, max-age=<lo que le queda a la
   firma>`, de modo que ninguna caché compartida los guarde y ninguna copia del navegador
   sobreviva a la credencial que la compró. Las negativas van con `no-store`: cada una es un
@@ -286,7 +290,7 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 - `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con
   la plantilla por defecto de PRD §7.10 (spec `seed-data-demo`).
 - `backend/app/main.py` — el montaje del router anónimo y la rama del tope de subida en
-  `MaxBodySizeMiddleware`.
+  `MaxBodySizeMiddleware` (contrato en [`specs/backend-http-posture.md`](backend-http-posture.md)).
 - `backend/app/properties/application/use_cases.py` — el punto donde el provisioner se compone
   con la transición del checkout.
 - `backend/alembic/versions/d4b0c7a91f38_cleaning_live_task_unique.py` — el índice parcial.
