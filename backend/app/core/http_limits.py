@@ -2,12 +2,15 @@
 
 Why this exists, precisely: FastAPI calls `await request.form()` inside its route handler
 wrapper *before* it solves dependencies, and Starlette's multipart parser spools file parts to
-a `SpooledTemporaryFile` with no size ceiling of its own. So a `settings.csv_import_max_bytes`
-check written inside the endpoint — which is where this change had it — runs after the whole
-upload is already on the container's disk, and it runs after `require(...)` too, meaning an
-**unauthenticated** request could make the backend write arbitrary volumes and then receive a
-401. Measured by the security review of this change: a 60 MiB anonymous POST was fully
-received before the 401.
+a `SpooledTemporaryFile` with no size ceiling of its own (it spools to memory up to 1 MiB and
+to the container's disk above that). So a `settings.csv_import_max_bytes` check written inside
+the endpoint — which is where this change had it — runs after the whole upload has already
+been received, and it runs after `require(...)` too, meaning an **unauthenticated** request
+could make the backend absorb arbitrary volumes and then receive a 401. Measured by the
+security review of this change: a 60 MiB anonymous POST was fully received before the 401.
+
+This module is the *implementation* of that contract; the contract itself is stated once, in
+rule 14 of `sdd/steering/security.md`. Everywhere else links there rather than re-deriving.
 
 Middleware is the only layer that sees the request before the body is touched, so that is where
 the limit belongs. It works in two steps, because either one alone is bypassable:
