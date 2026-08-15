@@ -82,6 +82,18 @@ services:
       # the app boot with an empty signing key.
       JWT_SECRET_KEY: ${JWT_SECRET_KEY:?Falta JWT_SECRET_KEY en .env (make up la genera)}
       ENCRYPTION_KEY: ${ENCRYPTION_KEY:?Falta ENCRYPTION_KEY en .env (make up la genera)}
+      # Almacén de objetos (change `object-storage-provisioning`). Solo en `backend`, igual que el
+      # volumen de medios de abajo y por el mismo motivo: es el único servicio que sube y sirve
+      # ficheros.
+      #
+      # Sin `:?` a propósito, al contrario que las dos de arriba: aquí el default vacío es el
+      # comportamiento correcto. El MVP local corre sobre `LOCAL` y estas cinco no hacen falta —
+      # exigirlas rompería `make up` para todo el mundo a cambio de nada.
+      S3_BUCKET: ${S3_BUCKET:-}
+      S3_REGION: ${S3_REGION:-}
+      S3_ENDPOINT_URL: ${S3_ENDPOINT_URL:-}
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
     volumes:
       - ./backend:/app
       - backend_venv:/app/.venv

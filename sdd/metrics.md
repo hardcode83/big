@@ -39,4 +39,5 @@
 | auth-account-recovery | new, design, tasks, run, review, ship, archive | 634046 | 1824328 | 549403100 | 360.6465 | 2026-08-09 | 2026-08-11 |
 | guest-portal-api | new, design, tasks, run, review, ship, archive | 913356 | 2485946 | 707218180 | 461.2949 | 2026-08-09 | 2026-08-11 |
 | seed-data-demo | new, design, tasks, run, review, ship, archive | 357779 | 990522 | 150643935 | 119.2975 | 2026-08-12 | 2026-08-12 |
+| backend-response-hardening | new, design, tasks, run, review, ship, archive | 95448 | 420721 | 61774591 | 51.1719 | 2026-08-15 | 2026-08-15 |
 | maintenance | new, design, tasks, run, review | 380340 | 1057078 | 275513591 | 181.5413 | 2026-08-15 | — |

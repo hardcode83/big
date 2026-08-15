@@ -10,6 +10,8 @@ from pathlib import Path
 
 import pytest
 
+from app.cleaning.api.dependencies import get_file_storage_factory
+from app.core.config import settings
 from app.integrations.domain.storage import (
     FileStorageFactory,
     LocalFileReadUnsupportedError,
@@ -22,6 +24,8 @@ from app.integrations.infrastructure.storage import (
     S3FileStorage,
 )
 from app.tenants.domain.enums import StorageType
+
+OCI_ENDPOINT = "https://ns.compat.objectstorage.eu-frankfurt-1.oraclecloud.com"
 
 
 class _ClientSpy:
@@ -116,3 +120,104 @@ def test_the_factory_holds_no_adapter_between_calls(tmp_path: Path) -> None:
     factory = _factory(tmp_path)
 
     assert factory.storage_for(StorageType.LOCAL) is not factory.storage_for(StorageType.LOCAL)
+
+
+# --- The wiring in `get_file_storage_factory` (`object-storage-provisioning` D5, R3.2/R3.4) ---
+
+
+def test_the_dependency_reads_the_settings_and_the_use_cases_do_not(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3.2: this dependency is the single place configuration enters the storage path.
+
+    Asserted through the client the factory builds, because that is the only observable proof
+    the three settings arrived — `ConfiguredFileStorageFactory` keeps them private.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "autohostai-dev-media")
+    monkeypatch.setattr(settings, "s3_region", "eu-frankfurt-1")
+    monkeypatch.setattr(settings, "s3_endpoint_url", OCI_ENDPOINT)
+
+    storage = get_file_storage_factory(derive_signing_key("s" * 64)).storage_for(StorageType.S3)
+
+    assert isinstance(storage, S3FileStorage)
+    client = storage._client
+    assert client.meta.endpoint_url == OCI_ENDPOINT
+    assert client.meta.region_name == "eu-frankfurt-1"
+
+
+def test_empty_settings_become_none_so_boto3_resolves_aws(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3.4, and the reason for the `or None` in the dependency.
+
+    boto3 reads `endpoint_url=""` as an endpoint, not as its absence, so passing the empty
+    string straight through would break the one provider that is supposed to need no
+    configuration at all.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "autohostai-dev-media")
+    monkeypatch.setattr(settings, "s3_region", "")
+    monkeypatch.setattr(settings, "s3_endpoint_url", "")
+
+    storage = get_file_storage_factory(derive_signing_key("s" * 64)).storage_for(StorageType.S3)
+
+    assert isinstance(storage, S3FileStorage)
+    assert storage._client.meta.endpoint_url.endswith(".amazonaws.com")
+
+
+@pytest.mark.parametrize("blank", ["   ", "\t", "\n", " \t "])
+def test_whitespace_only_settings_are_absence_too_and_not_a_crash(
+    monkeypatch: pytest.MonkeyPatch,
+    blank: str,
+) -> None:
+    """R3.4 again, for the value a hand-edited `.env` actually produces.
+
+    A bare `or None` treated `"   "` as configuration, because it is truthy, and handed it to
+    `boto3.client(...)` — which raises `InvalidRegionError` / `ValueError: Invalid endpoint:`
+    straight out of `storage_for(S3)`, escaping the `StorageWriteError` contract that
+    `ConfiguredFileStorageFactory` guarantees for a store that is not configured. The bucket
+    next to it has always been read as `.strip()`; these two now agree with it.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "autohostai-dev-media")
+    monkeypatch.setattr(settings, "s3_region", blank)
+    monkeypatch.setattr(settings, "s3_endpoint_url", blank)
+
+    storage = get_file_storage_factory(derive_signing_key("s" * 64)).storage_for(StorageType.S3)
+
+    assert isinstance(storage, S3FileStorage)
+    assert storage._client.meta.endpoint_url.endswith(".amazonaws.com")
+
+
+def test_a_whitespace_only_bucket_still_fails_loudly(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3.3 for the same typo: a blank bucket is no bucket, and never a quiet `LOCAL`.
+
+    Honest about what this does and does not pin: the bucket has **always** been read as
+    `s3_bucket.strip()` in `ConfiguredFileStorageFactory`, so this passes with or without the
+    region/endpoint fix above — it is not a regression test for it. What it adds is the first
+    pass of a whitespace-only bucket through the **real** `get_file_storage_factory` wiring;
+    `test_s3_without_a_configured_bucket_fails_loudly` only ever covered the hand-built factory.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "   ")
+
+    factory = get_file_storage_factory(derive_signing_key("s" * 64))
+
+    with pytest.raises(StorageWriteError):
+        factory.storage_for(StorageType.S3)
+
+
+def test_the_wiring_does_not_relax_the_empty_bucket_refusal(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R3.3, re-asserted through the real dependency rather than a hand-built factory.
+
+    With the settings at their empty defaults the merge is inert, and 'inert' has to mean the
+    loud failure of `test_s3_without_a_configured_bucket_fails_loudly` — never a quiet `LOCAL`.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "")
+
+    factory = get_file_storage_factory(derive_signing_key("s" * 64))
+
+    assert isinstance(factory.storage_for(StorageType.LOCAL), LocalFileStorage)
+    with pytest.raises(StorageWriteError):
+        factory.storage_for(StorageType.S3)

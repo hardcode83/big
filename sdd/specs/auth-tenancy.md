@@ -360,18 +360,13 @@ tocar la base de datos a mano.
 ### Tope de tamaño de cuerpo
 
 - THE SYSTEM SHALL aplicar un tope de tamaño de cuerpo a **todo** `/api/v1/`, antes de leer
-  el cuerpo, respondiendo `413` con `code` `PAYLOAD_TOO_LARGE`.
-- THE SYSTEM SHALL usar `CSV_IMPORT_MAX_BYTES` (10 MiB) para `/api/v1/integrations/` y
-  `REQUEST_MAX_BYTES` (1 MiB) para el resto, resolviendo el límite **por ruta** en una sola
-  instancia de middleware: dos instancias se anidan, así que la genérica rechazaría la
-  subida antes de que la específica la viera.
-- **Por qué no está acotado a las subidas**: mientras el backend escuchaba solo en
-  loopback, un cuerpo sin tope en un endpoint anónimo no costaba nada. Con `/api/v1`
-  alcanzable desde internet es un amplificador de memoria — medido, un `POST` de 400 MB a
-  `/auth/login` llevó el contenedor de 195 MiB a 1,016 GiB de RSS, y FastAPI lee el cuerpo
-  **antes** de resolver dependencias, o sea antes del throttle de 10/min. Ningún compose
-  limita la memoria de `backend`, así que el techo era el de la VM. Regla 12(c) y regla 6 de
-  `steering/security.md`.
+  el cuerpo, respondiendo `413` con `code` `PAYLOAD_TOO_LARGE` — de modo que un cuerpo sin
+  tope en un endpoint anónimo no pueda amplificar memoria por delante del throttle de login.
+- El contrato completo —los cuatro techos, por qué cada número, el orden en que se resuelven,
+  el mecanismo en dos pasos y el riesgo aceptado de cuerpo anónimo pre-auth— vive en
+  [`specs/backend-http-posture.md`](backend-http-posture.md), que es su único hogar. Aquí no
+  se reenuncia: esta sección llegó a nombrar dos techos de los cuatro que
+  `app/main.py` resuelve. Regla 12(c) y reglas 6 y 14 de `steering/security.md`.
 
 ### Contrato HTTP y patrón de capas
 

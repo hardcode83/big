@@ -25,6 +25,7 @@ from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.log_redaction import install_path_token_redaction
 from app.core.openapi import install_openapi
+from app.core.response_headers import NoSniffMiddleware
 from app.guests.api.errors import register_guest_error_handlers
 from app.guests.api.portal_router import router as guest_portal_router
 from app.guests.api.router import router as guests_router
@@ -231,6 +232,14 @@ def create_app() -> FastAPI:
             else settings.request_max_bytes
         ),
     )
+
+    # AFTER the mounting above, and the position is the mechanism: `add_middleware` inserts at
+    # position 0 and `build_middleware_stack` wraps the list in reverse, so the last one added
+    # ends up the OUTERMOST. Only from out there does this see the `413` that
+    # `MaxBodySizeMiddleware._refuse` builds and sends by itself, without passing through any
+    # route or handler. Reordering these two calls is not a style question; the test that fails
+    # when somebody does is `tests/test_response_headers.py`.
+    app.add_middleware(NoSniffMiddleware)
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck
     # in docker-compose.yml and docker-compose.deploy.yml probes /health, and the

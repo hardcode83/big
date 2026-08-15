@@ -672,3 +672,52 @@ No hay objetivo de `make` para esto a propósito: es una operación de rescate, 
 normal. Detalle completo de los tres endpoints y de la política de contraseña en
 `docs/auth-account-recovery.md`.
 
+## 9. Almacén de objetos para las fotos (change `object-storage-provisioning`)
+
+El bucket privado `autohostai-<env>-media`, su usuario IAM, su Customer Secret Key y los cuatro
+secretos del Vault los crea **Terraform**. Nada de esto se toca en la consola de OCI: la elección de
+proveedor y sus alternativas están en `docs/adr/0008-object-storage-provider-dev.md`.
+
+### 9.1 Rotar la Customer Secret Key
+
+**Cuándo**: sospecha de exposición del par acceso/secreto, o rotación periódica. Es la única
+credencial del bucket, así que rotarla invalida todo acceso anterior.
+
+```bash
+# Desde infra/environments/dev/, o por workflow_dispatch de infra-dev.yml sobre main.
+terraform apply -replace=oci_identity_customer_secret_key.media
+```
+
+El mismo `apply` reescribe los dos secretos del Vault que dependen de ella
+(`autohostai-<env>-media-access-key-id` y `-media-secret-access-key`), porque su contenido se deriva
+del recurso reemplazado. **La VM sigue con la clave vieja hasta el siguiente deploy**: el `.env` solo
+se rellena en el paso «Render .env», así que hay que lanzar `deploy-dev` después. Entre el `apply` y
+el deploy, las subidas de fotos fallan con `502` — es una ventana real y conviene rotar con el deploy
+a mano.
+
+No hay paso manual: **no** se copia nada de la consola de OCI. Si algún día hiciera falta ver el
+valor, sale del Vault, no del recurso.
+
+### 9.2 Poner un tenant en `S3` (paso 4 del procedimiento de verificación)
+
+`storage_type` **no** se abre al `PATCH` de la API, y por su razón original: cambiarlo apuntaría a
+fotos ya subidas a un sitio donde no están. La vía es el seed, y el valor se pasa **en línea** porque
+el deploy trunca el `.env` en cada ejecución:
+
+```bash
+# En la VM, desde el directorio del compose de deploy.
+# BLOQUEANTE antes de convergir: si el tenant ya tiene fotos, NO conviertas.
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT count(*) FROM cleaning_photos;"
+
+# Solo si el recuento es 0:
+docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 backend python -m app.cli.bootstrap
+```
+
+**Si el recuento no es cero, para y decide explícitamente** (borrar las filas o volver a subir las
+fotos). Migrar de verdad está fuera de alcance del change: las filas seguirían apuntando a claves que
+están en disco y `GET /api/v1/cleaning-photos/{id}` devolvería `404` para ese tenant.
+
+`apply_plan` **converge**: crea la configuración con ese `storage_type` y la **actualiza si difiere**
+en una re-ejecución. Volver atrás es el mismo comando con `BOOTSTRAP_STORAGE_TYPE=LOCAL`.
+

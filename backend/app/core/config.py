@@ -5,6 +5,8 @@ from pathlib import Path
 from pydantic import Field, ValidationError, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from app.tenants.domain.enums import StorageType
+
 REPO_ROOT_ENV_FILE = Path(__file__).resolve().parents[3] / ".env"
 
 # A Fernet key is base64url of exactly this many bytes (16 for signing + 16 for AES).
@@ -123,10 +125,14 @@ class Settings(BaseSettings):
     # would have to decide whether to trust a peer the first one may already have
     # rewritten — a check validating its own input.
 
-    # Limits of the CSV reservation import (R4.3, design D11). Both are checked BEFORE
-    # parsing: a 200 MB upload must be refused, not streamed into memory first. The byte
-    # ceiling is rule 6 of `steering/security.md` ("tamaño máx. configurable, default 10 MB");
-    # the row ceiling is this change's, because a small file can still hold a million rows.
+    # Limits of the CSV reservation import (R4.3, design D11). The two are enforced in
+    # different places and NEITHER of them here: the byte ceiling by `MaxBodySizeMiddleware`,
+    # which is the only layer that refuses before a byte is read, and the row ceiling by the
+    # parser (`integrations/infrastructure/csv_parser.py`), during the parse, over a buffer the
+    # middleware has already bounded. Rule 14 of `steering/security.md` is where that contract
+    # lives; do not restate it here. The byte ceiling is rule 6 of the same document ("tamaño
+    # máx. configurable, default 10 MB"); the row ceiling is this change's, because a small
+    # file can still hold a million rows.
     csv_import_max_bytes: int = 10 * 1024 * 1024
     csv_import_max_rows: int = 1000
 
@@ -146,19 +152,15 @@ class Settings(BaseSettings):
     # `/cleaning-checklist-templates` read in full before the `401`. The middleware branch in
     # `app/main.py` is what applies this number to the photo route and only to it.
     #
-    # It is checked TWICE, and the second check is not redundant — but not for the reason an
-    # earlier version of this comment gave (design D11, corrected). **What satisfies R2.5
+    # It is checked TWICE, and the second check is not redundant. **What satisfies R2.5
     # ("reject before reading the whole body") is `MaxBodySizeMiddleware`'s accumulating
-    # counter, and only it**: that is the half covering a client that understates
-    # `Content-Length` or sends `Transfer-Encoding: chunked` with none at all. The chunk
-    # counting inside `UploadCleaningPhotoUseCase` cannot do that job — FastAPI calls
-    # `await request.form()` before it resolves dependencies, so the file is already spooled
-    # to disk by the time the use case asks for its first chunk.
+    # counter, and only it**; the chunk counting inside `UploadCleaningPhotoUseCase` cannot do
+    # that job. Why it cannot is rule 14 of `steering/security.md`, the single home of that
+    # contract — do not restate the derivation here.
     #
-    # The use-case count stays for two other reasons: it bounds the in-process copy to this
-    # ceiling plus one chunk, and it is the only ceiling for any caller with no middleware in
-    # front (a test, a worker, a future non-HTTP consumer). Full reasoning lives with the code,
-    # in the docstring of `UploadCleaningPhotoUseCase._read_within_limit`.
+    # What is specific to this number: the use-case count stays because it bounds the
+    # in-process copy to this ceiling plus one chunk, and because it is the only ceiling for a
+    # caller with no middleware in front (a test, a worker, a future non-HTTP consumer).
     photo_upload_max_bytes: int = 10 * 1024 * 1024
 
     # The ceiling for every OTHER body under `/api/v1/` (change `api-ingress-routing`). It is
@@ -295,6 +297,38 @@ class Settings(BaseSettings):
     beds24_page_limit: int = 100
     beds24_timeout_seconds: float = 30.0
 
+    # Object storage for the `S3` adapter (change `object-storage-provisioning`, design D4).
+    # Three settings and no credentials: `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` travel by
+    # boto3's standard chain (environment, instance role), which is what rule 8 of
+    # `steering/security.md` and `sdd/specs/file-storage.md` already require — reading them as
+    # fields would put the secret inside an object any debug `repr` prints.
+    #
+    # All three default to empty, and that default is what makes merging this change inert
+    # (R3.1): `LOCAL` is untouched and an `S3` tenant keeps failing loudly with
+    # `StorageWriteError` instead of silently falling back (R3.3).
+    #
+    # An empty `s3_endpoint_url` means "let boto3 resolve the AWS endpoint" (R3.4), so pointing
+    # at AWS is *configuring nothing* and pointing at OCI, R2 or MinIO is configuring a URL.
+    # The provider active in `dev` and the value each setting takes per provider are in
+    # `docs/adr/0008-object-storage-provider-dev.md`.
+    s3_bucket: str = ""
+    s3_region: str = ""
+    s3_endpoint_url: str = ""
+
+    # Which storage the bootstrap CLI converges the tenant's `TenantConfig` onto
+    # (`object-storage-provisioning` design D10, R6.1). It is the **seed** route into `S3`, and
+    # deliberately the only one: R5.4 of `user-management` keeps `storage_type` out of the
+    # `PATCH` of `TenantConfig`, because moving a tenant that already has photos would point it
+    # at a store where those photos are not.
+    #
+    # `LOCAL` by default, which is what keeps R6.5 true by construction: the column default and
+    # this default agree, so a tenant created by any route is born `LOCAL`.
+    #
+    # Only `app/cli/bootstrap.py` reads it, and the deploy passes it inline
+    # (`docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 …`) rather than through the `.env`,
+    # which the deploy truncates on every run.
+    bootstrap_storage_type: str = "LOCAL"
+
     bootstrap_tenant_name: str = ""
     bootstrap_tenant_billing_email: str = ""
     bootstrap_owner_name: str = ""
@@ -368,6 +402,24 @@ class Settings(BaseSettings):
                 "(generate with: openssl rand 32 | base64 | tr '+/' '-_')"
             )
         return value
+
+    @field_validator("bootstrap_storage_type")
+    @classmethod
+    def _reject_unknown_storage_type(cls, value: str) -> str:
+        """R6.1 — refuse at boot, not at the `INSERT`.
+
+        An unknown value would otherwise reach `TenantConfigModel.storage_type` and fail inside
+        the driver, after the bootstrap transaction has already created a tenant and hashed two
+        passwords. Validated against the enum itself rather than a copied list, so adding a
+        storage type never leaves a second, stale enumeration behind.
+        """
+        candidate = value.strip().upper()
+        allowed = [member.value for member in StorageType]
+        if candidate not in allowed:
+            raise ValueError(
+                f"bootstrap_storage_type must be one of {', '.join(allowed)}; got {candidate!r}"
+            )
+        return candidate
 
     @model_validator(mode="after")
     def _default_database_url(self) -> "Settings":

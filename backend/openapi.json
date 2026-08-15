@@ -5399,7 +5399,7 @@
         "type": "object"
       },
       "app__cleaning__api__schemas__CleaningPhotoResponse": {
-        "description": "One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).\n\n`CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any\n`model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path\nthe moment somebody reaches for the convenient shape. Enumerating the fields is what makes\n\"the key never appears in a response\" a property of this class rather than of everyone who\never touches it. `ai_validation_result` is out for a different reason: nothing writes it\nyet (proposal §Out of scope), and a field that is always `null` is a contract promise\nnobody made.\n\n`url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what\na client uses instead of a path, and it is not stored anywhere.",
+        "description": "One uploaded photo. **An allowlist of fields, never a dump of the entity** (R3.2).\n\n`CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any\n`model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path\nthe moment somebody reaches for the convenient shape. Enumerating the fields is what makes\n\"the key never appears as a **field** of a response\" a property of this class rather than of\neveryone who ever touches it. `ai_validation_result` is out for a different reason: nothing\nwrites it yet (proposal §Out of scope), and a field that is always `null` is a contract\npromise nobody made.\n\n`url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what\na client uses instead of a path, and it is not stored anywhere.\n\n**And it is where the one accepted exception lives**, so the sentence above says \"field\" and\nnot \"response\": for an `S3` tenant this URL is minted by the object store and carries the\nbucket and the full key inside its own value, because that is what makes a presigned URL\npresigned. Accepted, with its reasoning and its two rejected alternatives, in\n`docs/adr/0008-object-storage-provider-dev.md`. For `LOCAL` the URL carries only the photo's\nUUID, and the prohibition stays absolute everywhere else — body, headers, and every other\nfield of this class.",
         "properties": {
           "cleaning_task_id": {
             "format": "uuid",
@@ -7227,7 +7227,7 @@
                 }
               }
             },
-            "description": "The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware` before the body is read, and again by the use case while it consumes the stream."
+            "description": "The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`."
           },
           "422": {
             "content": {

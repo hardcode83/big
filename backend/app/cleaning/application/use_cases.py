@@ -466,7 +466,11 @@ class _AuditWriter:
         arguments whose only legal combinations are these two.
 
         **`storage_key` is not in the diff, and its absence is the design.** R3.2 keeps the
-        internal key out of every API response, and `audit_logs.changes` is a rule-11 sink —
+        internal key out of every API response **field** — the one accepted exception being
+        that it appears inside the *value* of an `S3` presigned URL, which is part of the
+        signing protocol and cannot be removed
+        (`docs/adr/0008-object-storage-provider-dev.md`) — and `audit_logs.changes` is a
+        rule-11 sink —
         the one column whose contract is that nothing arrives through it unannounced. What the
         row records is who uploaded which kind of evidence against which cleaning.
         """
@@ -1282,8 +1286,11 @@ class UploadedCleaningPhoto:
 
     Two fields rather than one entity because the URL is not a property of the row: it is
     minted per request, expires in 3600 s, and depends on the tenant's storage backend. The
-    entity carries `storage_key`, which R3.2 forbids in any response — enumerating the
-    response fields at the schema, never dumping this, is what keeps that true.
+    entity carries `storage_key`, which R3.2 forbids as a **field** of any response —
+    enumerating the response fields at the schema, never dumping this, is what keeps that
+    true. With `S3` the key does travel inside the `url` above, because a presigned URL is an
+    address the store itself honours; that exception is accepted, with its reasoning, in
+    `docs/adr/0008-object-storage-provider-dev.md`.
     """
 
     photo: CleaningPhoto
@@ -1434,20 +1441,15 @@ class UploadCleaningPhotoUseCase(_TaskTransitionMixin):
         """Consume the upload in chunks, counting, and abort the moment it is too big (D11).
 
         **What this does NOT do, despite an earlier comment here saying it did: it does not
-        protect against a lying `Content-Length` or a chunked upload.** It cannot, and the
-        reason is mechanical. `app/core/http_limits.py` documents it: FastAPI calls
-        `await request.form()` inside its route wrapper *before* it solves dependencies, and
-        Starlette's multipart parser spools the file part to a `SpooledTemporaryFile` that has
-        no size ceiling of its own. So by the time this loop asks for its first chunk, the file
-        has already been received in full and written to the container's disk. Counting it
-        afterwards cannot un-receive it.
+        protect against a lying `Content-Length` or a chunked upload, and it does not satisfy
+        "reject before reading the body".** By the time this loop asks for its first chunk the
+        upload has already been received in full and spooled. Why that is mechanically the
+        case is **rule 14 of `sdd/steering/security.md`**, the single home of that contract —
+        do not re-derive it here.
 
         The check that genuinely stops an oversized or dishonest body is
         `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
-        (`http_limits.py:116-129`), which tallies bytes as they arrive and cuts the stream the
-        moment the total passes the ceiling — that is the half covering a client that
-        understates `Content-Length` or sends `Transfer-Encoding: chunked` with none at all.
-        The `Content-Length` refusal before it is only the cheap fast path.
+        (`app/core/http_limits.py`).
 
         **So do not "simplify" the middleware branch on the grounds that the use case already
         counts.** Deleting the middleware's counter would leave an anonymous caller able to

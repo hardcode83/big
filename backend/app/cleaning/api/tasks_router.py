@@ -400,8 +400,10 @@ _PHOTO_UPLOAD_RESPONSES: dict[int | str, dict[str, Any]] = {
         "model": ErrorEnvelope,
         "description": (
             "The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by "
-            "`MaxBodySizeMiddleware` before the body is read, and again by the use case while "
-            "it consumes the stream."
+            "`MaxBodySizeMiddleware`, which is the layer that refuses before the body is "
+            "read. The use case counts again as it consumes the stream, but that bounds the "
+            "in-memory copy rather than repeating the refusal — rule 14 of "
+            "`sdd/steering/security.md`."
         ),
     },
     502: {
@@ -443,12 +445,10 @@ async def upload_cleaning_photo(
     photo_type: Annotated[str, Form(min_length=1, max_length=MAX_PHOTO_TYPE_LENGTH)],
     # The `UploadFile` is handed to the use case unread, which consumes it in chunks counting
     # bytes (design D11). Read that as "this handler adds no buffering of its own", NOT as
-    # "the body has not been received yet" — by the time this signature binds, it has.
-    # `app/core/http_limits.py` spells out why: FastAPI calls `await request.form()` before it
-    # solves dependencies, and Starlette's multipart parser spools the part to a
-    # `SpooledTemporaryFile` with no ceiling of its own. The thing that actually stops an
-    # oversized upload from being received is `MaxBodySizeMiddleware`, which runs before any
-    # of this. See `_read_within_limit` for what the use case's count does cover.
+    # "the body has not been received yet" — by the time this signature binds, it has. Why is
+    # rule 14 of `sdd/steering/security.md`, the single home of that contract; do not
+    # re-derive it here. The thing that actually stops an oversized upload from being received
+    # is `MaxBodySizeMiddleware`. See `_read_within_limit` for what the use case's count covers.
     file: Annotated[UploadFile, File()],
     use_case: Annotated[
         UploadCleaningPhotoUseCase, Depends(get_upload_cleaning_photo_use_case)
