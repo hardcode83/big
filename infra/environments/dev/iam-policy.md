@@ -108,10 +108,32 @@ Y si esa premisa no se sostuviera, el síntoma sería que el deploy posterior al
 
 No hizo falta recorrer ninguna escalera. Si esto se rompiera algún día, los peldaños siguen siendo (a) reintentar, porque las policies de OCI propagan con consistencia eventual; (b) reponer `read secrets` **con** `where target.vault.id`; (c) leer por OCID exponiéndolo como `output`. Y **nunca** volver a la condición por nombre: por el punto 2 de arriba sería ensanchar el acceso, no arreglarlo.
 
+## Esta tenancy usa Identity Domains (IDCS), y eso condiciona crear usuarios por Terraform
+
+Descubierto el 2026-08-15 al aplicar `object-storage-provisioning`: el primer `apply`
+([run 31909392774](https://github.com/autohostai-labs/AutoHostAI/actions/runs/31909392774)) falló al
+crear `oci_identity_user.media` con
+
+```
+400-IdcsConversionError … "The primary email must be specified."
+error.identity.user.primaryEmailNotSpecified
+```
+
+**IDCS exige email primario en todo usuario, incluidos los de servicio que nunca inician sesión**; la
+IAM clásica no lo pedía. Cualquier `oci_identity_user` que se añada aquí en adelante tiene que
+declarar `email`, y la dirección debe ser **única** en el dominio — el patrón adoptado es
+plus-addressing sobre un buzón que ya existe (`var.media_user_email`), que evita dar de alta buzones
+y evita la colisión con la dirección del usuario humano.
+
+Vale la pena saberlo antes de escribir el recurso: el fallo llega **a mitad del apply**, con los
+recursos anteriores ya creados. No es grave —Terraform converge al relanzar— pero deja el entorno a
+medias mientras tanto.
+
 ## Verificado
 - `terraform plan` (provider con `svc-terraform-dev`): lee/refresca compute, red, budget y vault sin errores de autorización.
 - `terraform init` (backend con `svc-terraform-dev`): lee el bucket del state (`object-family`).
 - Ambos ejecutados el 2026-07-22, sin fallos de permisos.
+- **2026-08-15**, con los cuatro statements de `object-storage-provisioning` ya aplicados: el `apply` crea bucket, grupo, policy del bucket y dos secretos del Vault sin ningún error de autorización — las sentencias `manage buckets`, `manage groups` y `read objectstorage-namespaces` quedan así verificadas contra la API real. `manage users` no llegó a ejercerse: el usuario falló antes por el email, no por permisos.
 
 ## Mejora futura
 Un compartment `dev` dedicado permitiría acotar la policy `in compartment dev` en vez de `in tenancy` (los budgets seguirían a nivel de tenancy). Requiere mover los recursos actuales — fuera de alcance de este change.

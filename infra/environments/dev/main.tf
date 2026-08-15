@@ -529,6 +529,12 @@ resource "oci_identity_user" "media" {
   compartment_id = var.tenancy_ocid
   name           = "autohostai-${var.env}-media"
   description    = "Usuario de servicio que el backend de ${var.env} usa para leer y escribir fotos en el bucket de medios por la API compatible con S3. Sin login de consola; su única credencial es la Customer Secret Key de abajo."
+
+  # Obligatorio en esta tenancy, y no es opcional del provider: usa **Identity Domains** (IDCS), que
+  # rechaza la creación sin email primario —`error.identity.user.primaryEmailNotSpecified`, 400— aunque
+  # el usuario sea de servicio y no vaya a iniciar sesión jamás. La IAM clásica no lo pedía, y por eso
+  # el primer apply (run 31909392774) falló aquí con el bucket y el grupo ya creados.
+  email = var.media_user_email
 }
 
 resource "oci_identity_group" "media" {
