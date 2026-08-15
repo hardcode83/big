@@ -218,6 +218,34 @@ Criterios de aceptación:
   escritores de `current_operational_state` y el allowlist compartido. Nombre sugerido:
   `property-transition-audit`.
 
+- **La demostración del aislamiento por enumeración, en vez de un test por puerta** —
+  candidato a change propio, levantado por el panel de tenancy en la re-revisión del
+  2026-08-15. El aislamiento de este módulo está bien implementado y verificado ruta por ruta,
+  pero **demostrado** sólo en dos de sus tres puertas: el detalle (`GetIncidentUseCase`) y las
+  ocho transiciones (`_load_incident`, que es una única función compartida). La tercera
+  —`RespondOwnerApprovalUseCase`, detrás de `POST /owner-approvals/{id}/respond`— resuelve por
+  su propio par `approvals.get` + `incidents.get` y ningún test puede fallar si alguien
+  enhebra mal su `tenant_id`: el de RBAC sólo mira el 403, y el de «aprobación desconocida»
+  usa un `uuid4()` sobre dobles, no una fila real de otro tenant.
+  **No se cierra aquí porque un tercer espía deja el cuarto abierto**: cada ronda de este
+  review cubrió un call site y la siguiente encontró otro. Lo que hace falta es estructural y
+  es una decisión de diseño: o un test que **enumere** los sitios donde un caso de uso pide al
+  repositorio y exija que cada uno reciba el `tenant_id` del llamante —la disciplina sin
+  allowlist que `backend-response-hardening` ya usó para `nosniff`, donde una ruta nueva entra
+  sola—, o pasar el tenant por un contexto tipado en lugar de por un argumento posicional
+  repetido en cada firma. Nombre sugerido: `tenant-scoping-enumeration-guard`.
+
+- **Un comprobador estático en CI** — candidato a change propio, levantado por el panel de
+  seguridad en la re-revisión del 2026-08-15. El repositorio **no tiene ninguno**: ni `mypy`
+  ni `pyright` en `backend/pyproject.toml`, ni en el `Makefile`, ni paso de tipos en
+  `.github/workflows/`. Los LSP que declara `sdd/project.md` son otra cosa — ayudan al editor,
+  no bloquean un merge. La consecuencia la encontró este change al tercer intento de redactar
+  su fila del censo: **ninguna afirmación de la forma «lo garantiza el tipo» es sostenible
+  aquí**, porque un `Protocol` no impone su anotación de retorno en ejecución y nada comprueba
+  estáticamente que se respete. La fila quedó acotada a «todo adaptador que devuelva el tipo
+  declarado», que es cierto; cerrar la clase entera es lo que haría un comprobador en CI, y
+  vale para todo el backend, no para esta columna. Nombre sugerido: `backend-static-typecheck`.
+
 ## Affected specs
 
 - `sdd/specs/maintenance.md` *(no existe aún — se creará al archivar)*
