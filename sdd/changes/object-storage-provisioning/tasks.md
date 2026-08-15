@@ -9,9 +9,11 @@
 >    deltas a las cinco specs que el proposal enumera en *Affected specs*. Desviación consciente de
 >    la letra de D13 (que situaba la tabla en la spec): el contenido es el mismo, cambia quién lo
 >    escribe y cuándo.
-> 2. **R6.2–R6.4 no se pueden verificar antes del merge** (`infra-dev.yml` y `deploy-dev.yml` solo
->    corren desde `main` — OQ3). La §8 es el procedimiento post-merge y su cierre es una entrada
->    `deferred` en `BLOCKED.md`, no una casilla que se marque en `/sdd:run`.
+> 2. **R1.3 y R6.2–R6.4 no se pueden verificar antes del merge** (`infra-dev.yml` y `deploy-dev.yml`
+>    solo corren desde `main` — OQ3). La §8 es el procedimiento post-merge y **se escribe sin
+>    casillas**, por lo que explica ahí: en casillas bloquearía `mark-local-verified`, que rechaza
+>    cualquier tarea sin marcar. La entrada `deferred` de `BLOCKED.md` se repone **después del
+>    merge**, que es cuando el gate de `/sdd:archive` puede llegar a importar.
 >
 > **El contrato de API no gana ni un endpoint ni un campo** (design §Data & interfaces) — pero sí
 > cambia, y esta nota decía lo contrario hasta el panel de la sección 6. El barrido de D12 enmendó
@@ -185,30 +187,60 @@
   tenant `LOCAL` sube y sirve una foto igual que antes, y un tenant `S3` sigue fallando con
   `StorageWriteError` y no cae a `LOCAL`. Es la propiedad de la que depende que el merge sea inerte
   (OQ3 paso 1). — [R3.1, R3.3, R6.5]
-- [x] 7.4 Registrar en `BLOCKED.md` la entrada `deferred` de OQ3: la verificación R6.2–R6.4 queda
-  pendiente hasta después del merge, con el procedimiento de la §8 y su comando de reanudación
-  (`/sdd:review object-storage-provisioning`). `/sdd:archive` no cierra el change mientras exista. —
-  **Files:** `sdd/changes/object-storage-provisioning/BLOCKED.md` — [R6.2, R6.3, R6.4]
+- [x] 7.4 Dejar registrada la deuda `deferred` de OQ3 —R1.3 y R6.2–R6.4 pendientes hasta después del
+  merge— con su procedimiento y su comando de reanudación
+  (`/sdd:review object-storage-provisioning`). **Vive en la §8**, escrita como procedimiento sin
+  casillas; la entrada en `BLOCKED.md` que esta tarea creó primero se retiró en el panel de
+  `/sdd:review` (2026-08-15) porque bloqueaba `mark-local-verified`, y se repone **después del
+  merge**, que es cuando el gate de `/sdd:archive` puede llegar a importar. El porqué completo, en la
+  cabecera de la §8. — **Files:** `sdd/changes/object-storage-provisioning/tasks.md` §8 —
+  [R1.3, R6.2, R6.3, R6.4]
 
-## 8. Verificación post-merge en `dev` (procedimiento de OQ3 — no se marca en `/sdd:run`)
+## 8. Verificación post-merge en `dev` — **procedimiento, no checklist**
 
-- [ ] 8.1 (op.) `terraform apply` por `workflow_dispatch` de `infra-dev.yml` desde `main`. Confirmar
-  que el plan **crea** bucket, usuario, grupo, membership, policy, Customer Secret Key y los cuatro
-  secretos del Vault, y que la instancia y el resto del entorno quedan intactos
-  (`0 to destroy`). — [R1.1, R1.3, R2.2]
-- [ ] 8.2 (op.) **Re-lanzar** el deploy desde `main` y comprobar que el paso «Render .env» rellena
-  las cinco variables sin fallar por ningún OCID ausente de la enumeración de la policy. «Re-lanzar»
-  porque el merge ya disparó uno —el filtro de rutas de `deploy-dev.yml` cubre este change— y ese
-  **falló a propósito** en «Render .env»: los secretos no existían hasta 8.1. Falla antes del `pull`
-  y del `up`, así que la VM no se toca. — [R3.5, R2.1]
-- [ ] 8.3 (op.) **Bloqueante** (OQ4): `SELECT count(*) FROM cleaning_photos` del tenant de demo. Si
-  no es cero, **no convergir** y decidir explícitamente (borrar las filas o volver a subirlas);
-  migrar de verdad sigue fuera de alcance. Si es cero,
-  `docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 backend python -m app.cli.bootstrap` en la VM. —
-  [R6.1]
-- [ ] 8.4 (op.) Subir una foto de limpieza de la demo, abrir la URL prefirmada **sin credenciales** y
-  comprobar `200` y `Content-Type: image/jpeg` — no `binary/octet-stream`. — [R6.2, R6.3]
-- [ ] 8.5 Registrar la evidencia en el change nombrando **qué se subió y qué se obtuvo** (bucket,
-  clave, código de respuesta, `Content-Type`), retirar la entrada de `BLOCKED.md` y solo entonces
-  `/sdd:archive` — que además vuelca los deltas a las cinco specs de *Affected specs*. — **Files:**
-  `sdd/changes/object-storage-provisioning/BLOCKED.md` — [R6.4]
+> **Esta sección no lleva casillas a propósito, y es la única del fichero que no las lleva.**
+> Nada de aquí se puede ejecutar antes del merge (`infra-dev.yml` y `deploy-dev.yml` solo corren
+> desde `main`, OQ3), así que como casillas serían trabajo pendiente permanente: `ensure_local_gates`
+> del toolkit rechaza `mark-local-verified` con cualquier tarea sin marcar **y** con cualquier
+> `BLOCKED.md` no vacío, y `/sdd:archive` aplica ese mismo par. Con §8 en casillas y la entrada en
+> `BLOCKED.md`, el change no podía llegar a `READY_FOR_PR` sin renunciar a la secuencia que el gate
+> de diseño aprobó. Escrito como procedimiento numerado dice exactamente lo mismo y no bloquea el PR.
+>
+> **Lo que sí hay que reponer, y es el precio de esta decisión** (panel de `/sdd:review`,
+> 2026-08-15): en cuanto el PR esté mergeado, **volver a crear la entrada `deferred` en
+> `BLOCKED.md`** con el contenido de esta sección, para que `/sdd:archive` no pueda cerrar el change
+> antes de los cinco pasos. El gate se necesita justo cuando el archivado es posible, que es después
+> del merge y no antes. Comando de reanudación: `/sdd:review object-storage-provisioning`.
+>
+> **Son cuatro requisitos los que dependen de esto, no tres**: R6.2, R6.3, R6.4 y también **R1.3**
+> —«converger sin recrear el bucket ni vaciarlo» solo se observa en el `plan` del paso 1, ese
+> `0 to destroy`—. Esta sección no se da por cerrada hasta que los cuatro estén verificados.
+
+**Prerequisito humano del paso 1, sin el cual el `apply` falla por autorización.** Un admin de la
+tenancy tiene que haber aplicado antes los cuatro statements nuevos de `svc-terraform-dev` que
+versiona `infra/environments/dev/iam-policy.md`: `manage users`, `manage groups`,
+`read objectstorage-namespaces` y una sentencia **nueva y aparte**
+`manage buckets in tenancy where target.bucket.name='autohostai-dev-media'` — **aparte**, no
+fusionada con la condición de `object-family` del bucket del state, que es lo que este change
+escribió primero y se corrigió: `object-family` habría concedido además `OBJECT_READ` y
+`OBJECT_DELETE` sobre todas las fotos de todos los tenants.
+
+1. (op.) `terraform apply` por `workflow_dispatch` de `infra-dev.yml` desde `main`. Confirmar que el
+   plan **crea** bucket, usuario, grupo, membership, policy, Customer Secret Key y los cuatro
+   secretos del Vault, y que la instancia y el resto del entorno quedan intactos (`0 to destroy`) —
+   ese `0 to destroy` es la verificación de R1.3. — [R1.1, R1.3, R2.2]
+2. (op.) **Re-lanzar** el deploy desde `main` y comprobar que el paso «Render .env» rellena las cinco
+   variables sin fallar por ningún OCID ausente de la enumeración de la policy. «Re-lanzar» porque el
+   merge ya disparó uno —el filtro de rutas de `deploy-dev.yml` cubre este change— y ese **falló a
+   propósito** en «Render .env»: los secretos no existían hasta el paso 1. Falla antes del `pull` y
+   del `up`, así que la VM no se toca. — [R3.5, R2.1]
+3. (op.) **Bloqueante** (OQ4): `SELECT count(*) FROM cleaning_photos` del tenant de demo. Si no es
+   cero, **no convergir** y decidir explícitamente (borrar las filas o volver a subirlas); migrar de
+   verdad sigue fuera de alcance. Si es cero,
+   `docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 backend python -m app.cli.bootstrap` en la VM. —
+   [R6.1]
+4. (op.) Subir una foto de limpieza de la demo, abrir la URL prefirmada **sin credenciales** y
+   comprobar `200` y `Content-Type: image/jpeg` — no `binary/octet-stream`. — [R6.2, R6.3]
+5. Registrar la evidencia en el change nombrando **qué se subió y qué se obtuvo** (bucket, clave,
+   código de respuesta, `Content-Type`), borrar la entrada repuesta de `BLOCKED.md` y solo entonces
+   `/sdd:archive` — que además vuelca los deltas a las cinco specs de *Affected specs*. — [R6.4]

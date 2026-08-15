@@ -488,6 +488,16 @@ estándar del proveedor) sin ampliarla.
 >
 > Entre (1) y (6) el change lleva una entrada en `BLOCKED.md` de tipo `deferred` que nombra el paso
 > pendiente y su comando de reanudación; `/sdd:archive` se niega a cerrar mientras exista.
+>
+> > **Enmienda de `/sdd:review` (2026-08-15): esa entrada no puede existir *antes* del merge.**
+> > `ensure_local_gates` rechaza `mark-local-verified` con cualquier `BLOCKED.md` no vacío **y** con
+> > cualquier tarea sin marcar, y `/sdd:archive` aplica ese mismo par: el toolkit no tiene un estado
+> > para «verificado en local, con verificación legítimamente pendiente hasta después del merge»,
+> > que es justo lo que OQ3 diseñó. Así que el procedimiento vive en `tasks.md` §8 **sin casillas**,
+> > `BLOCKED.md` se retira para poder llegar a `READY_FOR_PR`, y la entrada **se repone en cuanto el
+> > PR esté mergeado** — que es cuando el archivado es posible y el gate empieza a servir para algo.
+> > Y son **cuatro** los requisitos que dependen de ella, no tres: R1.3 viaja con R6.2–R6.4, porque
+> > «converger sin recrear ni vaciar» solo se observa en el `0 to destroy` del paso (2).
 
 **OQ4 — ¿Qué se hace con las fotos `LOCAL` que ya tenga el tenant de demo de `dev`?**
 Al convergir a `S3` dejan de servirse (`404`): las filas siguen apuntando a claves que están en
