@@ -41,3 +41,4 @@
 | seed-data-demo | new, design, tasks, run, review, ship, archive | 357779 | 990522 | 150643935 | 119.2975 | 2026-08-12 | 2026-08-12 |
 | backend-response-hardening | new, design, tasks, run, review, ship, archive | 95448 | 420721 | 61774591 | 51.1719 | 2026-08-15 | 2026-08-15 |
 | maintenance | new, design, tasks, run, review, ship, archive | 422794 | 1256742 | 314898581 | 213.2853 | 2026-08-15 | 2026-08-15 |
+| object-storage-provisioning | new, design, tasks, run, review, ship, archive | 302167 | 782617 | 228923593 | 153.8390 | 2026-08-15 | 2026-08-16 |

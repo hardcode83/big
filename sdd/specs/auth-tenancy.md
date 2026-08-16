@@ -406,8 +406,18 @@ tocar la base de datos a mano.
   tenant inicial, su `TenantConfig` y dos usuarios (`TENANT_OWNER` y `PROPERTY_MANAGER`).
 - THE SYSTEM SHALL validar las ocho variables `BOOTSTRAP_*` **antes** de abrir transacción,
   listando de golpe todas las que falten.
-- El comando es idempotente: repetirlo no duplica ni modifica nada, y tolera un cambio de
-  caja en el email.
+- El comando es **convergente**, no idempotente, y la distinción es de `object-storage-provisioning`
+  (2026-08-15): repetirlo no duplica nada y tolera un cambio de caja en el email, pero **sí deja el
+  estado que declara la configuración** en el único campo que actualiza.
+- THE SYSTEM SHALL aplicar `BOOTSTRAP_STORAGE_TYPE` (default `LOCAL`, validado contra el enum
+  `StorageType`) al crear el `TenantConfig` **y actualizarlo si difiere** en una re-ejecución. Es la
+  única vía por la que ese ajuste alcanza un entorno cuyo tenant se sembró hace tiempo: create-only
+  exigiría un `UPDATE` a mano, que es justo lo que la norma IaC-first no admite. El contador de
+  resultados distingue lo creado de lo convergido.
+- THE SYSTEM SHALL NOT abrir `storage_type` a escritura por la API: el `PATCH` de `TenantConfig`
+  sigue devolviendo `422`. Cambiarlo apuntaría a ficheros ya subidos a un sitio donde no están.
+- THE SYSTEM SHALL mantener `LOCAL` como default tanto de la columna como del ajuste, de modo que
+  cualquier tenant creado por cualquier otra vía nazca `LOCAL`.
 - IF una dirección del bootstrap ya existe bajo otro tenant, THEN THE SYSTEM SHALL abortar
   con `BootstrapConflictError` nombrando `BOOTSTRAP_TENANT_NAME`. El índice único global
   rechazaría la escritura igualmente; el aborto explícito existe para dar un mensaje
