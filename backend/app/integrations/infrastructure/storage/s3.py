@@ -39,9 +39,15 @@ from app.integrations.domain.storage import (
 #: one machine verifies on every other.
 _CLIENT_CONFIG = Config(signature_version="s3v4")
 
-#: The same, plus **path-style** addressing, used only when an `endpoint_url` is configured
-#: (`object-storage-provisioning` design D3). See `build_s3_client` for why it is conditional.
-_CUSTOM_ENDPOINT_CONFIG = Config(signature_version="s3v4", s3={"addressing_style": "path"})
+#: The same, plus the two things a **non-AWS** S3-compatible endpoint needs: path-style addressing
+#: (design D3) and botocore's pre-1.36 checksum behaviour. Used only when an `endpoint_url` is
+#: configured. See `build_s3_client` for why both are conditional.
+_CUSTOM_ENDPOINT_CONFIG = Config(
+    signature_version="s3v4",
+    s3={"addressing_style": "path"},
+    request_checksum_calculation="when_required",
+    response_checksum_validation="when_required",
+)
 
 
 def build_s3_client(*, region_name: str | None = None, endpoint_url: str | None = None) -> Any:
@@ -62,6 +68,22 @@ def build_s3_client(*, region_name: str | None = None, endpoint_url: str | None 
     "custom endpoint ⇒ path" is right for all three non-AWS providers of the matrix in
     `docs/adr/0008-object-storage-provider-dev.md`. Without an endpoint the default is left
     alone, because AWS is exactly the case R3.4 wants to keep at *configure nothing*.
+
+    **And it also pins the checksum behaviour to what botocore did before 1.36, for the same
+    reason: the provider, not preference.** From botocore 1.36 `PutObject` defaults to
+    `request_checksum_calculation="when_supported"`, which sends the body with `aws-chunked`
+    content-encoding and a trailing CRC32. OCI's S3-compatible API does not implement it and
+    answers `501 NotImplemented: AWS chunked encoding not supported`, so **every upload fails** —
+    which is exactly what happened the first time a photo was uploaded to the real bucket in
+    `dev` (2026-08-16), and what no test could catch, because R4.4 requires them to build
+    clients without touching the network. `when_required` restores the old behaviour: checksums
+    only where the operation actually needs them. `response_checksum_validation` goes with it so
+    reads do not demand a checksum the store never wrote.
+
+    This is the recurring cost of talking a protocol whose reference implementation keeps
+    moving: botocore evolves with AWS, and each new default has to be re-checked against the
+    other three providers of the matrix. Both settings are scoped to the custom-endpoint path,
+    so AWS keeps botocore's current defaults untouched.
 
     Credentials come from the standard boto3 chain (environment, instance role), which is why
     none of them are settings here: rule 8 of `steering/security.md` keeps secrets out of the

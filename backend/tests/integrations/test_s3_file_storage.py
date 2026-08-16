@@ -125,6 +125,34 @@ class TestAddressingStyle:
         assert client.meta.config.s3 is None
         assert client.meta.endpoint_url == "https://s3.eu-west-1.amazonaws.com"
 
+
+class TestChecksumBehaviour:
+    """Regression for the failure that only a real bucket could show (2026-08-16).
+
+    From botocore 1.36 `PutObject` defaults to `request_checksum_calculation="when_supported"`,
+    which frames the body with `aws-chunked` content-encoding and a trailing CRC32. OCI's
+    S3-compatible API answers `501 NotImplemented: AWS chunked encoding not supported`, so every
+    upload failed with a `502` — the first photo ever sent to the provisioned bucket.
+
+    Nothing caught it earlier because R4.4 requires these tests to build clients **without
+    touching the network**, and the incompatibility only exists on the wire. What is assertable
+    offline is the resolved configuration, so that is what this pins: the day someone drops these
+    two settings, or a botocore upgrade renames them, this fails instead of `dev` failing.
+    """
+
+    def test_a_custom_endpoint_pins_the_pre_1_36_checksum_behaviour(self) -> None:
+        client = build_s3_client(region_name="eu-frankfurt-1", endpoint_url=OCI_ENDPOINT)
+
+        assert client.meta.config.request_checksum_calculation == "when_required"
+        assert client.meta.config.response_checksum_validation == "when_required"
+
+    def test_without_an_endpoint_botocore_keeps_its_current_defaults(self) -> None:
+        """Same reasoning as path-style: AWS implements chunked encoding, so there is nothing to
+        work around and R3.4's *configure nothing* stays literally true."""
+        client = build_s3_client(region_name="eu-west-1")
+
+        assert client.meta.config.request_checksum_calculation == "when_supported"
+
     def test_both_clients_still_sign_with_sigv4(self) -> None:
         """The property the config existed for before D3 touched it: some regions reject a
         presigned URL signed any other way, and OCI's S3-compatible API requires SigV4."""
