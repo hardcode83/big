@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/cleaning-completion-evidence-gatherer
 implementation_sha: 73d3ae91ef5b1eb19e7b0ff741f3a916a1498431
 pr_number: 
 pr_url: 
