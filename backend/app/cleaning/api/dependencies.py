@@ -16,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.application.use_cases import (
     AcceptCleaningTaskUseCase,
     AssignCleaningTaskUseCase,
@@ -138,12 +139,21 @@ def get_start_cleaning_task_use_case(session: SessionDep) -> StartCleaningTaskUs
 
 
 def get_complete_cleaning_task_use_case(session: SessionDep) -> CompleteCleaningTaskUseCase:
+    """The four reads of the close now arrive as one collaborator (design D5).
+
+    No `Depends` of its own for the gatherer: this module has one builder per use case and the
+    gatherer is not one, so a node in FastAPI's dependency graph that nobody else consumes would
+    buy nothing. Same four adapters and the same request session as before — the one already
+    marked with the tenant, which is what the listener of `app/core/db.py` scopes ORM reads by.
+    """
     return CompleteCleaningTaskUseCase(
-        completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
-        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
-        # PRD §11's third clause (R4): the close reads which photo types are already there.
-        photos=SqlAlchemyCleaningPhotoRepository(session),
-        incidents=SqlAlchemyBlockingIncidentQuery(session),
+        evidence=CompletionEvidenceGatherer(
+            templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+            completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
+            # PRD §11's third clause (R4): the close reads which photo types are already there.
+            photos=SqlAlchemyCleaningPhotoRepository(session),
+            incidents=SqlAlchemyBlockingIncidentQuery(session),
+        ),
         **_lifecycle_kwargs(session),
     )
 
