@@ -64,6 +64,28 @@ UNKNOWN_CLASSIFIER_ADAPTER = "UNKNOWN_CLASSIFIER"
 _ECHO_RUN_LENGTH = 8
 
 
+#: The closed set of titles an incident derived from a guest conversation may carry (R4.6,
+#: design D13).
+#:
+#: `incidents.title` is a rule-11 sink and *we* compose it, so it goes in closed form; the
+#: guest's own words go to `description`, verbatim, where excepción 2 covers them because the
+#: value is not ours.
+#:
+#: **It lives here, and not in the module that opens the incident, because `maintenance` owns
+#: the column.** The census in `steering/security.md` is written by writer, and this module is
+#: the writer of `incidents.title`; a caller that could bring its own vocabulary would make the
+#: closed form unenforceable from the side that has to guarantee it. `messaging` still decides
+#: *which* conversation intent opens an incident and therefore which of these titles it asks
+#: for — that mapping is its own, and `tests/maintenance/test_report_incident_from_conversation.py`
+#: pins the two together so neither can drift.
+CONVERSATION_INCIDENT_TITLES: frozenset[str] = frozenset(
+    {
+        "Maintenance issue reported in a guest conversation",
+        "Access problem reported in a guest conversation",
+    }
+)
+
+
 @dataclass
 class Incident:
     id: uuid.UUID

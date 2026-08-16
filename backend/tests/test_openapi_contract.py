@@ -125,6 +125,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # the anonymous one in the singular. That the two prefixes differ by a letter is worth
         # seeing here rather than discovering from a route that ended up on the wrong router.
         "guest",
+        # `messaging-ai`: the seven inbox routes of PRD §16, all under one prefix because
+        # `Conversation` is the aggregate and a message has no identity outside its thread —
+        # unlike `incidents`/`owner-approvals`, which are two aggregates and therefore two.
+        "conversations",
         "provenance",
     }
 

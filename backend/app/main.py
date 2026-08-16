@@ -16,6 +16,8 @@ from app.cleaning.api.errors import register_cleaning_error_handlers
 from app.maintenance.api.approvals_router import router as owner_approvals_router
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
+from app.messaging.api.errors import register_messaging_error_handlers
+from app.messaging.api.router import router as conversations_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
@@ -79,6 +81,7 @@ def create_app() -> FastAPI:
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
     register_maintenance_error_handlers(app)
+    register_messaging_error_handlers(app)
     register_access_error_handlers(app)
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
@@ -122,6 +125,12 @@ def create_app() -> FastAPI:
     # incident anonymously is the guest portal's, mounted below.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
     app.include_router(owner_approvals_router, prefix=API_V1_PREFIX)
+    # `messaging-ai`: the inbox of PRD §16. One router and seven routes, all authenticated —
+    # messages enter through the panel or the API, not from an OTA, because
+    # `PMSMessagingPort` is still the port with no methods that `pms-provider-resolution`
+    # fixed. Registered after `maintenance` because a guest message can open an incident, and
+    # reading the two in this order is how that dependency reads in the code.
+    app.include_router(conversations_router, prefix=API_V1_PREFIX)
     # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).

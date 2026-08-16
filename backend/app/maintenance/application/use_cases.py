@@ -32,7 +32,11 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
 from app.core.unit_of_work import UnitOfWork
-from app.maintenance.domain.entities import Incident, OwnerApproval
+from app.maintenance.domain.entities import (
+    CONVERSATION_INCIDENT_TITLES,
+    Incident,
+    OwnerApproval,
+)
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentSeverity,
@@ -210,6 +214,135 @@ class ReportGuestIncidentUseCase:
 
         await self._uow.commit()
         return incident
+
+
+#: What the timeline says when an incident is derived from a conversation
+#: (`messaging-ai` R4.6). A constant, for the reason `_TIMELINE_TITLE` above gives.
+_CONVERSATION_TIMELINE_TITLE = "Incident reported in a guest conversation"
+
+class ReportIncidentFromConversationUseCase:
+    """`IncidentReportingPort` of `messaging`, implemented here (`messaging-ai` R4.6, D12).
+
+    A sibling of `ReportGuestIncidentUseCase` above, and the differences are all consequences
+    of who is at the keyboard:
+
+    * **the actor is a human**, not the bearer of a guest link, so the `AuditLog` carries
+      `actor_user_id` and `actor_ip`. This is why `messaging-ai` needs **no new exception to
+      rule 9** of `steering/security.md` — worth saying because that rule's fourth exception
+      (automatic classification with no actor) invites the opposite assumption;
+    * `reporter_token_hash` does not exist here, which is why this is a new use case rather
+      than a reuse: `ReportGuestIncidentUseCase` requires that digest and forcing it would
+      mean inventing one;
+    * the timeline actor is `USER` and not `GUEST`, for the same reason.
+
+    **The incident is not classified** (R4.6): it is born `OPEN` with `ai_classification`
+    unset, which is exactly what the `classify_incidents` job of D2 picks up on its next tick.
+    Not one line of `IncidentClassifier` runs on this path.
+
+    **It never commits.** The wiring hands it a `CallerOwnedUnitOfWork` so the single commit
+    stays the messaging pipeline's (R4.7) — the mechanism `app/core/unit_of_work.py`
+    documents and `guest-portal-api` established after getting it wrong the other way first.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        audit: AuditLogRepository,
+        timeline: TimelineEventRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._incidents = incidents
+        self._audit = audit
+        self._timeline = timeline
+        self._uow = uow
+
+    async def report(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        property_id: uuid.UUID,
+        reservation_id: uuid.UUID | None,
+        title: str,
+        description: str,
+        actor_user_id: uuid.UUID,
+        ip: str | None,
+        now: datetime,
+    ) -> uuid.UUID:
+        """Open the incident and return its id.
+
+        **`title` is checked against the closed catalogue, not merely expected to come from
+        it.** `incidents.title` on this path is written by *us*, so rule 11 of
+        `steering/security.md` requires a closed form — and "the one caller passes a constant"
+        is the same argument the security panel refused for `messages.content`, where the
+        guard now lives in code. It lives in code here too, so a second caller (the API of
+        section 7 is written against this port) cannot pass operator-typed or guest-derived
+        text into it. `description` is the guest's message verbatim, which excepción 2 covers
+        because the value is not ours.
+
+        Neither reaches `audit_logs.changes` or `timeline_events`: `ChangeSet` refuses a field
+        outside `AUDITABLE_FIELDS["INCIDENT"]`, which names neither, and the timeline event
+        carries a constant title and identifiers.
+        """
+        if title not in CONVERSATION_INCIDENT_TITLES:
+            raise MaintenanceValidationError(
+                "Incident title must come from the closed catalogue of titles for incidents "
+                "derived from a conversation (rule 11 of steering/security.md)"
+            )
+        incident = Incident(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            property_id=property_id,
+            source=IncidentSource.GUEST,
+            title=title,
+            description=description,
+            created_at=now,
+            updated_at=now,
+            reservation_id=reservation_id,
+            reported_by_user_id=actor_user_id,
+        )
+        await self._incidents.add(tenant_id, incident)
+
+        await self._audit.add(
+            tenant_id,
+            AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=audit_actions.INCIDENT_CREATED,
+                entity_type=audit_actions.ENTITY_INCIDENT,
+                entity_id=incident.id,
+                actor_user_id=actor_user_id,
+                actor_guest_token_hash=None,
+                actor_ip=ip,
+                changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
+                .diff("source", None, IncidentSource.GUEST)
+                .diff("status", None, IncidentStatus.OPEN)
+                .diff("reservation_id", None, reservation_id),
+                now=now,
+            ),
+        )
+
+        await self._timeline.add(
+            tenant_id,
+            TimelineEventFactory.create(
+                TimelineEventData(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    property_id=property_id,
+                    actor_type=TimelineActorType.USER,
+                    actor_user_id=actor_user_id,
+                    event_type=TimelineEventType.INCIDENT_CREATED,
+                    title=_CONVERSATION_TIMELINE_TITLE,
+                    created_at=now,
+                    reservation_id=reservation_id,
+                    metadata={"incident_id": str(incident.id)},
+                )
+            ),
+        )
+
+        # Deliberately empty for this caller: `CallerOwnedUnitOfWork` makes the composing
+        # pipeline's commit the only one (R4.7).
+        await self._uow.commit()
+        return incident.id
 
 
 # --- The incident flow of `maintenance` itself (R1-R6, design D5-D13) -------------------

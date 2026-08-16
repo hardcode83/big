@@ -400,6 +400,17 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
         "/api/v1/provenance",
+        # `messaging-ai` D17: the seven routes of PRD §16, five distinct paths. All
+        # authenticated, and deliberately so — messages enter through the panel or the API,
+        # never from an OTA, because `PMSMessagingPort` is still the port with no methods.
+        # There is no anonymous door into this module, which is what keeps the human actor of
+        # D12 true and therefore keeps rule 9 free of a new exception. Asserted per role in
+        # `tests/messaging/test_api_authorization.py`.
+        "/api/v1/conversations",
+        "/api/v1/conversations/{conversation_id}",
+        "/api/v1/conversations/{conversation_id}/messages",
+        "/api/v1/conversations/{conversation_id}/escalate",
+        "/api/v1/conversations/{conversation_id}/resolve",
     }
 
 

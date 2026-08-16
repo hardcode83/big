@@ -204,6 +204,51 @@ export interface paths {
      */
     post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
   };
+  "/api/v1/conversations": {
+    /**
+     * List the tenant's conversations
+     * @description The inbox. Filtered by `status`, `escalation_status` and `property_id`, paginated with `page`/`per_page` (PRD §23), and ordered by `last_message_at` descending with **nulls last** — a conversation created a moment ago and never written to must not sit above whatever is on fire.
+     */
+    get: operations["list_conversations_api_v1_conversations_get"];
+    /**
+     * Open a conversation
+     * @description `property_id` is required (design D19): a conversation without one could not produce any of the four timeline events this capability declares mandatory. A conversation opened on `AIRBNB_MSG` or `BOOKING_MSG` is accepted and is **mute by design** — every send fails until the PMS messaging adapter arrives.
+     */
+    post: operations["create_conversation_api_v1_conversations_post"];
+  };
+  "/api/v1/conversations/{conversation_id}": {
+    /**
+     * Read one conversation
+     * @description A conversation of another tenant receives the same `404` as one that does not exist (R1.5).
+     */
+    get: operations["get_conversation_api_v1_conversations__conversation_id__get"];
+  };
+  "/api/v1/conversations/{conversation_id}/escalate": {
+    /**
+     * Escalate a conversation to a person
+     * @description The manual door. A conversation already escalated answers `409`: unlike the pipeline, where a guest's message must still be processed, here the caller asked for something that cannot happen.
+     */
+    post: operations["escalate_conversation_api_v1_conversations__conversation_id__escalate_post"];
+  };
+  "/api/v1/conversations/{conversation_id}/messages": {
+    /**
+     * Read the thread
+     * @description Chronological ascending and paginated (R7.4) — a conversation is read forwards, unlike the timeline, which is a feed.
+     */
+    get: operations["list_messages_api_v1_conversations__conversation_id__messages_get"];
+    /**
+     * Add a message to a conversation
+     * @description Two behaviours, chosen by `sender_type` (design D18). With `"GUEST"` the caller is transcribing what the guest said and the full pipeline runs: language detection, classification, escalation policy, and either an automatic reply or a handover to a person. Omitted, the caller is replying themselves — the `sender_type` is derived from their role, and replying to a conversation waiting for a person takes it over. Any other value is a `422`: a client cannot declare that a message was written by the AI.
+     */
+    post: operations["create_message_api_v1_conversations__conversation_id__messages_post"];
+  };
+  "/api/v1/conversations/{conversation_id}/resolve": {
+    /**
+     * Resolve a conversation
+     * @description Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.
+     */
+    post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
+  };
   "/api/v1/dashboard/properties": {
     /**
      * The dashboard card of every property
@@ -927,6 +972,75 @@ export interface components {
      */
     CleaningValidationStatus: "PENDING" | "PASSED" | "FAILED" | "WAIVED";
     /**
+     * ConversationChannel
+     * @enum {string}
+     */
+    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL";
+    /**
+     * ConversationEscalationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Conversation.escalation_status) without a named block (§7.14).
+     * @enum {string}
+     */
+    ConversationEscalationStatus: "NONE" | "PENDING_HUMAN" | "HUMAN_HANDLING" | "RESOLVED";
+    /** ConversationPageResponse */
+    ConversationPageResponse: {
+      /** Items */
+      items: components["schemas"]["ConversationResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ConversationResponse
+     * @description What an authenticated operator may see about one conversation.
+     *
+     * Fields are enumerated rather than dumped from the entity: a `from_attributes` dump would
+     * publish whatever `Conversation` grows next, which is how a projection stops being one.
+     */
+    ConversationResponse: {
+      /** Ai Enabled */
+      ai_enabled: boolean;
+      channel: components["schemas"]["ConversationChannel"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      escalation_status: components["schemas"]["ConversationEscalationStatus"];
+      /** Guest Id */
+      guest_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string;
+      /** Last Message At */
+      last_message_at: string | null;
+      /** Property Id */
+      property_id: string | null;
+      /** Reservation Id */
+      reservation_id: string | null;
+      status: components["schemas"]["ConversationStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ConversationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Conversation.status) without a named block (§7.14).
+     * @enum {string}
+     */
+    ConversationStatus: "OPEN" | "RESOLVED" | "ESCALATED" | "CLOSED";
+    /**
      * CreateChecklistTemplateRequest
      * @description The shape check. The **content** rules stay in the domain.
      *
@@ -963,6 +1077,36 @@ export interface components {
       scheduled_start?: string | null;
     };
     /**
+     * CreateConversationRequest
+     * @description `POST /conversations` (R7.1).
+     *
+     * `property_id` is **required**, which is where D19 lands for an HTTP caller;
+     * `Conversation.__post_init__` is where it lands for every other one. The column stays
+     * nullable, so this is a restriction of this change rather than of the schema.
+     *
+     * `channel` accepts `AIRBNB_MSG`/`BOOKING_MSG` because the enum has them — and a conversation
+     * created on one of those is **mute by design** (R6.3): every send fails with a named error
+     * until `beds24-messaging-adapter` implements `PMSMessagingPort`. `docs/messaging-ai.md`
+     * says so, so it does not read as a bug.
+     */
+    CreateConversationRequest: {
+      channel: components["schemas"]["ConversationChannel"];
+      /** Guest Id */
+      guest_id?: string | null;
+      /**
+       * Language
+       * @default es
+       */
+      language?: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id?: string | null;
+    };
+    /**
      * CreatedUserResponse
      * @description A separate type, and the only shape that carries the one-time secret (design D10).
      *
@@ -973,6 +1117,25 @@ export interface components {
       /** Temporary Password */
       temporary_password: string;
       user: components["schemas"]["UserResponse"];
+    };
+    /**
+     * CreateMessageRequest
+     * @description `POST /conversations/{id}/messages` — one route, two behaviours (D18).
+     *
+     * With `sender_type = "GUEST"`: the caller is transcribing what the guest said, and the full
+     * pipeline of D11 runs. Omitted: the caller is answering, and their `sender_type` is derived
+     * from their role.
+     *
+     * **`Literal["GUEST"]` and not `MessageSenderType`**: the enum has five members and four of
+     * them are ours to write, so accepting the enum would let a client declare that the AI wrote
+     * a message. The narrow type is what turns that into a `422` at the edge rather than a check
+     * somebody has to remember inside.
+     */
+    CreateMessageRequest: {
+      /** Content */
+      content: string;
+      /** Sender Type */
+      sender_type?: "GUEST" | null;
     };
     /** CreatePropertyRequest */
     CreatePropertyRequest: {
@@ -1495,6 +1658,66 @@ export interface components {
       /** Notes */
       notes?: string | null;
     };
+    /** MessagePageResponse */
+    MessagePageResponse: {
+      /** Items */
+      items: components["schemas"]["MessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * MessageResponse
+     * @description One message of a thread.
+     *
+     * `metadata` is serialised through `MessageMetadata.to_dict()`, so what reaches a client is
+     * the same closed set of keys the column holds — never a dump of an entity attribute that
+     * could widen without anyone noticing.
+     */
+    MessageResponse: {
+      /** Ai Generated */
+      ai_generated: boolean;
+      /** Confidence Score */
+      confidence_score: string | null;
+      /** Content */
+      content: string;
+      /**
+       * Conversation Id
+       * Format: uuid
+       */
+      conversation_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Intent */
+      intent: string | null;
+      /** Language */
+      language: string | null;
+      /** Metadata */
+      metadata: {
+        [key: string]: string;
+      } | null;
+      sender_type: components["schemas"]["MessageSenderType"];
+      /** Sender User Id */
+      sender_user_id: string | null;
+    };
+    /**
+     * MessageSenderType
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Message.sender_type) without a named block (§7.15).
+     * @enum {string}
+     */
+    MessageSenderType: "GUEST" | "OWNER" | "MANAGER" | "AI" | "SYSTEM";
     /** NextActionResponse */
     NextActionResponse: {
       /** Label */
@@ -3660,6 +3883,278 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's conversations
+   * @description The inbox. Filtered by `status`, `escalation_status` and `property_id`, paginated with `page`/`per_page` (PRD §23), and ordered by `last_message_at` descending with **nulls last** — a conversation created a moment ago and never written to must not sit above whatever is on fire.
+   */
+  list_conversations_api_v1_conversations_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        status?: components["schemas"]["ConversationStatus"] | null;
+        escalation_status?: components["schemas"]["ConversationEscalationStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Open a conversation
+   * @description `property_id` is required (design D19): a conversation without one could not produce any of the four timeline events this capability declares mandatory. A conversation opened on `AIRBNB_MSG` or `BOOKING_MSG` is accepted and is **mute by design** — every send fails until the PMS messaging adapter arrives.
+   */
+  create_conversation_api_v1_conversations_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateConversationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one conversation
+   * @description A conversation of another tenant receives the same `404` as one that does not exist (R1.5).
+   */
+  get_conversation_api_v1_conversations__conversation_id__get: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Escalate a conversation to a person
+   * @description The manual door. A conversation already escalated answers `409`: unlike the pipeline, where a guest's message must still be processed, here the caller asked for something that cannot happen.
+   */
+  escalate_conversation_api_v1_conversations__conversation_id__escalate_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read the thread
+   * @description Chronological ascending and paginated (R7.4) — a conversation is read forwards, unlike the timeline, which is a feed.
+   */
+  list_messages_api_v1_conversations__conversation_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Add a message to a conversation
+   * @description Two behaviours, chosen by `sender_type` (design D18). With `"GUEST"` the caller is transcribing what the guest said and the full pipeline runs: language detection, classification, escalation policy, and either an automatic reply or a handover to a person. Omitted, the caller is replying themselves — the `sender_type` is derived from their role, and replying to a conversation waiting for a person takes it over. Any other value is a `422`: a client cannot declare that a message was written by the AI.
+   */
+  create_message_api_v1_conversations__conversation_id__messages_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Resolve a conversation
+   * @description Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.
+   */
+  resolve_conversation_api_v1_conversations__conversation_id__resolve_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

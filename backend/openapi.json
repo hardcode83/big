@@ -814,6 +814,172 @@
         "title": "CleaningValidationStatus",
         "type": "string"
       },
+      "ConversationChannel": {
+        "enum": [
+          "WHATSAPP",
+          "AIRBNB_MSG",
+          "BOOKING_MSG",
+          "EMAIL",
+          "PHONE_TRANSCRIPT",
+          "MANUAL"
+        ],
+        "title": "ConversationChannel",
+        "type": "string"
+      },
+      "ConversationEscalationStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Conversation.escalation_status) without a named block (§7.14).",
+        "enum": [
+          "NONE",
+          "PENDING_HUMAN",
+          "HUMAN_HANDLING",
+          "RESOLVED"
+        ],
+        "title": "ConversationEscalationStatus",
+        "type": "string"
+      },
+      "ConversationPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ConversationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "ConversationPageResponse",
+        "type": "object"
+      },
+      "ConversationResponse": {
+        "description": "What an authenticated operator may see about one conversation.\n\nFields are enumerated rather than dumped from the entity: a `from_attributes` dump would\npublish whatever `Conversation` grows next, which is how a projection stops being one.",
+        "properties": {
+          "ai_enabled": {
+            "title": "Ai Enabled",
+            "type": "boolean"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ConversationChannel"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "escalation_status": {
+            "$ref": "#/components/schemas/ConversationEscalationStatus"
+          },
+          "guest_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Id"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "last_message_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Message At"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "status": {
+            "$ref": "#/components/schemas/ConversationStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "guest_id",
+          "channel",
+          "status",
+          "escalation_status",
+          "language",
+          "ai_enabled",
+          "last_message_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ConversationResponse",
+        "type": "object"
+      },
+      "ConversationStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Conversation.status) without a named block (§7.14).",
+        "enum": [
+          "OPEN",
+          "RESOLVED",
+          "ESCALATED",
+          "CLOSED"
+        ],
+        "title": "ConversationStatus",
+        "type": "string"
+      },
       "CreateChecklistTemplateRequest": {
         "additionalProperties": false,
         "description": "The shape check. The **content** rules stay in the domain.\n\nPydantic bounds the list sizes so an oversized body is refused before anything parses\nit, but the charset of `item_id`, its uniqueness and the `String(100)` ceiling are\n`parse_template_content`'s (R1.2) — those must hold for every path into a template, not\nonly for HTTP.",
@@ -911,6 +1077,86 @@
           "property_id"
         ],
         "title": "CreateCleaningTaskRequest",
+        "type": "object"
+      },
+      "CreateConversationRequest": {
+        "additionalProperties": false,
+        "description": "`POST /conversations` (R7.1).\n\n`property_id` is **required**, which is where D19 lands for an HTTP caller;\n`Conversation.__post_init__` is where it lands for every other one. The column stays\nnullable, so this is a restriction of this change rather than of the schema.\n\n`channel` accepts `AIRBNB_MSG`/`BOOKING_MSG` because the enum has them — and a conversation\ncreated on one of those is **mute by design** (R6.3): every send fails with a named error\nuntil `beds24-messaging-adapter` implements `PMSMessagingPort`. `docs/messaging-ai.md`\nsays so, so it does not read as a bug.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ConversationChannel"
+          },
+          "guest_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Id"
+          },
+          "language": {
+            "default": "es",
+            "maxLength": 5,
+            "minLength": 2,
+            "title": "Language",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          }
+        },
+        "required": [
+          "property_id",
+          "channel"
+        ],
+        "title": "CreateConversationRequest",
+        "type": "object"
+      },
+      "CreateMessageRequest": {
+        "additionalProperties": false,
+        "description": "`POST /conversations/{id}/messages` — one route, two behaviours (D18).\n\nWith `sender_type = \"GUEST\"`: the caller is transcribing what the guest said, and the full\npipeline of D11 runs. Omitted: the caller is answering, and their `sender_type` is derived\nfrom their role.\n\n**`Literal[\"GUEST\"]` and not `MessageSenderType`**: the enum has five members and four of\nthem are ours to write, so accepting the enum would let a client declare that the AI wrote\na message. The narrow type is what turns that into a `422` at the edge rather than a check\nsomebody has to remember inside.",
+        "properties": {
+          "content": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          },
+          "sender_type": {
+            "anyOf": [
+              {
+                "const": "GUEST",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender Type"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "CreateMessageRequest",
         "type": "object"
       },
       "CreatePropertyRequest": {
@@ -2172,6 +2418,155 @@
         },
         "title": "MarkExternalRequest",
         "type": "object"
+      },
+      "MessagePageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/MessageResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "MessagePageResponse",
+        "type": "object"
+      },
+      "MessageResponse": {
+        "description": "One message of a thread.\n\n`metadata` is serialised through `MessageMetadata.to_dict()`, so what reaches a client is\nthe same closed set of keys the column holds — never a dump of an entity attribute that\ncould widen without anyone noticing.",
+        "properties": {
+          "ai_generated": {
+            "title": "Ai Generated",
+            "type": "boolean"
+          },
+          "confidence_score": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Confidence Score"
+          },
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "conversation_id": {
+            "format": "uuid",
+            "title": "Conversation Id",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "intent": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Intent"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": {
+                  "type": "string"
+                },
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "sender_type": {
+            "$ref": "#/components/schemas/MessageSenderType"
+          },
+          "sender_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sender User Id"
+          }
+        },
+        "required": [
+          "id",
+          "conversation_id",
+          "sender_type",
+          "sender_user_id",
+          "content",
+          "language",
+          "ai_generated",
+          "confidence_score",
+          "intent",
+          "metadata",
+          "created_at"
+        ],
+        "title": "MessageResponse",
+        "type": "object"
+      },
+      "MessageSenderType": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Message.sender_type) without a named block (§7.15).",
+        "enum": [
+          "GUEST",
+          "OWNER",
+          "MANAGER",
+          "AI",
+          "SYSTEM"
+        ],
+        "title": "MessageSenderType",
+        "type": "string"
       },
       "NextActionResponse": {
         "properties": {
@@ -7475,6 +7870,580 @@
         "summary": "Record a manager's verdict on a finished cleaning",
         "tags": [
           "cleaning"
+        ]
+      }
+    },
+    "/api/v1/conversations": {
+      "get": {
+        "description": "The inbox. Filtered by `status`, `escalation_status` and `property_id`, paginated with `page`/`per_page` (PRD §23), and ordered by `last_message_at` descending with **nulls last** — a conversation created a moment ago and never written to must not sit above whatever is on fire.",
+        "operationId": "list_conversations_api_v1_conversations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConversationStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "escalation_status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ConversationEscalationStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Escalation Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's conversations",
+        "tags": [
+          "messaging"
+        ]
+      },
+      "post": {
+        "description": "`property_id` is required (design D19): a conversation without one could not produce any of the four timeline events this capability declares mandatory. A conversation opened on `AIRBNB_MSG` or `BOOKING_MSG` is accepted and is **mute by design** — every send fails until the PMS messaging adapter arrives.",
+        "operationId": "create_conversation_api_v1_conversations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateConversationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Open a conversation",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}": {
+      "get": {
+        "description": "A conversation of another tenant receives the same `404` as one that does not exist (R1.5).",
+        "operationId": "get_conversation_api_v1_conversations__conversation_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read one conversation",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/escalate": {
+      "post": {
+        "description": "The manual door. A conversation already escalated answers `409`: unlike the pipeline, where a guest's message must still be processed, here the caller asked for something that cannot happen.",
+        "operationId": "escalate_conversation_api_v1_conversations__conversation_id__escalate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Escalate a conversation to a person",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/messages": {
+      "get": {
+        "description": "Chronological ascending and paginated (R7.4) — a conversation is read forwards, unlike the timeline, which is a feed.",
+        "operationId": "list_messages_api_v1_conversations__conversation_id__messages_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessagePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read the thread",
+        "tags": [
+          "messaging"
+        ]
+      },
+      "post": {
+        "description": "Two behaviours, chosen by `sender_type` (design D18). With `\"GUEST\"` the caller is transcribing what the guest said and the full pipeline runs: language detection, classification, escalation policy, and either an automatic reply or a handover to a person. Omitted, the caller is replying themselves — the `sender_type` is derived from their role, and replying to a conversation waiting for a person takes it over. Any other value is a `422`: a client cannot declare that a message was written by the AI.",
+        "operationId": "create_message_api_v1_conversations__conversation_id__messages_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Add a message to a conversation",
+        "tags": [
+          "messaging"
+        ]
+      }
+    },
+    "/api/v1/conversations/{conversation_id}/resolve": {
+      "post": {
+        "description": "Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.",
+        "operationId": "resolve_conversation_api_v1_conversations__conversation_id__resolve_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "conversation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Conversation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ConversationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Resolve a conversation",
+        "tags": [
+          "messaging"
         ]
       }
     },
