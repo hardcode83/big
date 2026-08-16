@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/messaging-ai
 implementation_sha: 270b5a29d191ac2e956e4a61c9fd47ddf3bfeec9
 pr_number: 
 pr_url: 
