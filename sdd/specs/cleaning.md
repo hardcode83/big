@@ -120,8 +120,22 @@ no declara las rutas.
 - WHERE la plantilla no declara ninguna foto `required: true`, THE SYSTEM SHALL permitir el cierre
   sin ninguna foto: la regla es «las requeridas», no «alguna».
 - THE SYSTEM SHALL aplicar las tres cláusulas **dentro de `CleaningTask.complete()`** y en ningún
-  otro sitio. El caso de uso solo reúne la evidencia —plantilla, completions, tipos de foto
-  subidos e incidencias— y se la pasa a la entidad.
+  otro sitio. Las cuatro lecturas que la alimentan —plantilla, completions, tipos de foto subidos
+  e incidencia bloqueante— son responsabilidad de `CompletionEvidenceGatherer`
+  (`application/evidence.py`), que solo lee y ensambla el `CleaningCompletionEvidence`: no compara
+  nada. El caso de uso del cierre carga la tarea, le pide la evidencia al gatherer y se la pasa a
+  la entidad.
+- THE SYSTEM SHALL construir la evidencia con `spec.required_photo_types()` y no con
+  `spec.photo_types()`: leer todos los tipos declarados haría obligatorio también el opcional y
+  contradiría la cláusula «las requeridas, no alguna».
+- WHERE el gatherer necesita persistencia, THE SYSTEM SHALL depender solo de los cuatro puertos de
+  dominio (`CleaningChecklistTemplateRepository`, `CleaningChecklistCompletionRepository`,
+  `CleaningPhotoRepository`, `BlockingIncidentQuery`), y SHALL consultarlos con el `tenant_id`
+  recibido —completions y fotos por `task.id`, la incidencia por `task.property_id`—, recibiendo la
+  `CleaningTask` ya cargada para no repetir el scoping por tenant y por limpiadora que hace
+  `_load_task`.
+- IF la plantilla de la tarea ya no existe, THEN THE SYSTEM SHALL lanzar
+  `ChecklistTemplateNotFoundError` desde el gatherer, traducido a `404 NOT_FOUND`.
 - WHEN el cierre supera la validación, THE SYSTEM SHALL pasar la tarea a `COMPLETED` con
   `completed_at`, poner `validation_status` en `PASSED` y resolver el estado de la propiedad por
   contexto: `AWAITING_CHECKIN` si hay reserva que llega hoy, `READY_FOR_NEXT_GUEST` si la hay
@@ -281,6 +295,10 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
   (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
   ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local).
+- `backend/app/cleaning/application/evidence.py` — `CompletionEvidenceGatherer`, las cuatro
+  lecturas del cierre y el único sitio que ensambla un `CleaningCompletionEvidence`. Es el
+  colaborador que dejó `CompleteCleaningTaskUseCase` en ocho colaboradores (siete de
+  `_TaskLifecycleBase` más este) y lo que hace testeable con fakes la reunión de la evidencia.
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la

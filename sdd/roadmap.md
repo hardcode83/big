@@ -91,7 +91,7 @@ Categorías:
   completes: cleaning-photos-storage · size: M · kind: infra
 - [x] backend-response-hardening — [CROSS] **postura de cabeceras y de topes de cuerpo para TODO el backend**, no ruta a ruta: `nosniff` existe hoy en una sola ruta de las trece, y el error de razonamiento sobre topes de tamaño que costó dos rondas de revisión ya está reproducido en un segundo módulo, así que lo que cierra la clase es una nota de steering y no un tercer arreglo de redacción … → changes/archive/2026-08-15-backend-response-hardening/
   completes: cleaning-photos-storage · size: S · kind: tech
-- [ ] cleaning-completion-evidence-gatherer — [TECH] **extraer la orquestación de lectura del cierre de limpieza**, que hoy hace de `CompleteCleaningTaskUseCase` un caso de uso con 11 colaboradores. No toca D8: mueve la lectura, no la decisión, que sigue dentro de `CleaningTask.complete()` …
+- [x] cleaning-completion-evidence-gatherer — [TECH] **extraer la orquestación de lectura del cierre de limpieza**, que hoy hace de `CompleteCleaningTaskUseCase` un caso de uso con 11 colaboradores. No toca D8: mueve la lectura, no la decisión, que sigue dentro de `CleaningTask.complete()` … → changes/archive/2026-08-16-cleaning-completion-evidence-gatherer/
   completes: cleaning-photos-storage · size: S · kind: tech
 - [x] maintenance — [BE] Incident + clasificación IA + OwnerApproval + flujo técnico (PRD §26.11, §12) → changes/archive/2026-08-15-maintenance/
 - [x] pms-provider-resolution — [BE] **la fundación que ADR 0006 pide construir antes del adapter real**: fijar `PMSMessagingPort` como puerto propio frente a `PMSAdapter` (decisión 3) y resolver **proveedor y credenciales por propiedad** (decisión 7). → changes/archive/2026-08-06-pms-provider-resolution/
