@@ -160,9 +160,27 @@ de producto, y ampliar la allowlist es una línea el día que se tome.
 
 ### El adaptador `S3`
 
-- THE SYSTEM SHALL entender `S3` como el **protocolo** y no como AWS: el proveedor no está
-  decidido y el PRD lo deja abierto explícitamente («S3-compatible: Cloudflare R2 o AWS S3»). El
-  candidato natural del proyecto es OCI Object Storage, donde ya corre la VM de dev (ADR 0001).
+- THE SYSTEM SHALL entender `S3` como el **protocolo** y no como AWS. El proveedor **está decidido
+  para `dev`** —OCI Object Storage, por su API compatible y porque la VM ya vive en esa tenancy
+  ([ADR 0008](../../docs/adr/0008-object-storage-provider-dev.md), [ADR 0001](../../docs/adr/0001-dev-hosting-provider.md))—
+  y deliberadamente **sin decidir para staging y producción**, donde el PRD sigue abierto
+  («S3-compatible: Cloudflare R2 o AWS S3»). Esa decisión es configuración y no llega al adaptador.
+- THE SYSTEM SHALL NOT introducir ninguna dependencia del SDK de OCI: el único cliente del almacén
+  es boto3 apuntado por `endpoint_url`. Un test lo verifica por acoplamiento y no por palabras
+  —imports de SDK parseados con AST, hostnames de proveedor y símbolos de configuración de
+  almacén—, de modo que falla el día que alguien cablee un proveedor por debajo del puerto.
+- WHERE hay un `endpoint_url` configurado, THE SYSTEM SHALL usar direccionamiento **path-style**, y
+  WHERE no lo hay THE SYSTEM SHALL dejar el default de boto3. No es preferencia sino imposición del
+  proveedor: en OCI el estilo virtual-hosted vive en otro host y solo funciona para buckets creados
+  por la propia API S3, así que con `auto` fallarían por DNS todas las llamadas y todas las URL
+  prefirmadas. MinIO y R2 también quieren path-style.
+- WHERE hay un `endpoint_url` configurado, THE SYSTEM SHALL fijar el cálculo y la validación de
+  checksums en `when_required` —el comportamiento de botocore anterior a 1.36—, y WHERE no lo hay
+  THE SYSTEM SHALL dejar los defaults actuales. Desde 1.36 `PutObject` enmarca el cuerpo con
+  `aws-chunked` y un CRC32 final, que la API compatible de OCI **no implementa**: responde
+  `501 NotImplemented` y **falla toda subida**. Se descubrió con la primera foto enviada al bucket
+  real (2026-08-16), no antes, porque la suite construye clientes sin tocar red por decisión propia
+  y la incompatibilidad solo existe en el cable.
 - THE SYSTEM SHALL mantener las dos costuras que hacen que eso no sea una frase vacía: el
   constructor del cliente acepta un `endpoint_url` arbitrario, y el adaptador **recibe** el
   cliente inyectado en lugar de construirlo. Apuntar a otro almacén compatible es configuración,
@@ -189,8 +207,12 @@ aquí es un defecto, no una decisión.
   bucket y la clave completa**, porque es parte del protocolo de firma y no se puede retirar. La
   prohibición de exponer la clave interna sigue siendo absoluta para todo lo demás —cuerpo,
   cabeceras y la URL de `LOCAL`— y **no alcanza a los logs**, que sí pueden registrar la ruta
-  absoluta al reportar un fallo de escritura. Hoy es código inalcanzable: sin bucket configurado
-  la resolución falla antes de emitir ninguna URL.
+  absoluta al reportar un fallo de escritura. **Está aceptada por escrito**, con su razón y sus dos
+  alternativas rechazadas, en [ADR 0008](../../docs/adr/0008-object-storage-provider-dev.md): la
+  clave se compone solo de identificadores que generó el sistema
+  (`tenants/{tenant_id}/cleaning-tasks/{task_id}/{photo_id}.{ext}`), sin ningún dato de negocio ni
+  nombre de fichero elegido por el usuario. La regla 5 de `steering/security.md` lleva la misma
+  excepción con el mismo alcance, y el PRD línea 198 queda relajado ahí y solo ahí.
 - THE SYSTEM SHALL servir el `Content-Type` desde el proveedor en `S3` y desde la tabla derivada
   de la allowlist en `LOCAL`, ambas alimentadas por la **misma** allowlist para que no puedan
   divergir.
@@ -213,23 +235,70 @@ aquí es un defecto, no una decisión.
   los ficheros.
 - THE SYSTEM SHALL documentar que `docker compose down -v` borra el volumen, y por tanto todas las
   fotos subidas, en el README de la raíz y en `docs/cleaning.md`.
+- THE SYSTEM SHALL exponer tres ajustes de aplicación —`S3_BUCKET`, `S3_REGION` y
+  `S3_ENDPOINT_URL`—, los tres con **default vacío**, y THE SYSTEM SHALL leerlos en un **único
+  punto**: la dependencia que construye la factoría. Ningún caso de uso conoce bucket, región ni
+  endpoint.
+- THE SYSTEM SHALL tratar el valor vacío —y el que solo contiene espacios— como **ausencia**, no
+  como configuración: se convierte a `None` antes de llegar a boto3. Sin ese `.strip()`, un espacio
+  suelto superviviente de un `.env` editado a mano llega al cliente y revienta con
+  `InvalidRegionError` en vez del `StorageWriteError` que la factoría garantiza.
+- WHEN `S3_ENDPOINT_URL` está vacío, THE SYSTEM SHALL dejar que boto3 resuelva el endpoint por
+  defecto de AWS: apuntar a AWS es **no configurar nada**, y apuntar a cualquier otro proveedor es
+  configurar una URL.
+- THE SYSTEM SHALL declarar las cinco variables en `.env.example` y en la configuración del
+  despliegue a `dev`, y THE SYSTEM SHALL NOT dar valor a las dos credenciales en ningún fichero
+  versionado.
+- THE SYSTEM SHALL declararlas en el `environment:` **solo del servicio `backend`** de ambos
+  composes, con `${VAR:-}` y no `${VAR:?}`. Es la excepción acotada que la regla 8 de
+  `steering/security.md` nombra: el fail-fast se pierde en el arranque pero lo sustituye uno más
+  estricto en el punto de uso, porque `storage_for(S3)` lanza `StorageWriteError` y nunca cae a
+  `LOCAL`.
+
+#### Matriz de proveedores compatibles
+
+Es lo que hace verificable la palabra «agnóstico». El razonamiento y las alternativas rechazadas
+viven en [ADR 0008](../../docs/adr/0008-object-storage-provider-dev.md); aquí está solo qué toma
+cada ajuste:
+
+| Proveedor | `S3_BUCKET` | `S3_REGION` | `S3_ENDPOINT_URL` | Credenciales |
+|---|---|---|---|---|
+| **OCI Object Storage** (activo en `dev`) | nombre del bucket | identificador OCI (`eu-frankfurt-1`) | `https://<namespace>.compat.objectstorage.<region>.oraclecloud.com` | Customer Secret Key (par acceso/secreto) |
+| AWS S3 | nombre del bucket | región AWS (`eu-west-1`) | *vacío* — boto3 resuelve el endpoint | IAM access key o rol de instancia |
+| Cloudflare R2 | nombre del bucket | `auto` | `https://<account_id>.r2.cloudflarestorage.com` | token de API de R2 (par acceso/secreto) |
+| MinIO | nombre del bucket | `us-east-1` | `http://<host>:9000` | par acceso/secreto de MinIO |
 
 ## Estado
 
-- **No hay ningún almacén S3 aprovisionado**, y por tanto no hay bucket, endpoint ni región en la
-  configuración: un tenant con `storage_type = S3` recibe hoy `502` en cada subida. Es deuda
-  declarada, con entrada propia de roadmap (`object-storage-provisioning`), no un descuido.
-  `EXTERNAL_DEPENDENCY`.
-- **`S3FileStorage` no se valida contra un servicio real.** Lo que sí se valida es lo que importa
-  y lo que unas credenciales no comprobarían mejor: el contrato del puerto y la sustituibilidad
-  que exige SOLID-L, con un test que corre las mismas aserciones contra los dos adaptadores sobre
-  un cliente de prueba que responde como botocore. `LOCAL` es lo que corre el MVP —el default de
-  `TenantConfig.storage_type`—, que es por lo que basta.
-- **Condición de cierre heredada por el aprovisionamiento**: el día que se configure un bucket, la
-  exposición de la clave en la URL prefirmada pasa a ser real **en ese mismo commit y sin que
-  ningún test lo detenga**. La entrada de roadmap hereda la obligación de decidir una de tres:
-  poner un CDN o una ruta propia delante del bucket, aceptar la exposición por escrito con su
-  razón, o servir también `S3` por la ruta firmada propia.
+- **El almacén está aprovisionado en `dev` y el camino `S3` se ha ejecutado de verdad**
+  (`object-storage-provisioning`, 2026-08-16). Terraform declara el bucket privado
+  `autohostai-dev-media`, su usuario IAM con policy acotada al bucket y a cuatro permisos de objeto,
+  su Customer Secret Key y cuatro secretos del Vault que el deploy lee por nombre. El tenant de demo
+  de `dev` corre sobre `S3`. Verificado extremo a extremo: una foto subida por la API se almacena en
+  el bucket y su URL prefirmada la resuelve un cliente **sin credenciales** con `200` y
+  `Content-Type: image/jpeg`. Ya no hay `EXTERNAL_DEPENDENCY` aquí.
+- **Staging y producción siguen sin proveedor elegido**, y no lo heredan de `dev`: es una decisión
+  propia de cada entorno, con su revisión de las dos relajaciones de mínimo privilegio que `dev`
+  aceptó.
+- **El camino `S3` no funcionó al primer intento, y conviene que conste por qué.** Todo estaba bien
+  aprovisionado y la primera subida devolvió `502`: botocore ≥1.36 enmarca `PutObject` con
+  `aws-chunked`, que OCI no implementa. Ningún test podía verlo —construyen clientes sin tocar red
+  por decisión propia— y lo encontró la verificación en `dev` que el change mantuvo bloqueada hasta
+  después del merge. La lección es del método, no del bug: **una suite verde sobre un adaptador de
+  servicio externo no es prueba de que el servicio lo acepte**, y cada default nuevo de botocore hay
+  que re-verificarlo contra los otros proveedores de la matriz.
+- **La suite automatizada sigue sin hablar con un almacén real, a propósito.** Lo que valida es el
+  contrato del puerto y la sustituibilidad que exige SOLID-L, con las mismas aserciones contra los
+  dos adaptadores sobre un cliente de prueba que responde como botocore, más la configuración
+  **resuelta** del cliente —addressing style y checksums— que sí es comprobable sin red. Lo que
+  ninguna de esas cosas puede sustituir es una ejecución real contra el proveedor; por eso existe la
+  verificación en `dev`, y por eso encontró lo que la suite no podía.
+- **La condición de cierre que heredaba el aprovisionamiento está resuelta**: de las tres salidas
+  que había —CDN o ruta propia delante del bucket, aceptar la exposición por escrito, o servir `S3`
+  por la ruta firmada propia— se eligió **aceptarla**, con su razón y las otras dos registradas como
+  rechazadas en [ADR 0008](../../docs/adr/0008-object-storage-provider-dev.md). El CDN sigue siendo
+  la vía si algún día se quiere ocultar la clave de verdad: es un change de infra con su propio
+  dominio, TLS y coste.
 - **Residuo consciente del techo de caducidad**: se mide sobre `expiry - now`, así que una URL
   firmada con una caducidad muy lejana no es permanente pero **sí es válida durante su última
   hora**, en un instante futuro que elige quien la firmó. Cierra el riesgo grande —acceso anónimo
@@ -253,7 +322,14 @@ aquí es un defecto, no una decisión.
 - `backend/app/integrations/infrastructure/storage/local.py` — `LocalFileStorage`, la raíz
   `/app/media`, la escritura atómica y la resolución de rutas.
 - `backend/app/integrations/infrastructure/storage/s3.py` — `S3FileStorage` y `build_s3_client`,
-  con el `endpoint_url` que mantiene abierto el proveedor.
+  con el `endpoint_url` que mantiene abierto el proveedor y las dos concesiones que un endpoint
+  no-AWS exige (path-style y checksums `when_required`).
+- `backend/app/cleaning/api/dependencies.py` — `get_file_storage_factory`, el **único** punto donde
+  se leen los tres ajustes del almacén.
+- `backend/tests/integrations/test_storage_provider_agnostic.py` — las guardas de agnosticidad:
+  imports de SDK por AST, hostnames de proveedor y símbolos de configuración.
+- `infra/environments/dev/main.tf` — el bucket, su usuario IAM, la policy acotada, la Customer
+  Secret Key y los cuatro secretos del Vault.
 - `backend/app/tenants/domain/enums.py` — el enum `StorageType`, preexistente.
 - `docker-compose.yml`, `docker-compose.deploy.yml` — el volumen `backend_media`.
 - Tests: `backend/tests/integrations/test_storage_ports.py`, `test_storage_factory.py`,

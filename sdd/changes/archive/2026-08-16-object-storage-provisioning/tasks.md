@@ -244,3 +244,43 @@ escribió primero y se corrigió: `object-family` habría concedido además `OBJ
 5. Registrar la evidencia en el change nombrando **qué se subió y qué se obtuvo** (bucket, clave,
    código de respuesta, `Content-Type`), borrar la entrada repuesta de `BLOCKED.md` y solo entonces
    `/sdd:archive` — que además vuelca los deltas a las cinco specs de *Affected specs*. — [R6.4]
+
+## 9. Evidencia de la verificación (R6.4) — ejecutada el 2026-08-16
+
+### Lo que se ejecutó, en orden
+
+| Paso | Resultado |
+|---|---|
+| 1 — `terraform apply` (`workflow_dispatch` desde `main`) | **10 añadidos, 2 cambiados, 0 destruidos**, en dos tandas (la primera falló a mitad, ver abajo). Un `plan` posterior dice **`No changes. Your infrastructure matches the configuration.`** → **R1.3** |
+| 2 — deploy desde `main` | «Render .env» completó sin error, así que los cuatro secretos del Vault se leyeron y las cinco variables se escribieron → **R3.5** |
+| 3 — `count(*)` bloqueante (OQ4) | **0 fotos** en `cleaning_photos` del tenant de demo → se converge. `bootstrap` con `BOOTSTRAP_STORAGE_TYPE=S3`: `created 0 tenant(s), 0 config(s), 0 user(s); converged 1 config(s)` → **R6.1** |
+| 4 — subida y URL prefirmada | ver abajo → **R6.2**, **R6.3** |
+
+### Qué se subió y qué se obtuvo (R6.4)
+
+- **Bucket**: `autohostai-dev-media`
+- **Clave**: `tenants/6cee1642-cfe1-4271-938b-da35050b53a0/cleaning-tasks/a3ee5738-84ef-4eea-98f5-9ccd6ae6f460/93d4c103-58e6-4400-9486-d504e0b9b5c0.jpg`
+- **Subido**: un JPEG real de **333 bytes** (bytes de JPEG de verdad, no un fichero renombrado — el backend decide el formato por el contenido y nunca por el `Content-Type` del cliente), por `POST /api/v1/cleaning-tasks/{id}/photos` como la limpiadora asignada
+- **URL devuelta**: prefirmada por el propio almacén,
+  `https://frag3zplc9up.compat.objectstorage.eu-frankfurt-1.oraclecloud.com/autohostai-dev-media/tenants/…/93d4c103-….jpg?X-Amz-Algorithm=AWS4-HMAC-SHA256&…&X-Amz-Expires=3600&X-Amz-Signature=…`
+- **Resuelta SIN ninguna credencial** (`curl` sin cabecera de autenticación):
+  - `HTTP/1.1 200 OK`
+  - `Content-Type: image/jpeg` — **no** `binary/octet-stream` → **R6.3**
+  - `Content-Length: 333`
+  - los bytes bajados son **idénticos** a los subidos (`cmp`)
+- **`storage_key` NO aparece como campo del cuerpo** de la respuesta (comprobado sobre el JSON): sí va dentro del **valor** de `url`, que es exactamente la asimetría que [ADR 0008](../../../docs/adr/0008-object-storage-provider-dev.md) acepta por escrito, y la redacción que R5.3 enmendó.
+
+### El fallo que esta verificación existía para encontrar
+
+**La primera subida devolvió `502`, y el camino `S3` no había funcionado nunca contra un bucket real.** Desde botocore 1.36 `PutObject` enmarca el cuerpo con `aws-chunked` y un CRC32 final, y la API compatible de OCI responde `501 NotImplemented: AWS chunked encoding not supported`.
+
+Ningún test podía cazarlo: R4.4 exige construir clientes **sin tocar red**, y la incompatibilidad solo existe en el cable. Arreglado en el PR #89 —`request_checksum_calculation`/`response_checksum_validation` a `when_required`, acotado al camino de endpoint propio igual que el path-style de D3— con test de regresión sobre la configuración resuelta, que es lo comprobable sin red.
+
+**Es la justificación entera de OQ3**: sin esta verificación diferida, el change se habría archivado entregando una capacidad rota.
+
+### Dos condiciones fabricadas, y conviene que consten
+
+1. **La propiedad se puso en `AWAITING_CLEANING` con un `UPDATE`**, no llegando ahí por los jobs de reloj. Se intentó la vía legítima y las reglas de elegibilidad del scheduler pedían un montaje de reservas ortogonal a lo que R6 prueba. Todo lo posterior —asignar, aceptar, empezar, subir— sí fue por la API real, con las dos cuentas que la matriz de permisos exige.
+2. **Se adelantó un día el `check_out_date` de la reserva activa de la demo** durante ese intento. Es un dato de demo y se puede restaurar.
+
+Ninguna de las dos toca lo que R6.2/R6.3 afirman: que el objeto llega al bucket y que su URL prefirmada la resuelve cualquiera, con el tipo correcto.

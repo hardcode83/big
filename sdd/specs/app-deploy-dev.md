@@ -66,6 +66,9 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - THE SYSTEM SHALL registrar el runner minteando un installation-token de una **GitHub App** (permiso `administration: write`), leyendo la clave privada de la App del Vault por **instance principal** y firmando el JWT localmente; el pull de GHCR no usa la App.
 - WHERE la VM viva no puede recibir el `cloud-init` por Terraform (`metadata` ForceNew + `ignore_changes`), THE SYSTEM SHALL ejecutar el mismo bootstrap a mano una sola vez sobre la instancia (documentado en `RUNBOOK.md` §6).
 - THE SYSTEM SHALL generar los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY` — clave Fernet válida) con Terraform (`random_*`) y guardarlos, junto con la clave de la App, como `oci_vault_secret`; `POSTGRES_DB`/`POSTGRES_USER` son variables no sensibles.
+- THE SYSTEM SHALL escribir al `.env` del despliegue las cinco variables del almacén de objetos —`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`— leyendo del Vault **por nombre** los cuatro secretos de medios (nombres deterministas a partir de `ENV`, como el token del túnel) y derivando el nombre del bucket del propio `ENV`. Cero pasos manuales por entorno.
+- IF alguno de esos secretos no se puede leer del Vault, THEN THE SYSTEM SHALL fallar el paso «Render .env» **nombrando la clave ausente**. Es fail-fast deliberado y seguro: ocurre antes del `pull` y del `up`, así que la VM sigue sirviendo la versión anterior. La causa más probable es un OCID olvidado en la enumeración de la policy del runner.
+- THE SYSTEM SHALL NOT incluir las variables `BOOTSTRAP_*` ni `SEED_*` en ese `.env`: el paso lo **trunca y lo regenera** en cada ejecución con solo lo que la aplicación necesita en runtime. Los comandos que las requieren se ejecutan pasándolas en línea (procedimiento en `RUNBOOK-seed-demo.md`).
 
 ## Key files
 
