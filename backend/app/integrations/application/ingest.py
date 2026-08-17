@@ -1,11 +1,11 @@
 """The one place a `ReservationDTO` becomes a reservation (R2.4, R2.5, R3, R4, design D9).
 
-Both ingest routes — the PMS sync and the CSV import — go through `ReservationIngestor`, so
-idempotency, guest linking, timeline events and per-row error reporting behave identically
-whichever door the data came in by. Two copies of this logic would drift on exactly the
-detail that matters: whether a row already seen is created again.
+All three ingest routes — the PMS sync, the CSV import and the demo seed — go through
+`ReservationIngestor`, so idempotency, guest linking, timeline events and per-row error
+reporting behave identically whichever door the data came in by. Two copies of this logic
+would drift on exactly the detail that matters: whether a row already seen is created again.
 
-How a property is resolved is the ONLY difference between the two routes, so it is a
+How a property is resolved is the ONLY difference between the three routes, so it is a
 parameter (`resolve_property`), not a branch inside.
 """
 

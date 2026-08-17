@@ -27,12 +27,54 @@ la comprobación va antes de abrir transacción.
 | Reservas | Tres sobre REDES11: una pasada (`DIRECT`, hoy−10 → hoy−7), una activa (`AIRBNB`, hoy−2 → hoy+1) y una próxima (`BOOKING`, hoy+3 → hoy+7) |
 | Huéspedes | Pedro López, John Smith y María García |
 | Plantilla de limpieza | La de §7.10: 18 tareas y 6 fotos obligatorias, para las dos viviendas |
+| Incidencias | Las tres de §27: WiFi lento y código de acceso en REDES11, lavadora ruidosa en PAJARITOS8 |
+| Limpieza | La del checkout de la estancia pasada, **cerrada**: 18 ítems marcados y 6 fotos subidas |
 
-Lo que **no** siembra, y no es un olvido: las tres incidencias de §27 (las define `maintenance`,
-que aún no existe) y los estados avanzados que §27 dibuja —`CHECKED_IN_ESTIMATED`, `COMPLETED`,
-la limpieza cerrada con fotos—. Esos no se asignan: se **alcanzan**, por la máquina de estados y
-por el scheduler de `celery-jobs`. Sembrarlos a mano sería falsificar el recorrido que la demo
-existe para enseñar.
+## Y luego hace correr el reloj
+
+Desde `seed-data-demo-extension` el comando no entrega un dataset quieto: después de sembrar,
+**reproduce los hechos que §27 describe, en el orden en que habrían ocurrido y por las mismas vías
+que los produciría el sistema en marcha**. Nada de esto se escribe a mano en una columna.
+
+| Cuándo | Qué ocurre | Por dónde |
+|---|---|---|
+| hoy | La estancia `DIRECT` se confirma | `UpdateReservationUseCase` |
+| hoy−10 | Entra Pedro López: ventana de check-in y check-in | los disparadores de reloj de `celery-jobs` |
+| hoy−7 | Sale, y su salida **provisiona la limpieza** y se la asigna a la limpiadora | el aprovisionador del checkout |
+| hoy−7 | La limpiadora acepta, empieza, marca 18 ítems, sube 6 fotos y cierra | los casos de uso de `cleaning` |
+| hoy−2 | Entra John Smith, y su estancia pasa a `CHECKED_IN_ESTIMATED` | reloj + `UpdateReservationUseCase` |
+| hoy | Se crean las tres incidencias y **el clasificador** les pone categoría y severidad | `maintenance` |
+
+**Los disparadores de reloj van por tenant, no por vivienda**, porque son los mismos que el
+scheduler ejecuta cada pocos minutos y ésa es su unidad. En un tenant recién bootstrapeado eso son
+exactamente las dos viviendas de la demo; en uno que ya tuviera viviendas propias, el comando
+también las haría avanzar si estuvieran en un estado que admita el disparador. Otra razón para
+correr `seed-demo` sobre el tenant que `bootstrap` acaba de crear y no sobre uno en uso.
+
+**El orden es contrato y no presentación.** Sembrar las incidencias antes que las estancias deja
+REDES11 en `MAINTENANCE_REQUIRED` desde el primer paso, y desde ahí la máquina de estados no admite
+la apertura de la ventana de check-in: el dataset acabaría en el mismo estado final con la mitad
+del recorrido perdido, sin que nada fallara. Hay un test que afirma la secuencia entera de
+transiciones por ese motivo.
+
+## Tres cosas que la demo enseña y que no son defectos
+
+**REDES11 abre en `MAINTENANCE_REQUIRED`.** Hay un huésped dentro, una incidencia de acceso de
+severidad `HIGH` y un técnico asignado, así que la vivienda aparece como no reservable — y eso es
+correcto, no un fallo del seed. El **recorrido** (ventana de check-in, ocupada, limpieza, ocupada
+otra vez) está en el **timeline**, que es donde la demo lo cuenta; el estado operacional es la foto
+final, no la historia.
+
+**Las incidencias 1 y 3 quedan en `CLASSIFIED` y no en el `OPEN` que §27 dibuja.** `classify` es la
+única puerta de salida de `OPEN`, y el job de beat clasifica cualquier incidencia abierta cada cinco
+minutos: una sembrada en `OPEN` habría cambiado sola al poco de mirarla, y un dataset que cambia
+solo no es un dataset. La 2 sí queda en el `ASSIGNED` que §27 pide.
+
+**`make seed-demo` depende de red y de credenciales cuando el tenant guarda sus ficheros en `S3`**
+—el caso de `dev` desde `object-storage-provisioning`—, porque la limpieza sube seis fotos de
+verdad y el almacenamiento `S3` **nunca** cae de vuelta al disco local. Si falta el bucket, la
+región o la credencial, el comando lo dice y **sale antes de escribir nada**. Con `storage_type`
+en `LOCAL` —lo que trae cualquier tenant nuevo, y el caso de tu portátil— no cambia nada.
 
 ## Las credenciales son tuyas, no del comando
 
@@ -94,16 +136,41 @@ rotas a propósito, y sus datos ya divergen de §27 (dice `adults: 2` donde §27
 dos, ninguno está mal — son cosas distintas. Y las propiedades sembradas **no** llevan
 `pms_external_id`, precisamente para que `make pms-sync` no importe las del mock encima de éstas.
 
-**Quién figura como autor.** Todo lo que el comando escribe queda atribuido al `TENANT_OWNER`, en
-`audit_logs` y en `timeline_events`. Los casos de uso exigen una identidad y un comando no tiene la
-suya, así que se elige la única cuenta cuya existencia el tenant garantiza.
+**Quién figura como autor, que ya no es una sola persona.** Hasta que el dataset incluyó trabajo de
+campo, todo lo que el comando escribía iba a nombre del `TENANT_OWNER`. Ahora cada escritura lleva
+el actor que su caso de uso exige, y no por gusto:
+
+- **la limpieza es de la limpiadora**, porque aceptar, empezar, cerrar y subir fotos exigen que
+  quien actúa sea la persona asignada — el `TENANT_OWNER` sería rechazado;
+- **los disparadores de reloj van como `SYSTEM`**, que es lo que hace el scheduler;
+- **la clasificación no lleva actor ninguno**, y en el timeline figura como `AI`: no hubo persona
+  detrás, y ponerla diría que la propietaria clasificó tres incidencias que no miró;
+- **todo lo demás sigue siendo del `TENANT_OWNER`**, incluidas el alta de las incidencias y la
+  asignación al técnico.
+
+**Borrar a mano la estancia pasada cuesta más que antes.** Ahora arrastra su limpieza: la tarea, sus
+18 ítems y sus 6 fotos apuntan a ella, así que la base de datos se niega a borrarla suelta. La
+receta sigue siendo la de arriba — tirar la base y volver a sembrar.
+
+**Una segunda ejecución no vuelve a subir las fotos.** La comprobación es una sola: si la limpieza
+de la demo ya está cerrada, la fase no hace nada. Importa porque las filas de una siembra fallida se
+revierten y **los objetos del almacenamiento no**: si algo falla después de subirlas, el comando
+enumera en su salida las claves que quedaron sin fila que las referencie. Enumerar no es limpiar —
+borrarlas es trabajo de operación, no del seed.
+
+Y conviene saberlo antes de buscar un borrón y cuenta nueva: **`docker compose down -v` no toca esos
+objetos**. Se lleva el volumen de Postgres, así que las filas desaparecen, pero los ficheros viven en
+el volumen del almacenamiento local —y en `dev`, directamente en el bucket—, de modo que la
+siguiente siembra empieza con la base vacía y el almacén no. No rompe nada: las claves llevan el
+`task_id` y el `photo_id` nuevos, así que no colisionan; simplemente quedan ahí ocupando sitio, y
+sólo un borrado explícito se los lleva.
 
 ## Cuando falla
 
 | Código | Qué pasó |
 |---|---|
 | 0 | Sembrado, o no había nada que hacer |
-| 1 | Falta configuración, los dos correos `SEED_*` son el mismo, no existe el tenant, falta el owner o el manager, o un correo ya pertenece a otro tenant |
+| 1 | Falta configuración, los dos correos `SEED_*` son el mismo, la zona horaria del tenant no se resuelve, el tenant guarda en `S3` y le falta bucket, región o credenciales, no existe el tenant, falta el owner o el manager, un correo ya pertenece a otro tenant, o **el clasificador no produce la categoría y la severidad que §27 declara** |
 | 2 | Fallo inesperado. Se imprime **solo la clase** de la excepción, nunca su detalle |
 
 Ese código 2 es deliberadamente parco: los errores de SQLAlchemy anexan la sentencia **con sus
