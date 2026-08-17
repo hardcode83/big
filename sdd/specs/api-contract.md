@@ -194,7 +194,7 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 66 de las 77 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 73 de las 84 operaciones lo
   referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
@@ -211,6 +211,11 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
 - **Las doce rutas de `maintenance` entraron todas autenticadas y con permiso declarado**: once
   bajo `/api/v1/incidents` y `POST /api/v1/owner-approvals/{approval_id}/respond`. Ninguna tocó
   el allowlist anónimo, que sigue teniendo las once entradas de arriba.
+- **Las siete rutas de `messaging` entraron igual** (2026-08-16), todas bajo
+  `/api/v1/conversations` y repartidas entre `READ_CONVERSATIONS` y `MANAGE_CONVERSATIONS`
+  ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación
+  con un huésped se lee y se escribe siempre desde una sesión autenticada, porque el huésped no
+  es quien llama — llama el panel, o la API, con una persona detrás.
 
 ## Key files
 

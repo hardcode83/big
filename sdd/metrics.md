@@ -43,4 +43,4 @@
 | maintenance | new, design, tasks, run, review, ship, archive | 422794 | 1256742 | 314898581 | 213.2853 | 2026-08-15 | 2026-08-15 |
 | object-storage-provisioning | new, design, tasks, run, review, ship, archive | 302167 | 782617 | 228923593 | 153.8390 | 2026-08-15 | 2026-08-16 |
 | cleaning-completion-evidence-gatherer | new, design, tasks, run, review, ship, archive | 89997 | 317370 | 41275072 | 36.8541 | 2026-08-16 | 2026-08-16 |
-| messaging-ai | new, design, tasks, run, review | 510576 | 1159645 | 281845735 | 183.9500 | 2026-08-15 | — |
+| messaging-ai | new, design, tasks, run, review, ship, archive | 598014 | 1359371 | 344576885 | 229.7562 | 2026-08-15 | 2026-08-17 |

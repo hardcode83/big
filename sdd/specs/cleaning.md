@@ -143,8 +143,12 @@ no declara las rutas.
 - WHEN un `PROPERTY_MANAGER` valida manualmente una tarea cerrada, THE SYSTEM SHALL registrar
   `validated_by_user_id` y `validated_at` y admitir los veredictos `PASSED`, `FAILED` y `WAIVED`,
   rechazando `PENDING` con `409`.
-- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir: la validación automática depende
-  de `MockAIAdapter`, que llega con `messaging-ai`.
+- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir: no existe puerto que valide una
+  foto. `messaging-ai` entregó su `MockAIAdapter` el 2026-08-16, pero su puerto `AIAdapter`
+  declara **exactamente dos métodos** —`classify_message` y `generate_response`— y omite
+  `validate_cleaning_photo` a propósito ([`messaging-ai.md`](messaging-ai.md) R2): declarar los
+  seis del PRD §13 y dejar cuatro lanzando `NotImplementedError` rompería Liskov. La validación
+  automática de fotos necesita un puerto propio de `cleaning`, que nadie ha construido.
 
 ### Fotos de la limpieza
 
@@ -220,8 +224,9 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - THE SYSTEM SHALL registrar cada subida en `AuditLog` con actor e IP, contra la propia foto como
   entidad y no contra la tarea, y **sin** `storage_key` entre los campos auditables: la clave
   interna no entra en la columna diseñada para volcarse.
-- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos: la validación
-  automática llega con `messaging-ai`. No hay borrado de fotos por ninguna vía de la API.
+- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos, por el mismo
+  motivo: el `AIAdapter` que entregó `messaging-ai` no declara `validate_cleaning_photo`, y
+  `cleaning` no tiene puerto propio para ello. No hay borrado de fotos por ninguna vía de la API.
 
 ### Notificación y SLA
 

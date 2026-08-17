@@ -154,6 +154,16 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
 - WHEN se acepten datos de timeline, THE SYSTEM SHALL usar los tipos de dominio
   reales y no SHALL convertir strings UUID arbitrarios ni introducir validación de
   infraestructura.
+- WHERE una capacidad emite eventos que no son `PROPERTY_STATE_CHANGED`, THE SYSTEM SHALL
+  construirlos igualmente con `TimelineEventFactory.create`, que es la única vía. Los cuatro
+  eventos de mensajería —`GUEST_MESSAGE_RECEIVED`, `AI_RESPONSE_SENT`,
+  `AI_ESCALATED_TO_HUMAN` y `HUMAN_RESPONSE_SENT`— ganaron escritor con
+  [`messaging-ai.md`](messaging-ai.md) el 2026-08-16; hasta entonces el enum los declaraba sin
+  que nadie los escribiera.
+- WHERE el evento procede de un mensaje de huésped, THE SYSTEM SHALL llevar **título
+  constante** e identificadores y enums cerrados en `metadata`, y NEVER SHALL copiar en él el
+  contenido del mensaje. El motivo es estructural: `timeline_events` es append-only, así que una
+  palabra que escribió el huésped no podría redactarse después.
 
 ### Pureza y verificación
 

@@ -6,4 +6,6 @@
 | 2026-08-16 | design | claude-opus-5 | 114 | 57008 | 9324821 | 7.9423 |  |
 | 2026-08-16 | tasks | claude-opus-5 | 42 | 27307 | 1924187 | 3.0336 |  |
 | 2026-08-16 | run | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 420463 | 886576 | 242805718 | 151.2528 | incl. subagents |
-| 2026-08-16 | review | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 89219 | 129594 | 21578301 | 13.5159 | incl. subagents |
+| 2026-08-16 | review | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 112002 | 219692 | 54696130 | 33.4470 | incl. subagents |
+| 2026-08-16 | ship | claude-opus-5 | 286 | 22713 | 10058307 | 8.8843 |  |
+| 2026-08-16 | archive | claude-opus-5 | 64369 | 86915 | 19555014 | 16.9908 | incl. subagents |

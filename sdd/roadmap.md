@@ -104,7 +104,7 @@ Categorías:
   needs: pms-beds24-adapter · deferred-until: los canales OTA reales se conecten a la cuenta de Beds24 (misma ventana de corte que `beds24-webhook-cutover-measurement`, sin fecha), porque sin canal no hay conversación que leer ni reserva de OTA a la que responder · size: M · kind: feature
 - [ ] channex-validation-limits — [TECH] **corregir en las specs lo que la validación con Channex puede y no puede hacer**.
   completes: channex-staging-adapter · size: S · kind: tech
-- [ ] messaging-ai — [BE] Conversation + Message + MockAIAdapter + escalación (PRD §26.12, §13).
+- [x] messaging-ai — [BE] Conversation + Message + MockAIAdapter + escalación (PRD §26.12, §13). → changes/archive/2026-08-17-messaging-ai/
   needs: pms-beds24-adapter
 - [x] dashboard-web-frontend — [FE] dashboard FE (property cards, detalle, timeline) adelantado contra mocks/fixtures mientras dashboard-web (backend agregado) sigue su orden natural en el roadmap … → changes/archive/2026-08-01-dashboard-web-frontend/
 - [x] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17). → changes/archive/2026-08-08-access-notifications/

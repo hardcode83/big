@@ -7,8 +7,10 @@ desde el `OPEN` que deja cualquier fuente hasta `RESOLVED` o `CANCELLED`: clasif
 por un puerto propio, aprobación de la propietaria cuando el gasto supera el umbral del tenant,
 asignación a un técnico con su plazo de SLA, el ciclo de transiciones que conduce el técnico, y la
 recomposición del estado operacional de la propiedad. Es el único escritor de mutaciones sobre
-`incidents` y `owner_approvals`; la creación anónima sigue viviendo en el portal del huésped
-([`guest-portal-api.md`](guest-portal-api.md)).
+`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por dos vías: la anónima
+del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)) y, desde el 2026-08-16, una
+conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
+([`messaging-ai.md`](messaging-ai.md)).
 
 ## Requirements
 
@@ -198,8 +200,16 @@ recomposición del estado operacional de la propiedad. Es el único escritor de 
   `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `PATCH` de triaje y los `POST` de
   `classify`, `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve` y `cancel`) y
   `POST /api/v1/owner-approvals/{approval_id}/respond`.
-- THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo: la única
-  superficie que las crea es la anónima del portal del huésped.
+- THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo. Las dos
+  superficies que las crean son la anónima del portal del huésped y el pipeline de mensajería.
+- WHERE una conversación produce una incidencia, THE SYSTEM SHALL suministrar el implementador
+  (`ReportIncidentFromConversationUseCase`) de un puerto que declara `messaging` —nunca al revés—,
+  y ese implementador SHALL recibir una `CallerOwnedUnitOfWork` y NEVER SHALL comitear: el único
+  commit sigue siendo el del pipeline que la abrió.
+- WHERE la incidencia nace de una conversación, THE SYSTEM SHALL crearla `OPEN` con
+  `ai_classification` sin fijar, de modo que la recoja el job de R3 en su siguiente tick, y NEVER
+  SHALL clasificarla en la misma petición. `title` sale de un catálogo cerrado de constantes y
+  `description` es el mensaje del huésped literal.
 - THE SYSTEM SHALL conceder cuatro permisos —`READ_INCIDENTS`, `MANAGE_INCIDENTS`,
   `EXECUTE_INCIDENTS`, `RESPOND_OWNER_APPROVALS`— repartidos así:
 
