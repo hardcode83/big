@@ -241,7 +241,7 @@ CAPTURES: dict[str, str] = {
     "messages": "/bookings/messages",
 }
 
-SUBCOMMANDS = ("probe", "capture", "report", "provoke", "webhook", "window")
+SUBCOMMANDS = ("probe", "capture", "report", "provoke", "webhook", "window", "messages")
 
 # The subcommands that WRITE, and what they do — used to refuse without `--confirm-writes`
 # before the credential is even read. Everything else in this script is a read.
@@ -249,6 +249,9 @@ WRITING_SUBCOMMANDS = {
     "provoke": "it creates, modifies and cancels a booking",
     "webhook": "it changes where this property sends its booking data",
     "window": "it creates, modifies and cancels a booking to measure the modification window",
+    "messages": (
+        "it creates, modifies and cancels a booking, and writes messages onto it"
+    ),
 }
 
 # CONFIRMED 2026-08-04 (step 0): `POST /bookings` is the documented write endpoint, and the
@@ -262,6 +265,33 @@ BOOKINGS_WRITE_PATH = "/bookings"
 
 # The three events `provoke` causes, in order, to give R2.3 its minimum of three measurements.
 PROVOKE_ACTIONS = ("create", "modify", "cancel")
+
+# The messaging endpoint, and the open question of `beds24-messaging-adapter`.
+#
+# `pms-beds24-spike` measured a **GET** here and found it empty — "no hay conversación sin
+# canal" — and from that this repo concluded the whole capability waits for the cut-over
+# window. That conclusion covers reading an OTA thread; it says nothing about whether a
+# message can be **written** onto a channel-less booking. If `source: guest` is accepted, the
+# inbound path of `messaging-ai` has a real source before any listing is connected, and
+# `beds24-messaging-adapter` stops being blocked in full.
+MESSAGES_PATH = "/bookings/messages"
+
+# Both directions, and the control matters as much as the subject: `host` is the one the
+# provider has every reason to accept (it is how a host replies), so `host` accepted with
+# `guest` refused means the limit is about *direction*, while both refused means it is about
+# the absent channel. One of those two findings unblocks work and the other does not.
+MESSAGE_SOURCES = ("guest", "host")
+
+# ASSUMPTION: the request body of `POST /bookings/messages` is not documented in anything this
+# repo has measured — ADR 0006 records the endpoint and its `source` vocabulary
+# (`host | guest | internalNote | system`) and no more. Rather than guess once and report a
+# failure that means "wrong field name" as if it meant "not supported", the probe tries the
+# plausible spellings in order and stops at the first the provider does not reject.
+#
+# Retrying is free: MEASURED 2026-08-04 in `verify_window`, a **rejected** request consumes no
+# credit, and `_envelope_failure` returns the provider's own field-level message — which is
+# what turns a refusal into the answer of what the right shape is.
+MESSAGE_BODY_SHAPES = ("flat", "nested")
 
 
 class QuotaExhausted(RuntimeError):
@@ -1031,6 +1061,115 @@ def verify_window(
     return provoke(bench, room_id=room_id, observer=observe)
 
 
+def probe_messages(bench: Beds24Probe, *, room_id: str) -> list[dict[str, Any]]:
+    """Can a message be written onto a booking that has no OTA channel?
+
+    **The question this answers, and why it is worth a write.** `pms-beds24-spike` measured a
+    GET on `/bookings/messages` against a channel-less account, got an empty list, and recorded
+    "no hay conversación sin canal". Every downstream decision then treated the whole of
+    `beds24-messaging-adapter` as blocked until the cut-over window of the two Madrid listings —
+    a date nobody controls. But an empty GET only proves there is nothing to *read*. If the
+    provider accepts a POST with `source: guest`, then `messaging-ai`'s inbound path has a real
+    source today, and the deferral shrinks from "the whole capability" to "reading an OTA
+    thread". That is the difference between exercising the pipeline against a real provider
+    before production and not exercising it at all.
+
+    **It records rather than asserts**, the same contract as `verify_window`. A refusal is a
+    finding, not a crash: it tells `beds24-messaging-adapter` that its inbound path needs the
+    channel, which is exactly the thing worth knowing early. The only outcome treated as an
+    error is one that would leave state behind, and there is none here — `provoke` cancels the
+    booking whatever the messages did.
+
+    **One booking-creating path, not two.** This hooks into `provoke`'s observer for the reason
+    that function documents: "Creating bookings from two places is how a run ends up leaving one
+    behind". The messages are written after `create`, while the booking is confirmed, and read
+    back before the cycle cancels it.
+    """
+    def observe(action: str, booking_ref: str | None) -> list[dict[str, Any]]:
+        # Only after `create`: the booking is confirmed and still exists. Writing to it after
+        # `cancel` would measure a different question than the one asked.
+        if action != "create" or booking_ref is None:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        accepted_shape: str | None = None
+
+        for source in MESSAGE_SOURCES:
+            for shape in [accepted_shape] if accepted_shape else MESSAGE_BODY_SHAPES:
+                # Synthetic and obviously so, in both spellings. Nothing here is a real guest's
+                # words, so no rule-11 sink is involved and the content is safe in the log.
+                text = f"Probe message from {source} (beds24_probe, synthetic)"
+                if shape == "flat":
+                    body: Any = [
+                        {"bookingId": booking_ref, "message": text, "source": source}
+                    ]
+                else:
+                    body = [
+                        {"id": booking_ref, "messages": [{"message": text, "source": source}]}
+                    ]
+
+                response = bench.request("POST", MESSAGES_PATH, json_body=body)
+                rejected = _envelope_failure(response)
+                record = build_cost_record(
+                    endpoint=MESSAGES_PATH,
+                    method="POST",
+                    shape=f"write-{source}-{shape}",
+                    status=response.status_code,
+                    headers=response.headers,
+                    booking_ref=booking_ref,
+                )
+                record["message_source"] = source
+                record["body_shape"] = shape
+                # The provider's field-level message, never a value we sent. It is what makes a
+                # wrong guess about the body distinguishable from an unsupported operation —
+                # the whole reason this probe loops over shapes.
+                record["write_rejected"] = rejected
+                record["write_accepted"] = response.status_code < 300 and rejected is None
+                rows.append(record)
+
+                if record["write_accepted"]:
+                    accepted_shape = shape
+                    break
+
+            # Read back after each source, so a message that was accepted but is invisible to
+            # the reader is distinguishable from one that was never written. That distinction
+            # decides whether the adapter can round-trip or only push.
+            read = bench.request("GET", MESSAGES_PATH, {"bookingId": booking_ref})
+            read_record = build_cost_record(
+                endpoint=MESSAGES_PATH,
+                method="GET",
+                shape=f"read-after-{source}",
+                status=read.status_code,
+                headers=read.headers,
+                booking_ref=booking_ref,
+            )
+            read_record["message_source"] = source
+            read_record["messages_returned"] = _message_count(read)
+            rows.append(read_record)
+
+        return rows
+
+    return provoke(bench, room_id=room_id, observer=observe)
+
+
+def _message_count(response) -> int | None:
+    """How many messages the read returned. `None` when the question is unanswerable.
+
+    `None` rather than `0` for a non-200 or an unparseable body, for the reason
+    `_contains_booking` gives: "the listing does not show it" and "we could not ask" are
+    different findings, and reporting the second as the first is how a probe invents evidence.
+    """
+    if response.status_code >= 300:
+        return None
+    try:
+        payload = response.json()
+    except ValueError:
+        return None
+    if isinstance(payload, dict):
+        payload = payload.get("data")
+    return len(payload) if isinstance(payload, list) else None
+
+
 def _contains_booking(response, booking_ref: str | None) -> bool | None:
     """Whether the listing carries this booking id. `None` when the question is unanswerable.
 
@@ -1267,6 +1406,57 @@ def _reject_unknown_arguments(argv: list[str]) -> None:
             )
 
 
+def _report_messages(records: list[dict[str, Any]]) -> None:
+    """State the finding in the terminal, and state what it means for the roadmap.
+
+    The jsonl is the evidence, but a probe whose verdict only exists in a log file gets read as
+    "it ran" — and this one exists to move a roadmap entry, so it says which way.
+    """
+    guest_ok = any(
+        r.get("write_accepted") and r.get("message_source") == "guest" for r in records
+    )
+    host_ok = any(
+        r.get("write_accepted") and r.get("message_source") == "host" for r in records
+    )
+
+    for record in records:
+        if "write_accepted" in record:
+            verdict = "ACEPTADO" if record["write_accepted"] else "rechazado"
+            detail = record.get("write_rejected") or ""
+            print(
+                f"  {record['shape']}: {verdict} (HTTP {record['status']})"
+                + (f" — {detail}" if detail else "")
+            )
+        elif "messages_returned" in record:
+            count = record["messages_returned"]
+            seen = "no se pudo saber" if count is None else f"{count} mensaje(s)"
+            print(f"  {record['shape']}: la lectura devuelve {seen}")
+
+    print()
+    if guest_ok:
+        print(
+            "  VEREDICTO: se puede inyectar un mensaje de huésped sin canal OTA.\n"
+            "  El camino de entrada de messaging-ai tiene fuente real hoy, así que\n"
+            "  beds24-messaging-adapter deja de estar bloqueado entero: lo que sigue\n"
+            "  esperando a la ventana de corte es LEER un hilo de OTA, no escribir."
+        )
+    elif host_ok:
+        print(
+            "  VEREDICTO: 'host' se acepta y 'guest' no. El límite es de DIRECCIÓN,\n"
+            "  no del canal ausente. Se puede ejercitar el envío pero no simular la\n"
+            "  entrada del huésped; beds24-messaging-adapter sigue necesitando el canal\n"
+            "  para su mitad de entrada."
+        )
+    else:
+        print(
+            "  VEREDICTO: no se acepta ninguna escritura sin canal. Confirma el\n"
+            "  aplazamiento de beds24-messaging-adapter tal y como está en el roadmap.\n"
+            "  Si el motivo del rechazo nombra un CAMPO y no la ausencia de canal, la\n"
+            "  forma del cuerpo es la culpable: corrige MESSAGE_BODY_SHAPES y repite\n"
+            "  (una petición rechazada no consume crédito)."
+        )
+
+
 def _refresh_token() -> str:
     token = os.environ.get(REFRESH_TOKEN_ENV, "").strip()
     if not token:
@@ -1342,7 +1532,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"beds24-probe: webhook {'cleared' if clearing else 'set to ' + url}")
         return 0
 
-    if subcommand in ("provoke", "window"):
+    if subcommand in ("provoke", "window", "messages"):
         room_id = _option(args, "--room=", "")
         if not room_id:
             raise SystemExit(
@@ -1353,6 +1543,8 @@ def main(argv: list[str] | None = None) -> int:
         assert_account_is_a_measurement_account(bench, room_id=room_id)
         if subcommand == "window":
             records = verify_window(bench, room_id=room_id)
+        elif subcommand == "messages":
+            records = probe_messages(bench, room_id=room_id)
         else:
             records = provoke(bench, room_id=room_id)
         existing = read_records(out_path) if out_path.exists() else []
@@ -1369,6 +1561,8 @@ def main(argv: list[str] | None = None) -> int:
                         f"  {record['shape']}: modifiedFrom la ve -> {seen} "
                         f"(HTTP {record['status']})"
                     )
+        if subcommand == "messages":
+            _report_messages(records)
         return 0
 
     requested = [a for a in args if a in CAPTURES] or list(CAPTURES)
