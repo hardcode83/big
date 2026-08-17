@@ -686,8 +686,46 @@ existe.
 
 ### Forma real de los payloads de mensaje
 
-**No medido.** `/bookings/messages` responde 200 pero llega vacío: no hay conversación sin canal.
-Mismo bloqueo que la latencia de webhooks.
+**No medido en lectura.** `/bookings/messages` responde 200 pero llega vacío: no hay conversación
+sin canal. Mismo bloqueo que la latencia de webhooks.
+
+**Pero eso midió un GET, y la pregunta que decide el aplazamiento es la del POST.** Un GET vacío
+prueba que no hay nada que *leer*; no dice nada sobre si el proveedor acepta que le **escribas**
+un mensaje sobre una reserva sin canal. Si acepta `source: guest`, el camino de entrada de
+`messaging-ai` tiene fuente real hoy y `beds24-messaging-adapter` deja de estar bloqueado entero
+— lo que seguiría esperando a la ventana de corte sería leer un hilo de OTA, no ejercitar el
+pipeline. Por eso existe el subcomando `messages`:
+
+```bash
+export BEDS24_REFRESH_TOKEN=...   # cuenta de medición, nunca la de los pisos
+docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend \
+  uv run python scripts/beds24_probe.py messages \
+    --room=713992 --confirm-writes --out=/app/beds24-cost.jsonl
+```
+
+Lo que conviene saber antes de correrlo:
+
+- **Escribe**, así que exige `--confirm-writes` y pasa por el mismo guard de cuenta que
+  `provoke` — aborta si la cuenta no tiene exactamente una propiedad.
+- **Crea la reserva enganchándose al `observer` de `provoke`**, no con un ciclo propio. Hay una
+  sola vía de creación de reservas en este script a propósito, y `provoke` cancela al final pase
+  lo que pase.
+- **Prueba `guest` y `host`.** El control decide el significado: `host` aceptado y `guest`
+  rechazado significa que el límite es de *dirección*; ambos rechazados, que es del canal
+  ausente. Solo el primero de esos dos escenarios desbloquea trabajo.
+- **El cuerpo de `POST /bookings/messages` no está documentado** en nada que hayamos medido —
+  ADR 0006 registra el endpoint y su vocabulario de `source` y nada más. El sondeo prueba dos
+  formas y para en la primera que no rechacen; una petición rechazada no consume crédito y
+  `_envelope_failure` devuelve el mensaje **por campo** del proveedor, que es lo que convierte
+  un rechazo en la respuesta de cuál era la forma correcta.
+- **Ojo al `201` que rechaza.** El veredicto va en el cuerpo, no en el estado; leer solo el
+  status reportaría «la mensajería funciona sin canal», que es justo la respuesta equivocada en
+  la única pregunta que esto existe para responder. Hay test dedicado.
+
+**Resultado: pendiente de ejecutar.** Cuando se corra, el veredicto se escribe aquí y, si sale
+que `guest` se acepta, hay que revisar el `deferred-until:` de `beds24-messaging-adapter` en el
+roadmap, que hoy afirma que sin canal «no hay conversación que leer ni reserva de OTA a la que
+responder».
 
 ### Límite de tasa
 
