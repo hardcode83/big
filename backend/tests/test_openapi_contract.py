@@ -91,6 +91,13 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # is not under `/cleaning-tasks/` — the URL carries the photo id alone, never the
         # storage key (R3.2) and never the task.
         "cleaning-photos",
+        # `maintenance`: the ten incident routes of design D14 plus the owner's answer. Two
+        # prefixes because they are two aggregates — one incident can raise two approvals,
+        # so the approval has an identity the incident cannot stand in for. There is
+        # deliberately no `POST /incidents`: every source that creates one has a declared
+        # owner elsewhere.
+        "incidents",
+        "owner-approvals",
         # `access-notifications`: the five access-record routes of PRD §15 and the in-app
         # inbox that makes `IN_APP` delivery a fact rather than a claim (design D5/D6).
         "access-records",
@@ -118,6 +125,10 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # the anonymous one in the singular. That the two prefixes differ by a letter is worth
         # seeing here rather than discovering from a route that ended up on the wrong router.
         "guest",
+        # `messaging-ai`: the seven inbox routes of PRD §16, all under one prefix because
+        # `Conversation` is the aggregate and a message has no identity outside its thread —
+        # unlike `incidents`/`owner-approvals`, which are two aggregates and therefore two.
+        "conversations",
         "provenance",
     }
 

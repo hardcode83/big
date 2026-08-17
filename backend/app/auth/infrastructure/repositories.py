@@ -98,9 +98,34 @@ class SqlAlchemyUserRepository:
     async def find_by_email_globally(self, email: str) -> User | None:
         """ONE OF THE THREE unscoped queries in the system (design D16).
 
-        Its callers are the anonymous login and the bootstrap conflict check; both go
-        through here rather than writing their own, so a grep for this method name
-        enumerates every cross-tenant read *this* one serves.
+        **Its callers are whatever `grep -rn find_by_email_globally backend/app` returns**,
+        and that sentence is deliberately not a list. Every caller goes through here rather
+        than writing its own unscoped select, which is what makes the grep exhaustive — so
+        an enumeration adds nothing a reader cannot get in one command, and subtracts the
+        one thing they need, which is being right. It used to name two ("the anonymous
+        login and the bootstrap conflict check") while there were five; `seed-data-demo`'s
+        security panel found it stale rather than incomplete, having already gone stale
+        twice for the count below. A list nobody can be made to update is worse than no
+        list.
+
+        **One condition binds every caller:** this lookup must run on a session that is NOT
+        marked with a tenant. "Unscoped" is a property of the STATEMENT, not of this method
+        — mark the session and the `do_orm_execute` listener of `app/core/db.py` adds the
+        tenant clause here like anywhere else, this returns `None` for a neighbour's
+        address, and the caller learns about the conflict from `uq_users_lower_email`
+        instead of from its own message.
+
+        **The condition is on the SEQUENCE, and deliberately not on the kind of caller.**
+        The tempting shortcut is to derive it from the entry point — "`get_authenticated_
+        request` is the only thing that marks a session in a request, so an anonymous route
+        never has one" — and that shortcut is false: `SessionTenantBinder.bind`
+        (`app/guests/infrastructure/portal_repositories.py`) marks the request's session on
+        the guest-portal routes, which are anonymous. Believing it would license a caller
+        placed anywhere after that bind, whose statement is then silently tenant-scoped and
+        which therefore reports no conflict at all — the failure this method exists to
+        avoid. So the rule is the unglamorous one: **this lookup must run before anything
+        binds that session, whoever binds it.** `app/cli/seed_demo.py` both reads and binds,
+        and reads first, which is the shape any caller that binds has to copy.
 
         The other two, both added for the same structural reason — an anonymous caller
         presents a credential and the row is what resolves the tenant, so there is nothing

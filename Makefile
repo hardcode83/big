@@ -27,7 +27,7 @@ COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.work
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh bootstrap openapi check-version-parity db-clean-test
+.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity db-clean-test
 
 up:
 	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
@@ -130,6 +130,12 @@ up:
 # therefore works against the deployed prod image — see RUNBOOK §6.5.
 bootstrap:
 	$(COMPOSE) exec backend python -m app.cli.bootstrap
+
+# The demo dataset of PRD §27. Requires `bootstrap` first — it completes the tenant that
+# command created and refuses to run without it. Not part of `up` for the same reason
+# `bootstrap` is not (DoD §28.20), and `python -m` for the same reason too.
+seed-demo:
+	$(COMPOSE) exec backend python -m app.cli.seed_demo
 
 # Regenera backend/openapi.json, el contrato que consume el frontend. Ejecútalo cuando
 # cambies la forma de una respuesta: el workflow api-contract lo comprueba en cada PR y

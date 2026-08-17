@@ -56,6 +56,22 @@ class Permission(str, enum.Enum):
     READ_CLEANING_TEMPLATES = "READ_CLEANING_TEMPLATES"
     MANAGE_CLEANING_TEMPLATES = "MANAGE_CLEANING_TEMPLATES"
 
+    # Added by `maintenance` (design D13). The same triple split as cleaning above, with one
+    # deliberate difference: **`EXECUTE_INCIDENTS` is the manager's too**, because R4.5 says
+    # so literally — "un `PROPERTY_MANAGER` sí puede, para desatascar". The assignee
+    # restriction therefore rides the role and not the permission, in
+    # `IncidentActor.restrict_to_technician_id`, which is what puts it in the repository
+    # filter where no router can forget it (R5.3).
+    #
+    # `RESPOND_OWNER_APPROVALS` is the owner's alone (R2.6). There is deliberately **no**
+    # `READ_OWNER_APPROVALS` and no listing route: the dashboard already exposes pending
+    # approvals per property, and this catalogue carries only the permissions a change
+    # actually applies.
+    READ_INCIDENTS = "READ_INCIDENTS"
+    MANAGE_INCIDENTS = "MANAGE_INCIDENTS"
+    EXECUTE_INCIDENTS = "EXECUTE_INCIDENTS"
+    RESPOND_OWNER_APPROVALS = "RESPOND_OWNER_APPROVALS"
+
     # Added by `access-notifications`.
     #
     # `READ_OWN_NOTIFICATIONS` is self-service and not a role capability: the endpoint
@@ -95,6 +111,16 @@ class Permission(str, enum.Enum):
     # that writes guest PII, and every future holder of "can edit bookings" would inherit it
     # by accident.
     MANAGE_GUEST_ACCESS_TOKENS = "MANAGE_GUEST_ACCESS_TOKENS"
+
+    # Added by `messaging-ai` (design D17). The read/manage pair of `reservations` and
+    # `properties`, and the split is cited rather than invented: PRD §6 gives
+    # `PROPERTY_MANAGER` "operar reservas, limpiezas, incidencias, **conversaciones**".
+    #
+    # **No third `EXECUTE_CONVERSATIONS`**, unlike `cleaning` and `maintenance`: there is no
+    # role that answers a guest and cannot also manage the inbox, and this catalogue carries
+    # only the permissions a change actually applies.
+    READ_CONVERSATIONS = "READ_CONVERSATIONS"
+    MANAGE_CONVERSATIONS = "MANAGE_CONVERSATIONS"
 
 
 _SELF_SERVICE = frozenset(
@@ -149,6 +175,33 @@ _LEGAL_MANAGE = frozenset(
 # not a reason to hand out a portal credential — and `SUPER_ADMIN` stays out for the same
 # reason it holds no other operational permission inside a tenant (see the note below).
 _GUEST_ACCESS_TOKEN_MANAGE = frozenset({Permission.MANAGE_GUEST_ACCESS_TOKENS})
+# `maintenance` D13. Reading is for the owner, the manager and the technician; managing
+# (classifying by hand, triaging, assigning) is the manager's; executing the technician's
+# cycle is the technician's **and** the manager's, per R4.5. `CLEANER` gets none of the
+# four — a broken boiler is not part of doing a cleaning — and `SUPER_ADMIN` stays out for
+# the reason the note below gives about every other operational permission.
+_INCIDENT_READ = frozenset({Permission.READ_INCIDENTS})
+_INCIDENT_MANAGE = frozenset({Permission.READ_INCIDENTS, Permission.MANAGE_INCIDENTS})
+_INCIDENT_EXECUTE = frozenset({Permission.READ_INCIDENTS, Permission.EXECUTE_INCIDENTS})
+_OWNER_APPROVAL_RESPOND = frozenset({Permission.RESPOND_OWNER_APPROVALS})
+# `messaging-ai` D17. Reading is the owner's and the manager's; operating the inbox — creating
+# a conversation, writing into it, escalating, resolving — is the manager's alone.
+#
+# **The owner reads and does not operate, and that was weighed rather than assumed.** It was
+# put against the precedent of `_GUEST_ACCESS_TOKEN_MANAGE`, which the owner *does* get on the
+# argument that an owner of two flats without a manager would otherwise be unable to operate;
+# the design gate of 2026-08-16 resolved it the other way, for symmetry with `reservations` and
+# `properties` and because PRD §6 says it literally. The consequence is assumed and declared:
+# `MessageSenderType.OWNER` has no writer in this change, and the role→`sender_type` map of
+# D18 has a single entry. Whoever grants `MANAGE_CONVERSATIONS` to the owner adds the second.
+#
+# `CLEANER` and `TECHNICIAN` get neither — a guest's conversation is not part of doing a
+# cleaning or a repair — and `SUPER_ADMIN` stays out for the reason the note below gives about
+# every other operational permission inside a tenant.
+_CONVERSATION_READ = frozenset({Permission.READ_CONVERSATIONS})
+_CONVERSATION_MANAGE = frozenset(
+    {Permission.READ_CONVERSATIONS, Permission.MANAGE_CONVERSATIONS}
+)
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -197,6 +250,12 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # without a manager (PRD §1's scale) would otherwise have no way to let a guest
         # check in at all.
         | _GUEST_ACCESS_TOKEN_MANAGE
+        # Sees what is broken in her homes and answers the money questions; does not triage
+        # or assign, which PRD §12 and R1.4/R3.1 give to the manager.
+        | _INCIDENT_READ
+        | _OWNER_APPROVAL_RESPOND
+        # Sees what her guests are saying; does not answer them (D17).
+        | _CONVERSATION_READ
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -218,9 +277,17 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         | _ACCESS_MANAGE
         | _LEGAL_MANAGE
         | _GUEST_ACCESS_TOKEN_MANAGE
+        # Both, and that is the difference from cleaning: `_INCIDENT_MANAGE` is triage and
+        # assignment, `_INCIDENT_EXECUTE` is R4.5's "para desatascar".
+        | _INCIDENT_MANAGE
+        | _INCIDENT_EXECUTE
+        # PRD §6: "operar reservas, limpiezas, incidencias, **conversaciones**".
+        | _CONVERSATION_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
-    UserRole.TECHNICIAN: _SELF_SERVICE,
+    # Until `maintenance` this role held `_SELF_SERVICE` and nothing else: it existed and
+    # could do nothing. R5.2 asks for exactly what R3 and R4 need and nothing more.
+    UserRole.TECHNICIAN: _SELF_SERVICE | _INCIDENT_EXECUTE,
 }
 
 

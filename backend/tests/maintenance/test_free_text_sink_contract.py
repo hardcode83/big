@@ -143,6 +143,28 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
 
     The allowlist consequently names **two** modules rather than one, which is more honest: the
     use case composes the text and the adapter persists it, and both are the declared writer.
+
+    **And the gate was wrong a third time, which is the one that says why this keeps happening.**
+    `seed-data-demo-extension` (2026-08-17) made `app/cli/seed_demo.py` a writer of both columns,
+    and the gate did not see it: it is not under `maintenance/`, it never names `IncidentModel`,
+    and its only `"incidents"` literals are dict keys of the console counts with no write verb
+    beside them. Its census row was added by a human reviewer noticing, which is exactly the
+    failure mode rule 11 warns about — «una columna viva puede ganar escritores sin que la fila lo
+    note». The lesson is that the gate had been tracking *where the column is persisted* while
+    producers accumulate *wherever the use case is callable from*. So the gate now also follows
+    the door: any module naming **`ReportIncidentUseCase`**, the generic creation path that change
+    opened and that the lock alert announced in `maintenance/api/incidents_router.py` will come
+    through. A CLI is the first caller outside the package; it will not be the last.
+
+    **And the gate keys on names, which is the residual — written down rather than left implied**,
+    because the security panel's re-review pointed out that a module receiving the use case as an
+    injected collaborator names neither the class nor the ORM model. That is why the port itself
+    (`IncidentRepository`) is a clause too: anything that can reach the row has to hold the port
+    somewhere, and the five extra modules that clause admits —`guests/api/portal_dependencies.py`,
+    the three of `messaging/`, and `scheduler/tasks.py`— turn out to write neither column, so the
+    offender set is unchanged and the gate is strictly stronger for free. What would still evade
+    it is a caller typed only against a protocol alias that mentions none of the four names; if
+    that ever appears, the fifth clause is the import graph rather than another substring.
     """
     gated_prefix = "maintenance/"
     offenders: dict[str, set[str]] = {}
@@ -153,6 +175,8 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         if not (
             relative.startswith(gated_prefix)
             or "IncidentModel" in source
+            or "ReportIncidentUseCase" in source
+            or "IncidentRepository" in source
             or _writes_incidents_in_raw_sql(tree)
         ):
             continue
@@ -192,6 +216,32 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
     assert set(offenders) == {
         "maintenance/application/use_cases.py",
         "maintenance/infrastructure/repositories.py",
+        # The three `maintenance` adds are the false positives this docstring predicts, and
+        # each is named rather than waved through:
+        #
+        # * `api/schemas.py` declares `title` and `description` as **response** fields and
+        #   fills them in `IncidentResponse.from_domain` — a read of the columns, on the way
+        #   out. It cannot write them: a Pydantic DTO has no session, and the only writer of
+        #   the row is the adapter above, whose `_MUTABLE_INCIDENT_COLUMNS` excludes both.
+        # * The two routers match on FastAPI's own `description=` route metadata — the
+        #   documented reason `properties/api/router.py` forced the raw-SQL clause of this
+        #   census to be quote-aware in the first place.
+        #
+        # What the entries cost is real and bounded: a genuine write appearing in one of
+        # these three would no longer be reported. It would still have to reach the database
+        # through the adapter, which is still gated, still allowlisted, and still the only
+        # module with an `IncidentModel(...)` in it.
+        "maintenance/api/schemas.py",
+        "maintenance/api/incidents_router.py",
+        "maintenance/api/approvals_router.py",
+        # `seed-data-demo-extension`: the demo seed is the third writer of both columns and the
+        # first one outside `maintenance/`. It is here rather than waved through because its
+        # contract is declared in the census — **closed form by discipline**: the three PRD §27
+        # literals are module constants (`SEED_INCIDENTS`), so no prose of ours is composed and
+        # exception 2 is neither invoked nor needed. What the entry does not buy is enforcement:
+        # `ReportIncidentUseCase` accepts any `str`, so a future caller that composes text there
+        # is under the structured form by default and owes this table a row of its own.
+        "cli/seed_demo.py",
     }, (
         "a module names incidents.title/description in a writing position: rule 11's second "
         "exception is declared for the reporter's own prose and no other producer, so a new "

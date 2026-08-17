@@ -204,6 +204,51 @@ export interface paths {
      */
     post: operations["validate_cleaning_task_api_v1_cleaning_tasks__task_id__validate_post"];
   };
+  "/api/v1/conversations": {
+    /**
+     * List the tenant's conversations
+     * @description The inbox. Filtered by `status`, `escalation_status` and `property_id`, paginated with `page`/`per_page` (PRD §23), and ordered by `last_message_at` descending with **nulls last** — a conversation created a moment ago and never written to must not sit above whatever is on fire.
+     */
+    get: operations["list_conversations_api_v1_conversations_get"];
+    /**
+     * Open a conversation
+     * @description `property_id` is required (design D19): a conversation without one could not produce any of the four timeline events this capability declares mandatory. A conversation opened on `AIRBNB_MSG` or `BOOKING_MSG` is accepted and is **mute by design** — every send fails until the PMS messaging adapter arrives.
+     */
+    post: operations["create_conversation_api_v1_conversations_post"];
+  };
+  "/api/v1/conversations/{conversation_id}": {
+    /**
+     * Read one conversation
+     * @description A conversation of another tenant receives the same `404` as one that does not exist (R1.5).
+     */
+    get: operations["get_conversation_api_v1_conversations__conversation_id__get"];
+  };
+  "/api/v1/conversations/{conversation_id}/escalate": {
+    /**
+     * Escalate a conversation to a person
+     * @description The manual door. A conversation already escalated answers `409`: unlike the pipeline, where a guest's message must still be processed, here the caller asked for something that cannot happen.
+     */
+    post: operations["escalate_conversation_api_v1_conversations__conversation_id__escalate_post"];
+  };
+  "/api/v1/conversations/{conversation_id}/messages": {
+    /**
+     * Read the thread
+     * @description Chronological ascending and paginated (R7.4) — a conversation is read forwards, unlike the timeline, which is a feed.
+     */
+    get: operations["list_messages_api_v1_conversations__conversation_id__messages_get"];
+    /**
+     * Add a message to a conversation
+     * @description Two behaviours, chosen by `sender_type` (design D18). With `"GUEST"` the caller is transcribing what the guest said and the full pipeline runs: language detection, classification, escalation policy, and either an automatic reply or a handover to a person. Omitted, the caller is replying themselves — the `sender_type` is derived from their role, and replying to a conversation waiting for a person takes it over. Any other value is a `422`: a client cannot declare that a message was written by the AI.
+     */
+    post: operations["create_message_api_v1_conversations__conversation_id__messages_post"];
+  };
+  "/api/v1/conversations/{conversation_id}/resolve": {
+    /**
+     * Resolve a conversation
+     * @description Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.
+     */
+    post: operations["resolve_conversation_api_v1_conversations__conversation_id__resolve_post"];
+  };
   "/api/v1/dashboard/properties": {
     /**
      * The dashboard card of every property
@@ -249,6 +294,75 @@ export interface paths {
      */
     patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
   };
+  "/api/v1/incidents": {
+    /**
+     * List the tenant's incidents
+     * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
+     */
+    get: operations["list_incidents_api_v1_incidents_get"];
+  };
+  "/api/v1/incidents/{incident_id}": {
+    /**
+     * Read one incident
+     * @description A `TECHNICIAN` who is not the assignee receives the same `404` as for an incident that does not exist, and so does an incident of another tenant (R5.3, R5.4).
+     */
+    get: operations["get_incident_api_v1_incidents__incident_id__get"];
+    /**
+     * Triage an incident
+     * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+     */
+    patch: operations["triage_incident_api_v1_incidents__incident_id__patch"];
+  };
+  "/api/v1/incidents/{incident_id}/accept": {
+    /**
+     * The technician takes the job
+     * @description Cancels the SLA deadline the assignment opened (R3.3).
+     */
+    post: operations["accept_incident_api_v1_incidents__incident_id__accept_post"];
+  };
+  "/api/v1/incidents/{incident_id}/assign": {
+    /**
+     * Assign or reassign a technician
+     * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+     */
+    post: operations["assign_incident_api_v1_incidents__incident_id__assign_post"];
+  };
+  "/api/v1/incidents/{incident_id}/cancel": {
+    /**
+     * Cancel an incident
+     * @description Terminal from anywhere that is not already terminal. The property's operational state is recomposed from what is left (R4.4, R4.6).
+     */
+    post: operations["cancel_incident_api_v1_incidents__incident_id__cancel_post"];
+  };
+  "/api/v1/incidents/{incident_id}/classify": {
+    /**
+     * Force the classifier over one incident
+     * @description The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).
+     */
+    post: operations["classify_incident_api_v1_incidents__incident_id__classify_post"];
+  };
+  "/api/v1/incidents/{incident_id}/resolve": {
+    /**
+     * Close the incident with its real cost
+     * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+     */
+    post: operations["resolve_incident_api_v1_incidents__incident_id__resolve_post"];
+  };
+  "/api/v1/incidents/{incident_id}/resume": {
+    /** Work resumes after the part arrived */
+    post: operations["resume_work_api_v1_incidents__incident_id__resume_post"];
+  };
+  "/api/v1/incidents/{incident_id}/start": {
+    /** The technician starts work */
+    post: operations["start_incident_api_v1_incidents__incident_id__start_post"];
+  };
+  "/api/v1/incidents/{incident_id}/wait-parts": {
+    /**
+     * The job is waiting for an external part
+     * @description The incident stays **open** — `WAITING_EXTERNAL_PARTS` counts as open, because the flat still has a broken thing in it.
+     */
+    post: operations["wait_for_parts_api_v1_incidents__incident_id__wait_parts_post"];
+  };
   "/api/v1/integrations/pms/import-csv": {
     /**
      * Import reservations from a CSV file
@@ -276,6 +390,15 @@ export interface paths {
      * @description The in-app channel of PRD §14. Returns only the notifications addressed to the authenticated user — the restriction is derived from the token and there is no parameter that widens it. Newest first, paginated with `page`/`per_page` (PRD §23).
      */
     get: operations["list_own_notifications_api_v1_notifications_get"];
+  };
+  "/api/v1/owner-approvals/{approval_id}/respond": {
+    /**
+     * The owner answers a pending approval
+     * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
+     *
+     * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+     */
+    post: operations["respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post"];
   };
   "/api/v1/properties": {
     /**
@@ -529,13 +652,21 @@ export interface components {
      * `CleaningPhoto` carries `storage_key` — it has to, the signer needs it — so any
      * `model_validate`, `from_attributes` or `asdict` over it publishes the internal storage path
      * the moment somebody reaches for the convenient shape. Enumerating the fields is what makes
-     * "the key never appears in a response" a property of this class rather than of everyone who
-     * ever touches it. `ai_validation_result` is out for a different reason: nothing writes it
-     * yet (proposal §Out of scope), and a field that is always `null` is a contract promise
-     * nobody made.
+     * "the key never appears as a **field** of a response" a property of this class rather than of
+     * everyone who ever touches it. `ai_validation_result` is out for a different reason: nothing
+     * writes it yet (proposal §Out of scope), and a field that is always `null` is a contract
+     * promise nobody made.
      *
      * `url` is the signed URL of design D7, minted per response with a 3600 s expiry. It is what
      * a client uses instead of a path, and it is not stored anywhere.
+     *
+     * **And it is where the one accepted exception lives**, so the sentence above says "field" and
+     * not "response": for an `S3` tenant this URL is minted by the object store and carries the
+     * bucket and the full key inside its own value, because that is what makes a presigned URL
+     * presigned. Accepted, with its reasoning and its two rejected alternatives, in
+     * `docs/adr/0008-object-storage-provider-dev.md`. For `LOCAL` the URL carries only the photo's
+     * UUID, and the prohibition stays absolute everywhere else — body, headers, and every other
+     * field of this class.
      */
     app__cleaning__api__schemas__CleaningPhotoResponse: {
       /**
@@ -596,6 +727,14 @@ export interface components {
        * Format: uuid
        */
       assigned_cleaner_id: string;
+    };
+    /** AssignIncidentRequest */
+    AssignIncidentRequest: {
+      /**
+       * Technician Id
+       * Format: uuid
+       */
+      technician_id: string;
     };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
@@ -833,6 +972,75 @@ export interface components {
      */
     CleaningValidationStatus: "PENDING" | "PASSED" | "FAILED" | "WAIVED";
     /**
+     * ConversationChannel
+     * @enum {string}
+     */
+    ConversationChannel: "WHATSAPP" | "AIRBNB_MSG" | "BOOKING_MSG" | "EMAIL" | "PHONE_TRANSCRIPT" | "MANUAL";
+    /**
+     * ConversationEscalationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Conversation.escalation_status) without a named block (§7.14).
+     * @enum {string}
+     */
+    ConversationEscalationStatus: "NONE" | "PENDING_HUMAN" | "HUMAN_HANDLING" | "RESOLVED";
+    /** ConversationPageResponse */
+    ConversationPageResponse: {
+      /** Items */
+      items: components["schemas"]["ConversationResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * ConversationResponse
+     * @description What an authenticated operator may see about one conversation.
+     *
+     * Fields are enumerated rather than dumped from the entity: a `from_attributes` dump would
+     * publish whatever `Conversation` grows next, which is how a projection stops being one.
+     */
+    ConversationResponse: {
+      /** Ai Enabled */
+      ai_enabled: boolean;
+      channel: components["schemas"]["ConversationChannel"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      escalation_status: components["schemas"]["ConversationEscalationStatus"];
+      /** Guest Id */
+      guest_id: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Language */
+      language: string;
+      /** Last Message At */
+      last_message_at: string | null;
+      /** Property Id */
+      property_id: string | null;
+      /** Reservation Id */
+      reservation_id: string | null;
+      status: components["schemas"]["ConversationStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
+     * ConversationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Conversation.status) without a named block (§7.14).
+     * @enum {string}
+     */
+    ConversationStatus: "OPEN" | "RESOLVED" | "ESCALATED" | "CLOSED";
+    /**
      * CreateChecklistTemplateRequest
      * @description The shape check. The **content** rules stay in the domain.
      *
@@ -869,6 +1077,36 @@ export interface components {
       scheduled_start?: string | null;
     };
     /**
+     * CreateConversationRequest
+     * @description `POST /conversations` (R7.1).
+     *
+     * `property_id` is **required**, which is where D19 lands for an HTTP caller;
+     * `Conversation.__post_init__` is where it lands for every other one. The column stays
+     * nullable, so this is a restriction of this change rather than of the schema.
+     *
+     * `channel` accepts `AIRBNB_MSG`/`BOOKING_MSG` because the enum has them — and a conversation
+     * created on one of those is **mute by design** (R6.3): every send fails with a named error
+     * until `beds24-messaging-adapter` implements `PMSMessagingPort`. `docs/messaging-ai.md`
+     * says so, so it does not read as a bug.
+     */
+    CreateConversationRequest: {
+      channel: components["schemas"]["ConversationChannel"];
+      /** Guest Id */
+      guest_id?: string | null;
+      /**
+       * Language
+       * @default es
+       */
+      language?: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id?: string | null;
+    };
+    /**
      * CreatedUserResponse
      * @description A separate type, and the only shape that carries the one-time secret (design D10).
      *
@@ -879,6 +1117,25 @@ export interface components {
       /** Temporary Password */
       temporary_password: string;
       user: components["schemas"]["UserResponse"];
+    };
+    /**
+     * CreateMessageRequest
+     * @description `POST /conversations/{id}/messages` — one route, two behaviours (D18).
+     *
+     * With `sender_type = "GUEST"`: the caller is transcribing what the guest said, and the full
+     * pipeline of D11 runs. Omitted: the caller is answering, and their `sender_type` is derived
+     * from their role.
+     *
+     * **`Literal["GUEST"]` and not `MessageSenderType`**: the enum has five members and four of
+     * them are ours to write, so accepting the enum would let a client declare that the AI wrote
+     * a message. The narrow type is what turns that into a `422` at the edge rather than a check
+     * somebody has to remember inside.
+     */
+    CreateMessageRequest: {
+      /** Content */
+      content: string;
+      /** Sender Type */
+      sender_type?: "GUEST" | null;
     };
     /** CreatePropertyRequest */
     CreatePropertyRequest: {
@@ -1236,6 +1493,22 @@ export interface components {
       updated: number;
     };
     /**
+     * IncidentCategory
+     * @enum {string}
+     */
+    IncidentCategory: "ACCESS" | "LOCK" | "WIFI" | "ELECTRICITY" | "WATER" | "PLUMBING" | "HVAC" | "APPLIANCE" | "NOISE" | "CLEANING" | "DAMAGE" | "SAFETY" | "OTHER";
+    /** IncidentPageResponse */
+    IncidentPageResponse: {
+      /** Items */
+      items: components["schemas"]["IncidentResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
      * IncidentReportedResponse
      * @description The acknowledgement, and **only** the acknowledgement (R5.3, D15).
      *
@@ -1262,6 +1535,64 @@ export interface components {
       status: components["schemas"]["IncidentStatus"];
     };
     /**
+     * IncidentResponse
+     * @description What an authenticated operator may see about one incident.
+     *
+     * `description` **is** here, unlike in the dashboard's `IncidentSummary`: this is the
+     * surface a technician works from and the fault is what they have to read. What is not
+     * here is everything that identifies who reported it (`reported_by_guest_token`,
+     * `reported_by_user_id`) and the raw classifier verdict (`ai_classification`) — the first
+     * is a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink
+     * whose audience is the flow, not a client. `ai_summary` stays: it is our own closed
+     * vocabulary, and it is what tells an operator the incident was looked at.
+     */
+    IncidentResponse: {
+      /** Ai Summary */
+      ai_summary: string | null;
+      /** Approved Cost */
+      approved_cost: string | null;
+      /** Assigned Technician Id */
+      assigned_technician_id: string | null;
+      category: components["schemas"]["IncidentCategory"];
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Description */
+      description: string;
+      /** Estimated Cost */
+      estimated_cost: string | null;
+      /** Final Cost */
+      final_cost: string | null;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Owner Approval Required */
+      owner_approval_required: boolean;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Resolved At */
+      resolved_at: string | null;
+      severity: components["schemas"]["IncidentSeverity"];
+      source: components["schemas"]["IncidentSource"];
+      status: components["schemas"]["IncidentStatus"];
+      /** Title */
+      title: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+    };
+    /**
      * IncidentSeverity
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
      * (Incident.severity) without a named block (§7.13). Not the same enum
@@ -1269,6 +1600,13 @@ export interface components {
      * @enum {string}
      */
     IncidentSeverity: "LOW" | "MEDIUM" | "HIGH" | "CRITICAL";
+    /**
+     * IncidentSource
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Incident.source) without a named block (§7.13).
+     * @enum {string}
+     */
+    IncidentSource: "GUEST" | "CLEANER" | "OWNER" | "SYSTEM" | "PMS" | "LOCK_ALERT";
     /**
      * IncidentStatus
      * @enum {string}
@@ -1320,6 +1658,66 @@ export interface components {
       /** Notes */
       notes?: string | null;
     };
+    /** MessagePageResponse */
+    MessagePageResponse: {
+      /** Items */
+      items: components["schemas"]["MessageResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * MessageResponse
+     * @description One message of a thread.
+     *
+     * `metadata` is serialised through `MessageMetadata.to_dict()`, so what reaches a client is
+     * the same closed set of keys the column holds — never a dump of an entity attribute that
+     * could widen without anyone noticing.
+     */
+    MessageResponse: {
+      /** Ai Generated */
+      ai_generated: boolean;
+      /** Confidence Score */
+      confidence_score: string | null;
+      /** Content */
+      content: string;
+      /**
+       * Conversation Id
+       * Format: uuid
+       */
+      conversation_id: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Intent */
+      intent: string | null;
+      /** Language */
+      language: string | null;
+      /** Metadata */
+      metadata: {
+        [key: string]: string;
+      } | null;
+      sender_type: components["schemas"]["MessageSenderType"];
+      /** Sender User Id */
+      sender_user_id: string | null;
+    };
+    /**
+     * MessageSenderType
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (Message.sender_type) without a named block (§7.15).
+     * @enum {string}
+     */
+    MessageSenderType: "GUEST" | "OWNER" | "MANAGER" | "AI" | "SYSTEM";
     /** NextActionResponse */
     NextActionResponse: {
       /** Label */
@@ -1382,6 +1780,13 @@ export interface components {
      * @enum {string}
      */
     NotificationStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+    /**
+     * OwnerApprovalStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (OwnerApproval.status) without a named block (§7.19).
+     * @enum {string}
+     */
+    OwnerApprovalStatus: "PENDING" | "APPROVED" | "REJECTED" | "EXPIRED";
     /**
      * PaymentStatus
      * @enum {string}
@@ -1883,6 +2288,28 @@ export interface components {
       token: string;
     };
     /**
+     * ResolveIncidentRequest
+     * @description R4.2 — `final_cost` is required, which is where "SHALL exigir `final_cost`" lands for
+     * an HTTP caller. The entity requires it too, for callers that are not HTTP.
+     */
+    ResolveIncidentRequest: {
+      /** Final Cost */
+      final_cost: number | string;
+    };
+    /**
+     * RespondOwnerApprovalRequest
+     * @description `POST /owner-approvals/{id}/respond` (R2.4, R2.5).
+     *
+     * `status` is the enum, and the entity refuses anything but `APPROVED`/`REJECTED` — the
+     * two an owner can give. `response_notes` is free text the owner types, bounded here and
+     * kept out of `audit_logs.changes` by the allowlist (D6).
+     */
+    RespondOwnerApprovalRequest: {
+      /** Response Notes */
+      response_notes?: string | null;
+      status: components["schemas"]["OwnerApprovalStatus"];
+    };
+    /**
      * RowErrorResponse
      * @description One row the import could not take, with what a person needs to fix it.
      */
@@ -2180,6 +2607,19 @@ export interface components {
       refresh_token: string;
       /** Token Type */
       token_type: string;
+    };
+    /**
+     * TriageIncidentRequest
+     * @description `PATCH /incidents/{id}` (R1.4, R2.1).
+     *
+     * Every field is optional because a triage may correct only one of them; sending none is
+     * a no-op the entity accepts, and refusing it here would be a rule this schema invented.
+     */
+    TriageIncidentRequest: {
+      category?: components["schemas"]["IncidentCategory"] | null;
+      /** Estimated Cost */
+      estimated_cost?: number | string | null;
+      severity?: components["schemas"]["IncidentSeverity"] | null;
     };
     /**
      * UpdatePropertyRequest
@@ -3329,7 +3769,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
-      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware` before the body is read, and again by the use case while it consumes the stream. */
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`. */
       413: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
@@ -3443,6 +3883,278 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's conversations
+   * @description The inbox. Filtered by `status`, `escalation_status` and `property_id`, paginated with `page`/`per_page` (PRD §23), and ordered by `last_message_at` descending with **nulls last** — a conversation created a moment ago and never written to must not sit above whatever is on fire.
+   */
+  list_conversations_api_v1_conversations_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        status?: components["schemas"]["ConversationStatus"] | null;
+        escalation_status?: components["schemas"]["ConversationEscalationStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Open a conversation
+   * @description `property_id` is required (design D19): a conversation without one could not produce any of the four timeline events this capability declares mandatory. A conversation opened on `AIRBNB_MSG` or `BOOKING_MSG` is accepted and is **mute by design** — every send fails until the PMS messaging adapter arrives.
+   */
+  create_conversation_api_v1_conversations_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateConversationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one conversation
+   * @description A conversation of another tenant receives the same `404` as one that does not exist (R1.5).
+   */
+  get_conversation_api_v1_conversations__conversation_id__get: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Escalate a conversation to a person
+   * @description The manual door. A conversation already escalated answers `409`: unlike the pipeline, where a guest's message must still be processed, here the caller asked for something that cannot happen.
+   */
+  escalate_conversation_api_v1_conversations__conversation_id__escalate_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read the thread
+   * @description Chronological ascending and paginated (R7.4) — a conversation is read forwards, unlike the timeline, which is a feed.
+   */
+  list_messages_api_v1_conversations__conversation_id__messages_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MessagePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Add a message to a conversation
+   * @description Two behaviours, chosen by `sender_type` (design D18). With `"GUEST"` the caller is transcribing what the guest said and the full pipeline runs: language detection, classification, escalation policy, and either an automatic reply or a handover to a person. Omitted, the caller is replying themselves — the `sender_type` is derived from their role, and replying to a conversation waiting for a person takes it over. Any other value is a `422`: a client cannot declare that a message was written by the AI.
+   */
+  create_message_api_v1_conversations__conversation_id__messages_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreateMessageRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["MessageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Resolve a conversation
+   * @description Closes the escalation with it when there is one, because no route resolves that axis on its own and a conversation resolved with its handover left pending would sit for ever in whatever list asks for pending handovers.
+   */
+  resolve_conversation_api_v1_conversations__conversation_id__resolve_post: {
+    parameters: {
+      path: {
+        conversation_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["ConversationResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
@@ -3765,6 +4477,426 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's incidents
+   * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
+   */
+  list_incidents_api_v1_incidents_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        status?: components["schemas"]["IncidentStatus"] | null;
+        severity?: components["schemas"]["IncidentSeverity"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one incident
+   * @description A `TECHNICIAN` who is not the assignee receives the same `404` as for an incident that does not exist, and so does an incident of another tenant (R5.3, R5.4).
+   */
+  get_incident_api_v1_incidents__incident_id__get: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Triage an incident
+   * @description Correct the category or the severity, and put a price on the job (R1.4). An `estimated_cost` above the tenant's threshold opens the owner-approval gate and moves the incident to `AWAITING_OWNER_APPROVAL` (R2.1).
+   */
+  triage_incident_api_v1_incidents__incident_id__patch: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["TriageIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The technician takes the job
+   * @description Cancels the SLA deadline the assignment opened (R3.3).
+   */
+  accept_incident_api_v1_incidents__incident_id__accept_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Assign or reassign a technician
+   * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+   */
+  assign_incident_api_v1_incidents__incident_id__assign_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["AssignIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Cancel an incident
+   * @description Terminal from anywhere that is not already terminal. The property's operational state is recomposed from what is left (R4.4, R4.6).
+   */
+  cancel_incident_api_v1_incidents__incident_id__cancel_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Force the classifier over one incident
+   * @description The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).
+   */
+  classify_incident_api_v1_incidents__incident_id__classify_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Close the incident with its real cost
+   * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+   */
+  resolve_incident_api_v1_incidents__incident_id__resolve_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ResolveIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /** Work resumes after the part arrived */
+  resume_work_api_v1_incidents__incident_id__resume_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /** The technician starts work */
+  start_incident_api_v1_incidents__incident_id__start_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The job is waiting for an external part
+   * @description The incident stays **open** — `WAITING_EXTERNAL_PARTS` counts as open, because the flat still has a broken thing in it.
+   */
+  wait_for_parts_api_v1_incidents__incident_id__wait_parts_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Import reservations from a CSV file
    * @description Manual alternative to the PMS integration. Valid rows are imported and invalid ones are reported with their line number — one bad row never costs the good ones. Rows carrying an `external_pms_id` already known to the tenant are updated, not duplicated. The property is named by its `internal_code` (e.g. REDES11).
    */
@@ -3891,6 +5023,50 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["NotificationPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The owner answers a pending approval
+   * @description `TENANT_OWNER` only (R2.6), once only, and only within their own tenant. An `APPROVED` answer returns the incident to where the approval's `related_type` says it belongs — `CLASSIFIED` for a budget, `IN_PROGRESS` for a real cost — and a `REJECTED` one cancels it and recomposes the property's operational state (R2.5).
+   *
+   * Returns the **incident**, not the approval: what the caller does next depends on where the incident ended up.
+   */
+  respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post: {
+    parameters: {
+      path: {
+        approval_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["RespondOwnerApprovalRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */

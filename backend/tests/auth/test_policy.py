@@ -191,6 +191,100 @@ def test_no_permission_is_granted_to_every_role_by_accident() -> None:
         assert not all(is_allowed(role, permission) for role in UserRole)
 
 
+# --- Incidents and owner approvals (`maintenance` R5.2, design D13) --------------------
+
+INCIDENT_PERMISSIONS = (
+    Permission.READ_INCIDENTS,
+    Permission.MANAGE_INCIDENTS,
+    Permission.EXECUTE_INCIDENTS,
+    Permission.RESPOND_OWNER_APPROVALS,
+)
+
+#: The whole table of D13, written out rather than derived: the interesting content is the
+#: **exclusions**, and a derived expectation would restate the implementation.
+EXPECTED_INCIDENT_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
+    UserRole.SUPER_ADMIN: frozenset(),
+    UserRole.TENANT_OWNER: frozenset(
+        {Permission.READ_INCIDENTS, Permission.RESPOND_OWNER_APPROVALS}
+    ),
+    UserRole.PROPERTY_MANAGER: frozenset(
+        {
+            Permission.READ_INCIDENTS,
+            Permission.MANAGE_INCIDENTS,
+            Permission.EXECUTE_INCIDENTS,
+        }
+    ),
+    UserRole.TECHNICIAN: frozenset(
+        {Permission.READ_INCIDENTS, Permission.EXECUTE_INCIDENTS}
+    ),
+    UserRole.CLEANER: frozenset(),
+}
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_the_incident_matrix_is_the_one_design_d13_decided(role: UserRole) -> None:
+    granted = ROLE_PERMISSIONS[role] & frozenset(INCIDENT_PERMISSIONS)
+
+    assert granted == EXPECTED_INCIDENT_PERMISSIONS[role]
+
+
+def test_the_cleaner_gets_nothing_from_the_incident_flow() -> None:
+    """R5.4: the routes are never exposed to `CLEANER`, and this is where that is decided.
+
+    A broken boiler is not part of doing a cleaning, and the twelve routes of D14 all sit
+    behind one of these four permissions — so holding none of them is what makes the 403
+    structural rather than a check each router has to remember.
+    """
+    for permission in INCIDENT_PERMISSIONS:
+        assert not is_allowed(UserRole.CLEANER, permission)
+
+
+def test_the_super_admin_gets_nothing_from_the_incident_flow() -> None:
+    """Same reason it holds no other operational permission inside a tenant: its powers in
+    PRD §6 are global, and `saas-cross-tenant` decides what cross-tenant access looks like."""
+    for permission in INCIDENT_PERMISSIONS:
+        assert not is_allowed(UserRole.SUPER_ADMIN, permission)
+
+
+def test_the_technician_may_execute_but_never_manage() -> None:
+    """R5.2: "NEVER SHALL concederle nada más". Assigning and triaging are the manager's."""
+    assert is_allowed(UserRole.TECHNICIAN, Permission.EXECUTE_INCIDENTS)
+    assert not is_allowed(UserRole.TECHNICIAN, Permission.MANAGE_INCIDENTS)
+    assert not is_allowed(UserRole.TECHNICIAN, Permission.RESPOND_OWNER_APPROVALS)
+
+
+def test_the_manager_executes_too_and_that_is_the_difference_from_cleaning() -> None:
+    """R4.5: "un `PROPERTY_MANAGER` sí puede, para desatascar" — where `cleaning` gives
+    `EXECUTE_CLEANING_TASKS` to the cleaner alone."""
+    assert is_allowed(UserRole.PROPERTY_MANAGER, Permission.EXECUTE_INCIDENTS)
+    assert not is_allowed(UserRole.PROPERTY_MANAGER, Permission.EXECUTE_CLEANING_TASKS)
+
+
+def test_only_the_owner_answers_an_approval() -> None:
+    """R2.6: "NEVER SHALL permitir responder una aprobación a un rol distinto de
+    `TENANT_OWNER`" — the manager included, because the money is not hers."""
+    allowed = {
+        role for role in UserRole if is_allowed(role, Permission.RESPOND_OWNER_APPROVALS)
+    }
+
+    assert allowed == {UserRole.TENANT_OWNER}
+
+
+def test_every_incident_permission_implies_reading_incidents() -> None:
+    """Anyone who can act on an incident can see it — otherwise the actor gets a 404 on the
+    thing they were just told to do, which is the trap `cleaning` documents for its own
+    execute permission."""
+    for role in UserRole:
+        for permission in (Permission.MANAGE_INCIDENTS, Permission.EXECUTE_INCIDENTS):
+            if is_allowed(role, permission):
+                assert is_allowed(role, Permission.READ_INCIDENTS)
+
+
+def test_no_incident_permission_is_granted_to_every_role() -> None:
+    for permission in INCIDENT_PERMISSIONS:
+        assert not all(is_allowed(role, permission) for role in UserRole)
+
+
 # --- The guest portal token (`guest-portal-api` R1.1, R1.4, design D14) ----------------
 
 

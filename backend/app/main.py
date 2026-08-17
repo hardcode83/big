@@ -13,6 +13,11 @@ from app.auth.api.errors import register_auth_error_handlers
 from app.auth.api.router import router as auth_router
 from app.auth.api.users_router import router as users_router
 from app.cleaning.api.errors import register_cleaning_error_handlers
+from app.maintenance.api.approvals_router import router as owner_approvals_router
+from app.maintenance.api.errors import register_maintenance_error_handlers
+from app.maintenance.api.incidents_router import router as incidents_router
+from app.messaging.api.errors import register_messaging_error_handlers
+from app.messaging.api.router import router as conversations_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
@@ -22,6 +27,7 @@ from app.core.errors import register_error_handlers
 from app.core.http_limits import JSON_BODY_MAX_BYTES, MaxBodySizeMiddleware
 from app.core.log_redaction import install_path_token_redaction
 from app.core.openapi import install_openapi
+from app.core.response_headers import NoSniffMiddleware
 from app.guests.api.errors import register_guest_error_handlers
 from app.guests.api.portal_router import router as guest_portal_router
 from app.guests.api.router import router as guests_router
@@ -74,6 +80,8 @@ def create_app() -> FastAPI:
     register_tenant_error_handlers(app)
     register_property_error_handlers(app)
     register_cleaning_error_handlers(app)
+    register_maintenance_error_handlers(app)
+    register_messaging_error_handlers(app)
     register_access_error_handlers(app)
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
@@ -110,6 +118,19 @@ def create_app() -> FastAPI:
     # authorisation, and `tests/test_route_authorization.py` names it in `ANONYMOUS_ENDPOINTS`,
     # which is a visible diff by construction.
     app.include_router(cleaning_photos_router, prefix=API_V1_PREFIX)
+    # `maintenance`: the `api/` layer that module never had. Two routers because they are two
+    # aggregates — one incident can raise two owner approvals, so the approval has an
+    # identity the incident cannot stand in for (design D14). Both are fully authenticated:
+    # there is no anonymous door into this module, and the one surface that creates an
+    # incident anonymously is the guest portal's, mounted below.
+    app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    app.include_router(owner_approvals_router, prefix=API_V1_PREFIX)
+    # `messaging-ai`: the inbox of PRD §16. One router and seven routes, all authenticated —
+    # messages enter through the panel or the API, not from an OTA, because
+    # `PMSMessagingPort` is still the port with no methods that `pms-provider-resolution`
+    # fixed. Registered after `maintenance` because a guest message can open an incident, and
+    # reading the two in this order is how that dependency reads in the code.
+    app.include_router(conversations_router, prefix=API_V1_PREFIX)
     # `access-notifications`: the read side of the in-app channel. Without it the dispatcher
     # would mark `IN_APP` rows `SENT` with nothing able to show them to their recipient
     # (design D5/D6).
@@ -220,6 +241,14 @@ def create_app() -> FastAPI:
             else settings.request_max_bytes
         ),
     )
+
+    # AFTER the mounting above, and the position is the mechanism: `add_middleware` inserts at
+    # position 0 and `build_middleware_stack` wraps the list in reverse, so the last one added
+    # ends up the OUTERMOST. Only from out there does this see the `413` that
+    # `MaxBodySizeMiddleware._refuse` builds and sends by itself, without passing through any
+    # route or handler. Reordering these two calls is not a style question; the test that fails
+    # when somebody does is `tests/test_response_headers.py`.
+    app.add_middleware(NoSniffMiddleware)
 
     # Deliberately NOT under API_V1_PREFIX (design D2): the container healthcheck
     # in docker-compose.yml and docker-compose.deploy.yml probes /health, and the

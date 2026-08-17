@@ -44,6 +44,29 @@ que este change exista separado de `channex-staging-adapter` y de que el banco d
 construyera **antes** de abrir la cuenta: los 14 días van íntegros a medir, no a escribir
 herramientas.
 
+> ⚠️ **El trial venció el 2026-08-17 y la cuenta no se convirtió a pago.** La API responde `401`
+> al intercambio de token, indistinguible de una credencial inválida — el proveedor no dice cuál
+> de las dos cosas es, y por eso hay que mirarlo en el panel y no en la respuesta.
+>
+> **Nada desplegado se rompió**, y conviene decir por qué para que nadie lo re-investigue: la
+> aplicación lee las credenciales de PMS de la tabla cifrada `pms_credentials` y **nunca** del
+> entorno (`.env.example`, sección Beds24), `BEDS24_REFRESH_TOKEN` existe solo para este sondeo,
+> no hay `BEDS24_*` en los workflows ni en el compose, y una propiedad sin `pms_provider` resuelve
+> a `MockPMSAdapter`. Lo que muere con la cuenta es la **medición**, no el producto.
+>
+> **Lo que esto destapa, y es la lección que valía la pena escribir**: la frase de arriba
+> registraba el coste como dato de alta y ahí se acababa. Nadie anotó que la cuenta de medición
+> tiene **fecha de caducidad, coste recurrente y un dueño de esa decisión**, así que venció sin
+> que saltara nada — no había nada que pudiera saltar. El banco de medición costó un change
+> entero (`pms-beds24-spike`) y queda inservible mientras la cuenta esté muerta, junto con
+> `beds24-webhook-cutover-measurement` y la sonda `messages`.
+>
+> **Al reactivarla**: el trial convierte a cuenta normal conservando la configuración, así que
+> `TEST-MEDICION` (id 345754) y su room `713992` deberían seguir ahí — compruébalo antes de
+> asumirlo. El refresh token anterior puede haber muerto con la cuenta; si tras reactivar sigue
+> dando `401`, es rotación (ver «Rotar el refresh token»), que exige un invite code generado a
+> mano en el panel.
+
 Antes de registrarte, ten listo:
 
 - El banco corriendo en local (secciones 1-6 del change, ya commiteadas).
@@ -686,8 +709,46 @@ existe.
 
 ### Forma real de los payloads de mensaje
 
-**No medido.** `/bookings/messages` responde 200 pero llega vacío: no hay conversación sin canal.
-Mismo bloqueo que la latencia de webhooks.
+**No medido en lectura.** `/bookings/messages` responde 200 pero llega vacío: no hay conversación
+sin canal. Mismo bloqueo que la latencia de webhooks.
+
+**Pero eso midió un GET, y la pregunta que decide el aplazamiento es la del POST.** Un GET vacío
+prueba que no hay nada que *leer*; no dice nada sobre si el proveedor acepta que le **escribas**
+un mensaje sobre una reserva sin canal. Si acepta `source: guest`, el camino de entrada de
+`messaging-ai` tiene fuente real hoy y `beds24-messaging-adapter` deja de estar bloqueado entero
+— lo que seguiría esperando a la ventana de corte sería leer un hilo de OTA, no ejercitar el
+pipeline. Por eso existe el subcomando `messages`:
+
+```bash
+export BEDS24_REFRESH_TOKEN=...   # cuenta de medición, nunca la de los pisos
+docker compose run --rm --no-deps -e BEDS24_REFRESH_TOKEN backend \
+  uv run python scripts/beds24_probe.py messages \
+    --room=713992 --confirm-writes --out=/app/beds24-cost.jsonl
+```
+
+Lo que conviene saber antes de correrlo:
+
+- **Escribe**, así que exige `--confirm-writes` y pasa por el mismo guard de cuenta que
+  `provoke` — aborta si la cuenta no tiene exactamente una propiedad.
+- **Crea la reserva enganchándose al `observer` de `provoke`**, no con un ciclo propio. Hay una
+  sola vía de creación de reservas en este script a propósito, y `provoke` cancela al final pase
+  lo que pase.
+- **Prueba `guest` y `host`.** El control decide el significado: `host` aceptado y `guest`
+  rechazado significa que el límite es de *dirección*; ambos rechazados, que es del canal
+  ausente. Solo el primero de esos dos escenarios desbloquea trabajo.
+- **El cuerpo de `POST /bookings/messages` no está documentado** en nada que hayamos medido —
+  ADR 0006 registra el endpoint y su vocabulario de `source` y nada más. El sondeo prueba dos
+  formas y para en la primera que no rechacen; una petición rechazada no consume crédito y
+  `_envelope_failure` devuelve el mensaje **por campo** del proveedor, que es lo que convierte
+  un rechazo en la respuesta de cuál era la forma correcta.
+- **Ojo al `201` que rechaza.** El veredicto va en el cuerpo, no en el estado; leer solo el
+  status reportaría «la mensajería funciona sin canal», que es justo la respuesta equivocada en
+  la única pregunta que esto existe para responder. Hay test dedicado.
+
+**Resultado: pendiente de ejecutar.** Cuando se corra, el veredicto se escribe aquí y, si sale
+que `guest` se acepta, hay que revisar el `deferred-until:` de `beds24-messaging-adapter` en el
+roadmap, que hoy afirma que sin canal «no hay conversación que leer ni reserva de OTA a la que
+responder».
 
 ### Límite de tasa
 

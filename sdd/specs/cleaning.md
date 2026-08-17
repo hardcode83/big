@@ -9,6 +9,16 @@ cumple la regla de validación de PRD §11. Sustituye la coordinación operativa
 
 El *cómo se opera* está en [`docs/cleaning.md`](../../docs/cleaning.md); aquí vive el *qué hace*.
 
+**Sus casos de uso son invocables fuera de HTTP, y desde el 2026-08-17 hay quien lo hace.** El
+comando `make seed-demo` ([`seed-data-demo.md`](seed-data-demo.md)) recorre el ciclo entero de una
+limpieza —aceptar, empezar, los ítems del checklist, las fotos, cerrar— componiendo estos mismos
+casos de uso desde un CLI, con una `CallerOwnedUnitOfWork` y sin pasar por ningún router. No hizo
+falta cambiar nada de esta capacidad para que funcionara, y esa es justamente la constatación que
+merece quedar escrita: los invariantes que este módulo defiende —que el actor sea la limpiadora
+asignada, que la validación de PRD §11 se cumpla antes de cerrar— viven en los casos de uso y en la
+entidad, no en la capa HTTP, así que un segundo llamante los hereda enteros en vez de tener que
+reimplementarlos.
+
 ## Requirements
 
 ### Plantilla de checklist
@@ -31,9 +41,17 @@ El *cómo se opera* está en [`docs/cleaning.md`](../../docs/cleaning.md); aquí
 - IF la `property_id` indicada no existe en el tenant del token, THEN THE SYSTEM SHALL responder
   `404`.
 
-**Desviación registrada (`ASSUMPTION`)**: PRD §23 no declara endpoints de plantilla y PRD §27 no
-siembra ninguna, pero `cleaning_tasks.checklist_template_id` es `NOT NULL`. Sin estas rutas el
-alta automática no tendría a qué apuntar. Convención de desviación de ADR 0005.
+**Desviación registrada (`ASSUMPTION`)**: PRD §23 no declara endpoints de plantilla, pero
+`cleaning_tasks.checklist_template_id` es `NOT NULL`, así que sin estas rutas el alta automática no
+tendría a qué apuntar. Convención de desviación de ADR 0005.
+
+Esta nota decía además que «PRD §27 no siembra ninguna», y **era falso**: §27 sí cierra con un
+bloque `CleaningChecklistTemplate (una por tenant, para ambas propiedades)` que remite a la
+plantilla por defecto de §7.10. Lo corrige `seed-data-demo`, que la crea invocando
+`CreateChecklistTemplateUseCase` —sin pasar por el router, sin peticionario y sin comprobación de
+rol, con la transacción en manos del comando—, así que estos endpoints **ya no son lo único** que
+separa el `NOT NULL` de un entorno inutilizable. Lo que sigue en pie de la desviación es que el PRD
+no declara las rutas.
 
 ### Alta automática al cerrar el checkout
 
@@ -112,8 +130,22 @@ alta automática no tendría a qué apuntar. Convención de desviación de ADR 0
 - WHERE la plantilla no declara ninguna foto `required: true`, THE SYSTEM SHALL permitir el cierre
   sin ninguna foto: la regla es «las requeridas», no «alguna».
 - THE SYSTEM SHALL aplicar las tres cláusulas **dentro de `CleaningTask.complete()`** y en ningún
-  otro sitio. El caso de uso solo reúne la evidencia —plantilla, completions, tipos de foto
-  subidos e incidencias— y se la pasa a la entidad.
+  otro sitio. Las cuatro lecturas que la alimentan —plantilla, completions, tipos de foto subidos
+  e incidencia bloqueante— son responsabilidad de `CompletionEvidenceGatherer`
+  (`application/evidence.py`), que solo lee y ensambla el `CleaningCompletionEvidence`: no compara
+  nada. El caso de uso del cierre carga la tarea, le pide la evidencia al gatherer y se la pasa a
+  la entidad.
+- THE SYSTEM SHALL construir la evidencia con `spec.required_photo_types()` y no con
+  `spec.photo_types()`: leer todos los tipos declarados haría obligatorio también el opcional y
+  contradiría la cláusula «las requeridas, no alguna».
+- WHERE el gatherer necesita persistencia, THE SYSTEM SHALL depender solo de los cuatro puertos de
+  dominio (`CleaningChecklistTemplateRepository`, `CleaningChecklistCompletionRepository`,
+  `CleaningPhotoRepository`, `BlockingIncidentQuery`), y SHALL consultarlos con el `tenant_id`
+  recibido —completions y fotos por `task.id`, la incidencia por `task.property_id`—, recibiendo la
+  `CleaningTask` ya cargada para no repetir el scoping por tenant y por limpiadora que hace
+  `_load_task`.
+- IF la plantilla de la tarea ya no existe, THEN THE SYSTEM SHALL lanzar
+  `ChecklistTemplateNotFoundError` desde el gatherer, traducido a `404 NOT_FOUND`.
 - WHEN el cierre supera la validación, THE SYSTEM SHALL pasar la tarea a `COMPLETED` con
   `completed_at`, poner `validation_status` en `PASSED` y resolver el estado de la propiedad por
   contexto: `AWAITING_CHECKIN` si hay reserva que llega hoy, `READY_FOR_NEXT_GUEST` si la hay
@@ -121,8 +153,12 @@ alta automática no tendría a qué apuntar. Convención de desviación de ADR 0
 - WHEN un `PROPERTY_MANAGER` valida manualmente una tarea cerrada, THE SYSTEM SHALL registrar
   `validated_by_user_id` y `validated_at` y admitir los veredictos `PASSED`, `FAILED` y `WAIVED`,
   rechazando `PENDING` con `409`.
-- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir: la validación automática depende
-  de `MockAIAdapter`, que llega con `messaging-ai`.
+- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir: no existe puerto que valide una
+  foto. `messaging-ai` entregó su `MockAIAdapter` el 2026-08-16, pero su puerto `AIAdapter`
+  declara **exactamente dos métodos** —`classify_message` y `generate_response`— y omite
+  `validate_cleaning_photo` a propósito ([`messaging-ai.md`](messaging-ai.md) R2): declarar los
+  seis del PRD §13 y dejar cuatro lanzando `NotImplementedError` rompería Liskov. La validación
+  automática de fotos necesita un puerto propio de `cleaning`, que nadie ha construido.
 
 ### Fotos de la limpieza
 
@@ -177,10 +213,14 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - WHERE el `storage_type` del tenant es `S3`, THE SYSTEM SHALL responder `404` en esa ruta: el
   navegador va directo al proveedor y aquí no hay nada que servir. Solo es alcanzable **tras** una
   firma válida, así que no revela nada.
-- THE SYSTEM SHALL sellar **toda** respuesta de esa ruta —los bytes y las tres negativas— con
-  `X-Content-Type-Options: nosniff`, y derivar el `Content-Type` únicamente de la extensión de la
-  clave. Sin ello, un polyglot que empiece por `FF D8 FF` y lleve HTML sería XSS almacenado sobre
-  el origen de la API, que `api-ingress-routing` dejó alcanzable desde internet.
+- THE SYSTEM SHALL derivar el `Content-Type` de esa ruta únicamente de la extensión de la clave
+  almacenada. Sin eso —y sin el `nosniff` que el backend sella globalmente— un polyglot que empiece
+  por `FF D8 FF` y lleve HTML sería XSS almacenado sobre el origen de la API, que
+  `api-ingress-routing` dejó alcanzable desde internet.
+- THE SYSTEM SHALL emitir `X-Content-Type-Options: nosniff` en toda respuesta de esa ruta —los bytes
+  y las tres negativas— con **un solo valor**. La ruta lo sella por su cuenta y el middleware global
+  lo sobrescribe con el mismo valor; el contrato es de
+  [`specs/backend-http-posture.md`](backend-http-posture.md), no de esta capability.
 - THE SYSTEM SHALL responder los bytes con `Cache-Control: private, max-age=<lo que le queda a la
   firma>`, de modo que ninguna caché compartida los guarde y ninguna copia del navegador
   sobreviva a la credencial que la compró. Las negativas van con `no-store`: cada una es un
@@ -194,8 +234,9 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - THE SYSTEM SHALL registrar cada subida en `AuditLog` con actor e IP, contra la propia foto como
   entidad y no contra la tarea, y **sin** `storage_key` entre los campos auditables: la clave
   interna no entra en la columna diseñada para volcarse.
-- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos: la validación
-  automática llega con `messaging-ai`. No hay borrado de fotos por ninguna vía de la API.
+- THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos, por el mismo
+  motivo: el `AIAdapter` que entregó `messaging-ai` no declara `validate_cleaning_photo`, y
+  `cleaning` no tiene puerto propio para ello. No hay borrado de fotos por ninguna vía de la API.
 
 ### Notificación y SLA
 
@@ -269,14 +310,20 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
   (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
   ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local).
+- `backend/app/cleaning/application/evidence.py` — `CompletionEvidenceGatherer`, las cuatro
+  lecturas del cierre y el único sitio que ensambla un `CleaningCompletionEvidence`. Es el
+  colaborador que dejó `CompleteCleaningTaskUseCase` en ocho colaboradores (siete de
+  `_TaskLifecycleBase` más este) y lo que hace testeable con fakes la reunión de la evidencia.
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
   ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
 - `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
   almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
+- `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con
+  la plantilla por defecto de PRD §7.10 (spec `seed-data-demo`).
 - `backend/app/main.py` — el montaje del router anónimo y la rama del tope de subida en
-  `MaxBodySizeMiddleware`.
+  `MaxBodySizeMiddleware` (contrato en [`specs/backend-http-posture.md`](backend-http-posture.md)).
 - `backend/app/properties/application/use_cases.py` — el punto donde el provisioner se compone
   con la transición del checkout.
 - `backend/alembic/versions/d4b0c7a91f38_cleaning_live_task_unique.py` — el índice parcial.

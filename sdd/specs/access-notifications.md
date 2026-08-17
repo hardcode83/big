@@ -214,6 +214,18 @@ guarda constantes sin enlace, así que registra **que se envió un aviso, no su 
 fallo del adapter **no se reintenta**, porque un reintento del despachador entregaría el cuerpo
 guardado, que no lleva enlace. El usuario vuelve a solicitar.
 
+**`GUEST_ESCALATION` ganó su primer escritor el 2026-08-16**, con
+[`messaging-ai.md`](messaging-ai.md). El miembro existía en `NotificationType` desde
+`celery-jobs` sin que nadie lo escribiera. A diferencia de `auth-account-recovery`, sí pasa por
+el despachador: la fila nace `PENDING` en canal `IN_APP` y es este barrido el que la mueve a
+`SENT`. Cumple el contrato de la regla 11 que fijó `celery-jobs` en vez de derivar uno nuevo —
+asunto constante, y un cuerpo que solo nombra la conversación y la propiedad: ni una palabra de
+lo que escribió el huésped, y tampoco la razón de escalación, que es un enum y sería segura pero
+ya vive en el `metadata` del mensaje y en el evento de timeline, y una tercera copia es una
+tercera cosa que mantener cierta. **Sin `sla_deadline_at` a propósito**: `escalation_for` no
+tiene regla para `GUEST_ESCALATION`, así que un plazo aquí produciría un incumplimiento que no
+escala a nadie — el mismo razonamiento que `owner_approval_notification`.
+
 **Semántica declarada: at-least-once acotado.** Un proceso que muera entre la llamada al adapter
 y la escritura del resultado puede reenviar esa fila en el siguiente tick, pero `attempts` ya
 está persistido, así que el tope de reintentos **acota** los duplicados en vez de dejarlos sin

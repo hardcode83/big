@@ -45,11 +45,13 @@ Lo que conviene saber al operarlas:
   recibe ese bloque a `null`, no su contenido: reserva y huésped con
   `READ_RESERVATIONS`, limpieza con `READ_CLEANING_TASKS`, acceso con
   `READ_ACCESS_RECORDS`.
-- **Bloques que hoy llegan vacíos, y por qué**: `open_incidents` y
-  `pending_approvals` esperan al change `maintenance`; el financiero, a `revenue`;
+- **Bloques que hoy llegan vacíos, y por qué**: el financiero espera a `revenue`;
   `last_cleaning_photos` espera a `cleaning-photos-storage`, porque una foto se sirve
-  por URL firmada y no exponiendo su `storage_key`. Los tres consultan su tabla real,
+  por URL firmada y no exponiendo su `storage_key`. Los dos consultan su tabla real,
   así que el contrato no cambiará cuando esos changes aterricen — solo los datos.
+  `open_incidents` y `pending_approvals` estaban en esta lista y ya no: `maintenance`
+  les dio escritor, así que traen datos reales sin que su contrato haya cambiado —
+  que era exactamente lo que esta nota predecía.
 - **`notes` llega siempre `null`**, a propósito: ninguna columna lo posee, y las
   candidatas (`access_notes`, `cleaning_notes`, `emergency_notes`) son texto libre
   donde un operador puede haber pegado un código de puerta.

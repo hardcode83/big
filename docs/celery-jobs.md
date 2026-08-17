@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los siete jobs
+## Los ocho jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -15,6 +15,7 @@ es el *cómo se usa y se diagnostica*.
 | `dispatch_notifications` | cada minuto | Drena las filas `PENDING` por su canal → `SENT` / `FAILED` / `SKIPPED` (change `access-notifications`) |
 | `provision_access_records` | cada 5 min | Reserva confirmada sin `AccessRecord` → lo crea en `PENDING`, revoca los de reservas canceladas y arranca el registro legal de PRD §17 (change `access-notifications`) |
 | `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API (change `reservations-webhooks`) — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
+| `classify_incidents` | cada 5 min | Pasa por el clasificador toda incidencia `OPEN` que nadie ha mirado (change `maintenance`) — ver [`maintenance.md`](maintenance.md) |
 
 Las cadencias viven en `backend/app/scheduler/schedule.py`. De esa misma tabla sale el TTL del
 lock de cada job, así que no se pueden desincronizar.

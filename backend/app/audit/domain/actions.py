@@ -75,6 +75,12 @@ ENTITY_INCIDENT = "INCIDENT"
 # scan over `changes`. It is also the same distinction `ENTITY_WEBHOOK_ENDPOINT` draws — a
 # credential *we* mint is not the entity it grants access to.
 ENTITY_GUEST_ACCESS_TOKEN = "GUEST_ACCESS_TOKEN"
+# A row of `owner_approvals` (`maintenance` D6). Rule 9 of `sdd/steering/security.md` names
+# `OwnerApproval` in its enumeration explicitly. Its own entity type and not the incident's,
+# for the reason `ENTITY_GUEST_ACCESS_TOKEN` gives: one incident can raise two approvals —
+# D11's budget gate and its real-cost gate — so pointing both at the incident's id would
+# turn "who answered THIS one" into a scan over `changes`.
+ENTITY_OWNER_APPROVAL = "OWNER_APPROVAL"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -196,12 +202,53 @@ LEGAL_REGISTRATION_FAILED = "LEGAL_REGISTRATION_FAILED"
 GUEST_ACCESS_TOKEN_ISSUED = "GUEST_ACCESS_TOKEN_ISSUED"
 GUEST_ACCESS_TOKEN_REVOKED = "GUEST_ACCESS_TOKEN_REVOKED"
 
-# Incidents (`guest-portal-api` D15). Only the creation, and only the guest-reported one:
-# it is the first writer of `incidents`, and rule 9 names the entity. There is no
-# `INCIDENT_CLASSIFIED`/`_ASSIGNED`/`_RESOLVED` here because nothing performs those yet, and
-# pre-authorising an operation no code exercises is what rule 9 refuses to do for
-# `SCHEDULER`.
+# Incidents (`guest-portal-api` D15, then `maintenance` D6). The creation is the guest
+# portal's, which was the first writer of `incidents`; rule 9 names the entity.
+#
+# Where this comment used to say there is no `INCIDENT_CLASSIFIED`/`_ASSIGNED`/`_RESOLVED`
+# "because nothing performs those yet, and pre-authorising an operation no code exercises is
+# what rule 9 refuses to do for `SCHEDULER`": that door is what `maintenance` walks through.
+# The ten actions below are each performed by a use case of that module, so they are minted
+# by the same rule that kept them out — a writer exists now.
+#
+# `INCIDENT_CLASSIFIED` is the one written **without an actor** when the job of D2 does the
+# classifying (`actor_user_id` and `actor_ip` both `NULL`). That is rule 9's **fourth named
+# exception** in `sdd/steering/security.md`, minted by this change rather than borrowed: the
+# second exception is justified by cadence, and this one by there being no actor at all — the
+# clock fires the job, so there is no person and no request for `actor_ip` to come from.
+#
+# It is bounded to this one action and to that one caller. A manual classification by a
+# manager carries its actor like any other operation, and none of the eleven actions below
+# may be written anonymously — `_AuditWriter` in `app/maintenance/application/use_cases.py`
+# refuses them by construction.
 INCIDENT_CREATED = "INCIDENT_CREATED"
+INCIDENT_CLASSIFIED = "INCIDENT_CLASSIFIED"
+INCIDENT_TRIAGED = "INCIDENT_TRIAGED"
+INCIDENT_ASSIGNED = "INCIDENT_ASSIGNED"
+INCIDENT_ACCEPTED = "INCIDENT_ACCEPTED"
+INCIDENT_STARTED = "INCIDENT_STARTED"
+INCIDENT_WAITING_PARTS = "INCIDENT_WAITING_PARTS"
+INCIDENT_RESOLVED = "INCIDENT_RESOLVED"
+INCIDENT_CANCELLED = "INCIDENT_CANCELLED"
+# The two states an owner approval leaves the incident in, and they are their own actions
+# because neither is a triage. `INCIDENT_TRIAGED` covered both until the architecture panel
+# of section 4's sibling — section 6 — pointed out that an auditor reading it on those rows
+# would think somebody corrected a category. `maintenance` D6 records the addition.
+#
+# `INCIDENT_AWAITING_APPROVAL`: the technician's closing cost went past the tenant threshold
+# and the close was not accepted (D11's second gate).
+# `INCIDENT_RESUMED`: the owner said yes and the incident went back to where its approval's
+# `related_type` says it belongs.
+INCIDENT_AWAITING_APPROVAL = "INCIDENT_AWAITING_APPROVAL"
+INCIDENT_RESUMED = "INCIDENT_RESUMED"
+
+# Owner approvals (`maintenance` D6). Two actions and not one per outcome: the answer's
+# outcome is a field of the approval (`status`), so `APPROVED` and `REJECTED` are the same
+# operation with a different diff. Splitting them would put the same question — "what did the
+# owner decide about this cost" — in two places, which is what this module's closed
+# vocabulary exists to prevent.
+OWNER_APPROVAL_REQUESTED = "OWNER_APPROVAL_REQUESTED"
+OWNER_APPROVAL_ANSWERED = "OWNER_APPROVAL_ANSWERED"
 
 ENTITY_TYPES = frozenset(
     {
@@ -219,6 +266,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_RESERVATION,
         ENTITY_INCIDENT,
         ENTITY_GUEST_ACCESS_TOKEN,
+        ENTITY_OWNER_APPROVAL,
     }
 )
 
@@ -261,5 +309,17 @@ ACTIONS = frozenset(
         GUEST_ACCESS_TOKEN_ISSUED,
         GUEST_ACCESS_TOKEN_REVOKED,
         INCIDENT_CREATED,
+        INCIDENT_CLASSIFIED,
+        INCIDENT_TRIAGED,
+        INCIDENT_ASSIGNED,
+        INCIDENT_ACCEPTED,
+        INCIDENT_STARTED,
+        INCIDENT_WAITING_PARTS,
+        INCIDENT_RESOLVED,
+        INCIDENT_CANCELLED,
+        INCIDENT_AWAITING_APPROVAL,
+        INCIDENT_RESUMED,
+        OWNER_APPROVAL_REQUESTED,
+        OWNER_APPROVAL_ANSWERED,
     }
 )

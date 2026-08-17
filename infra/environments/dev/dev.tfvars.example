@@ -8,8 +8,13 @@ private_key_path = "<ruta a tu .pem privado, p.ej. ~/.oci/oci_api_key.pem>"
 region           = "<p.ej. eu-frankfurt-1>"
 compartment_ocid = "<compartment OCID (raíz de la tenancy, para empezar)>"
 
-# CIDRs de operadores permitidos para SSH (22) y los puertos de app (8000/3000). Uno por IP, prefijo >= /24.
+# CIDRs de operadores permitidos para SSH (22). Uno por IP, prefijo >= /24 (sácala con `curl -s ifconfig.me`).
 allowed_ssh_cidrs = ["<tu IP pública>/32"]
+
+# Excepción nombrada al mínimo de /24, para operadores con IP dinámica sin rango estrecho.
+# Suelo propio: >= /16. Cada entrada exige justificación en el PR que la añade; ámbito dev/test.
+# Déjala vacía salvo que estés añadiendo una, y revisa `variables.tf` antes.
+allowed_ssh_cidrs_wide = []
 
 # Lista de claves públicas SSH autorizadas (una por operador). Par dedicado a esta VM
 # (ssh-keygen -t ed25519 -f ~/.ssh/autohostai_dev_vm) — nunca reutilizar la API key de OCI.

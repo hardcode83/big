@@ -24,6 +24,7 @@ from app.integrations.infrastructure.storage.local import LocalFileStorage
 from app.integrations.infrastructure.storage.s3 import S3FileStorage, build_s3_client
 
 BUCKET = "autohostai-media"
+OCI_ENDPOINT = "https://ns.compat.objectstorage.eu-frankfurt-1.oraclecloud.com"
 KEY = "tenants/11111111-1111-1111-1111-111111111111/cleaning-tasks/t/p.jpg"
 JPEG = b"\xff\xd8\xff\xe0 pretend this is a photo"
 
@@ -95,6 +96,68 @@ class TestTheDependencyLanded:
         is how an EXTERNAL_DEPENDENCY ends up with tests at all."""
         assert callable(build_s3_client)
         S3FileStorage(bucket=BUCKET, client=_StubS3Client())  # no credentials involved
+
+
+class TestAddressingStyle:
+    """`object-storage-provisioning` design D3 / R3.4 — path-style, and only with an endpoint.
+
+    No network here either: `boto3.client` resolves its configuration locally and makes no
+    request, so the resolved value can be read straight off the client it returns.
+    """
+
+    def test_a_custom_endpoint_forces_path_style(self) -> None:
+        """Without this, botocore addresses `<bucket>.<namespace>.compat.objectstorage…`, a host
+        that does not exist — and every call and every presigned URL fails on DNS at the first
+        upload rather than at boot."""
+        client = build_s3_client(
+            region_name="eu-frankfurt-1",
+            endpoint_url=OCI_ENDPOINT,
+        )
+
+        assert client.meta.config.s3["addressing_style"] == "path"
+        assert client.meta.endpoint_url == OCI_ENDPOINT
+
+    def test_without_an_endpoint_boto3_keeps_its_own_default(self) -> None:
+        """R3.4 keeps AWS at *configure nothing*, so pinning path-style unconditionally would
+        change behaviour for the one provider that needs no configuration at all."""
+        client = build_s3_client(region_name="eu-west-1")
+
+        assert client.meta.config.s3 is None
+        assert client.meta.endpoint_url == "https://s3.eu-west-1.amazonaws.com"
+
+
+class TestChecksumBehaviour:
+    """Regression for the failure that only a real bucket could show (2026-08-16).
+
+    From botocore 1.36 `PutObject` defaults to `request_checksum_calculation="when_supported"`,
+    which frames the body with `aws-chunked` content-encoding and a trailing CRC32. OCI's
+    S3-compatible API answers `501 NotImplemented: AWS chunked encoding not supported`, so every
+    upload failed with a `502` — the first photo ever sent to the provisioned bucket.
+
+    Nothing caught it earlier because R4.4 requires these tests to build clients **without
+    touching the network**, and the incompatibility only exists on the wire. What is assertable
+    offline is the resolved configuration, so that is what this pins: the day someone drops these
+    two settings, or a botocore upgrade renames them, this fails instead of `dev` failing.
+    """
+
+    def test_a_custom_endpoint_pins_the_pre_1_36_checksum_behaviour(self) -> None:
+        client = build_s3_client(region_name="eu-frankfurt-1", endpoint_url=OCI_ENDPOINT)
+
+        assert client.meta.config.request_checksum_calculation == "when_required"
+        assert client.meta.config.response_checksum_validation == "when_required"
+
+    def test_without_an_endpoint_botocore_keeps_its_current_defaults(self) -> None:
+        """Same reasoning as path-style: AWS implements chunked encoding, so there is nothing to
+        work around and R3.4's *configure nothing* stays literally true."""
+        client = build_s3_client(region_name="eu-west-1")
+
+        assert client.meta.config.request_checksum_calculation == "when_supported"
+
+    def test_both_clients_still_sign_with_sigv4(self) -> None:
+        """The property the config existed for before D3 touched it: some regions reject a
+        presigned URL signed any other way, and OCI's S3-compatible API requires SigV4."""
+        assert build_s3_client(endpoint_url=OCI_ENDPOINT).meta.config.signature_version == "s3v4"
+        assert build_s3_client().meta.config.signature_version == "s3v4"
 
 
 class TestS3Adapter:

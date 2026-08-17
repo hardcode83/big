@@ -1122,3 +1122,82 @@ def test_capture_narrows_the_request_when_given_params(monkeypatch, tmp_path):
     beds24.capture("one", "/bookings", bench=_bench(handler), params={"id": "90923575"})
 
     assert seen["id"] == "90923575"
+
+
+# --- `messages`: can a message be written without an OTA channel? ---------------------------
+
+
+def _messages_handler(*, on_message):
+    """Route `/bookings/messages` to `on_message` and everything else to the booking cycle."""
+
+    def handler(request):
+        if request.url.path.endswith("/bookings/messages"):
+            return on_message(request)
+        return httpx.Response(200, json=[{"id": 777}])
+
+    return handler
+
+
+def test_messages_refuses_to_run_without_explicit_confirmation():
+    """It writes: a booking cycle plus messages onto it."""
+    with pytest.raises(SystemExit, match="--confirm-writes"):
+        beds24.main(["messages", "--room=713992"])
+
+
+def test_messages_records_an_accepted_guest_write():
+    """The finding that would unblock the inbound half of `beds24-messaging-adapter`."""
+    records = beds24.probe_messages(
+        _bench(_messages_handler(on_message=lambda r: httpx.Response(200, json=[{"id": 1}]))),
+        room_id="713992",
+    )
+
+    guest = [r for r in records if r.get("message_source") == "guest" and "write_accepted" in r]
+    assert guest and guest[0]["write_accepted"] is True
+    assert guest[0]["write_rejected"] is None
+
+
+def test_messages_treats_a_201_with_success_false_as_a_refusal():
+    """The provider answers 2xx while refusing; the verdict is in the body, not the status.
+
+    This is the trap `_envelope_failure` exists for, and a probe that read the status alone
+    would report "messaging works without a channel" — the exact wrong answer, on the exact
+    question this subcommand exists to settle.
+    """
+    refusal = httpx.Response(
+        201, json=[{"success": False, "errors": [{"field": "source", "message": "invalid"}]}]
+    )
+    records = beds24.probe_messages(
+        _bench(_messages_handler(on_message=lambda r: refusal)), room_id="713992"
+    )
+
+    writes = [r for r in records if "write_accepted" in r]
+    assert writes and all(r["write_accepted"] is False for r in writes)
+    assert "source: invalid" in writes[0]["write_rejected"]
+
+
+def test_messages_stops_trying_shapes_once_one_is_accepted():
+    """A rejected request costs no credit, but an accepted one does — so it does not repeat."""
+    seen = []
+
+    def on_message(request):
+        if request.method == "GET":
+            return httpx.Response(200, json={"data": []})
+        seen.append(request.content)
+        if len(seen) == 1:  # the flat shape is refused, the nested one is not
+            return httpx.Response(201, json=[{"success": False, "error": "no such field"}])
+        return httpx.Response(200, json=[{"id": 1}])
+
+    records = beds24.probe_messages(
+        _bench(_messages_handler(on_message=on_message)), room_id="713992"
+    )
+
+    shapes = [r["shape"] for r in records if "write_accepted" in r]
+    # guest tries flat (refused) then nested (accepted); host goes straight to nested.
+    assert shapes == ["write-guest-flat", "write-guest-nested", "write-host-nested"]
+
+
+def test_message_count_says_unknown_rather_than_zero_when_it_cannot_ask():
+    """"Nothing came back" and "we could not ask" are different findings."""
+    assert beds24._message_count(httpx.Response(500, text="nope")) is None
+    assert beds24._message_count(httpx.Response(200, text="not json")) is None
+    assert beds24._message_count(httpx.Response(200, json={"data": [{"id": 1}]})) == 1

@@ -26,6 +26,7 @@ from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.core.config import settings
 from app.core.db import async_session_factory
+from app.tenants.domain.enums import StorageType
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 
 
@@ -49,6 +50,7 @@ class SeedUser:
 class BootstrapPlan:
     tenant_name: str
     billing_email: str
+    storage_type: StorageType
     users: tuple[SeedUser, ...]
 
 
@@ -77,6 +79,10 @@ def build_plan() -> BootstrapPlan:
     return BootstrapPlan(
         tenant_name=settings.bootstrap_tenant_name.strip(),
         billing_email=normalize_email(settings.bootstrap_tenant_billing_email),
+        # Not in `required` above: unlike the eight names there it ships a working default
+        # (`LOCAL`), and `Settings` has already refused any value outside the enum, so by here
+        # it can only be a member.
+        storage_type=StorageType(settings.bootstrap_storage_type),
         users=(
             SeedUser(
                 name=settings.bootstrap_owner_name.strip(),
@@ -98,8 +104,16 @@ def build_plan() -> BootstrapPlan:
 
 
 async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptPasswordHasher) -> dict[str, int]:
-    """Idempotent: a second run over an initialised database changes nothing (R7.2)."""
-    created = {"tenants": 0, "tenant_configs": 0, "users": 0}
+    """Convergent: a second run leaves the state the configuration declares (R7.2, D10).
+
+    It used to be described as *idempotent* — "a second run changes nothing" — and that stopped
+    being the whole truth with `object-storage-provisioning`: `storage_type` is applied on
+    creation **and updated when it differs**, because in `dev` the tenant and its config already
+    exist, so a create-only setting would never arrive without a hand-written `UPDATE` — exactly
+    what the IaC-first norm and R1.5 refuse. Everything else is still create-only, so a re-run
+    with an unchanged configuration is still a no-op.
+    """
+    created = {"tenants": 0, "tenant_configs": 0, "tenant_configs_converged": 0, "users": 0}
     users = SqlAlchemyUserRepository(session)
 
     tenant = (
@@ -120,8 +134,17 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
     ).scalar_one_or_none()
     if config is None:
         # Other modules assume a tenant always has its config.
-        session.add(TenantConfigModel(id=uuid.uuid4(), tenant_id=tenant.id))
+        session.add(
+            TenantConfigModel(
+                id=uuid.uuid4(), tenant_id=tenant.id, storage_type=plan.storage_type
+            )
+        )
         created["tenant_configs"] = 1
+    elif config.storage_type is not plan.storage_type:
+        # The convergence half of D10, and the only field this CLI updates. It is what makes
+        # `BOOTSTRAP_STORAGE_TYPE` reach an environment whose tenant was seeded long ago.
+        config.storage_type = plan.storage_type
+        created["tenant_configs_converged"] = 1
 
     for seed in plan.users:
         # One global lookup answers both questions, because a normalised email is
@@ -190,11 +213,14 @@ def main() -> int:
     except BootstrapConflictError as exc:
         print(f"bootstrap: refusing to continue — {exc}", file=sys.stderr)
         return 1
-    # Counts, never the credentials.
+    # Counts, never the credentials. The converged count is reported separately from the
+    # created one because a re-run that only moves `storage_type` creates nothing, and a line
+    # saying "created 0 config(s)" would read as "did nothing" when it did the one thing asked.
     print(
         "bootstrap: created "
         f"{created['tenants']} tenant(s), {created['tenant_configs']} config(s), "
-        f"{created['users']} user(s)"
+        f"{created['users']} user(s); converged "
+        f"{created['tenant_configs_converged']} config(s)"
     )
     return 0
 

@@ -53,6 +53,63 @@ variable "allowed_ssh_cidrs" {
   }
 }
 
+variable "allowed_ssh_cidrs_wide" {
+  description = <<-EOT
+    EXCEPCIÓN NOMBRADA al mínimo de /24 de `allowed_ssh_cidrs`, para operadores con IP dinámica cuyo
+    proveedor no da un rango estrecho. Va aparte y no relajando el mínimo de la variable normal, para
+    que abrir un rango ancho siga siendo una decisión explícita y visible en vez de algo que se cuela
+    en una lista donde todo lo demás es un /32.
+
+    Ámbito dev/test, y revisión pendiente antes de reutilizar el patrón en staging/prod — igual que
+    las dos relajaciones de IAM que este entorno ya lleva documentadas en `iam-policy.md`.
+
+    Cada entrada exige justificación en el PR que la añade: quién es, por qué no vale un /24, y
+    cuándo se revisa. Y conviene decir en voz alta lo que concede: el 22 es la ÚNICA vía de entrada a
+    la VM —el resto del tráfico va por el túnel de Cloudflare—, así que ensanchar esto ensancha la
+    única puerta que hay.
+
+    Uso actual (2026-08-15, change `object-storage-provisioning`): `79.116.0.0/16`, la operadora
+    Marta. La regla existía desde antes **a mano en la consola de OCI**, donde nadie la revisaba y
+    ningún fichero de este repositorio la explicaba; el primer `terraform plan` que corrió después
+    (run 31908077371) proponía borrarla. Traerla aquí no ensancha la exposición real —ya estaba
+    abierta—, la hace visible, revisable y reproducible. Sustituible por un /32 en cuanto se conozca
+    su IP fija.
+  EOT
+  type        = list(string)
+  default     = []
+
+  validation {
+    # Mismo formato estricto, pero el suelo baja a /16: sigue rechazando IPv6, /8 y 0.0.0.0/0. Que la
+    # excepción tenga su propio suelo es lo que impide que «excepción» acabe significando «sin límite».
+    condition = alltrue([
+      for c in var.allowed_ssh_cidrs_wide :
+      can(regex("^([0-9]{1,3}\\.){3}[0-9]{1,3}/([0-9]|[12][0-9]|3[0-2])$", c)) && tonumber(split("/", c)[1]) >= 16
+    ])
+    error_message = "Cada CIDR de allowed_ssh_cidrs_wide debe ser IPv4 válido con prefijo >= /16. Un rango más ancho que /16 no es una excepción, es abrir el puerto: no se admite ni aquí."
+  }
+}
+
+variable "media_user_email" {
+  description = <<-EOT
+    Email primario del usuario de servicio del bucket de medios. **No es opcional**: esta tenancy usa
+    Identity Domains (IDCS), que rechaza crear un usuario sin él aunque sea de servicio y no vaya a
+    iniciar sesión nunca.
+
+    No es un secreto y por eso lleva default versionado, igual que `budget_alert_recipients`. El
+    default usa **plus-addressing** (`+autohostai-media`) sobre un buzón que ya existe: IDCS quiere
+    una dirección única por usuario, y así se consigue sin dar de alta un buzón nuevo ni reutilizar
+    tal cual la del usuario humano —que colisionaría—, y además cualquier aviso de IDCS llega a
+    alguien en vez de perderse.
+  EOT
+  type        = string
+  default     = "josegascon+autohostai-media@gmail.com"
+
+  validation {
+    condition     = can(regex("^[^@[:space:]]+@[^@[:space:]]+$", var.media_user_email))
+    error_message = "media_user_email debe ser una dirección de correo válida."
+  }
+}
+
 variable "ssh_authorized_keys" {
   description = "Lista de claves públicas SSH autorizadas (una por operador), inyectadas vía cloud-init al usuario por defecto de la imagen (ubuntu). Cada par dedicado a esta VM — distinto de la API key de OCI del provider/backend, nunca reutilizar. Por ahora solo la de Jose; añadir más no requiere recrear."
   type        = list(string)

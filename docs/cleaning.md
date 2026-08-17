@@ -157,7 +157,11 @@ caduque a la vez que la credencial que la trajo.
 ### Dónde viven las fotos
 
 Cada tenant tiene un `storage_type`, `LOCAL` por defecto, y no se cambia desde el `update` de
-tenant: darle la vuelta dejaría apuntando a un almacén las fotos que están en el otro.
+tenant: darle la vuelta dejaría apuntando a un almacén las fotos que están en el otro. La única
+vía es el **seed** — `BOOTSTRAP_STORAGE_TYPE` y una re-ejecución de `python -m app.cli.bootstrap`,
+que converge la configuración del tenant— y sigue teniendo la misma consecuencia, así que hay que
+comprobar antes que ese tenant no tenga fotos ya subidas (procedimiento en
+`infra/environments/dev/RUNBOOK.md` §9.2).
 
 - **`LOCAL`** — el adaptador escribe bajo **`/app/media`** dentro del contenedor `backend`, que
   es el volumen con nombre `backend_media` de `docker-compose.yml`. El objeto queda en
@@ -167,8 +171,16 @@ tenant: darle la vuelta dejaría apuntando a un almacén las fotos que están en
   origen, y **no contiene la ruta interna del objeto**.
 - **`S3`** — la URL firmada la emite el propio proveedor, así que necesariamente lleva el bucket
   y la clave del objeto: es inherente a cómo funciona un presigned URL y no es algo que esta API
-  pueda recortar. Para un tenant `S3` la ruta de servido de arriba contesta `404`, porque el
-  navegador va directo al almacén.
+  pueda recortar. **Aceptado por escrito**, con su razón y las dos alternativas descartadas, en
+  [ADR 0008](adr/0008-object-storage-provider-dev.md). Para un tenant `S3` la ruta de servido de
+  arriba contesta `404`, porque el navegador va directo al almacén.
+
+  Qué almacén hay detrás es **configuración**, no código: `S3_BUCKET`, `S3_REGION` y
+  `S3_ENDPOINT_URL`, más el par `AWS_ACCESS_KEY_ID`/`AWS_SECRET_ACCESS_KEY` que boto3 lee de su
+  cadena estándar. Con las cinco vacías —el caso local— nada cambia: `LOCAL` funciona igual y un
+  tenant `S3` falla ruidosamente en vez de caer a disco. En `dev` el proveedor es OCI Object
+  Storage y Terraform aprovisiona el bucket; qué vale cada ajuste en OCI, AWS S3, Cloudflare R2 y
+  MinIO está tabulado en el mismo ADR.
 
 **Coste que hay que conocer: `docker compose down -v` borra el volumen y con él todas las fotos
 subidas.** `make down` no lo hace —para los contenedores y conserva los volúmenes—, pero el

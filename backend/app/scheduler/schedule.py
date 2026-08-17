@@ -44,6 +44,13 @@ CADENCES: dict[str, timedelta] = {
     # the confirmation, so the latency is irrelevant and the reconciliation is cheap.
     "provision_access_records": timedelta(minutes=5),
     "process_webhook_events": timedelta(seconds=60),
+    # Every five minutes, from `maintenance` (its D2). Not one of PRD §8.3's either, and the
+    # same kind of divergence as the two above: §12 says an incident must arrive classified
+    # and says nothing about what triggers the classification. Five minutes rather than one
+    # because the wait costs a manager some latency on a triage screen, while the tick costs
+    # a call to whatever sits behind `IncidentClassifier` — and the day that is a real AI
+    # provider, the cadence is the ceiling on what it is asked.
+    "classify_incidents": timedelta(minutes=5),
 }
 
 

@@ -136,7 +136,8 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
   puertos con un desplazamiento (`PORT_OFFSET`), no volver a publicarlos sin más.
 - **Coste, que no desaparece**: los volúmenes van por proyecto, así que el stack de un worktree
   arranca con base de datos **vacía**, reinstala dependencias la primera vez y ocupa sus propios gigas.
-  Se siembra con `make bootstrap`.
+  Se siembra con `make bootstrap`, y con `make seed-demo` detrás si se quiere un stack recorrible
+  en vez de un dashboard vacío (ver spec `seed-data-demo`).
 - **Stacks huérfanos**: borrar un worktree sin bajar su stack deja los contenedores vivos retendiendo
   puertos. Y el caso habitual no es «directorio borrado» sino «worktree desregistrado con el directorio
   en pie», porque `git worktree remove --force` **falla** sobre los ficheros que Docker creó por
@@ -151,9 +152,10 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 - WHEN se ejecuta `make up` y no existe `.env`, THE SYSTEM SHALL crearlo automáticamente copiando `.env.example` antes de levantar el stack — cero pasos manuales para arrancar por primera vez.
 - WHEN se ejecuta `make up` y falta `JWT_SECRET_KEY` en `.env` (o está vacía), THE SYSTEM SHALL generarla con `openssl rand -hex 32` bajo `umask 077`, escribirla en el `.env` local y dejar el fichero en `600`, de forma idempotente y también sobre un `.env` preexistente. Es la forma de cumplir a la vez la regla 8 de `steering/security.md` —la clave de firma nunca lleva valor por defecto en el repositorio— y el arranque sin pasos manuales: el valor se genera en la máquina del desarrollador (ver spec `auth-tenancy`).
 - WHEN se ejecuta `make up`, `make down`, `make logs`, `make ps` o `make sh`, THE SYSTEM SHALL delegar en el comando `docker compose` equivalente.
-- THE SYSTEM SHALL hacer que **los ocho targets que hablan con Compose** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»).
+- THE SYSTEM SHALL hacer que **los nueve targets que hablan con Compose** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»).
 - WHERE se invoque `docker compose` **desnudo** en lugar de por el `Makefile`, THE SYSTEM SHALL comportarse igual en el worktree principal —ahí `make` tampoco pasa `-f`— y **distinto** en un worktree enlazado, donde el comando desnudo carga solo el fichero base. Los que **no crean** contenedores (`exec`, `logs`, `ps`, `down`) funcionan igual en los dos sitios; los que crean o **recrean** (`up`, y `run` cuando arrastra dependencias) publicarían los cuatro puertos. Medido, porque la intuición dice lo contrario: tener las dependencias ya levantadas **no** protege — Compose recrea la que tenga un hash de configuración distinto, así que un `run` desnudo en un worktree las recrea publicando. Desde un worktree: `make`, o `--no-deps` cuando el comando no necesita la base de datos (por eso `make openapi` lo lleva).
 - `make bootstrap` crea el tenant y los usuarios iniciales ejecutando `python -m app.cli.bootstrap` dentro del contenedor `backend` — deliberadamente **no** forma parte de `make up`, porque necesita valores que elige una persona (ver spec `auth-tenancy`). Usa `python -m` y no `uv run` para que el mismo comando valga contra la imagen `prod`, que no lleva `uv`.
+- `make seed-demo` llena el tenant que `bootstrap` dejó con el dataset de demo de PRD §27 ejecutando `python -m app.cli.seed_demo` dentro del contenedor `backend` — igual que `bootstrap`, **no** forma parte de `make up` porque necesita valores que elige una persona, y **exige que el tenant ya exista**: sin él sale con error nombrando `make bootstrap` y sin escribir nada (ver spec `seed-data-demo`).
 - `make db-clean-test` borra las bases de datos de test huérfanas que deje una ejecución de pytest interrumpida, sin tocar la de desarrollo (ver spec `backend-ci`).
 - WHERE se pasa `SERVICE=<nombre>` a cualquiera de esos targets, THE SYSTEM SHALL limitar la operación a ese servicio — Compose arranca automáticamente sus dependencias declaradas (p.ej. `SERVICE=backend` trae `postgres`+`redis`; `SERVICE=frontend` trae además `backend`).
 - `make sh` sin `SERVICE=` abre shell en `backend` por defecto.
@@ -169,7 +171,7 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 
 - El backend expone `GET /health` → `200 {"status": "ok"}`.
 - El frontend renderiza dinámicamente (sin cachear el resultado en build time) una página raíz que hace fetch a `${BACKEND_INTERNAL_URL}/health` y muestra `backend: ok` o `backend: ko` según la respuesta.
-- El worker ejecuta las siete tareas periódicas que `celery-jobs` registra en `backend/app/worker.py` —las cuatro nombradas por PRD §8.3 más las tres que no lo están: `dispatch_notifications`, `provision_access_records` y `process_webhook_events`—, con broker/backend en `REDIS_URL`; `beat` es quien las dispara (ver `specs/celery-jobs.md`). El fichero de estado de `beat` aparece como `backend/celerybeat-schedule` en el árbol de trabajo —el bind mount de `./backend` lo hace persistente en el host, no efímero— y está en `.gitignore`.
+- El worker ejecuta las ocho tareas periódicas que `celery-jobs` registra en `backend/app/worker.py` —las cuatro nombradas por PRD §8.3 más las cuatro que no lo están: `dispatch_notifications`, `provision_access_records`, `process_webhook_events` y `classify_incidents`—, con broker/backend en `REDIS_URL`; `beat` es quien las dispara (ver `specs/celery-jobs.md`). El fichero de estado de `beat` aparece como `backend/celerybeat-schedule` en el árbol de trabajo —el bind mount de `./backend` lo hace persistente en el host, no efímero— y está en `.gitignore`.
 
 ### Inicialización de git
 

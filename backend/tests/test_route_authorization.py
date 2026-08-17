@@ -368,6 +368,21 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
+        # `maintenance`: the twelve routes of its D14. Every one of them is authenticated —
+        # the module has no anonymous door, and the only surface that creates an incident
+        # without a session is the guest portal's, which is in `ANONYMOUS_ENDPOINTS`.
+        # Asserted per role in `tests/maintenance/test_api_incidents.py`.
+        "/api/v1/incidents",
+        "/api/v1/incidents/{incident_id}",
+        "/api/v1/incidents/{incident_id}/accept",
+        "/api/v1/incidents/{incident_id}/assign",
+        "/api/v1/incidents/{incident_id}/cancel",
+        "/api/v1/incidents/{incident_id}/classify",
+        "/api/v1/incidents/{incident_id}/resolve",
+        "/api/v1/incidents/{incident_id}/resume",
+        "/api/v1/incidents/{incident_id}/start",
+        "/api/v1/incidents/{incident_id}/wait-parts",
+        "/api/v1/owner-approvals/{approval_id}/respond",
         "/api/v1/reservations",
         "/api/v1/reservations/{reservation_id}",
         "/api/v1/reservations/{reservation_id}/guest-access-token",
@@ -385,6 +400,17 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
         "/api/v1/provenance",
+        # `messaging-ai` D17: the seven routes of PRD §16, five distinct paths. All
+        # authenticated, and deliberately so — messages enter through the panel or the API,
+        # never from an OTA, because `PMSMessagingPort` is still the port with no methods.
+        # There is no anonymous door into this module, which is what keeps the human actor of
+        # D12 true and therefore keeps rule 9 free of a new exception. Asserted per role in
+        # `tests/messaging/test_api_authorization.py`.
+        "/api/v1/conversations",
+        "/api/v1/conversations/{conversation_id}",
+        "/api/v1/conversations/{conversation_id}/messages",
+        "/api/v1/conversations/{conversation_id}/escalate",
+        "/api/v1/conversations/{conversation_id}/resolve",
     }
 
 

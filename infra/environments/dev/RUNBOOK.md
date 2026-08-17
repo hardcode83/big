@@ -352,7 +352,7 @@ Cómo mirar la app y diagnosticar cuando algo va mal, sabiendo que **no hay ning
 #### Requisitos previos
 
 1. Tener la clave privada de la VM en `~/.ssh/autohostai_dev_vm` (recuperable del Vault, §2).
-2. Que **tu IP pública esté en `allowed_ssh_cidrs`**. Si cambió de casa/oficina, actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev` (§0). Compruébala con `curl -s ifconfig.me`.
+2. Que **tu IP pública esté en `allowed_ssh_cidrs`**. Si cambió de casa/oficina, actualiza el secret `ALLOWED_SSH_CIDRS` —el array JSON, `["1.2.3.4/32", ...]`— y aplica `infra-dev` (§0). Compruébala con `curl -s ifconfig.me`, y ponla como `/32`: la validación de `variables.tf` rechaza cualquier prefijo menor de `/24`, así que el bloque entero de tu ISP no vale. **No la añadas por la consola de OCI**: sobrevive hasta el siguiente `apply` y entonces desaparece.
 3. Saber la IP pública de la VM. Es **reservada**, así que no cambia:
 
    ```bash
@@ -542,7 +542,7 @@ Este es el árbol de decisión. Compara lo que ves **por HTTPS público** con lo
 
 SSH es la red de seguridad y **nunca se cierra**. Si tampoco entra por SSH:
 
-1. Tu IP pública ha cambiado y ya no está en `allowed_ssh_cidrs` → actualiza el secret `ALLOWED_SSH_CIDR` y aplica `infra-dev`.
+1. Tu IP pública ha cambiado y ya no está en `allowed_ssh_cidrs` → actualiza el secret `ALLOWED_SSH_CIDRS` (array JSON) y aplica `infra-dev`. Si antes entrabas por una regla puesta a mano en la consola, el síntoma es el mismo y la causa otra: el último `apply` la borró.
 2. Si eso no fuera posible, queda la **consola serie de OCI** (Compute → Instance → Console connection), que no depende de la red de la VM.
 
 ### 7.4.6 Comprobar que el túnel sigue aislado de los datos
@@ -671,4 +671,53 @@ es inocuo, pero genera otra contraseña.
 No hay objetivo de `make` para esto a propósito: es una operación de rescate, no parte del flujo
 normal. Detalle completo de los tres endpoints y de la política de contraseña en
 `docs/auth-account-recovery.md`.
+
+## 9. Almacén de objetos para las fotos (change `object-storage-provisioning`)
+
+El bucket privado `autohostai-<env>-media`, su usuario IAM, su Customer Secret Key y los cuatro
+secretos del Vault los crea **Terraform**. Nada de esto se toca en la consola de OCI: la elección de
+proveedor y sus alternativas están en `docs/adr/0008-object-storage-provider-dev.md`.
+
+### 9.1 Rotar la Customer Secret Key
+
+**Cuándo**: sospecha de exposición del par acceso/secreto, o rotación periódica. Es la única
+credencial del bucket, así que rotarla invalida todo acceso anterior.
+
+```bash
+# Desde infra/environments/dev/, o por workflow_dispatch de infra-dev.yml sobre main.
+terraform apply -replace=oci_identity_customer_secret_key.media
+```
+
+El mismo `apply` reescribe los dos secretos del Vault que dependen de ella
+(`autohostai-<env>-media-access-key-id` y `-media-secret-access-key`), porque su contenido se deriva
+del recurso reemplazado. **La VM sigue con la clave vieja hasta el siguiente deploy**: el `.env` solo
+se rellena en el paso «Render .env», así que hay que lanzar `deploy-dev` después. Entre el `apply` y
+el deploy, las subidas de fotos fallan con `502` — es una ventana real y conviene rotar con el deploy
+a mano.
+
+No hay paso manual: **no** se copia nada de la consola de OCI. Si algún día hiciera falta ver el
+valor, sale del Vault, no del recurso.
+
+### 9.2 Poner un tenant en `S3` (paso 4 del procedimiento de verificación)
+
+`storage_type` **no** se abre al `PATCH` de la API, y por su razón original: cambiarlo apuntaría a
+fotos ya subidas a un sitio donde no están. La vía es el seed, y el valor se pasa **en línea** porque
+el deploy trunca el `.env` en cada ejecución:
+
+```bash
+# En la VM, desde el directorio del compose de deploy.
+# BLOQUEANTE antes de convergir: si el tenant ya tiene fotos, NO conviertas.
+docker compose exec -T postgres psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" \
+  -c "SELECT count(*) FROM cleaning_photos;"
+
+# Solo si el recuento es 0:
+docker compose exec -e BOOTSTRAP_STORAGE_TYPE=S3 backend python -m app.cli.bootstrap
+```
+
+**Si el recuento no es cero, para y decide explícitamente** (borrar las filas o volver a subir las
+fotos). Migrar de verdad está fuera de alcance del change: las filas seguirían apuntando a claves que
+están en disco y `GET /api/v1/cleaning-photos/{id}` devolvería `404` para ese tenant.
+
+`apply_plan` **converge**: crea la configuración con ese `storage_type` y la **actualiza si difiere**
+en una re-ejecución. Volver atrás es el mismo comando con `BOOTSTRAP_STORAGE_TYPE=LOCAL`.
 

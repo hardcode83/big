@@ -78,8 +78,38 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
     2. It does nothing on a session without a tenant marker. Unmarked: Celery tasks,
        the bootstrap command, the anonymous login query — which *needs* it, because
        `find_by_email_globally` has no tenant yet — and `POST /auth/refresh`,
-       which is anonymous and so never reaches `get_authenticated_request`, the only
-       place that marks. Any future anonymous endpoint touching data inherits this.
+       which is anonymous and so never reaches `get_authenticated_request`. That
+       dependency is the usual marker, not the only one: `SessionTenantBinder`
+       (`app/guests/infrastructure/portal_repositories.py`) marks the request's session on
+       the anonymous guest-portal routes, and every CLI command marks its own. So being
+       anonymous is no guarantee of being unmarked — what decides it is where the request
+       is in its sequence, not which kind of route it is. Any future anonymous endpoint
+       touching data inherits this limit.
+
+       **`app/cli/seed_demo.py` reads unmarked and then marks the same session mid-run**,
+       and it belongs in this list precisely because it does not fit it. It is not the
+       first to do that — `GuestPortalAuthenticator` (`app/guests/application/portal.py`)
+       resolves a token on an unmarked session and binds afterwards — so what earns the
+       entry is the shape, not being first. It reads two things while unmarked, and they
+       are not the same kind of read:
+
+       * the **tenant**, resolved by NAME — `TenantModel` carries no `tenant_id`, so it is
+         not one of the scoped classes below and this listener would never have filtered
+         it. Two plain values come off that row: its `id`, which is the argument to the bind
+         and then flows into every write of the run, and its `timezone`, which anchors the
+         demo dataset's dates to the tenant's own calendar day. Both are scalars read before
+         the bind rather than an entity carried across it, which is why neither is what the
+         constraint below is about;
+       * `find_by_email_globally`, which returns a **`User`** — a scoped class. This one
+         must precede the bind or the listener scopes it and the cross-tenant conflict
+         check silently stops being global.
+
+       The constraint is therefore about the second read only, and it is limit 4 below: a
+       scoped row loaded while unmarked stays reachable afterwards. So the entity that
+       lookup returns is only ever asked two questions — which tenant owns it, for the
+       refusal, and whether it exists at all, for the "leave it alone" skip — and is never
+       mutated, never carried into a write, never re-attached. Copy the sequence only with
+       that attached.
 
        This is how `webhook_events` rows whose `tenant_id` is NULL are reached through
        the ORM. That column is nullable by design (§7.26: a payload that cannot be

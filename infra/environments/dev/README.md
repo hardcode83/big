@@ -13,6 +13,9 @@
 - Una instancia `VM.Standard.A1.Flex` (2 OCPU/12 GB, cupo Always Free completo) con una imagen Ubuntu 22.04 ARM64 resuelta dinámicamente (nunca un OCID hardcodeado), con `cloud-init` que instala Docker + el plugin de Compose.
 - Una IP pública reservada (no efímera) asociada a la instancia.
 - Un presupuesto (`oci_budget_budget` + `oci_budget_alert_rule`) que avisa por email si el gasto real supera un umbral — mitigación del riesgo de facturación documentado en el ADR.
+- **El almacén de objetos de las fotos** (change `object-storage-provisioning`): un bucket **privado** `autohostai-<env>-media` (`NoPublicAccess` — todo objeto se entrega por URL prefirmada de caducidad acotada), su usuario IAM propio con una policy acotada a ese bucket y a cuatro permisos de objeto, su Customer Secret Key, y cuatro `oci_vault_secret` con lo que la VM necesita. El backend le habla por la API **compatible con S3** con boto3 apuntado por `endpoint_url`, sin SDK de OCI: cambiar a AWS S3, R2 o MinIO es configuración, no código. Elección de proveedor y matriz de equivalencias en [`docs/adr/0008-object-storage-provider-dev.md`](../../../docs/adr/0008-object-storage-provider-dev.md); rotación de la clave y conversión de un tenant a `S3`, en RUNBOOK §9.
+
+  Sus outputs son los tres valores que el backend configura —`media_bucket_name`, `media_region`, `media_s3_endpoint`— más los **nombres** (nunca los valores) de los cuatro secretos: `media_access_key_secret_name`, `media_secret_key_secret_name`, `media_endpoint_secret_name`, `media_region_secret_name`. El endpoint no se escribe a mano: se deriva del namespace de la tenancy (`data "oci_objectstorage_namespace"`) y de la región.
 
 El despliegue de la aplicación en sí (`docker compose pull && up -d` dentro de la VM) lo hace el change `app-deploy-dev` vía `.github/workflows/deploy-dev.yml` — build a GHCR + deploy local en un runner self-hosted que corre en la VM (ver RUNBOOK §6). Este Terraform sí aprovisiona **el runner** (en el `cloud-init`), sus **secrets de runtime** (generados por TF → Vault) y su **instance principal** (dynamic group + policy de mínimo privilegio para leer del Vault la clave de la GitHub App y los secrets de runtime).
 
@@ -70,10 +73,25 @@ El workflow `infra-dev` (jobs `plan`/`apply`, disparo manual `workflow_dispatch`
 | `OCI_PRIVATE_KEY` | Contenido del `.pem` privado. El workflow lo escribe a un fichero en `$RUNNER_TEMP` y pasa la **ruta** (`private_key_path`) a Terraform — nunca el contenido inline en un string/heredoc HCL (más frágil, ver `design.md` D2). |
 | `OCI_COMPARTMENT_OCID` | Compartment donde se crean los recursos. |
 | `TFSTATE_NAMESPACE`, `TFSTATE_BUCKET` | Config del backend de state (paso de bootstrap de arriba). |
-| `ALLOWED_SSH_CIDR` | CIDR IPv4 de operador (`>= /24`, nunca abierto) permitido para SSH/app — el workflow lo envuelve en lista JSON para `TF_VAR_allowed_ssh_cidrs`. Si tu IP cambia, actualiza el secret y re-aplica. |
-| `SSH_PUBLIC_KEY` | Contenido de la clave **pública** SSH de la VM — el workflow lo envuelve en lista JSON para `TF_VAR_ssh_authorized_keys`. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
+| `ALLOWED_SSH_CIDRS` | **Varios operadores.** Array JSON de CIDRs IPv4 (`>= /24`, nunca abierto) permitidos para SSH, tal cual: `["1.2.3.4/32","5.6.7.8/32"]`. Es el que hay que usar. |
+| `ALLOWED_SSH_CIDR` | *(histórico, un solo operador)* CIDR suelto que el workflow envuelve en lista. Solo se lee **si `ALLOWED_SSH_CIDRS` está vacío o no existe**. |
+| `ALLOWED_SSH_CIDRS_WIDE` | **Excepción nombrada** al mínimo de `/24`: array JSON de rangos anchos (mínimo `/16`) para operadores con IP dinámica sin rango estrecho. Vacío si no existe. Cada entrada exige justificación en el PR que la añade. |
+| `SSH_PUBLIC_KEYS` | **Varios operadores.** Array JSON con las claves **públicas** SSH, una por operador. |
+| `SSH_PUBLIC_KEY` | *(histórico, una sola clave)* Igual que arriba: solo se lee si el plural está vacío. La privada nunca sale de tu máquina (copia recuperable en el Vault). |
 
-> Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`). Para varios operadores, convierte `ALLOWED_SSH_CIDR`/`SSH_PUBLIC_KEY` en arrays JSON y pásalos tal cual.
+> **Añadir un operador se hace SIEMPRE por el secret plural, nunca por la consola de OCI.** Una regla de ingress añadida a mano sobrevive hasta el siguiente `apply` y entonces desaparece sin avisar: el `plan` del 2026-08-15 destapó dos (`Marta`, `SSH HOTEL AMA`) que llevaban tiempo puestas y que ningún fichero de este repositorio explicaba. Si tu IP cambia, actualiza el secret y re-aplica (RUNBOOK §0).
+>
+> Se conservan las dos formas —singular y plural— a propósito: migrar de golpe habría dejado una ventana en la que el `apply` falla porque el plural aún no existe y el singular ya no se lee, con un JSON inválido en un `TF_VAR` como único síntoma.
+
+### Rangos anchos: excepción nombrada, no relajación general
+
+`allowed_ssh_cidrs` exige prefijo **`>= /24`** (`variables.tf`), y eso no se toca. Un operador con IP dinámica cuyo ISP no da un rango estrecho va en **`ALLOWED_SSH_CIDRS_WIDE`**, una lista aparte con su propio suelo (`>= /16`, que sigue rechazando `/8` y `0.0.0.0/0`).
+
+Está separada a propósito: si el rango ancho pudiera ir en la lista normal, «excepción» acabaría significando «sin límite», y abrir la única puerta de entrada a la VM dejaría de requerir una decisión. **El 22 es la única vía de entrada** — el resto del tráfico llega por el túnel de Cloudflare — así que ensanchar esto ensancha lo único que hay.
+
+**Uso actual (2026-08-15):** `79.116.0.0/16`, la operadora Marta. La regla llevaba tiempo puesta **a mano en la consola de OCI**, sin que ningún fichero de este repositorio la explicara; el primer `plan` que corrió después proponía borrarla. Traerla aquí no ensancha la exposición real —ya estaba abierta—, la hace visible y revisable. Se sustituye por un `/32` en `ALLOWED_SSH_CIDRS` en cuanto se conozca su IP fija.
+
+> Nota: `BUDGET_ALERT_EMAIL` ya **no** se usa — las alertas de presupuesto van a `budget_alert_recipients` (default Jose+Marta en `variables.tf`).
 
 ## Ejecutar el pipeline
 

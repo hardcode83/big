@@ -163,13 +163,26 @@ tocar la base de datos a mano.
 
 - THE SYSTEM SHALL materializar la política de PRD §6 como un enum `Permission` y un mapa
   de rol a permisos en `app/auth/domain/policy.py`, sin permisos especulativos: cada
-  capacidad añade los que sus endpoints declaran. Además de los dos de autoservicio
-  (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`), que PRD §6 concede a todo rol que puede
-  autenticarse, el catálogo contiene hoy los que añadió `reservations`
+  capacidad añade los que sus endpoints declaran. Además de los de autoservicio
+  (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION` y `READ_OWN_NOTIFICATIONS`), que PRD §6 concede a
+  todo rol que puede autenticarse, el catálogo contiene hoy los que añadió `reservations`
   (`READ_RESERVATIONS`, `MANAGE_RESERVATIONS`), los cuatro de `user-management`
   (`READ_USERS`, `MANAGE_USERS`, `READ_TENANT_SETTINGS`, `MANAGE_TENANT_SETTINGS`), los dos de
-  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`) y los cinco de `cleaning`, todos
-  diferenciados por rol.
+  `properties-crud` (`READ_PROPERTIES`, `MANAGE_PROPERTIES`), los cinco de `cleaning` y los
+  cuatro de `maintenance` (`READ_INCIDENTS`, `MANAGE_INCIDENTS`, `EXECUTE_INCIDENTS`,
+  `RESPOND_OWNER_APPROVALS`), todos diferenciados por rol.
+- **`TECHNICIAN` dejó de ser un rol sin capacidades el 2026-08-15.** Hasta `maintenance` tenía
+  autoservicio y nada más: existía y no podía hacer nada. Ahora suma `READ_INCIDENTS` y
+  `EXECUTE_INCIDENTS` —exactamente lo que necesita el ciclo del técnico— y NEVER SHALL poder
+  clasificar, triar, asignar, cancelar ni responder aprobaciones, que son de
+  `PROPERTY_MANAGER` y `TENANT_OWNER` ([`maintenance.md`](maintenance.md)). Es el mismo reparto
+  que `CLEANER` tiene con `_CLEANING_EXECUTE`, con una diferencia deliberada: el manager
+  **también** puede conducir el ciclo del técnico, para desatascar.
+- WHERE un rol sólo puede ver una parte de las filas de una capacidad, THE SYSTEM SHALL derivar
+  esa restricción del **rol del token** y NEVER SHALL aceptarla como parámetro de la petición.
+  `TECHNICIAN` es el caso vivo: sólo ve las incidencias que tiene asignadas, la ruta no expone
+  filtro por técnico, y una incidencia de otro devuelve el **mismo `404`** que una inexistente,
+  para que el endpoint no sirva de sonda de existencia.
 - **`properties-crud` es el único reparto que no se puede citar de PRD §6**, y por eso su razón
   queda registrada en lugar de referenciada: §6 no nombra capacidad de crear ni editar
   propiedades para ningún rol. Da a `TENANT_OWNER` «ver sus propiedades y reservas» —una
@@ -217,7 +230,11 @@ tocar la base de datos a mano.
   los dos endpoints anónimos de `auth-account-recovery`, `POST /auth/forgot-password` y
   `POST /auth/reset-password`, que resuelven la cuenta antes de conocer su tenant;
   **las tareas Celery dejaron de estarlo con `celery-jobs`**, que abre
-  una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
+  una sesión marcada por tenant y enumera los tenants desde otra que nunca se marca; y
+  `make seed-demo`, el primer llamante que **lee sin marcar y marca a media ejecución** — resuelve
+  el tenant por nombre y comprueba el conflicto global de correos con la sesión aún limpia, y sólo
+  entonces la marca, porque «sin scope» es una propiedad de la sentencia y no del método: marcada,
+  el listener añade la cláusula de tenant también a `find_by_email_globally`); no protege INSERTs; no cubre el mapa de identidad; y no alcanza
   las tablas hijas sin `tenant_id` propio (`messages`, `cleaning_checklist_completions`,
   `cleaning_photos`), que deben unirse a su padre scopado y traer su propio test.
 - WHEN un comando o job resuelve credenciales de PMS propiedad a propiedad, THE SYSTEM SHALL
@@ -356,18 +373,13 @@ tocar la base de datos a mano.
 ### Tope de tamaño de cuerpo
 
 - THE SYSTEM SHALL aplicar un tope de tamaño de cuerpo a **todo** `/api/v1/`, antes de leer
-  el cuerpo, respondiendo `413` con `code` `PAYLOAD_TOO_LARGE`.
-- THE SYSTEM SHALL usar `CSV_IMPORT_MAX_BYTES` (10 MiB) para `/api/v1/integrations/` y
-  `REQUEST_MAX_BYTES` (1 MiB) para el resto, resolviendo el límite **por ruta** en una sola
-  instancia de middleware: dos instancias se anidan, así que la genérica rechazaría la
-  subida antes de que la específica la viera.
-- **Por qué no está acotado a las subidas**: mientras el backend escuchaba solo en
-  loopback, un cuerpo sin tope en un endpoint anónimo no costaba nada. Con `/api/v1`
-  alcanzable desde internet es un amplificador de memoria — medido, un `POST` de 400 MB a
-  `/auth/login` llevó el contenedor de 195 MiB a 1,016 GiB de RSS, y FastAPI lee el cuerpo
-  **antes** de resolver dependencias, o sea antes del throttle de 10/min. Ningún compose
-  limita la memoria de `backend`, así que el techo era el de la VM. Regla 12(c) y regla 6 de
-  `steering/security.md`.
+  el cuerpo, respondiendo `413` con `code` `PAYLOAD_TOO_LARGE` — de modo que un cuerpo sin
+  tope en un endpoint anónimo no pueda amplificar memoria por delante del throttle de login.
+- El contrato completo —los cuatro techos, por qué cada número, el orden en que se resuelven,
+  el mecanismo en dos pasos y el riesgo aceptado de cuerpo anónimo pre-auth— vive en
+  [`specs/backend-http-posture.md`](backend-http-posture.md), que es su único hogar. Aquí no
+  se reenuncia: esta sección llegó a nombrar dos techos de los cuatro que
+  `app/main.py` resuelve. Regla 12(c) y reglas 6 y 14 de `steering/security.md`.
 
 ### Contrato HTTP y patrón de capas
 
@@ -394,8 +406,18 @@ tocar la base de datos a mano.
   tenant inicial, su `TenantConfig` y dos usuarios (`TENANT_OWNER` y `PROPERTY_MANAGER`).
 - THE SYSTEM SHALL validar las ocho variables `BOOTSTRAP_*` **antes** de abrir transacción,
   listando de golpe todas las que falten.
-- El comando es idempotente: repetirlo no duplica ni modifica nada, y tolera un cambio de
-  caja en el email.
+- El comando es **convergente**, no idempotente, y la distinción es de `object-storage-provisioning`
+  (2026-08-15): repetirlo no duplica nada y tolera un cambio de caja en el email, pero **sí deja el
+  estado que declara la configuración** en el único campo que actualiza.
+- THE SYSTEM SHALL aplicar `BOOTSTRAP_STORAGE_TYPE` (default `LOCAL`, validado contra el enum
+  `StorageType`) al crear el `TenantConfig` **y actualizarlo si difiere** en una re-ejecución. Es la
+  única vía por la que ese ajuste alcanza un entorno cuyo tenant se sembró hace tiempo: create-only
+  exigiría un `UPDATE` a mano, que es justo lo que la norma IaC-first no admite. El contador de
+  resultados distingue lo creado de lo convergido.
+- THE SYSTEM SHALL NOT abrir `storage_type` a escritura por la API: el `PATCH` de `TenantConfig`
+  sigue devolviendo `422`. Cambiarlo apuntaría a ficheros ya subidos a un sitio donde no están.
+- THE SYSTEM SHALL mantener `LOCAL` como default tanto de la columna como del ajuste, de modo que
+  cualquier tenant creado por cualquier otra vía nazca `LOCAL`.
 - IF una dirección del bootstrap ya existe bajo otro tenant, THEN THE SYSTEM SHALL abortar
   con `BootstrapConflictError` nombrando `BOOTSTRAP_TENANT_NAME`. El índice único global
   rechazaría la escritura igualmente; el aborto explícito existe para dar un mensaje
@@ -407,6 +429,16 @@ tocar la base de datos a mano.
 - No es una migración de datos de Alembic (mezclaría esquema con contenido y no se puede
   reejecutar con seguridad) ni está enganchado a `make up`, que sigue arrancando sin pasos
   manuales.
+- El bootstrap crea **dos** cuentas y nada más. WHERE haga falta un tenant recorrible, THE SYSTEM
+  SHALL completarlo con `make seed-demo`, que añade una `CLEANER` y una `TECHNICIAN` desde las seis
+  variables `SEED_*` —obligatorias y sin default en el árbol, como las `BOOTSTRAP_*_PASSWORD`— y
+  resuelve al owner y al manager **por rol**, no por correo, para no crear un segundo
+  `TENANT_OWNER`. Esas dos cuentas nacen **operativas**, con `must_change_password` en falso: no
+  pasan por `CreateUserUseCase` —que genera la contraseña y por eso marca el flag— sino por
+  `User.create` y el puerto, que es lo que el default `False` de la entidad existe para permitir.
+  Comportamiento completo en la spec `seed-data-demo`.
+- A partir de esas cuatro cuentas, el alta de usuarios es por API (`POST /api/v1/users`, spec
+  `user-management`): ni el bootstrap ni el seed son la vía normal de crear gente.
 
 ### Secretos y configuración
 
@@ -445,7 +477,8 @@ tocar la base de datos a mano.
   (`get_authenticated_request`, `require(permission)`, `get_client_ip`).
 - Núcleo compartido: `backend/app/core/` — `config.py`, `db.py` (filtro global por tenant),
   `errors.py` (sobre de error), `redis.py`, `models_registry.py`.
-- Bootstrap: `backend/app/cli/bootstrap.py`.
+- Bootstrap: `backend/app/cli/bootstrap.py`. El seed que lo completa vive en
+  `backend/app/cli/seed_demo.py` y es capacidad aparte (`specs/seed-data-demo.md`).
 - Migraciones: `backend/alembic/versions/8ff62a7cb50c_auth_sessions.py`,
   `e1eed2e039ee_globally_unique_lower_email.py`.
 - Tests: `backend/tests/auth/`, `backend/tests/test_layering.py`,

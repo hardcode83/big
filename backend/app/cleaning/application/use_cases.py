@@ -20,6 +20,7 @@ from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
+from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.domain.assignment import resolve_auto_assignee
 from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
@@ -49,7 +50,6 @@ from app.cleaning.domain.exceptions import (
     ReservationNotFoundError,
     UnsupportedPhotoFormatError,
 )
-from app.cleaning.domain.ports import BlockingIncidentQuery
 from app.cleaning.domain.repositories import (
     CleaningChecklistCompletionRepository,
     CleaningChecklistTemplateRepository,
@@ -61,10 +61,7 @@ from app.cleaning.domain.repositories import (
     UnscopedCleaningPhotoLocationQuery,
 )
 from app.cleaning.domain.templates import resolve_template
-from app.cleaning.domain.value_objects import (
-    CleaningCompletionEvidence,
-    parse_template_content,
-)
+from app.cleaning.domain.value_objects import parse_template_content
 from app.core.unit_of_work import UnitOfWork
 from app.integrations.domain.storage import (
     MAGIC_BYTES_LENGTH,
@@ -466,7 +463,11 @@ class _AuditWriter:
         arguments whose only legal combinations are these two.
 
         **`storage_key` is not in the diff, and its absence is the design.** R3.2 keeps the
-        internal key out of every API response, and `audit_logs.changes` is a rule-11 sink —
+        internal key out of every API response **field** — the one accepted exception being
+        that it appears inside the *value* of an `S3` presigned URL, which is part of the
+        signing protocol and cannot be removed
+        (`docs/adr/0008-object-storage-provider-dev.md`) — and `audit_logs.changes` is a
+        rule-11 sink —
         the one column whose contract is that nothing arrives through it unannounced. What the
         row records is who uploaded which kind of evidence against which cleaning.
         """
@@ -879,64 +880,33 @@ class AssignCleaningTaskUseCase(_TaskLifecycleBase):
 class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
     """R5.1-R5.4, and R4 of `cleaning-photos-storage` — the close.
 
-    **Gathers the evidence; does not judge it.** All three clauses of PRD §11 are applied by
-    `CleaningTask.complete()` and nowhere else (R4.3, design D4/D8), so what this class owns is
-    four reads — the template, the checklist completions, the uploaded photo types and the
-    blocking-incident flag — and the assembly of one `CleaningCompletionEvidence` from them.
-    Moving any of the four comparisons up here would split an invariant `cleaning` spent a
-    whole change concentrating in one method.
+    **Neither gathers the evidence nor judges it.** All three clauses of PRD §11 are applied by
+    `CleaningTask.complete()` and nowhere else (R4.3, design D4/D8); the four reads that feed it
+    — the template, the checklist completions, the uploaded photo types and the blocking-incident
+    flag — belong to `CompletionEvidenceGatherer` since `cleaning-completion-evidence-gatherer`
+    (its R1.1), which is what took this class from eleven collaborators to eight. What is left
+    here is the close itself: load, ask for the evidence, let the entity decide, then save,
+    transition, audit and commit.
+
+    Moving any of the four comparisons up here would still split an invariant `cleaning` spent a
+    whole change concentrating in one method — and so would moving them into the gatherer, which
+    is why that class only reads and assembles.
     """
 
-    def __init__(
-        self,
-        *,
-        completions: CleaningChecklistCompletionRepository,
-        templates: CleaningChecklistTemplateRepository,
-        photos: CleaningPhotoRepository,
-        incidents: BlockingIncidentQuery,
-        **kwargs,
-    ) -> None:
+    def __init__(self, *, evidence: CompletionEvidenceGatherer, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._completions = completions
-        self._templates = templates
-        self._photos = photos
-        self._incidents = incidents
+        self._evidence = evidence
 
     async def execute(
         self, *, tenant_id: uuid.UUID, task_id: uuid.UUID, actor: CleaningActor, now: datetime
     ) -> CleaningTask:
         task = await self._load_task(tenant_id, task_id, actor)
-        template = await self._templates.get(tenant_id, task.checklist_template_id)
-        if template is None:
-            raise ChecklistTemplateNotFoundError(
-                "The task's checklist template no longer exists"
-            )
-        spec = parse_template_content(
-            template.items, template.required_photos, template_id=template.id
-        )
-        completions = await self._completions.list_for_task(tenant_id, task.id)
-
-        evidence = CleaningCompletionEvidence(
-            required_item_ids=spec.required_item_ids(),
-            completed_item_ids=frozenset(
-                completion.item_id for completion in completions if completion.completed
-            ),
-            # PRD §11's third clause (R4.1). `required_photo_types()` filters on
-            # `required: true` and `photo_types()` — the one the upload path uses — does not;
-            # reading the wrong one here would make every declared type mandatory and break
-            # R4.5, which is why the two accessors are named for the questions they answer.
-            required_photo_types=spec.required_photo_types(),
-            # Distinct types, straight from the repository. Scoped by `tenant_id` like every
-            # other read here, and its contract answers with an empty set for a task that is
-            # not this tenant's — which blocks a close rather than granting one (design D12).
-            uploaded_photo_types=await self._photos.uploaded_photo_types(tenant_id, task.id),
-            has_unresolved_critical_incident=await self._incidents.has_unresolved_critical(
-                tenant_id, task.property_id
-            ),
-        )
+        # The same `tenant_id` `_load_task` scoped by, and the entity it returned: the gatherer
+        # takes the task rather than its id precisely so it cannot re-read it unscoped (design D3).
+        evidence = await self._evidence.gather(tenant_id=tenant_id, task=task)
 
         previous = task.status
-        # The rule lives in the entity (design D4); this only gathers what it needs.
+        # The rule lives in the entity (design D4); this only hands it the evidence.
         task.complete(actor.user_id, evidence, now)
         await self._tasks.save(tenant_id, task)
         await self._transition(
@@ -1282,8 +1252,11 @@ class UploadedCleaningPhoto:
 
     Two fields rather than one entity because the URL is not a property of the row: it is
     minted per request, expires in 3600 s, and depends on the tenant's storage backend. The
-    entity carries `storage_key`, which R3.2 forbids in any response — enumerating the
-    response fields at the schema, never dumping this, is what keeps that true.
+    entity carries `storage_key`, which R3.2 forbids as a **field** of any response —
+    enumerating the response fields at the schema, never dumping this, is what keeps that
+    true. With `S3` the key does travel inside the `url` above, because a presigned URL is an
+    address the store itself honours; that exception is accepted, with its reasoning, in
+    `docs/adr/0008-object-storage-provider-dev.md`.
     """
 
     photo: CleaningPhoto
@@ -1434,20 +1407,15 @@ class UploadCleaningPhotoUseCase(_TaskTransitionMixin):
         """Consume the upload in chunks, counting, and abort the moment it is too big (D11).
 
         **What this does NOT do, despite an earlier comment here saying it did: it does not
-        protect against a lying `Content-Length` or a chunked upload.** It cannot, and the
-        reason is mechanical. `app/core/http_limits.py` documents it: FastAPI calls
-        `await request.form()` inside its route wrapper *before* it solves dependencies, and
-        Starlette's multipart parser spools the file part to a `SpooledTemporaryFile` that has
-        no size ceiling of its own. So by the time this loop asks for its first chunk, the file
-        has already been received in full and written to the container's disk. Counting it
-        afterwards cannot un-receive it.
+        protect against a lying `Content-Length` or a chunked upload, and it does not satisfy
+        "reject before reading the body".** By the time this loop asks for its first chunk the
+        upload has already been received in full and spooled. Why that is mechanically the
+        case is **rule 14 of `sdd/steering/security.md`**, the single home of that contract —
+        do not re-derive it here.
 
         The check that genuinely stops an oversized or dishonest body is
         `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
-        (`http_limits.py:116-129`), which tallies bytes as they arrive and cuts the stream the
-        moment the total passes the ceiling — that is the half covering a client that
-        understates `Content-Length` or sends `Transfer-Encoding: chunked` with none at all.
-        The `Content-Length` refusal before it is only the cheap fast path.
+        (`app/core/http_limits.py`).
 
         **So do not "simplify" the middleware branch on the grounds that the use case already
         counts.** Deleting the middleware's counter would leave an anonymous caller able to

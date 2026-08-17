@@ -459,6 +459,38 @@ def test_bootstrap_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch)
     assert settings.bootstrap_manager_password == ""
 
 
+def test_seed_demo_credentials_have_no_defaults(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Same reasoning as the BOOTSTRAP_* test above: the absence of a DEFAULT is the property
+    # under test, and a developer who filled these in their own .env to run `make seed-demo`
+    # would otherwise pass this for the wrong reason.
+    for name in ("SEED_CLEANER_PASSWORD", "SEED_TECHNICIAN_PASSWORD"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.seed_cleaner_password == ""
+    assert settings.seed_technician_password == ""
+
+
+def test_the_boot_path_also_withholds_the_seed_demo_passwords(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    # Design D4 claims these two stay inside the protection `_load_settings` already gives the
+    # `bootstrap_*_password` fields. That claim is about the boot path, not about their names,
+    # so it is asserted the way the sibling tests above assert theirs: make an unrelated field
+    # fail and check the message carries no password.
+    monkeypatch.setenv("JWT_SECRET_KEY", "too-short-but-still-a-secret")
+    monkeypatch.setenv("SEED_CLEANER_PASSWORD", "cleaner-s3cr3t")
+    monkeypatch.setenv("SEED_TECHNICIAN_PASSWORD", "technician-s3cr3t")
+
+    with pytest.raises(ConfigurationError) as excinfo:
+        _load_settings()
+
+    message = str(excinfo.value)
+    assert "cleaner-s3cr3t" not in message
+    assert "technician-s3cr3t" not in message
+
+
 def test_jwt_algorithm_is_a_constant_not_a_setting() -> None:
     assert JWT_ALGORITHM == "HS256"
     assert "jwt_algorithm" not in Settings.model_fields
@@ -519,3 +551,56 @@ def test_there_is_no_expiry_setting_for_a_guest_token() -> None:
 
     assert not hasattr(settings, "guest_portal_token_ttl_minutes")
     assert not hasattr(settings, "guest_portal_token_expiry_days")
+
+
+# --- Object storage (`object-storage-provisioning` R2.1, R3.1, design D4) -------------
+
+
+def test_the_object_store_settings_default_to_empty(monkeypatch: pytest.MonkeyPatch) -> None:
+    """R3.1: the empty default is what makes merging this change inert.
+
+    Cleared from the ambient environment on purpose — the deployed `.env` fills all three, so
+    a developer running the suite against a configured stack would otherwise pass this for the
+    wrong reason.
+    """
+    for name in ("S3_BUCKET", "S3_REGION", "S3_ENDPOINT_URL"):
+        monkeypatch.delenv(name, raising=False)
+
+    settings = Settings(_env_file=None, **_REQUIRED)
+
+    assert settings.s3_bucket == ""
+    assert settings.s3_region == ""
+    assert settings.s3_endpoint_url == ""
+
+
+@pytest.mark.parametrize(
+    ("env_var", "field_name", "value"),
+    [
+        ("S3_BUCKET", "s3_bucket", "autohostai-dev-media"),
+        ("S3_REGION", "s3_region", "eu-frankfurt-1"),
+        (
+            "S3_ENDPOINT_URL",
+            "s3_endpoint_url",
+            "https://ns.compat.objectstorage.eu-frankfurt-1.oraclecloud.com",
+        ),
+    ],
+)
+def test_the_object_store_settings_come_from_the_environment(
+    monkeypatch: pytest.MonkeyPatch, env_var: str, field_name: str, value: str
+) -> None:
+    monkeypatch.setenv(env_var, value)
+
+    assert getattr(Settings(_env_file=None, **_REQUIRED), field_name) == value
+
+
+def test_the_object_store_credentials_are_not_settings() -> None:
+    """R2.1 / design D4, asserted as an absence.
+
+    The access key pair travels by boto3's standard chain. Reading it into `Settings` would put
+    a live credential inside an object that any debug `repr` prints, so re-adding it has to
+    fail here rather than be noticed in a log.
+    """
+    assert "aws_access_key_id" not in Settings.model_fields
+    assert "aws_secret_access_key" not in Settings.model_fields
+    assert "s3_access_key_id" not in Settings.model_fields
+    assert "s3_secret_access_key" not in Settings.model_fields

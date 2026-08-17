@@ -70,6 +70,42 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
 - WHEN se desbloquee `BLOCKED_BY_OWNER`, THE SYSTEM SHALL exigir destino explícito
   y validar ese destino contra el contexto actual; no SHALL restaurar un estado
   histórico automáticamente.
+- **Los tres triggers de incidencia dejaron de ser código inalcanzable el 2026-08-15**: hasta
+  `maintenance` nadie los disparaba, y por eso `MAINTENANCE_REQUIRED` y `CRITICAL_INCIDENT` eran
+  estados inalcanzables en producción. Quien los dispara ahora es el flujo de incidencias
+  ([`maintenance.md`](maintenance.md)), y ejercitarlos con datos reales destapó **dos omisiones
+  de la matriz**, corregidas en el mismo change:
+  - `VACANT_READY` admitía `INCIDENT_HIGH` pero no `INCIDENT_CRITICAL`, así que una avería
+    crítica en un piso vacío y listo lo dejaba **reservable**. THE SYSTEM SHALL producir
+    `CRITICAL_INCIDENT` desde `VACANT_READY` ante `INCIDENT_CRITICAL`.
+  - `CLEANING_SCHEDULED` admitía `INCIDENT_CRITICAL` pero no `INCIDENT_HIGH`, mientras
+    `AWAITING_CLEANING` y `CLEANING_IN_PROGRESS` admitían los dos. THE SYSTEM SHALL producir
+    `MAINTENANCE_REQUIRED` desde `CLEANING_SCHEDULED` ante `INCIDENT_HIGH`.
+- IF el trigger es `INCIDENT_RESOLVED`, THEN THE SYSTEM SHALL exigir que la incidencia fuente esté
+  `RESOLVED` **o `CANCELLED`**, y NEVER SHALL tratar la cancelación como un contexto incompatible.
+  `ContextualStateResolver.after_incident_resolution` ya filtraba las activas por
+  `status not in (RESOLVED, CANCELLED)`, así que sólo esta guarda distinguía las dos; sin la
+  corrección, una propietaria que rechaza el presupuesto cancela la incidencia y **deja la
+  propiedad varada** en `CRITICAL_INCIDENT`, porque no queda nada que la saque.
+- WHERE la propiedad está en `BLOCKED_BY_OWNER` o `OUT_OF_SERVICE`, THE SYSTEM SHALL rechazar
+  todo trigger de incidencia: no existe fila de política desde esos dos estados, y esa negativa
+  es deliberada — un piso retirado no cambia de estado porque alguien reporte una avería.
+
+**La matriz es sensible al orden, y quien reproduce hechos tiene que fijarlo.** Se revisó al
+archivar `seed-data-demo-extension` (2026-08-17) y **no hizo falta cambiar `_POLICY`**; lo que sí
+quedó demostrado es una propiedad suya que conviene tener escrita. Aplicar los mismos disparadores
+en distinto orden no da el mismo recorrido: sembrar una incidencia `HIGH` antes que las estancias
+deja la vivienda en `MAINTENANCE_REQUIRED`, y el par `(MAINTENANCE_REQUIRED,
+CHECKIN_WINDOW_OPENED)` **no existe en la matriz**, así que las transiciones de estancia siguientes
+se rechazan una a una. El estado final coincide, cinco transiciones se pierden y el timeline queda
+vacío — el fallo silencioso perfecto, porque quien traga el rechazo lo registra como aviso y sigue.
+Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pasados en lote:
+
+- WHERE un llamante aplique varios triggers sobre la misma propiedad en una sola ejecución, THE
+  SYSTEM SHALL exigir que los aplique en el **orden cronológico de los hechos** que representan, y
+  ese orden SHALL ser parte del contrato del llamante y no una consecuencia accidental de su código.
+  La máquina no puede defenderse sola: cada transición es válida o inválida por sí misma y ninguna
+  sabe cuál venía antes.
 
 ### Resolución contextual y precedencia
 
@@ -134,6 +170,16 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
 - WHEN se acepten datos de timeline, THE SYSTEM SHALL usar los tipos de dominio
   reales y no SHALL convertir strings UUID arbitrarios ni introducir validación de
   infraestructura.
+- WHERE una capacidad emite eventos que no son `PROPERTY_STATE_CHANGED`, THE SYSTEM SHALL
+  construirlos igualmente con `TimelineEventFactory.create`, que es la única vía. Los cuatro
+  eventos de mensajería —`GUEST_MESSAGE_RECEIVED`, `AI_RESPONSE_SENT`,
+  `AI_ESCALATED_TO_HUMAN` y `HUMAN_RESPONSE_SENT`— ganaron escritor con
+  [`messaging-ai.md`](messaging-ai.md) el 2026-08-16; hasta entonces el enum los declaraba sin
+  que nadie los escribiera.
+- WHERE el evento procede de un mensaje de huésped, THE SYSTEM SHALL llevar **título
+  constante** e identificadores y enums cerrados en `metadata`, y NEVER SHALL copiar en él el
+  contenido del mensaje. El motivo es estructural: `timeline_events` es append-only, así que una
+  palabra que escribió el huésped no podría redactarse después.
 
 ### Pureza y verificación
 

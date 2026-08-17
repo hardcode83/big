@@ -22,9 +22,10 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL registrar los cuatro nombres literales de PRD §8.3 con sus cadencias:
   `check_checkin_windows`, `process_checkouts` y `mark_occupied_estimated` cada 5 minutos, y
   `check_sla_breaches` cada minuto.
-- THE SYSTEM SHALL registrar además las tres tareas que PRD §8.3 no nombra: `dispatch_notifications`
-  cada minuto y `provision_access_records` cada 5 minutos, las dos de `access-notifications`, y
-  `process_webhook_events` cada 60 segundos, de `reservations-webhooks`. El PRD dice qué debe
+- THE SYSTEM SHALL registrar además las cuatro tareas que PRD §8.3 no nombra: `dispatch_notifications`
+  cada minuto y `provision_access_records` cada 5 minutos, las dos de `access-notifications`,
+  `process_webhook_events` cada 60 segundos, de `reservations-webhooks`, y `classify_incidents`
+  cada 5 minutos, de [`maintenance.md`](maintenance.md). El PRD dice qué debe
   ocurrir, no qué lo dispara, así que nombrarlas fue una decisión de cada change y no una
   contradicción; los cuatro originales no se tocaron. `dispatch_notifications` va a un minuto porque
   una fila solo puede incumplir su plazo **después** de entregarse: un emisor más lento retrasaría
@@ -162,6 +163,15 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   vía de sincronización.
 - **Una excepción a nivel de tarea depende del aislamiento de Celery**, no de código propio, y
   no tiene test de primera parte.
+- **`AdvancePropertyStatesUseCase` ya no se invoca sólo desde beat** (2026-08-17). El comando
+  `make seed-demo` ([`seed-data-demo.md`](seed-data-demo.md)) lo ejecuta con los mismos
+  disparadores que los tres jobs de reloj, para que el estado operacional de las viviendas de la
+  demo sea **consecuencia** de unos hechos y no una columna escrita a mano. Es la confirmación de
+  que esta capacidad es el **calendario** y no el dueño del caso de uso: el caso de uso vive en
+  `properties` y ya recibía su `now` y su unidad de trabajo por parámetro, así que un segundo
+  llamante no necesitó abrir ninguna costura nueva. Lo que ese llamante sí hace y beat no es
+  pasar un `now` **histórico** —reproduce hechos de hace días— y encadenar los disparadores en
+  orden cronológico explícito, porque la política de transiciones es sensible al orden.
 - **Un `beat` colgado pero vivo pasa el healthcheck**: comprueba que el proceso es beat, no que
   esté planificando.
 - **Coste del filtro global medido**: ~280 µs por sentencia con 22 clases acotadas, ~14 % del
@@ -170,7 +180,7 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 ## Key files
 
-- `backend/app/scheduler/` — `schedule.py` (cadencias y `beat_schedule`), `tasks.py` (las siete
+- `backend/app/scheduler/` — `schedule.py` (cadencias y `beat_schedule`), `tasks.py` (las ocho
   tareas), `runner.py` (puente asyncio, engine y cliente Redis por ejecución, bucle por tenant,
   y el helper de sesión marcada por lote de tenants que usa `process_webhook_events`),
   `locks.py` (lock Redis con liberación por token).

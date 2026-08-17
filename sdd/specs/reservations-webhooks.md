@@ -81,8 +81,8 @@ muestreo. Igualar el coste con trabajo de relleno alargaría el camino sin igual
 
 - THE SYSTEM SHALL aplicar a esta ruta el mismo tope de cuerpo que a todo `/api/v1/`
   (`REQUEST_MAX_BYTES`, 1 MiB por defecto), impuesto **antes del enrutado** por el middleware
-  existente, y no SHALL declarar una tercera perilla propia. El middleware comprueba
-  `Content-Length` y, cuando no viene o miente, cuenta los bytes del stream.
+  existente, y no SHALL declarar una tercera perilla propia. El mecanismo del middleware está en
+  [`specs/backend-http-posture.md`](backend-http-posture.md), su único hogar.
 - IF el cuerpo supera ese tope, THEN THE SYSTEM SHALL responder `413` sin escribir ningún
   `WebhookEvent`, incluso cuando la sobremedida se descubre a mitad del stream.
 - THE SYSTEM SHALL declarar **dos** límites de tasa como configuración con valor por defecto, con

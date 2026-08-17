@@ -164,7 +164,9 @@ Medidos el 2026-08-04. Detalle y evidencia en [`docs/beds24-spike.md`](../../doc
 - `backend/scripts/anonymise.py` — la política fail-closed compartida; solo la allowlist de
   negocio es por proveedor, y el orden agujas-antes-que-sufijos es contrato.
 - `backend/scripts/beds24_probe.py` — transporte, allowlist de host, catálogo de coste, captura,
-  guardia de cuenta, escritura de webhook, `provoke` e informe.
+  guardia de cuenta, escritura de webhook, `provoke`, la sonda de mensajería (`messages`, que
+  comprueba si se puede **escribir** un mensaje sin canal OTA — ver `docs/beds24-spike.md`) e
+  informe.
 - `backend/scripts/beds24_webhook_sink.py` — receptor sellado en UTC, latencia y desorden.
 - `backend/tests/integrations/fixtures/beds24/bookings.json` — reserva real anonimizada.
 - `docs/beds24-request-cost.jsonl` — registro crudo que respalda el informe.

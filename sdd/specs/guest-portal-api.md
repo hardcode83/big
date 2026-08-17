@@ -252,7 +252,12 @@ garantiza el sistema.
 - THE SYSTEM SHALL dejar `category`, `severity`, `ai_summary`, `ai_classification`,
   `assigned_technician_id`, `owner_approval_required`, los costes y `resolved_at` en sus valores
   por defecto, de modo que una incidencia creada aquí sea **indistinguible** para el flujo de
-  clasificación de cualquier otra en `OPEN`.
+  clasificación de cualquier otra en `OPEN`. **Ese flujo existe desde `maintenance`**
+  (2026-08-15) y consume exactamente ese par —`OPEN` y sin `ai_classification`—, así que la
+  indistinguibilidad dejó de ser una promesa de diseño y es la condición literal del job
+  `classify_incidents` ([`maintenance.md`](maintenance.md)). La clasificación **no** ocurre
+  dentro de esta petición: colgar la llamada al clasificador de una ruta anónima de internet es
+  lo que prohíbe la regla 12(d) de `steering/security.md`.
 - THE SYSTEM SHALL exigir `title` además de `description`, porque la columna es `NOT NULL`.
   Derivarlo de los primeros caracteres de la descripción sería inventar un dato del huésped.
 - IF el cuerpo excede los límites o no contiene texto válido, THEN THE SYSTEM SHALL rechazarlo
@@ -262,11 +267,15 @@ garantiza el sistema.
   de incidencias en el portal, así que no hay nada que restringir. La respuesta del `POST` lleva
   `id`, `status` y `created_at` de la que acaba de crear, y nada más.
 - THE SYSTEM SHALL dar a `maintenance` el `application/` que no tenía —un puerto de repositorio
-  con **un solo método** (`add`) y el caso de uso de creación— y NEVER SHALL darle `api/`: la ruta
-  es del portal. Es la convención de
+  con **un solo método** (`add`) y el caso de uso de creación— sin darle `api/`: la ruta de
+  creación es del portal. Es la convención de
   [`domain-foundation-ops.md`](domain-foundation-ops.md), que asigna el `application/` de cada
   entidad al change que primero la persiste. Un puerto de un método es más fácil de ensanchar que
-  uno especulativo de diez.
+  uno especulativo de diez — y **eso es exactamente lo que pasó**: el change `maintenance`
+  (2026-08-15) ensanchó ese puerto y le dio a `maintenance` su propia capa `api/`
+  ([`maintenance.md`](maintenance.md)). Esta ruta del portal sigue siendo la única superficie
+  **anónima** que crea incidencias, y ninguna de las rutas nuevas es alcanzable con un token de
+  huésped.
 - THE SYSTEM SHALL rechazar en el adaptador cualquier escritura cuyo tenant no coincida con el de
   la entidad, en lugar de confiar en el filtro global, que no cubre los `INSERT`.
 

@@ -8,6 +8,7 @@ That net does **not** reach `cleaning_checklist_completions`, which has no `tena
 column (design D6); there the explicit `JOIN` inside the adapter is the only mechanism.
 """
 
+from functools import partial
 from typing import Annotated
 
 from fastapi import Depends
@@ -15,6 +16,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.application.use_cases import (
     AcceptCleaningTaskUseCase,
     AssignCleaningTaskUseCase,
@@ -45,7 +47,10 @@ from app.core.config import settings
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.integrations.domain.storage import FileStorageFactory, derive_signing_key
-from app.integrations.infrastructure.storage import ConfiguredFileStorageFactory
+from app.integrations.infrastructure.storage import (
+    ConfiguredFileStorageFactory,
+    build_s3_client,
+)
 from app.notifications.infrastructure.repositories import (
     SqlAlchemyNotificationLogRepository,
 )
@@ -134,12 +139,21 @@ def get_start_cleaning_task_use_case(session: SessionDep) -> StartCleaningTaskUs
 
 
 def get_complete_cleaning_task_use_case(session: SessionDep) -> CompleteCleaningTaskUseCase:
+    """The four reads of the close now arrive as one collaborator (design D5).
+
+    No `Depends` of its own for the gatherer: this module has one builder per use case and the
+    gatherer is not one, so a node in FastAPI's dependency graph that nobody else consumes would
+    buy nothing. Same four adapters and the same request session as before — the one already
+    marked with the tenant, which is what the listener of `app/core/db.py` scopes ORM reads by.
+    """
     return CompleteCleaningTaskUseCase(
-        completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
-        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
-        # PRD §11's third clause (R4): the close reads which photo types are already there.
-        photos=SqlAlchemyCleaningPhotoRepository(session),
-        incidents=SqlAlchemyBlockingIncidentQuery(session),
+        evidence=CompletionEvidenceGatherer(
+            templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+            completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
+            # PRD §11's third clause (R4): the close reads which photo types are already there.
+            photos=SqlAlchemyCleaningPhotoRepository(session),
+            incidents=SqlAlchemyBlockingIncidentQuery(session),
+        ),
         **_lifecycle_kwargs(session),
     )
 
@@ -200,8 +214,32 @@ def get_file_storage_factory(signing_key: SigningKeyDep) -> FileStorageFactory:
 
     Its own dependency, and overridable as one, so a test can point the `LOCAL` root at a
     temporary directory without reaching into the use case builders below.
+
+    **This is the only place the object-store settings are read** (`object-storage-provisioning`
+    design D5, R3.2): the use cases receive the factory and never learn a bucket, a region or an
+    endpoint exists. `partial` keeps `s3_client_factory` a zero-argument callable, so the tests
+    that inject a spy through this same dependency go on working unchanged.
+
+    `.strip() or None` is what satisfies R3.4: an unset variable arrives as `""`, and boto3 reads
+    an empty `endpoint_url` as an endpoint rather than as its absence. Turning it into `None` is
+    what makes "point at AWS" mean *configure nothing*.
+
+    The `.strip()` is not decoration, and a bare `or None` was wrong here. A whitespace-only value
+    — one stray space surviving a hand-edited `.env` — is truthy, so it would reach
+    `boto3.client(...)` and raise `InvalidRegionError` or `ValueError: Invalid endpoint:` straight
+    out of `storage_for(S3)`, bypassing the `StorageWriteError` contract that
+    `ConfiguredFileStorageFactory` otherwise guarantees for a misconfigured store. The bucket beside
+    it has always been read as `s3_bucket.strip()` for exactly this reason; these two now match it.
     """
-    return ConfiguredFileStorageFactory(signing_key=signing_key)
+    return ConfiguredFileStorageFactory(
+        signing_key=signing_key,
+        s3_bucket=settings.s3_bucket,
+        s3_client_factory=partial(
+            build_s3_client,
+            region_name=settings.s3_region.strip() or None,
+            endpoint_url=settings.s3_endpoint_url.strip() or None,
+        ),
+    )
 
 
 StorageFactoryDep = Annotated[FileStorageFactory, Depends(get_file_storage_factory)]

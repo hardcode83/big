@@ -102,8 +102,10 @@ de estados en un hub que importa a los otros siete.
   localizada, y SHALL NOT devolver la columna `incidents.title`, que es texto libre.
 - WHERE el dominio que escribe un bloque todavía no existe, THE SYSTEM SHALL consultar
   igualmente su tabla real y devolver la lista vacía o `null`, de modo que el contrato no
-  cambie cuando esos changes aterricen: `incidents` y `owner_approvals` esperan a `maintenance`,
-  y los gastos a `revenue`.
+  cambie cuando esos changes aterricen. **La apuesta se cobró con `maintenance`** (2026-08-15):
+  `incidents` y `owner_approvals` ya los puebla su flujo operativo y los dos bloques devuelven
+  datos reales **sin que el agregado cambiara de forma ni de código**. Sólo los gastos siguen
+  esperando a `revenue`.
 - THE SYSTEM SHALL resolver la moneda del bloque financiero así: la de la reserva, o `EUR` por
   defecto; con **exactamente una** moneda en los gastos pendientes, ésa y su total, conservando
   el total de la reserva sólo si coincide la moneda; con cero o dos o más monedas, la de la
@@ -194,12 +196,23 @@ de estados en un hub que importa a los otros siete.
   | `CLEANING_SCHEDULED` | pendiente de aceptar | limpiadora asignada |
   | `CLEANING_IN_PROGRESS` | limpieza en curso | limpiadora asignada |
   | `AWAITING_CHECKIN` | entregar acceso | manager |
-  | `MAINTENANCE_REQUIRED` | revisar incidencia | — (hasta `maintenance`) |
-  | `CRITICAL_INCIDENT` | atender incidencia | — (hasta `maintenance`) |
+  | `MAINTENANCE_REQUIRED` | revisar incidencia | — (ver nota) |
+  | `CRITICAL_INCIDENT` | atender incidencia | — (ver nota) |
   | `OCCUPIED_ESTIMATED`, `READY_FOR_NEXT_GUEST`, `VACANT_READY`, `BLOCKED_BY_OWNER`, `OUT_OF_SERVICE` | `next_action: null` | — |
 
   La tabla es un `ASSUMPTION`: PRD §9.1 pide «próxima acción requerida y responsable» y da un
   ejemplo, pero no la define. Acordada en el gate de diseño del 2026-08-09.
+
+  **Nota sobre los dos estados de incidencia.** Su acción es real (`review_incident`,
+  `attend_incident`) y su responsable sigue viajando `null`. El motivo original era que nadie
+  podía asignar un técnico; `maintenance` cerró eso el 2026-08-15 —ya hay
+  `assigned_technician_id` y un rol `TECHNICIAN` con permisos— **y este read model no se
+  revisó**: `Responsible` sigue teniendo dos miembros (`MANAGER`, `ASSIGNED_CLEANER`) y las dos
+  entradas de `NEXT_ACTION_BY_STATE` siguen dando `None`
+  (`backend/app/dashboard/domain/next_action.py`). Es deuda con dueño, no una decisión
+  vigente: quien la cierre tiene que decidir si el responsable es el técnico asignado —y qué
+  responde una incidencia sin asignar todavía—, y eso es una pregunta de producto, no una
+  consulta más.
 - THE SYSTEM SHALL expresar el responsable como un **rol**, no como una persona: resolver el
   nombre real cuesta una consulta más y «el manager» no está definido cuando un tenant tiene
   varios, decisión que el PRD no toma.
@@ -269,8 +282,10 @@ de estados en un hub que importa a los otros siete.
   persiste un `storage_key`, no una URL, y firmarla es `StorageAdapter.get_signed_url`, que
   entrega `cleaning-photos-storage`. THE SYSTEM SHALL NOT construir ninguna URL de
   almacenamiento ni exponer el `storage_key`.
-- **`incidents`, `owner_approvals` y los gastos llegan vacíos** hasta que `maintenance` y
-  `revenue` los pueblen: sus tablas se leen, no se escriben aquí.
+- **`incidents` y `owner_approvals` ya llegan poblados** desde `maintenance` (2026-08-15); **los
+  gastos siguen llegando vacíos** hasta que `revenue` los pueble. Las tres tablas se leen, no se
+  escriben aquí, y esa separación es la que permitió que los dos primeros bloques pasaran de
+  vacíos a reales sin tocar el agregado.
 - **`check_in` / `check_out` viajan como fecha**, no como instante, aunque el contrato del
   frontend los tipa como fecha-hora ISO. Es una divergencia deliberada: la columna es una fecha
   y fabricar una hora sería inventar precisión.

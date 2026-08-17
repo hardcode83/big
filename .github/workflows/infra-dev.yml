@@ -95,10 +95,23 @@ jobs:
           TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          # Vars-lista: se envuelven en JSON desde secrets de un solo valor (un operador).
-          # Para varios operadores, convertir el secret en un array JSON y pasarlo tal cual.
-          TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
-          TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
+          # Vars-lista, con DOS formas admitidas y en este orden de preferencia:
+          #   1. `*_CIDRS`/`*_KEYS`: un array JSON ya escrito, p. ej. ["1.2.3.4/32","5.6.7.8/32"].
+          #      Es la única forma que admite VARIOS operadores.
+          #   2. `*_CIDR`/`*_KEY` (singular, histórico): un valor suelto que se envuelve en lista.
+          # Se conservan las dos a propósito: cambiar de la una a la otra habría dejado una ventana
+          # en la que el apply falla —el secret plural aún no existe y el singular ya no se lee—,
+          # y el fallo sería un JSON inválido en un `TF_VAR`, que no dice nada de lo que pasa.
+          # El `||` de Actions cae al singular mientras el plural esté vacío o sin crear.
+          #
+          # Que el singular exista es lo que llevó a añadir operadores A MANO en la consola, donde
+          # el siguiente apply los borraba sin avisar: `terraform plan` lo destapó el 2026-08-15 con
+          # dos reglas de SSH que nadie había escrito en código.
+          TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          # Excepción nombrada al mínimo de /24 (ver `variables.tf`). Vacía si el secret no existe:
+          # abrir un rango ancho tiene que costar crear un secret aparte, no heredarse por defecto.
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
+          TF_VAR_ssh_authorized_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
           # GitHub App del runner self-hosted (change app-deploy-dev). ids no sensibles → vars;
           # la clave privada (sensible) → secret, y Terraform la escribe al Vault de cada entorno.
@@ -174,8 +187,12 @@ jobs:
           TF_VAR_private_key_path: ${{ runner.temp }}/oci_private_key.pem
           TF_VAR_region: ${{ secrets.OCI_REGION }}
           TF_VAR_compartment_ocid: ${{ secrets.OCI_COMPARTMENT_OCID }}
-          TF_VAR_allowed_ssh_cidrs: '["${{ secrets.ALLOWED_SSH_CIDR }}"]'
-          TF_VAR_ssh_authorized_keys: '["${{ secrets.SSH_PUBLIC_KEY }}"]'
+          # Mismas dos formas que en el job `plan` — ver el comentario largo de allí.
+          TF_VAR_allowed_ssh_cidrs: ${{ secrets.ALLOWED_SSH_CIDRS || format('["{0}"]', secrets.ALLOWED_SSH_CIDR) }}
+          # Excepción nombrada al mínimo de /24 (ver `variables.tf`). Vacía si el secret no existe:
+          # abrir un rango ancho tiene que costar crear un secret aparte, no heredarse por defecto.
+          TF_VAR_allowed_ssh_cidrs_wide: ${{ secrets.ALLOWED_SSH_CIDRS_WIDE || '[]' }}
+          TF_VAR_ssh_authorized_keys: ${{ secrets.SSH_PUBLIC_KEYS || format('["{0}"]', secrets.SSH_PUBLIC_KEY) }}
           TF_VAR_ad_number: ${{ github.event.inputs.ad_number }}
           TF_VAR_github_app_id: ${{ vars.GH_APP_ID }}
           TF_VAR_github_app_installation_id: ${{ vars.GH_APP_INSTALLATION_ID }}
