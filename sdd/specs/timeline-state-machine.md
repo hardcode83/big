@@ -91,6 +91,22 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
   todo trigger de incidencia: no existe fila de política desde esos dos estados, y esa negativa
   es deliberada — un piso retirado no cambia de estado porque alguien reporte una avería.
 
+**La matriz es sensible al orden, y quien reproduce hechos tiene que fijarlo.** Se revisó al
+archivar `seed-data-demo-extension` (2026-08-17) y **no hizo falta cambiar `_POLICY`**; lo que sí
+quedó demostrado es una propiedad suya que conviene tener escrita. Aplicar los mismos disparadores
+en distinto orden no da el mismo recorrido: sembrar una incidencia `HIGH` antes que las estancias
+deja la vivienda en `MAINTENANCE_REQUIRED`, y el par `(MAINTENANCE_REQUIRED,
+CHECKIN_WINDOW_OPENED)` **no existe en la matriz**, así que las transiciones de estancia siguientes
+se rechazan una a una. El estado final coincide, cinco transiciones se pierden y el timeline queda
+vacío — el fallo silencioso perfecto, porque quien traga el rechazo lo registra como aviso y sigue.
+Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pasados en lote:
+
+- WHERE un llamante aplique varios triggers sobre la misma propiedad en una sola ejecución, THE
+  SYSTEM SHALL exigir que los aplique en el **orden cronológico de los hechos** que representan, y
+  ese orden SHALL ser parte del contrato del llamante y no una consecuencia accidental de su código.
+  La máquina no puede defenderse sola: cada transición es válida o inválida por sí misma y ninguna
+  sabe cuál venía antes.
+
 ### Resolución contextual y precedencia
 
 - WHEN se resuelva una incidencia, THE SYSTEM SHALL aplicar exactamente esta

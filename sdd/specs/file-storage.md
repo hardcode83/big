@@ -5,7 +5,8 @@
 Guarda fuera de la base de datos los ficheros que sube la aplicación y los devuelve por URL
 firmada de caducidad acotada, sin que ningún caso de uso sepa dónde acaban. Es una capability
 **compartida**: hoy su único llamante son las fotos de limpieza
-([`specs/cleaning.md`](cleaning.md)), y `maintenance` (fotos de incidente) y `revenue`
+([`specs/cleaning.md`](cleaning.md)) —por dos puertas, la API y el comando `make seed-demo`
+([`seed-data-demo.md`](seed-data-demo.md))—, y `maintenance` (fotos de incidente) y `revenue`
 (`expenses.receipt_storage_key`) están nombrados como sus siguientes consumidores, que es la
 razón de que viva en `app/integrations/` y no colgando del dominio que la estrenó.
 
@@ -189,6 +190,15 @@ de producto, y ampliar la allowlist es una línea el día que se tome.
   `StorageType.S3`: renombrarlo desalinearía el código de la columna.
 - THE SYSTEM SHALL tomar las credenciales de la cadena estándar del proveedor (entorno, rol de
   instancia) y no de ajustes versionados (regla 8 de `steering/security.md`).
+- THE SYSTEM SHALL ofrecer `credentials_are_resolvable()` **desde el paquete de almacenamiento**,
+  como la única forma de preguntar «¿resuelve esta máquina alguna credencial?» sin escribir nada, y
+  esa función SHALL vivir junto al constructor del cliente porque es el único módulo del árbol
+  autorizado a hablar con el SDK. Un llamante que importara boto3 por su cuenta para responderse
+  sería un segundo punto de acoplamiento al proveedor.
+- THE SYSTEM SHALL hacerla responder `False` ante **cualquier** fallo de la cadena —perfil obsoleto,
+  configuración malformada, token expirado— en lugar de propagar, y SHALL entenderse que responde
+  sobre la **existencia** de la credencial y nunca sobre el permiso: que exista es lo que se puede
+  ver desde fuera, que sirva lo decide el primer `put`.
 - THE SYSTEM SHALL etiquetar el objeto con el MIME **detectado** al escribirlo: sin él el almacén
   sirve `binary/octet-stream` y el navegador descarga la foto en vez de mostrarla.
 - THE SYSTEM SHALL firmar con SigV4 fijado en el cliente, para que una URL acuñada en una máquina

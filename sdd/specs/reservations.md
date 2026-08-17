@@ -6,8 +6,10 @@ Esta capacidad gestiona el ciclo de vida de una reserva —alta manual, consulta
 cancelación— y la trae desde el exterior por dos vías: sincronización con el PMS a través
 de un adapter sustituible e importación manual por CSV. Desde `seed-data-demo` hay un tercer
 llamante que no viene del exterior: `make seed-demo` compone las dos vías —el caso de uso de alta
-para su estancia `DIRECT` y el ingestor para las dos de canal OTA— sin dejar de pasar por ellas
-(spec `seed-data-demo`). Es la primera capacidad de negocio
+para su estancia `DIRECT` y el ingestor para las dos de canal OTA— sin dejar de pasar por ellas, y
+desde `seed-data-demo-extension` (2026-08-17) es además el primer llamante de
+`UpdateReservationUseCase` fuera de la API, que usa para alcanzar estados que esta capacidad no
+sabe escribir de otra forma ([`seed-data-demo.md`](seed-data-demo.md)). Es la primera capacidad de negocio
 con API del producto y el dato del que cuelga la operación: la máquina de estados de la
 propiedad resuelve su precedencia a partir de "reserva activa" y "próxima reserva", y
 limpieza, accesos, mensajería y statements se disparan desde el ciclo de una reserva.
@@ -98,10 +100,26 @@ reservas confirmadas sin `AccessRecord` para darles uno en `PENDING` y fijarles
 canceladas. No hay enganche en el camino de confirmación **a propósito**: hay reservas ya
 confirmadas en la base de datos que un hook nunca cubriría, y las confirmaciones entran por cuatro
 vías —`PATCH`, import CSV, sync PMS y `make seed-demo`, las tres últimas vía
-`ReservationStatus.parse_ingested`, que por defecto confirma; el seed deja `status` en `None` a
-propósito (R4.4 de `seed-data-demo`), así que sus dos estancias OTA nacen confirmadas por ese
-default y `provision_access_records` también las recoge—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
+`ReservationStatus.parse_ingested`, que por defecto confirma; el seed no pasa `status` al ingestor,
+así que sus dos estancias OTA nacen confirmadas por ese default y `provision_access_records` también
+las recoge—. El coste es hasta cinco minutos de latencia. Y como `CANCELLED → CONFIRMED`
 está permitido, una reserva re-confirmada acaba con un `AccessRecord` nuevo junto al revocado.
+
+**Una reserva manual nace `PENDING`, y el reloj no puede avanzar nunca una reserva `PENDING`.**
+`CreateReservationCommand` no acepta `status` a propósito —una reserva que ya está `CANCELLED` no es
+algo que crear en un paso— mientras que las cuatro precondiciones de reloj de
+[`timeline-state-machine.md`](timeline-state-machine.md) exigen `CONFIRMED` o
+`CHECKED_IN_ESTIMATED`. Las dos decisiones son correctas por separado y su composición deja un
+hueco: una reserva creada por `POST /reservations` y nunca confirmada por `PATCH` es invisible para
+la máquina de estados, sin que nada falle ni avise. Se descubrió al sembrar el dataset de demo
+(2026-08-17), que por eso confirma explícitamente su estancia manual antes de avanzarla.
+
+**`CHECKED_IN_ESTIMATED` y `COMPLETED` no tienen escritor propio en esta capacidad, y eso es un
+hueco declarado.** La máquina de estados los **lee** como precondición y nunca los escribe, y no
+existe hoy ninguna operación de check-in ni de cierre: el único camino para alcanzarlos es
+`UpdateReservationUseCase`, es decir, fijar la columna con un caso de uso en medio.
+[`seed-data-demo.md`](seed-data-demo.md) lo usa así y lo declara como **sustituto** y no como la vía
+definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pendiente.
 
 ### Timeline: evidencia de cada mutación, en la misma transacción
 

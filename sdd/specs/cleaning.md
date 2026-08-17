@@ -9,6 +9,16 @@ cumple la regla de validación de PRD §11. Sustituye la coordinación operativa
 
 El *cómo se opera* está en [`docs/cleaning.md`](../../docs/cleaning.md); aquí vive el *qué hace*.
 
+**Sus casos de uso son invocables fuera de HTTP, y desde el 2026-08-17 hay quien lo hace.** El
+comando `make seed-demo` ([`seed-data-demo.md`](seed-data-demo.md)) recorre el ciclo entero de una
+limpieza —aceptar, empezar, los ítems del checklist, las fotos, cerrar— componiendo estos mismos
+casos de uso desde un CLI, con una `CallerOwnedUnitOfWork` y sin pasar por ningún router. No hizo
+falta cambiar nada de esta capacidad para que funcionara, y esa es justamente la constatación que
+merece quedar escrita: los invariantes que este módulo defiende —que el actor sea la limpiadora
+asignada, que la validación de PRD §11 se cumpla antes de cerrar— viven en los casos de uso y en la
+entidad, no en la capa HTTP, así que un segundo llamante los hereda enteros en vez de tener que
+reimplementarlos.
+
 ## Requirements
 
 ### Plantilla de checklist

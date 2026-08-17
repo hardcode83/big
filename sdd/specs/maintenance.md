@@ -7,10 +7,11 @@ desde el `OPEN` que deja cualquier fuente hasta `RESOLVED` o `CANCELLED`: clasif
 por un puerto propio, aprobación de la propietaria cuando el gasto supera el umbral del tenant,
 asignación a un técnico con su plazo de SLA, el ciclo de transiciones que conduce el técnico, y la
 recomposición del estado operacional de la propiedad. Es el único escritor de mutaciones sobre
-`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por dos vías: la anónima
-del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)) y, desde el 2026-08-16, una
+`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por tres vías: la anónima
+del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)), desde el 2026-08-16 una
 conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
-([`messaging-ai.md`](messaging-ai.md)).
+([`messaging-ai.md`](messaging-ai.md)), y desde el 2026-08-17 el alta **genérica** que abre
+`ReportIncidentUseCase` ([`seed-data-demo.md`](seed-data-demo.md)).
 
 ## Requirements
 
@@ -91,9 +92,16 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ### R3 — El job de clasificación
 
 - THE SYSTEM SHALL ejecutar la clasificación en un job periódico, `classify_incidents`, **cada 5
-  minutos**, y NEVER SHALL clasificar dentro de la petición que crea la incidencia: el único
-  escritor de incidencias en `OPEN` es una ruta **anónima desde internet**, y colgar de ella la
-  llamada al clasificador es lo que prohíbe la regla 12(d) de `steering/security.md`.
+  minutos**, y NEVER SHALL clasificar dentro de la **petición** que crea la incidencia: las dos
+  vías que crean incidencias por HTTP son una ruta **anónima desde internet** y un pipeline
+  disparado por un webhook, y colgar de ellas la llamada al clasificador es lo que prohíbe la
+  regla 12(d) de `steering/security.md`.
+- WHERE la creación no viene de una petición sino de un comando que una persona ejecuta —hoy sólo
+  `make seed-demo`—, THE SYSTEM SHALL permitir clasificar en la misma transacción que crea la
+  incidencia. Lo que la regla 12(d) acota es el trabajo que un desconocido puede provocar desde
+  fuera; un CLI no es esa superficie. La consecuencia buscada es un dataset **estable**: una
+  incidencia sembrada en `OPEN` con `ai_classification` a `NULL` la movería el job en su siguiente
+  tick, y un dataset que cambia solo no es un dataset.
 - THE SYSTEM SHALL seleccionar exactamente las incidencias `OPEN` **y con `ai_classification` a
   `NULL`**, por tenant activo, ordenadas por antigüedad y acotadas por `notification_batch_size`.
   Ese par de condiciones da las dos propiedades que el flujo necesita: una incidencia cuyo adaptador
@@ -200,8 +208,43 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `PATCH` de triaje y los `POST` de
   `classify`, `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve` y `cancel`) y
   `POST /api/v1/owner-approvals/{approval_id}/respond`.
-- THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo. Las dos
-  superficies que las crean son la anónima del portal del huésped y el pipeline de mensajería.
+- THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo, y esa
+  negativa SHALL sobrevivir a la aparición de un alta genérica: `ReportIncidentUseCase` es un caso
+  de uso, no una ruta. Las superficies que crean incidencias son la anónima del portal del huésped,
+  el pipeline de mensajería y el comando `make seed-demo`.
+
+**El alta genérica, y la precondición que tiene que descargar ella misma.** Desde el 2026-08-17
+`maintenance` ofrece `ReportIncidentUseCase` —`tenant_id`, `property_id`, `source`, `title`,
+`description`, `actor`, `now`— junto al `ReportGuestIncidentUseCase` que ya existía. Hace falta
+porque el que existía **no puede** crear cualquier incidencia: fija `source=GUEST` y exige
+`reservation_id` y `reporter_token_hash`.
+
+- THE SYSTEM SHALL resolver `property_id` **dentro del tenant** antes de escribir nada, rechazando
+  con `MaintenanceValidationError` la propiedad que no sea suya. No es defensa en profundidad: las
+  claves ajenas de `incidents` son globales y no compuestas con `tenant_id`, así que la base de
+  datos aceptaría una incidencia del tenant A colgada de una propiedad del tenant B, y el puerto
+  declara esa precondición como algo que **no puede detectar**. El creador del portal la satisface
+  *estructuralmente* —sus identificadores salen de la sesión que resolvió el token— y un caso de uso
+  abierto a cualquier llamante no tiene nada equivalente.
+- THE SYSTEM SHALL exigir actor: el alta no está en el conjunto de acciones que `_AuditWriter`
+  exime, así que una creación sin actor se rechaza y no commitea nada.
+- THE SYSTEM SHALL NOT aceptar `reservation_id` ni `reported_by_user_id`. Se diseñaron y se
+  quitaron: arrastraban la misma precondición sin descargar y hoy no tienen llamante. Quien traiga
+  el primero —la alerta de cerradura que este módulo anuncia— añade el parámetro **junto con** la
+  búsqueda que lo hace seguro.
+- THE SYSTEM SHALL admitir cualquier miembro de `IncidentSource`, sin filtro, y SHALL dejar la
+  incidencia en `OPEN` sin fijar `category`, `severity` ni `ai_classification` — que es lo que
+  mantiene a `classify` como única puerta de salida de `OPEN` (R1).
+- THE SYSTEM SHALL escribir la entidad, su `AuditLog` (`INCIDENT_CREATED`) y su `TimelineEvent`
+  (`INCIDENT_CREATED`, actor `USER`) en la misma transacción, con un título de timeline constante y
+  metadatos que son **sólo identificadores**: ningún texto de quien reporta viaja al timeline.
+- THE SYSTEM SHALL aceptar `title` y `description` como `str` sin restringir, y esa apertura SHALL
+  entenderse como lo que es: la forma cerrada que la regla 11 de `steering/security.md` exige de un
+  escritor nuestro es **disciplina del llamante**, no un invariante del caso de uso. Quien componga
+  ahí prosa propia en vez de pasar una constante necesita su propia fila en el censo de sumideros.
+  El guardián automático de ese censo vigila desde entonces a quien nombre `ReportIncidentUseCase`
+  o el puerto `IncidentRepository`, precisamente porque el primer llamante nuevo vivía fuera de
+  `maintenance/` y el censo no se enteró solo.
 - WHERE una conversación produce una incidencia, THE SYSTEM SHALL suministrar el implementador
   (`ReportIncidentFromConversationUseCase`) de un puerto que declara `messaging` —nunca al revés—,
   y ese implementador SHALL recibir una `CallerOwnedUnitOfWork` y NEVER SHALL comitear: el único
@@ -266,10 +309,17 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `response_notes`.
 - THE SYSTEM SHALL nombrar como actor al usuario que ejecuta la transición, y NEVER SHALL escribir
   una fila que reclame a la vez un usuario y un portador de token.
-- WHERE la clasificación la dispara el job, THE SYSTEM SHALL escribir la fila **sin actor**
-  (`actor_user_id` y `actor_ip` a `NULL`) y con actor `AI` en el timeline: la dispara el reloj, no
-  una persona. `INCIDENT_CLASSIFIED` SHALL ser la **única** acción de este módulo que admite actor
-  ausente; cualquier otra sin actor SHALL fallar.
+- WHERE la clasificación la dispara el job **o el comando de seed**, THE SYSTEM SHALL escribir la
+  fila **sin actor** (`actor_user_id` y `actor_ip` a `NULL`) y con actor `AI` en el timeline: la
+  categoría y la severidad las pone el clasificador sobre un texto que ya estaba escrito, así que
+  no hay decisión humana que registrar. `INCIDENT_CLASSIFIED` SHALL ser la **única** acción de este
+  módulo que admite actor ausente; cualquier otra sin actor SHALL fallar, incluida el alta genérica.
+  Lo que concede la excepción es la ausencia de **decisión**, no la de petición: una clasificación
+  manual por `POST /incidents/{id}/classify` lleva su actor aunque la lance un operador, y ningún
+  otro comando queda eximido por ser un comando.
+- WHEN se crea una incidencia por el alta genérica, THE SYSTEM SHALL escribir su `AuditLog`
+  `INCIDENT_CREATED` con un `ChangeSet` que sólo difiere `source` y `status`, y su `TimelineEvent`
+  `INCIDENT_CREATED` con actor `USER`, título constante y metadatos sólo con identificadores.
 - THE SYSTEM SHALL escribir en el timeline `INCIDENT_CLASSIFIED`, `OWNER_APPROVAL_REQUIRED`,
   `OWNER_APPROVED_EXPENSE`, `OWNER_REJECTED_EXPENSE`, `TECHNICIAN_ASSIGNED`, `TECHNICIAN_ACCEPTED`,
   `TECHNICIAN_STARTED`, `INCIDENT_RESOLVED` e `INCIDENT_CANCELLED`, con **título constante** y

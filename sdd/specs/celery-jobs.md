@@ -163,6 +163,15 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   vía de sincronización.
 - **Una excepción a nivel de tarea depende del aislamiento de Celery**, no de código propio, y
   no tiene test de primera parte.
+- **`AdvancePropertyStatesUseCase` ya no se invoca sólo desde beat** (2026-08-17). El comando
+  `make seed-demo` ([`seed-data-demo.md`](seed-data-demo.md)) lo ejecuta con los mismos
+  disparadores que los tres jobs de reloj, para que el estado operacional de las viviendas de la
+  demo sea **consecuencia** de unos hechos y no una columna escrita a mano. Es la confirmación de
+  que esta capacidad es el **calendario** y no el dueño del caso de uso: el caso de uso vive en
+  `properties` y ya recibía su `now` y su unidad de trabajo por parámetro, así que un segundo
+  llamante no necesitó abrir ninguna costura nueva. Lo que ese llamante sí hace y beat no es
+  pasar un `now` **histórico** —reproduce hechos de hace días— y encadenar los disparadores en
+  orden cronológico explícito, porque la política de transiciones es sensible al orden.
 - **Un `beat` colgado pero vivo pasa el healthcheck**: comprueba que el proceso es beat, no que
   esté planificando.
 - **Coste del filtro global medido**: ~280 µs por sentencia con 22 clases acotadas, ~14 % del
