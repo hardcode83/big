@@ -148,4 +148,39 @@ Ninguna abierta. Resueltas en revisión de diseño:
 - **Layout** → una sola página scrollable con tres secciones apiladas (D5).
 - **Acuse de incidencia** → confirmación localizada + `status` traducido + `created_at` si aporta valor; **sin** renderizar el `id` UUID (D4/D10).
 - **Diagrama** → no se genera SVG; el flujo queda descrito en texto (D5–D7).
-- **Prerrequisito Cloudflare** → gate operativo obligatorio antes de `READY_FOR_PR`/ship, no bloquea design/tasks/run, y no se degrada a deuda aceptada por defecto (ver Risks; registrado en `BLOCKED.md`).
+- **Prerrequisito Cloudflare** → gate operativo obligatorio antes de `READY_FOR_PR`/ship, no bloquea design/tasks/run, y no se degrada a deuda aceptada por defecto (ver Risks; resuelto abajo).
+
+## Gate operativo Cloudflare — resolución: VERIFICADO (2026-08-17)
+
+El gate declarado por `guest-portal-api` (retención del URI completo con el token en el
+log del túnel de dev) se resuelve como **verificado**, no como deuda aceptada: el token
+viaja en la URL pero **no se conserva en ningún log persistido**, y donde el access log
+lo tocaría, se **redacta**. Evidencia por categoría:
+
+1. **IaC (edge).** `infra/environments/dev/main.tf` declara para Cloudflare solo el túnel
+   (`cloudflare_zero_trust_tunnel_cloudflared` + `_config`, ingress → `frontend:3000` +
+   catch-all 404), `cloudflare_dns_record` (proxied) y `cloudflare_zone_setting`
+   (`always_use_https`). **No hay** `cloudflare_logpush_job`, `cloudflare_zero_trust_gateway_*`
+   ni recurso de retención/redacción (grep vacío en todo el repo). Zona `digitalsec.work`
+   en plan **Free Website** (verificado READ-ONLY vía API); Logpush de HTTP request logs es
+   Enterprise-only.
+2. **Runtime `cloudflared`.** `docker-compose.deploy.yml`: `tunnel --no-autoupdate run`,
+   sin `TUNNEL_LOGLEVEL`/`TUNNEL_LOGFILE` → loglevel `info`; los logs observados no
+   contienen request paths/URIs (cloudflared solo registra URIs en `debug`).
+3. **Redacción backend.** Las rutas guest redactan el token en el access log
+   (`log_redaction.py`), con tests que verifican que el token completo no aparece.
+4. **Sin persistencia en frontend.** Prod `node server.js`, `NODE_ENV=production`: el
+   logging por-petición de Next vive solo en el dev server; sin `middleware`/`instrumentation`;
+   los error boundaries no renderizan la URL; el único log server-side (proxy `app/api/[...path]`)
+   emite el motivo del error, no la URL/token (comprobado empíricamente con undici).
+5. **Confirmación operacional del responsable de infraestructura** (2026-08-17): en la capa
+   gratuita no existe configuración adicional de Logpush/Gateway HTTP logging fuera de lo
+   auditado; se loguea desde el monolito pero aún no hay stack de observabilidad
+   persistiendo. Cierra los ítems 3-6 del checklist ("operador con acceso").
+
+Nota de trazabilidad: la verificación por API quedó como `INSUFFICIENT API PERMISSIONS`
+(el token disponible, y el propio token de IaC según `variables.tf`, carecen de `Logs | Read`
+en scope Zone/Account; `GET .../logpush/jobs` → HTTP 403 `10000`). El cierre de los ítems
+3-6 se apoya en la confirmación operacional (punto 5), que es la vía que el checklist
+previó. Criterio de cierre de `guest-portal-api` (no se conserva el URI/token, o se redacta)
+→ **satisfecho**. Este gate deja de retener `READY_FOR_PR`.
