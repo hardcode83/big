@@ -170,7 +170,8 @@ sólo un borrado explícito se los lleva.
 | Código | Qué pasó |
 |---|---|
 | 0 | Sembrado, o no había nada que hacer |
-| 1 | Falta configuración, los dos correos `SEED_*` son el mismo, la zona horaria del tenant no se resuelve, el tenant guarda en `S3` y le falta bucket, región o credenciales, no existe el tenant, falta el owner o el manager, un correo ya pertenece a otro tenant, o **el clasificador no produce la categoría y la severidad que §27 declara** |
+| 1 | Falta configuración, los dos correos `SEED_*` son el mismo, la zona horaria del tenant no se resuelve, el tenant guarda en `S3` y le falta bucket, región o credenciales, no existe el tenant, falta el owner o el manager, un correo ya pertenece a otro tenant, **el clasificador no produce la categoría y la severidad que §27 declara**, **la cuenta de `SEED_TECHNICIAN_EMAIL` ya existía y no es un `TECHNICIAN` activo**, o **la limpieza de la demo no está asignada a la cuenta de `SEED_CLEANER_EMAIL`** (o el checkout la aprovisionó y luego no aparece) |
+| 2 | El ingest devolvió filas saltadas o con error. Aquí **sí** se imprimen los motivos |
 | 2 | Fallo inesperado. Se imprime **solo la clase** de la excepción, nunca su detalle |
 
 Ese código 2 es deliberadamente parco: los errores de SQLAlchemy anexan la sentencia **con sus
