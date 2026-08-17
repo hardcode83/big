@@ -230,6 +230,81 @@ describe("incident journey (R3, task 5.2)", () => {
   });
 });
 
+describe("token cache isolation (R5, task 1.3)", () => {
+  it("never serves one token's cached stay data to a different token", async () => {
+    // A single client shared across both renders, so any bleed would come through
+    // its cache. Token A resolves; token B is kept pending, so the only way B could
+    // ever show "Casa A" is a colliding (token-less) cache key. It must not.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>
+        <I18nProvider locale="es">{children}</I18nProvider>
+      </QueryClientProvider>
+    );
+    source.getStayInfo.mockImplementation((token: string) =>
+      token === "token-a" ? Promise.resolve({ ...STAY, propertyName: "Casa A" }) : new Promise(() => {}),
+    );
+    source.getCheckinStatus.mockImplementation((token: string) =>
+      token === "token-a" ? Promise.resolve(CHECKIN_STATUS) : new Promise(() => {}),
+    );
+
+    const first = render(<GuestPortalView token="token-a" />, { wrapper });
+    expect(await screen.findByText("Casa A")).toBeInTheDocument();
+    first.unmount();
+
+    render(<GuestPortalView token="token-b" />, { wrapper });
+    // B has no cache entry of its own and its query is still pending → it must show
+    // the loading state, and crucially must never surface A's cached "Casa A".
+    expect(await screen.findByText("Cargando…")).toBeInTheDocument();
+    expect(screen.queryByText("Casa A")).not.toBeInTheDocument();
+  });
+});
+
+describe("safe error mapping for 413/5xx (R5.3, tasks 4.3, 5.2)", () => {
+  it("maps a 413 on check-in to the too-large copy without leaking the raw body", async () => {
+    source.submitCheckin.mockRejectedValue(
+      new ApiError({ code: "PAYLOAD_TOO_LARGE", message: "body too large", status: 413 }),
+    );
+    renderView();
+    await screen.findByLabelText("Número de documento");
+    fillCheckin();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar check-in" }));
+
+    expect(await screen.findByText("El contenido es demasiado grande.")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("body too large");
+  });
+
+  it("maps a 5xx on check-in to the generic safe copy without leaking a trace", async () => {
+    source.submitCheckin.mockRejectedValue(
+      new ApiError({ code: "INTERNAL_ERROR", message: "Traceback (most recent call last)", status: 500 }),
+    );
+    renderView();
+    await screen.findByLabelText("Número de documento");
+    fillCheckin();
+    fireEvent.click(screen.getByRole("button", { name: "Enviar check-in" }));
+
+    expect(await screen.findByText("No hemos podido completar la operación.")).toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("Traceback");
+  });
+
+  it("maps a 5xx on an incident to the generic safe copy without confirming creation", async () => {
+    source.reportIncident.mockRejectedValue(
+      new ApiError({ code: "INTERNAL_ERROR", message: "boom stacktrace", status: 500 }),
+    );
+    renderView();
+    await screen.findByLabelText("Título");
+    fireEvent.change(screen.getByLabelText("Título"), { target: { value: "Fuga" } });
+    fireEvent.change(screen.getByLabelText("Descripción"), { target: { value: "Agua" } });
+    fireEvent.click(screen.getByRole("button", { name: "Enviar aviso" }));
+
+    expect(await screen.findByText("No hemos podido completar la operación.")).toBeInTheDocument();
+    expect(screen.queryByText(/Incidencia comunicada/)).not.toBeInTheDocument();
+    expect(document.body.innerHTML).not.toContain("stacktrace");
+  });
+});
+
 describe("accessibility (R4.3, task 5.4)", () => {
   it("wires labels and error descriptions and has no axe violations", async () => {
     renderView();
