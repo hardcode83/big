@@ -44,4 +44,4 @@
 | object-storage-provisioning | new, design, tasks, run, review, ship, archive | 302167 | 782617 | 228923593 | 153.8390 | 2026-08-15 | 2026-08-16 |
 | cleaning-completion-evidence-gatherer | new, design, tasks, run, review, ship, archive | 89997 | 317370 | 41275072 | 36.8541 | 2026-08-16 | 2026-08-16 |
 | messaging-ai | new, design, tasks, run, review, ship, archive | 598014 | 1359371 | 344576885 | 229.7562 | 2026-08-15 | 2026-08-17 |
-| seed-data-demo-extension | new, design, tasks, run, review | 577864 | 1324521 | 347829555 | 222.8844 | 2026-08-16 | — |
+| seed-data-demo-extension | new, design, tasks, run, review | 601865 | 1449453 | 383379014 | 243.5270 | 2026-08-16 | — |
