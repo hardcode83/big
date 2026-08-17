@@ -26,7 +26,11 @@ from app.integrations.infrastructure.storage.local import (
     MEDIA_ROOT,
     LocalFileStorage,
 )
-from app.integrations.infrastructure.storage.s3 import S3FileStorage, build_s3_client
+from app.integrations.infrastructure.storage.s3 import (
+    S3FileStorage,
+    build_s3_client,
+    credentials_are_resolvable,
+)
 from app.tenants.domain.enums import StorageType
 
 __all__ = [
@@ -35,6 +39,7 @@ __all__ = [
     "MEDIA_ROOT",
     "S3FileStorage",
     "build_s3_client",
+    "credentials_are_resolvable",
 ]
 
 

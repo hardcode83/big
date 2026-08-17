@@ -121,7 +121,7 @@ Con eso ya se puede entrar, pero el producto está vacío: ni viviendas, ni rese
 plantilla de limpieza. El tercer paso lo llena con el dataset de demo de PRD §27:
 
 ```bash
-make seed-demo   # dos viviendas, dos cuentas más (CLEANER y TECHNICIAN), tres reservas y la plantilla de limpieza
+make seed-demo   # dos viviendas, dos cuentas más (CLEANER y TECHNICIAN), tres reservas, la plantilla de limpieza, tres incidencias y una limpieza cerrada con sus fotos
 ```
 
 **Exige un tenant ya creado**: completa el que `make bootstrap` dejó, y si no lo encuentra sale

@@ -95,6 +95,32 @@ def build_s3_client(*, region_name: str | None = None, endpoint_url: str | None 
     return boto3.client("s3", region_name=region_name, endpoint_url=endpoint_url, config=config)
 
 
+def credentials_are_resolvable() -> bool:
+    """Whether boto3's chain finds credentials in this environment, without writing anything.
+
+    Here and not in the caller, because this module is the one place that talks to the SDK
+    (`steering/architecture.md`: "Todo sistema externo detrás de adapter … El core nunca se
+    acopla a un proveedor"). What asks is `make seed-demo`, which needs to refuse **before**
+    it starts seeding rather than break halfway through the first upload; every other caller
+    finds out the ordinary way, when `put` fails.
+
+    Any exception is `False`, and that is the useful answer rather than laziness: botocore
+    raises instead of answering for a stale `AWS_PROFILE`, a malformed `~/.aws/config` or an
+    expired SSO token, and for a caller deciding whether to refuse, "the chain cannot tell me"
+    and "there are none" are the same fact. Letting them escape would hand the caller the
+    unexplained failure this function exists to replace.
+
+    It resolves the same chain `build_s3_client` will, so it answers about the credentials
+    that would really be used — including an ambient one (an operator's SSO, an instance
+    role) that happens to grant nothing on the bucket. That it exists is what this can see;
+    that it works is what the first `put` decides.
+    """
+    try:
+        return boto3.Session().get_credentials() is not None
+    except Exception:  # noqa: BLE001 - see the docstring: the chain's failures all mean "no"
+        return False
+
+
 class S3FileStorage:
     """Implements `FileStoragePort` over one bucket of an **S3-compatible** object store.
 

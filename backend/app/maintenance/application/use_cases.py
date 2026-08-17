@@ -454,6 +454,139 @@ class _AuditWriter:
         )
 
 
+#: What the timeline says when an incident is opened by anyone who is not the guest portal.
+#: A constant, for the reason `_TIMELINE_TITLE` above gives: `timeline_events` is append-only,
+#: so free text could never be redacted afterwards.
+_REPORTED_TIMELINE_TITLE = "Incident reported"
+
+
+class ReportIncidentUseCase:
+    """Open an incident from any source, audit it, and put it on the timeline (D5).
+
+    The same three writes and the same order as `ReportGuestIncidentUseCase`, without its two
+    assumptions: that the source is `GUEST` (it fixes `IncidentSource.GUEST` in the entity
+    constructor) and that the incident hangs off a stay (`reservation_id` and
+    `reporter_token_hash` are required there). Neither holds for the incidents PRD §27 seeds —
+    one is `source: CLEANER` and none belongs to a reservation — and neither holds for the
+    lock alert `maintenance/api/incidents_router.py` says `messaging-ai` will bring, which is
+    why this is generic rather than shaped for the seed.
+
+    **No HTTP route.** A use case is not an endpoint; the router explains why `POST /incidents`
+    does not exist and what will bring it.
+
+    The audit row goes through `_AuditWriter`, so an alta without an actor is refused rather
+    than written anonymously: rule 9's fourth exception covers `INCIDENT_CLASSIFIED` and
+    nothing else.
+
+    **`property_id` is resolved inside the tenant, and that is not defensive tidiness**:
+    `IncidentRepository.add` states as a precondition that the caller must already have
+    resolved it within `tenant_id`, because the foreign keys of `incidents` are global rather
+    than composite and the database would accept an incident of tenant A anchored to a
+    property of tenant B. The guest path satisfies that structurally — its ids come from the
+    session the token resolved — and a use case open to any caller has nothing equivalent, so
+    it discharges the precondition itself. Same idiom `AssignIncidentUseCase` uses for the
+    technician, and for the same stated reason.
+
+    **It takes no `reservation_id` and no `reported_by_user_id`** (amended D5, 2026-08-16,
+    agreed at the section-2 panel): both would carry the same undischarged precondition, and
+    no caller has one. Whoever brings the first — the lock alert of `messaging-ai`, most
+    likely — adds the parameter together with the lookup that makes it safe.
+
+    **`actor.user_id` stays the caller's obligation**, and it is the one id of the timeline
+    port's precondition this class does not discharge: it is the identity of whoever is
+    acting, resolved by the authenticated request or, for a command, by the tenant lookup
+    that found the account. Every operation of this flow treats it the same way.
+
+    **`title` and `description` carry the prose of whoever reported, and nothing of ours.**
+    They are rule-11 sinks of `steering/security.md`, and their excepción 2 concedes exactly
+    that — «*el valor no es nuestro y no lo hemos ido a buscar*» — while saying it «*no
+    autoriza a un escritor nuestro*». A caller that composes these strings itself is under
+    the structured form by default, whatever it is reporting; a caller that relays what a
+    person typed also owns the bound on them, the way the guest portal does in its request
+    schema (`guests/api/portal_schemas.py`) and not in the entity, whose two fields are bare
+    `str`.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        properties: PropertyRepository,
+        audit: AuditLogRepository,
+        timeline: TimelineEventRepository,
+        uow: UnitOfWork,
+    ) -> None:
+        self._incidents = incidents
+        self._properties = properties
+        self._audit = _AuditWriter(audit)
+        self._timeline = timeline
+        self._uow = uow
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        property_id: uuid.UUID,
+        source: IncidentSource,
+        title: str,
+        description: str,
+        actor: IncidentActor,
+        now: datetime,
+    ) -> Incident:
+        if await self._properties.get(tenant_id, property_id) is None:
+            raise MaintenanceValidationError(
+                "property_id must be a property of this tenant"
+            )
+
+        incident = Incident(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            property_id=property_id,
+            source=source,
+            title=title,
+            description=description,
+            created_at=now,
+            updated_at=now,
+        )
+        # `category`, `severity`, `status` and `ai_classification` are not passed, exactly as
+        # the guest path leaves them: the classifier is what writes them, and an incident born
+        # with them filled in would be indistinguishable from a classified one.
+        await self._incidents.add(tenant_id, incident)
+
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=audit_actions.INCIDENT_CREATED,
+            entity_type=audit_actions.ENTITY_INCIDENT,
+            entity_id=incident.id,
+            actor=actor,
+            changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
+            .diff("source", None, source)
+            .diff("status", None, IncidentStatus.OPEN),
+            now=now,
+        )
+
+        await self._timeline.add(
+            tenant_id,
+            TimelineEventFactory.create(
+                TimelineEventData(
+                    id=uuid.uuid4(),
+                    tenant_id=tenant_id,
+                    property_id=property_id,
+                    actor_type=TimelineActorType.USER,
+                    actor_user_id=actor.user_id,
+                    event_type=TimelineEventType.INCIDENT_CREATED,
+                    title=_REPORTED_TIMELINE_TITLE,
+                    created_at=now,
+                    # Identifiers only, for the reason the title is a constant.
+                    metadata={"incident_id": str(incident.id), "source": source.value},
+                )
+            ),
+        )
+
+        await self._uow.commit()
+        return incident
+
+
 class _IncidentTransitionMixin:
     """The shared middle of every operation that may move the property's state.
 

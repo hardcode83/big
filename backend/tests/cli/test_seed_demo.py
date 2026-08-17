@@ -18,24 +18,56 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from app.auth.domain.repositories import UserFilters
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.cleaning.infrastructure.repositories import (
+    SqlAlchemyCleaningChecklistCompletionRepository,
     SqlAlchemyCleaningChecklistTemplateRepository,
+    SqlAlchemyCleaningPhotoRepository,
+    SqlAlchemyCleaningTaskRepository,
 )
 from app.guests.infrastructure.repositories import SqlAlchemyGuestRepository
 from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.domain.repositories import TimelineFilters
 from app.timeline.infrastructure.models import TimelineEventModel
 from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventReader
 
+from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
 from app.cleaning.domain.value_objects import parse_template_content
-from app.cleaning.infrastructure.models import CleaningChecklistTemplateModel
+from app.integrations.infrastructure.storage import ConfiguredFileStorageFactory
+from app.cleaning.infrastructure.models import (
+    CleaningChecklistCompletionModel,
+    CleaningChecklistTemplateModel,
+    CleaningPhotoModel,
+    CleaningTaskModel,
+)
 from app.guests.infrastructure.models import GuestModel
-from app.properties.domain.enums import PropertyOperationalState
-from app.properties.infrastructure.models import PropertyModel
+from app.integrations.application.ingest import IngestReport
+from app.properties.domain.enums import (
+    PropertyOperationalState,
+    StateTransitionTriggeredBy,
+)
+from app.properties.infrastructure.models import (
+    PropertyModel,
+    PropertyStateTransitionModel,
+)
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 
 from app.cli import seed_demo
+from app.integrations.domain.storage import MAGIC_BYTES_LENGTH, detect_image_type
+from app.maintenance.domain.enums import (
+    IncidentCategory,
+    IncidentSeverity,
+    IncidentStatus,
+)
+from app.maintenance.domain.value_objects import IncidentClassification
+from app.maintenance.infrastructure.classifier import RuleBasedIncidentClassifier
+from app.maintenance.domain.repositories import IncidentFilters
+from app.maintenance.infrastructure.models import IncidentModel
+from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentReader
+from app.notifications.infrastructure.models import NotificationLogModel
+from app.tenants.domain.enums import StorageType
+from app.tenants.infrastructure.models import TenantConfigModel
 from app.audit.domain import actions
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import UserRole
@@ -202,6 +234,45 @@ def test_an_unexpected_failure_prints_its_class_and_never_its_parameters(
     assert "IntegrityError" in captured.err
 
 
+def test_a_configuration_refusal_exits_one_and_carries_its_own_remedy(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The exit-1 half of R6.1, and of every other `SeedConfigurationError` before it.
+
+    Driven through `main()` rather than through `apply_plan`, because the exit code is
+    `main()`'s and nothing else asserted it: the whole table of codes (1 for configuration,
+    precondition and conflict; 2 for ingest and unexpected) was pinned only on its 2s. The
+    message a person reads is asserted against the real database in
+    `test_a_tenant_whose_timezone_cannot_be_resolved_is_refused_before_any_write`; what is
+    driven here is the mapping.
+
+    Two conditions and not one, because since R6.1 they differ in remedy: one is a variable
+    in `.env`, the other a column of the database, and the handler no longer appends a
+    blanket "fill them in your .env" to both.
+    """
+    for message, misdirection in (
+        ("tenants.timezone is not a resolvable time zone: 'Not/AZone'.", ".env"),
+        ("Missing required environment variables: SEED_CLEANER_NAME. Fill them in your .env", None),
+        (
+            "This tenant stores files in S3 and the demo cleaning uploads six photos, but "
+            "this is not configured (values not echoed): S3_BUCKET.",
+            None,
+        ),
+    ):
+
+        async def _refuse(message: str = message) -> dict[str, int]:
+            raise SeedConfigurationError(message)
+
+        monkeypatch.setattr(seed_demo, "run", _refuse)
+
+        assert seed_demo.main() == 1
+
+        err = capsys.readouterr().err
+        assert message in err
+        if misdirection is not None:
+            assert misdirection not in err, "a database column is not fixed in the .env file"
+
+
 def test_an_ingest_failure_reaches_the_console_with_its_reasons(
     monkeypatch: pytest.MonkeyPatch, capsys
 ) -> None:
@@ -229,6 +300,87 @@ def test_an_ingest_failure_reaches_the_console_with_its_reasons(
     err = capsys.readouterr().err
     assert "Unknown property 'REDES11'" in err
     assert "details withheld" not in err, "this must not fall through to the catch-all"
+
+
+@pytest.mark.asyncio
+async def test_an_ingest_that_skipped_rows_without_rejecting_any_still_fails_loudly(
+    db_session, bootstrapped_tenant, complete_env, hasher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R6.3: the branch that reports the counts when there is no `RowError` to quote.
+
+    `skipped` can be non-zero with nothing in `errors` — the ingestor's "known and unchanged"
+    case — and joining an empty `errors` used to produce a refusal that ended in a colon and
+    said nothing. The pre-filter of `_seed_ota_reservations` keeps that unreachable in
+    practice, which is why it takes a stubbed `ingest` to reach it, and why it went untested.
+
+    The exception class already reaches the console with its detail ahead of the catch-all
+    (the test above); what this one adds is that the detail exists at all when `errors` is
+    empty, and that it names the counts instead of trailing off after a colon.
+    """
+
+    async def _skipped_without_errors(self, **kwargs):
+        return IngestReport(created=0, updated=0, skipped=1)
+
+    monkeypatch.setattr(seed_demo.ReservationIngestor, "ingest", _skipped_without_errors)
+
+    with pytest.raises(seed_demo.SeedIngestError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    message = str(excinfo.value)
+    assert "1 were skipped" in message
+    assert not message.rstrip().endswith(":"), "a loud failure that names no reason states counts"
+
+
+# --- The dataset constants of PRD §27 (R1.1, R3.2, D6, D10) ---------------------------
+
+
+def test_the_six_photos_are_bytes_the_upload_path_accepts_as_images() -> None:
+    """R3.2: the format is read from the CONTENT, so a placeholder string would be a 422.
+
+    Six distinct payloads and not one repeated: six objects in the store have to be six
+    objects, or a second run writing over the same key would look like idempotency.
+    """
+    assert set(seed_demo.SEED_PHOTO_BYTES) == {
+        photo_type for photo_type, _ in seed_demo._CHECKLIST_PHOTOS
+    }
+    for photo_type, content in seed_demo.SEED_PHOTO_BYTES.items():
+        image = detect_image_type(content[:MAGIC_BYTES_LENGTH])
+        assert image is not None, f"{photo_type} is not an accepted image"
+        assert image.extension == "jpg"
+    assert len(set(seed_demo.SEED_PHOTO_BYTES.values())) == 6
+
+
+@pytest.mark.asyncio
+async def test_the_upload_delivers_the_whole_photo_in_chunks() -> None:
+    """`UploadCleaningPhotoUseCase` reads its `ChunkedUpload` in 64 KiB bites and stops on the
+    first empty answer, so a `read` that ignored `size` or never emptied would hang or truncate."""
+    content = seed_demo.SEED_PHOTO_BYTES["kitchen"]
+    upload = seed_demo.BytesUpload(content)
+
+    chunks = []
+    while chunk := await upload.read(8):
+        assert len(chunk) <= 8
+        chunks.append(chunk)
+
+    assert b"".join(chunks) == content
+    assert await upload.read(8) == b""
+
+
+def test_the_three_incidents_are_the_ones_prd_27_declares() -> None:
+    """Constants of the module and not composed text (D6): `incidents.title`/`description` are
+    rule-11 sinks whose excepción 2 «no autoriza a un escritor nuestro», and the seed is one."""
+    assert [
+        (incident.internal_code, incident.source.value, incident.title)
+        for incident in seed_demo.SEED_INCIDENTS
+    ] == [
+        ("REDES11", "GUEST", "WiFi va lento"),
+        ("REDES11", "GUEST", "Problema con código de acceso"),
+        ("PAJARITOS8", "CLEANER", "Lavadora hace ruido extraño"),
+    ]
+    assert [
+        (incident.category.value, incident.severity.value)
+        for incident in seed_demo.SEED_INCIDENTS
+    ] == [("WIFI", "LOW"), ("ACCESS", "HIGH"), ("APPLIANCE", "MEDIUM")]
 
 
 # --- Preconditions: the tenant and the two accounts bootstrap left (R1.3, D4) ----------
@@ -270,6 +422,16 @@ async def _row_counts(session) -> dict[str, int]:
             CleaningChecklistTemplateModel,
             AuditLogModel,
             TimelineEventModel,
+            # Everything the advance phase can write, including the two child tables with no
+            # `tenant_id` of their own: "nothing was written" has to be measured over every
+            # table a refusal could have written to, or the guarantee is only as wide as the
+            # list somebody remembered to keep.
+            IncidentModel,
+            CleaningTaskModel,
+            CleaningChecklistCompletionModel,
+            CleaningPhotoModel,
+            PropertyStateTransitionModel,
+            NotificationLogModel,
         )
     }
 
@@ -318,11 +480,172 @@ async def test_without_the_manager_it_aborts_without_writing_anything(
 
 
 @pytest.mark.asyncio
-async def test_the_actor_of_everything_it_writes_is_the_owner(
+async def test_a_tenant_whose_timezone_cannot_be_resolved_is_refused_before_any_write(
     db_session, bootstrapped_tenant, complete_env, hasher
 ) -> None:
-    # D5: one actor for the whole run, and the owner rather than the manager because a tenant
-    # is guaranteed to keep an owner.
+    """R6.1. Written straight onto the column, which is the only way it can happen.
+
+    `normalise_timezone` refuses this value on every domain path, so the row that carries it
+    got there past the entity — and until this check it surfaced as `main()`'s catch-all:
+    "unexpected ZoneInfoNotFoundError; details withheld", naming neither the column nor the
+    value. Unlike the `SEED_*` refusals the message echoes the value: a zone name is not a
+    person's address and it is what the operator has to correct.
+    """
+    bootstrapped_tenant.timezone = "Not/AZone"
+    await db_session.flush()
+    before = await _row_counts(db_session)
+
+    with pytest.raises(SeedConfigurationError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    message = str(excinfo.value)
+    assert "tenants.timezone" in message
+    assert "Not/AZone" in message
+    assert await _row_counts(db_session) == before
+
+
+def _configured_s3(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A complete object-store configuration, with the credential chain answered rather than
+    resolved: left alone, `credentials_are_resolvable` reads the operator's `~/.aws` files
+    and the instance metadata endpoint, which would make the outcome depend on the machine."""
+    monkeypatch.setattr(settings, "s3_bucket", "autohost-media")
+    monkeypatch.setattr(settings, "s3_region", "eu-madrid-1")
+    monkeypatch.setattr(seed_demo, "credentials_are_resolvable", lambda: True)
+
+
+@pytest.mark.parametrize(
+    ("blanked", "expected"),
+    [
+        ("s3_bucket", "S3_BUCKET"),
+        ("s3_region", "S3_REGION"),
+        (None, "AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_a_tenant_in_s3_missing_any_piece_is_refused_before_any_write(
+    db_session,
+    bootstrapped_tenant,
+    complete_env,
+    hasher,
+    monkeypatch: pytest.MonkeyPatch,
+    blanked: str | None,
+    expected: str,
+) -> None:
+    """R3.3 and D10, over every piece its IF-clause names, not just the bucket.
+
+    The store is judged before the transaction and not in the middle of it: `storage_for(S3)`
+    raises and **never** falls back to `LOCAL`, and six photos are `required: True` in the
+    seed's own template, so a half-configured `dev` would otherwise break after the
+    reservations were seeded and report "details withheld" with exit 2.
+
+    **`S3_ENDPOINT_URL` is not one of the pieces**, and its absence from this list is the
+    decision of the section-4 panel rather than an oversight: an empty endpoint is how the
+    rest of the system spells "this is AWS".
+    """
+    db_session.add(
+        TenantConfigModel(tenant_id=bootstrapped_tenant.id, storage_type=StorageType.S3)
+    )
+    await db_session.flush()
+    _configured_s3(monkeypatch)
+    if blanked is None:
+        monkeypatch.setattr(seed_demo, "credentials_are_resolvable", lambda: False)
+    else:
+        monkeypatch.setattr(settings, blanked, "   ")
+    before = await _row_counts(db_session)
+
+    with pytest.raises(SeedConfigurationError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    message = str(excinfo.value)
+    assert expected in message
+    # The names of what is missing, never a value: two of the four real secrets of rule 8
+    # can be in that list.
+    assert "values not echoed" in message
+    assert await _row_counts(db_session) == before
+
+
+@pytest.mark.asyncio
+async def test_an_s3_tenant_with_no_endpoint_passes_the_precondition(
+    db_session, bootstrapped_tenant, complete_env, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The conflict the section-4 panel resolved: an empty `S3_ENDPOINT_URL` is the correct
+    configuration for AWS, so refusing it would refuse a deployment every other path serves.
+
+    Driven against the precondition rather than the whole run, and the reason is the point:
+    a full run over an `S3` tenant really uploads six photos, so the only way to assert "the
+    command goes on" end to end would be to reach a store — which the suite refuses to do by
+    design (`app/integrations/infrastructure/storage/s3.py`: "nothing in the automated suite
+    talks to a real store").
+    """
+    db_session.add(
+        TenantConfigModel(tenant_id=bootstrapped_tenant.id, storage_type=StorageType.S3)
+    )
+    await db_session.flush()
+    _configured_s3(monkeypatch)
+    monkeypatch.setattr(settings, "s3_endpoint_url", "")
+
+    await seed_demo._refuse_an_object_store_this_run_cannot_reach(
+        db_session, bootstrapped_tenant.id
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_local_tenant_is_not_asked_for_any_object_store_setting(
+    db_session, bootstrapped_tenant, complete_env, hasher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The other half of R3.3: `LOCAL` — the default, and every new tenant — changes nothing.
+
+    Left without a `tenant_configs` row on purpose, which is the state `make bootstrap`
+    leaves and the one the check has to read as `LOCAL` without creating anything. Nothing
+    about the store is even asked, which is why the credential chain is not stubbed here.
+    """
+    monkeypatch.setattr(settings, "s3_bucket", "")
+
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert created["properties"] == 2
+
+
+@pytest.mark.asyncio
+async def test_each_write_carries_the_actor_its_use_case_demands(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """What replaces `test_the_actor_of_everything_it_writes_is_the_owner` (R5.1-R5.4, D8).
+
+    The old rule — one actor for the whole run, the `TENANT_OWNER` — described a command
+    that only wrote things an owner can write. It is not relaxed here: it became impossible.
+    `accept`, `start`, `complete` and every photo upload call `_require_assignee` on the
+    entity, so the cleaning cycle can only be signed by the cleaner it was assigned to; and
+    the automatic classification is written with no actor at all, which is what rule 9's
+    fourth exception of `steering/security.md` concedes and `TimelineEventFactory` mirrors
+    by putting `AI` in the timeline instead of a person who was not there.
+
+    So the assertion is a **split by action** rather than a single set: what the seed already
+    wrote before this change, plus the incident work, stays with the owner; the cleaning is
+    the cleaner's; `INCIDENT_CLASSIFIED` has none. Anything else without an actor would be a
+    rule-9 violation and fails here.
+
+    **The set of actions is pinned first, and by equality**, because a split by action can
+    only speak about the rows it finds: an action that stopped being audited would simply not
+    appear, and the loop below would pass over a trail with a hole in it. Rule 9 names
+    `Incident` and `roles de User` in its enumeration, so their absence is exactly what has
+    to fail.
+
+    **What this test does NOT cover, and it is not an oversight**: the property-state
+    transitions the cleaning cycle fires carry actor `USER`, and rule 9's first exception
+    excuses only `SYSTEM` ones from `AuditLog` — but no writer in `properties`, `cleaning` or
+    `maintenance` writes that row, and `audit/domain/actions.py` has no action for it. That
+    gap is the design's OQ3, decided and recorded: this change "no lo cierra ni lo ensancha:
+    usa los mismos casos de uso que la API ya usa". Asserting it here would be asserting a
+    behaviour nobody implements, so the boundary is written down instead. Raised by the
+    section-8 security panel.
+
+    The set below encodes a second recorded debt, and it is worth naming so that its day
+    comes as a red test rather than a surprise: rule 9 lists `Reservation`, `reservations`
+    writes no `AuditLog` for its mutations (its own spec records it), and the seed moves
+    three stays — so no `RESERVATION_*` action appears here. When that trail arrives, this
+    equality fails and somebody adds it deliberately.
+    """
     await apply_plan(db_session, build_plan(), hasher)
 
     owner = (
@@ -333,10 +656,52 @@ async def test_the_actor_of_everything_it_writes_is_the_owner(
             )
         )
     ).scalar_one()
-    actors = (
-        (await db_session.execute(select(AuditLogModel.actor_user_id))).scalars().all()
+    cleaner = (
+        await db_session.execute(
+            select(UserModel).where(UserModel.email == COMPLETE_ENV["SEED_CLEANER_EMAIL"])
+        )
+    ).scalar_one()
+    rows = (
+        (
+            await db_session.execute(
+                select(AuditLogModel.action, AuditLogModel.actor_user_id)
+            )
+        )
+        .tuples()
+        .all()
     )
-    assert set(actors) == {owner.id}
+    by_action: dict[str, set] = {}
+    for action, actor_user_id in rows:
+        by_action.setdefault(action, set()).add(actor_user_id)
+
+    assert by_action.keys() == {
+        actions.USER_CREATED,
+        actions.PROPERTY_CREATED,
+        actions.CLEANING_TASK_ACCEPTED,
+        actions.CLEANING_TASK_STARTED,
+        actions.CLEANING_PHOTO_UPLOADED,
+        actions.CLEANING_TASK_COMPLETED,
+        actions.INCIDENT_CREATED,
+        actions.INCIDENT_CLASSIFIED,
+        actions.INCIDENT_ASSIGNED,
+    }
+
+    # `CLEANING_` and not `CLEANING_TASK_`: the photo upload writes its own action
+    # (`CLEANING_PHOTO_UPLOADED`) and is as much the cleaner's hands as the rest of the cycle.
+    cleaning_actions = {action for action in by_action if action.startswith("CLEANING_")}
+    assert cleaning_actions, "the cleaning cycle has to leave its own audit trail"
+    for action in cleaning_actions:
+        assert by_action[action] == {cleaner.id}, action
+
+    for action, actors in by_action.items():
+        if action in cleaning_actions:
+            continue
+        if action == actions.INCIDENT_CLASSIFIED:
+            # Rule 9's fourth exception, and only for this action: the classification is
+            # written by a command with no person behind it.
+            assert actors == {None}
+            continue
+        assert actors == {owner.id}, action
 
 
 # --- The two operational accounts (R3.1-R3.6, D3, D6) ---------------------------------
@@ -477,6 +842,11 @@ _CONSOLE_COUNTS = {
     "guests": 3,
     "reservations": 3,
     "checklist_templates": 1,
+    # The three the advance phase adds (D12). Entities created and nothing else: no
+    # operational state and no transition, because a state is not an entity somebody created.
+    "cleaning_tasks": 1,
+    "cleaning_photos": 6,
+    "incidents": 3,
 }
 
 
@@ -507,7 +877,7 @@ def test_the_output_carries_a_count_per_entity_and_nothing_else(
 
     assert exit_code == 0
     captured = capsys.readouterr()
-    for entity in ("users", "properties", "guests", "reservations", "checklist_templates"):
+    for entity in _CONSOLE_COUNTS:
         assert entity in captured.out
     for secret in (
         COMPLETE_ENV["SEED_CLEANER_PASSWORD"],
@@ -541,20 +911,11 @@ def test_a_run_with_nothing_to_do_prints_every_count_at_zero_and_exits_zero(
     # R1.2's console half: an operator has to be able to SEE that nothing happened, which is
     # why every entity type is printed even at zero. A line that dropped the zeros would be
     # indistinguishable from a run that did only part of the work.
-    exit_code = _drive_main(
-        monkeypatch,
-        {
-            "users": 0,
-            "properties": 0,
-            "guests": 0,
-            "reservations": 0,
-            "checklist_templates": 0,
-        },
-    )
+    exit_code = _drive_main(monkeypatch, dict.fromkeys(_CONSOLE_COUNTS, 0))
 
     assert exit_code == 0
     out = capsys.readouterr().out
-    for entity in ("users", "properties", "guests", "reservations", "checklist_templates"):
+    for entity in _CONSOLE_COUNTS:
         assert f"0 {entity}" in out
 
 
@@ -568,13 +929,7 @@ async def test_a_second_run_returns_every_count_at_zero(
 
     created = await apply_plan(db_session, build_plan(), hasher)
 
-    assert created == {
-        "users": 0,
-        "properties": 0,
-        "guests": 0,
-        "reservations": 0,
-        "checklist_templates": 0,
-    }
+    assert created == dict.fromkeys(_CONSOLE_COUNTS, 0)
 
 
 @pytest.mark.asyncio
@@ -628,6 +983,13 @@ async def test_nothing_the_seed_writes_is_reachable_from_another_tenant(
             CleaningChecklistTemplateModel,
             AuditLogModel,
             TimelineEventModel,
+            # The five the advance phase brought. `notification_logs` is one of them because
+            # the checkout auto-assigns the cleaning — the tenant has exactly one active
+            # cleaner — and that writes its assignment notice.
+            IncidentModel,
+            CleaningTaskModel,
+            PropertyStateTransitionModel,
+            NotificationLogModel,
         ):
             owners = (
                 (await stranger.execute(select(model.tenant_id).distinct())).scalars().all()
@@ -671,6 +1033,33 @@ async def test_nothing_the_seed_writes_is_reachable_from_another_tenant(
             neighbour.id, redes, filters=TimelineFilters(), page=1, per_page=50
         )
         assert events.total == 0
+        assert (
+            await SqlAlchemyIncidentReader(stranger).list(
+                neighbour.id, IncidentFilters(), page=1, per_page=50
+            )
+        ).total == 0
+        assert not await SqlAlchemyCleaningTaskRepository(stranger).list_for_property(
+            neighbour.id, redes
+        )
+
+        # `cleaning_checklist_completions` and `cleaning_photos` have **no `tenant_id` of
+        # their own** — `app/core/db.py` names them among the child tables the listener
+        # cannot reach, so "any repository touching them must join the scoped parent
+        # explicitly and bring its own isolation test". That join is the only thing between a
+        # neighbour and these rows, so it is asked directly: the task id is the real one, and
+        # the answer still has to be empty.
+        task_id = (
+            await stranger.execute(select(CleaningTaskModel.id))
+        ).scalar_one()
+        assert not await SqlAlchemyCleaningChecklistCompletionRepository(
+            stranger
+        ).list_for_task(neighbour.id, task_id)
+        assert not await SqlAlchemyCleaningPhotoRepository(stranger).list_for_task(
+            neighbour.id, task_id
+        )
+        assert not await SqlAlchemyCleaningPhotoRepository(stranger).uploaded_photo_types(
+            neighbour.id, task_id
+        )
 
 
 # --- The two properties (R2.1-R2.4) ---------------------------------------------------
@@ -705,19 +1094,60 @@ async def test_it_creates_the_two_properties_of_the_prd_with_their_values(
 
 
 @pytest.mark.asyncio
-async def test_both_properties_are_born_vacant_ready(
+async def test_the_operational_state_is_always_a_consequence_and_never_a_column_written(
     db_session, bootstrapped_tenant, complete_env, hasher
 ) -> None:
-    # R2.2: the seed never passes nor writes `current_operational_state` — the column takes
-    # its DDL default and stays where `PropertyStateMachine` governs it.
+    """What survives of `test_both_properties_are_born_vacant_ready`, and what does not.
+
+    Still true, and the property this change is careful to keep: the seed never passes nor
+    writes `current_operational_state` — every value it ends up with is the verdict of
+    `PropertyStateMachine`, reached by a trigger, with its `property_state_transitions` row
+    behind it. No longer true: that both homes end in `VACANT_READY`. REDES11 now has a
+    journey, and the sequence test is what pins it; PAJARITOS8 receives no trigger at all —
+    it has no stays, and its incident is `MEDIUM`, which maps to no trigger — so it is the
+    one that still shows the untouched default.
+    """
     await apply_plan(db_session, build_plan(), hasher)
 
-    states = (
-        (await db_session.execute(select(PropertyModel.current_operational_state)))
+    pajaritos = (
+        await db_session.execute(
+            select(PropertyModel).where(PropertyModel.internal_code == "PAJARITOS8")
+        )
+    ).scalar_one()
+    assert pajaritos.current_operational_state is PropertyOperationalState.VACANT_READY
+    assert not (
+        await db_session.execute(
+            select(PropertyStateTransitionModel).where(
+                PropertyStateTransitionModel.property_id == pajaritos.id
+            )
+        )
+    ).scalars().all()
+
+    redes = (
+        await db_session.execute(
+            select(PropertyModel).where(PropertyModel.internal_code == "REDES11")
+        )
+    ).scalar_one()
+    transitions = (
+        (
+            await db_session.execute(
+                select(PropertyStateTransitionModel).where(
+                    PropertyStateTransitionModel.property_id == redes.id
+                )
+            )
+        )
         .scalars()
         .all()
     )
-    assert set(states) == {PropertyOperationalState.VACANT_READY}
+    # Not a state count: the point is that wherever REDES11 ended up, a transition put it
+    # there, and the chain starts at the DDL default nobody wrote.
+    #
+    # Deliberately not "the newest row's destination": two transitions of this run share an
+    # instant — the checkout and the auto-assignment its provisioner performs — so `created_at`
+    # does not order them. The full ordered sequence is the sequence test's business.
+    assert transitions
+    assert PropertyOperationalState.VACANT_READY in {row.from_state for row in transitions}
+    assert redes.current_operational_state in {row.to_state for row in transitions}
 
 
 @pytest.mark.asyncio
@@ -816,36 +1246,52 @@ async def test_it_creates_the_three_stays_of_the_prd_dated_from_today(
 
 
 @pytest.mark.asyncio
-async def test_none_of_the_three_is_given_a_status_by_hand(
+async def test_none_of_the_three_is_given_a_status_at_the_moment_it_is_created(
     db_session, bootstrapped_tenant, complete_env, hasher
 ) -> None:
-    """R4.4, and the single most tempting thing to get wrong in this change.
+    """What survives of `test_none_of_the_three_is_given_a_status_by_hand` (R2.1-R2.3).
 
-    §27 draws the three stays as `CHECKED_IN_ESTIMATED`, `CONFIRMED` and `COMPLETED`. Two of
-    those are states that are REACHED — by `PropertyStateMachine` and by the scheduler of
-    `celery-jobs` — not values to assign. The DIRECT path cannot express one at all
+    Still true, and still the most tempting thing to get wrong: **no stay is born with a
+    status somebody chose**. The DIRECT path cannot express one at all
     (`CreateReservationCommand` has no `status` field); the OTA path can, through
-    `ReservationDTO.status`, and leaving it `None` is what makes this hold.
+    `ReservationDTO.status`, and leaving it `None` is what makes this hold. The two defaults
+    are DIFFERENT on purpose: `Reservation.create` starts a hand-made booking at `PENDING`,
+    while `ReservationStatus.parse_ingested(None)` reads a feed row with no status as
+    `CONFIRMED` — "a booking somebody already accepted".
 
-    The two defaults are DIFFERENT, and that is the point rather than an inconsistency:
-    `Reservation.create` starts a hand-made booking at `PENDING`, while
-    `ReservationStatus.parse_ingested(None)` deliberately reads a feed row with no status as
-    `CONFIRMED` — "a reservation that reaches us from a PMS feed or a CSV without a status is
-    a booking somebody already accepted". Each stay is born in the default OF ITS PATH, which
-    is exactly what R4.4 asks for; asserting one shared value would be asserting that the
-    seed had flattened the distinction.
+    What is no longer true is that the statuses §27 draws never appear. They do, and they
+    arrive **afterwards and through a writer**: `UpdateReservationUseCase`, which is a
+    declared substitute rather than the definitive way — `reservations` offers no check-in
+    operation and no closing one, and opening them is its own work, not a seed's. What this
+    test pins is the difference between reaching a status and being born with it, which is
+    the whole of R4.4's original point.
     """
     await apply_plan(db_session, build_plan(), hasher)
 
     stays = await _reservations_by_channel(db_session)
-    assert stays[ReservationChannel.DIRECT].status is ReservationStatus.PENDING
-    assert stays[ReservationChannel.AIRBNB].status is ReservationStatus.CONFIRMED
+    # Reached: each by one `UpdateReservationUseCase` call, at the instant of the fact.
+    assert stays[ReservationChannel.DIRECT].status is ReservationStatus.COMPLETED
+    assert stays[ReservationChannel.AIRBNB].status is ReservationStatus.CHECKED_IN_ESTIMATED
+    # Untouched: the upcoming stay keeps the status its ingest gave it.
     assert stays[ReservationChannel.BOOKING].status is ReservationStatus.CONFIRMED
-    # The two §27 values that are reached and never assigned must appear nowhere.
-    assert ReservationStatus.CHECKED_IN_ESTIMATED not in {
-        stay.status for stay in stays.values()
-    }
-    assert ReservationStatus.COMPLETED not in {stay.status for stay in stays.values()}
+
+    # And each move left its `RESERVATION_UPDATED` in the timeline — which is what makes it a
+    # transition of the system and not a column somebody wrote.
+    updates = (
+        (
+            await db_session.execute(
+                select(TimelineEventModel).where(
+                    TimelineEventModel.event_type == TimelineEventType.RESERVATION_UPDATED
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    moved = {event.reservation_id for event in updates}
+    assert stays[ReservationChannel.DIRECT].id in moved
+    assert stays[ReservationChannel.AIRBNB].id in moved
+    assert stays[ReservationChannel.BOOKING].id not in moved
 
 
 @pytest.mark.asyncio
@@ -952,6 +1398,32 @@ async def test_deleting_the_direct_stay_by_hand_and_reseeding_duplicates_its_gue
     direct = (await _reservations_by_channel(db_session))[ReservationChannel.DIRECT]
     await db_session.execute(
         delete(TimelineEventModel).where(TimelineEventModel.reservation_id == direct.id)
+    )
+    # The past stay now drags a whole cleaning behind it: the checkout provisioned a
+    # `CleaningTask` pointing at it, and the cleaner walked it — 18 completions and 6 photos
+    # — so three foreign keys refuse the delete. Part of what "hand-deleting the stay" costs,
+    # and the reason `docs/seed-demo.md` says to drop the database instead.
+    task_ids = (
+        (
+            await db_session.execute(
+                select(CleaningTaskModel.id).where(
+                    CleaningTaskModel.reservation_id == direct.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await db_session.execute(
+        delete(CleaningPhotoModel).where(CleaningPhotoModel.cleaning_task_id.in_(task_ids))
+    )
+    await db_session.execute(
+        delete(CleaningChecklistCompletionModel).where(
+            CleaningChecklistCompletionModel.cleaning_task_id.in_(task_ids)
+        )
+    )
+    await db_session.execute(
+        delete(CleaningTaskModel).where(CleaningTaskModel.reservation_id == direct.id)
     )
     await db_session.execute(delete(ReservationModel).where(ReservationModel.id == direct.id))
     await db_session.flush()
@@ -1130,6 +1602,662 @@ async def test_a_tenant_that_already_has_a_template_gets_no_second_one(
         )
         == 1
     )
+
+
+# --- The three incidents, each by its own way in (R1.1-R1.6, R5.3, D2 step 12) ---------
+
+
+async def _incidents_by_title(db_session) -> dict:
+    rows = (await db_session.execute(select(IncidentModel))).scalars().all()
+    return {row.title: row for row in rows}
+
+
+@pytest.mark.asyncio
+async def test_the_three_incidents_are_born_unclassified_and_end_where_prd_27_says(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R1.1-R1.5: created with no verdict, then given one by the classifier.
+
+    The pair `(category, severity)` is asserted against §27 because that is what R1.3 makes
+    the command itself check: they are the classifier's answer, and a seed that wrote them
+    would be a seed that cannot tell a working classifier from a broken one.
+
+    Incidents 1 and 3 end `CLASSIFIED` and not §27's literal `OPEN`, which is the declared
+    divergence of R1.5: `classify` is the only door out of `OPEN`, and the beat job would
+    move an `OPEN` one within five minutes anyway.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    incidents = await _incidents_by_title(db_session)
+    assert len(incidents) == 3
+    for seeded in seed_demo.SEED_INCIDENTS:
+        row = incidents[seeded.title]
+        assert row.description == seeded.description
+        assert row.source is seeded.source
+        assert row.category is seeded.category
+        assert row.severity is seeded.severity
+        assert row.ai_classification is not None, "the verdict has to come from the adapter"
+
+    assert incidents["Problema con código de acceso"].status is IncidentStatus.ASSIGNED
+    assert incidents["WiFi va lento"].status is IncidentStatus.CLASSIFIED
+    assert incidents["Lavadora hace ruido extraño"].status is IncidentStatus.CLASSIFIED
+
+
+@pytest.mark.asyncio
+async def test_the_classification_names_no_person_and_the_assignment_does(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R1.2, R1.4, R5.3, R5.4 and D7.
+
+    The classification goes with `actor=None`, so its `AuditLog` row has no actor —
+    the fourth exception of rule 9, which this change extended to name the seed command —
+    and its timeline entry says `AI`. Putting the owner there instead would have the demo
+    claim she classified three incidents she never looked at.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    classified = (
+        (
+            await db_session.execute(
+                select(AuditLogModel).where(
+                    AuditLogModel.action == actions.INCIDENT_CLASSIFIED
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(classified) == 3
+    for row in classified:
+        assert row.actor_user_id is None
+        assert row.actor_ip is None
+
+    events = (
+        (
+            await db_session.execute(
+                select(TimelineEventModel).where(
+                    TimelineEventModel.event_type == TimelineEventType.INCIDENT_CLASSIFIED
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {event.actor_type for event in events} == {TimelineActorType.AI}
+    assert {event.actor_user_id for event in events} == {None}
+
+    technician = (
+        await db_session.execute(
+            select(UserModel).where(UserModel.email == COMPLETE_ENV["SEED_TECHNICIAN_EMAIL"])
+        )
+    ).scalar_one()
+    access = (await _incidents_by_title(db_session))["Problema con código de acceso"]
+    assert access.assigned_technician_id == technician.id
+    # And its SLA is open: an assignment nobody answers has to escalate like any other.
+    assert await db_session.scalar(
+        select(func.count())
+        .select_from(NotificationLogModel)
+        .where(NotificationLogModel.related_id == access.id)
+    )
+
+
+@pytest.mark.asyncio
+async def test_a_classifier_that_drifts_stops_the_seed_instead_of_changing_the_dataset(
+    db_session, bootstrapped_tenant, complete_env, hasher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R1.3: the command refuses a dataset that is not the one PRD §27 declares.
+
+    Not a nicety: the `(category, severity)` of §27 is what the demo is shown against, and a
+    keyword edit that quietly turned the WiFi incident into `OTHER/MEDIUM` would leave a
+    dataset that still looks seeded. The message names both values because "this is not what
+    §27 says" without saying what it is sends the reader to the wrong file.
+    """
+
+    async def _drift(self, *, title: str, description: str):
+        return IncidentClassification(
+            category=IncidentCategory.NOISE,
+            severity=IncidentSeverity.LOW,
+            summary="Noise problem reported at the property",
+            confidence=Decimal("0.95"),
+            vocabulary=frozenset({"Noise problem reported at the property"}),
+        )
+
+    monkeypatch.setattr(RuleBasedIncidentClassifier, "classify", _drift)
+
+    with pytest.raises(SeedConflictError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    message = str(excinfo.value)
+    assert "WiFi va lento" in message, "the refusal has to name the incident"
+    assert "NOISE" in message and "WIFI" in message, "and both verdicts, obtained and expected"
+
+    await db_session.rollback()
+    assert await db_session.scalar(select(func.count()).select_from(IncidentModel)) == 0
+
+
+def test_a_conflict_refusal_exits_one_with_its_reason(
+    monkeypatch: pytest.MonkeyPatch, capsys
+) -> None:
+    """The exit-1 half of R1.3, driven through `main()` — which no async test can do.
+
+    The mapping is the thing under test, not the message: `SeedConflictError` subclasses
+    `Exception` like `SeedIngestError` does, so moving its branch below the catch-all would
+    silently turn this refusal into an exit 2 with "details withheld", losing the one detail
+    an operator can act on. The message itself is asserted against the database by
+    `test_a_classifier_that_drifts_stops_the_seed_instead_of_changing_the_dataset`.
+    """
+    reason = (
+        "The classifier put 'WiFi va lento' in NOISE/LOW, and PRD §27 declares WIFI/LOW."
+    )
+
+    async def _refuse() -> dict[str, int]:
+        raise SeedConflictError(reason)
+
+    monkeypatch.setattr(seed_demo, "run", _refuse)
+
+    assert seed_demo.main() == 1
+
+    err = capsys.readouterr().err
+    assert reason in err
+    assert "details withheld" not in err, "this must not fall through to the catch-all"
+
+
+@pytest.mark.asyncio
+async def test_a_technician_account_that_cannot_take_the_incident_is_named(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R5.3's loud half, over the only way it can really happen.
+
+    The seed leaves an account that already exists exactly as it is (R3.5), so an address
+    that was already in use with another role — or deactivated — reaches the assignment as
+    an assignee the use case refuses. Without a name for it, that arrives as `main()`'s
+    catch-all: "unexpected InvalidTechnicianError; details withheld", exit 2, which says
+    nothing about which account to fix.
+    """
+    await insert_user(
+        db_session,
+        tenant=bootstrapped_tenant,
+        role=UserRole.PROPERTY_MANAGER,
+        email=COMPLETE_ENV["SEED_TECHNICIAN_EMAIL"],
+    )
+
+    with pytest.raises(SeedPreconditionError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    message = str(excinfo.value)
+    assert "SEED_TECHNICIAN_EMAIL" in message
+    assert "TECHNICIAN" in message
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_creates_no_fourth_incident(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R4.1 and R4.2: the key is `(property_id, title)`, which does not move with the day."""
+    created = await apply_plan(db_session, build_plan(), hasher)
+    assert created["incidents"] == 3
+
+    again = await apply_plan(db_session, build_plan(), hasher)
+
+    assert again["incidents"] == 0
+    assert await db_session.scalar(select(func.count()).select_from(IncidentModel)) == 3
+
+
+# --- The cleaning cycle and its six photos (R3.1-R3.5, R4.5, R4.6, R5.2, D9, D11) ------
+
+
+@pytest.fixture(autouse=True)
+def seed_storage(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """The `LOCAL` backend, rooted where the test can count what really got written.
+
+    Left alone, the seed writes its six objects under `MEDIA_ROOT` (`/app/media`) — the
+    container's real media directory, shared by every test of the run. Pointing the factory
+    at `tmp_path` is what makes "six objects, not twelve" a question this suite can answer.
+
+    **`autouse`, and that is not convenience**: every test in this file that runs the command
+    uploads six photos, so without it a single run of this module would leave hundreds of
+    files in the container's media directory and each test's count would depend on which
+    tests ran before it.
+    """
+    root = tmp_path / "media"
+    factory = ConfiguredFileStorageFactory(signing_key=b"k" * 32, local_root=root)
+    monkeypatch.setattr(seed_demo, "_file_storage_factory", lambda: factory)
+    return root
+
+
+def _stored_objects(root) -> list:
+    return sorted(path for path in root.rglob("*") if path.is_file())
+
+
+@pytest.mark.asyncio
+async def test_the_cleaning_is_walked_by_the_cleaner_and_closes_with_its_evidence(
+    db_session, bootstrapped_tenant, complete_env, hasher, seed_storage
+) -> None:
+    """R3.1, R3.2, R3.4 and R5.2: the whole cycle, through the use cases of `cleaning`.
+
+    `validation_status = PASSED` is not written by the seed — `CleaningTask.complete` sets it
+    once PRD §11's three clauses hold — so asserting it is asserting that the evidence was
+    really there: 18 required items ticked and the 6 required photos uploaded.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    task = (await db_session.execute(select(CleaningTaskModel))).scalars().one()
+    cleaner = (
+        await db_session.execute(
+            select(UserModel).where(UserModel.email == COMPLETE_ENV["SEED_CLEANER_EMAIL"])
+        )
+    ).scalar_one()
+    assert task.status is CleaningTaskStatus.COMPLETED
+    assert task.validation_status is CleaningValidationStatus.PASSED
+    assert task.assigned_cleaner_id == cleaner.id
+
+    completions = (
+        (
+            await db_session.execute(
+                select(CleaningChecklistCompletionModel).where(
+                    CleaningChecklistCompletionModel.cleaning_task_id == task.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(completions) == 18
+    assert {row.completed_by for row in completions} == {cleaner.id}
+
+    photos = (
+        (
+            await db_session.execute(
+                select(CleaningPhotoModel).where(
+                    CleaningPhotoModel.cleaning_task_id == task.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert {photo.photo_type for photo in photos} == {
+        photo_type for photo_type, _ in seed_demo._CHECKLIST_PHOTOS
+    }
+    assert {photo.uploaded_by for photo in photos} == {cleaner.id}
+    # And the six objects are really in the store the tenant resolves — a row pointing at
+    # nothing would be a broken photo for ever (R3.4).
+    assert len(_stored_objects(seed_storage)) == 6
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_uploads_no_seventh_photo(
+    db_session, bootstrapped_tenant, complete_env, hasher, seed_storage
+) -> None:
+    """R3.5 and D9: one question — "is the task already `COMPLETED`?" — covers the task, its
+    items and its photos.
+
+    Counting the **objects** and not only the rows is the whole point: a re-upload would roll
+    its rows back on any later failure and still leave six more files nobody references.
+    """
+    created = await apply_plan(db_session, build_plan(), hasher)
+    assert created["cleaning_photos"] == 6
+
+    again = await apply_plan(db_session, build_plan(), hasher)
+
+    assert again["cleaning_photos"] == 0
+    assert again["cleaning_tasks"] == 0
+    assert await db_session.scalar(select(func.count()).select_from(CleaningPhotoModel)) == 6
+    assert len(_stored_objects(seed_storage)) == 6
+
+
+@pytest.mark.asyncio
+async def test_a_tenant_that_creates_no_cleaning_tasks_is_seeded_without_one(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The quiet half of the amended D9: no task provisioned, no cleaning to walk.
+
+    A tenant that turned `auto_create_cleaning_task` off is a configuration choice, not a
+    broken environment — `ProvisionCleaningTaskUseCase` "returns `None` for every ordinary
+    reason not to create one and lets the caller count it", and refusing the whole seed over
+    it would be this command deciding something that is not its to decide. What tells the
+    operator is the console: zero tasks, zero photos.
+    """
+    db_session.add(
+        TenantConfigModel(
+            tenant_id=bootstrapped_tenant.id, auto_create_cleaning_task=False
+        )
+    )
+    await db_session.flush()
+
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert created["cleaning_tasks"] == 0
+    assert created["cleaning_photos"] == 0
+    assert created["properties"] == 2, "the rest of the dataset is seeded as usual"
+    assert await db_session.scalar(select(func.count()).select_from(CleaningTaskModel)) == 0
+
+
+@pytest.mark.asyncio
+async def test_a_provisioned_cleaning_that_cannot_be_found_stops_the_run(
+    db_session, bootstrapped_tenant, complete_env, hasher, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The loud half of the amended D9, and the distinction the section-7 panel asked for.
+
+    "No task at all" is ordinary; "the checkout just provisioned one and it is not there" is
+    a dataset nobody can explain, and the two must not share an answer. Reproduced by making
+    the lookup blind rather than by corrupting the data, which is the only way to reach a
+    disagreement between the report and the table.
+    """
+
+    async def _sees_nothing(self, tenant_id, property_id):
+        return []
+
+    monkeypatch.setattr(
+        seed_demo.SqlAlchemyCleaningTaskRepository, "list_for_property", _sees_nothing
+    )
+
+    with pytest.raises(SeedPreconditionError) as excinfo:
+        await apply_plan(db_session, build_plan(), hasher)
+
+    assert "cannot be found" in str(excinfo.value)
+
+
+@pytest.mark.asyncio
+async def test_a_failure_after_the_photos_names_the_objects_it_could_not_take_back(
+    db_session, bootstrapped_tenant, complete_env, hasher, seed_storage, capsys,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """R4.6 and D11: the one write of this command a rollback cannot undo.
+
+    `UploadCleaningPhotoUseCase` deletes the object compensatorily only when **its own**
+    `commit()` fails, and under `CallerOwnedUnitOfWork` that commit never happens — so a
+    failure after the uploads takes the six rows and leaves the six objects. Enumerating them
+    is not cleaning them, and that distinction is what makes the output honest.
+    """
+
+    async def _explode(self) -> None:
+        raise RuntimeError("the transaction could not be closed")
+
+    monkeypatch.setattr(seed_demo.SqlAlchemyUnitOfWork, "commit", _explode)
+
+    with pytest.raises(RuntimeError):
+        await apply_plan(db_session, build_plan(), hasher)
+
+    err = capsys.readouterr().err
+    stored = _stored_objects(seed_storage)
+    assert len(stored) == 6
+    for path in stored:
+        assert path.stem in err, "every orphaned object has to be named"
+    assert "rolled back" in err
+
+    # R4.5, measured and not taken from the message: the rows really go, which is what makes
+    # the objects orphans in the first place. Without this the test would pass over an
+    # implementation that committed the cleaning halfway and merely said otherwise.
+    await db_session.rollback()
+    for model in (CleaningPhotoModel, CleaningChecklistCompletionModel, CleaningTaskModel):
+        assert await db_session.scalar(select(func.count()).select_from(model)) == 0
+    # R4.5 in full — "incluidos los estados ya avanzados". The advanced states are the part
+    # most easily left behind: they are written by a different use case, on a different
+    # table, and a `SqlAlchemyUnitOfWork` slipped into any of the wiring would commit them
+    # while the cleaning rolled back.
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == 0
+    )
+    assert await db_session.scalar(select(func.count()).select_from(IncidentModel)) == 0
+
+
+# --- The advance phase: the clock of the two stays (R2.1-R2.4, D2, D3, D4) -------------
+
+
+async def _transitions_of(db_session, internal_code: str):
+    property = (
+        await db_session.execute(
+            select(PropertyModel).where(PropertyModel.internal_code == internal_code)
+        )
+    ).scalar_one()
+    rows = (
+        (
+            await db_session.execute(
+                select(PropertyStateTransitionModel).where(
+                    PropertyStateTransitionModel.property_id == property.id
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    return property, rows
+
+
+@pytest.mark.asyncio
+async def test_the_past_stay_is_confirmed_before_the_clock_can_touch_it(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """D4, and a finding about the system rather than about this change.
+
+    The DIRECT stay is born `PENDING`, and all four clock preconditions demand `CONFIRMED` or
+    `CHECKED_IN_ESTIMATED` — so the stay the seed has been writing since 2026-08-12 was in a
+    state no trigger could ever advance. Two `RESERVATION_UPDATED` events is what says the
+    confirmation happened and was not skipped by a step that wrote `COMPLETED` straight over
+    `PENDING`: one for the confirmation, one for the close.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    direct = (await _reservations_by_channel(db_session))[ReservationChannel.DIRECT]
+    updates = (
+        (
+            await db_session.execute(
+                select(TimelineEventModel).where(
+                    TimelineEventModel.reservation_id == direct.id,
+                    TimelineEventModel.event_type == TimelineEventType.RESERVATION_UPDATED,
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(updates) == 2
+    assert direct.status is ReservationStatus.COMPLETED
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_does_not_walk_a_reached_status_backwards(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R4.1's «no mover ningún estado ya alcanzado», over the one move that is not free.
+
+    `update_details` compares values and has no state machine, so an unguarded confirmation
+    step would take the already-`COMPLETED` stay back to `CONFIRMED` and forward again on
+    every re-run: two real writes and two more timeline events each time. Counting the
+    events is what sees it — the final status looks identical either way.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+    direct = (await _reservations_by_channel(db_session))[ReservationChannel.DIRECT]
+    airbnb = (await _reservations_by_channel(db_session))[ReservationChannel.AIRBNB]
+
+    await apply_plan(db_session, build_plan(), hasher)
+
+    stays = await _reservations_by_channel(db_session)
+    assert stays[ReservationChannel.DIRECT].status is ReservationStatus.COMPLETED
+    assert stays[ReservationChannel.AIRBNB].status is ReservationStatus.CHECKED_IN_ESTIMATED
+    updates = (
+        (
+            await db_session.execute(
+                select(TimelineEventModel).where(
+                    TimelineEventModel.event_type == TimelineEventType.RESERVATION_UPDATED,
+                    TimelineEventModel.reservation_id.in_([direct.id, airbnb.id]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    assert len(updates) == 3, "two moves for the past stay, one for the live one, once"
+
+
+@pytest.mark.asyncio
+async def test_redes11_walks_the_journey_and_pajaritos8_receives_no_trigger(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R2.4 and D2: the states of the demo are reached, one trigger at a time.
+
+    The four this asserts are the ones the past stay produces — arrival, occupancy, checkout
+    — and they are asserted as *visited*, not as a final state: the run keeps going. What
+    pins the order and the whole set is the sequence test.
+
+    PAJARITOS8 is the control: no stays, and an incident that maps to no trigger, so nothing
+    at all should have moved it.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    _, redes_rows = await _transitions_of(db_session, "REDES11")
+    visited = {row.from_state for row in redes_rows} | {row.to_state for row in redes_rows}
+    assert {
+        PropertyOperationalState.VACANT_READY,
+        PropertyOperationalState.AWAITING_CHECKIN,
+        PropertyOperationalState.OCCUPIED_ESTIMATED,
+        PropertyOperationalState.AWAITING_CLEANING,
+    } <= visited
+
+    # The clock's transitions fired as `SYSTEM`, and that is not decoration: rule 9 of
+    # `steering/security.md` exempts a property transition from `AuditLog` **only** for that
+    # actor — "una transición con cualquier otro actor … NO está exenta". A re-wiring that
+    # produced a `USER` actor here would silently leave them unaudited, so the exemption this
+    # phase relies on is asserted rather than assumed.
+    #
+    # The cleaning cycle's transitions are `USER` — the cleaner really is the actor — and
+    # they inherit the known, documented gap of `cleaning`'s own mixin (design OQ3): this
+    # change "no lo cierra ni lo ensancha: usa los mismos casos de uso que la API ya usa".
+    clock_states = {
+        PropertyOperationalState.AWAITING_CHECKIN,
+        PropertyOperationalState.OCCUPIED_ESTIMATED,
+        PropertyOperationalState.AWAITING_CLEANING,
+    }
+    assert {
+        row.triggered_by for row in redes_rows if row.to_state in clock_states
+    } == {StateTransitionTriggeredBy.SYSTEM}
+
+    pajaritos, pajaritos_rows = await _transitions_of(db_session, "PAJARITOS8")
+    assert pajaritos_rows == []
+    assert pajaritos.current_operational_state is PropertyOperationalState.VACANT_READY
+
+
+@pytest.mark.asyncio
+async def test_redes11_walks_the_whole_sequence_of_d2_in_order(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The mitigation D2 names for its own risk, and the reason it is a *sequence* test.
+
+    The permutation that seeds the incidents before the stays leaves REDES11 in
+    `MAINTENANCE_REQUIRED` from the first step; `(MAINTENANCE_REQUIRED,
+    CHECKIN_WINDOW_OPENED)` does not exist in `_POLICY`, and the properties use case filters
+    its candidates by source state, so the refusal is not even raised — the property is
+    simply never a candidate. The dataset would reach the same **final** state with five
+    transitions missing and a timeline with nothing in it. Only the whole ordered sequence
+    fails in red for that.
+
+    Step 8 (`CLEANING_COMPLETED`) is the one position asserted as a **set**: its destination
+    is resolved contextually out of `{READY_FOR_NEXT_GUEST, AWAITING_CHECKIN, VACANT_READY}`
+    and all three chain on to the next arrival, so pinning one value would pin an
+    implementation detail of the resolver rather than this command's contract.
+
+    Ordered by `created_at` and then by the chain itself, because two of the nine share an
+    instant: the checkout and the auto-assignment its provisioner performs.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    redes, rows = await _transitions_of(db_session, "REDES11")
+    by_instant = sorted(rows, key=lambda row: row.created_at)
+    chain = [(row.from_state, row.to_state) for row in _chained(by_instant)]
+
+    contextual = {
+        PropertyOperationalState.READY_FOR_NEXT_GUEST,
+        PropertyOperationalState.AWAITING_CHECKIN,
+        PropertyOperationalState.VACANT_READY,
+    }
+    assert len(chain) == 9, "nine facts of D2 carry a trigger"
+    assert chain[:5] == [
+        (PropertyOperationalState.VACANT_READY, PropertyOperationalState.AWAITING_CHECKIN),
+        (PropertyOperationalState.AWAITING_CHECKIN, PropertyOperationalState.OCCUPIED_ESTIMATED),
+        (PropertyOperationalState.OCCUPIED_ESTIMATED, PropertyOperationalState.AWAITING_CLEANING),
+        (PropertyOperationalState.AWAITING_CLEANING, PropertyOperationalState.CLEANING_SCHEDULED),
+        (PropertyOperationalState.CLEANING_SCHEDULED, PropertyOperationalState.CLEANING_IN_PROGRESS),
+    ]
+    assert chain[5][0] is PropertyOperationalState.CLEANING_IN_PROGRESS
+    assert chain[5][1] in contextual
+    assert chain[6] == (chain[5][1], PropertyOperationalState.AWAITING_CHECKIN)
+    assert chain[7] == (
+        PropertyOperationalState.AWAITING_CHECKIN,
+        PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+    assert chain[8] == (
+        PropertyOperationalState.OCCUPIED_ESTIMATED,
+        PropertyOperationalState.MAINTENANCE_REQUIRED,
+    )
+    assert redes.current_operational_state is PropertyOperationalState.MAINTENANCE_REQUIRED
+
+
+def _chained(rows: list) -> list:
+    """Order transitions that share an instant by following `from_state` → `to_state`.
+
+    Two of the nine are written at the same `created_at` — the checkout and the assignment
+    its provisioner performs — so `created_at` alone does not order them, and asserting a
+    sequence over an ambiguous order would be asserting whatever the database returned.
+    """
+    remaining = list(rows)
+    ordered = [remaining.pop(0)]
+    while remaining:
+        following = next(
+            (row for row in remaining if row.from_state is ordered[-1].to_state), None
+        )
+        assert following is not None, (
+            "the transitions do not form a chain: "
+            f"{[(row.from_state, row.to_state) for row in rows]}"
+        )
+        remaining.remove(following)
+        ordered.append(following)
+    return ordered
+
+
+@pytest.mark.asyncio
+async def test_two_runs_on_the_same_day_end_in_the_same_state(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R2.5: whatever the machine resolves, it resolves the same twice.
+
+    The trigger of the `HIGH` incident and the ones of the stays compete for REDES11, and the
+    proposal accepts as the answer whatever the state machine decides — on the condition that
+    it decides it consistently.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+    redes, first = await _transitions_of(db_session, "REDES11")
+    state = redes.current_operational_state
+
+    await apply_plan(db_session, build_plan(), hasher)
+
+    redes, second = await _transitions_of(db_session, "REDES11")
+    assert redes.current_operational_state is state
+    assert len(second) == len(first), "a second run adds no transition"
+
+
+@pytest.mark.asyncio
+async def test_the_checkout_provisions_the_cleaning_instead_of_the_seed_inserting_it(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R3.1: the task of the past stay comes from the way that creates one today.
+
+    `AdvancePropertyStatesUseCase` is handed a `ProvisionCleaningTaskUseCase` for the
+    checkout and for no other trigger, exactly as the scheduler wires it — so the task is
+    the checkout's consequence and carries the stay that produced it.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    direct = (await _reservations_by_channel(db_session))[ReservationChannel.DIRECT]
+    tasks = (
+        (await db_session.execute(select(CleaningTaskModel))).scalars().all()
+    )
+    assert len(tasks) == 1
+    assert tasks[0].reservation_id == direct.id
+    assert tasks[0].property_id == direct.property_id
 
 
 @pytest.mark.asyncio
