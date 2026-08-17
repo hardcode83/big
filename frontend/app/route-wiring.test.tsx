@@ -1,7 +1,7 @@
 import { describe, expect, it, vi } from "vitest";
 
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 import { PropertyDetailView } from "@/features/dashboard";
+import { GuestPortalView } from "@/features/guest-portal";
 
 const redirectMock = vi.hoisted(() =>
   vi.fn((url: string) => {
@@ -24,13 +24,11 @@ describe("route wiring (tasks 7.2–7.6)", () => {
     expect(element.props.propertyId).toBe("redes11");
   });
 
-  it("wires the guest token page to the guest placeholder (no token prop)", async () => {
+  it("wires the guest token page to GuestPortalView with the awaited token", async () => {
     const Page = (await import("@/app/(guest)/guest/[token]/page")).default;
-    const element = Page();
-    expect(element.type).toBe(RoutePlaceholder);
-    expect(element.props.routeId).toBe("guest");
-    expect(element.props).not.toHaveProperty("token");
-    expect(element.props).not.toHaveProperty("params");
+    const element = await Page({ params: Promise.resolve({ token: "opaque-token" }) });
+    expect(element.type).toBe(GuestPortalView);
+    expect(element.props.token).toBe("opaque-token");
   });
 
   it("wires the cleaner task page to the cleaner-task placeholder", async () => {

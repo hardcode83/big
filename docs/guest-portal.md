@@ -6,9 +6,11 @@ para que consulte su estancia, complete el check-in legal de PRD §17 y abra una
 [`sdd/specs/guest-portal-api.md`](../sdd/specs/guest-portal-api.md); esta página es el *cómo se
 usa, se opera y se diagnostica*.
 
-**Lo que este change NO trae: la página.** La ruta `frontend/app/(guest)/guest/[token]/`
-existe reservada, pero la interfaz —estados de carga, formulario, i18n— es `guest-portal-web`.
-Hoy el portal se opera y se prueba con `curl`.
+**La página la trae `guest-portal-web`.** La ruta `frontend/app/(guest)/guest/[token]/` ya
+renderiza la interfaz real —carga de la estancia, formularios de check-in e incidencia,
+estados accesibles de carga/error/validación/rate-limit/éxito e i18n ES/EN—, consumiendo las
+cuatro rutas anónimas de abajo por el proxy same-origin. Los ejemplos con `curl` de esta
+página siguen sirviendo para operar y diagnosticar la API por debajo.
 
 ## El token es el enlace, y el enlace es la credencial
 
@@ -159,9 +161,11 @@ secreto de cabecera detrás, como sí lo hay en los webhooks—. En el despliegu
 público termina en un túnel de Cloudflare (`docker-compose.deploy.yml`), cuyo registro de
 peticiones **no lo configura ni lo desactiva nada de este repositorio**: si lo consultas ahí,
 verás tokens en claro **por diseño del intermediario**, y eso no es el incidente que describe
-el párrafo anterior. Confirmar la retención del URI completo en esa cuenta es requisito previo
-de `guest-portal-web`, que es el change que hace la superficie realmente navegable; hoy
-ninguna página ni cliente la ejerce.
+el párrafo anterior. Confirmar la retención del URI completo en esa cuenta sigue siendo
+requisito previo del **despliegue** de `guest-portal-web` —el change que hace la superficie
+realmente navegable—: con la página ya implementada, el token empieza a viajar de verdad en
+cuanto la superficie se despliega. Es un gate operativo abierto antes del ship, no un bloqueo
+del código de frontend.
 
 **Quién tocó qué**: cada escritura del huésped deja una fila en `audit_logs` con
 `actor_guest_token_hash` (el hash, nunca el token), la IP y los campos afectados.

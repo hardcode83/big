@@ -38,6 +38,7 @@
 | backend-suite-runtime | new, design, tasks, run, review, ship, archive | 425400 | 1073789 | 237164785 | 163.5965 | 2026-08-09 | 2026-08-10 |
 | auth-account-recovery | new, design, tasks, run, review, ship, archive | 634046 | 1824328 | 549403100 | 360.6465 | 2026-08-09 | 2026-08-11 |
 | guest-portal-api | new, design, tasks, run, review, ship, archive | 913356 | 2485946 | 707218180 | 461.2949 | 2026-08-09 | 2026-08-11 |
+| guest-portal-web | design, review, run | 8827 | 214254 | 17560456 | 17.9005 | 2026-08-11 | — |
 | seed-data-demo | new, design, tasks, run, review, ship, archive | 357779 | 990522 | 150643935 | 119.2975 | 2026-08-12 | 2026-08-12 |
 | backend-response-hardening | new, design, tasks, run, review, ship, archive | 95448 | 420721 | 61774591 | 51.1719 | 2026-08-15 | 2026-08-15 |
 | maintenance | new, design, tasks, run, review, ship, archive | 422794 | 1256742 | 314898581 | 213.2853 | 2026-08-15 | 2026-08-15 |
