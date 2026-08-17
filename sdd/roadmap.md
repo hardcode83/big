@@ -110,7 +110,7 @@ Categorías:
 - [x] access-notifications — [BE] AccessRecord + ManualAccessAdapter + NotificationAdapter/Log + SES.Hospedajes capa operativa (PRD §26.13-14, §15, §17). → changes/archive/2026-08-08-access-notifications/
 - [x] guest-portal-api — [BE] API y seguridad del portal de huésped: token opaco, autorización por estancia/tenant, consulta de información, check-in, PII, auditoría e incidencias (PRD §§6, 7.6, 7.7, 17, 22, 23 … → changes/archive/2026-08-11-guest-portal-api/
   needs: access-notifications · size: M · kind: feature
-- [ ] guest-portal-web — [FE] página `/guest/[token]`, instrucciones, formulario de check-in, soporte, estados accesibles e i18n ES/EN (PRD §§23-24; capability original `guest-portal`)
+- [x] guest-portal-web — [FE] página `/guest/[token]`, instrucciones, formulario de check-in, soporte, estados accesibles e i18n ES/EN (PRD §§23-24; capability original `guest-portal`) → changes/archive/2026-08-17-guest-portal-web/
   needs: guest-portal-api · size: M · kind: feature
 - [x] auth-account-recovery — [BE] **opcional MVP**: recuperación de contraseña (`/forgot-password`, PRD §24) y cambio de contraseña por el propio usuario. → changes/archive/2026-08-11-auth-account-recovery/
 - [x] frontend-auth-session — [FE] **el login real y la sesión en el frontend**, separado de `dashboard-web` el 2026-08-07 porque no depende de la API agregada y sí bloquea cualquier pantalla real. → changes/archive/2026-08-08-frontend-auth-session/
