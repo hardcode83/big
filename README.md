@@ -28,6 +28,7 @@ make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make seed-demo         # llena ese tenant con el dataset de demo (ver abajo); exige bootstrap antes
 make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
+make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -90,9 +91,15 @@ base e intentarían publicar los cuatro puertos:
   vivos del proyecto, y funcionan igual desde un worktree. Por eso el
   `docker compose exec backend uv run pytest` de §Tests es correcto en los dos sitios.
 
-Si algo choca de puertos, `docker compose ls` dice qué proyectos hay vivos y desde qué fichero; el
-diagnóstico con marcas (huérfano, otro worktree, ajeno) es una entrada propia del roadmap,
-`compose-stacks-diagnostic`.
+Lo que un stack abandonado retiene no son puertos, sino **disco**: un worktree enlazado no publica
+ninguno (`ports: !reset []`), así que el único que puede chocar de puertos es el stack del worktree
+principal. Bajar un worktree sin bajar su stack deja volúmenes e imágenes vivos y sin nada que los
+explique.
+
+`make compose-stacks` los lista todos con su directorio de origen y los marca: `vivo` (worktree
+registrado en git, con su rama), `huérfano` (bajo el árbol de este repositorio, pero ese worktree ya
+no está registrado), `ajeno` (fuera del árbol) o `indeterminado` (Docker no da un origen resoluble).
+Informa y nada más: no baja stacks, no borra volúmenes y no imprime ningún comando para pegar.
 
 ### Levantar un solo componente
 
