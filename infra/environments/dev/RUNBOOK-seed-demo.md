@@ -24,12 +24,29 @@ Crea el dataset de PRD §27:
 | `guests` | 3 | |
 | `reservations` | 3 | una pasada, una activa y una próxima |
 | `cleaning_checklist_templates` | 1 | con seis tipos de foto: `living_room`, `bedroom`, `bathroom`, `kitchen`, `entrance`, `damage_if_found` |
+| `incidents` | 3 | las tres de §27, clasificadas; la segunda asignada al técnico |
+| `cleaning_tasks` | 1 | la del checkout de la estancia pasada, recorrida hasta `COMPLETED` |
+| `cleaning_photos` | 6 | objetos reales en el almacenamiento que el tenant resuelva |
 
-**No crea tareas de limpieza.** Crea la *plantilla*, no tareas — si necesitas una tarea (por ejemplo
-para probar la subida de fotos), la creas por la API.
+**Desde `seed-data-demo-extension` (2026-08-17) sí crea una tarea de limpieza, y la cierra.** Antes
+sólo creaba la *plantilla*; ahora deja el dataset avanzado por sus propias vías: las dos estancias
+que §27 muestra en un estado alcanzado llegan a él por sus casos de uso, el estado operacional de
+las viviendas es consecuencia de la máquina de estados y no una columna escrita, y la limpieza de
+la estancia pasada se recorre entera —aceptar, empezar, 18 ítems, 6 fotos, cerrar—. Consecuencias
+para quien opera `dev`, las tres:
+
+- **La demo abre con «Redes 11» en `MAINTENANCE_REQUIRED`**, porque hay un huésped dentro y una
+  incidencia `ACCESS`/`HIGH` con técnico asignado. **Es correcto, no un fallo del seed**: el
+  recorrido completo está en el *timeline*, y el estado operacional es la foto final.
+- **Las incidencias 1 y 3 quedan en `CLASSIFIED`**, no en el `OPEN` literal de §27: `classify` es
+  la única puerta de salida de `OPEN`, y el job de beat las movería igual cada cinco minutos.
+- **En `dev` el comando necesita red y credenciales**, porque el tenant está en `S3` desde
+  `object-storage-provisioning` y las seis fotos van por el puerto de almacenamiento. Si falta el
+  bucket, la región o la credencial, aborta con **exit 1 antes de escribir nada** — ver §5.
 
 Es idempotente: una segunda ejecución no crea ni modifica ninguna fila y sale con código 0,
-imprimiendo los cinco recuentos a cero.
+imprimiendo los ocho recuentos a cero. **Tampoco vuelve a subir las fotos**, así que en el bucket
+siguen siendo seis y no doce.
 
 ---
 
@@ -91,11 +108,13 @@ shred -u /tmp/seedpass
 Salida esperada:
 
 ```
-seed-demo: created 2 users, 2 properties, 3 guests, 3 reservations, 1 checklist_templates
+seed-demo: created 2 users, 2 properties, 3 guests, 3 reservations, 1 checklist_templates, 1 cleaning_tasks, 6 cleaning_photos, 3 incidents
 ```
 
-Los cinco tipos se imprimen **incluso a cero**, que es lo que distingue «una segunda ejecución no
-hizo nada» de «se hizo a medias».
+Los ocho tipos se imprimen **incluso a cero**, que es lo que distingue «una segunda ejecución no
+hizo nada» de «se hizo a medias». Un `0 cleaning_tasks, 0 cleaning_photos` en una **primera**
+ejecución no es un fallo: significa que el checkout no aprovisionó limpieza —el tenant la tiene
+desactivada o no hay plantilla de checklist— y el comando sigue adelante a propósito.
 
 ### Emails de las cuentas
 

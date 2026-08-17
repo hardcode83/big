@@ -269,8 +269,13 @@ en `:2257-2284`); las decisiones que citan las tareas están en `design.md`.
   falle en rojo en vez de llegar al mismo estado final con cinco transiciones menos y un timeline
   vacío. El destino del paso 8 sale por `{READY_FOR_NEXT_GUEST, AWAITING_CHECKIN, VACANT_READY}`
   (`state_machine.py:55`, resuelto por `ContextualStateResolver`), así que el test acepta **el
-  conjunto** en esa posición y un valor exacto en las otras seis. Afirmar también que dos
+  conjunto** en esa posición y un valor exacto en las otras **ocho**. Afirmar también que dos
   ejecuciones sobre el mismo día producen el mismo estado final. [R2.5, D2]
+
+  (**«ocho» y no «seis»**: corregido el 2026-08-17 por el panel de QA. Nueve filas menos la
+  contextual son ocho, y es lo que el test afirma; el «seis» era el residuo de la cuenta a ojo
+  que ya había fallado una vez en esta misma tarea. Verificado contra la base real: la posición
+  contextual salió `VACANT_READY`.)
 
 - [x] 8.2 **Hecho dentro de la sección 6** (2026-08-16): las tres claves nuevas del diccionario
   entran con las escrituras que las cuentan, así que dejarlo para la 8 habría dejado dos tests en
@@ -350,30 +355,84 @@ en `:2257-2284`); las decisiones que citan las tareas están en `design.md`.
   viviendas… tres reservas y la plantilla de limpieza») y esa lista se había quedado corta. Todo lo
   demás sigue delegado en `docs/seed-demo.md`, al que ya enlaza. [R3.3]
 
+- [x] 9.3 **Añadida el 2026-08-17 por el panel de `/sdd:review`**, que la encontró grepeando la
+  redacción superada por todo el árbol y no sólo en los ficheros que el diff tocaba. Actualizar
+  `infra/environments/dev/RUNBOOK-seed-demo.md`, el procedimiento que un operador sigue en la VM
+  de `dev` —es decir justo el camino `S3` que este change estrena—, que se había quedado
+  describiendo el comando anterior: su tabla de entidades no tenía las tres nuevas, afirmaba
+  «**No crea tareas de limpieza**» (ya no es cierto: crea una y la cierra), y documentaba el
+  contrato de consola de **cinco** recuentos en tres sitios (`:32`, el ejemplo literal de `:94` y
+  «Los cinco tipos se imprimen incluso a cero» de `:97`). Añadir además las tres consecuencias
+  operativas que `docs/seed-demo.md` ya explica —`MAINTENANCE_REQUIRED` es correcto, las
+  incidencias 1 y 3 quedan en `CLASSIFIED`, y en `dev` el comando exige red y credenciales— y la
+  nota de que una primera ejecución con `0 cleaning_tasks` no es un fallo. Su SQL de limpieza no
+  necesitaba nada: ya borraba `incidents`, `cleaning_photos`, `cleaning_checklist_completions` y
+  `property_state_transitions`. Las tareas 9.1 y 9.2 no lo cazaron porque nombran
+  `docs/seed-demo.md`, `.env.example` y el `README.md` de raíz, y este fichero vive en `infra/`.
+  [R4.4, D12]
+
 ## 10. Verification
+
+**Re-ejecutada entera el 2026-08-17 sobre la rama rebasada, y eso es el punto.** La primera vez
+que se marcaron estas casillas, la rama no tenía ningún commit y su HEAD era antecesor de `main`,
+que había avanzado 13 commits: la suite corría en verde contra el `cleaning/` de **antes** del
+refactor de `cleaning-completion-evidence-gatherer`, así que acreditaba un árbol que no era el
+objetivo de integración. El panel de `/sdd:review` lo levantó, y en efecto el cierre de la
+limpieza estaba llamando a `CompleteCleaningTaskUseCase` con los cuatro repositorios que `main`
+ya no acepta — un `TypeError` en cuanto se rebasara. Tras el rebase sobre `b42ddec`, arreglar esa
+llamada (`evidence=CompletionEvidenceGatherer(...)`, como la cablea `cleaning/api/dependencies.py`)
+y **con la base de datos vaciada y remigrada para no heredar el dataset de la ejecución vieja**,
+las seis casillas se repitieron y todas dan lo que dicen. Los números medidos están en cada una.
 
 - [x] 10.1 Suite completa del backend en verde desde el worktree:
   `docker compose exec backend uv run pytest` (con el stack parado,
   `docker compose run --rm backend uv run pytest`).
+  → **7327 passed, 39 skipped, 0 failed** sobre la rama rebasada (6:14). El uno de más respecto a
+  la medición anterior es el test estructural de R1.6 que añadió el panel.
 - [x] 10.2 Levantar el stack de este worktree (`make up`) y ejecutar el camino completo de verdad:
   `make bootstrap` y luego `make seed-demo`. Es lo único que verifica el grafo de imports del
   comando y el `bind_session_to_tenant`, que ningún test unitario detecta. Comprobar la salida:
   ocho recuentos, ninguna contraseña.
+  → `bootstrap: created 1 tenant(s), 1 config(s), 2 user(s)` y después
+  `seed-demo: created 2 users, 2 properties, 3 guests, 3 reservations, 1 checklist_templates,
+  1 cleaning_tasks, 6 cleaning_photos, 3 incidents`, exit 0, sin ninguna credencial en la salida.
 - [x] 10.3 Contra la base real, comprobar el dataset resultante (MCP `postgres` o `make sh`): tres
   incidencias con su categoría y severidad de §27, la 2 en `ASSIGNED` al técnico y las otras dos en
   `CLASSIFIED`; la estancia AIRBNB en `CHECKED_IN_ESTIMATED` y la DIRECT en `COMPLETED`; la
   `CleaningTask` en `COMPLETED` con `validation_status = PASSED`, sus 18 ítems y sus 6 fotos; y las
   **nueve** filas de `property_state_transitions` de REDES11 en el orden de D2 (nueve y no siete,
   por lo que explica la 8.1). [R1, R2, R3]
+  → Todo comprobado por `psql`: `WiFi va lento` WIFI/LOW CLASSIFIED, `Problema con código de
+  acceso` ACCESS/HIGH **ASSIGNED**, `Lavadora hace ruido extraño` APPLIANCE/MEDIUM CLASSIFIED;
+  DIRECT `COMPLETED`, AIRBNB `CHECKED_IN_ESTIMATED`, BOOKING `CONFIRMED` sin tocar; la tarea
+  `COMPLETED`/`PASSED` con 18 ítems y 6 fotos; y las nueve transiciones en el orden exacto de D2
+  —`VACANT_READY → AWAITING_CHECKIN → OCCUPIED_ESTIMATED → AWAITING_CLEANING →
+  CLEANING_SCHEDULED → CLEANING_IN_PROGRESS → VACANT_READY → AWAITING_CHECKIN →
+  OCCUPIED_ESTIMATED → MAINTENANCE_REQUIRED`—, **todas de REDES11**: PAJARITOS8 no recibió ningún
+  disparador y quedó en `VACANT_READY`. La posición contextual del paso 8 resolvió a
+  `VACANT_READY`, uno de los tres del conjunto que D2 admite.
 - [x] 10.4 `make seed-demo` una segunda vez: los ocho recuentos a cero, código de salida 0, ninguna
   fila nueva ni modificada, y **seis objetos en el almacenamiento y no doce** (el `storage_type`
   del stack del worktree es `LOCAL`, así que aquí se comprueba en el volumen; el camino `S3` de
   `dev` es el mismo puerto). [R3.5, R4.1]
+  → Los ocho recuentos a cero, exit 0, y las filas intactas (3 incidencias, 1 tarea, 6 fotos, 9
+  transiciones). Sobre los objetos, un detalle que conviene no leer mal: el volumen tenía **12**
+  ficheros antes y **12** después, y los seis de más son los que quedaron huérfanos al vaciar el
+  esquema para esta re-verificación — que es exactamente lo que D11 dice y lo que la
+  documentación advierte ahora: tirar la base no toca el almacén. Lo que la casilla afirma es el
+  delta, y el delta fue **cero**: la segunda ejecución no subió una séptima foto.
 - [x] 10.5 Los dos abortos nuevos contra el stack real: un `tenants.timezone` irresoluble (exit 1,
   nombra columna y valor, no escribe) y un tenant en `S3` sin bucket (exit 1, frase accionable, no
   escribe). [R6.1, R3.3]
+  → Zona horaria: con `timezone='Mars/Olympus_Mons'`, «`tenants.timezone` is not a resolvable time
+  zone: 'Mars/Olympus_Mons'…» y **exit 1** (medido sobre `python -m`, no sobre `make`, que
+  devuelve su propio 2). Almacenamiento: con `storage_type='S3'` y el entorno sin configurar,
+  «…this is not configured (**values not echoed**): S3_BUCKET, S3_REGION,
+  AWS_ACCESS_KEY_ID/AWS_SECRET_ACCESS_KEY…» y **exit 1**. Tras los dos abortos, los recuentos y
+  los objetos estaban intactos: ninguno escribió nada.
 - [x] 10.6 Confirmar que el esquema no cambió:
   `docker compose exec backend uv run alembic check` no propone ninguna migración.
+  → «No new upgrade operations detected.»
 
 **Lo que esta sección deliberadamente no incluye**, para que su ausencia no se lea como un olvido:
 no hay `make openapi` ni `cd frontend && npm run api:check` porque el change **no añade ningún

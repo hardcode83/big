@@ -158,6 +158,13 @@ revierten y **los objetos del almacenamiento no**: si algo falla después de sub
 enumera en su salida las claves que quedaron sin fila que las referencie. Enumerar no es limpiar —
 borrarlas es trabajo de operación, no del seed.
 
+Y conviene saberlo antes de buscar un borrón y cuenta nueva: **`docker compose down -v` no toca esos
+objetos**. Se lleva el volumen de Postgres, así que las filas desaparecen, pero los ficheros viven en
+el volumen del almacenamiento local —y en `dev`, directamente en el bucket—, de modo que la
+siguiente siembra empieza con la base vacía y el almacén no. No rompe nada: las claves llevan el
+`task_id` y el `photo_id` nuevos, así que no colisionan; simplemente quedan ahí ocupando sitio, y
+sólo un borrado explícito se los lleva.
+
 ## Cuando falla
 
 | Código | Qué pasó |

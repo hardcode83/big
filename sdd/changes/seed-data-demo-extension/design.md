@@ -367,9 +367,17 @@ quien lo quiera lo consulta.
 
 ### D13 — Los tres barridos, cada uno donde ya vive su contrato
 
-- **R6.1** (zona horaria): la comprobación va a `build_plan`, junto a las siete variables y al
-  rechazo de correos iguales, y suma su condición a las de exit 1 de D11. Hoy `ZoneInfo(tenant.timezone)`
-  se evalúa en `:413`, ya dentro de `apply_plan`, y sale por el catch-all de `main()` (`:887-906`).
+- **R6.1** (zona horaria): la comprobación sube a la **fase de precondiciones de `apply_plan`** —tras
+  resolver el `TenantModel` y antes de `bind_session_to_tenant`, es decir antes de la primera
+  escritura— y suma su condición a las de exit 1 de D11. Hoy `ZoneInfo(tenant.timezone)` se evalúa
+  ya avanzado `apply_plan` y sale por el catch-all de `main()` con la clase de la excepción y
+  «details withheld».
+
+  **Enmendado el 2026-08-17** (panel de `/sdd:review`): la redacción original decía «va a
+  `build_plan`», y ahí no puede ir. `build_plan()` **no lee la base de datos** —resuelve el tenant
+  `apply_plan`—, así que una comprobación sobre `tenants.timezone` no tiene dónde leer el valor
+  desde allí. Es la misma ubicación y la misma razón que D10 da para el fail-fast de `S3`, que
+  también necesita `tenant_configs`. El código está bien; lo que estaba obsoleto era esta frase.
 - **R6.2** (docstring): dos frases en `integrations/application/ingest.py:1-9` — «All three ingest
   routes … the PMS sync, the CSV import and the demo seed» y «the ONLY difference between the three
   routes». Sin cambio de comportamiento.

@@ -6,9 +6,11 @@ the seed belongs to no single domain, it crosses five. `test_bootstrap.py` lives
 `tests/auth/` because bootstrap really is an auth concern.
 """
 
+import ast
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
+from pathlib import Path
 
 import pytest
 from sqlalchemy import delete, func, select, text
@@ -1801,6 +1803,117 @@ async def test_a_second_run_creates_no_fourth_incident(
 
     assert again["incidents"] == 0
     assert await db_session.scalar(select(func.count()).select_from(IncidentModel)) == 3
+
+
+def test_the_seed_reaches_incidents_only_through_maintenance_use_cases() -> None:
+    """R1.6, and it needs to be structural rather than behavioural to mean anything.
+
+    Every other test here asserts what the rows *look like* after a run, and a second write
+    route added tomorrow would produce rows that look exactly the same — the criterion would
+    stay green while the thing it forbids happened. `/sdd:review`'s panel flagged R1.6 as met
+    by code audit alone for that reason.
+
+    So this reads the module instead: `app/cli/seed_demo.py` may not name the ORM class, the
+    table, or the incident adapter. What it may name are the three `maintenance` use cases,
+    which is the route the requirement mandates — they encapsulate the `AuditLog` and the
+    `TimelineEvent` that a hand-rolled `IncidentModel(...)` would silently skip, which is why
+    D5 rejected composing entity plus port from the CLI in the first place.
+
+    **Three** things are forbidden and one is explicitly allowed, and the distinction is the
+    whole test. Forbidden: naming `IncidentModel` at all (a row built by hand), calling a
+    mutating method **on** an incident port, and carrying raw SQL that writes the table.
+    Allowed: *constructing* an incident repository, because the use cases take it as a
+    collaborator — `ReportIncidentUseCase` cannot be wired without one, so banning the name
+    would ban the compliant route along with the forbidden one. The first draft of this test did
+    exactly that and failed, which is why the allowance is written down instead of assumed.
+
+    **The second and third clauses exist because the panel broke the first version of this
+    test.** Its mutating-call check keyed on the receiver's *name* containing `"incident"`, and
+    its author had no raw-SQL check at all; QA demonstrated both bypasses with an AST probe —
+    `repo = SqlAlchemyIncidentRepository(session); await repo.add(...)` and
+    `session.execute(text("UPDATE incidents SET title = …"))` — each of which satisfied every
+    assertion while doing precisely what R1.6 forbids. So the receiver is now resolved by **what
+    it was assigned from** rather than by what it is called, and the raw-SQL literal check is
+    borrowed from `tests/maintenance/test_free_text_sink_contract.py`, which had already learned
+    that a `values()`/`text()` write is the form an AST matcher misses first.
+
+    The census guard in `tests/maintenance/test_free_text_sink_contract.py` covers the
+    complementary direction: that no new module composes the *text* of those columns.
+    """
+    tree = ast.parse(Path(seed_demo.__file__).read_text(encoding="utf-8"))
+
+    named = {node.id for node in ast.walk(tree) if isinstance(node, ast.Name)} | {
+        node.attr for node in ast.walk(tree) if isinstance(node, ast.Attribute)
+    }
+    assert "IncidentModel" not in named, (
+        "the seed names IncidentModel: R1.6 says it writes `incidents` only through a use case "
+        "of `maintenance`, because those are what carry the AuditLog and the TimelineEvent "
+        "with it, and a hand-built row skips both"
+    )
+
+    # Which locals hold an incident port, by what they were *assigned from* rather than by what
+    # they are called — `repo = SqlAlchemyIncidentRepository(session)` binds a writer under a name
+    # that says nothing, and a substring check on the receiver would wave it through. Reported as
+    # a LOW by the security panel's re-review of the first version of this test, which matched
+    # `"incident" in name.lower()`.
+    port_holders: set[str] = set()
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Assign) or not isinstance(node.value, ast.Call):
+            continue
+        constructed = node.value.func
+        name = (
+            constructed.id
+            if isinstance(constructed, ast.Name)
+            else constructed.attr
+            if isinstance(constructed, ast.Attribute)
+            else ""
+        )
+        if "IncidentRepository" in name:
+            port_holders.update(
+                target.id for target in node.targets if isinstance(target, ast.Name)
+            )
+
+    mutators = {"add", "update", "save", "delete", "create", "persist", "upsert", "merge"}
+    direct_writes = [
+        f"{node.func.value.id}.{node.func.attr}"
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr in mutators
+        and isinstance(node.func.value, ast.Name)
+        and (node.func.value.id in port_holders or "incident" in node.func.value.id.lower())
+    ]
+    assert not direct_writes, (
+        f"the seed calls {sorted(set(direct_writes))} straight on an incident repository: "
+        "injecting the port into a use case is the compliant wiring, writing through it here "
+        "is the second route R1.6 forbids"
+    )
+
+    # A raw `insert`/`update`/`delete` against the table sidesteps the port entirely, so it has
+    # to be checked as text and not as a method call.
+    raw_sql = [
+        node.value
+        for node in ast.walk(tree)
+        if isinstance(node, ast.Constant)
+        and isinstance(node.value, str)
+        and "incidents" in node.value.lower()
+        and any(
+            verb in node.value.lower()
+            for verb in ("insert into", "update ", "delete from")
+        )
+    ]
+    assert not raw_sql, (
+        f"the seed carries raw SQL that writes `incidents`: {raw_sql}. R1.6 admits exactly one "
+        "route, and it is a use case of `maintenance`"
+    )
+
+    # And the route it *is* meant to use is the route it uses, so the test cannot pass by the
+    # seed having quietly stopped writing incidents at all.
+    assert {
+        "ReportIncidentUseCase",
+        "ClassifyIncidentUseCase",
+        "AssignIncidentUseCase",
+    } <= named
 
 
 # --- The cleaning cycle and its six photos (R3.1-R3.5, R4.5, R4.6, R5.2, D9, D11) ------

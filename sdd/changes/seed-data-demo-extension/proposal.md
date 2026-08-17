@@ -195,8 +195,18 @@ Criterios de aceptación:
 2. WHEN el comando recorre el ciclo de la limpieza, THE SYSTEM SHALL actuar como el usuario de
    `SEED_CLEANER_EMAIL`, porque `accept`, `start`, `complete` y la subida de fotos exigen que el
    actor sea el cleaner asignado.
-3. WHEN el comando asigna la incidencia 2, THE SYSTEM SHALL usar un actor cuyo rol satisfaga lo que
-   `AssignIncidentUseCase` exige, y THE SYSTEM SHALL fallar en voz alta si no lo satisface.
+3. WHEN el comando asigna la incidencia 2, THE SYSTEM SHALL usar el `TENANT_OWNER` como actor, y
+   THE SYSTEM SHALL fallar en voz alta —exit 1, nombrando la cuenta— si el usuario de
+   `SEED_TECHNICIAN_EMAIL` no satisface lo que `AssignIncidentUseCase` exige del técnico (existir,
+   ser `TECHNICIAN` y estar `ACTIVE`), sin degradar a «sin asignar».
+
+   **Enmendado el 2026-08-17** (panel de `/sdd:review`): la redacción original pedía «un actor cuyo
+   rol satisfaga lo que `AssignIncidentUseCase` exige, y fallar en voz alta si no lo satisface», y
+   esa segunda mitad era **vacua**: el caso de uso no exige nada del rol del *actor* —sólo que no
+   sea nulo— así que la rama negativa no era alcanzable ni testeable, y un criterio que no puede
+   fallar no verifica nada. Lo que sí tiene precondición comprobable es el **técnico**, que es
+   quien el caso de uso valida (`use_cases.py`, `InvalidTechnicianError`), y ahí sí hay un test
+   que lo pone rojo. El requisito pasa a pedir lo que el sistema puede de verdad garantizar.
 4. WHEN cada escritura genera su `TimelineEvent` o su `AuditLog`, THE SYSTEM SHALL dejar constancia
    del actor real que la ejecutó.
 5. THE SYSTEM SHALL sustituir en la spec viva la regla «el actor de todo lo que el seed escribe es el

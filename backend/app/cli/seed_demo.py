@@ -41,6 +41,7 @@ from app.auth.domain.repositories import UserFilters
 from app.auth.domain.value_objects import normalize_email
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.application.use_cases import (
     AcceptCleaningTaskUseCase,
     CleaningActor,
@@ -1181,11 +1182,17 @@ async def _run_the_cleaning(
         # happens. A failure after this point takes the six rows and leaves the six objects.
         uploaded_keys.append(uploaded.photo.storage_key)
 
+    # The four reads of the close arrive as one collaborator since
+    # `cleaning-completion-evidence-gatherer` (its R1.1): `CompleteCleaningTaskUseCase` no longer
+    # takes the four repositories, and the gatherer is not a use case, so it is built inline here
+    # exactly as `cleaning/api/dependencies.py` builds it for the route.
     await CompleteCleaningTaskUseCase(
-        completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
-        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
-        photos=SqlAlchemyCleaningPhotoRepository(session),
-        incidents=SqlAlchemyBlockingIncidentQuery(session),
+        evidence=CompletionEvidenceGatherer(
+            templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+            completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
+            photos=SqlAlchemyCleaningPhotoRepository(session),
+            incidents=SqlAlchemyBlockingIncidentQuery(session),
+        ),
         **lifecycle,
     ).execute(tenant_id=tenant_id, task_id=task.id, actor=actor, now=now)
 
