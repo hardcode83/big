@@ -47,8 +47,8 @@ Categorías:
   **Y la obligación de método que este historial impone**: demostrar la guardia **en rojo** para cada vía del censo antes de darla por buena, con la regla 13(c) de `steering/security.md` como referente — el precedente del guard de fixtures de `channex-staging-adapter`, que pasó verde cubriendo un fichero de tres, y el de esta propia guardia, que pasó verde cinco veces (no está en el plan original, separada de `local-dev-network-hardening` el 2026-08-05)
 - [x] worktree-parallel-stack — [INFRA] **permitir varios stacks de dev a la vez**, para que dos sesiones concurrentes en worktrees distintos puedan correr tests. → changes/archive/2026-08-05-worktree-parallel-stack/
   completes: local-dev-network-hardening · size: M · kind: infra
-- [ ] compose-stacks-diagnostic — [INFRA] **saber qué stacks de Compose hay vivos en la máquina, desde qué directorio, cuáles son huérfanos y quién retiene cada puerto**.
-  completes: worktree-parallel-stack · size: S · kind: infra
+- [ ] compose-stacks-diagnostic — [INFRA] **saber qué stacks de Compose hay vivos y cuáles son huérfanos** —su worktree ya no existe—, para recuperar el disco que retienen en silencio. Reencuadrada a la baja el 2026-08-17: la mitad de puertos caducó y con ella casi todo su modelo de amenaza (ver la nota).
+  completes: worktree-parallel-stack · size: XS · kind: infra
 - [ ] tunnel-host-surface-hardening — [INFRA] **mitigar el residual de radio del túnel que `ingress-https-hardening` documentó y midió pero no cerró** (2026-08-04).
 - [x] app-version-visibility — [FE] **versión de build visible al abrir la app**, para saber qué está desplegado sin entrar en la VM. → changes/archive/2026-07-31-app-version-visibility/
 - [x] app-version-badge-date — [FE] el badge muestra la cadena **canónica completa** (`0.1.0+2026-07-31.5872022`) en vez de recortar la fecha de build. → changes/archive/2026-07-31-app-version-badge-date/
