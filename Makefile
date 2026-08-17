@@ -27,7 +27,7 @@ COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.work
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity db-clean-test
+.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity compose-stacks db-clean-test
 
 up:
 	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
@@ -149,6 +149,20 @@ openapi:
 
 check-version-parity:
 	python3 scripts/check-version-parity.py
+
+# Lista los stacks de Compose vivos en la máquina y marca los huérfanos (su directorio de
+# origen ya no está registrado en `git worktree list`). Informa; no baja nada.
+#
+# Deliberadamente **fuera de `$(COMPOSE)`**, y es el segundo target que no lo usa: el ámbito
+# de este diagnóstico es la máquina y no este proyecto, así que pasarlo por `$(COMPOSE)` lo
+# acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca.
+#
+# Y queda prohibido «mejorarlo» con `docker compose config` o con un `docker inspect` sin
+# `--format`: el primero resuelve e imprime los valores del `.env` (`JWT_SECRET_KEY`,
+# `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`) y la salida por defecto del segundo incluye
+# `.Config.Env`.
+compose-stacks:
+	python3 scripts/compose-stacks.py
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
 # `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y
