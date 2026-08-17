@@ -1,8 +1,11 @@
 # Channex staging — runbook y hallazgos
 
-Cómo se opera el sandbox de Channex que valida el backend contra un PMS real, y **qué se
-midió al hacerlo**. Este documento es la mitad del entregable del change
-`channex-staging-adapter`: es un spike, así que lo que se aprende vale tanto como el código.
+Runbook del sandbox de Channex y **registro de lo que se midió al operarlo**, el 2026-08-03.
+No describe una capacidad disponible a demanda: la validación end-to-end contra Booking.com vivo
+fue un tiro único que dependió de ganar un turno sobre un hotel de test compartido, y lo que
+costó está medido en §«Reserva end-to-end contra Booking.com». Este documento es la mitad del
+entregable del change `channex-staging-adapter`: es un spike, así que lo que se aprende vale
+tanto como el código.
 
 Decisión de fondo: [ADR 0006](adr/0006-pms-channel-manager-provider.md) elige **Beds24** para
 el MVP y sitúa Channex en fase SaaS. Nada de lo que hay aquí reabre eso — el `ChannexAdapter`
@@ -156,6 +159,17 @@ use"*. A las 13:50, la hora exacta en que el ID en EUR debía liberarse, guardar
 devolvió *"channel with same settings already exists"* — con **cero canales en nuestra cuenta**,
 comprobado por API. Es decir: **la comprobación de unicidad es global entre cuentas**, otro
 integrador se lo había llevado en el intervalo, y **no hay cola ni reserva de turno**.
+
+**Y el turno que se gana es el resto de la franja de otro, no una ventana nueva.** El panel
+anuncia un **instante absoluto** (*"In use until August 3rd 2026, HH:MM"*) y en ningún sitio una
+duración, así que lo que queda por delante depende de cuándo caduque el arrendamiento ajeno, no de
+cuándo entres tú. La **única sesión observada** duró **del orden de tres horas**: el turno se ganó
+tras ~16 min de barrido posteriores al intento fallido de las `13:50` sobre el ID en EUR, y el
+arrendamiento expiró a las **17:00 Madrid** (§«Al desconectar un canal, Channex borra el hilo de
+mensajes…»). Eso es una observación con **n=1**, no una asignación garantizada: nadie la ha medido
+dos veces, y de las dos marcas horarias que la acotan una (`13:50`) no lleva zona horaria. Tomar
+«unas tres horas» como la ventana que te toca sería repetir exactamente el error que este
+documento corrige.
 
 **Consecuencia práctica, y es la mitigación**: crear **un rate plan por moneda** (EUR, GBP, USD,
 JPY) en la propiedad de staging. El mapeo exige que la moneda del rate plan coincida con la del
