@@ -11,9 +11,9 @@ Entidades de dominio y esquema de base de datos para las 10 entidades del PRD (�
 - Las 10 entidades se reparten en 7 módulos: `pricing` (`PricingRule`, `PriceRecommendation`), `maintenance` (`OwnerApproval`), `reviews` (`Review`, `ReviewResponseDraft`), `statements` (`OwnerStatement`, `Expense`), `notifications` (`NotificationLog`), `audit` (`AuditLog`) e `integrations` (`WebhookEvent`).
 - `reviews` y `audit` son dominios que **no** aparecen en la lista de PRD §3.2; están añadidos a `steering/architecture.md` con su justificación — `audit` es transversal igual que `timeline`, que §3.2 sí lista. Se descartaron plegar las reviews en `statements` (mezclaría reporting financiero con contenido de OTAs) y alojar `AuditLog` en `app/core/` (infraestructura compartida, no entidades de negocio).
 - `webhook_events` es la primera tabla que tiene el módulo `integrations`, hasta entonces solo adapters (`csv_parser.py`, `mock_pms.py`) y su `cli/`.
-- Los módulos que son solo estructura de datos tienen `domain/` (entidades + enums) e `infrastructure/` (modelos SQLAlchemy) y **no** `application/` ni `api/`; esas dos capas llegan con el primer caso de uso. La excepción está escrita en `steering/backend-architecture.md` §"Cuándo simplificar". De los 16 dominios, solo `auth`, `reservations` e `integrations` tienen las cuatro capas.
-- Las 10 entidades son `@dataclass` planos sin métodos de mutación: ninguna tiene todavía una invariante que proteger — los guardrails de `PricingRule` son reglas del cálculo, que vive en `revenue`.
-- Ninguna tiene puertos de repositorio ni casos de uso; se difieren al change que primero la persista.
+- Los módulos que son solo estructura de datos tienen `domain/` (entidades + enums) e `infrastructure/` (modelos SQLAlchemy) y **no** `application/` ni `api/`; esas dos capas llegan con el primer caso de uso. La excepción está escrita en `steering/backend-architecture.md` §"Cuándo simplificar". De los 17 dominios de hoy sólo quedan **tres** en ese estado —`audit`, `reviews` y `statements`—; trece tienen las cuatro capas y `dashboard` es el caso aparte, con `domain/`, `application/` y `api/` y sin `infrastructure/` propia porque no tiene tabla. **`pricing` salió de ese grupo con [`revenue-pricing`](revenue-pricing.md)** (2026-08-18), que es quien le dio `application/` y `api/`.
+- Las 10 entidades nacieron como `@dataclass` planos sin métodos de mutación: ninguna tenía todavía una invariante que proteger. **Dos han dejado de serlo.** `PricingRule` gana con [`revenue-pricing`](revenue-pricing.md) su `create`, su `update_details` y un `validate` que hace cumplir cada invariante de sus guardrails y el esquema de sus cinco columnas JSONB; `PriceRecommendation` gana su máquina de estados. El cálculo del precio, en cambio, sigue **fuera** de las entidades: vive en funciones puras de `app/pricing/domain/`, y los guardrails que la regla declara los aplica el calculador, no la fila.
+- Ninguna nació con puertos de repositorio ni casos de uso; se difieren al change que primero la persista. `PricingRule` y `PriceRecommendation` ya los tienen, de [`revenue-pricing`](revenue-pricing.md): **las dos tablas han dejado de ser tablas sin escritor**. Las ocho restantes siguen esperando el suyo.
 - `backend/tests/test_layering.py` verifica por glob que ningún `domain/` importa `sqlalchemy`, `fastapi` ni `pydantic`.
 
 ### Enums de dominio
@@ -65,7 +65,9 @@ Entidades de dominio y esquema de base de datos para las 10 entidades del PRD (�
 
 ## Key files
 
-- `backend/app/pricing/{domain,infrastructure}/` — `PricingRule`, `PriceRecommendation`.
+- `backend/app/pricing/{domain,infrastructure}/` — `PricingRule`, `PriceRecommendation`. Sus
+  capas `application/` y `api/`, el cálculo y las siete rutas son de
+  [`revenue-pricing`](revenue-pricing.md).
 - `backend/app/maintenance/{domain,infrastructure}/` — `OwnerApproval`, junto a `Incident`.
 - `backend/app/reviews/{domain,infrastructure}/` — `Review`, `ReviewResponseDraft`.
 - `backend/app/statements/{domain,infrastructure}/` — `OwnerStatement`, `Expense`.

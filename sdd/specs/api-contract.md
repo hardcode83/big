@@ -45,16 +45,21 @@ typecheck del frontend contra los tipos derivados, que pertenece a otra capacida
 
 - THE SYSTEM SHALL definir en `app/core/error_codes.py` el `StrEnum` `ErrorCode` como
   **única fuente de verdad** de los códigos del envoltorio de PRD §23.
-- THE SYSTEM SHALL referenciar ese registro desde los nueve sitios que emiten un código:
-  los atributos `code` de las subclases de `AppError`, el diccionario `_HTTP_STATUS_CODES`,
-  las tablas `_MAPPING` de `auth`, `cleaning`, `properties`, `reservations` y `tenants`, los
-  literales de `integrations` y `TOO_LARGE_CODE` de `app/core/http_limits.py`. La de `cleaning`
+- THE SYSTEM SHALL referenciar ese registro desde todos los sitios que emiten un código: los
+  atributos `code` de las subclases de `AppError`, el diccionario `_HTTP_STATUS_CODES`, las
+  **once** tablas `_MAPPING` de `access`, `auth`, `cleaning`, `guests`, `maintenance`,
+  `messaging`, `pricing`, `properties`, `reservations`, `tenants` y `timeline`, los literales de
+  `integrations` y `TOO_LARGE_CODE` de `app/core/http_limits.py`. La de `cleaning`
   existía desde aquel change y quedaba fuera de la guarda; entró con `cleaning-photos-storage`,
   que es lo que hizo que la omisión importara — le añade cuatro filas, una con un código
   (`BAD_GATEWAY`) que ninguna otra tabla emite.
 - THE SYSTEM SHALL incluir cada `_MAPPING` nuevo en la guarda que recorre el registro. Una
   tabla que la guarda no importa queda fuera de la comprobación aunque exista, y el módulo
   seguiría pudiendo emitir un literal ajeno a `ErrorCode` sin que la suite lo notara.
+  `revenue-pricing` cumplió esta regla en la **misma** tarea que creó su tabla y no una tarea
+  después, citando en el comentario de la guarda que el hueco ya se había estrenado antes. Hoy
+  **la guarda importa seis de las once** —`auth`, `cleaning`, `pricing`, `properties`,
+  `reservations` y `tenants`—; las cinco que faltan están en §Estado como deuda con dueño.
 - THE SYSTEM SHALL fallar la suite si alguno de esos sitios contiene un valor que no sea
   miembro de `ErrorCode`, recorriéndolos estructuralmente y descendiendo en profundidad por
   las subclases de `AppError`.
@@ -181,11 +186,25 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
 - **El documento servido y el commiteado son el mismo**: `install_openapi()` sustituye
   `app.openapi`, así que `/docs`, `/openapi.json` y `backend/openapi.json` no pueden
   divergir.
+- **Cinco `_MAPPING` viven fuera de la guarda** (medido el 2026-08-18, al archivar
+  `revenue-pricing`): existen once tablas en `app/*/api/errors.py` y
+  `tests/test_openapi_contract.py` importa seis. Las de `access`, `guests`, `maintenance`,
+  `messaging` y `timeline` no entran, así que ninguna está cubierta por la comprobación que sí
+  cubre a las otras seis. No es un hueco de pricing —`pricing` sí entró— sino **el mismo hueco
+  que `properties` y `cleaning` ya tuvieron**, repetido por los changes que estrenaron esos
+  módulos. Y los tests por módulo no lo tapan: `access`, `guests`, `maintenance` y `timeline` no
+  tienen `test_errors.py`, y el de `messaging` compara contra miembros de `ErrorCode` que, siendo
+  un `StrEnum`, son iguales al literal equivalente — un `"NOT_FOUND"` a pelo pasaría, que es
+  exactamente el fallo que el panel de `properties-crud` demostró inyectando una cadena. Cerrarlo
+  es añadir los cinco `import` a la tupla de la guarda; lo que le falta es dueño.
 - **Deuda con dueño**: la guarda de integridad del registro recorre los `_MAPPING`, las
   subclases de `AppError` y `_HTTP_STATUS_CODES`, pero **no las llamadas sueltas a
-  `error_envelope(...)`**. Los siete sitios de hoy están cubiertos, pero un módulo futuro
-  que pase un literal directamente se colaría, y el contrato promete que ningún código vive
-  fuera del registro. Cerrarlo pide una comprobación por AST sobre `backend/app/**` que
+  `error_envelope(...)`**. Los **catorce** sitios de hoy pasan todos un miembro de `ErrorCode`
+  —cuatro en `integrations/api/errors.py`, tres en `integrations/api/webhooks_router.py`, tres en
+  `cleaning/api/photos_router.py`, dos en `guests/api/portal_router.py`, uno en
+  `guests/api/errors.py` y uno en el propio `core/errors.py`, el del `422` de validación—, pero un módulo futuro que pase un literal directamente se colaría, y
+  el contrato promete que ningún código vive fuera del registro. `pricing` no añade ninguno: su
+  handler pasa el `code` que le da su `_MAPPING`, que sí está en la guarda. Cerrarlo pide una comprobación por AST sobre `backend/app/**` que
   rechace un primer argumento literal. Lo levantó el panel de QA en el `/sdd:review` del
   change.
 - **El límite del guard de red**: bloquear los constructores de `socket` cubre cualquier
@@ -194,7 +213,7 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 73 de las 84 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 80 de las 91 operaciones lo
   referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
