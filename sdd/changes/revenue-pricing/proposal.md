@@ -37,8 +37,11 @@ Dos decisiones tomadas antes de escribir esto, ambas cerrando huecos del PRD:
 1. **`max_daily_change_pct` se mide contra el día anterior del mismo horizonte.** PRD §19 lo
    declara guardrail obligatorio, pero la fórmula de §7.17 solo aplica `min_price`/`max_price`
    y nunca lo usa: la contradicción es del PRD, no una omisión de lectura. Acotar contra el
-   día anterior hace la curva continua, es determinista y no necesita conocer el precio
-   publicado en la OTA.
+   día anterior es determinista y no necesita conocer el precio publicado en la OTA.
+   **Lo que no hace es la curva continua sin excepciones**, y esta frase decía que sí: la
+   referencia es el precio **persistido** del día anterior, así que una fila preservada por R4.3
+   —y el primer día de cada horizonte— quedan sin acotar contra su vecino. Los dos bordes, con
+   sus cifras, en R3.2 y en **D4** de `design.md`.
 2. **Las tres operaciones ARI del `PMSAdapter` no entran.**
    `backend/app/integrations/domain/ports.py:93` las reserva («`update_price`, `block_dates` y
    `get_availability`, ARI, arriving with `revenue`»), pero Modo 1 no publica precios, así que
@@ -114,8 +117,21 @@ Acceptance criteria:
 1. WHEN el precio calculado cae fuera de `[min_price, max_price]`, THE SYSTEM SHALL acotarlo
    al límite correspondiente (PRD §7.17 paso 5, §19).
 2. WHEN se genera el horizonte, THE SYSTEM SHALL recorrerlo en orden ascendente de fecha y
-   acotar cada precio a ±`max_daily_change_pct` % respecto del **precio recomendado del día
-   inmediatamente anterior del mismo horizonte**.
+   acotar cada precio a ±`max_daily_change_pct` % respecto del **precio persistido para el día
+   inmediatamente anterior del mismo horizonte** — el que queda en su fila, que es el que la
+   manager ve, y no el que el recálculo «habría» dado para ese día.
+   Una redacción anterior decía «el precio **recomendado** del día anterior», y describía una
+   garantía más ancha de la que el sistema da: **R4.3 gana a R3.2 en el borde de una fila
+   preservada**, a propósito, porque el tope sólo se puede imponer hacia delante y R4.3 prohíbe
+   ajustar al vecino ya decidido por una persona. El par *(recalculado, preservado)* queda por
+   tanto estructuralmente sin acotar — con base 100, tope 20% y los días +1/+3/+5 aprobados a
+   200/300/120, el horizonte emitido es `[200, 160, 300, 240, 120, 100]`, con saltos de +87,5% y
+   −50% sin ningún clamp en juego. Es un límite conocido y medido, no un descuido: el porqué, las
+   alternativas rechazadas y el segundo borde (el primer día del horizonte se repone sin tope cada
+   noche) están en **D4** de `design.md`, y lo fija
+   `backend/tests/pricing/test_use_cases.py::test_two_adjacent_persisted_rows_can_break_the_daily_cap_when_one_is_preserved`.
+   Lo que sí se promete, y es lo que R3.2 exige: el día **siguiente** a uno preservado se acota
+   contra el precio que la manager ve, no contra uno inventado.
 3. WHERE la fecha es el primer día del horizonte, THE SYSTEM SHALL no aplicar el tope diario,
    porque no hay base contra la que medirlo.
 4. WHEN el tope diario y los límites `min_price`/`max_price` compiten, THE SYSTEM SHALL aplicar

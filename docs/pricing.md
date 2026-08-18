@@ -91,6 +91,14 @@ Ese orden importa y es deliberado: los límites van **los últimos**, así que n
 queda nunca fuera del rango aunque el tope diario lo permitiera. El primer día del horizonte no
 tiene tope diario, porque no hay día anterior contra el que medirlo.
 
+**Y si ves un salto que el tope diario «no debería» permitir, probablemente no es un fallo.** El
+tope sólo se impone hacia delante, y una recomendación que ya aprobaste no se toca al regenerar,
+así que el par *(día recalculado, día aprobado)* queda sin acotar entre sí: con base 100 y tope
+20%, unos días aprobados a 200/300/120 dejan el horizonte en `[200, 160, 300, 240, 120, 100]`.
+Lo mismo pasa en la cabecera del calendario, porque cada ejecución arranca sin referencia. Lo que
+sí se garantiza es que el día **siguiente** a uno aprobado se mide contra el precio que tú ves, no
+contra uno recalculado por dentro.
+
 ## Cuándo corre el job, y cómo forzarlo
 
 Corre **a las 06:00 UTC** —no locales: el worker fija su zona en UTC a propósito y las horas
