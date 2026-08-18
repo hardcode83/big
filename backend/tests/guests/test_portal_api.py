@@ -42,6 +42,7 @@ from app.properties.infrastructure.models import PropertyModel
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from app.timeline.infrastructure.models import TimelineEventModel
+from tests.conftest import request_session_override
 from tests.auth.conftest import (  # noqa: F401
     TEST_BCRYPT_ROUNDS,
     tenant_a,
@@ -106,11 +107,14 @@ def throttle() -> _AllowAll:
 def _build_app(db_session, throttle):
     app = create_app()
 
-    async def _session_override():
-        yield db_session
-
-    app.dependency_overrides[get_db_session] = _session_override
+    # The tenant marker is reset when each request ends. Every route here resolves the stay
+    # through `find_live_by_token_hash`, which runs before `SessionTenantBinder.bind` and
+    # would be refused on a session an earlier request in the same test had bound. What each
+    # request DID bind is recorded in `bound_tenants`, which is how a test still asserts it.
+    override = request_session_override(db_session)
+    app.dependency_overrides[get_db_session] = override
     app.dependency_overrides[get_guest_portal_throttle] = lambda: throttle
+    app.bound_tenants = override.bound_tenants  # type: ignore[attr-defined]
     return app
 
 
@@ -125,6 +129,8 @@ async def api(db_session, throttle):
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         client.codec = codec  # type: ignore[attr-defined]
+        # The tenant each request bound its session to, in order (see `_build_app`).
+        client.bound_tenants = app.bound_tenants  # type: ignore[attr-defined]
         yield client
 
 
@@ -736,11 +742,23 @@ async def test_a_revoked_token_cannot_submit(api, db_session, tenant_a) -> None:
 # regression in the wiring — the layer that decides which repository runs on which session
 # with which `tenant_id` — had nothing here that could fail.
 #
-# One constraint shapes how these are written. `bind_session_to_tenant` is one-way and the
-# test client shares a single session with the fixtures, so **one test cannot authorise for
-# two tenants**: the second `bind` raises rather than repointing the filter, which is exactly
-# the protection it exists to give. Each test therefore drives one tenant and inspects the
-# other's rows directly.
+# These are shaped by the fixture the client runs on, and the shape is deliberate: each test
+# drives ONE tenant and inspects the other's rows directly.
+#
+# What `rule11-ownership-single-source` changed, stated precisely because the obvious shorthand
+# for it is wrong: `request_session_override` clears the tenant marker when each request ends.
+# It is NOT a session per request — the same session, connection and transaction are reused, so
+# uncommitted setup rows stay visible and the identity map is shared.
+#
+# What that means for the two-tenant case: markers no longer accumulate, so a second request
+# binding a different tenant meets an unmarked session and does not raise. `bind_session_to_tenant`
+# only refuses a REBIND within one request (`current is not None and current != tenant_id`). So
+# the old "one test cannot authorise for two tenants" no longer holds as a mechanism — these
+# tests keep one tenant each because it reads more clearly, not because a second bind would fail.
+#
+# A real session per request is the roadmap candidate `test-session-per-request` that design D13
+# rejected as out of scope; `/sdd:archive` is what creates that entry, so do not expect a file
+# under `sdd/roadmap/` for it yet.
 
 
 @pytest.mark.asyncio
@@ -758,8 +776,15 @@ async def test_a_token_only_ever_answers_for_its_own_tenant(
 
     assert body["property_name"] == "Piso Riazor"
     assert "Casa Redes" not in str(body)
-    # And the session ended up marked with the token's tenant, not the other one.
-    assert db_session.info[TENANT_ID_SESSION_KEY] == tenant_b.id
+    # And the request bound its session to the TOKEN's tenant, not the other one.
+    #
+    # This used to read the marker off `db_session` after the fact, which worked only because
+    # the fixture left it there. The fixture now resets it between requests, so the assertion
+    # is made on what the request did — recorded on the way out by `request_session_override`.
+    # That is the same property, observed one step closer to the app: it fails if the binder
+    # is dropped from the portal's composition, and it fails if it binds the wrong tenant.
+    assert api.bound_tenants == [tenant_b.id]
+    assert TENANT_ID_SESSION_KEY not in db_session.info
 
 
 @pytest.mark.asyncio
@@ -941,10 +966,7 @@ async def test_the_router_drives_the_real_throttle(db_session, tenant_a) -> None
     token = await _token(db_session, tenant_a, reservation)
     app = create_app()
 
-    async def _session_override():
-        yield db_session
-
-    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_db_session] = request_session_override(db_session)
     # A unique address per run, for the reason the webhook version of this test records:
     # `ASGITransport` reports every request as `127.0.0.1`, and the refusal below charges a
     # real, shared key that outlives the test inside its 60-second window. What is being

@@ -2,8 +2,8 @@
 
 **The error is an enum, not a string, and that is the whole point.** `notification_logs
 .last_error` is one of the cleartext sinks of rule 11 in `sdd/steering/security.md`, whose
-contract for this column is the structured form: no rule-3 value survives in it at all.
-This change is its first writer, so the contract is inherited here.
+contract for this column is the structured form: no rule-3 value survives in it at all. Who
+writes it is declared in that rule's table.
 
 Making the code a closed enum moves that guarantee from discipline to construction: a
 provider SDK's exception routinely embeds the very message it failed to send — subject,

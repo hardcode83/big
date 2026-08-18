@@ -2,7 +2,7 @@
 
 Rule 11 governs the columns through which a rule-3 value (an access code, a WiFi password,
 a document number) could reach the database in cleartext without the column name announcing
-it. `audit_logs.changes` is one of them, and this change is its first writer.
+it. `audit_logs.changes` is one of them; who writes it is declared in that rule's table.
 
 The rule is not enforced here by convention but by construction: there are exactly two ways
 to record a field, and the one that keeps the value **raises** for any field on

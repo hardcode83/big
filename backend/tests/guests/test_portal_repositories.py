@@ -16,7 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from app.access.domain.enums import AccessRecordStatus
 from app.access.infrastructure.models import AccessRecordModel
 from app.core.db import TENANT_ID_SESSION_KEY, bind_session_to_tenant
-from app.core.tenancy import CrossTenantWriteError
+from app.core.tenancy import CrossTenantWriteError, TenantMarkedSessionError
 from app.guests.domain.portal_ports import GuestAccessToken
 from app.guests.domain.portal_token import generate_guest_token, hash_guest_token
 from app.guests.infrastructure.legal import SqlAlchemyLegalRegistrationStayStore
@@ -101,6 +101,26 @@ async def test_the_global_lookup_resolves_the_tenant_without_being_told_it(db_se
     assert found is not None
     assert found.tenant_id == tenant_b.id
     assert found.reservation_id == reservation_b.id
+
+
+@pytest.mark.asyncio
+async def test_the_global_lookup_refuses_a_marked_session(db_session) -> None:
+    """R6.2/R6.3: the sequence `SessionTenantBinder` depends on, made executable.
+
+    This adapter is the one that resolves the tenant *before* the bind, so a caller placed
+    after the bind is precisely the mistake. Asserting the raise rather than the absence of a
+    row: on a marked session the listener scopes even this five-column select, so an empty
+    result would look exactly like an unknown token.
+    """
+    tenant, _, reservation = await _stay(db_session, "marked-session")
+    repository = SqlAlchemyGuestAccessTokenRepository(db_session)
+    token = generate_guest_token()
+    await repository.add(tenant.id, _token(tenant, reservation, hash_guest_token(token)))
+    await db_session.flush()
+    bind_session_to_tenant(db_session, tenant.id)
+
+    with pytest.raises(TenantMarkedSessionError, match="find_live_by_token_hash"):
+        await repository.find_live_by_token_hash(hash_guest_token(token))
 
 
 @pytest.mark.asyncio

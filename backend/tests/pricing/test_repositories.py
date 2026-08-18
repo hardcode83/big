@@ -237,10 +237,11 @@ async def test_the_same_property_day_twice_in_one_call_is_a_validation_error(
 async def test_the_stored_explanation_is_exactly_what_was_rendered(
     rules, recommendations, world
 ) -> None:
-    """This sink of rule 11 gets its test at its first writer.
+    """This sink of rule 11 gets the test the rule demands.
 
     `steering/security.md`: "El contrato lo hereda el change que primero escribe en cada
-    una, **con su propio test**." Raised by the section-3 security panel.
+    una, **con su propio test**." Whose contract it is lives in the census row, not here.
+    Raised by the section-3 security panel.
     """
     rule = make_rule(world.tenant.id)
     await rules.add(world.tenant.id, rule)

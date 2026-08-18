@@ -161,12 +161,17 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         #
         # Deliberately through the PORT rather than a raw cross-tenant select: an unscoped
         # query is something the system accounts for one by one, and a hand-rolled one here
-        # would add to that list without appearing in it. The list itself lives in one place,
-        # the docstring of `SqlAlchemyUserRepository.find_by_email_globally`.
+        # would add to that list without appearing in it. The list is not prose: the reads that
+        # resolve a tenant out of the row call `require_unmarked_session` (`app/core/db.py`), and
+        # `tests/test_unscoped_reads.py` asserts that set is exactly the declared one — no count
+        # here, deliberately: every prose copy of that number has been wrong, this one included
+        # when it said four. The test holds it; read it there. It also names the
+        # unmarked-session reads that fall outside that census.
         #
         # This comment used to say the audit was grep-based, over the two `*_globally` names.
         # `guest-portal-api` added a third unscoped query that carries neither name, so the
-        # grep stopped being exhaustive; what survives is the enumeration, not the suffix.
+        # grep stopped being exhaustive; it then named one docstring as the home of the
+        # enumeration, and that went stale too. A test cannot.
         existing = await users.find_by_email_globally(seed.email)
         if existing is not None and existing.tenant_id != tenant.id:
             raise BootstrapConflictError(

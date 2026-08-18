@@ -1,7 +1,8 @@
 """SQLAlchemy adapters for the pricing ports (R1.2, R4.2, R5.1; design D9).
 
-The first writers `pricing_rules` and `price_recommendations` have ever had — the tables
-landed with `domain-foundation-financial` in 2026-07-31 and nothing wrote to them until now.
+These adapters reach `pricing_rules` and `price_recommendations`, whose tables landed with
+`domain-foundation-financial` in 2026-07-31. Both hold rule-11 sinks; who writes them is
+declared in that rule's table in `steering/security.md`, which is the only place it lives.
 
 Every statement filters `tenant_id` explicitly. The session listener of `app/core/db.py`
 also covers both tables (they carry `TenantScopedMixin`), but it is the net and never the
@@ -176,7 +177,8 @@ def _recommendation_conditions(
 
 
 class SqlAlchemyPricingRuleRepository:
-    """`PricingRuleRepository` — the first writer `pricing_rules` has ever had."""
+    """`PricingRuleRepository`. `pricing_rules.name` is a rule-11 sink; its contract and who
+    writes it live in that rule's table in `steering/security.md`."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
@@ -269,7 +271,8 @@ class SqlAlchemyPricingRuleRepository:
 
 
 class SqlAlchemyPriceRecommendationRepository:
-    """`PriceRecommendationRepository` — the first writer `price_recommendations` has had."""
+    """`PriceRecommendationRepository`. `price_recommendations.explanation` is a rule-11 sink;
+    its contract and who writes it live in that rule's table in `steering/security.md`."""
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

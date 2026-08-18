@@ -41,14 +41,28 @@ tocar la base de datos a mano.
   `PasswordResetTokenRepository.consume_globally` lo hace desde `auth-account-recovery`, y
   `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash` desde
   [`guest-portal-api.md`](guest-portal-api.md).
-- THE SYSTEM SHALL mantener su **enumeración en un solo sitio** —el docstring de
-  `SqlAlchemyUserRepository.find_by_email_globally`—, y todo lo demás la cita en vez de repetir
-  el recuento. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
+- THE SYSTEM SHALL mantener su **enumeración en un solo sitio y en forma ejecutable** —el
+  conjunto de llamantes de `require_unmarked_session` (`backend/app/core/db.py`), afirmado por
+  `backend/tests/test_unscoped_reads.py`—, y todo lo demás la cita en vez de repetir el
+  recuento. Ese censo cubre **una clase completa**: las lecturas que resuelven el tenant a partir
+  de la fila que leen — completa desde que el panel de review de
+  `rule11-ownership-single-source` encontró que `find_by_token_hash` estaba fuera. No es el
+  conjunto de toda consulta que corre sin tenant: los drenajes de cola de `webhook_events`, cuyo
+  `tenant_id` es nullable, exigen sesión sin marcar por otro motivo —una sesión marcada esconde
+  sus filas `NULL` sin error— y no llaman al guard. Esa frontera la declara el propio test en vez
+  de dejarla implícita. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
+  `rule11-ownership-single-source` (2026-08-17): decía «tres» y no estaba desviada en uno —el
+  recuento en prosa se equivocó cada vez, la última mientras se le buscaba sustituto—. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
   quedó obsoleta dos veces por estar copiada: `auth-account-recovery` y `guest-portal-api`
   añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que
   el merge dejó tres consultas y un número que decía dos. **La auditoría por `grep` del sufijo
   `*_globally` dejó además de ser exhaustiva**: la del portal no lleva el sufijo ni vive en ese
-  módulo. Quien añada una consulta sin scope actualiza la enumeración y añade su viñeta.
+  módulo. **Quien añada una consulta sin scope de esa clase la declara en tres sitios y ninguno
+  es una viñeta de spec**: la llamada al guard como primera sentencia, su entrada en
+  `DECLARED_UNSCOPED_READS` (`backend/tests/test_unscoped_reads.py`) y un test que la invoque
+  sobre sesión marcada y exija el fallo. Una viñeta aquí **cita** el censo; reenunciarlo es
+  devolverle un segundo hogar a la enumeración, que es lo que este párrafo narra haber fallado
+  dos veces.
 - WHERE en el futuro una misma identidad deba pertenecer a varios tenants, THE SYSTEM
   SHALL modelarlo como identidad global más memberships separadas, nunca repitiendo la
   dirección.

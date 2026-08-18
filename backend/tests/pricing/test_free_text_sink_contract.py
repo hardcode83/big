@@ -1,8 +1,8 @@
 """`price_recommendations.explanation` as a rule-11 sink, with the test the rule demands.
 
 Rule 11 of `sdd/steering/security.md` censuses the free-text columns and says the contract
-"lo hereda el change que primero escribe en cada una, **con su propio test**". This change
-is its first writer, so this file is that test. The census row itself is task 8.2.
+"lo hereda el change que primero escribe en cada una, **con su propio test**". This file is
+that test; who the column's contract belongs to is declared in the census row, not here.
 
 **What is being pinned is the boundary of the exception D13 asks for**, not the prose it
 allows. `explanation` is composed by our own closed template (`domain/explanation.py`), and

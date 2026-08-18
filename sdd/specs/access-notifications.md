@@ -203,8 +203,8 @@ El adapter cableado es una sola línea de DI, señalada como tal.
   nombre de tarea, con TTL de tres veces la cadencia, sin un estado `SENDING` intermedio y sin
   bloqueo de filas.
 
-**El despachador no es el único camino de entrega.** `auth-account-recovery` es el segundo
-escritor vivo de `notification_logs` y **no pasa por aquí**: invoca el adapter de canal `EMAIL`
+**El despachador no es el único camino de entrega.** `auth-account-recovery` escribe
+`notification_logs` y **no pasa por aquí**: invoca el adapter de canal `EMAIL`
 de forma síncrona dentro de su propia petición HTTP y escribe la fila ya en `SENT` o `FAILED`,
 con `attempts = 1`, **nunca en `PENDING`**. No es una excepción de conveniencia sino la única
 forma de cumplir la regla 11 de `steering/security.md`: el despachador entrega *leyendo*
@@ -214,8 +214,9 @@ guarda constantes sin enlace, así que registra **que se envió un aviso, no su 
 fallo del adapter **no se reintenta**, porque un reintento del despachador entregaría el cuerpo
 guardado, que no lleva enlace. El usuario vuelve a solicitar.
 
-**`GUEST_ESCALATION` ganó su primer escritor el 2026-08-16**, con
-[`messaging-ai.md`](messaging-ai.md). El miembro existía en `NotificationType` desde
+**`GUEST_ESCALATION` dejó de estar sin escribir el 2026-08-16**, con
+[`messaging-ai.md`](messaging-ai.md); quién lo escribe lo declara la tabla de la regla 11, que ya
+atribuye ese aviso, y no esta línea. El miembro existía en `NotificationType` desde
 `celery-jobs` sin que nadie lo escribiera. A diferencia de `auth-account-recovery`, sí pasa por
 el despachador: la fila nace `PENDING` en canal `IN_APP` y es este barrido el que la mueve a
 `SENT`. Cumple el contrato de la regla 11 que fijó `celery-jobs` en vez de derivar uno nuevo —
@@ -251,8 +252,8 @@ fila nunca alcanzaba `FAILED`, con lo que «at-least-once **acotado**» dejaba d
   uno fallido que no lo traiga: la escritura ramifica exactamente sobre esos dos campos, y un
   `last_error` nulo no le dice nada al operador.
 
-Es la aplicación de la regla 11 de `steering/security.md` a la única columna de la que este change
-es primer escritor. Que el tipo sea un enum es lo que impide que la excepción de un SDK —que
+Es la aplicación de la regla 11 de `steering/security.md` a `notification_logs.last_error`,
+cuya atribución vive en la tabla de esa regla. Que el tipo sea un enum es lo que impide que la excepción de un SDK —que
 rutinariamente lleva incrustado el mensaje que no pudo enviar— acabe en la columna: el texto del
 proveedor **no cabe** en el tipo de retorno, y ampliarlo es un diff que un revisor ve. Un campo
 `provider_message_id: str | None` llegó a existir y el panel de seguridad lo retiró por ser
@@ -535,7 +536,7 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   change que le da un `sla_deadline_at`, no aquí. El decimoséptimo miembro del enum
   (`PASSWORD_RESET_REQUESTED`, de `auth-account-recovery`) no cuenta entre ellos: no tener plazo
   es su comportamiento correcto, no una pieza pendiente.
-- **Valores de enum sin escritor**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
+- **Valores de enum que nadie escribe todavía**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.
 - **`AccessRecord.expire()` es un camino no ejercitado**: nada escribe `valid_from`/`valid_to`.

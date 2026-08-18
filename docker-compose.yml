@@ -101,6 +101,18 @@ services:
       # contract. Keep the host workflow visible read-only so the project test command works
       # both locally and in CI without embedding a duplicate fixture in backend/.
       - ./.github/workflows/deploy-dev.yml:/workspace/deploy-dev.yml:ro
+      # Same reason, one change later: `tests/test_rule11_ownership.py` walks the prose tree to
+      # stop the ownership of a rule 11 sink being restated outside its table, and most of the
+      # sites it guards are Markdown under `sdd/` and `docs/`. The container only mounts
+      # `./backend`, so without these it would walk nothing. Read-only: the suite reads this
+      # tree, never writes it. In CI the checkout is complete and the test resolves the root by
+      # its second and last candidate, the repository layout, so these lines are the local half
+      # of the same contract. Dev-only for a second reason worth stating: this makes the
+      # internal threat model readable from the container that publishes 8000 on every
+      # interface, which is acceptable on a developer's machine and not somewhere else.
+      # `docker-compose.deploy.yml` deliberately does not get them: it does not run the suite.
+      - ./sdd:/workspace/sdd:ro
+      - ./docs:/workspace/docs:ro
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Volumen con nombre y NO un bind mount del árbol: `/app` es el repositorio por el bind
       # de arriba, así que sin este volumen las fotos aparecerían en `git status`. El

@@ -3,12 +3,15 @@
 Creates `webhook_endpoints` (rule 12(a)/(b) of `steering/security.md`, design D2) and adds
 `webhook_events.attempts` / `webhook_events.next_attempt_at` (design D9).
 
-**Additive, and safe for a reason worth naming rather than assuming.** `webhook_events` has had
-no writer since `domain-foundation-financial` created it — its own model docstring says so
-("Nothing writes here yet") — so the two new columns land on an empty table in every environment
-and their `server_default` is never actually exercised on existing rows. It is still declared,
-because the default is what makes the column meaningful for every row inserted *afterwards* by a
-statement that does not mention it.
+**Additive, and safe for a reason worth naming rather than assuming: `webhook_events` was empty
+in every environment when this migration was applied.** Nothing had written to it between
+`domain-foundation-financial`, which created the table, and this change, which brings its first
+writer — so the two new columns land on no existing rows and their `server_default` is never
+actually exercised by the backfill. It is still declared, because the default is what makes the
+column meaningful for every row inserted *afterwards* by a statement that does not mention it.
+(Stated as the fact it is. This used to cite the model's docstring as evidence, which was the
+wrong kind of support twice over: a docstring is not a record of what was in the table, and that
+one no longer says it.)
 
 **The two new columns are a deliberate deviation from PRD §7.26**, recorded in design D9 and left
 open for ratification in the change's `BLOCKED.md`. They add retry accounting the PRD's entity

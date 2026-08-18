@@ -169,9 +169,10 @@ RESPONSE_VOCABULARY: frozenset[str] = frozenset(RESPONSE_TEMPLATES.values())
 #:
 #: **This is the mapping, not the vocabulary.** `messaging` decides which conversation intent
 #: opens an incident and therefore which title it asks for; the closed set those titles must
-#: come from is `maintenance.domain.entities.CONVERSATION_INCIDENT_TITLES`, because
-#: `maintenance` is the writer of `incidents.title` and the census in `steering/security.md`
-#: is written by writer. Neither module imports the other: `ReportIncidentFromConversationUseCase`
+#: come from is `maintenance.domain.entities.CONVERSATION_INCIDENT_TITLES`, which is where the
+#: catalogue belongs because the census of rule 11 is organised by writer and that is the module
+#: the table points at for this column — look there, not here, for who writes what.
+#: Neither module imports the other: `ReportIncidentFromConversationUseCase`
 #: validates against its own constant, and
 #: `tests/maintenance/test_report_incident_from_conversation.py` asserts that these values are
 #: exactly that set, so the two cannot drift apart in silence.

@@ -19,8 +19,8 @@ class AuditLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin):
     `ix_audit_logs_tenant_id_entity_type_entity_id` makes listing every Guest diff
     cheap, and rule 4 keeps the document number out of listings entirely.
 
-    Nothing writes here yet; `user-management` (role changes) and whoever first audits
-    guest documents inherit the contract. Do not restate rule 11 here.
+    Who writes this column, and under what contract, is declared in the rule 11 table of
+    `sdd/steering/security.md` and nowhere else. Do not restate it here.
     """
 
     __tablename__ = "audit_logs"

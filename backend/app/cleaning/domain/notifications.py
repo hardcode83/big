@@ -1,9 +1,9 @@
 """The notifications a cleaning assignment produces (R6).
 
 Pure builders, so the **content** of what gets written is testable without a session and
-lives next to the rule that shapes it — rule 11 of `sdd/steering/security.md`, whose contract
-for `notification_logs.subject`/`body` was fixed by `celery-jobs` (the first writer). This
-change does not derive a new one; it complies with the one that exists.
+lives next to the rule that shapes it — rule 11 of `sdd/steering/security.md`, which is where
+the contract for `notification_logs.subject`/`body` and its writers are declared. This module
+does not derive a contract of its own; it complies with the one that exists.
 
 What that means concretely, and it is the same discipline as `_escalation_row`
 (`app/notifications/application/use_cases.py:198-232`): the body carries **ids and a type**,

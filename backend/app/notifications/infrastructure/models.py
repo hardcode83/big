@@ -22,11 +22,9 @@ class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, Timesta
     quietly reopen a door `AccessRecordModel` deliberately closed — it stores
     `code_masked` only, with no plaintext column at all.
 
-    **First writer: `celery-jobs`**, whose SLA job (PRD §14) queues its escalations here.
-    It carries the contract for `subject`/`body` with its own tests — the escalation row is
-    built from ids and a fixed template, never from the breached notification's own text.
-    `last_error` still has no writer; `access-notifications` inherits that one when it adds
-    delivery. Do not restate rule 11 here — it lives in one place on purpose.
+    Who writes `subject`, `body` and `last_error`, and under what contract, is declared in the
+    rule 11 table of `sdd/steering/security.md` and nowhere else. Do not restate it here — it
+    lives in one place on purpose.
     """
 
     __tablename__ = "notification_logs"

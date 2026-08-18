@@ -1,8 +1,7 @@
 """`EscalateBreachedSlasUseCase` — SLA enforcement (`celery-jobs` R5, R4.4).
 
 Unit tests with in-memory fakes. The one thing they must not let pass is a row that
-carries a rule-3 value forward into `subject`/`body` (rule 11 of `steering/security.md`),
-because this change is that table's first writer.
+carries a rule-3 value forward into `subject`/`body` (rule 11 of `steering/security.md`).
 """
 
 import uuid
@@ -326,12 +325,11 @@ class TestRule11:
 
     @pytest.mark.asyncio
     async def test_the_subject_of_the_breached_notification_is_never_copied_forward(self) -> None:
-        """`subject` is the other half of rule 11's single exception, and it had no test.
+        """`subject` is the other half of that row's contract, and it had no test.
 
         A future `subject=f"SLA breach: {breached.subject}"` would have passed the whole
-        suite while forwarding the column this change is the first writer of. It cannot be
-        written now — `_escalation_row` never receives the entity — and this fails if that
-        changes.
+        suite while forwarding a value out of the breached row. It cannot be written now —
+        `_escalation_row` never receives the entity — and this fails if that changes.
         """
         harness = Harness()
         harness.users.add_user(role=UserRole.PROPERTY_MANAGER)

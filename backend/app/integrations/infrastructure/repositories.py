@@ -16,6 +16,7 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import SecretDecryptionError
+from app.core.db import require_unmarked_session
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.entities import (
@@ -192,6 +193,11 @@ class SqlAlchemyWebhookEndpointRepository:
     webhook carries no JWT. What makes it safe is not a filter, it is the shape of the key — 256
     bits of CSPRNG output behind a `UNIQUE` index, so the query addresses at most one row and
     guessing it is the thing rule 12(b) is betting against. Every other method takes `tenant_id`.
+
+    It calls `require_unmarked_session` (`app/core/db.py`), so its precondition is a `raise` and
+    not a paragraph: on a session already marked with a tenant the global listener would filter
+    this lookup silently — down to a single-column `select` — and a webhook would fail to
+    authenticate for a reason no one could see. See limit 2 of `_scope_statement_to_tenant`.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -200,6 +206,7 @@ class SqlAlchemyWebhookEndpointRepository:
     async def find_by_token_hash(
         self, provider: PMSProvider, token_hash: str
     ) -> WebhookEndpoint | None:
+        require_unmarked_session(self._session, read="find_by_token_hash")
         result = await self._session.execute(
             select(WebhookEndpointModel).where(
                 WebhookEndpointModel.token_hash == token_hash,

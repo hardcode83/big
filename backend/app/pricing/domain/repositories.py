@@ -2,7 +2,8 @@
 
 `app/pricing/` was one of the modules `steering/backend-architecture.md` calls "dominios que
 todavía son solo estructura de datos" — entities and tables, no use case, no port. These are
-its first, and they arrive together because this change is also its first writer.
+its first, and they arrive together. Who writes the rule-11 sinks these ports reach is declared
+in that rule's table in `steering/security.md`, and nowhere else.
 
 Two ports and not one, per the same rule `maintenance` cites: "No repositorio 'Dios' con
 métodos de varios agregados — un repositorio por agregado raíz". A `PricingRule` and a

@@ -214,8 +214,9 @@ redactarse juntos. Los dos bordes tienen test propio.
 - THE SYSTEM SHALL persistir cada aviso aceptado como una fila de `webhook_events` con `processed`
   falso, el `provider`, el `event_type`, el `payload` limpiado, el `received_at` y el `tenant_id`
   resuelto por el token.
-- THE SYSTEM SHALL escribir `payload` y `error` en **forma estructurada** (regla 11). Esta capacidad
-  es el primer escritor de las tres columnas de esta tabla y hereda su contrato.
+- THE SYSTEM SHALL escribir `payload` y `error` en **forma estructurada** (regla 11). Quién
+  escribe las tres columnas de esta tabla lo declara la tabla de esa regla y solo ella; lo que
+  esta capacidad hereda es el contrato, no su titularidad.
 - THE SYSTEM SHALL admitir en `error` **únicamente** un par código-campo serializado: el código de un
   vocabulario cerrado (`UNATTRIBUTED`, `UNMAPPABLE`, `PROVIDER_UNAVAILABLE`) y el `field` un **nombre**
   de clave con forma de identificador, nunca un valor. El tipo de la entidad no es una cadena libre,
