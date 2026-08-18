@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/rule11-ownership-single-source
 implementation_sha: 414b24ebedd8fba146d2eea8c4cd810b9141d21f
 pr_number: 
 pr_url: 
