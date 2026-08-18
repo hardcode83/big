@@ -3,20 +3,30 @@
 In code, inside the image — not a host crontab. `steering/infra.md`'s IaC-first norm and
 the plain fact that a schedule outside the artefact cannot be reviewed in a Pull Request.
 
-`CADENCES` is the single source: `beat_schedule` is derived from it, and `lock_ttl_for`
-sizes each task's lock from the same numbers, so a cadence cannot be changed in one place
-and stay stale in the other.
+**Two tables, one calendar.** `CADENCES` holds the jobs that run on a period, `DAILY_JOBS`
+the ones that run at an hour of the day, and `beat_schedule()` is derived from both — so the
+calendar still has a single source (`revenue-pricing` design D8). The split is not cosmetic:
+a periodic job sizes its lock through `lock_ttl_for` from the very same number beat uses, so
+a cadence cannot be changed in one place and stay stale in the other, while a daily job
+carries its TTL explicitly because that derivation would give it a three-day lock.
 """
 
+from dataclasses import dataclass
 from datetime import timedelta
+
+from celery.schedules import crontab
 
 #: Every periodic job, with its cadence: the four of PRD §8.3 that `celery-jobs` owns, with
 #: the PRD's own numbers, plus the two that `access-notifications` adds and the one that
 #: `reservations-webhooks` adds.
 #:
-#: The other two of PRD §8.3 are deliberately absent: `generate_price_recommendations`
-#: belongs to `revenue` and `send_checkin_reminders` to `messaging-ai` /
-#: `access-notifications` — they are messages to a guest, not clock-driven state.
+#: Two of PRD §8.3 are absent from *this* table for different reasons.
+#: `generate_price_recommendations` is not periodic — it runs at an hour of the day, so it
+#: lives in `DAILY_JOBS` below (`revenue-pricing` D8) and the calendar still carries it.
+#: `send_checkin_reminders` has no code to schedule yet: it is a message to a guest, so what
+#: it needs is the channel adapter and the template that `messaging-ai` /
+#: `access-notifications` own. The clock is the trivial half, and a beat entry pointing at a
+#: task nobody has written fails once, at 03:00, in a worker log nobody is reading.
 #:
 #: **`dispatch_notifications` and `provision_access_records` are not in PRD §8.3, and that
 #: is a declared divergence** (`access-notifications` design D3 and D2). The PRD says what
@@ -54,12 +64,52 @@ CADENCES: dict[str, timedelta] = {
 }
 
 
+@dataclass(frozen=True)
+class DailySchedule:
+    """An hour of the day, and the lock TTL that goes with it (`revenue-pricing` D8).
+
+    **`hour` is UTC**, because `app/worker.py` fixes `celery_app.conf.timezone = "UTC"` on
+    purpose (`celery-jobs` R3.7: the process never interprets zones; local hours are derived
+    from each property's own zone). For a tenant in Europe/Madrid, hour 6 is 07:00-08:00
+    local — irrelevant to a job that plans a 60-day horizon, and a beat entry per tenant zone
+    would be N calendar rows bought for nothing.
+
+    **`lock_ttl` is explicit and must not come from `lock_ttl_for`.** That function returns
+    cadence x 3, which on a daily job is three days: a worker killed mid-run would wedge the
+    job until Thursday. The value here is generous against how long a generation takes
+    (minutes) and far below the next window.
+    """
+
+    hour: int
+    lock_ttl: timedelta
+
+
+#: Jobs that run at an hour of the day rather than on a period. A `timedelta(days=1)` in
+#: `CADENCES` would not do: it fires 24 h after beat starts rather than at the hour PRD §8.3
+#: names, and it drags the three-day lock along with it (`revenue-pricing` D8).
+DAILY_JOBS: dict[str, DailySchedule] = {
+    #: PRD §8.3, "diario 06:00" (`revenue-pricing` R4.1, R4.7). Three hours of lock against a
+    #: run measured in minutes.
+    "generate_price_recommendations": DailySchedule(hour=6, lock_ttl=timedelta(hours=3)),
+}
+
+
 def beat_schedule() -> dict[str, dict]:
-    """The `beat_schedule` Celery expects, derived from `CADENCES`."""
-    return {
+    """The `beat_schedule` Celery expects, derived from `CADENCES` and `DAILY_JOBS`."""
+    schedule: dict[str, dict] = {
         f"{name}-every-{int(cadence.total_seconds())}s": {
             "task": name,
             "schedule": cadence,
         }
         for name, cadence in CADENCES.items()
     }
+    schedule.update(
+        {
+            f"{name}-daily-{daily.hour:02d}00-utc": {
+                "task": name,
+                "schedule": crontab(hour=daily.hour, minute=0),
+            }
+            for name, daily in DAILY_JOBS.items()
+        }
+    )
+    return schedule

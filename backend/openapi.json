@@ -1159,6 +1159,163 @@
         "title": "CreateMessageRequest",
         "type": "object"
       },
+      "CreatePricingRuleRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/v1/pricing-rules` (R1.1, R1.3, R1.4).\n\n`property_id` omitted means a tenant-wide rule (R1.5), which is why it is nullable\nrather than required. The five JSONB columns default to empty: a rule with no\nmodifiers is a flat `base_price`, which is a legitimate starting point.",
+        "properties": {
+          "active": {
+            "default": true,
+            "title": "Active",
+            "type": "boolean"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Base Price"
+          },
+          "event_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Rules"
+          },
+          "lead_time_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Rules"
+          },
+          "max_daily_change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "default": "20.00",
+            "title": "Max Daily Change Pct"
+          },
+          "max_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Max Price"
+          },
+          "min_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              }
+            ],
+            "title": "Min Price"
+          },
+          "name": {
+            "maxLength": 200,
+            "title": "Name",
+            "type": "string"
+          },
+          "occupancy_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occupancy Rules"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "seasonality_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seasonality Rules"
+          },
+          "weekday_modifiers": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekday Modifiers"
+          }
+        },
+        "required": [
+          "name",
+          "base_price",
+          "min_price",
+          "max_price"
+        ],
+        "title": "CreatePricingRuleRequest",
+        "type": "object"
+      },
       "CreatePropertyRequest": {
         "additionalProperties": false,
         "properties": {
@@ -1686,6 +1843,20 @@
         "title": "CurrentUserResponse",
         "type": "object"
       },
+      "DecidePriceRecommendationRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/v1/price-recommendations/{id}` (R5.2, R5.3, R5.4).\n\nOnly `status`, and only the three legal moves get through — but the refusal is the\nentity's, not this schema's: `PriceRecommendation` owns the state machine, so an\nillegal move is a `409` with the status untouched (R5.4) rather than a `422` about a\nshape. Typing the field as the enum keeps a value outside the enum entirely out of the\ndomain, which is a different failure and correctly a `422`.",
+        "properties": {
+          "status": {
+            "$ref": "#/components/schemas/PriceRecommendationStatus"
+          }
+        },
+        "required": [
+          "status"
+        ],
+        "title": "DecidePriceRecommendationRequest",
+        "type": "object"
+      },
       "DocumentStoredResponse": {
         "description": "What a successful write returns: **no document number**.\n\nThe caller just sent it; echoing it back would put it in one more response body, one more\nproxy log and one more browser cache for no benefit.",
         "properties": {
@@ -1824,6 +1995,55 @@
           }
         },
         "title": "ForgotPasswordResponse",
+        "type": "object"
+      },
+      "GeneratePriceRecommendationsRequest": {
+        "additionalProperties": false,
+        "description": "`POST /api/v1/price-recommendations/generate` (R4.5, OQ4).\n\n`property_id` omitted sweeps the tenant's whole active portfolio, which is the case\nthat motivates the endpoint: a tenant-wide rule just changed and every property needs\nrepricing (OQ4). Naming a property that is unknown, another tenant's, or not `ACTIVE`\nis a `422` — it is a body field, not a path identifier (D9's fourth refinement).",
+        "properties": {
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          }
+        },
+        "title": "GeneratePriceRecommendationsRequest",
+        "type": "object"
+      },
+      "GenerationReportResponse": {
+        "description": "The four counters R4.5 asks a generation to report.\n\nOne number per outcome, and they do not overlap: `created` are new rows, `updated` are\nrecalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are\nproperties with no applicable active rule (R4.6). A fifth counter exists inside the use\ncase — `failed` — and stays out of the published contract per D9/D10; a failed property\nis reported in the application log with the id that caused it.",
+        "properties": {
+          "created": {
+            "title": "Created",
+            "type": "integer"
+          },
+          "preserved": {
+            "title": "Preserved",
+            "type": "integer"
+          },
+          "skipped": {
+            "title": "Skipped",
+            "type": "integer"
+          },
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "created",
+          "updated",
+          "preserved",
+          "skipped"
+        ],
+        "title": "GenerationReportResponse",
         "type": "object"
       },
       "GuestAccessTokenIssuedResponse": {
@@ -2819,6 +3039,269 @@
           "currency"
         ],
         "title": "PendingApprovalResponse",
+        "type": "object"
+      },
+      "PriceRecommendationPageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PriceRecommendationResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "PriceRecommendationPageResponse",
+        "type": "object"
+      },
+      "PriceRecommendationResponse": {
+        "description": "One recommended price, with the sentence that explains it.\n\n`explanation` **is** here, and that is the point of R6: the owner approves with\ncriterion instead of blind. It carries its own row in rule 11's census in `steering/security.md`, and its\naudience is exactly this surface — an authenticated `TENANT_OWNER` or\n`PROPERTY_MANAGER`, reading a price for their own flat.\n\n`current_price` is always `null` while Mode 1 never calls the PMS (R5.5, D19); it is\npublished anyway because the column exists and a client that omitted it would have to\nchange shape the day ARI arrives.",
+        "properties": {
+          "confidence": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Confidence",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_price": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Current Price"
+          },
+          "date": {
+            "format": "date",
+            "title": "Date",
+            "type": "string"
+          },
+          "explanation": {
+            "title": "Explanation",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "pricing_rule_id": {
+            "format": "uuid",
+            "title": "Pricing Rule Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "recommended_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Recommended Price",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PriceRecommendationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "pricing_rule_id",
+          "date",
+          "recommended_price",
+          "current_price",
+          "confidence",
+          "status",
+          "explanation",
+          "created_at"
+        ],
+        "title": "PriceRecommendationResponse",
+        "type": "object"
+      },
+      "PriceRecommendationStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(PriceRecommendation.status) without a named block (§7.18).",
+        "enum": [
+          "DRAFT",
+          "RECOMMENDED",
+          "APPROVED",
+          "APPLIED_EXTERNAL",
+          "REJECTED"
+        ],
+        "title": "PriceRecommendationStatus",
+        "type": "string"
+      },
+      "PricingRulePageResponse": {
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/PricingRuleResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "PricingRulePageResponse",
+        "type": "object"
+      },
+      "PricingRuleResponse": {
+        "description": "What an authorised operator may see about one rule.\n\nEvery writable column of the rule plus its identity and timestamps — a rule is the\nmanager's own declaration, so there is nothing here she did not write herself. What is\nabsent is `tenant_id`: it is the token's, and echoing it back tells a caller nothing it\ndid not already prove.",
+        "properties": {
+          "active": {
+            "title": "Active",
+            "type": "boolean"
+          },
+          "base_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Base Price",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "event_rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Event Rules",
+            "type": "array"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "lead_time_rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Lead Time Rules",
+            "type": "array"
+          },
+          "max_daily_change_pct": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Max Daily Change Pct",
+            "type": "string"
+          },
+          "max_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Max Price",
+            "type": "string"
+          },
+          "min_price": {
+            "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+            "title": "Min Price",
+            "type": "string"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "occupancy_rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Occupancy Rules",
+            "type": "array"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "seasonality_rules": {
+            "items": {
+              "additionalProperties": true,
+              "type": "object"
+            },
+            "title": "Seasonality Rules",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "weekday_modifiers": {
+            "additionalProperties": true,
+            "title": "Weekday Modifiers",
+            "type": "object"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "name",
+          "active",
+          "base_price",
+          "min_price",
+          "max_price",
+          "max_daily_change_pct",
+          "weekday_modifiers",
+          "lead_time_rules",
+          "occupancy_rules",
+          "seasonality_rules",
+          "event_rules",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PricingRuleResponse",
         "type": "object"
       },
       "PrivateProvenanceResponse": {
@@ -4972,6 +5455,181 @@
           }
         },
         "title": "TriageIncidentRequest",
+        "type": "object"
+      },
+      "UpdatePricingRuleRequest": {
+        "additionalProperties": false,
+        "description": "`PATCH /api/v1/pricing-rules/{id}` (R1.2, R1.3, R1.4).\n\nEvery field optional, and the router forwards `model_dump(exclude_unset=True)` — so\n**\"absent\" and \"sent as null\" are different things**, which this endpoint needs: setting\n`property_id` to `null` is how a per-property rule becomes tenant-wide (R1.5), and a\nschema that could not tell the two apart would make that unexpressible.\n\nThe other fields are typed `| None` only to be optional; the entity refuses a null in\nany of them and names the field (D16). Sending no field at all is a no-op the use case\nanswers without writing anything.",
+        "properties": {
+          "active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Active"
+          },
+          "base_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Base Price"
+          },
+          "event_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Event Rules"
+          },
+          "lead_time_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Lead Time Rules"
+          },
+          "max_daily_change_pct": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Daily Change Pct"
+          },
+          "max_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Price"
+          },
+          "min_price": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Min Price"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "occupancy_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Occupancy Rules"
+          },
+          "property_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Id"
+          },
+          "seasonality_rules": {
+            "anyOf": [
+              {
+                "items": {
+                  "additionalProperties": true,
+                  "type": "object"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Seasonality Rules"
+          },
+          "weekday_modifiers": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Weekday Modifiers"
+          }
+        },
+        "title": "UpdatePricingRuleRequest",
         "type": "object"
       },
       "UpdatePropertyRequest": {
@@ -10196,6 +10854,629 @@
         "summary": "The owner answers a pending approval",
         "tags": [
           "maintenance"
+        ]
+      }
+    },
+    "/api/v1/price-recommendations": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `date_from`/`date_to` range and by `status`, all combined with AND. Only recommendations of the caller's tenant are ever returned (R5.1).\n\nEach item carries its `explanation`: the ordered modifiers with their percentages and whichever guardrails cut the price, so the recommendation can be approved with criterion rather than blind (R6.1).",
+        "operationId": "list_price_recommendations_api_v1_price_recommendations_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "date",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PriceRecommendationStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceRecommendationPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's price recommendations",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/price-recommendations/generate": {
+      "post": {
+        "description": "The manual door of the nightly job: the same generator, over the same 60-day horizon, so a rule that was just edited takes effect without waiting for 06:00 UTC (design D10). Naming a `property_id` limits it to that property; omitting it sweeps the tenant's whole **active** portfolio (OQ4).\n\nIdempotent by construction (R4.2), and a recommendation already `APPROVED` or `APPLIED_EXTERNAL` is left untouched and counted in `preserved` — a regeneration never undoes a human decision (R4.3). A property with no applicable active rule is counted in `skipped` without failing the run (R4.6).\n\nA `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422`: it is a field of the body naming something the tenant cannot reprice, not a missing resource in the path.",
+        "operationId": "generate_price_recommendations_api_v1_price_recommendations_generate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/GeneratePriceRecommendationsRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GenerationReportResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Generate the recommendations now",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/price-recommendations/{recommendation_id}": {
+      "patch": {
+        "description": "Three moves and no others (R5.2, R5.3): `RECOMMENDED` → `APPROVED`, `RECOMMENDED` → `REJECTED`, and `APPROVED` → `APPLIED_EXTERNAL`. Anything else is a `409` with the status untouched (R5.4).\n\n`APPLIED_EXTERNAL` is the manager saying she published the price in the OTA herself: it puts a `PRICE_UPDATED_EXTERNAL` event on the property's timeline and writes its own audit action, because it records a fact rather than a decision (design D12, D14). **No transition calls the PMS** — Mode 1 recommends and never publishes (R5.5), and `current_price` stays `null` for the same reason.",
+        "operationId": "decide_price_recommendation_api_v1_price_recommendations__recommendation_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "recommendation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Recommendation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DecidePriceRecommendationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PriceRecommendationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Approve, reject, or record a recommendation as published",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing-rules": {
+      "get": {
+        "description": "Paginated with `page`/`per_page` (PRD §23). `property_id` narrows to one property's own rules and `active` to the ones in force; both are combined with AND. Only rules of the caller's tenant are ever returned (R1.2).",
+        "operationId": "list_pricing_rules_api_v1_pricing_rules_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "active",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Active"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRulePageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's pricing rules",
+        "tags": [
+          "pricing"
+        ]
+      },
+      "post": {
+        "description": "`201` with the stored rule, whose `id` is what the other three routes take (R1.1). Omitting `property_id` makes the rule tenant-wide: it applies to every property that has no active rule of its own (R1.5). A `property_id` the tenant does not own is a `422` — the body names something that is not there (design D20).\n\nEvery invariant of R1.3 and R1.4 is checked in the domain and the `422` names the field that failed, so a crossed `min_price`/`max_price` pair or a malformed entry in any of the five JSONB columns is refused without persisting anything.",
+        "operationId": "create_pricing_rule_api_v1_pricing_rules_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreatePricingRuleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRuleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a pricing rule",
+        "tags": [
+          "pricing"
+        ]
+      }
+    },
+    "/api/v1/pricing-rules/{rule_id}": {
+      "get": {
+        "description": "A rule of another tenant answers the same `404` as one that does not exist, with the same body (R1.7).",
+        "operationId": "get_pricing_rule_api_v1_pricing_rules__rule_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRuleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Read one pricing rule",
+        "tags": [
+          "pricing"
+        ]
+      },
+      "patch": {
+        "description": "Partial: only the fields present in the body move, and the whole rule is re-validated afterwards — so raising `min_price` is judged against the stored `max_price` (R1.3). A refused update leaves the rule and its `updated_at` exactly as they were.\n\nSending `property_id: null` turns a per-property rule into a tenant-wide one, which is why absent and null are different here. A `property_id` the tenant does not own is a `422`, as it is on creation (design D20).",
+        "operationId": "update_pricing_rule_api_v1_pricing_rules__rule_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "rule_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Rule Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdatePricingRuleRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PricingRuleResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Adjust a pricing rule",
+        "tags": [
+          "pricing"
         ]
       }
     },

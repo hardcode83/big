@@ -4,7 +4,7 @@ Cómo se opera el scheduler que mueve el estado operacional de las viviendas con
 El *qué hace* está en [`sdd/specs/celery-jobs.md`](../sdd/specs/celery-jobs.md); esta página
 es el *cómo se usa y se diagnostica*.
 
-## Los ocho jobs
+## Los nueve jobs
 
 | Job | Cadencia | Qué hace |
 |---|---|---|
@@ -16,17 +16,25 @@ es el *cómo se usa y se diagnostica*.
 | `provision_access_records` | cada 5 min | Reserva confirmada sin `AccessRecord` → lo crea en `PENDING`, revoca los de reservas canceladas y arranca el registro legal de PRD §17 (change `access-notifications`) |
 | `process_webhook_events` | cada 60 s | Drena la cola de avisos del PMS y relee por API (change `reservations-webhooks`) — ver [`reservations-webhooks.md`](reservations-webhooks.md) |
 | `classify_incidents` | cada 5 min | Pasa por el clasificador toda incidencia `OPEN` que nadie ha mirado (change `maintenance`) — ver [`maintenance.md`](maintenance.md) |
+| `generate_price_recommendations` | **diario, 06:00 UTC** | Recalcula el horizonte de 60 días de precio recomendado de cada vivienda activa con regla aplicable (change `revenue-pricing`) — ver [`pricing.md`](pricing.md) |
 
-Las cadencias viven en `backend/app/scheduler/schedule.py`. De esa misma tabla sale el TTL del
-lock de cada job, así que no se pueden desincronizar.
+El calendario vive en `backend/app/scheduler/schedule.py`, en **dos tablas**: `CADENCES` para
+los ocho que corren por periodo y `DAILY_JOBS` para el que corre a una hora del día.
+`beat_schedule()` sale de las dos.
 
-**Los cuatro primeros son los de PRD §8.3, con sus cadencias. Los tres últimos no están en el
-PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3, `reservations-webhooks`
-design D10): el PRD dice *qué* tiene que pasar —§14 entrega notificaciones, §15 le da un registro de
-acceso a cada reserva confirmada, §16 recibe los avisos del PMS— y no dice qué lo dispara. Los tres
-son idempotentes y dependen del reloj, así que beat es su sitio; los nombres de los cuatro originales
-no se han tocado. `test_schedule.py` los separa (`PRD_8_3` frente a `BEYOND_PRD_8_3`) para que nadie
-invoque «lo dice el PRD» sobre un número que el PRD no ha visto nunca.
+De `CADENCES` sale también el TTL del lock de cada job periódico —cadencia × 3—, así que esos
+ocho no se pueden desincronizar. **El diario no puede derivarlo así**: cadencia × 3 sobre un
+job diario son tres días de bloqueo si un worker muere a mitad de ejecución, de modo que
+`DAILY_JOBS` lleva el suyo escrito (tres horas).
+
+**Cinco son de PRD §8.3, con sus números: los cuatro primeros y el diario. Los otros cuatro no
+están en el PRD**, y es una divergencia declarada (`access-notifications` design D2 y D3,
+`reservations-webhooks` design D10, `maintenance` D2): el PRD dice *qué* tiene que pasar —§14
+entrega notificaciones, §15 le da un registro de acceso a cada reserva confirmada, §16 recibe los
+avisos del PMS, §12 pide que una incidencia llegue clasificada— y no dice qué lo dispara. Los
+cuatro son idempotentes y dependen del reloj, así que beat es su sitio; los nombres del PRD no se
+han tocado. `test_schedule.py` los separa (`PRD_8_3` y `PRD_8_3_DAILY` frente a `BEYOND_PRD_8_3`)
+para que nadie invoque «lo dice el PRD» sobre un número que el PRD no ha visto nunca.
 
 **Por qué `provision_access_records` es un barrido y no un enganche a la confirmación**: ya hay
 reservas confirmadas en la base de datos. Un hook en la transición solo cubriría las futuras y
@@ -38,9 +46,15 @@ confirma por defecto).
 coalesce todo un tick en una llamada por destino, así que la cadencia *es* el techo de llamadas
 salientes al proveedor — acortarla lo sube.
 
-**Los otros dos jobs de PRD §8.3 no están aquí a propósito**: `generate_price_recommendations`
-pertenece a `revenue` y `send_checkin_reminders` a `messaging-ai` / `access-notifications` —
-son mensajes al huésped, no estado dependiente del reloj.
+**`generate_price_recommendations` no va por cadencia sino por hora del día**: corre a las
+**06:00 UTC** desde una segunda tabla, `DAILY_JOBS`, de la que `beat_schedule()` también
+deriva (`revenue-pricing`, 2026-08-18). Lleva su TTL de lock explícito —tres horas— en vez de
+derivarlo de la cadencia como los demás, porque `lock_ttl_for` devuelve cadencia × 3 y para un
+job diario eso serían tres días de bloqueo tras un worker muerto.
+
+**El único job de PRD §8.3 que sigue sin estar aquí es `send_checkin_reminders`**, y no por
+falta de reloj: es un mensaje al huésped, así que lo que le falta es el adaptador de canal y la
+plantilla que traen `messaging-ai` / `access-notifications`.
 
 ## Arrancar y mirar
 

@@ -48,3 +48,4 @@
 | seed-data-demo-extension | new, design, tasks, run, review, ship, archive | 639168 | 1539713 | 404776963 | 259.5022 | 2026-08-16 | 2026-08-17 |
 | channex-validation-limits | new, design, tasks, run, review, ship, archive | 87208 | 216609 | 27823773 | 26.1853 | 2026-08-17 | 2026-08-17 |
 | compose-stacks-diagnostic | new, design, tasks, run, review, ship, archive | 106930 | 389606 | 48193658 | 42.6715 | 2026-08-17 | 2026-08-18 |
+| revenue-pricing | new, design, tasks, run, review | 999472 | 2318407 | 513698668 | 347.4541 | 2026-08-16 | — |

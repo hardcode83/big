@@ -253,6 +253,60 @@ def test_the_technician_may_execute_but_never_manage() -> None:
     assert not is_allowed(UserRole.TECHNICIAN, Permission.RESPOND_OWNER_APPROVALS)
 
 
+# --- Pricing (`revenue-pricing` R1.1, R1.2, R5.2, design D11) --------------------------
+
+PRICING_PERMISSIONS = (
+    Permission.READ_PRICING_RULES,
+    Permission.MANAGE_PRICING_RULES,
+    Permission.READ_PRICE_RECOMMENDATIONS,
+    Permission.MANAGE_PRICE_RECOMMENDATIONS,
+)
+
+#: D11's table, written out rather than derived — as above, the content is the exclusions.
+#: Note the owner and the manager hold **the same four**, which is the deliberate divergence
+#: from "la owner ve, el manager opera" that every other pair in this file follows.
+EXPECTED_PRICING_PERMISSIONS: dict[UserRole, frozenset[Permission]] = {
+    UserRole.SUPER_ADMIN: frozenset(),
+    UserRole.TENANT_OWNER: frozenset(PRICING_PERMISSIONS),
+    UserRole.PROPERTY_MANAGER: frozenset(PRICING_PERMISSIONS),
+    UserRole.TECHNICIAN: frozenset(),
+    UserRole.CLEANER: frozenset(),
+}
+
+
+@pytest.mark.parametrize("role", list(UserRole))
+def test_the_pricing_matrix_is_the_one_design_d11_decided(role: UserRole) -> None:
+    granted = ROLE_PERMISSIONS[role] & frozenset(PRICING_PERMISSIONS)
+
+    assert granted == EXPECTED_PRICING_PERMISSIONS[role]
+
+
+def test_the_owner_manages_pricing_and_not_only_reads_it() -> None:
+    """The divergence D11 argues for, pinned so nobody "fixes" it into the usual shape.
+
+    `min_price`/`max_price`/`max_daily_change_pct` bound the owner's own money (R3's user
+    story), and PRD §19 Mode 1 says "Manager/owner aprueba manualmente y actualiza en OTA".
+    An owner without a manager — PRD §1's scale — would otherwise be unable to set her own
+    floor or approve a price for her own flat.
+    """
+    assert is_allowed(UserRole.TENANT_OWNER, Permission.MANAGE_PRICING_RULES)
+    assert is_allowed(UserRole.TENANT_OWNER, Permission.MANAGE_PRICE_RECOMMENDATIONS)
+
+
+@pytest.mark.parametrize("role", [UserRole.CLEANER, UserRole.TECHNICIAN])
+def test_the_operational_roles_get_nothing_from_pricing(role: UserRole) -> None:
+    """R1.1/R5.2: the seven routes all sit behind one of these four, so holding none is
+    what makes the 403 structural instead of a check each router must remember."""
+    for permission in PRICING_PERMISSIONS:
+        assert not is_allowed(role, permission)
+
+
+def test_the_super_admin_gets_nothing_from_pricing() -> None:
+    """Same reason it holds no other operational permission inside a tenant."""
+    for permission in PRICING_PERMISSIONS:
+        assert not is_allowed(UserRole.SUPER_ADMIN, permission)
+
+
 def test_the_manager_executes_too_and_that_is_the_difference_from_cleaning() -> None:
     """R4.5: "un `PROPERTY_MANAGER` sí puede, para desatascar" — where `cleaning` gives
     `EXECUTE_CLEANING_TASKS` to the cleaner alone."""

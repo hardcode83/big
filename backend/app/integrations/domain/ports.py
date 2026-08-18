@@ -7,7 +7,8 @@ interfaz definitiva".
 
 **Two methods of the eight in PRD §16**, deliberately. `update_price`, `block_dates`,
 `get_availability`, `list_properties`, `get_messages` and `send_message` arrive with the
-changes that consume them (`revenue`, `messaging-ai`); a port sized for everything it could
+changes that consume them (an ARI change of its own for the first three — **not** pricing,
+see the note below; `messaging-ai` for the last two); a port sized for everything it could
 eventually do is the "StorageAdapter gigante con 15 métodos" that
 `steering/backend-architecture.md` names as the Interface Segregation failure. The two here
 keep PRD §16's signatures verbatim so the rest can be added without rewriting these.
@@ -91,7 +92,16 @@ class PMSMessagingPort(Protocol):
       messaging API, followed by `messaging-ai` as its first consumer.
 
     What stays on `PMSAdapter` instead: `update_price`, `block_dates` and `get_availability`
-    (ARI, arriving with `revenue`) and `list_properties`.
+    (ARI) and `list_properties`.
+
+    **The three ARI methods arrive with an ARI change of their own, when something exists that
+    consumes them** — not with pricing (`revenue-pricing` D19). An earlier version of this note
+    promised them to `revenue`, and that was wrong in a way worth recording: `revenue-pricing`
+    shipped Mode 1 of PRD §19, in which the system **recommends a price and never publishes
+    it** — a person approves it and updates the OTA by hand, and `PriceRecommendation` even has
+    an `APPLIED_EXTERNAL` status to record that she did. So pricing never needed to write a
+    price back to the provider, and pointing at it left three methods waiting on a change that
+    was never going to call them.
 
     A provider without messaging implements `PMSAdapter` and simply does not implement this. It is
     `PMSAdapterFactory.messaging_for` — defined below in this same file — that refuses, by raising

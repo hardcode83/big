@@ -400,6 +400,63 @@ export interface paths {
      */
     post: operations["respond_owner_approval_api_v1_owner_approvals__approval_id__respond_post"];
   };
+  "/api/v1/price-recommendations": {
+    /**
+     * List the tenant's price recommendations
+     * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `date_from`/`date_to` range and by `status`, all combined with AND. Only recommendations of the caller's tenant are ever returned (R5.1).
+     *
+     * Each item carries its `explanation`: the ordered modifiers with their percentages and whichever guardrails cut the price, so the recommendation can be approved with criterion rather than blind (R6.1).
+     */
+    get: operations["list_price_recommendations_api_v1_price_recommendations_get"];
+  };
+  "/api/v1/price-recommendations/{recommendation_id}": {
+    /**
+     * Approve, reject, or record a recommendation as published
+     * @description Three moves and no others (R5.2, R5.3): `RECOMMENDED` → `APPROVED`, `RECOMMENDED` → `REJECTED`, and `APPROVED` → `APPLIED_EXTERNAL`. Anything else is a `409` with the status untouched (R5.4).
+     *
+     * `APPLIED_EXTERNAL` is the manager saying she published the price in the OTA herself: it puts a `PRICE_UPDATED_EXTERNAL` event on the property's timeline and writes its own audit action, because it records a fact rather than a decision (design D12, D14). **No transition calls the PMS** — Mode 1 recommends and never publishes (R5.5), and `current_price` stays `null` for the same reason.
+     */
+    patch: operations["decide_price_recommendation_api_v1_price_recommendations__recommendation_id__patch"];
+  };
+  "/api/v1/price-recommendations/generate": {
+    /**
+     * Generate the recommendations now
+     * @description The manual door of the nightly job: the same generator, over the same 60-day horizon, so a rule that was just edited takes effect without waiting for 06:00 UTC (design D10). Naming a `property_id` limits it to that property; omitting it sweeps the tenant's whole **active** portfolio (OQ4).
+     *
+     * Idempotent by construction (R4.2), and a recommendation already `APPROVED` or `APPLIED_EXTERNAL` is left untouched and counted in `preserved` — a regeneration never undoes a human decision (R4.3). A property with no applicable active rule is counted in `skipped` without failing the run (R4.6).
+     *
+     * A `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422`: it is a field of the body naming something the tenant cannot reprice, not a missing resource in the path.
+     */
+    post: operations["generate_price_recommendations_api_v1_price_recommendations_generate_post"];
+  };
+  "/api/v1/pricing-rules": {
+    /**
+     * List the tenant's pricing rules
+     * @description Paginated with `page`/`per_page` (PRD §23). `property_id` narrows to one property's own rules and `active` to the ones in force; both are combined with AND. Only rules of the caller's tenant are ever returned (R1.2).
+     */
+    get: operations["list_pricing_rules_api_v1_pricing_rules_get"];
+    /**
+     * Create a pricing rule
+     * @description `201` with the stored rule, whose `id` is what the other three routes take (R1.1). Omitting `property_id` makes the rule tenant-wide: it applies to every property that has no active rule of its own (R1.5). A `property_id` the tenant does not own is a `422` — the body names something that is not there (design D20).
+     *
+     * Every invariant of R1.3 and R1.4 is checked in the domain and the `422` names the field that failed, so a crossed `min_price`/`max_price` pair or a malformed entry in any of the five JSONB columns is refused without persisting anything.
+     */
+    post: operations["create_pricing_rule_api_v1_pricing_rules_post"];
+  };
+  "/api/v1/pricing-rules/{rule_id}": {
+    /**
+     * Read one pricing rule
+     * @description A rule of another tenant answers the same `404` as one that does not exist, with the same body (R1.7).
+     */
+    get: operations["get_pricing_rule_api_v1_pricing_rules__rule_id__get"];
+    /**
+     * Adjust a pricing rule
+     * @description Partial: only the fields present in the body move, and the whole rule is re-validated afterwards — so raising `min_price` is judged against the stored `max_price` (R1.3). A refused update leaves the rule and its `updated_at` exactly as they were.
+     *
+     * Sending `property_id: null` turns a per-property rule into a tenant-wide one, which is why absent and null are different here. A `property_id` the tenant does not own is a `422`, as it is on creation (design D20).
+     */
+    patch: operations["update_pricing_rule_api_v1_pricing_rules__rule_id__patch"];
+  };
   "/api/v1/properties": {
     /**
      * List the tenant's properties
@@ -1137,6 +1194,56 @@ export interface components {
       /** Sender Type */
       sender_type?: "GUEST" | null;
     };
+    /**
+     * CreatePricingRuleRequest
+     * @description `POST /api/v1/pricing-rules` (R1.1, R1.3, R1.4).
+     *
+     * `property_id` omitted means a tenant-wide rule (R1.5), which is why it is nullable
+     * rather than required. The five JSONB columns default to empty: a rule with no
+     * modifiers is a flat `base_price`, which is a legitimate starting point.
+     */
+    CreatePricingRuleRequest: {
+      /**
+       * Active
+       * @default true
+       */
+      active?: boolean;
+      /** Base Price */
+      base_price: number | string;
+      /** Event Rules */
+      event_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Lead Time Rules */
+      lead_time_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /**
+       * Max Daily Change Pct
+       * @default 20.00
+       */
+      max_daily_change_pct?: number | string;
+      /** Max Price */
+      max_price: number | string;
+      /** Min Price */
+      min_price: number | string;
+      /** Name */
+      name: string;
+      /** Occupancy Rules */
+      occupancy_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Property Id */
+      property_id?: string | null;
+      /** Seasonality Rules */
+      seasonality_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Weekday Modifiers */
+      weekday_modifiers?: {
+        [key: string]: unknown;
+      } | null;
+    };
     /** CreatePropertyRequest */
     CreatePropertyRequest: {
       /** Access Notes */
@@ -1324,6 +1431,19 @@ export interface components {
       tenant_id: string;
     };
     /**
+     * DecidePriceRecommendationRequest
+     * @description `PATCH /api/v1/price-recommendations/{id}` (R5.2, R5.3, R5.4).
+     *
+     * Only `status`, and only the three legal moves get through — but the refusal is the
+     * entity's, not this schema's: `PriceRecommendation` owns the state machine, so an
+     * illegal move is a `409` with the status untouched (R5.4) rather than a `422` about a
+     * shape. Typing the field as the enum keeps a value outside the enum entirely out of the
+     * domain, which is a different failure and correctly a `422`.
+     */
+    DecidePriceRecommendationRequest: {
+      status: components["schemas"]["PriceRecommendationStatus"];
+    };
+    /**
      * DocumentStoredResponse
      * @description What a successful write returns: **no document number**.
      *
@@ -1397,6 +1517,39 @@ export interface components {
        * @default If the address belongs to an account, a recovery link has been sent.
        */
       detail?: string;
+    };
+    /**
+     * GeneratePriceRecommendationsRequest
+     * @description `POST /api/v1/price-recommendations/generate` (R4.5, OQ4).
+     *
+     * `property_id` omitted sweeps the tenant's whole active portfolio, which is the case
+     * that motivates the endpoint: a tenant-wide rule just changed and every property needs
+     * repricing (OQ4). Naming a property that is unknown, another tenant's, or not `ACTIVE`
+     * is a `422` — it is a body field, not a path identifier (D9's fourth refinement).
+     */
+    GeneratePriceRecommendationsRequest: {
+      /** Property Id */
+      property_id?: string | null;
+    };
+    /**
+     * GenerationReportResponse
+     * @description The four counters R4.5 asks a generation to report.
+     *
+     * One number per outcome, and they do not overlap: `created` are new rows, `updated` are
+     * recalculated ones, `preserved` are the human decisions R4.3 protects, and `skipped` are
+     * properties with no applicable active rule (R4.6). A fifth counter exists inside the use
+     * case — `failed` — and stays out of the published contract per D9/D10; a failed property
+     * is reported in the application log with the id that caused it.
+     */
+    GenerationReportResponse: {
+      /** Created */
+      created: number;
+      /** Preserved */
+      preserved: number;
+      /** Skipped */
+      skipped: number;
+      /** Updated */
+      updated: number;
     };
     /**
      * GuestAccessTokenIssuedResponse
@@ -1830,6 +1983,144 @@ export interface components {
      * @enum {string}
      */
     PMSProvider: "MOCK" | "CHANNEX" | "BEDS24";
+    /** PriceRecommendationPageResponse */
+    PriceRecommendationPageResponse: {
+      /** Items */
+      items: components["schemas"]["PriceRecommendationResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * PriceRecommendationResponse
+     * @description One recommended price, with the sentence that explains it.
+     *
+     * `explanation` **is** here, and that is the point of R6: the owner approves with
+     * criterion instead of blind. It carries its own row in rule 11's census in `steering/security.md`, and its
+     * audience is exactly this surface — an authenticated `TENANT_OWNER` or
+     * `PROPERTY_MANAGER`, reading a price for their own flat.
+     *
+     * `current_price` is always `null` while Mode 1 never calls the PMS (R5.5, D19); it is
+     * published anyway because the column exists and a client that omitted it would have to
+     * change shape the day ARI arrives.
+     */
+    PriceRecommendationResponse: {
+      /** Confidence */
+      confidence: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Current Price */
+      current_price: string | null;
+      /**
+       * Date
+       * Format: date
+       */
+      date: string;
+      /** Explanation */
+      explanation: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Pricing Rule Id
+       * Format: uuid
+       */
+      pricing_rule_id: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Recommended Price */
+      recommended_price: string;
+      status: components["schemas"]["PriceRecommendationStatus"];
+    };
+    /**
+     * PriceRecommendationStatus
+     * @description ASSUMPTION: name invented — the PRD declares this enum inline
+     * (PriceRecommendation.status) without a named block (§7.18).
+     * @enum {string}
+     */
+    PriceRecommendationStatus: "DRAFT" | "RECOMMENDED" | "APPROVED" | "APPLIED_EXTERNAL" | "REJECTED";
+    /** PricingRulePageResponse */
+    PricingRulePageResponse: {
+      /** Items */
+      items: components["schemas"]["PricingRuleResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+    };
+    /**
+     * PricingRuleResponse
+     * @description What an authorised operator may see about one rule.
+     *
+     * Every writable column of the rule plus its identity and timestamps — a rule is the
+     * manager's own declaration, so there is nothing here she did not write herself. What is
+     * absent is `tenant_id`: it is the token's, and echoing it back tells a caller nothing it
+     * did not already prove.
+     */
+    PricingRuleResponse: {
+      /** Active */
+      active: boolean;
+      /** Base Price */
+      base_price: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /** Event Rules */
+      event_rules: {
+          [key: string]: unknown;
+        }[];
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Lead Time Rules */
+      lead_time_rules: {
+          [key: string]: unknown;
+        }[];
+      /** Max Daily Change Pct */
+      max_daily_change_pct: string;
+      /** Max Price */
+      max_price: string;
+      /** Min Price */
+      min_price: string;
+      /** Name */
+      name: string;
+      /** Occupancy Rules */
+      occupancy_rules: {
+          [key: string]: unknown;
+        }[];
+      /** Property Id */
+      property_id: string | null;
+      /** Seasonality Rules */
+      seasonality_rules: {
+          [key: string]: unknown;
+        }[];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Weekday Modifiers */
+      weekday_modifiers: {
+        [key: string]: unknown;
+      };
+    };
     /** PrivateProvenanceResponse */
     PrivateProvenanceResponse: {
       /**
@@ -2620,6 +2911,55 @@ export interface components {
       /** Estimated Cost */
       estimated_cost?: number | string | null;
       severity?: components["schemas"]["IncidentSeverity"] | null;
+    };
+    /**
+     * UpdatePricingRuleRequest
+     * @description `PATCH /api/v1/pricing-rules/{id}` (R1.2, R1.3, R1.4).
+     *
+     * Every field optional, and the router forwards `model_dump(exclude_unset=True)` — so
+     * **"absent" and "sent as null" are different things**, which this endpoint needs: setting
+     * `property_id` to `null` is how a per-property rule becomes tenant-wide (R1.5), and a
+     * schema that could not tell the two apart would make that unexpressible.
+     *
+     * The other fields are typed `| None` only to be optional; the entity refuses a null in
+     * any of them and names the field (D16). Sending no field at all is a no-op the use case
+     * answers without writing anything.
+     */
+    UpdatePricingRuleRequest: {
+      /** Active */
+      active?: boolean | null;
+      /** Base Price */
+      base_price?: number | string | null;
+      /** Event Rules */
+      event_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Lead Time Rules */
+      lead_time_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Max Daily Change Pct */
+      max_daily_change_pct?: number | string | null;
+      /** Max Price */
+      max_price?: number | string | null;
+      /** Min Price */
+      min_price?: number | string | null;
+      /** Name */
+      name?: string | null;
+      /** Occupancy Rules */
+      occupancy_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Property Id */
+      property_id?: string | null;
+      /** Seasonality Rules */
+      seasonality_rules?: {
+          [key: string]: unknown;
+        }[] | null;
+      /** Weekday Modifiers */
+      weekday_modifiers?: {
+        [key: string]: unknown;
+      } | null;
     };
     /**
      * UpdatePropertyRequest
@@ -5067,6 +5407,295 @@ export interface operations {
       200: {
         content: {
           "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's price recommendations
+   * @description Paginated with `page`/`per_page` (PRD §23), filtered by `property_id`, by the `date_from`/`date_to` range and by `status`, all combined with AND. Only recommendations of the caller's tenant are ever returned (R5.1).
+   *
+   * Each item carries its `explanation`: the ordered modifiers with their percentages and whichever guardrails cut the price, so the recommendation can be approved with criterion rather than blind (R6.1).
+   */
+  list_price_recommendations_api_v1_price_recommendations_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        date_from?: string | null;
+        date_to?: string | null;
+        status?: components["schemas"]["PriceRecommendationStatus"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PriceRecommendationPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Approve, reject, or record a recommendation as published
+   * @description Three moves and no others (R5.2, R5.3): `RECOMMENDED` → `APPROVED`, `RECOMMENDED` → `REJECTED`, and `APPROVED` → `APPLIED_EXTERNAL`. Anything else is a `409` with the status untouched (R5.4).
+   *
+   * `APPLIED_EXTERNAL` is the manager saying she published the price in the OTA herself: it puts a `PRICE_UPDATED_EXTERNAL` event on the property's timeline and writes its own audit action, because it records a fact rather than a decision (design D12, D14). **No transition calls the PMS** — Mode 1 recommends and never publishes (R5.5), and `current_price` stays `null` for the same reason.
+   */
+  decide_price_recommendation_api_v1_price_recommendations__recommendation_id__patch: {
+    parameters: {
+      path: {
+        recommendation_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["DecidePriceRecommendationRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PriceRecommendationResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Generate the recommendations now
+   * @description The manual door of the nightly job: the same generator, over the same 60-day horizon, so a rule that was just edited takes effect without waiting for 06:00 UTC (design D10). Naming a `property_id` limits it to that property; omitting it sweeps the tenant's whole **active** portfolio (OQ4).
+   *
+   * Idempotent by construction (R4.2), and a recommendation already `APPROVED` or `APPLIED_EXTERNAL` is left untouched and counted in `preserved` — a regeneration never undoes a human decision (R4.3). A property with no applicable active rule is counted in `skipped` without failing the run (R4.6).
+   *
+   * A `property_id` that is unknown, another tenant's, or not `ACTIVE` is a `422`: it is a field of the body naming something the tenant cannot reprice, not a missing resource in the path.
+   */
+  generate_price_recommendations_api_v1_price_recommendations_generate_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["GeneratePriceRecommendationsRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["GenerationReportResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the tenant's pricing rules
+   * @description Paginated with `page`/`per_page` (PRD §23). `property_id` narrows to one property's own rules and `active` to the ones in force; both are combined with AND. Only rules of the caller's tenant are ever returned (R1.2).
+   */
+  list_pricing_rules_api_v1_pricing_rules_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+        property_id?: string | null;
+        active?: boolean | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PricingRulePageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Create a pricing rule
+   * @description `201` with the stored rule, whose `id` is what the other three routes take (R1.1). Omitting `property_id` makes the rule tenant-wide: it applies to every property that has no active rule of its own (R1.5). A `property_id` the tenant does not own is a `422` — the body names something that is not there (design D20).
+   *
+   * Every invariant of R1.3 and R1.4 is checked in the domain and the `422` names the field that failed, so a crossed `min_price`/`max_price` pair or a malformed entry in any of the five JSONB columns is refused without persisting anything.
+   */
+  create_pricing_rule_api_v1_pricing_rules_post: {
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CreatePricingRuleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["PricingRuleResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Read one pricing rule
+   * @description A rule of another tenant answers the same `404` as one that does not exist, with the same body (R1.7).
+   */
+  get_pricing_rule_api_v1_pricing_rules__rule_id__get: {
+    parameters: {
+      path: {
+        rule_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PricingRuleResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Adjust a pricing rule
+   * @description Partial: only the fields present in the body move, and the whole rule is re-validated afterwards — so raising `min_price` is judged against the stored `max_price` (R1.3). A refused update leaves the rule and its `updated_at` exactly as they were.
+   *
+   * Sending `property_id: null` turns a per-property rule into a tenant-wide one, which is why absent and null are different here. A `property_id` the tenant does not own is a `422`, as it is on creation (design D20).
+   */
+  update_pricing_rule_api_v1_pricing_rules__rule_id__patch: {
+    parameters: {
+      path: {
+        rule_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["UpdatePricingRuleRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PricingRuleResponse"];
         };
       };
       /** @description Missing, malformed or expired credentials. */
