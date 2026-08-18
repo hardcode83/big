@@ -31,6 +31,22 @@ Operación y runbook: [`docs/reservations-webhooks.md`](../../docs/reservations-
   filtra por `tenant_id` explícito. No SHALL marcar la sesión ni siquiera después de resolver el
   tenant, porque marcar a mitad de petición crea la sesión medio-marcada que el guard existe para
   impedir.
+- THE SYSTEM SHALL hacer cumplir esa precondición en código y no en prosa: `find_by_token_hash`
+  (`backend/app/integrations/infrastructure/repositories.py`) SHALL invocar
+  `require_unmarked_session` (`backend/app/core/db.py`) como primera sentencia, de forma que una
+  sesión ya marcada falle con `TenantMarkedSessionError` en vez de dejar que el listener global
+  filtre la búsqueda en silencio —hasta un `select` de una sola columna— y el webhook no se
+  autentique por un motivo que nadie puede ver. El límite 2 del docstring de
+  `_scope_statement_to_tenant` dice qué le hace una sesión marcada a esta consulta.
+- THE SYSTEM SHALL declarar esta lectura en la enumeración que el sistema guarda **en un solo
+  sitio** —el conjunto de llamantes de `require_unmarked_session`, afirmado por
+  `backend/tests/test_unscoped_reads.py`— en lugar de reenunciar aquí cuántas hay. Esta capability
+  estuvo **fuera** de ese censo hasta que el panel de review de `rule11-ownership-single-source`
+  (2026-08-18) la encontró: la convención de nombrado `*_globally` no la alcanza, porque ni lleva
+  el sufijo ni vive en `auth/`. Los drenajes de cola de `webhook_events` **no** pertenecen a ese
+  censo y no llaman al guard: también exigen sesión sin marcar, pero por otro motivo —su
+  `tenant_id` es nullable y una sesión marcada esconde sus filas `NULL` sin error—, y esa frontera
+  la declara el propio test.
 - WHEN la autenticación de la sección siguiente se supera, THE SYSTEM SHALL responder `202` **sin
   cuerpo alguno** — ni de negocio ni de diagnóstico.
 - THE SYSTEM SHALL redactar el segmento del token en el log de acceso del proceso, y SHALL usar el
