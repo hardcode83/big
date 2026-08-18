@@ -142,4 +142,8 @@ timeline es evidencia de cambios, no de peticiones.
 - **La API no sale a internet** todavía: el túnel enruta solo al frontend. Para probarla contra
   dev hace falta un túnel SSH (`infra/environments/dev/RUNBOOK.md` §7.4). Lo cambia la entrada
   `api-ingress-routing`.
-- **No hay frontend de reservas**: llega con `dashboard-web`.
+- **Frontend read-only** (`reservations-web`, archivado): la pantalla `/reservations` lista las
+  reservas del tenant con filtros por `status` y rango de fechas `date_from`/`date_to`
+  (D4) y paginación; `/reservations/[id]` muestra el detalle. La escritura
+  (`POST`/`PATCH`/`DELETE`) sigue fuera de alcance desde la web y pertenece a su
+  propia entrada.

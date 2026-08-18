@@ -26,6 +26,10 @@
       "title": "Reservations",
       "description": "Reservation list and detail."
     },
+    "reservation-detail": {
+      "title": "Reservation detail",
+      "description": "Detailed information for a reservation."
+    },
     "cleaning": {
       "title": "Cleaning",
       "description": "Cleaning tasks and their coordination."

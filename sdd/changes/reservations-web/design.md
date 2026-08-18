@@ -66,14 +66,14 @@ La query key del listado se construye como `reservationsKeys.list(tenantId, filt
 - *Expandir la fila al click para mostrar campos extra* — duplica la ruta `/reservations/[id]` sin ganar nada que el detalle no dé ya; el comportamiento canónico es navegar al detalle, que es deep-linkable.
 - *Ampliar a `/properties` o `/dashboard/properties` para conseguir el nombre* — fuera de scope, requiere aprobación explícita.
 
-### D6 — Ruta de detalle sin `href` ni `navigationGroup`, y la lista de PRD §24 se queda como está
+### D6 — Ruta de detalle sin `href` ni `navigationGroup`, simétrica con `property-detail`
 
-**Chosen:** Añadir el descriptor de `reservation-detail` en `route-registry.ts` con `pattern: "/reservations/[id]"`, `match: "exact"`, **sin** `href` y **sin** `navigationGroup` — replicando `property-detail` (`route-registry.ts:114-122`). Las claves `routes.reservation-detail.{title,description}` se crean en los dos locales, y la lista `PRD_24_SURFACES` de `route-registry.test.ts` se queda como está: ya contiene `/reservations` y eso es lo que verifica, no contiene `/properties/[id]`-con-id- concreto ni lo va a contener el nuevo id — la lista es de **superficies** de navegación, no de patterns.
+**Chosen:** Añadir el descriptor de `reservation-detail` en `route-registry.ts` con `pattern: "/reservations/[id]"`, `match: "exact"`, **sin** `href` y **sin** `navigationGroup` — replicando `property-detail` (`route-registry.ts:114-122`). Las claves `routes.reservation-detail.{title,description}` se crean en los dos locales, y la lista `PRD_24_SURFACES` de `route-registry.test.ts` se **extiende** con `/reservations/[id]`, igual que ya contiene `/properties/[id]`: la lista es de **superficies de navegación** con id, y la asimetría de excluir el hijo parametrizado sería una sorpresa para el siguiente descriptor detail.
 
-**Why:** Replicar `property-detail` evita tres regresiones a la vez (las suites de `route-registry`, `route-metadata` y `breadcrumbs` cubren el contrato, y un descriptor mal formado las pone en rojo). Modificar la lista de superficies para añadir `/reservations/[id]` la desincronizaría del precedent `/properties/[id]`, que tampoco aparece como superficie con id — la suite prueba la ruta padre, no la hija parametrizada.
+**Why:** Replicar `property-detail` evita tres regresiones a la vez (las suites de `route-registry`, `route-metadata` y `breadcrumbs` cubren el contrato, y un descriptor mal formado las pone en rojo). El test "covers exactly the PRD §24 surfaces" compara `routeRegistry.map(r => r.pattern).sort()` con la lista, así que si el descriptor entra al registro y la lista no se actualiza, el test falla en rojo por construcción — no hay forma de saltarse la cobertura. Incluir el id en la lista mantiene la simetría con `properties/[id]`, que ya lo tiene, y deja al siguiente detail route con un precedent claro.
 
 **Rejected:**
-- *Añadir `/reservations/[id]` a `PRD_24_SURFACES`* — introduce una inconsistencia con `properties`, que tampoco está.
+- *Dejar `PRD_24_SURFACES` sin `/reservations/[id]`* — el test "covers exactly..." fallaría en rojo; el precedent de `/properties/[id]` es la postura simétrica.
 - *Poner `navigationGroup` y `href` en la ruta de detalle* — la haría aparecer en la barra lateral, que no es lo que la spec pide ni lo que `property-detail` hace.
 
 ## Changes by area
@@ -88,7 +88,7 @@ La query key del listado se construye como `reservationsKeys.list(tenantId, filt
 | Data | `frontend/features/reservations/data/http/http-reservations-source.ts` | New: `HttpReservationsSource` with `listReservations` and `getReservation`, plus `mapReservationSummary`, `mapReservationDetail`, `mapGuestSummary`. |
 | Data | `frontend/features/reservations/data/http/http-reservations-source.test.ts` | New: unit tests for the two methods (mappers + paths). |
 | Hooks | `frontend/features/reservations/hooks/query-keys.ts` | New: `reservationsKeys` (list, detail) using `tenantScopedKey`. |
-| Hooks | `frontend/features/reservations/hooks/use-reservations.ts` | New: `useReservations(filters)` and `useReservation(id)` with `retry` policy from `use-dashboard-data.ts:35-40`. |
+| Hooks | `frontend/features/reservations/hooks/use-reservations.ts` | New: `useReservations(filters)` and `useReservation(id)` with `retry: retryPolicy` importado desde `@/lib/api/retry-policy` (módulo compartido en `main`; precedent: `frontend/features/dashboard/hooks/use-dashboard-data.ts:6` y `frontend/features/guest-portal/hooks/use-checkin.ts:5`). |
 | Hooks | `frontend/features/reservations/hooks/use-reservations.test.tsx` | New: hook tests against a mocked `HttpReservationsSource` (or a fake inline). |
 | Components | `frontend/features/reservations/components/list/reservations-view.tsx` | New: client view that consumes `useReservations`, renders tabla con paginación y estado vacío/error. |
 | Components | `frontend/features/reservations/components/list/reservations-view.test.tsx` | New: render tests (loading / loaded / empty / error). |
