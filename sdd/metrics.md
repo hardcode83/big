@@ -47,4 +47,4 @@
 | messaging-ai | new, design, tasks, run, review, ship, archive | 598014 | 1359371 | 344576885 | 229.7562 | 2026-08-15 | 2026-08-17 |
 | seed-data-demo-extension | new, design, tasks, run, review, ship, archive | 639168 | 1539713 | 404776963 | 259.5022 | 2026-08-16 | 2026-08-17 |
 | channex-validation-limits | new, design, tasks, run, review, ship, archive | 87208 | 216609 | 27823773 | 26.1853 | 2026-08-17 | 2026-08-17 |
-| compose-stacks-diagnostic | new, design, tasks, run, review, ship | 106858 | 367039 | 43879514 | 38.9437 | 2026-08-17 | — |
+| compose-stacks-diagnostic | new, design, tasks, run, review, ship, archive | 106930 | 389606 | 48193658 | 42.6715 | 2026-08-17 | 2026-08-18 |
