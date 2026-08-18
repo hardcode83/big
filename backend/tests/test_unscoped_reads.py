@@ -200,10 +200,16 @@ def test_what_this_census_does_not_catch() -> None:
     five declared names are distinct.
 
     The naming convention does not close it either, and that is measured rather than assumed:
-    `*_globally` is already non-exhaustive, because **three of the five** declared reads do not
-    carry the suffix — the portal's, `cleaning`'s and `integrations`'. Two specs say so, and the
-    third is the one that spent two changes outside the census: a convention that names only two
-    of five is not a search you can trust to find the rest.
+    `*_globally` is already non-exhaustive, because **most** of the declared reads do not carry
+    the suffix — the portal's, `cleaning`'s and `integrations`'. Two specs say so, and the third
+    is the one that spent two changes outside the census: a convention that names only the
+    `*_globally` pair is not a search you can trust to find the rest.
+
+    No count in that paragraph, deliberately, and the reason is worth keeping because it is
+    subtle: the assertion below pins the *unsuffixed names*, not how many reads there are. A sixth
+    read called `*_globally` would be added to `DECLARED_UNSCOPED_READS`, leave `unsuffixed`
+    byte-identical, and keep the suite green while any "N of M" written here went false. The
+    numerator is defended; a denominator would not be.
 
     What does cover it is a human reading the diff: any `select` without a tenant clause in an
     adapter is visible in review, and the tenancy panel has it on its list. This test exists so
