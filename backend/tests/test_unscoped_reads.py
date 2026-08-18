@@ -4,12 +4,15 @@ The system's cross-tenant reads used to be counted in prose, in the docstring of
 `SqlAlchemyUserRepository.find_by_email_globally`, which four specs cited as "the one place
 that count is stated". It went stale three times: it said "THE ONLY" until `guest-portal-api`
 added a second, then "THE TWO" twice over in parallel branches, and it was still saying
-"ONE OF THE THREE" while `locate_without_tenant_scoping` had made it four.
+"ONE OF THE THREE" while `locate_without_tenant_scoping` had made it four. It was **five** all
+along: the review panel of `rule11-ownership-single-source` found `find_by_token_hash` outside
+the count, which is the fourth time that numeral was wrong and the reason it is no longer written
+anywhere a human maintains it.
 
 That count is the audit control for rule 1 of `steering/security.md`, so it stops being prose
 here. The set of callers of `require_unmarked_session` is the census of one class of read: the
 ones where an anonymous caller presents a credential and the row itself resolves the tenant.
-Asserted below against the declared four — adding a caller without declaring it is red,
+Asserted below against the five declared — adding a caller without declaring it is red,
 removing a call is red.
 
 **What this census is NOT is a list of every query in the system that runs without a tenant**,
@@ -41,17 +44,25 @@ DECLARED_UNSCOPED_READS = frozenset(
         ("auth/infrastructure/repositories.py", "consume_globally"),
         ("guests/infrastructure/portal_repositories.py", "find_live_by_token_hash"),
         ("cleaning/infrastructure/repositories.py", "locate_without_tenant_scoping"),
+        # The fifth, and the reason this set is five and not four: the review panel of
+        # `rule11-ownership-single-source` found it outside the census while three prose sites
+        # claimed the census WAS the class. An incoming webhook carries no JWT, so the row
+        # resolves the tenant — structurally identical to the portal's token lookup above.
+        ("integrations/infrastructure/repositories.py", "find_by_token_hash"),
     }
 )
 
 
-#: Reads that require an unmarked session and do NOT call the guard, all in
+#: Reads that require an unmarked session and do NOT call the guard, both in
 #: `integrations/infrastructure/repositories.py`. Named so the census's green cannot be read as
-#: covering every unscoped read in the system; see `test_what_this_census_does_not_catch` for
-#: why each is outside and why closing the gap is not this change's to do.
-KNOWN_UNGUARDED_UNMARKED_READS = frozenset(
-    {"select_pending", "lease", "find_by_token_hash"}
-)
+#: covering every query in the system that runs without a tenant; see
+#: `test_what_this_census_does_not_catch` for why they are outside.
+#:
+#: `find_by_token_hash` was here too until the review panel established it was the SAME class as
+#: the declared reads rather than a different one. It is now guarded and declared above — which
+#: is the outcome this set exists to force: an entry is either a different class with a written
+#: reason, or a gap someone closes.
+KNOWN_UNGUARDED_UNMARKED_READS = frozenset({"select_pending", "lease"})
 
 
 def _app_modules() -> list[Path]:
@@ -150,32 +161,31 @@ def test_the_scan_finds_a_caller_and_ignores_what_it_should() -> None:
 def test_what_this_census_does_not_catch() -> None:
     """R3.4's obligation, applied to this guard: say what the green does not cover.
 
-    **First, and measured rather than hypothetical: three reads that require an unmarked session
-    exist today and are not in the census above.** All three are in
+    **First, and measured rather than hypothetical: two reads that require an unmarked session
+    exist today and are deliberately not in the census above.** Both are in
     `app/integrations/infrastructure/repositories.py`:
 
-    - `select_pending` and `lease` MUST run unmarked because `webhook_events.tenant_id` is
-      nullable and a marked session hides `tenant_id IS NULL` rows *without erroring* — the same
-      silent failure this guard exists to convert into a `raise`. They are a different class from
-      the four above: nothing about them resolves a tenant, they drain a queue that deliberately
-      holds unattributed rows. `scheduler/tasks.py` opens their session unmarked, and
-      `test_tenant_filter.py` pins it (`test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`)
-      — so the invariant is held by a test, just not by this one.
-    - `find_by_token_hash` IS the same class as the four (an incoming webhook carries no JWT, so
-      the row resolves the tenant) and is the one genuine omission from the census. Its safety
-      today rests on the shape of its key — 256 bits of CSPRNG behind a `UNIQUE` index — not on
-      a guard.
+    `select_pending` and `lease` MUST run unmarked because `webhook_events.tenant_id` is
+    nullable and a marked session hides `tenant_id IS NULL` rows *without erroring* — the same
+    silent failure this guard exists to convert into a `raise`. They are a **different class**
+    from the five above: nothing about them resolves a tenant, they drain a queue that
+    deliberately holds unattributed rows, so "was this session marked?" is not the question that
+    protects them. `scheduler/tasks.py` opens their session unmarked, and `test_tenant_filter.py`
+    pins it (`test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`) — the
+    invariant is held by a test, just not by this one.
 
-    Extending the guard to those three changes behaviour on the webhook path, so it is not this
-    change's to make; it is written here so the next reader inherits the fact instead of
-    rediscovering it. The earlier version of this docstring called the residual "a **fifth**
-    unscoped read that is entirely new", which was wrong in the way that matters: the fifth
-    already existed, and calling it hypothetical is what let a green here read as coverage of
-    every unscoped read in the system.
+    **The history matters more than the list, because it is what the list is for.** This
+    docstring first called the residual "a **fifth** unscoped read that is entirely new", which
+    was false in the way that counts: the fifth already existed. It was `find_by_token_hash`, in
+    this same module. Naming it as merely hypothetical is what let a green here read as coverage
+    of every unscoped read in the system, and the review panel caught it. It was then listed here
+    as a known gap — and a gap that is listed is a gap someone can close, which is what happened:
+    it is guarded and declared above. The residual list earns its place by being the thing that
+    makes an omission actionable, not by being complete.
 
-    Beyond those, the residual is a genuinely new read that neither calls the guard nor appears
-    above. Nothing here can reclaim it: the scan is anchored on the guard, so a `select` with no
-    `tenant_id` written from scratch in an adapter is invisible to it.
+    Beyond those two, the residual is a genuinely new read that neither calls the guard nor
+    appears above. Nothing here can reclaim it: the scan is anchored on the guard, so a `select`
+    with no `tenant_id` written from scratch in an adapter is invisible to it.
 
     What is NO LONGER a residual, because the security panel of section 1 found it: a read that
     calls the guard as `db.require_unmarked_session(...)` instead of by imported name. That one
@@ -187,11 +197,13 @@ def test_what_this_census_does_not_catch() -> None:
     SECOND guarded read that shares both its module and its method name with a declared one
     (a different class, same method name), which the existing entry absorbs — the census is
     keyed on `(module, function name)`, not on the class. No such collision exists today; the
-    four declared names are distinct.
+    five declared names are distinct.
 
     The naming convention does not close it either, and that is measured rather than assumed:
-    `*_globally` is already non-exhaustive, because two of the four declared reads do not carry
-    the suffix — the portal's and `cleaning`'s. Two specs say so.
+    `*_globally` is already non-exhaustive, because **three of the five** declared reads do not
+    carry the suffix — the portal's, `cleaning`'s and `integrations`'. Two specs say so, and the
+    third is the one that spent two changes outside the census: a convention that names only two
+    of five is not a search you can trust to find the rest.
 
     What does cover it is a human reading the diff: any `select` without a tenant clause in an
     adapter is visible in review, and the tenancy panel has it on its list. This test exists so
@@ -199,9 +211,13 @@ def test_what_this_census_does_not_catch() -> None:
     """
     unsuffixed = {read for _, read in DECLARED_UNSCOPED_READS if not read.endswith("_globally")}
 
-    assert unsuffixed == {"find_live_by_token_hash", "locate_without_tenant_scoping"}
+    assert unsuffixed == {
+        "find_live_by_token_hash",
+        "locate_without_tenant_scoping",
+        "find_by_token_hash",
+    }
 
-    # The three reads named above are pinned, not just described. A docstring that lists them
+    # The reads named above are pinned, not just described. A docstring that lists them
     # would go stale the moment one is guarded or renamed — which is the pathology this whole
     # change exists to end, so the disclosure gets the same treatment as the census itself.
     outside = KNOWN_UNGUARDED_UNMARKED_READS

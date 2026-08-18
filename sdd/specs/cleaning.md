@@ -303,7 +303,7 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 - **Esta capacidad aporta una de las lecturas sin scope de tenant del sistema**:
   `SqlAlchemyUnscopedCleaningPhotoLocationQuery.locate_without_tenant_scoping`, que sirve la ruta
   anónima de fotos firmadas. No lleva el sufijo `*_globally` ni vive en `auth/`, y por eso estuvo
-  fuera del recuento en prosa durante tres changes —decía «tres» cuando eran cuatro—, hasta que
+  fuera del recuento en prosa durante tres changes —decía «tres» cuando eran cinco—, hasta que
   `rule11-ownership-single-source` (2026-08-17) lo sustituyó por el conjunto de llamantes de
   `require_unmarked_session`, afirmado por `backend/tests/test_unscoped_reads.py`. Que faltara en
   la enumeración es justamente lo que esta línea existe para que no vuelva a pasar en silencio.

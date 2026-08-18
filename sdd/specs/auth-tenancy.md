@@ -44,11 +44,15 @@ tocar la base de datos a mano.
 - THE SYSTEM SHALL mantener su **enumeración en un solo sitio y en forma ejecutable** —el
   conjunto de llamantes de `require_unmarked_session` (`backend/app/core/db.py`), afirmado por
   `backend/tests/test_unscoped_reads.py`—, y todo lo demás la cita en vez de repetir el
-  recuento. Ese censo cubre **una clase**: las lecturas que resuelven el tenant a partir de la
-  fila que leen. No es el conjunto de toda consulta que corre sin tenant —los drenajes de cola
-  de `webhook_events`, cuyo `tenant_id` es nullable, exigen sesión sin marcar por otro motivo y
-  no llaman al guard—, y esa frontera la declara el propio test en vez de dejarla implícita. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
-  `rule11-ownership-single-source` (2026-08-17): decía «tres» cuando eran cuatro. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
+  recuento. Ese censo cubre **una clase completa**: las lecturas que resuelven el tenant a partir
+  de la fila que leen — las cinco, desde que el panel de review de
+  `rule11-ownership-single-source` encontró que `find_by_token_hash` estaba fuera. No es el
+  conjunto de toda consulta que corre sin tenant: los drenajes de cola de `webhook_events`, cuyo
+  `tenant_id` es nullable, exigen sesión sin marcar por otro motivo —una sesión marcada esconde
+  sus filas `NULL` sin error— y no llaman al guard. Esa frontera la declara el propio test en vez
+  de dejarla implícita. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
+  `rule11-ownership-single-source` (2026-08-17): decía «tres» cuando eran cinco —el recuento en
+  prosa se equivocó cuatro veces, la última mientras se le buscaba sustituto—. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
   quedó obsoleta dos veces por estar copiada: `auth-account-recovery` y `guest-portal-api`
   añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que
   el merge dejó tres consultas y un número que decía dos. **La auditoría por `grep` del sufijo

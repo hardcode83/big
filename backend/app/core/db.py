@@ -208,17 +208,16 @@ def require_unmarked_session(session: AsyncSession, *, read: str) -> None:
     resolve a tenant out of the row they read (`tests/test_unscoped_reads.py` pins it).
 
     That census is not the set of every query in the system that runs without a tenant, and
-    the difference is written down rather than left to be discovered. Three reads in
-    `app/integrations/infrastructure/repositories.py` require an unmarked session and do not
-    call this guard:
+    the difference is written down rather than left to be discovered: `select_pending` and
+    `lease` (`app/integrations/infrastructure/repositories.py`) also require an unmarked session
+    and do not call this guard. They are a **different class** — they drain a queue that
+    deliberately holds `tenant_id IS NULL` rows, and a marked session hides those without
+    erroring, so what protects them is not this question. `test_tenant_filter.py` pins them.
 
-    - `select_pending` and `lease` are a different class — they drain a queue that deliberately
-      holds `tenant_id IS NULL` rows, and a marked session hides those without erroring.
-    - `find_by_token_hash` is the SAME class as the four (an incoming webhook carries no JWT,
-      so the row resolves the tenant). It is a genuine omission, not a different case, and it
-      is named here rather than in a footnote for that reason.
-
-    `tests/test_unscoped_reads.py` pins all three and records why closing the gap was deferred.
+    `tests/test_unscoped_reads.py` holds both the census and that boundary. Worth knowing why it
+    holds the second: `find_by_token_hash` sat outside the census for two changes while three
+    prose sites claimed the census was the whole class. Declaring the boundary is what turned
+    that from an invisible gap into a one-line fix.
 
     It lives here and not in the four adapters because `tests/test_session_marking.py` bans
     every access to `session.info` in `app/` outside this module — that ban is the guard

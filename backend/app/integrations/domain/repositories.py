@@ -152,6 +152,10 @@ class WebhookEndpointRepository(Protocol):
     never marked and filters by nothing but the hash, which is only safe because the hash is a
     256-bit random value and the method returns exactly one row (`UNIQUE`).
 
+    That "never marked" is enforced and not merely intended: the adapter calls
+    `require_unmarked_session`, and `tests/test_unscoped_reads.py` holds the census of the reads
+    that do. Do not implement this port against a session an authenticated request has bound.
+
     Every other method takes `tenant_id` explicitly, like the rest of this module's ports.
     """
 

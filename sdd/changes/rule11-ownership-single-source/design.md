@@ -404,20 +404,33 @@ la patología, que es literalmente el argumento de cabecera del proposal.
 > tenant de la fila igual que las cuatro, y no llama al guard. Su seguridad hoy descansa en la
 > forma de la clave (256 bits de CSPRNG tras un índice `UNIQUE`), no en el guard.
 >
-> **Lo elegido: acotar la afirmación en los ocho sitios, no extender el guard**, y dejar la
-> omisión declarada en vez de tapada. `KNOWN_UNGUARDED_UNMARKED_READS`
-> (`backend/tests/test_unscoped_reads.py`) fija las tres lecturas en las dos direcciones —
-> enrojece si una desaparece y enrojece si alguna empieza a llamar al guard—, así que la
-> declaración no es prosa que pueda podrirse.
+> **Lo elegido, en dos pasos y con la medición entre ellos.**
 >
-> **Por qué `find_by_token_hash` no se guarda aquí, dicho como deuda y no como decisión cerrada**:
-> arquitectura señaló con razón que su único llamante de producción
-> (`app/integrations/application/webhooks.py:267`, ruta anónima de webhook) ya corre siempre sin
-> marcar, así que añadir el guard sería una red de seguridad y no un cambio de comportamiento. No
-> se hizo porque **hay trece sitios de test que la invocan directamente sobre `db_session`**
-> (`tests/integrations/test_webhook_endpoints.py`, `test_webhook_provisioning.py`) y el demonio de
-> Docker estaba caído en esta fase, así que no se pudo demostrar que la suite siga verde. Guardarla
-> es el siguiente paso natural y requiere una pasada de suite, no un debate.
+> **Primero** se acotó la afirmación en los ocho sitios y se declaró la omisión en vez de taparla:
+> `KNOWN_UNGUARDED_UNMARKED_READS` (`backend/tests/test_unscoped_reads.py`) fija las lecturas de
+> fuera en las dos direcciones —enrojece si una desaparece y enrojece si alguna empieza a llamar al
+> guard—, así que la declaración no es prosa que pueda podrirse. `find_by_token_hash` entró ahí
+> como deuda, no como decisión cerrada, porque en ese momento el demonio de Docker estaba caído y
+> no se podía demostrar que guardarla dejara la suite verde con **trece sitios de test** que la
+> invocan directamente sobre `db_session`.
+>
+> **Después se midió, y la medición cerró el debate**: con el guard puesto,
+> `tests/integrations` da **927 pasados, 0 fallos**. Los trece sitios atacan el repositorio
+> directamente sobre `db_session`, sin capa HTTP, así que la sesión nunca estuvo marcada y guardarla
+> no cambia nada observable. Sólo enrojecían los dos tests del censo, que es su diseño: obligan a
+> declarar el movimiento en vez de permitirlo en silencio.
+>
+> **Así que se guarda.** `find_by_token_hash` llama a `require_unmarked_session` y pasa de
+> `KNOWN_UNGUARDED_UNMARKED_READS` a `DECLARED_UNSCOPED_READS`; la clase 1 tiene **cinco** miembros
+> y el censo los cubre todos. Los drenajes de cola siguen fuera, por su motivo escrito.
+>
+> **Lo que esto enseña sobre R6.1, y es la lección que sobrevive al change**: su premisa —«las
+> cuatro lecturas no scoped del sistema»— era falsa cuando se escribió. No lo descubrió el barrido
+> ni el guardián, sino un panel leyendo un módulo que el proposal no miraba. Tres rondas de review
+> gastadas acotando prosa alrededor de un número equivocado, cuando el arreglo eran tres líneas.
+> La forma correcta de escribir un requisito así no es enumerar los miembros, es declarar la
+> propiedad que los define y dejar que un test los cuente — que es exactamente lo que D9 hace
+> ahora y lo que R6.1 no hizo.
 
 ### D10 — Las dos copias de `cleaning` citan la precondición real y el límite 2
 
