@@ -8,10 +8,16 @@ ya no está registrado en git). Informa; no actúa.
 
 Lista negra — prohibido en este script, y no es cosmética:
 
-- `docker inspect` sin `--format`: su salida por defecto incluye `.Config.Env`.
-- `docker compose config`, en cualquier forma: **resuelve e imprime los valores del `.env`**
-  (medido sobre el stack vivo con `JWT_SECRET_KEY`, `POSTGRES_PASSWORD` y `ENCRYPTION_KEY`
-  dentro).
+- `docker inspect` sin `--format`: su salida por defecto incluye `.Config.Env`. Sin excepción:
+  aquí no hay bandera que acote nada.
+- `docker compose config` **sin `--no-interpolate --no-env-resolution`**: en su forma desnuda
+  **resuelve e imprime los valores del `.env`** (medido sobre el stack vivo con `JWT_SECRET_KEY`,
+  `POSTGRES_PASSWORD` y `ENCRYPTION_KEY` dentro). Acotado por **forma** y no por sujeto en el
+  change `compose-ports-guard` (2026-08-18), cuando `scripts/compose-ports.py` necesitó `config`
+  como única fuente correcta: con las dos banderas la salida no contiene ningún valor del `.env`
+  (medido), y una lista de banderas es comprobable, mientras que «prohibido salvo para este
+  script» habría sido una excepción nominal que el siguiente script pediría también. **Este**
+  script sigue sin necesitarlo en ninguna forma: hace su trabajo con `docker compose ls`.
 - `docker ps --format '{{.Labels}}'` y cualquier atribución por etiquetas de contenedor:
   cualquier contenedor de la máquina las pone con `docker run --label`.
 - Cualquier volcado de salida completa de un comando ajeno.

@@ -33,6 +33,7 @@ Categorías:
 - [x] ingress-https-hardening — [INFRA] cierra los 3 hallazgos **bloqueantes** que el panel de `/sdd:review` encontró en `ingress-https-dev` … → changes/archive/2026-08-04-ingress-https-hardening/
 - [x] local-dev-network-hardening — [INFRA] acotar a loopback los puertos que `docker-compose.yml` publica en `0.0.0.0` (`5432:5432` de Postgres y `6379:6379` de Redis), igual que ya hace `docker-compose.deploy.yml` con `127.0.0.1:8000` y `127.0.0.1:3000`. → changes/archive/2026-08-05-local-dev-network-hardening/
 - [ ] compose-ports-guard — [INFRA] **la comprobación automática de la postura de red del compose local**, separada de `local-dev-network-hardening` el 2026-08-05 tras cinco rondas de revisión.
+  completes: local-dev-network-hardening · size: L · kind: infra
 
   **Lo que la guardia debe cumplir** (los seis criterios que R5 llegó a tener, ya depurados por el panel): (1) falla nombrando servicio y mapeo cuando cualquier puerto se publica sin acotar a `127.0.0.1`; (2) es reproducible por cualquiera y su resultado es función **solo** del repositorio, no del entorno de quien la ejecuta; (3) exime exactamente dos pares **servicio+puerto** —`backend:8000` y `frontend:3000`—, nunca servicios enteros, porque un puerto extra en un servicio exento debe fallar igual; (4) evalúa los servicios bajo `profiles:` estén o no activos; (5) rechaza `network_mode: host`, que publica todo sin declarar mapeo alguno; (6) **nunca degrada a verde**: cualquier fallo de la cadena es rojo con mensaje propio.
 

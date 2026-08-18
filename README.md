@@ -4,9 +4,9 @@ Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas t
 
 ## Arrancar en local
 
-Requisitos: Docker + **Docker Compose ≥ 2.24**, **git ≥ 2.31**, `make`.
+Requisitos: Docker + **Docker Compose ≥ 2.35.0**, **git ≥ 2.31**, `make`.
 
-Los dos suelos de versión son del soporte para varios stacks a la vez: Compose 2.24 introdujo el tag `!reset` que usa `docker-compose.worktree.yml`, y git 2.31 el `--path-format` con el que `make up` distingue un worktree enlazado del principal. Por debajo del suelo de git la detección falla hacia «publicar», así que un worktree chocaría de puertos en vez de arrancar sin ellos.
+De dónde salen los suelos: git 2.31 trae el `--path-format` con el que `make up` distingue un worktree enlazado del principal (por debajo, la detección falla hacia «publicar», así que un worktree chocaría de puertos en vez de arrancar sin ellos). El de Compose lo fijan dos cosas y manda la mayor: 2.24 introdujo el tag `!reset` que usa `docker-compose.worktree.yml`, y **2.35.0 la bandera `--no-env-resolution`** con la que `make check-compose-ports` inspecciona la postura de red sin necesitar `.env`. Por debajo del suelo esa guardia sale en rojo avisando de la versión, no en verde.
 
 ```bash
 make up   # levanta todo el stack: postgres, redis, backend, worker, beat, frontend
@@ -29,6 +29,7 @@ make seed-demo         # llena ese tenant con el dataset de demo (ver abajo); ex
 make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)
+make check-compose-ports # comprueba la postura de red del compose local (ver abajo)
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
@@ -54,11 +55,12 @@ deliberado: es lo que permite abrir la app desde un móvil real por la IP de tu 
 como se comprueba el diseño mobile-first. Así que el stack local no es "invisible desde la
 red" — la UI y la API sí lo son; el acceso directo al datastore, no.
 
-**Esta postura no tiene todavía comprobación automática**: si alguien publica un puerto sin el
-prefijo `127.0.0.1:`, hoy solo lo atrapa la revisión del diff. La guardia que lo comprobaría en
-cada PR es una entrada propia del roadmap (`compose-ports-guard`), separada de este cambio
-porque construirla bien resultó ser un problema con más fondo del que parece — ver el análisis
-heredado en esa entrada.
+**Esta postura se comprueba sola**: `make check-compose-ports` en local, y el check `compose-ports`
+en cada Pull Request. Si alguien publica un puerto sin el prefijo `127.0.0.1:`, sale en rojo
+nombrando el servicio y el mapeo, en vez de depender de que alguien lo vea en el diff. Exime
+exactamente los dos pares del párrafo anterior —`backend:8000` y `frontend:3000`—, y por **par**, no
+por servicio: un puerto extra en `backend` falla igual. Contrato completo y limitaciones conocidas en
+`sdd/specs/local-environment.md` §«Guardia de la postura de red».
 
 **Ojo con el alcance, para no leerlo de más**: lo que esto protege es el acceso *desde la red*.
 Redis corre sin `requirepass`, así que otro proceso de tu propia máquina sí puede tocar esos
@@ -71,7 +73,7 @@ mapeo de puertos declarado** — no solo ninguno con puerto de host explícito, 
 `ports:` que Docker publica en un puerto efímero sin declararlo. Los mapeos siguen
 declarados en `docker-compose.yml` a propósito, y no en un fichero aparte: es esa declaración la que
 describe la postura de red del proyecto, la que ve un `docker compose config` desnudo y la que
-`compose-ports-guard` podrá comprobar.
+`make check-compose-ports` comprueba en cada Pull Request.
 
 **Consecuencia práctica para los `docker compose` desnudos de este README**, y conviene ser preciso
 porque no afecta a todos igual. En el worktree principal valen todos, porque ahí `make` tampoco pasa

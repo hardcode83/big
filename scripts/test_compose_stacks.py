@@ -448,7 +448,19 @@ def test_main_exits_zero_with_orphans(tmp_path):
 
 
 def test_main_attributes_the_live_worktrees_of_this_repository(tmp_path):
-    """El propio worktree desde el que corre la suite sale `vivo` con su rama, no huérfano."""
+    """El propio worktree desde el que corre la suite sale `vivo` con su rama, no huérfano.
+
+    La rama se asierta **condicionada a que exista**, y no es una concesión: `parse_worktrees`
+    la devuelve `None` cuando el worktree está en HEAD desprendido, y `render` omite entonces la
+    línea `rama:` a propósito (`compose-stacks.py`, bloque de `origen`/`worktree`/`rama`). Es lo
+    que pasa en CI: `actions/checkout` deja el clon en HEAD desprendido, así que la redacción
+    anterior —`f"rama: {roots[ROOT]}"` sin condición— comparaba contra el literal `"rama: None"`
+    y fallaba. Lo que hay que probar es lo mismo en los dos entornos: con rama, que se nombra;
+    sin ella, que **no** se inventa una línea. Salió a la luz en `compose-ports-guard`
+    (2026-08-18), el primer change que lleva `scripts/test_*.py` a CI (R6.4): el test llevaba
+    desde `compose-stacks-diagnostic` pasando solo porque nunca había corrido fuera de una
+    máquina de desarrollo.
+    """
     main_root, roots = module.parse_worktrees(
         subprocess.run(
             module.WORKTREE_COMMAND, cwd=ROOT, text=True, capture_output=True, check=True
@@ -466,7 +478,14 @@ def test_main_attributes_the_live_worktrees_of_this_repository(tmp_path):
     result = run_script(fake_path(tmp_path, payload=payload))
     assert result.returncode == 0, result.stderr
     assert "clase: vivo" in result.stdout
-    assert f"rama: {roots[ROOT]}" in result.stdout
+    branch = roots[ROOT]
+    if branch is None:
+        assert "rama:" not in result.stdout, (
+            "sin rama (HEAD desprendido) no debe aparecer ninguna línea `rama:`: "
+            "inventarla sería atribuir a una rama que no existe"
+        )
+    else:
+        assert f"rama: {branch}" in result.stdout
     assert main_root in roots
 
 
