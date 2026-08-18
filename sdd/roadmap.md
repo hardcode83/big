@@ -48,7 +48,7 @@ Categorías:
 - [x] worktree-parallel-stack — [INFRA] **permitir varios stacks de dev a la vez**, para que dos sesiones concurrentes en worktrees distintos puedan correr tests. → changes/archive/2026-08-05-worktree-parallel-stack/
   completes: local-dev-network-hardening · size: M · kind: infra
 - [x] compose-stacks-diagnostic — [INFRA] **saber qué stacks de Compose hay vivos y cuáles son huérfanos** —su worktree ya no existe—, para recuperar el disco que retienen en silencio. Reencuadrada a la baja el 2026-08-17: la mitad de puertos caducó y con ella casi todo su modelo de amenaza (ver la nota). → changes/archive/2026-08-18-compose-stacks-diagnostic/
-  completes: worktree-parallel-stack · size: XS · kind: infra
+  completes: worktree-parallel-stack · size: S · kind: infra
 - [ ] tunnel-host-surface-hardening — [INFRA] **mitigar el residual de radio del túnel que `ingress-https-hardening` documentó y midió pero no cerró** (2026-08-04).
 - [x] app-version-visibility — [FE] **versión de build visible al abrir la app**, para saber qué está desplegado sin entrar en la VM. → changes/archive/2026-07-31-app-version-visibility/
 - [x] app-version-badge-date — [FE] el badge muestra la cadena **canónica completa** (`0.1.0+2026-07-31.5872022`) en vez de recortar la fecha de build. → changes/archive/2026-07-31-app-version-badge-date/
