@@ -194,8 +194,9 @@ def request_session_override(db_session):
     session on one shared connection keeps them visible, but `join_transaction_mode` turns a
     use case's `commit()` into a savepoint release — a suite-wide change of meaning that reds
     concurrency and atomicity tests in `scheduler`, `messaging`, `notifications` and
-    `integrations` that no unscoped read goes near. Both are the roadmap's
-    `test-session-per-request`, which is where that work belongs.
+    `integrations` that no unscoped read goes near. Both belong to the roadmap candidate design
+    D13 proposed under the name `test-session-per-request`, which `/sdd:archive` is what creates —
+    so there is no `sdd/roadmap/` file for it yet.
 
     Being test-only matters and is not a loophole: `tests/test_session_marking.py` bans this
     on `app/`, where un-marking mid-request would disable tenant scoping for the rest of a

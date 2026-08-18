@@ -44,7 +44,10 @@ tocar la base de datos a mano.
 - THE SYSTEM SHALL mantener su **enumeración en un solo sitio y en forma ejecutable** —el
   conjunto de llamantes de `require_unmarked_session` (`backend/app/core/db.py`), afirmado por
   `backend/tests/test_unscoped_reads.py`—, y todo lo demás la cita en vez de repetir el
-  recuento. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
+  recuento. Ese censo cubre **una clase**: las lecturas que resuelven el tenant a partir de la
+  fila que leen. No es el conjunto de toda consulta que corre sin tenant —los drenajes de cola
+  de `webhook_events`, cuyo `tenant_id` es nullable, exigen sesión sin marcar por otro motivo y
+  no llaman al guard—, y esa frontera la declara el propio test en vez de dejarla implícita. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
   `rule11-ownership-single-source` (2026-08-17): decía «tres» cuando eran cuatro. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
   quedó obsoleta dos veces por estar copiada: `auth-account-recovery` y `guest-portal-api`
   añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que

@@ -208,10 +208,17 @@ def require_unmarked_session(session: AsyncSession, *, read: str) -> None:
     resolve a tenant out of the row they read (`tests/test_unscoped_reads.py` pins it).
 
     That census is not the set of every query in the system that runs without a tenant, and
-    the difference is written down rather than left to be discovered: `select_pending` and
-    `lease` (`app/integrations/infrastructure/repositories.py`) must also run unmarked — a
-    marked session hides their `tenant_id IS NULL` rows without erroring — and they do not
-    call this guard. `tests/test_unscoped_reads.py` names them, and why they are not here.
+    the difference is written down rather than left to be discovered. Three reads in
+    `app/integrations/infrastructure/repositories.py` require an unmarked session and do not
+    call this guard:
+
+    - `select_pending` and `lease` are a different class — they drain a queue that deliberately
+      holds `tenant_id IS NULL` rows, and a marked session hides those without erroring.
+    - `find_by_token_hash` is the SAME class as the four (an incoming webhook carries no JWT,
+      so the row resolves the tenant). It is a genuine omission, not a different case, and it
+      is named here rather than in a footnote for that reason.
+
+    `tests/test_unscoped_reads.py` pins all three and records why closing the gap was deferred.
 
     It lives here and not in the four adapters because `tests/test_session_marking.py` bans
     every access to `session.info` in `app/` outside this module — that ban is the guard

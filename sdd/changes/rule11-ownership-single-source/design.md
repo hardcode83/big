@@ -386,6 +386,39 @@ de tenancy lo tiene en su lista.
 Rejected: mantener el recuento en el docstring y añadirle la cuarta — arregla la copia y no
 la patología, que es literalmente el argumento de cabecera del proposal.
 
+> **Enmienda de `/sdd:review` (2026-08-18, hallazgo del panel de seguridad, confirmado por
+> arquitectura).** Este apartado decía —y lo repetía la prosa que instaló en ocho sitios— que
+> «el conjunto de llamantes del guard **es** la enumeración» de las lecturas no scoped. **Eso es
+> falso, y falso por la misma clase de exceso que este change existe para eliminar.**
+>
+> Hay **dos clases** de lectura que exigen sesión sin marcar, y este censo cubre una:
+>
+> 1. **Las que resuelven el tenant a partir de la fila que leen** — las cuatro declaradas. Es la
+>    clase que el censo audita.
+> 2. **Los drenajes de cola sobre un `tenant_id` nullable** — `select_pending` y `lease`
+>    (`app/integrations/infrastructure/repositories.py`). Exigen sesión sin marcar por un motivo
+>    distinto: una sesión marcada esconde las filas `tenant_id IS NULL` sin error. No llaman al
+>    guard; los pina `test_tenant_filter.py`.
+>
+> Y hay **una omisión genuina de la clase 1**: `find_by_token_hash` (mismo módulo) resuelve el
+> tenant de la fila igual que las cuatro, y no llama al guard. Su seguridad hoy descansa en la
+> forma de la clave (256 bits de CSPRNG tras un índice `UNIQUE`), no en el guard.
+>
+> **Lo elegido: acotar la afirmación en los ocho sitios, no extender el guard**, y dejar la
+> omisión declarada en vez de tapada. `KNOWN_UNGUARDED_UNMARKED_READS`
+> (`backend/tests/test_unscoped_reads.py`) fija las tres lecturas en las dos direcciones —
+> enrojece si una desaparece y enrojece si alguna empieza a llamar al guard—, así que la
+> declaración no es prosa que pueda podrirse.
+>
+> **Por qué `find_by_token_hash` no se guarda aquí, dicho como deuda y no como decisión cerrada**:
+> arquitectura señaló con razón que su único llamante de producción
+> (`app/integrations/application/webhooks.py:267`, ruta anónima de webhook) ya corre siempre sin
+> marcar, así que añadir el guard sería una red de seguridad y no un cambio de comportamiento. No
+> se hizo porque **hay trece sitios de test que la invocan directamente sobre `db_session`**
+> (`tests/integrations/test_webhook_endpoints.py`, `test_webhook_provisioning.py`) y el demonio de
+> Docker estaba caído en esta fase, así que no se pudo demostrar que la suite siga verde. Guardarla
+> es el siguiente paso natural y requiere una pasada de suite, no un debate.
+
 ### D10 — Las dos copias de `cleaning` citan la precondición real y el límite 2
 
 **Elegido:** en `backend/app/cleaning/api/dependencies.py:298` y

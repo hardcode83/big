@@ -161,9 +161,10 @@ async def apply_plan(session: AsyncSession, plan: BootstrapPlan, hasher: BcryptP
         #
         # Deliberately through the PORT rather than a raw cross-tenant select: an unscoped
         # query is something the system accounts for one by one, and a hand-rolled one here
-        # would add to that list without appearing in it. The list is not prose: every
-        # unscoped read calls `require_unmarked_session` (`app/core/db.py`), and
-        # `tests/test_unscoped_reads.py` asserts that set is exactly the declared four.
+        # would add to that list without appearing in it. The list is not prose: the reads that
+        # resolve a tenant out of the row call `require_unmarked_session` (`app/core/db.py`), and
+        # `tests/test_unscoped_reads.py` asserts that set is exactly the declared four — and
+        # names the unmarked-session reads that fall outside that census.
         #
         # This comment used to say the audit was grep-based, over the two `*_globally` names.
         # `guest-portal-api` added a third unscoped query that carries neither name, so the

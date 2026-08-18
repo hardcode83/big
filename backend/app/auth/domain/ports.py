@@ -6,9 +6,10 @@ exceptions that serve anonymous endpoints, where there is no tenant yet. Two of 
 live on this port: `find_by_email_globally` (design D16 of `auth-tenancy`) and
 `consume_globally` (design D3 of `auth-account-recovery`).
 
-**Their enumeration is not here, and it is no longer prose anywhere.** Every unscoped read
-calls `require_unmarked_session` (`app/core/db.py`), so the set of its callers IS the
-enumeration, and `tests/test_unscoped_reads.py` asserts it. This paragraph used to say "two
+**Their enumeration is not here, and it is no longer prose anywhere.** The reads that resolve
+a tenant out of the row they read call `require_unmarked_session` (`app/core/db.py`), so the
+set of its callers is the audited census of that class — not of every query in the system that
+runs without a tenant, a distinction `tests/test_unscoped_reads.py` states and pins. This paragraph used to say "two
 deliberate exceptions… both named `*_globally` so a grep for that suffix enumerates every
 cross-tenant read": `guest-portal-api` added a third that lives on another port and is
 **not** named that way, so neither the count nor the suffix-grep held. It then pointed at
@@ -36,9 +37,10 @@ class UserRepository(Protocol):
     async def find_by_email_globally(self, email: str) -> User | None:
         """The only unscoped query behind THIS port (design D16).
 
-        There are others elsewhere, and **their enumeration is not prose**: every unscoped read
-        calls `require_unmarked_session` (`app/core/db.py`), so the set of its callers is the
-        enumeration, and `tests/test_unscoped_reads.py` asserts it. This sentence used to say
+        There are others elsewhere, and **their enumeration is not prose**: the reads that
+        resolve a tenant out of the row they read call `require_unmarked_session`
+        (`app/core/db.py`), so the set of its callers is the audited census of that class, and
+        `tests/test_unscoped_reads.py` asserts it — along with the reads it does not cover. This sentence used to say
         "two in total; both named `*_globally`" — `guest-portal-api` added a third that carries
         neither this port nor that suffix, so counting here was one of six copies of a fact
         that then had to be corrected in six places. It then deferred to one docstring as the
@@ -210,9 +212,10 @@ class PasswordResetTokenRepository(Protocol):
     ) -> "PasswordResetToken | None":
         """Spend a token if it is still spendable; return the row, or None (R3.2, design D1).
 
-        **One of the system's unscoped queries** — the set of them is the set of callers of
+        **One of the system's unscoped queries** — specifically one of those that resolve a
+        tenant out of the row they read, whose census is the set of callers of
         `require_unmarked_session` (`app/core/db.py`), asserted by
-        `tests/test_unscoped_reads.py`. This said "THE SECOND … so a grep for the two
+        `tests/test_unscoped_reads.py` together with the reads that fall outside it. This said "THE SECOND … so a grep for the two
         `*_globally` methods still enumerates every cross-tenant read that exists";
         `guest-portal-api` added a third that is not named that way, so neither the count nor
         the grep held, and the docstring this then deferred to went stale in its turn.

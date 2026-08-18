@@ -159,8 +159,8 @@ def test_what_this_census_does_not_catch() -> None:
       silent failure this guard exists to convert into a `raise`. They are a different class from
       the four above: nothing about them resolves a tenant, they drain a queue that deliberately
       holds unattributed rows. `scheduler/tasks.py` opens their session unmarked, and
-      `test_tenant_filter.py` plus this module's queue tests pin it — so the invariant is held by
-      a test, just not by this one.
+      `test_tenant_filter.py` pins it (`test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`)
+      — so the invariant is held by a test, just not by this one.
     - `find_by_token_hash` IS the same class as the four (an incoming webhook carries no JWT, so
       the row resolves the tenant) and is the one genuine omission from the census. Its safety
       today rests on the shape of its key — 256 bits of CSPRNG behind a `UNIQUE` index — not on

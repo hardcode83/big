@@ -742,17 +742,23 @@ async def test_a_revoked_token_cannot_submit(api, db_session, tenant_a) -> None:
 # regression in the wiring — the layer that decides which repository runs on which session
 # with which `tenant_id` — had nothing here that could fail.
 #
-# These are shaped by a constraint that still holds: the client shares ONE session with the
-# fixtures, so a second `bind` in the same test raises rather than repointing the filter, and
-# **one test cannot authorise for two tenants**. Each test drives one tenant and inspects the
-# other's rows directly.
+# These are shaped by the fixture the client runs on, and the shape is deliberate: each test
+# drives ONE tenant and inspects the other's rows directly.
 #
-# What `rule11-ownership-single-source` changed is narrower than session-per-request, and the
-# difference matters to anyone writing a test here: `request_session_override` clears the tenant
-# marker when each request ends, so an anonymous request that follows an authenticated one meets
-# an unmarked session. Same session, same connection, same transaction — uncommitted setup rows
-# stay visible, and the identity map is shared. Session-per-request is the roadmap entry
-# `test-session-per-request` (design D13 rejected it as out of scope), NOT what runs here.
+# What `rule11-ownership-single-source` changed, stated precisely because the obvious shorthand
+# for it is wrong: `request_session_override` clears the tenant marker when each request ends.
+# It is NOT a session per request — the same session, connection and transaction are reused, so
+# uncommitted setup rows stay visible and the identity map is shared.
+#
+# What that means for the two-tenant case: markers no longer accumulate, so a second request
+# binding a different tenant meets an unmarked session and does not raise. `bind_session_to_tenant`
+# only refuses a REBIND within one request (`current is not None and current != tenant_id`). So
+# the old "one test cannot authorise for two tenants" no longer holds as a mechanism — these
+# tests keep one tenant each because it reads more clearly, not because a second bind would fail.
+#
+# A real session per request is the roadmap candidate `test-session-per-request` that design D13
+# rejected as out of scope; `/sdd:archive` is what creates that entry, so do not expect a file
+# under `sdd/roadmap/` for it yet.
 
 
 @pytest.mark.asyncio

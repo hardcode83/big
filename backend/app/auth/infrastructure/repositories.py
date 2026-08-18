@@ -109,9 +109,10 @@ class SqlAlchemyUserRepository:
         login and the bootstrap conflict check") while there were five; `seed-data-demo`'s
         security panel found it stale rather than incomplete, having already gone stale
         twice for the count that used to live here as well. A list nobody can be made to
-        update is worse than no list — which is why the count is gone too: the set of
-        unscoped reads is now the set of callers of `require_unmarked_session`, asserted by
-        `tests/test_unscoped_reads.py`.
+        update is worse than no list — which is why the count is gone too: the census of the
+        reads that resolve a tenant out of the row is now the set of callers of
+        `require_unmarked_session`, asserted by `tests/test_unscoped_reads.py`, which also
+        names the unmarked-session reads that census does not cover.
 
         **One condition binds every caller, and `require_unmarked_session`
         (`app/core/db.py`) is where it now lives:** this lookup must run on a session that

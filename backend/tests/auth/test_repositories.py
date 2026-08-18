@@ -997,8 +997,9 @@ async def test_consuming_is_unscoped_and_finds_a_token_of_any_tenant(
     """Design D3: an unscoped query. No caller supplies the tenant.
 
     Said "the second and last" until `guest-portal-api` added a third; there is no count in
-    prose any more — the set of unscoped reads is the set of callers of
-    `require_unmarked_session`, asserted by `tests/test_unscoped_reads.py`.
+    prose any more — the census of the reads that resolve a tenant out of the row is the set of
+    callers of `require_unmarked_session`, asserted by `tests/test_unscoped_reads.py`, which
+    also names the unmarked-session reads outside it.
 
     The token of tenant B resolves without anyone naming B, and the row is what reveals it.
     """
