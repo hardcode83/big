@@ -516,7 +516,7 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
       están aquí … → `revenue`»), que **NO se toca aquí**: es spec viva, y la regla 7 del flujo
       reserva `sdd/specs/` a `/sdd:archive`, post-merge. Queda anotada para que ese paso la
       encuentre en vez de descubrirla el siguiente change.
-- [ ] 8.4 Regenerar **las dos mitades del puente** del contrato (`steering/documentation.md`):
+- [x] 8.4 Regenerar **las dos mitades del puente** del contrato (`steering/documentation.md`):
       `make openapi` para `backend/openapi.json`, y el artefacto derivado del frontend
       `frontend/lib/api/generated/openapi.d.ts`. Desde un worktree el comando documentado
       (`cd frontend && npm run api:generate`) **no funciona**: usar la secuencia verificada de
