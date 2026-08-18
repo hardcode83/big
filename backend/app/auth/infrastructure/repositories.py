@@ -16,10 +16,10 @@ enumerates every cross-tenant read that exists" — and both halves of that were
 `guest-portal-api` added one that is not in this module and does not carry the suffix.
 Three copies of the count lived in this one file and the merge that created the third
 only corrected one of them; the architecture panel found the other two, and the
-survivor was still saying "three" when there were **five**. That enumeration is the audit
+survivor was still saying "three", and it was not off by one. That enumeration is the audit
 control for rule 1 of `steering/security.md`, which is why it stopped being prose — and the
-count was wrong twice more inside the change that removed it, which is why it stopped being a
-number at all.
+count was wrong twice more inside the change that removed it, which is why no number is
+restated here. `tests/test_unscoped_reads.py` is where it lives.
 
 No method commits: the transactional boundary is the use case (design D10).
 """

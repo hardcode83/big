@@ -57,7 +57,12 @@ tocar la base de datos a mano.
   añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que
   el merge dejó tres consultas y un número que decía dos. **La auditoría por `grep` del sufijo
   `*_globally` dejó además de ser exhaustiva**: la del portal no lleva el sufijo ni vive en ese
-  módulo. Quien añada una consulta sin scope actualiza la enumeración y añade su viñeta.
+  módulo. **Quien añada una consulta sin scope de esa clase la declara en tres sitios y ninguno
+  es una viñeta de spec**: la llamada al guard como primera sentencia, su entrada en
+  `DECLARED_UNSCOPED_READS` (`backend/tests/test_unscoped_reads.py`) y un test que la invoque
+  sobre sesión marcada y exija el fallo. Una viñeta aquí **cita** el censo; reenunciarlo es
+  devolverle un segundo hogar a la enumeración, que es lo que este párrafo narra haber fallado
+  dos veces.
 - WHERE en el futuro una misma identidad deba pertenecer a varios tenants, THE SYSTEM
   SHALL modelarlo como identidad global más memberships separadas, nunca repitiendo la
   dirección.

@@ -201,10 +201,10 @@ def bind_session_to_tenant(session: AsyncSession, tenant_id: uuid.UUID) -> None:
 def require_unmarked_session(session: AsyncSession, *, read: str) -> None:
     """Refuse an unscoped read on a session that already carries a tenant marker.
 
-    This is where the invariant of limit 2 lives now. It used to live in prose, restated in
-    four files, and every version of it was wrong: the enumeration in `find_by_email_globally`
-    still said "three" when there were **five**, and the fourth wrong count was written by the
-    change that removed it. A `raise` cannot go
+    This is where the invariant of limit 2 lives now. It used to live in prose, restated across
+    several files, and **every version of that count was wrong at some point** — including the
+    ones written by the change that removed it, twice, during its own review. No number is
+    repeated here for that reason: a `raise` cannot go
     stale, and the set of callers of this function is the audited census of the reads that
     resolve a tenant out of the row they read (`tests/test_unscoped_reads.py` pins it).
 

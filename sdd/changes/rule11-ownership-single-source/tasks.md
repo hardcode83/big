@@ -10,6 +10,12 @@ El sistema queda en verde al cerrar cada sección. Dentro de §1 **no**: la tare
 tests y la 1.4 los clasifica, y por eso están en la misma sección (Riesgos del design,
 punto R6.4).
 
+> **Nota de `/sdd:review` (2026-08-18).** Donde este documento dice «las cuatro lecturas no
+> scoped» (1.2, 1.5, 4.9) son **cinco**: el panel encontró `find_by_token_hash`
+> (`app/integrations/infrastructure/repositories.py`) fuera del censo. El texto de las tareas se
+> deja como se aprobó —es el registro de lo que se planificó— y la corrección vive en la enmienda
+> de D9, que es la que gobierna. La quinta está guardada, declarada y con su test de R6.3.
+
 ## 1. El invariante «sesión sin marcar» pasa a código <!-- panel: PASS 2026-08-17 -->
 
 <!--
