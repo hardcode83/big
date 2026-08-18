@@ -27,6 +27,7 @@ from app.core.errors import _HTTP_STATUS_CODES, AppError
 from app.core.http_limits import TOO_LARGE_CODE
 from app.core.openapi import ENVELOPE_SCHEMA_NAME, ErrorEnvelope, build_openapi
 from app.main import create_app
+from app.pricing.api.errors import _MAPPING as PRICING_MAPPING
 from app.properties.api.errors import _MAPPING as PROPERTY_MAPPING
 from app.reservations.api.errors import _MAPPING as RESERVATION_MAPPING
 from app.tenants.api.errors import _MAPPING as TENANT_MAPPING
@@ -129,6 +130,11 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # `Conversation` is the aggregate and a message has no identity outside its thread —
         # unlike `incidents`/`owner-approvals`, which are two aggregates and therefore two.
         "conversations",
+        # `revenue-pricing`: the seven routes of PRD §23. Two prefixes because they are two
+        # aggregates (design D1) — the rules a person edits and the horizon the nightly job
+        # rewrites, with their own permissions each.
+        "pricing-rules",
+        "price-recommendations",
         "provenance",
     }
 
@@ -293,9 +299,14 @@ def test_no_error_code_lives_outside_the_registry() -> None:
     # `cleaning` and was never inspected here — and `cleaning-photos-storage` is what makes the
     # omission matter: it adds four rows, one of them carrying a code (`BAD_GATEWAY`) that no
     # other mapping emits.
+    # `revenue-pricing` adds itself in the same task that creates its mapping (its design D15),
+    # rather than a task later: the docstring of `app/core/error_codes.py` documents that
+    # exactly this gap already shipped once, so entering the guard is part of having a mapping
+    # at all.
     for mapping in (
         AUTH_MAPPING,
         CLEANING_MAPPING,
+        PRICING_MAPPING,
         PROPERTY_MAPPING,
         RESERVATION_MAPPING,
         TENANT_MAPPING,

@@ -208,24 +208,28 @@ def test_each_entity_has_its_own_field_allowlist() -> None:
 
 
 def test_an_unknown_entity_type_cannot_have_a_change_set() -> None:
-    """`PRICING_RULE` is the example on purpose: a real table with no audit trail yet.
+    """`OWNER_STATEMENT` is the example on purpose: a real table with no audit trail yet.
 
-    The name has now moved four times, and each move is the test working as designed. It
+    The name has now moved five times, and each move is the test working as designed. It
     was `PROPERTY` until `properties-crud` registered it, then `RESERVATION` until
     `access-notifications` registered *that* — for the legal-registration and access
     projections of PRD §17 and §15, not for the module's own mutations, which
     `specs/reservations.md` still records as owed — then `INCIDENT` until `guest-portal-api`
     registered it, because the guest portal is the first thing that persists an `Incident`
     (its design D15, and the reparto rule of `specs/domain-foundation-ops.md:12`), then
-    `OWNER_APPROVAL` until `maintenance` registered it with the approval flow of its D6.
+    `OWNER_APPROVAL` until `maintenance` registered it with the approval flow of its D6,
+    then `PRICING_RULE` until `revenue-pricing` registered it and its sibling
+    `PRICE_RECOMMENDATION` (its D12) — which exhausted rule 9's enumeration.
 
-    `PRICING_RULE` is next in rule 9's enumeration ("PricingRule/PriceRecommendation") with
-    no writer at all. Whoever audits it will trip on this line, which is the intended
-    behaviour: registering an entity type is a decision, so a test asserting the opposite
-    should demand a conscious edit rather than pass silently.
+    `OWNER_STATEMENT` is `owner_statements`, a table `domain-foundation-financial` created
+    and nothing writes; `revenue-statements`, the sibling change of the one that moved this
+    name last, is who will. Rule 9 does not enumerate it, so whoever audits it argues from
+    the precedent `PROPERTY` set rather than from a citation. Either way they will trip on
+    this line, which is the intended behaviour: registering an entity type is a decision, so
+    a test asserting the opposite should demand a conscious edit rather than pass silently.
     """
     with pytest.raises(AuditContractError):
-        ChangeSet("PRICING_RULE")
+        ChangeSet("OWNER_STATEMENT")
 
 
 @pytest.mark.parametrize("value", [float("nan"), float("inf"), float("-inf")])

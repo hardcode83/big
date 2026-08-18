@@ -29,6 +29,21 @@ class UnitOfWork(Protocol):
         """
         ...
 
+    async def rollback(self) -> None:
+        """Abandon the work done since the last commit.
+
+        The sibling of `commit()`, and it arrives with `revenue-pricing` D9, whose
+        generator puts a transaction around **each property** and keeps going when one
+        fails: without this the failing property's partial rows would ride along into the
+        next property's commit, and a database-level failure would leave the session
+        unusable for the rest of the sweep.
+
+        It is on the port rather than reached for through the session because a use case
+        that may end a transaction is the one that may also abandon it — and
+        `application/` never imports SQLAlchemy.
+        """
+        ...
+
 
 class SqlAlchemyUnitOfWork:
     def __init__(self, session: AsyncSession) -> None:
@@ -36,6 +51,9 @@ class SqlAlchemyUnitOfWork:
 
     async def commit(self) -> None:
         await self._session.commit()
+
+    async def rollback(self) -> None:
+        await self._session.rollback()
 
 
 class CallerOwnedUnitOfWork:
@@ -63,3 +81,25 @@ class CallerOwnedUnitOfWork:
 
     async def commit(self) -> None:
         """Deliberately empty. The composing use case commits, once, at the end."""
+
+    async def rollback(self) -> None:
+        """Deliberately empty, for the same reason `commit()` is.
+
+        An inner use case that abandoned the transaction would discard the outer one's
+        work too — the mirror image of the failure that produced this class.
+
+        **What that costs, said plainly rather than discovered later**: a use case whose
+        correctness depends on abandoning its own failed unit cannot be composed under this
+        boundary. `revenue-pricing`'s generator is exactly that — its `rollback()` on a
+        failed property is what keeps the partial horizon out of the next property's commit
+        — so composed here its "abandon and carry on" would silently become "keep and carry
+        on", reporting `failed` while committing the rows that failed.
+
+        That sentence used to be the *only* barrier, while the one machine-checked surface
+        (`tests/test_unit_of_work.py`) asserted the two adapters substitutable — so a future
+        composer would type-check, pass the suite and corrupt a horizon. The QA panel of
+        `/sdd:review` reproduced it (`created=0, failed=2`, then
+        `InFailedSQLTransactionError`), so `GeneratePriceRecommendationsUseCase.__init__`
+        now refuses this class outright. The prose stays because it is the *reason*; the
+        constructor check is what makes it hold.
+        """

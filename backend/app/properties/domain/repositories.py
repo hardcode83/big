@@ -144,6 +144,33 @@ class PropertyRepository(Protocol):
         """
         ...
 
+    async def list_by_status(
+        self, tenant_id: uuid.UUID, status: PropertyStatus
+    ) -> list[Property]:
+        """The tenant's properties in one administrative `status` (`revenue-pricing` R4.1).
+
+        The narrow method `list_all`'s docstring asks for, rather than filtering it in
+        memory: the nightly pricing job wants "every ACTIVE property" and nothing else, and
+        `list_all` says in as many words that "un caller que solo necesita un subconjunto
+        debería añadir un método más estrecho en vez de filtrar éste en memoria".
+
+        **Not `list_by_state`**, which is the *operational* state (`VACANT_READY`,
+        `OCCUPIED`…). A property being cleaned still has a calendar and still needs a price,
+        so the pricing job asks the administrative question — is this property live at all —
+        and that is `status`.
+
+        Unpaginated, like `list_by_state` beside it: it feeds a sweep, not a screen.
+
+        **Ordered by `internal_code`, ascending, and that is part of the contract.** A sweep
+        must walk a tenant's portfolio the same way twice so a failing run is reproducible
+        from its log rather than order-dependent — and `revenue-pricing`'s generator relies
+        on the order being *some* fixed one to make "a property that fails does not discard
+        the horizons already written" a testable claim at all. Promised here because the port
+        is what `application/` programs against: while the order lived only in the adapter,
+        deleting the `.order_by` left the suite green.
+        """
+        ...
+
     async def list_all(self, tenant_id: uuid.UUID) -> list[Property]:
         """Every property of the tenant (`pms-provider-resolution` R2.2).
 
