@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/compose-ports-guard
 implementation_sha: df9a0dfff3c8ae1761ae8f10741b3fafc2d30a68
 pr_number: 
 pr_url: 
