@@ -645,8 +645,8 @@ async def apply_plan(
     # R3.6's check runs HERE, while the session is still unmarked, and that placement is the
     # whole reason it works. `find_by_email_globally` is one of the deliberately unscoped
     # queries — the set of them is the callers of `require_unmarked_session`, held by
-    # `tests/test_unscoped_reads.py` and not by a numeral here, which said "three" and was wrong
-    # by two — but "unscoped" is a property of the statement, not of the method: once
+    # `tests/test_unscoped_reads.py` and not by a numeral here, which said "three" and was not
+    # off by one — but "unscoped" is a property of the statement, not of the method: once
     # `bind_session_to_tenant` marks the session, the listener of `app/core/db.py` adds the
     # tenant clause to it like to any other ORM read, and an address belonging to a neighbour
     # comes back as `None`. The seed would then insert and get `EmailAlreadyExistsError` out of

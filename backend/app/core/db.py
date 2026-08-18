@@ -220,10 +220,10 @@ def require_unmarked_session(session: AsyncSession, *, read: str) -> None:
     prose sites claimed the census was the whole class. Declaring the boundary is what turned
     that from an invisible gap into a one-line fix.
 
-    It lives here and not in the four adapters because `tests/test_session_marking.py` bans
-    every access to `session.info` in `app/` outside this module — that ban is the guard
-    that keeps anyone from switching the global filter off mid-request, and relaxing it to
-    let four adapters peek would cost more than it buys.
+    It lives here and not in the adapters that hold those reads because
+    `tests/test_session_marking.py` bans every access to `session.info` in `app/` outside this
+    module — that ban is the guard that keeps anyone from switching the global filter off
+    mid-request, and relaxing it to let those adapters peek would cost more than it buys.
 
     `read` names the caller in the message, because the failure a reader has to diagnose is
     "which read ran too late", not "a session was marked".

@@ -84,9 +84,9 @@ async def test_find_by_token_hash_refuses_a_marked_session(db_session, tenant_a)
     unknown token — and this route answers both the same way on purpose (R1.6), so a broken guard
     here would look exactly like the intended refusal.
 
-    This read is the FIFTH of its class, and it spent two changes outside the census while three
-    prose sites claimed the census was the whole class. It is guarded and declared since
-    `rule11-ownership-single-source`; this is the test the other four already had.
+    This read was the one outside the census: it spent two changes there while three prose sites
+    claimed the census was the whole class. It is guarded and declared since
+    `rule11-ownership-single-source`; this is the test its siblings already had.
     """
     token = generate_webhook_token()
     repository = SqlAlchemyWebhookEndpointRepository(db_session)
