@@ -14,7 +14,8 @@ from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
 from app.auth.domain.exceptions import EmailAlreadyExistsError
 from app.auth.domain.repositories import MAX_PAGE, MAX_PER_PAGE, UserFilters
 from app.auth.domain.value_objects import normalize_email
-from app.core.tenancy import CrossTenantWriteError
+from app.core.db import bind_session_to_tenant
+from app.core.tenancy import CrossTenantWriteError, TenantMarkedSessionError
 from app.auth.infrastructure.models import (
     PasswordResetTokenModel,
     UserModel,
@@ -85,6 +86,22 @@ async def test_find_by_email_globally_reaches_any_tenant(db_session, tenant_a, t
     assert found is not None
     assert found.id == user.id
     assert found.tenant_id == tenant_b.id
+
+
+@pytest.mark.asyncio
+async def test_find_by_email_globally_refuses_a_marked_session(db_session, tenant_a) -> None:
+    """R6.2/R6.3: the precondition is a failure, not a paragraph.
+
+    Asserting the raise and not the rows, deliberately: on a marked session the listener
+    scopes even a single-column select, so "no user came back" would be indistinguishable
+    from a legitimately empty result and this test would pass on a broken guard.
+    """
+    await insert_user(db_session, tenant=tenant_a, email="owner@example.com")
+    bind_session_to_tenant(db_session, tenant_a.id)
+    repo = SqlAlchemyUserRepository(db_session)
+
+    with pytest.raises(TenantMarkedSessionError, match="find_by_email_globally"):
+        await repo.find_by_email_globally("owner@example.com")
 
 
 @pytest.mark.asyncio
@@ -979,8 +996,9 @@ async def test_consuming_is_unscoped_and_finds_a_token_of_any_tenant(
 ) -> None:
     """Design D3: an unscoped query. No caller supplies the tenant.
 
-    Said "the second and last" until `guest-portal-api` added a third; the count lives in
-    `SqlAlchemyUserRepository.find_by_email_globally`'s docstring and nowhere else.
+    Said "the second and last" until `guest-portal-api` added a third; there is no count in
+    prose any more — the set of unscoped reads is the set of callers of
+    `require_unmarked_session`, asserted by `tests/test_unscoped_reads.py`.
 
     The token of tenant B resolves without anyone naming B, and the row is what reveals it.
     """
@@ -994,6 +1012,24 @@ async def test_consuming_is_unscoped_and_finds_a_token_of_any_tenant(
 
     assert consumed is not None
     assert consumed.tenant_id == tenant_b.id
+
+
+@pytest.mark.asyncio
+async def test_consume_globally_refuses_a_marked_session(db_session, tenant_a) -> None:
+    """R6.2/R6.3, and here the silent alternative is worse than an empty read.
+
+    A scoped UPDATE that matches nothing does not spend the token, so without the guard the
+    caller would report an unusable link and the row would stay live.
+    """
+    user = await insert_user(db_session, tenant=tenant_a)
+    repo = SqlAlchemyPasswordResetTokenRepository(db_session)
+    token = _reset_token(tenant_a.id, user.id)
+    await repo.add(tenant_a.id, token)
+    await db_session.flush()
+    bind_session_to_tenant(db_session, tenant_a.id)
+
+    with pytest.raises(TenantMarkedSessionError, match="consume_globally"):
+        await repo.consume_globally(token.token_hash, utc_now())
 
 
 @pytest.mark.asyncio

@@ -351,9 +351,10 @@ garantiza el sistema.
   superficie, **excepto** la búsqueda por `token_hash`, que es la que resuelve el tenant y por
   tanto no tiene por qué filtrar.
 - Esa búsqueda es una de las consultas sin scope de tenant del sistema. Su enumeración —el
-  control de auditoría de la regla 1 de `steering/security.md`— vive en **un solo sitio**, el
-  docstring de `SqlAlchemyUserRepository.find_by_email_globally`, y esta spec lo cita en vez de
-  repetir el recuento. La convención de nombrado `*_globally` dejó de enumerarlas: esta no lleva
+  control de auditoría de la regla 1 de `steering/security.md`— vive en **un solo sitio y ya no
+  en prosa**: es el conjunto de llamantes de `require_unmarked_session`
+  (`backend/app/core/db.py`), afirmado por `backend/tests/test_unscoped_reads.py`, y esta spec lo
+  cita en vez de repetir el recuento. La convención de nombrado `*_globally` dejó de enumerarlas: esta no lleva
   el sufijo ni vive en ese módulo.
 - THE SYSTEM SHALL marcar la sesión con el tenant en cuanto lo resuelve, y NEVER SHALL desmarcarla:
   el marcado es de un solo sentido, que es correcto porque la sesión de una ruta anónima nace sin

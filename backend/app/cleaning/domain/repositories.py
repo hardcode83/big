@@ -298,8 +298,9 @@ class UnscopedCleaningPhotoLocationQuery(Protocol):
     impossible to write, and this is the single, named exception.
 
     **Why it has to exist.** `GET /api/v1/cleaning-photos/{photo_id}` is anonymous by design
-    (D7) — an `<img src>` sends no `Authorization` header — so there is no session tenant, and
-    the route needs one twice: to rebuild the storage key the signature covers, and to resolve
+    (D7) — an `<img src>` sends no `Authorization` header — so the caller supplies no tenant,
+    and the route needs one twice: to rebuild the storage key the signature covers, and to
+    resolve
     `TenantConfig.storage_type` and decide whether there is anything to serve locally at all.
     `CleaningPhotoRepository.get(tenant_id, photo_id)` demands the tenant by construction,
     which is precisely what makes a photo unreachable by UUID, so it cannot answer here.
@@ -319,11 +320,17 @@ class UnscopedCleaningPhotoLocationQuery(Protocol):
     refusal is a single constant `403` for "no such photo", "wrong signature", "expired" and
     "tampered" alike (task 4.3b, R3.4).
 
-    **It must run on a session that was never marked with a tenant.** The anonymous route never
-    reaches `get_authenticated_request`, so its session carries no marker and the global filter
-    of `app/core/db.py` is inert — limit 2 of that module's docstring names this exact case.
-    Handing this query a marked session would silently scope it and turn a legitimate serve
-    into a `403`; it must never be given one, and it must never un-mark one.
+    **It must run on a session that was never marked with a tenant.** Handing it a marked one
+    would silently scope the read and turn a legitimate serve into a `403`; it must never be
+    given one, and it must never un-mark one.
+
+    **That precondition is enforced, not inferred.** `require_unmarked_session`
+    (`app/core/db.py`) refuses the read on a session something has already bound, which is what
+    an implementer of this port has to satisfy. Do **not** derive it from the route being
+    anonymous: limit 2 of `_scope_statement_to_tenant` says being anonymous is no guarantee of
+    being unmarked — what decides it is where the read sits in the request's sequence. An
+    earlier version of this paragraph made exactly that derivation and cited limit 2 as
+    supporting it, when limit 2 says the opposite.
     """
 
     async def locate_without_tenant_scoping(

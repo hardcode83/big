@@ -1,9 +1,10 @@
 """`incidents.title`/`description` as a rule-11 sink, with the test the rule demands.
 
-Rule 11 of `sdd/steering/security.md` censuses nine free-text columns and says the contract
-"lo hereda el change que primero escribe en cada una, **con su propio test**". This change is
-their first writer, and the writer at the other end is an anonymous stranger on the internet,
-so this file is that test.
+Rule 11 of `sdd/steering/security.md` censuses the free-text columns and says the contract
+"lo hereda el change que primero escribe en cada una, **con su propio test**". That table is
+where the census and its attribution live — no count and no owner is repeated here. What makes
+this file necessary is local: the writer at the other end is an anonymous stranger on the
+internet, so this is that test.
 
 **What is being pinned is the *boundary* of the second named exception**, not the prose it
 allows. The exception concedes text a third party wrote; what it explicitly does not concede is

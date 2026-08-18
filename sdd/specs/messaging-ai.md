@@ -91,7 +91,7 @@ sin métodos que fijó [`pms-provider-resolution.md`](pms-provider-resolution.md
 
 - THE SYSTEM SHALL declarar `messages.content`, `messages.intent` y `messages.metadata` en el
   censo de la regla 11 de [`steering/security.md`](../steering/security.md), único sitio donde
-  vive ese contrato, con esta capability como primer escritor vivo.
+  viven ese contrato **y su atribución**: esta línea las declara, no dice de quién son.
 - WHERE el mensaje lo escribe el huésped (`sender_type = GUEST`), `messages.content` SHALL ir
   bajo **excepción de prosa de tercero**: el valor no es nuestro y ningún código nuestro
   renderiza ahí un valor de la regla 3. Se acota con tipo y longitud máxima, sin pretender que

@@ -56,6 +56,7 @@ from app.cleaning.infrastructure.models import (
     CleaningPhotoModel,
     CleaningTaskModel,
 )
+from app.core.db import require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
@@ -530,11 +531,17 @@ class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
     It still joins `cleaning_tasks`, but for a different reason than everything above: not to
     filter, but because `tenant_id` lives there and is one of the two facts the caller needs.
 
-    **Contract of the session it is given: never marked with a tenant.** The anonymous route
-    does not go through `get_authenticated_request`, which is the only place that marks, so the
-    global filter of `app/core/db.py` is inert on its session — limit 2 of that docstring.
-    Given a marked session this query would silently scope to that tenant and refuse every
-    photo of any other, which would read as a broken signature rather than as a wiring mistake.
+    **Contract of the session it is given: never marked with a tenant.** Nothing in this route's
+    dependency chain binds one — read off the chain on 2026-08-17, by a person, and **not**
+    something the route's shape guarantees or any test asserts. Limit 2 of `_scope_statement_to_tenant` is explicit
+    that being anonymous is no guarantee of being unmarked, and names the cases; this docstring
+    does not repeat them, because a census kept in three places is the failure this change
+    exists to end.
+
+    What keeps the contract true under that change is not this paragraph but
+    `require_unmarked_session`, called below: given a marked session this query would otherwise
+    scope silently to that tenant and refuse every photo of any other, which reads as a broken
+    signature rather than as the wiring mistake it is. The guard makes it a failure.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -548,6 +555,7 @@ class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
         Returning `SignedPhotoLocation` rather than `CleaningPhoto` keeps everything else about
         the row — who uploaded it, when, of what — out of a request nobody authenticated.
         """
+        require_unmarked_session(self._session, read="locate_without_tenant_scoping")
         row = (
             await self._session.execute(
                 select(CleaningPhotoModel.storage_key, CleaningTaskModel.tenant_id)

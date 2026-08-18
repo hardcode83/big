@@ -41,9 +41,11 @@ tocar la base de datos a mano.
   `PasswordResetTokenRepository.consume_globally` lo hace desde `auth-account-recovery`, y
   `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash` desde
   [`guest-portal-api.md`](guest-portal-api.md).
-- THE SYSTEM SHALL mantener su **enumeración en un solo sitio** —el docstring de
-  `SqlAlchemyUserRepository.find_by_email_globally`—, y todo lo demás la cita en vez de repetir
-  el recuento. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
+- THE SYSTEM SHALL mantener su **enumeración en un solo sitio y en forma ejecutable** —el
+  conjunto de llamantes de `require_unmarked_session` (`backend/app/core/db.py`), afirmado por
+  `backend/tests/test_unscoped_reads.py`—, y todo lo demás la cita en vez de repetir el
+  recuento. Vivió en prosa, en el docstring de `find_by_email_globally`, hasta
+  `rule11-ownership-single-source` (2026-08-17): decía «tres» cuando eran cuatro. Es el control de auditoría de la regla 1 de `steering/security.md`, y la lista se
   quedó obsoleta dos veces por estar copiada: `auth-account-recovery` y `guest-portal-api`
   añadieron cada uno un caso en ramas paralelas y cada uno actualizó el número a «dos», así que
   el merge dejó tres consultas y un número que decía dos. **La auditoría por `grep` del sufijo

@@ -30,6 +30,7 @@ from app.integrations.infrastructure.storage import ConfiguredFileStorageFactory
 from app.main import create_app
 from app.properties.infrastructure.models import PropertyModel
 from app.reservations.infrastructure.models import ReservationModel
+from tests.conftest import request_session_override
 from tests.auth.conftest import (  # noqa: F401
     TEST_BCRYPT_ROUNDS,
     tenant_a,
@@ -63,10 +64,10 @@ async def api(db_session, tmp_path):
     app = create_app()
     codec = JwtTokenCodec(secret=SECRET, access_minutes=15, refresh_days=7)
 
-    async def _session_override():
-        yield db_session
-
-    app.dependency_overrides[get_db_session] = _session_override
+    # One shared session whose tenant marker is cleared when each request ends — not a session
+    # per request. The anonymous photo route runs `locate_without_tenant_scoping`, which refuses
+    # a session an earlier authenticated request has left bound.
+    app.dependency_overrides[get_db_session] = request_session_override(db_session)
     app.dependency_overrides[get_token_codec] = lambda: codec
     app.dependency_overrides[get_password_hasher] = lambda: BcryptPasswordHasher(
         rounds=TEST_BCRYPT_ROUNDS

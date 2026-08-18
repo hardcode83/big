@@ -5,17 +5,19 @@ Every method takes `tenant_id` and filters on it — except two deliberate excep
 D3 of `auth-account-recovery`). Every other cross-tenant need goes through one of them
 rather than hand-rolling another.
 
-**The system-wide count of unscoped queries is asserted in exactly one place**, the
-docstring of `find_by_email_globally` below, and everything else cites it. It used to be
-stated here too, as "the only unscoped queries in the system... both named `*_globally`,
-so a grep for that suffix enumerates every cross-tenant read that exists" — and both
-halves of that are now false: `guest-portal-api` added a third,
-`SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`, which is not in this
-module and does not carry the suffix. Three copies of the count lived in this one file
-and the merge that created the third only corrected one of them; the architecture panel
-found the other two. That enumeration is the audit control for rule 1 of
-`steering/security.md`, so it gets the treatment rule 11 of the same document prescribes
-for its own contract: one formulation, everyone else cites it.
+**The census of the reads that resolve a tenant out of the row is no longer stated in prose
+anywhere**: it is the set of callers of `require_unmarked_session` (`app/core/db.py`), and
+`tests/test_unscoped_reads.py` asserts it. That census is narrower than "every query that
+runs without a tenant" — the webhook queue drains in
+`app/integrations/infrastructure/repositories.py` also require an unmarked session and are
+not in it; the test names them. It used to be stated here, as "the only
+unscoped queries in the system... both named `*_globally`, so a grep for that suffix
+enumerates every cross-tenant read that exists" — and both halves of that were false:
+`guest-portal-api` added one that is not in this module and does not carry the suffix.
+Three copies of the count lived in this one file and the merge that created the third
+only corrected one of them; the architecture panel found the other two, and the
+survivor was still saying "three" when there were four. That enumeration is the audit
+control for rule 1 of `steering/security.md`, which is why it stopped being prose.
 
 No method commits: the transactional boundary is the use case (design D10).
 """
@@ -38,6 +40,7 @@ from app.auth.infrastructure.models import (
     UserModel,
     UserSessionModel,
 )
+from app.core.db import require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
 from app.tenants.domain.enums import TenantStatus
 from app.tenants.infrastructure.models import TenantModel
@@ -96,7 +99,7 @@ class SqlAlchemyUserRepository:
         return _to_user(model) if model is not None else None
 
     async def find_by_email_globally(self, email: str) -> User | None:
-        """ONE OF THE THREE unscoped queries in the system (design D16).
+        """One of the system's unscoped queries (design D16).
 
         **Its callers are whatever `grep -rn find_by_email_globally backend/app` returns**,
         and that sentence is deliberately not a list. Every caller goes through here rather
@@ -105,45 +108,27 @@ class SqlAlchemyUserRepository:
         one thing they need, which is being right. It used to name two ("the anonymous
         login and the bootstrap conflict check") while there were five; `seed-data-demo`'s
         security panel found it stale rather than incomplete, having already gone stale
-        twice for the count below. A list nobody can be made to update is worse than no
-        list.
+        twice for the count that used to live here as well. A list nobody can be made to
+        update is worse than no list — which is why the count is gone too: the set of
+        unscoped reads is now the set of callers of `require_unmarked_session`, asserted by
+        `tests/test_unscoped_reads.py`.
 
-        **One condition binds every caller:** this lookup must run on a session that is NOT
-        marked with a tenant. "Unscoped" is a property of the STATEMENT, not of this method
-        — mark the session and the `do_orm_execute` listener of `app/core/db.py` adds the
-        tenant clause here like anywhere else, this returns `None` for a neighbour's
-        address, and the caller learns about the conflict from `uq_users_lower_email`
-        instead of from its own message.
+        **One condition binds every caller, and `require_unmarked_session`
+        (`app/core/db.py`) is where it now lives:** this lookup must run on a session that
+        is NOT marked with a tenant. "Unscoped" is a property of the STATEMENT, not of this
+        method — limit 2 of `_scope_statement_to_tenant` says what a marked session does to
+        it, and the guard turns that into a `TenantMarkedSessionError` instead of a `None`
+        for a neighbour's address.
 
         **The condition is on the SEQUENCE, and deliberately not on the kind of caller.**
         The tempting shortcut is to derive it from the entry point — "`get_authenticated_
         request` is the only thing that marks a session in a request, so an anonymous route
         never has one" — and that shortcut is false: `SessionTenantBinder.bind`
         (`app/guests/infrastructure/portal_repositories.py`) marks the request's session on
-        the guest-portal routes, which are anonymous. Believing it would license a caller
-        placed anywhere after that bind, whose statement is then silently tenant-scoped and
-        which therefore reports no conflict at all — the failure this method exists to
-        avoid. So the rule is the unglamorous one: **this lookup must run before anything
-        binds that session, whoever binds it.** `app/cli/seed_demo.py` both reads and binds,
-        and reads first, which is the shape any caller that binds has to copy.
-
-        The other two, both added for the same structural reason — an anonymous caller
-        presents a credential and the row is what resolves the tenant, so there is nothing
-        to filter by when the query runs:
-
-        * `SqlAlchemyPasswordResetTokenRepository.consume_globally`
-          (`auth-account-recovery`), named the same way on purpose;
-        * `SqlAlchemyGuestAccessTokenRepository.find_live_by_token_hash`
-          (`app/guests/infrastructure/portal_repositories.py`, `guest-portal-api`).
-
-        **The count is the audit control for rule 1 of `steering/security.md`, and it has
-        now gone stale twice.** This sentence said "THE ONLY" until the section 3 security
-        panel of `guest-portal-api` found the portal lookup missing from it — and then said
-        "THE TWO" twice over, because that change and `auth-account-recovery` each added a
-        third case and each updated this line to two, in parallel branches. The merge is
-        where that surfaced. A reviewer trusting the number would have audited two of three
-        either way, so: whoever adds an unscoped query updates the number **and** adds a
-        bullet, exactly as `app/core/db.py`'s second limit names its own cases.
+        the guest-portal routes, which are anonymous. The shortcut is written down here to
+        be refuted, because believing it is what licenses a caller placed anywhere after
+        that bind. `app/cli/seed_demo.py` both reads and binds, and reads first, which is
+        the shape any caller that binds has to copy.
 
         Login is anonymous, so there is no tenant yet — the address alone has to
         identify the user, and it does: `uq_users_lower_email` makes a normalised
@@ -160,6 +145,7 @@ class SqlAlchemyUserRepository:
         The comparison is a plain equality against the Python-normalised address —
         never `lower()` inside the query — see `normalize_email` and design D19.
         """
+        require_unmarked_session(self._session, read="find_by_email_globally")
         result = await self._session.execute(
             select(UserModel).where(UserModel.email == normalize_email(email))
         )
@@ -494,9 +480,10 @@ class SqlAlchemyPasswordResetTokenRepository:
 
     Every method is scoped by tenant EXCEPT `consume_globally`, which is one of the system's
     unscoped queries (design D3) — see its docstring on the port for why, and
-    `find_by_email_globally` above for the enumeration of all of them, which is the one place
-    that count is stated. This docstring said "the second and last" until `guest-portal-api`
-    added a third and the architecture panel of that change's merge caught the claim.
+    `require_unmarked_session` (`app/core/db.py`) for the condition all of them share. This
+    docstring said "the second and last" until `guest-portal-api` added a third and the
+    architecture panel of that change's merge caught the claim; there is no count here now
+    because a count is what kept going stale.
     """
 
     def __init__(self, session: AsyncSession) -> None:
@@ -551,9 +538,14 @@ class SqlAlchemyPasswordResetTokenRepository:
         unique index on `token_hash` identifies at most one row in the whole installation. The
         tenant comes back OUT of that row.
 
+        **Which is why it must run on a session that is NOT marked with a tenant**, enforced
+        by `require_unmarked_session` (`app/core/db.py`); limit 2 of
+        `_scope_statement_to_tenant` says what a marked session would do to this UPDATE.
+
         `RETURNING` the whole row rather than a bool: the caller is anonymous and cannot know
         whose token it just spent until this tells it.
         """
+        require_unmarked_session(self._session, read="consume_globally")
         result = await self._session.execute(
             update(PasswordResetTokenModel)
             .where(

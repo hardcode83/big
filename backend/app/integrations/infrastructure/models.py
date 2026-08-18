@@ -48,18 +48,20 @@ class WebhookEventModel(Base, UUIDPrimaryKeyMixin):
     Pinned by `tests/test_tenant_filter.py::test_webhook_events_without_a_tenant_are_invisible_to_a_marked_session`.
 
     **`payload` and `error` are cleartext sinks fed by an external party.** Structured
-    form, per rule 11 of steering/security.md — and the most exposed of the six, since
+    form, per rule 11 of steering/security.md — and the most exposed of the census, since
     PRD §16 has the provider POST this body and §7.26 has it persisted verbatim, so a
     PMS check-in event carrying `document_number` lands here by default rather than by
     mistake. `error` must never echo the raw body back: that would reintroduce through
-    the text column what `payload` just dropped.
+    the text column what `payload` just dropped. No count here on purpose: how many columns
+    the census holds is the table's to say, not this docstring's, and the figure it used to
+    give ("the six") was wrong long before anyone noticed.
 
-    `reservations-webhooks` is the writer, and it holds the contract with its own tests: the
-    receiving route inserts the row (with the body scrubbed of card data first), and the
-    `process_webhook_events` job updates `processed`/`processed_at`, `attempts`,
-    `next_attempt_at` and `error`. Every value that reaches `error` is rendered from a
-    `WebhookEventFailure`, which is what makes rule 11's structured form structural rather than
-    remembered. Do not restate rule 11 here.
+    Two mechanisms make rule 11's structured form structural here rather than remembered, and
+    they are named because they are facts about this module and not about who owns the column:
+    `payload` is persisted through `scrub_card_data`, which discards the provider's card data
+    before the row exists — that is the dropping the paragraph above refers to — and every
+    value that reaches `error` is rendered from a `WebhookEventFailure`. Who *writes* these
+    columns is declared in the rule 11 table and nowhere else; do not restate rule 11 here.
     """
 
     __tablename__ = "webhook_events"

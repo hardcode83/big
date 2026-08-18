@@ -5,7 +5,8 @@ in this codebase to state up front: `find_live_by_token_hash` is the step that *
 tenant, so there is nothing to filter by when it runs. It is the same situation as
 `find_by_email_globally` on the login path, and `app/core/db.py`'s second documented limit
 covers it — an unmarked session is not filtered, which is what makes an anonymous entry point
-possible at all.
+possible at all. That precondition is not left to this prose: `require_unmarked_session`
+refuses the read on a session that something already bound.
 
 What makes it safe here is not the query, it is the schema. `token_hash` carries a **global**
 `UNIQUE` index, so "exactly one row" is a guarantee rather than an assumption; and the
@@ -36,7 +37,7 @@ _USABLE_ACCESS_STATUSES = (
     AccessRecordStatus.CREATED_EXTERNAL,
     AccessRecordStatus.DELIVERED,
 )
-from app.core.db import bind_session_to_tenant
+from app.core.db import bind_session_to_tenant, require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
 from app.guests.domain.portal_ports import GuestAccessToken, PortalStay, StayInfo
 from app.guests.infrastructure.models import GuestAccessTokenModel
@@ -64,6 +65,7 @@ class SqlAlchemyGuestAccessTokenRepository:
         modules, and D5 needs every failure to be indistinguishable, which is only checkable
         if one place makes all of them.
         """
+        require_unmarked_session(self._session, read="find_live_by_token_hash")
         row = (
             await self._session.execute(
                 # **Columns, not the model**, and on this method that is a security property

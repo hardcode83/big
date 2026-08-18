@@ -1,7 +1,7 @@
 """The `PROPERTY` audit contract (`properties-crud` R5, R7, design D7).
 
-`properties-crud` is the first writer of a property's audit trail, so this is where its half of
-rule 11 of `sdd/steering/security.md` gets pinned. The value that matters most is the WiFi
+This is where this module's half of rule 11 of `sdd/steering/security.md` gets pinned; who
+writes the column is declared in that rule's table. The value that matters most is the WiFi
 password: rule 3 names it **first** among the values that never exist in cleartext, and rule 11
 is explicit that a guest needing to see it does not authorise a masked form either.
 

@@ -20,7 +20,7 @@ from tests.db_names import scoped_name
 import app.core.models_registry  # noqa: F401
 
 from app.core.config import settings
-from app.core.db import Base
+from app.core.db import TENANT_ID_SESSION_KEY, Base
 from app.core.redis import close_redis
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 
@@ -174,6 +174,54 @@ async def db_session(test_engine):
         yield session
 
 
+def request_session_override(db_session):
+    """A `get_db_session` override that clears the tenant marker when a request ends.
+
+    Production opens one session per request, so an unscoped read — `find_by_email_globally`,
+    `find_live_by_token_hash`, `locate_without_tenant_scoping`, `consume_globally` — always
+    gets a session nothing has bound. The suite hands every request of a test the SAME
+    `db_session`, and `session.info` is per-session, so the marker an authenticated request
+    leaves behind is still there for the next one. `require_unmarked_session` turned that into
+    44 red tests describing sequences production cannot perform.
+
+    Resetting the marker at the end of a request reproduces the ONE property of
+    session-per-request those reads depend on, and changes nothing else: same session, same
+    connection, same transaction, same visibility of flushed-but-uncommitted rows.
+
+    **The two faithful alternatives were both measured, and both cost more than they buy.**
+    Giving each request its own session on its own connection makes flushed setup rows
+    invisible to the app, which reds 249 tests in `auth` and `cleaning` alone. Putting every
+    session on one shared connection keeps them visible, but `join_transaction_mode` turns a
+    use case's `commit()` into a savepoint release — a suite-wide change of meaning that reds
+    concurrency and atomicity tests in `scheduler`, `messaging`, `notifications` and
+    `integrations` that no unscoped read goes near. Both are the roadmap's
+    `test-session-per-request`, which is where that work belongs.
+
+    Being test-only matters and is not a loophole: `tests/test_session_marking.py` bans this
+    on `app/`, where un-marking mid-request would disable tenant scoping for the rest of a
+    real session. Here the request has ended, and the next one would have had a fresh session
+    in production anyway.
+
+    Popping the marker would also destroy the only place a test can still observe it, so it is
+    **recorded on the way out**: `bound_tenants` collects, in order, the tenant each request
+    bound its session to. A test that used to assert the marker was left behind on the shared
+    session asserts this list instead — which is the stronger statement, because it is about
+    what the request did rather than about what the fixture left lying around.
+    """
+    bound_tenants: list = []
+
+    async def _override():
+        try:
+            yield db_session
+        finally:
+            marker = db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+            if marker is not None:
+                bound_tenants.append(marker)
+
+    _override.bound_tenants = bound_tenants
+    return _override
+
+
 @pytest_asyncio.fixture(autouse=True)
 async def _close_the_redis_client_between_tests():
     """`app/core/redis.py::get_redis` caches one client in a module global; loops are per-test.
@@ -219,10 +267,7 @@ async def api(db_session):
     app = create_app()
     codec = JwtTokenCodec(secret="u" * 64, access_minutes=15, refresh_days=7)
 
-    async def _session_override():
-        yield db_session
-
-    app.dependency_overrides[get_db_session] = _session_override
+    app.dependency_overrides[get_db_session] = request_session_override(db_session)
     app.dependency_overrides[get_token_codec] = lambda: codec
     app.dependency_overrides[get_login_throttle] = lambda: UnlimitedLoginThrottle()
     app.dependency_overrides[get_password_hasher] = lambda: BcryptPasswordHasher(

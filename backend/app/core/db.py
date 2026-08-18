@@ -15,6 +15,7 @@ from sqlalchemy.orm import (
 )
 
 from app.core.config import settings
+from app.core.tenancy import TenantMarkedSessionError
 
 
 class Base(DeclarativeBase):
@@ -79,12 +80,17 @@ def _scope_statement_to_tenant(execute_state: ORMExecuteState) -> None:
        the bootstrap command, the anonymous login query — which *needs* it, because
        `find_by_email_globally` has no tenant yet — and `POST /auth/refresh`,
        which is anonymous and so never reaches `get_authenticated_request`. That
-       dependency is the usual marker, not the only one: `SessionTenantBinder`
-       (`app/guests/infrastructure/portal_repositories.py`) marks the request's session on
-       the anonymous guest-portal routes, and every CLI command marks its own. So being
-       anonymous is no guarantee of being unmarked — what decides it is where the request
-       is in its sequence, not which kind of route it is. Any future anonymous endpoint
-       touching data inherits this limit.
+       dependency is the usual marker but **not the only one**, so being anonymous is no
+       guarantee of being unmarked: what decides it is where the request is in its
+       sequence, not which kind of route it is. Any future anonymous endpoint touching
+       data inherits this limit.
+
+       **Which things mark a session is deliberately not enumerated here.** That list went
+       stale every time one was added, and the reads that care do not need it: they call
+       `require_unmarked_session` below, which refuses a marked session outright instead of
+       letting this listener scope the statement in silence. That guard is where the
+       invariant lives now, and `tests/test_unscoped_reads.py` is what keeps the set of
+       reads subject to it honest.
 
        **`app/cli/seed_demo.py` reads unmarked and then marks the same session mid-run**,
        and it belongs in this list precisely because it does not fit it. It is not the
@@ -190,6 +196,34 @@ def bind_session_to_tenant(session: AsyncSession, tenant_id: uuid.UUID) -> None:
             "would repoint the global filter at another tenant mid-session"
         )
     session.info[TENANT_ID_SESSION_KEY] = tenant_id
+
+
+def require_unmarked_session(session: AsyncSession, *, read: str) -> None:
+    """Refuse an unscoped read on a session that already carries a tenant marker.
+
+    This is where the invariant of limit 2 lives now. It used to live in prose, restated in
+    four files, and it went stale three times — the enumeration in
+    `find_by_email_globally` still said "three" while there were four. A `raise` cannot go
+    stale, and the set of callers of this function is the audited census of the reads that
+    resolve a tenant out of the row they read (`tests/test_unscoped_reads.py` pins it).
+
+    That census is not the set of every query in the system that runs without a tenant, and
+    the difference is written down rather than left to be discovered: `select_pending` and
+    `lease` (`app/integrations/infrastructure/repositories.py`) must also run unmarked — a
+    marked session hides their `tenant_id IS NULL` rows without erroring — and they do not
+    call this guard. `tests/test_unscoped_reads.py` names them, and why they are not here.
+
+    It lives here and not in the four adapters because `tests/test_session_marking.py` bans
+    every access to `session.info` in `app/` outside this module — that ban is the guard
+    that keeps anyone from switching the global filter off mid-request, and relaxing it to
+    let four adapters peek would cost more than it buys.
+
+    `read` names the caller in the message, because the failure a reader has to diagnose is
+    "which read ran too late", not "a session was marked".
+    """
+    tenant_id = session.info.get(TENANT_ID_SESSION_KEY)
+    if tenant_id is not None:
+        raise TenantMarkedSessionError(read=read, tenant_id=tenant_id)
 
 
 async def get_db_session() -> AsyncIterator[AsyncSession]:
