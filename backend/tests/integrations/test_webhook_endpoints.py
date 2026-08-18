@@ -20,8 +20,8 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.crypto import SecretDecryptionError, decrypt, encrypt
-from app.core.db import tenant_scoped_classes
-from app.core.tenancy import CrossTenantWriteError
+from app.core.db import bind_session_to_tenant, tenant_scoped_classes
+from app.core.tenancy import CrossTenantWriteError, TenantMarkedSessionError
 from app.integrations.domain.entities import WebhookEndpoint
 from app.integrations.domain.enums import PMSProvider
 from app.integrations.domain.errors import WebhookEndpointAlreadyExistsError
@@ -73,6 +73,32 @@ async def test_an_endpoint_is_stored_and_recovered_by_its_token(
     assert found is not None
     assert found.tenant_id == tenant_a.id
     assert decrypt(found.header_secret) == "s3cret"
+
+
+@pytest.mark.asyncio
+async def test_find_by_token_hash_refuses_a_marked_session(db_session, tenant_a) -> None:
+    """R6.2/R6.3: the precondition is a failure, not a paragraph.
+
+    Asserting the raise and not the rows, deliberately: on a marked session the listener scopes
+    even a single-column select, so "no endpoint came back" would be indistinguishable from an
+    unknown token — and this route answers both the same way on purpose (R1.6), so a broken guard
+    here would look exactly like the intended refusal.
+
+    This read is the FIFTH of its class, and it spent two changes outside the census while three
+    prose sites claimed the census was the whole class. It is guarded and declared since
+    `rule11-ownership-single-source`; this is the test the other four already had.
+    """
+    token = generate_webhook_token()
+    repository = SqlAlchemyWebhookEndpointRepository(db_session)
+    await repository.upsert(tenant_a.id, _endpoint(tenant_a.id, token=token))
+    await db_session.flush()
+
+    bind_session_to_tenant(db_session, tenant_a.id)
+
+    with pytest.raises(TenantMarkedSessionError, match="find_by_token_hash"):
+        await repository.find_by_token_hash(
+            PMSProvider.BEDS24, hash_webhook_token(token)
+        )
 
 
 @pytest.mark.asyncio

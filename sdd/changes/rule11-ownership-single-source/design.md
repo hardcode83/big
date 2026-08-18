@@ -17,7 +17,8 @@ El segundo sumidero de la misma patología es el invariante «esta lectura tiene
 antes de que nadie marque la sesión con un tenant». Su hogar declarado es el docstring de
 `SqlAlchemyUserRepository.find_by_email_globally`
 (`backend/app/auth/infrastructure/repositories.py:98-162`), que cuatro specs citan como «la
-enumeración vive en un solo sitio» — y que **hoy dice «ONE OF THE THREE» cuando son cuatro**:
+enumeración vive en un solo sitio» — y que **hoy dice «ONE OF THE THREE» cuando son cuatro**
+(eran **cinco**; este documento no lo supo hasta su review, ver la enmienda de D9):
 `SqlAlchemyUnscopedCleaningPhotoLocationQuery.locate_without_tenant_scoping`
 (`backend/app/cleaning/infrastructure/repositories.py:543`) nunca entró en la lista. Es la
 tercera vez que ese recuento se queda obsoleto, y el propio docstring narra las dos
@@ -338,8 +339,9 @@ guardián — deja sin vigilancia justo el sitio donde nació la copia número o
 
 **Elegido:** una función `require_unmarked_session(session, *, read: str)` en
 `backend/app/core/db.py`, junto a `bind_session_to_tenant` y al listener, que lanza
-`TenantMarkedSessionError` nombrando la lectura y la precondición. Las cuatro lecturas la
-invocan como primera sentencia de su cuerpo (R6.1, R6.2).
+`TenantMarkedSessionError` nombrando la lectura y la precondición. Las lecturas de esa clase la
+invocan como primera sentencia de su cuerpo (R6.1, R6.2) — **cinco**, no las cuatro que R6.1
+enumera; ver la enmienda de D9.
 
 El sitio **no es una preferencia**: `test_session_marking.py:67` prohíbe leer `session.info`
 en cualquier módulo de `app/` que no sea `core/db.py`. La alternativa sería relajar ese test,
@@ -469,7 +471,7 @@ alimenta de las dieciséis columnas de la tabla y `wifi_password_encrypted` /
 
 ### D13 — Los tests que hoy afirman el filtrado silencioso pasan a afirmar el fallo
 
-**Elegido:** los tests que sobre una sesión marcada esperan que una de las cuatro lecturas
+**Elegido:** los tests que sobre una sesión marcada esperan que una de esas lecturas
 devuelva `None` cambian a `pytest.raises(TenantMarkedSessionError)`. No es «modificar un
 caller legítimo» (R6.4): esas aserciones **documentaban el peligro** que el guard convierte
 en fallo, así que su forma correcta después de este change es la contraria.
@@ -521,7 +523,7 @@ en fallo, así que su forma correcta después de este change es la contraria.
 La causa es la fixture: `backend/tests/conftest.py:222-225` sustituye `get_db_session` por
 **una sola** `db_session` para todo el test, mientras producción abre una por petición. Un
 test que autentica —lo que marca esa sesión— y después golpea una ruta anónima ejecuta una de
-las cuatro lecturas sobre una sesión marcada, cosa que en producción no pasa.
+esas lecturas sobre una sesión marcada, cosa que en producción no pasa.
 `backend/tests/auth/test_recovery_api.py:1131` ya lo documenta como divergencia conocida.
 
 Rejected: hacer que la fixture `api` abra una sesión por petición. Es el arreglo de verdad y
@@ -544,7 +546,7 @@ un guard.
 | Dominio (value objects) | `backend/app/audit/domain/value_objects.py`, `backend/app/notifications/domain/results.py`, `backend/app/cleaning/domain/notifications.py` | Tres copias que R1.2 no lista (D2): quitar «first writer», conservar el mecanismo estructural |
 | Migración | `backend/alembic/versions/a4d17e83b6c1_reservations_webhooks.py` | La justificación de seguridad afirma el hecho (tabla vacía al aplicarla) en vez de citar un docstring que desaparece (D2) |
 | Guard de sesión | `backend/app/core/db.py`, `backend/app/core/tenancy.py` | `require_unmarked_session` + `TenantMarkedSessionError` (D8) |
-| Las cuatro lecturas | `backend/app/auth/infrastructure/repositories.py` (`find_by_email_globally`, `consume_globally`), `backend/app/guests/infrastructure/portal_repositories.py` (`find_live_by_token_hash`), `backend/app/cleaning/infrastructure/repositories.py` (`locate_without_tenant_scoping`) | Invocar el guard; recortar el docstring a una cita del guard y del límite 2 (R6.5, D9) |
+| Las **cinco** lecturas de la clase | `backend/app/auth/infrastructure/repositories.py` (`find_by_email_globally`, `consume_globally`), `backend/app/guests/infrastructure/portal_repositories.py` (`find_live_by_token_hash`), `backend/app/cleaning/infrastructure/repositories.py` (`locate_without_tenant_scoping`) y `backend/app/integrations/infrastructure/repositories.py` (`find_by_token_hash`, la quinta — ver la enmienda de D9) | Invocar el guard; recortar el docstring a una cita del guard y del límite 2 (R6.5, D9) |
 | Copias de `cleaning` (R5) | `backend/app/cleaning/api/dependencies.py`, `backend/app/cleaning/infrastructure/repositories.py` | Quitar «the only place that marks»; precondición real + cita al límite 2 (D10) |
 | Límite 2 | `backend/app/core/db.py` | El párrafo del límite 2 remite al guard como sitio donde el invariante pasa a vivir |
 | Tests nuevos | `backend/tests/test_rule11_ownership.py`, `backend/tests/test_unscoped_reads.py` | Guardián de propiedad (D6, D7) y guardián + censo de lecturas no scoped (D8, D9) |

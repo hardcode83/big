@@ -14,8 +14,10 @@ deliberate exceptions… both named `*_globally` so a grep for that suffix enume
 cross-tenant read": `guest-portal-api` added a third that lives on another port and is
 **not** named that way, so neither the count nor the suffix-grep held. It then pointed at
 one docstring as the single copy to trust, and that copy went stale too — it still said
-three when there were four. Counting here was one of the copies that had to be corrected
-everywhere — the failure mode rule 11 of `steering/security.md` documents about itself.
+three when there were **five**. Counting here was one of the copies that had to be corrected
+everywhere — the failure mode rule 11 of `steering/security.md` documents about itself, and it
+recurred inside the change that removed the count: its own review had to correct the number
+twice more before the census replaced it.
 """
 
 import uuid
