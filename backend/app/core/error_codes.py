@@ -1,7 +1,7 @@
 """The single source of truth for the `code` of the PRD §23 error envelope.
 
 Every code that can reach a client goes through here: the `code` attributes of
-`AppError` subclasses, the `_MAPPING` tables of `app/{auth,properties,reservations,
+`AppError` subclasses, the `_MAPPING` tables of `app/{auth,pricing,properties,reservations,
 tenants}/api/errors.py`, the literals of `app/integrations/api/errors.py` and
 `_HTTP_STATUS_CODES`.
 

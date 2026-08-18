@@ -67,8 +67,9 @@ MINIMUM_MARKDOWN_FILES = 40
 # exception list naming every one of them, which is what `test_free_text_sink_contract.py`
 # documents as proof of nothing.
 
-#: The sixteen columns of the census, the six tables that hold them, and the vocabulary that
-#: refers to the rule itself.
+#: The columns of the census, the tables that hold them, and the vocabulary that refers to the
+#: rule itself. No count here: the table governs how many there are, and this tuple went stale
+#: once already when `revenue-pricing` merged two columns in mid-review.
 #:
 #: **The bare table names are here because leaving them out was measured, not guessed.** Run
 #: against the pre-sweep tree, a column-only axis caught ten of the thirteen swept files and
@@ -89,6 +90,13 @@ SINK_TERMS = (
     "webhook_events",
     "notification_logs",
     "owner_approvals",
+    # `revenue-pricing` merged two columns into the census while this change was in review.
+    # They are here because the sink axis is fed by the table, so a column the table governs and
+    # this tuple does not is a blind spot the green would hide — residual 3, arriving for real
+    # rather than as a warning. `price_recommendations` and `pricing_rules` are unambiguous
+    # identifiers, so they go in as bare table names like the four above.
+    "price_recommendations",
+    "pricing_rules",
     "incidents.title",
     "incidents.description",
     "incidents.ai_summary",

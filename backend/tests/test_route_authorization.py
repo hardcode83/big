@@ -399,6 +399,16 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
+        # `revenue-pricing`: the seven routes of PRD §23 over five paths, on two routers
+        # because they are two aggregates (design D1). Every one is authenticated — the
+        # module has no anonymous door, and the nightly generator reaches the same use case
+        # through the scheduler rather than through a route. Asserted per method and per role
+        # in `tests/pricing/test_api_authorization.py`.
+        "/api/v1/pricing-rules",
+        "/api/v1/pricing-rules/{rule_id}",
+        "/api/v1/price-recommendations",
+        "/api/v1/price-recommendations/generate",
+        "/api/v1/price-recommendations/{recommendation_id}",
         "/api/v1/provenance",
         # `messaging-ai` D17: the seven routes of PRD §16, five distinct paths. All
         # authenticated, and deliberately so — messages enter through the panel or the API,

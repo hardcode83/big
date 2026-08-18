@@ -1,0 +1,11 @@
+{
+  "loading": "Cargando…", "retry": "Reintentar", "unavailable": "No disponible", "listSeparator": ", ",
+  "invalid": { "title": "Este enlace no es válido", "description": "Pide a tu anfitrión un enlace nuevo." },
+  "errors": { "title": "Ha ocurrido un error", "generic": "No hemos podido completar la operación.", "rateLimit": "Espera antes de volver a intentarlo. No sabemos si se recibió el aviso.", "tooLarge": "El contenido es demasiado grande.", "validation": "Revisa los campos indicados.", "required": "Este campo es obligatorio.", "invalidField": "Revisa este campo." },
+  "stay": { "title": "Tu estancia", "dates": "Fechas", "address": "Dirección", "wifi": "WiFi", "instructions": "Instrucciones de llegada", "accessCode": "Código de acceso", "support": "Soporte" },
+  "checkin": { "title": "Check-in", "missing": "Estado: {{fields}}", "none": "No faltan campos", "sending": "Enviando…", "success": "Check-in enviado.", "submit": "Enviar check-in" },
+  "fields": { "fullName": "Nombre completo", "nationality": "Nacionalidad", "birthDate": "Fecha de nacimiento", "documentType": "Tipo de documento", "documentNumber": "Número de documento", "expiryDate": "Caducidad del documento" },
+  "documentTypes": { "DNI": "DNI", "NIE": "NIE", "PASSPORT": "Pasaporte", "RESIDENCE_CARD": "Tarjeta de residencia", "OTHER": "Otro" },
+  "status": { "NOT_PROVIDED": "No aportado", "PENDING": "Pendiente", "PROVIDED": "Aportado", "VERIFIED": "Verificado", "REJECTED": "Rechazado", "NOT_REQUIRED": "No requerido", "PENDING_GUEST_DATA": "Faltan datos", "READY_TO_SUBMIT": "Listo para enviar", "SUBMITTED": "Enviado", "FAILED": "Fallido", "MANUAL_REVIEW": "Revisión manual" },
+  "incident": { "title": "Comunicar una incidencia", "titleField": "Título", "description": "Descripción", "sending": "Enviando…", "success": "Incidencia comunicada.", "submit": "Enviar aviso", "status": { "OPEN": "Abierta", "CLASSIFIED": "Clasificada", "AWAITING_OWNER_APPROVAL": "Pendiente de aprobación", "ASSIGNED": "Asignada", "ACCEPTED": "Aceptada", "IN_PROGRESS": "En curso", "WAITING_EXTERNAL_PARTS": "Esperando piezas", "RESOLVED": "Resuelta", "CANCELLED": "Cancelada" } }
+}

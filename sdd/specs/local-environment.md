@@ -138,21 +138,117 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
   arranca con base de datos **vacía**, reinstala dependencias la primera vez y ocupa sus propios gigas.
   Se siembra con `make bootstrap`, y con `make seed-demo` detrás si se quiere un stack recorrible
   en vez de un dashboard vacío (ver spec `seed-data-demo`).
-- **Stacks huérfanos**: borrar un worktree sin bajar su stack deja los contenedores vivos retendiendo
-  puertos. Y el caso habitual no es «directorio borrado» sino «worktree desregistrado con el directorio
-  en pie», porque `git worktree remove --force` **falla** sobre los ficheros que Docker creó por
-  bind-mount. Por eso: `make down` antes de borrar el worktree. `docker compose ls` lista los proyectos
-  vivos con su fichero de origen; un diagnóstico con marcas y atribución es la entrada
-  `compose-stacks-diagnostic` del roadmap, que se separó al medirse que atribuir stacks a partir de
-  etiquetas de contenedor —que cualquier contenedor puede poner, con cualquier byte— tiene mucho más
-  fondo del que aparenta.
+- **Stacks huérfanos**: borrar un worktree sin bajar su stack deja sus contenedores y volúmenes vivos,
+  y lo que retiene un huérfano es **disco** —volúmenes e imágenes—, **no puertos**: un worktree
+  enlazado no publica ninguno, así que solo el stack del principal puede chocar de puertos y el coste
+  de un huérfano es silencioso, sin síntoma que avise. Y el caso habitual no es «directorio borrado»
+  sino «worktree desregistrado con el directorio en pie», porque `git worktree remove --force`
+  **falla** sobre los ficheros que Docker creó por bind-mount. Por eso: `make down` antes de borrar el
+  worktree, y `make compose-stacks` para verlo a posteriori (§«Diagnóstico de stacks de Compose»).
+
+### Diagnóstico de stacks de Compose
+
+`make compose-stacks` ejecuta `python3 scripts/compose-stacks.py`, que lista los proyectos de Compose
+de la máquina y marca cuáles quedaron huérfanos. Informa; no actúa.
+
+- THE SYSTEM SHALL listar cada proyecto de Compose de la máquina —incluidos los **parados**, vía
+  `docker compose ls -a --format json`— con su nombre, su estado y el directorio desde el que se
+  levantó. Los parados entran porque un huérfano parado retiene exactamente el mismo disco que uno
+  corriendo, que es la motivación entera del diagnóstico.
+- THE SYSTEM SHALL consultar el ámbito de **toda la máquina**, y por eso este target es
+  deliberadamente el segundo que **no** pasa por `$(COMPOSE)`: acotarlo a los ficheros de este
+  directorio dejaría fuera justo los stacks ajenos que busca.
+- THE SYSTEM SHALL derivar el directorio de origen del **primer** fichero de `ConfigFiles`, que es el
+  que Compose toma como directorio del proyecto cuando nadie pasa `--project-directory` — y el
+  `Makefile` nunca lo pasa.
+- THE SYSTEM SHALL clasificar cada proyecto con cuatro reglas **en este orden**, comparando rutas
+  resueltas (`Path.resolve()`, que normaliza `..` y enlaces simbólicos aunque el directorio ya no
+  exista):
+  1. `ConfigFiles` vacío, con algún fragmento no absoluto o con un byte NUL → **`indeterminado`**,
+     nombrando el motivo. El campo llega unido por comas y una ruta puede contener una coma: la
+     ambigüedad se **detecta** exigiendo que todos los fragmentos sean absolutos, nunca se adivina.
+     Ausencia de dato no es evidencia de abandono.
+  2. El directorio de origen **coincide exactamente** con una raíz registrada en
+     `git worktree list --porcelain` → **`vivo`**, atribuido a ese worktree y a su rama.
+  3. El directorio de origen cuelga del árbol del worktree **principal** → **`huérfano`**.
+  4. El resto → **`ajeno`**, sin proponer nada sobre él.
+- THE SYSTEM SHALL aplicar la igualdad exacta **antes** que la pertenencia al árbol, porque los
+  worktrees de este repositorio viven **dentro** del principal (`<principal>/.claude/worktrees/…`):
+  una regla de «prefijo registrado más largo» atribuiría un worktree desregistrado al principal y lo
+  daría por vivo. Funciona porque cada proyecto tiene su fichero de compose en la **raíz** de su
+  worktree — la regla asume un proyecto por raíz, condición a revisar si algún día se añade uno
+  anidado (hoy se marcaría como huérfano; el informe imprime la ruta, así que se ve de un vistazo).
+- THE SYSTEM SHALL decidir «huérfano» por lo que dice `git worktree list` y **nunca** por lo que haya
+  en disco: la existencia del directorio se imprime como dato, no se usa como criterio, precisamente
+  porque el caso habitual es «worktree desregistrado con el directorio en pie».
+- THE SYSTEM SHALL tomar como raíz del repositorio el **primer** registro de
+  `git worktree list --porcelain` —git documenta que el principal va primero—, de forma que el
+  veredicto es el mismo se lance desde el worktree que se lance.
+- IF `docker` o `git` faltan del `PATH`, el demonio no responde, un comando sale con código distinto
+  de cero, el JSON no es una lista de objetos con las tres claves `Name`/`Status`/`ConfigFiles`,
+  `git worktree list` no devuelve registros, alguna de sus rutas no es absoluta, o el repositorio es
+  `bare`, THEN THE SYSTEM SHALL abortar nombrando el problema y salir con código **1** — nunca
+  presentar un inventario vacío como si no hubiera stacks. Una lista vacía con código cero es un
+  inventario vacío legítimo, y se distingue del fallo por el **código de salida**, no por la forma de
+  la salida.
+- WHEN el inventario se obtuvo, THE SYSTEM SHALL salir con código **cero** haya huérfanos o no: es un
+  informe, no una guardia de CI. Un código distinto de cero por hallazgo invitaría a ponerlo en CI,
+  que está fuera de alcance por decisión explícita.
+- THE SYSTEM SHALL limitarse a informar: no ejecuta `down`, `rm` ni `prune`, y **no imprime ningún
+  comando de derribo con datos interpolados**; cierra con una frase fija recordando que qué stack se
+  baja lo decide y lo ejecuta una persona. Mismo precedente que `specs/seed-data-demo.md` —enumera
+  los objetos huérfanos y no los borra— y `specs/backend-ci.md`, que avisa de que `make db-clean-test`
+  no distingue una base huérfana de una viva.
+- THE SYSTEM SHALL usar **exactamente dos fuentes**, una invocación cada una, con lista de argumentos
+  y nunca por shell: `git worktree list --porcelain` y `docker compose ls -a --format json`. Quedan
+  **prohibidos** `docker compose config` en cualquier forma y `docker inspect` sin `--format`: el
+  primero resuelve e imprime los valores del `.env` y la salida por defecto del segundo incluye
+  `.Config.Env` — medido sobre el stack vivo, con `JWT_SECRET_KEY`, `POSTGRES_PASSWORD` y
+  `ENCRYPTION_KEY` dentro (regla 8 de `steering/security.md`). La prohibición está escrita en tres
+  sitios —docstring del script, comentario del `Makefile` y aquí— porque es portante, no cosmética.
+- THE SYSTEM SHALL atribuir cruzando **rutas**, nunca etiquetas de contenedor
+  (`com.docker.compose.project.working_dir` y compañía): cualquier contenedor de la máquina las pone
+  con `docker run --label` y admiten cualquier byte. Atribuir por etiquetas es lo que hizo fracasar el
+  intento de 2026-08-05; el cruce por ruta las hace innecesarias.
+- THE SYSTEM SHALL clasificar con el valor **crudo** que devuelven Docker y git, y sanear **solo al
+  imprimir** con un escape **inyectivo**: `\\` para la barra invertida y `\xNN`/`\uNNNN`/`\UNNNNNNNN`
+  —de longitud fija, que es lo que mantiene la inyectividad— para todo carácter no imprimible
+  (controles C0, C1 incluido `\x9b`, y separadores distintos del espacio). Un filtro que **borre**
+  caracteres no vale: mapea `autohostai!` → `autohostai`, y con eso un contenedor hostil consigue que
+  el informe lo muestre como si fuera otro proyecto. Sanear antes de clasificar tampoco: cambiaría el
+  veredicto.
+- THE SYSTEM SHALL imprimir **una etiqueta y un valor por línea**, un bloque por proyecto y en orden
+  determinista —huérfanos primero, luego indeterminados, vivos y ajenos, y por nombre dentro de cada
+  clase—, cerrando con el recuento por clase. Sin tabla y sin delimitador compuesto: con un campo por
+  línea no hay separador que un nombre hostil pueda falsificar para fabricar una fila, ni ancho de
+  terminal que corte.
+- **Limitación conocida**: un worktree creado fuera del árbol del repositorio (`git worktree add
+  ~/tmp/foo`) sale como `ajeno` aunque sea nuestro, incluso desregistrado. Es lo que pide la regla 4
+  literalmente, y hoy es hipotético porque todos los worktrees los crea la misma herramienta bajo
+  `.claude/worktrees/`.
+- **Lo que el informe no dice: cuánto disco retiene cada huérfano.** Medirlo por proyecto obliga a
+  filtrar volúmenes por `label=com.docker.compose.project=<nombre>`, es decir a **leer etiquetas** —
+  justo lo que la atribución por ruta evita. Descartado a sabiendas el 2026-08-17; si se quiere, es
+  entrada propia del roadmap que decida antes cómo se lee una etiqueta sin confiar en ella.
+- El script vive en `scripts/compose-stacks.py` con `scripts/test_compose_stacks.py` al lado —el
+  patrón de `check-version-parity.py`, cargado por `importlib` porque el nombre kebab-case no es
+  importable— y **ningún workflow lo recoge**: el `pytest` de `backend-tests.yml` corre con
+  `working-directory: backend`. Se ejecuta en local con `python3 -m pytest scripts/`. Su test de
+  contrato invoca el `docker compose ls -a --format json` real cuando hay `docker` en el `PATH`, y es
+  lo que avisará el día que Docker renombre un campo.
+- **La redacción caducada de «un stack huérfano retiene puertos» no vuelve**: se verifica con
+  `grep -rniE 'retendiendo|reteniendo|quién retiene|choca de puertos' --include='*.md' .`, del
+  **verbo solo** y no del par de palabras, porque en la redacción vieja «retendiendo» cerraba una
+  línea y «puertos» abría la siguiente — un grep de una sola línea con ambas no lo encontraba. Los
+  únicos aciertos aceptables están bajo `sdd/changes/archive/`, que es registro histórico y no se
+  reescribe.
 
 ### Makefile como entrypoint único
 
 - WHEN se ejecuta `make up` y no existe `.env`, THE SYSTEM SHALL crearlo automáticamente copiando `.env.example` antes de levantar el stack — cero pasos manuales para arrancar por primera vez.
 - WHEN se ejecuta `make up` y falta `JWT_SECRET_KEY` en `.env` (o está vacía), THE SYSTEM SHALL generarla con `openssl rand -hex 32` bajo `umask 077`, escribirla en el `.env` local y dejar el fichero en `600`, de forma idempotente y también sobre un `.env` preexistente. Es la forma de cumplir a la vez la regla 8 de `steering/security.md` —la clave de firma nunca lleva valor por defecto en el repositorio— y el arranque sin pasos manuales: el valor se genera en la máquina del desarrollador (ver spec `auth-tenancy`).
 - WHEN se ejecuta `make up`, `make down`, `make logs`, `make ps` o `make sh`, THE SYSTEM SHALL delegar en el comando `docker compose` equivalente.
-- THE SYSTEM SHALL hacer que **los nueve targets que hablan con Compose** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»).
+- THE SYSTEM SHALL hacer que **los nueve targets que invocan `docker compose` desde el `Makefile`** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»). Siguen siendo nueve: los dos targets que delegan en un script host-side —`check-version-parity` y `compose-stacks`— no invocan `docker compose` desde el `Makefile` y por tanto no entran en la cuenta. En `compose-stacks` quedar fuera de `$(COMPOSE)` es **deliberado y no un olvido que arreglar**: su ámbito es la máquina y no este proyecto, así que pasarlo por la definición común lo acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca (ver §«Diagnóstico de stacks de Compose»).
 - WHERE se invoque `docker compose` **desnudo** en lugar de por el `Makefile`, THE SYSTEM SHALL comportarse igual en el worktree principal —ahí `make` tampoco pasa `-f`— y **distinto** en un worktree enlazado, donde el comando desnudo carga solo el fichero base. Los que **no crean** contenedores (`exec`, `logs`, `ps`, `down`) funcionan igual en los dos sitios; los que crean o **recrean** (`up`, y `run` cuando arrastra dependencias) publicarían los cuatro puertos. Medido, porque la intuición dice lo contrario: tener las dependencias ya levantadas **no** protege — Compose recrea la que tenga un hash de configuración distinto, así que un `run` desnudo en un worktree las recrea publicando. Desde un worktree: `make`, o `--no-deps` cuando el comando no necesita la base de datos (por eso `make openapi` lo lleva).
 - `make bootstrap` crea el tenant y los usuarios iniciales ejecutando `python -m app.cli.bootstrap` dentro del contenedor `backend` — deliberadamente **no** forma parte de `make up`, porque necesita valores que elige una persona (ver spec `auth-tenancy`). Usa `python -m` y no `uv run` para que el mismo comando valga contra la imagen `prod`, que no lleva `uv`.
 - `make seed-demo` llena el tenant que `bootstrap` dejó con el dataset de demo de PRD §27 ejecutando `python -m app.cli.seed_demo` dentro del contenedor `backend` — igual que `bootstrap`, **no** forma parte de `make up` porque necesita valores que elige una persona, y **exige que el tenant ya exista**: sin él sale con error nombrando `make bootstrap` y sin escribir nada (ver spec `seed-data-demo`).
@@ -180,6 +276,7 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 
 ## Key files
 
-- Raíz: `docker-compose.yml`, `Makefile`, `.env.example`, `.gitignore`, `README.md`.
+- Raíz: `docker-compose.yml`, `docker-compose.worktree.yml`, `Makefile`, `.env.example`, `.gitignore`, `README.md`.
+- Herramienta host-side (fuera de `$(COMPOSE)`, ejecutada con el `python3` del host y sin dependencias): `scripts/compose-stacks.py` + `scripts/test_compose_stacks.py` (diagnóstico de stacks huérfanos, `make compose-stacks`); `scripts/check-version-parity.py` + `scripts/test_check_version_parity.py`.
 - Backend: `backend/devops/Dockerfile`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/app/worker.py`, `backend/pyproject.toml` + `backend/uv.lock`, `backend/tests/test_health.py`.
 - Frontend: `frontend/devops/Dockerfile`, `frontend/devops/docker-entrypoint.sh` (sincroniza `node_modules` con el lockfile en dev), `frontend/devops/test-entrypoint.sh` (test del entrypoint, `npm run test:entrypoint`), `frontend/app/(workspace)/page.tsx` (redirige `/` a `/dashboard`), `frontend/app/layout.tsx`, `frontend/next.config.ts`, `frontend/app/route-wiring.test.tsx` (verifica el wiring de la ruta raíz).

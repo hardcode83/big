@@ -44,6 +44,29 @@ que este change exista separado de `channex-staging-adapter` y de que el banco d
 construyera **antes** de abrir la cuenta: los 14 días van íntegros a medir, no a escribir
 herramientas.
 
+> ⚠️ **El trial venció el 2026-08-17 y la cuenta no se convirtió a pago.** La API responde `401`
+> al intercambio de token, indistinguible de una credencial inválida — el proveedor no dice cuál
+> de las dos cosas es, y por eso hay que mirarlo en el panel y no en la respuesta.
+>
+> **Nada desplegado se rompió**, y conviene decir por qué para que nadie lo re-investigue: la
+> aplicación lee las credenciales de PMS de la tabla cifrada `pms_credentials` y **nunca** del
+> entorno (`.env.example`, sección Beds24), `BEDS24_REFRESH_TOKEN` existe solo para este sondeo,
+> no hay `BEDS24_*` en los workflows ni en el compose, y una propiedad sin `pms_provider` resuelve
+> a `MockPMSAdapter`. Lo que muere con la cuenta es la **medición**, no el producto.
+>
+> **Lo que esto destapa, y es la lección que valía la pena escribir**: la frase de arriba
+> registraba el coste como dato de alta y ahí se acababa. Nadie anotó que la cuenta de medición
+> tiene **fecha de caducidad, coste recurrente y un dueño de esa decisión**, así que venció sin
+> que saltara nada — no había nada que pudiera saltar. El banco de medición costó un change
+> entero (`pms-beds24-spike`) y queda inservible mientras la cuenta esté muerta, junto con
+> `beds24-webhook-cutover-measurement` y la sonda `messages`.
+>
+> **Al reactivarla**: el trial convierte a cuenta normal conservando la configuración, así que
+> `TEST-MEDICION` (id 345754) y su room `713992` deberían seguir ahí — compruébalo antes de
+> asumirlo. El refresh token anterior puede haber muerto con la cuenta; si tras reactivar sigue
+> dando `401`, es rotación (ver «Rotar el refresh token»), que exige un invite code generado a
+> mano en el panel.
+
 Antes de registrarte, ten listo:
 
 - El banco corriendo en local (secciones 1-6 del change, ya commiteadas).

@@ -19,7 +19,7 @@ from app.core.encrypted_secret import EncryptedSecret
 from app.core.tenancy import CrossTenantWriteError
 from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import Property, PropertyStateTransition
-from app.properties.domain.enums import PropertyOperationalState
+from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.exceptions import (
     AmbiguousPropertyExternalIdError,
     DuplicateInternalCodeError,
@@ -111,6 +111,19 @@ class SqlAlchemyPropertyRepository:
             .order_by(PropertyModel.id)
         )
         return [_to_property(model) for model in result.scalars()]
+
+    async def list_by_status(
+        self, tenant_id: uuid.UUID, status: PropertyStatus
+    ) -> list[Property]:
+        result = await self._session.execute(
+            select(PropertyModel)
+            .where(PropertyModel.tenant_id == tenant_id, PropertyModel.status == status)
+            # `internal_code` and not `id` like the two neighbours: the order this method
+            # returns is **promised by the port**, so it has to be the one a reader of a
+            # sweep's log can reconstruct, and an operator knows a flat by its code.
+            .order_by(PropertyModel.internal_code)
+        )
+        return [_to_property(model) for model in result.scalars().all()]
 
     async def list_all(self, tenant_id: uuid.UUID) -> list[Property]:
         result = await self._session.execute(

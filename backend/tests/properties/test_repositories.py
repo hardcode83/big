@@ -18,6 +18,7 @@ from app.integrations.domain.enums import PMSProvider
 from app.properties.domain.entities import PropertyStateTransition
 from app.properties.domain.enums import (
     PropertyOperationalState,
+    PropertyStatus,
     StateTransitionTriggeredBy,
 )
 from app.properties.domain.exceptions import AmbiguousPropertyExternalIdError
@@ -45,6 +46,7 @@ async def _property(
     pms_external_id: str | None = None,
     state: PropertyOperationalState = PropertyOperationalState.VACANT_READY,
     pms_provider: PMSProvider | None = None,
+    status: PropertyStatus = PropertyStatus.ACTIVE,
 ) -> PropertyModel:
     model = PropertyModel(
         tenant_id=tenant.id,
@@ -52,6 +54,7 @@ async def _property(
         internal_code=internal_code,
         pms_external_id=pms_external_id,
         pms_provider=pms_provider,
+        status=status,
         current_operational_state=state,
     )
     db_session.add(model)
@@ -226,6 +229,73 @@ async def test_list_by_state_without_states_returns_empty_without_querying(db_se
     await _property(db_session, tenant, internal_code="REDES11")
 
     assert await SqlAlchemyPropertyRepository(db_session).list_by_state(tenant.id, []) == []
+
+
+# --- `list_by_status` (`revenue-pricing` R4.1, design D17) ----------------------------
+
+
+@pytest.mark.asyncio
+async def test_list_by_status_returns_only_that_status(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    live = await _property(db_session, tenant, internal_code="REDES11")
+    await _property(
+        db_session, tenant, internal_code="RETIRED1", status=PropertyStatus.INACTIVE
+    )
+
+    found = await SqlAlchemyPropertyRepository(db_session).list_by_status(
+        tenant.id, PropertyStatus.ACTIVE
+    )
+
+    assert [p.id for p in found] == [live.id]
+
+
+@pytest.mark.asyncio
+async def test_list_by_status_does_not_reach_another_tenant(db_session) -> None:
+    """Rule 1 of `steering/security.md`, and it bites for the same reason `list_by_state`
+    does: the nightly pricing job iterates tenants in one process, so a missing filter
+    would price a neighbour's flat."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    mine = await _property(db_session, tenant_a, internal_code="REDES11")
+    await _property(db_session, tenant_b, internal_code="THEIRS")
+
+    found = await SqlAlchemyPropertyRepository(db_session).list_by_status(
+        tenant_a.id, PropertyStatus.ACTIVE
+    )
+
+    assert [p.id for p in found] == [mine.id]
+
+
+@pytest.mark.asyncio
+async def test_list_by_status_is_ordered_deterministically(db_session) -> None:
+    """A failing nightly run has to be reproducible, not order-dependent."""
+    tenant = await _tenant(db_session, "TenantA")
+    for code in ("ZULU", "ALFA", "MIKE"):
+        await _property(db_session, tenant, internal_code=code)
+
+    found = await SqlAlchemyPropertyRepository(db_session).list_by_status(
+        tenant.id, PropertyStatus.ACTIVE
+    )
+
+    assert [p.internal_code for p in found] == ["ALFA", "MIKE", "ZULU"]
+
+
+@pytest.mark.asyncio
+async def test_list_by_status_is_not_list_by_state(db_session) -> None:
+    """D17: a property being cleaned still has a calendar and still needs a price."""
+    tenant = await _tenant(db_session, "TenantA")
+    occupied = await _property(
+        db_session,
+        tenant,
+        internal_code="REDES11",
+        state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+
+    found = await SqlAlchemyPropertyRepository(db_session).list_by_status(
+        tenant.id, PropertyStatus.ACTIVE
+    )
+
+    assert [p.id for p in found] == [occupied.id]
 
 
 @pytest.mark.asyncio

@@ -36,6 +36,9 @@ from app.integrations.api.errors import register_integration_error_handlers
 from app.integrations.api.router import router as integrations_router
 from app.integrations.api.webhooks_router import router as webhooks_router
 from app.notifications.api.router import router as notifications_router
+from app.pricing.api.errors import register_pricing_error_handlers
+from app.pricing.api.recommendations_router import router as price_recommendations_router
+from app.pricing.api.rules_router import router as pricing_rules_router
 from app.properties.api.errors import register_property_error_handlers
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
@@ -85,6 +88,7 @@ def create_app() -> FastAPI:
     register_access_error_handlers(app)
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
+    register_pricing_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23
@@ -160,6 +164,13 @@ def create_app() -> FastAPI:
     # `PropertyNotFoundError` from `app/properties/domain/`, which
     # `register_property_error_handlers` above already maps to the §23 envelope.
     app.include_router(dashboard_router, prefix=API_V1_PREFIX)
+    # `revenue-pricing`: the `api/` layer `pricing` never had — the module was entities and
+    # two tables with no writer at all. Two routers because they are two aggregates with
+    # different lifecycles and different permissions (design D1): a rule is edited by a
+    # person, a horizon is rewritten by the nightly job. Both fully authenticated; there is
+    # no anonymous door into this module.
+    app.include_router(pricing_rules_router, prefix=API_V1_PREFIX)
+    app.include_router(price_recommendations_router, prefix=API_V1_PREFIX)
     app.include_router(provenance_router, prefix=API_V1_PREFIX)
 
     # Before anything reads the body — see `app/core/http_limits.py` for why an in-endpoint

@@ -3,14 +3,36 @@
 ## Purpose
 
 Segunda implementación del puerto `PMSAdapter`, contra la API real de Channex en su entorno de
-staging. Existe para **validar el backend contra un PMS de verdad** en vez de contra un mock que
-nosotros escribimos: `ReservationIngestor`, la idempotencia por `(tenant_id, external_pms_id)`, la
-persistencia de `TimelineEvent` y el CLI de sync se verifican con payloads que no fabricamos.
+staging. Conviven aquí tres cosas distintas y confundirlas es lo que hace planificar mal: lo que
+aporta **de forma permanente**, lo que fue **un tiro único**, y lo que **sigue vigente**.
+
+**Permanente: la regresión sobre payloads que no fabricamos.** Los payloads reales están
+capturados y commiteados en `backend/tests/integrations/fixtures/channex/` (`bookings.json`,
+`revisions.json`, `message_threads.json`), y §«Fixtures y su anonimización» exige alimentar con
+ellos los tests del mapeo **sin ninguna llamada de red**. Ese valor **no depende del hotel de test
+ni de la cuenta de staging**: la suite de CI no depende de ellos y no volverá a depender. Es lo que
+mantiene verificados `ReservationIngestor`, la idempotencia por `(tenant_id, external_pms_id)`, la
+persistencia de `TimelineEvent` y el CLI de sync contra la forma real del proveedor en vez de
+contra un mock que escribimos nosotros.
+
+**Tiro único: la validación end-to-end contra una OTA viva.** Se ejercitó una vez, el 2026-08-03,
+contra un hotel de test de Booking.com, y está amortizada. **No fue ni es una capacidad disponible
+a demanda**: dependió de ganar un turno sobre un recurso compartido con otros integradores. Lo que
+sobrevive al turno son sus hallazgos, algunos con carácter normativo — el más caro, medido ahí: que
+**toda** reserva de OTA llega con un objeto `guarantee` con `card_number`, `cvv` y
+`expiration_date`, origen de la **regla 13** de `steering/security.md` (los datos de tarjeta se
+descartan en la frontera, no se cifran).
+
+**Vigente: el `ChannexAdapter` no se retira.** Channex sigue siendo el único proveedor evaluado con
+acceso al entorno de test de Booking.com, y por tanto la única vía documentada a una OTA de verdad;
+esta spec sigue siendo normativa sobre el adapter, su cliente y su mapeo. Que la validación en vivo
+fuera un tiro único no retira nada de eso.
 
 **No es el proveedor de producción.** [ADR 0006](../../docs/adr/0006-pms-channel-manager-provider.md)
-elige Beds24 para el MVP y sitúa Channex en fase SaaS. Lo que Channex aporta y ningún otro
-proveedor evaluado puede es acceso al entorno de test de Booking.com. Operación, hallazgos medidos
-y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
+elige Beds24 para el MVP y sitúa Channex en fase SaaS, y nada de aquí reabre esa decisión.
+
+Runbook, hallazgos medidos y **el coste operativo del turno** —su única casa, no se repite cifra
+alguna aquí—: [`docs/channex-staging.md`](../../docs/channex-staging.md).
 
 ## Requirements
 
@@ -122,6 +144,27 @@ y runbook: [`docs/channex-staging.md`](../../docs/channex-staging.md).
   opcionalidad que el payload real.
 - THE SYSTEM SHALL leer la credencial solo del entorno y SHALL rechazar cualquier argumento no
   reconocido **sin imprimir su valor**, que podría ser la propia credencial.
+
+**Inventario de `message_threads.json`.** Las reglas de arriba dicen qué debe cumplir una captura,
+no qué hay capturado; este fichero necesita ficha porque en §Key files solo aparece bajo el glob y
+no se le adivina el contenido:
+
+- **Qué es**: un hilo de mensajes **real de Booking.com**, capturado el 2026-08-03 durante el turno
+  del hotel de test. Un solo thread, con su `last_message`.
+- **Qué forma tiene el fichero**: la respuesta JSON:API entera, no el thread pelado. En la raíz hay
+  `data` (lista) y `meta` (`total`, `limit`, `page`, `order_by`, `order_direction`), y el thread es
+  `data[0]`, con `id`, `type: "message_thread"` y **dos hermanos**: `attributes` y `relationships`.
+  Así que la ruta a un campo del thread es `data[0]["attributes"][…]` y `relationships` **no** está
+  dentro de `attributes`. Leerlo desde la raíz del documento no encuentra nada.
+- **Qué campos trae, y dónde están de verdad**: en `attributes`, `provider` (`BookingCom`),
+  `ota_message_thread_id`, `message_count`, `is_closed`, `title`, `inserted_at`, `updated_at` y
+  `last_message_received_at`; en `relationships`, punteros a `property`, `channel` y `booking`.
+  **`sender` y `attachments` NO cuelgan del thread**: viven dentro de `attributes.last_message`,
+  junto a `message` e `inserted_at`. Buscarlos un nivel más arriba es no encontrarlos.
+- **Qué NO permite validar**: `title` y `last_message.message` llegan `***scrubbed***` por la
+  política fail-closed de arriba —correctamente: son texto libre de OTA—, así que el fixture sirve
+  para **el sobre y el mapeo** y nunca para el tratamiento del contenido. Y es forma de **Channex**:
+  `beds24-messaging-adapter` no hereda de aquí la forma de sus payloads.
 
 ### Provisión del sandbox
 

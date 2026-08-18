@@ -7,3 +7,4 @@
 | 2026-08-17 | tasks | claude-opus-5 | 34 | 20543 | 1392503 | 2.2583 |  |
 | 2026-08-17 | run | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 330056 | 557034 | 139743423 | 88.1912 | incl. subagents |
 | 2026-08-17 | review | claude-haiku-4-5-20251001 claude-opus-5 claude-sonnet-5 | 326810 | 439017 | 92459256 | 61.2129 | incl. subagents |
+| 2026-08-18 | ship | claude-opus-5 | 14 | 3738 | 2709741 | 1.4937 |  |
