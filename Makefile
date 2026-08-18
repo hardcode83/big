@@ -20,24 +20,124 @@ SERVICE ?=
 # manifiesta como "la app no carga".
 IS_WORKTREE := $(shell test "$$(git rev-parse --path-format=absolute --git-dir 2>/dev/null)" != "$$(git rev-parse --path-format=absolute --git-common-dir 2>/dev/null)" && echo yes)
 
-# El worktree principal invoca `docker compose` desnudo, exactamente como antes de que este fichero
-# supiera de worktrees: así lo que Compose descubre por sí solo sigue siendo la postura de red real
-# del proyecto. Un worktree enlazado añade el overlay que retira la publicación de puertos.
-COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.worktree.yml,)
+# Desplazamiento de los cuatro puertos publicados: `make up PORT_OFFSET=10` levanta este stack en
+# 5442/6389/8010/3010 en vez de 5432/6379/8000/3000. Existe para recuperar el navegador que
+# `worktree-parallel-stack` costó —un worktree enlazado no publica nada— sin reintroducir el choque
+# de puertos que aquella decisión eliminó.
+#
+# `make` toma sus variables del entorno, así que un `export PORT_OFFSET=10` en la shell de un
+# worktree desplaza todos sus `make up` sin repetirlo. Lo que NO puede hacer es mover a la guardia
+# de puertos: `check-compose-ports` no pasa por `$(COMPOSE)` y su script construye el entorno del
+# hijo por lista blanca, así que un `PORT_OFFSET` exportado no cambia su veredicto.
+#
+# El valor pasa por dos pasos, y el ORDEN entre ellos es la parte que importa: primero se rechaza
+# lo que no es un entero, y solo después se normaliza. Al revés —que es como estuvo escrito—, la
+# normalización podía convertir un valor inservible en uno válido y el rechazo nunca llegaba.
+PORT_OFFSET ?=
+#
+# Sin `$(strip …)`, y es deliberado: estuvo ahí y era un tercer agujero de la misma familia que los
+# otros dos. `$(strip)` corre ANTES de la puerta de abajo, así que un `PORT_OFFSET=' 10'` llegaba
+# convertido en `10` y se aceptaba en silencio — cuando el mensaje de la propia puerta promete «sin
+# espacios» y `parse_offset()` de `scripts/compose-offset.py` rechaza ese mismo ` 10` por dedazo. Dos
+# capas que se contradicen sobre el mismo valor es justo lo que este bloque existe para no tener.
+# Ahora el valor llega crudo a la puerta y un espacio lo rechaza, se llame como se llame.
+#
+# Consecuencia aceptada: un `PORT_OFFSET` de solo espacios ya no equivale a vacío (R3.3 habla de
+# vacío y de `0`, no de blancos), y aborta nombrándolo. El mensaje dice cómo salir.
+OFFSET_RAW := $(value PORT_OFFSET)
+
+# Paso 1: solo dígitos, comprobado en tiempo de parseo y ANTES de que el valor llegue a ninguna
+# receta.
+#
+# No es defensa en profundidad ni desconfianza del validador del script: es que `make` interpola la
+# variable en el TEXTO de la línea que ejecuta `/bin/sh`, así que entrecomillarla NO contiene un
+# valor que lleve una comilla dentro —la cierra, y lo que venga detrás se ejecuta—. Medido: con
+# `PORT_OFFSET='1"; echo PWNED; "'` la receta ejecutaba el `echo` y al validador del script le
+# llegaba un `1` inofensivo. Y a diferencia de `$(SERVICE)`, cuya exención de la cabecera se apoya
+# en que lo escribe una persona en su propia terminal, este valor se toma **del entorno** a
+# propósito (ver arriba), que es justo el canal no humano que aquella exención excluye — así que
+# aquí toca lo que la cabecera manda: entrecomillar **y validar**.
+#
+# Se hace con `subst` y no con `$(shell … grep …)`: comprobar el valor pasándolo por un shell es
+# exactamente el agujero que se quiere cerrar. Esto no ejecuta nada, es sustitución de texto de
+# `make`, y por eso puede correr en tiempo de parseo.
+#
+# `$(value PORT_OFFSET)` y NO `$(PORT_OFFSET)`, que es la parte que menos se ve y la que de verdad
+# cierra el agujero. Una variable de entorno es para `make` una variable de expansión diferida, así
+# que nombrarla la expande — y si su texto lleva un `$(shell …)` dentro, `make` ejecuta ese comando
+# ANTES de que exista nada que comparar, y encima lo hace para CUALQUIER target, porque esta
+# asignación es de nivel superior. `$(value …)` devuelve el texto **sin expandir**, así que el
+# `$(shell …)` llega entero a la comprobación de abajo y se rechaza sin haberse ejecutado. Medido
+# con un `touch` como carga: por entorno no se crea el fichero; el valor sale rechazado.
+#
+# Residual declarado, porque no lo puede cerrar ningún constructo de este fichero: una definición
+# en la LÍNEA DE COMANDOS (`make up 'PORT_OFFSET=$(shell …)'`) la expande `make` al parsear sus
+# argumentos, antes de leer este Makefile. Ahí sí se ejecuta — y es exactamente el caso que la
+# cabecera de este fichero ya acepta para `$(SERVICE)`: auto-inyección de quien escribe en su
+# propia terminal, sin ganancia de privilegio. Lo que la cabecera señala como problema real es el
+# canal no humano —un `.envrc`, un wrapper, un agente, un job de CI—, y ése es el entorno, que es
+# el que `$(value …)` cierra.
+#
+# El centinela `x…x` de la comparación es cinturón y tirantes, y conviene decirlo sin adornar:
+# medido con GNU Make 3.81, la forma desnuda `ifneq ($(OFFSET_NOT_DIGITS),)` también rechaza un
+# `1 0` —cuyo residuo tras quitar dígitos es un espacio—. El centinela hace que el veredicto no
+# dependa de cómo trate los espacios de sus argumentos la versión de `make` que toque.
+#
+# Solo la CLASE de caracteres se decide aquí. El rango, el techo de 57535 y el mensaje que nombra
+# el puerto culpable siguen viviendo en `scripts/compose-offset.py`, que es su única sede.
+OFFSET_NOT_DIGITS := $(subst 0,,$(subst 1,,$(subst 2,,$(subst 3,,$(subst 4,,$(subst 5,,$(subst 6,,$(subst 7,,$(subst 8,,$(subst 9,,$(OFFSET_RAW)))))))))))
+ifneq (x$(OFFSET_NOT_DIGITS)x,xx)
+$(error PORT_OFFSET tiene que ser un entero no negativo en decimal, y recibí `$(value PORT_OFFSET)`. Sin signo, sin espacios y sin hexadecimal. Esta comprobación corre en CUALQUIER target, así que si lo tienes exportado en la shell con un valor malo y solo quieres bajar el stack: `PORT_OFFSET= make down`.)
+endif
+
+# Paso 2: «vale cero» y «no se pasó» son lo mismo (R3.3). La prueba es que al valor no le quede
+# nada tras quitarle los ceros, y no que la palabra sea exactamente `0`: un `PORT_OFFSET=00` es
+# cero igual, y con la comprobación por palabra se colaba por la rama del desplazamiento generando
+# un overlay que publica los puertos SIN desplazar (5432/6379/8000/3000) — es decir, justo la
+# colisión que este change existe para evitar, a partir de un dedazo que no parece nada.
+OFFSET := $(if $(subst 0,,$(OFFSET_RAW)),$(OFFSET_RAW),)
+
+# Ruta ESTABLE y conocida en tiempo de parseo, que es lo que permite que `COMPOSE_ARGS` siga siendo
+# una sola definición: con un fichero temporal habría que construir la invocación dentro de cada
+# receta, es decir una segunda definición. Vive en `.make/` (gitignorado) y NO se llama
+# `docker-compose.override.yml`. Queda PROHIBIDO moverlo a la raíz, renombrarlo así o añadirlo con
+# `-f` al target de la guardia: las tres cosas lo meten en lo que Compose descubre por sí solo, y
+# entonces el desplazamiento cambiaría el veredicto de `check-compose-ports`, que tiene que ser
+# función solo del repositorio.
+OFFSET_FILE := .make/docker-compose.offset.yml
+
+# Una sola definición y tres ramas, en este orden de prioridad:
+#
+# 1. Con desplazamiento: fichero base + overlay generado. NO se carga `docker-compose.worktree.yml`,
+#    porque el overlay usa `ports: !override`, que SUSTITUYE la lista del base — la fusión de
+#    Compose concatena arrays, así que hace falta el tag para reemplazarla, y con él el overlay vale
+#    igual aquí y en el principal sin depender del orden de los `-f`. Esta rama no mira
+#    `IS_WORKTREE` a propósito: es lo que permite que el worktree principal también se aparte en vez
+#    de obligar a bajarlo.
+# 2. Worktree enlazado sin desplazamiento: el overlay que retira la publicación de puertos.
+# 3. Worktree principal sin desplazamiento: `docker compose` DESNUDO, exactamente como antes de que
+#    este fichero supiera de worktrees, para que lo que Compose descubre por sí solo siga siendo la
+#    postura de red real del proyecto.
+COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.worktree.yml,))
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity compose-stacks check-compose-ports db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo openapi check-version-parity compose-stacks check-compose-ports db-clean-test
 
+# El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
+# con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
+# así que exigirlo ahí sería pedir un fichero que la invocación no va a usar.
 up:
-	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
+	@if [ -z "$(OFFSET)" ] && [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
 		echo "error: falta docker-compose.worktree.yml, que es lo que evita que este worktree"; \
 		echo "       choque de puertos con el principal."; \
 		echo "       Esta rama es anterior al change worktree-parallel-stack: rebasa sobre main,"; \
 		echo "       o levanta el stack desde el worktree principal."; \
 		exit 1; \
 	fi
-	@if [ -n "$(IS_WORKTREE)" ]; then \
+	@if [ -n "$(OFFSET)" ]; then \
+		:; \
+	elif [ -n "$(IS_WORKTREE)" ]; then \
 		echo "→ worktree enlazado: stack SIN puertos publicados (no habrá UI ni API en el navegador del host)"; \
 	else \
 		echo "→ worktree principal: stack CON puertos publicados (postgres/redis en 127.0.0.1; 8000 y 3000 en todas las interfaces)"; \
@@ -114,7 +214,7 @@ up:
 # materializa el `.env` entero resuelto (JWT_SECRET_KEY, POSTGRES_PASSWORD, ENCRYPTION_KEY) en
 # `$$cfg`, y bastaría un `set -x` o un `echo` de depuración para volcarlo. Medido al añadirlas: el
 # `!reset []` sigue dejando CERO claves `ports` con y sin banderas, así que la aserción no cambia.
-	@if [ -n "$(IS_WORKTREE)" ]; then \
+	@if [ -z "$(OFFSET)" ] && [ -n "$(IS_WORKTREE)" ]; then \
 		cfg=$$($(COMPOSE) config --no-interpolate --no-env-resolution --format json) || { \
 			echo "error: 'docker compose config' falló, así que no se ha podido comprobar que este"; \
 			echo "       worktree no publica puertos. Se aborta en rojo a propósito: sin esa"; \
@@ -128,6 +228,27 @@ up:
 			echo "       tag !reset (aquí: $$($(COMPOSE) version --short))."; \
 			exit 1;; \
 		esac; \
+	fi
+# La rama con desplazamiento, en el orden exacto del diseño y TODA antes de levantar:
+# generar -> asertar la configuración resuelta -> sondear los binds -> anunciar -> levantar.
+#
+# Ese orden no es indiferente. Sondear antes de asertar diría "el puerto está libre" sobre una
+# configuración que quizá no publica lo que creemos; y sondear después de levantar es justamente
+# el síntoma ilegible que esto existe para evitar —Compose fallando a medio arrancar con un "port
+# is already allocated" y contenedores a medias— en vez de un error que nombra puerto y servicio.
+#
+# `check` es también lo que cubre "el overlay no se pudo combinar": si `!override` no se aplicó,
+# la configuración resuelta trae los dos mapeos y la aserción sale en rojo. NUNCA se degrada a
+# levantar publicando lo que salga.
+#
+# `$(OFFSET)` va ENTRECOMILLADO, al contrario que `$(SERVICE)`: aquí no hay ninguna razón para
+# querer que un valor con espacios se parta en varios argumentos, y entrecomillarlo hace que un
+# valor inservible llegue entero al validador, que lo rechaza nombrándolo, en vez de degradar a un
+# error de uso del script.
+	@if [ -n "$(OFFSET)" ]; then \
+		python3 scripts/compose-offset.py generate "$(OFFSET)" || exit 1; \
+		python3 scripts/compose-offset.py check "$(OFFSET)" || exit 1; \
+		python3 scripts/compose-offset.py announce "$(OFFSET)" $(if $(IS_WORKTREE),--worktree,) || exit 1; \
 	fi
 	$(COMPOSE) up -d --build $(SERVICE)
 
@@ -180,7 +301,8 @@ compose-stacks:
 # guardia que sostiene la exención de POSTGRES_PASSWORD de steering/security.md regla 8, y corre
 # también en CI (.github/workflows/compose-ports.yml).
 #
-# Deliberadamente **fuera de $(COMPOSE)**, y es el tercer target host-side que no lo usa — pero
+# Deliberadamente **fuera de $(COMPOSE)**, y es el tercero de los cuatro targets host-side que no
+# lo usan (`check-version-parity`, `compose-stacks`, éste y `ports`) — pero
 # por un motivo distinto del de compose-stacks, así que no se lee del de arriba. Aquí no es que
 # el ámbito sea la máquina: es que pasar por $(COMPOSE) añadiría docker-compose.worktree.yml en
 # un worktree enlazado, que retira los cuatro mapeos, y entonces la guardia vería CERO claves
@@ -225,6 +347,34 @@ db-clean-test:
 				-c "DROP DATABASE IF EXISTS \"$$db\" WITH (FORCE)" >/dev/null </dev/null; \
 		done; echo "listo"
 
+# Informa del desplazamiento vigente y de los cuatro mapeos efectivos, sin volver a arrancar nada.
+#
+# Lo DERIVA del stack vivo (`docker compose ps`) y no del overlay generado, y esa es la decisión:
+# el fichero describe la última *intención* —la del último `make up` que pasó un número—, mientras
+# que el stack describe lo que está corriendo. Así la respuesta es verdad aunque alguien levantara
+# con otro número, y existe también en el worktree principal, donde no hay overlay ninguno.
+#
+# El stack parado y el stack sin puertos publicados son estados NORMALES: se informan y salen en
+# verde. Un stack con desplazamientos incoherentes entre servicios se informa como tal, sin
+# inventar un número que lo describa.
+#
+# Es el **cuarto** target host-side fuera de `$(COMPOSE)`, y aquí el motivo es otro más: pasar por
+# `$(COMPOSE)` no cambiaría la respuesta —`ps` direcciona el proyecto por su nombre— pero ataría
+# la consulta al conjunto de ficheros de la invocación, y entonces preguntar por el desplazamiento
+# exigiría saberlo ya.
+ports:
+	@python3 scripts/compose-offset.py show
+
+# `down`, `logs`, `ps` y `sh` NO necesitan que se les repita `PORT_OFFSET`, y conviene saberlo
+# porque la lectura ingenua dice lo contrario. Direccionan el proyecto por su NOMBRE —que Compose
+# saca del directorio, y el de cada worktree es distinto—, no por sus puertos, así que dan con el
+# mismo stack con desplazamiento y sin él, y nunca acaban hablando con otro.
+#
+# Consecuencia que se lee mal si no está escrita: un `up` al que se le pasó `PORT_OFFSET` y un
+# `down` posterior al que no operan sobre CONJUNTOS DE FICHEROS distintos. Es seguro precisamente
+# porque el segundo no crea contenedores: `down` los para y los borra por proyecto. El único
+# target que necesita el número es `up`, porque es el único que CREA los mapeos — y por eso un
+# `make up SERVICE=<x>` parcial sin repetir el desplazamiento recrearía ese servicio sin puertos.
 down:
 	$(COMPOSE) down $(SERVICE)
 

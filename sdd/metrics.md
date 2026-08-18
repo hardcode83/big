@@ -51,3 +51,4 @@
 | revenue-pricing | new, design, tasks, run, review, ship, archive | 1000364 | 2386224 | 533545258 | 361.8554 | 2026-08-16 | 2026-08-18 |
 | rule11-ownership-single-source | new, design, tasks, run, review, ship, archive | 657928 | 1194264 | 289632353 | 194.9298 | 2026-08-17 | 2026-08-18 |
 | compose-ports-guard | new, design, tasks, run, review, ship, archive | 242042 | 674109 | 161324018 | 117.3315 | 2026-08-18 | 2026-08-18 |
+| worktree-port-offset | new, design, tasks, run, review | 279783 | 638273 | 121042320 | 88.7978 | 2026-08-18 | — |
