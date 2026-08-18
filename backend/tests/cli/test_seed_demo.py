@@ -78,12 +78,31 @@ from app.cli.seed_demo import (
     SeedConfigurationError,
     SeedConflictError,
     SeedPreconditionError,
-    apply_plan,
     build_plan,
 )
+from app.cli.seed_demo import apply_plan as _apply_plan
 from app.core.config import settings
+from app.core.db import TENANT_ID_SESSION_KEY
 from tests.auth.conftest import insert_tenant, insert_user
 from tests.cli.conftest import BOOTSTRAPPED_TENANT_NAME
+
+async def apply_plan(session, plan, hasher, **kwargs):
+    """One call models one `make seed-demo` PROCESS, which always gets a fresh session.
+
+    `apply_plan` resolves the tenant by name through `find_by_email_globally` BEFORE it binds,
+    and `require_unmarked_session` refuses that lookup on a session something already bound.
+    Production cannot reach the refusal — every run is a new process with a new session — but
+    the suite reuses one `db_session` for a whole test, so the idempotency tests, which run the
+    seed twice on purpose, would meet the marker the first run left behind.
+
+    Clearing it here is what makes the second call a second *run* rather than a second call on
+    a session halfway through the first. Everything else is left alone, so the rows the first
+    run wrote are exactly the state the second one has to find and leave untouched, which is
+    what those tests are about.
+    """
+    session.info.pop(TENANT_ID_SESSION_KEY, None)
+    return await _apply_plan(session, plan, hasher, **kwargs)
+
 
 COMPLETE_ENV = {
     "BOOTSTRAP_TENANT_NAME": BOOTSTRAPPED_TENANT_NAME,

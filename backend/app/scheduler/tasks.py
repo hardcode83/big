@@ -9,6 +9,11 @@ report. No rules live here — this is the scheduler's equivalent of a FastAPI r
 `reservations-webhooks`: the PRD never named it because §16 describes the queue without a
 drainer, and its shape differs too — it reads a queue first and only then knows which tenants
 it concerns, so it takes the lock through `_locked` without going through `_guarded`.
+
+**And one that runs daily rather than on a period**: `generate_price_recommendations`
+(`revenue-pricing` R4.1). It is the ordinary per-tenant shape, with one difference that
+matters — its lock TTL comes from `DAILY_JOBS`, not from `lock_ttl_for`, because cadence x 3
+on a daily job is three days of wedge after a dead worker (D8).
 """
 
 import logging
@@ -49,6 +54,11 @@ from app.notifications.application.use_cases import (
 )
 from app.notifications.infrastructure.adapters import adapter_registry
 from app.notifications.infrastructure.repositories import SqlAlchemyNotificationLogRepository
+from app.pricing.application.use_cases import GeneratePriceRecommendationsUseCase
+from app.pricing.infrastructure.repositories import (
+    SqlAlchemyPriceRecommendationRepository,
+    SqlAlchemyPricingRuleRepository,
+)
 from app.properties.application.use_cases import AdvancePropertyStatesUseCase
 from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.properties.infrastructure.repositories import (
@@ -65,7 +75,7 @@ from app.scheduler.runner import (
     worker_redis,
     worker_session_factory,
 )
-from app.scheduler.schedule import CADENCES
+from app.scheduler.schedule import CADENCES, DAILY_JOBS
 from app.maintenance.application.use_cases import (
     ClassifyIncidentUseCase,
     ClassifyPendingIncidentsUseCase,
@@ -173,7 +183,27 @@ async def _classify_incidents(session: AsyncSession, tenant_id, now: datetime):
     return await use_case.execute(tenant_id=tenant_id, now=now)
 
 
-async def _locked(name: str, cadence: timedelta, run, *, skipped) -> dict:
+async def _generate_price_recommendations(session: AsyncSession, tenant_id, now: datetime):
+    """`revenue-pricing` R4.1: the whole portfolio's 60-day horizon, once a day.
+
+    No `property_id` — the sweep is the point — and `actor=None`, which is what makes the run
+    anonymous and therefore exempt from `AuditLog` under the fifth named exception to rule 9
+    of `steering/security.md`. The endpoint of the same use case passes an actor and is not
+    exempt.
+    """
+    use_case = GeneratePriceRecommendationsUseCase(
+        rules=SqlAlchemyPricingRuleRepository(session),
+        recommendations=SqlAlchemyPriceRecommendationRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)
+
+
+async def _locked(name: str, ttl: timedelta, run, *, skipped) -> dict:
     """Take the lock, run `run()`, and always return a serialisable report.
 
     Losing the lock is `skipped`, not a failure (R4.2): the previous run is still doing the
@@ -184,9 +214,15 @@ async def _locked(name: str, cadence: timedelta, run, *, skipped) -> dict:
     per-tenant loop — it reads a queue first and only then knows which tenants it concerns
     (`reservations-webhooks` D11) — but it needs exactly the same mutual exclusion. `skipped`
     is the report to hand back on contention, and it differs per job because the reports do.
+
+    **The TTL arrives already computed** rather than derived from a cadence here, since
+    `generate_price_recommendations` joined: a daily job has no cadence to derive from, and
+    the derivation that is right for the periodic jobs is precisely wrong for it
+    (`revenue-pricing` D8). One lock mechanism; `_guarded` and `_guarded_daily` are the two
+    ways of sizing it.
     """
     async with worker_redis() as redis:
-        async with task_lock(redis, name, lock_ttl_for(cadence)) as acquired:
+        async with task_lock(redis, name, ttl) as acquired:
             if not acquired:
                 logger.info("scheduler.skipped_locked", extra={"task": name})
                 return asdict(skipped)
@@ -197,7 +233,22 @@ async def _guarded(name: str, cadence: timedelta, work) -> dict:
     """The per-tenant shape: lock, then run `work` once for every active tenant."""
     return await _locked(
         name,
-        cadence,
+        lock_ttl_for(cadence),
+        lambda: run_for_every_tenant(name, work),
+        skipped=TenantRunReport(task=name, skipped_locked=True),
+    )
+
+
+async def _guarded_daily(name: str, work) -> dict:
+    """`_guarded` for a job on `DAILY_JOBS`, whose TTL is written down instead of derived.
+
+    A separate entry point rather than a parameter on `_guarded`, so the seven periodic jobs
+    keep passing the cadence they always passed: D8 rejected its alternative precisely because
+    it "toca las siete tareas vivas y sus TTL derivados para acomodar la octava".
+    """
+    return await _locked(
+        name,
+        DAILY_JOBS[name].lock_ttl,
         lambda: run_for_every_tenant(name, work),
         skipped=TenantRunReport(task=name, skipped_locked=True),
     )
@@ -333,7 +384,7 @@ def process_webhook_events() -> dict:
     return run_sync(
         _locked(
             WEBHOOK_TASK,
-            CADENCES[WEBHOOK_TASK],
+            lock_ttl_for(CADENCES[WEBHOOK_TASK]),
             _process_webhook_events,
             skipped=WebhookProcessingReport(skipped_locked=True),
         )
@@ -392,3 +443,24 @@ def provision_access_records() -> dict:
             _provision_access,
         )
     )
+
+
+PRICING_TASK = "generate_price_recommendations"
+
+
+@celery_app.task(name=PRICING_TASK)
+def generate_price_recommendations() -> dict:
+    """PRD §8.3, daily at 06:00 UTC: every property's 60-day price horizon.
+
+    The only daily job on the calendar, so it is the only one whose lock TTL does not come
+    from a cadence: `DAILY_JOBS` carries three hours explicitly, because `lock_ttl_for` on a
+    daily job would be three days and a worker killed mid-run would wedge it for three
+    windows (`revenue-pricing` D8).
+
+    Idempotent by construction rather than by luck, which is what makes a repeated run safe
+    (R4.2): the writer upserts on `(property_id, date)` and its `ON CONFLICT` predicate
+    refuses to touch a recommendation a person has already approved or applied (D9). So beat
+    firing twice, or an operator re-running it by hand, re-prices the undecided days and
+    leaves the decided ones exactly as the manager left them.
+    """
+    return run_sync(_guarded_daily(PRICING_TASK, _generate_price_recommendations))

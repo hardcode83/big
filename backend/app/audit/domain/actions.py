@@ -81,6 +81,16 @@ ENTITY_GUEST_ACCESS_TOKEN = "GUEST_ACCESS_TOKEN"
 # D11's budget gate and its real-cost gate — so pointing both at the incident's id would
 # turn "who answered THIS one" into a scan over `changes`.
 ENTITY_OWNER_APPROVAL = "OWNER_APPROVAL"
+# A row of `pricing_rules` (`revenue-pricing` D12). Rule 9 of `sdd/steering/security.md`
+# names `PricingRule/PriceRecommendation` in its enumeration explicitly, so unlike
+# `PROPERTY` this needs no argument beyond the citation.
+ENTITY_PRICING_RULE = "PRICING_RULE"
+# A row of `price_recommendations`. Its own entity type and not the rule's, for the reason
+# `ENTITY_OWNER_APPROVAL` gives: one rule produces sixty recommendations per property per
+# night, so pointing them all at the rule's id would turn "who approved THIS price" into a
+# scan over `changes` instead of a lookup on
+# `ix_audit_logs_tenant_id_entity_type_entity_id`.
+ENTITY_PRICE_RECOMMENDATION = "PRICE_RECOMMENDATION"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -250,6 +260,51 @@ INCIDENT_RESUMED = "INCIDENT_RESUMED"
 OWNER_APPROVAL_REQUESTED = "OWNER_APPROVAL_REQUESTED"
 OWNER_APPROVAL_ANSWERED = "OWNER_APPROVAL_ANSWERED"
 
+# Pricing (`revenue-pricing` D12). Rule 9 names both entities in its enumeration.
+#
+# `PRICE_RECOMMENDATION_DECIDED` is **one** action for `APPROVED` and `REJECTED`, with the
+# outcome in the diff — the precedent `OWNER_APPROVAL_ANSWERED` set just above: the
+# decision's outcome is a field of the entity, and splitting it would put "what was decided
+# about this price" in two places.
+#
+# `PRICE_RECOMMENDATION_APPLIED_EXTERNAL` is separate, and that asymmetry is the decision.
+# It is **not a decision but a fact of the world**: somebody published that price in the
+# OTA, outside this system. A review asks those two things separately.
+#
+# `PRICE_RECOMMENDATIONS_GENERATED` covers **only the human path**: one row per property
+# whose horizon `POST /price-recommendations/generate` rewrote, on `ENTITY_PROPERTY`, because
+# a horizon is 60 recommendations and the property is the single honest anchor an
+# `entity_id` can hold. It carries no diff — the question it answers is "who repriced this
+# property, and when", and the counts belong to the response and the run's log.
+#
+# **The nightly job still writes nothing**, and that asymmetry is the decision. Why it is
+# permitted is stated in ONE place — the named exception in rule 9 of
+# `sdd/steering/security.md`, written by task 8.1 of this change. This comment does not
+# restate it, not even the volume figures, for the reason the `PMS_CREDENTIAL_READ` comment
+# above gives at length: rule 9 says "todo lo demás la cita, nadie la reformula", and a
+# paraphrase here would be the fourth copy of a statement whose previous five-copy life
+# produced three consecutive reviews each finding a different error in it.
+#
+# The scope narrowed after design D12/OQ1 were approved: OQ1 exempted both paths on the
+# ground of «ausencia de actor», which is true of the clock and false of an endpoint that
+# receives a `user_id` and an `ip` — and rule 9's second and third exceptions say in as many
+# words that they «no exime la lectura con actor humano o iniciada por API». Decided by Jose
+# on 2026-08-17, on the section-5 security panel's finding.
+#
+# Until task 8.1 lands there is nothing to cite, which is why that task gates the change
+# rather than trailing it — the same route rule 9's fourth exception took through
+# `maintenance`'s task 9.1b, and for the reason rule 9 states: the approval in a design is
+# not what widens the rule, the line in `security.md` is.
+#
+# Every action here carries its actor: `_AuditWriter` in
+# `app/pricing/application/use_cases.py` refuses all five without one, which is also the
+# mechanism that keeps the job's rows unwritten — it is called only when somebody is acting.
+PRICING_RULE_CREATED = "PRICING_RULE_CREATED"
+PRICING_RULE_UPDATED = "PRICING_RULE_UPDATED"
+PRICE_RECOMMENDATION_DECIDED = "PRICE_RECOMMENDATION_DECIDED"
+PRICE_RECOMMENDATION_APPLIED_EXTERNAL = "PRICE_RECOMMENDATION_APPLIED_EXTERNAL"
+PRICE_RECOMMENDATIONS_GENERATED = "PRICE_RECOMMENDATIONS_GENERATED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -267,6 +322,8 @@ ENTITY_TYPES = frozenset(
         ENTITY_INCIDENT,
         ENTITY_GUEST_ACCESS_TOKEN,
         ENTITY_OWNER_APPROVAL,
+        ENTITY_PRICING_RULE,
+        ENTITY_PRICE_RECOMMENDATION,
     }
 )
 
@@ -321,5 +378,10 @@ ACTIONS = frozenset(
         INCIDENT_RESUMED,
         OWNER_APPROVAL_REQUESTED,
         OWNER_APPROVAL_ANSWERED,
+        PRICING_RULE_CREATED,
+        PRICING_RULE_UPDATED,
+        PRICE_RECOMMENDATION_DECIDED,
+        PRICE_RECOMMENDATION_APPLIED_EXTERNAL,
+        PRICE_RECOMMENDATIONS_GENERATED,
     }
 )

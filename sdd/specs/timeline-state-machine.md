@@ -175,7 +175,17 @@ Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pas
   eventos de mensajería —`GUEST_MESSAGE_RECEIVED`, `AI_RESPONSE_SENT`,
   `AI_ESCALATED_TO_HUMAN` y `HUMAN_RESPONSE_SENT`— ganaron escritor con
   [`messaging-ai.md`](messaging-ai.md) el 2026-08-16; hasta entonces el enum los declaraba sin
-  que nadie los escribiera.
+  que nadie los escribiera. **Los dos de pricing hicieron lo mismo el 2026-08-18** con
+  [`revenue-pricing.md`](revenue-pricing.md): `PRICE_RECOMMENDATION_CREATED` lo emite el
+  generador, y **sólo cuando la fila se crea** —una regeneración que actualiza no pone nada en
+  el timeline, así que en régimen estacionario es una fila por vivienda y día en vez de
+  sesenta—, y `PRICE_UPDATED_EXTERNAL` lo emite la transición a `APPLIED_EXTERNAL`, que es el
+  registro de que una persona publicó ese precio fuera del sistema.
+- WHERE el evento apunta a una fila que un `ON CONFLICT DO UPDATE` pudo reescribir, THE SYSTEM
+  SHALL tomar su identificador de lo que **devuelve la sentencia** y no de una lectura previa.
+  En la rama de conflicto la fila guardada conserva su propio `id`, así que un evento construido
+  desde la lectura previa apuntaría a ninguna fila — y siendo `timeline_events` append-only, ese
+  puntero colgado sería permanente.
 - WHERE el evento procede de un mensaje de huésped, THE SYSTEM SHALL llevar **título
   constante** e identificadores y enums cerrados en `metadata`, y NEVER SHALL copiar en él el
   contenido del mensaje. El motivo es estructural: `timeline_events` es append-only, así que una

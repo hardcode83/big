@@ -262,10 +262,10 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
   completar la respuesta sin error y sin modificar nada: una tarea creada antes de
   `access-notifications` no tiene plazo que anular, así que cero filas es el caso normal.
 
-**El escalado está vivo desde `access-notifications`.** Este es el primer escritor de
-`CLEANING_TASK_ASSIGNED`, cuyo escalado a `SLA_BREACH` para el `PROPERTY_MANAGER` está definido
-desde `celery-jobs`; `check_sla_breaches` solo considera candidatos con `status = SENT`, y el
-emisor que llegó con `access-notifications` es el primero que escribe ese valor. La cadena
+**El escalado está vivo desde `access-notifications`.** El escalado de
+`CLEANING_TASK_ASSIGNED` a `SLA_BREACH` para el `PROPERTY_MANAGER` está definido desde
+`celery-jobs`; `check_sla_breaches` solo considera candidatos con `status = SENT`, y hasta que
+llegó el emisor de `access-notifications` nadie escribía ese valor. La cadena
 funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 
 ### Aislamiento y autorización
@@ -300,6 +300,18 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 - THE SYSTEM SHALL dejar `cleaning_tasks.notes` y `cleaning_checklist_completions.notes` fuera de
   toda superficie de escritura y de toda respuesta: son texto libre que la tabla de la regla 11
   de `steering/security.md` no enumera, y ampliarla es una decisión de steering.
+- **Esta capacidad aporta una de las lecturas sin scope de tenant del sistema**:
+  `SqlAlchemyUnscopedCleaningPhotoLocationQuery.locate_without_tenant_scoping`, que sirve la ruta
+  anónima de fotos firmadas. No lleva el sufijo `*_globally` ni vive en `auth/`, y por eso estuvo
+  fuera del recuento en prosa durante tres changes —decía «tres» y no estaba desviado en uno—, hasta que
+  `rule11-ownership-single-source` (2026-08-17) lo sustituyó por el conjunto de llamantes de
+  `require_unmarked_session`, afirmado por `backend/tests/test_unscoped_reads.py`. Que faltara en
+  la enumeración es justamente lo que esta línea existe para que no vuelva a pasar en silencio.
+- THE SYSTEM SHALL ejecutar esa lectura sobre una sesión que **nadie haya marcado** con un tenant.
+  Sobre una marcada, el filtro global la acotaría a ese tenant y la ruta rechazaría toda foto
+  ajena como si la firma fuera inválida; `require_unmarked_session` lo convierte en fallo en vez
+  de en un `403` engañoso. La precondición es sobre la **secuencia** de la petición, no sobre que
+  la ruta sea anónima: el límite 2 de `_scope_statement_to_tenant` enumera los casos.
 
 ## Key files
 

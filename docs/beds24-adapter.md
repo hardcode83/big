@@ -165,7 +165,11 @@ bloquee sola a los 30 días sin que nadie se entere.
   aunque rechace una escritura está implementado en el cliente —el veredicto se lee del cuerpo,
   también en las lecturas— pero su primer consumidor de escritura nace con la mensajería.
 - **Precios y disponibilidad.** `update_price`, `block_dates` y `get_availability` llegan con
-  `revenue`.
+  **un change de ARI propio, cuando exista quien las consuma** — no con pricing.
+  `revenue-pricing` (2026-08-18) implementó el Modo 1 del PRD §19: el sistema **recomienda un
+  precio y no lo publica**; lo aprueba una persona y lo sube ella a la OTA, y por eso
+  `PriceRecommendation` tiene el estado `APPLIED_EXTERNAL`. Así que pricing nunca llegó a
+  necesitar escribir un precio en el proveedor.
 
 ---
 

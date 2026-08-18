@@ -293,10 +293,14 @@ def get_serve_local_cleaning_photo_use_case(
     tenant. Every other builder in this module hands out `SqlAlchemyCleaningPhotoRepository`,
     whose every method demands one.
 
-    The session it gets is the request's, and for this route that session was **never marked
-    with a tenant** — the endpoint declares no `require(...)` and so never reaches
-    `get_authenticated_request`, the only place that marks. That is the precondition the query
-    documents, and it holds by construction of the route rather than by anyone remembering it.
+    The session it gets is the request's, and for this route nothing binds a tenant to it, so
+    the query runs unfiltered — the precondition it documents. That is this chain as it stood
+    on 2026-08-17, read off by a person; no test asserts it, and it is **not** something the
+    absence of `require(...)` guarantees: limit 2 of `_scope_statement_to_tenant` (`app/core/db.py`) says being anonymous
+    is no guarantee of being unmarked, and names the cases — which this docstring deliberately
+    does not repeat. What holds the precondition if a dependency here ever starts binding is
+    `require_unmarked_session`, which fails the read instead of letting it answer for one
+    tenant.
 
     `signing_key` is the same dependency the factory signs with, so signing and verifying
     cannot drift apart.

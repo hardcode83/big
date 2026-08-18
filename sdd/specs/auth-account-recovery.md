@@ -327,8 +327,8 @@ garantiza el sistema.
   aportaría el atacante.
 - THE SYSTEM SHALL mantener `consume_globally` como la **única** consulta sin scope de tenant de
   este módulo, y SHALL declararla en la enumeración que el sistema guarda en un solo sitio —el
-  docstring de `UserRepository.find_by_email_globally` (ADR 0005)— en lugar de reenunciar aquí
-  cuántas hay. No es «la última»: [`guest-portal-api.md`](guest-portal-api.md) añadió después la
+  conjunto de llamantes de `require_unmarked_session` (`backend/app/core/db.py`), afirmado por
+  `backend/tests/test_unscoped_reads.py`— en lugar de reenunciar aquí cuántas hay. No es «la última»: [`guest-portal-api.md`](guest-portal-api.md) añadió después la
   del portal del huésped, por el mismo motivo estructural. Las demás operaciones sobre
   `password_reset_tokens` —`add`, `count_live`, `revoke_other_live`, `revoke_oldest_beyond`—
   **sí** llevan `tenant_id`, y `add` rechaza con `CrossTenantWriteError` una fila cuyo tenant no

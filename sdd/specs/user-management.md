@@ -8,8 +8,10 @@ aprobación del propietario, SLAs, ventanas de check-in/checkout y conmutadores 
 Cierra lo que `auth-tenancy` dejó fuera a propósito: los usuarios ya no entran solo por el
 comando de bootstrap, así que dar de alta una limpiadora o un técnico no exige un despliegue.
 
-Es además el **primer escritor real de `audit_logs`**, cuya entidad llegó con
-`domain-foundation-financial` sin ningún consumidor, y la primera capacidad que demuestra sobre
+Es además la primera capacidad que consume `audit_logs`, cuya entidad llegó con
+`domain-foundation-financial` sin ningún consumidor —quién escribe hoy `audit_logs.changes` lo
+declara la tabla de la regla 11 de [`steering/security.md`](../steering/security.md), y solo
+ella—, y la primera que demuestra sobre
 sus propios endpoints los dos criterios que `auth-tenancy` declaró fuera de su alcance por
 tener endpoints autorreferenciales: el `404` cross-tenant y la matriz de autorización completa.
 

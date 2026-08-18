@@ -122,6 +122,29 @@ class Permission(str, enum.Enum):
     READ_CONVERSATIONS = "READ_CONVERSATIONS"
     MANAGE_CONVERSATIONS = "MANAGE_CONVERSATIONS"
 
+    # Added by `revenue-pricing` (design D11). Four, in the usual two read/manage pairs —
+    # reading a price and setting the box it moves in are different capabilities, the same
+    # split `reservations`, `properties` and `cleaning` already draw.
+    #
+    # **What is NOT usual: the owner manages here too**, and it is a conscious divergence
+    # from the "la owner ve, el manager opera" pattern every pair above follows.
+    # `min_price`, `max_price` and `max_daily_change_pct` are the limits of her own money
+    # (R3's user story: "pueda dejar el sistema generando sin vigilarlo"), and PRD §19 Mode 1
+    # says literally "Manager/owner aprueba manualmente y actualiza en OTA". Denying her
+    # either one would leave an owner without a manager — PRD §1's scale — unable to set her
+    # own floor or approve a price for her own flat.
+    #
+    # `MANAGE_PRICE_RECOMMENDATIONS` covers the three transitions **and** `POST /generate`:
+    # forcing a recalculation after touching a rule is the same operational capability, and
+    # a permission for one button is not something anyone reasons about separately.
+    #
+    # `CLEANER` and `TECHNICIAN` get none of the four; `SUPER_ADMIN` neither, for the reason
+    # the note below gives about every operational permission inside a tenant.
+    READ_PRICING_RULES = "READ_PRICING_RULES"
+    MANAGE_PRICING_RULES = "MANAGE_PRICING_RULES"
+    READ_PRICE_RECOMMENDATIONS = "READ_PRICE_RECOMMENDATIONS"
+    MANAGE_PRICE_RECOMMENDATIONS = "MANAGE_PRICE_RECOMMENDATIONS"
+
 
 _SELF_SERVICE = frozenset(
     {
@@ -202,6 +225,14 @@ _CONVERSATION_READ = frozenset({Permission.READ_CONVERSATIONS})
 _CONVERSATION_MANAGE = frozenset(
     {Permission.READ_CONVERSATIONS, Permission.MANAGE_CONVERSATIONS}
 )
+# `revenue-pricing` D11. Both bundles go to `TENANT_OWNER` **and** `PROPERTY_MANAGER` — see
+# the enum entry for why the owner manages here when she only reads elsewhere.
+_PRICING_RULE_MANAGE = frozenset(
+    {Permission.READ_PRICING_RULES, Permission.MANAGE_PRICING_RULES}
+)
+_PRICE_RECOMMENDATION_MANAGE = frozenset(
+    {Permission.READ_PRICE_RECOMMENDATIONS, Permission.MANAGE_PRICE_RECOMMENDATIONS}
+)
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -256,6 +287,11 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         | _OWNER_APPROVAL_RESPOND
         # Sees what her guests are saying; does not answer them (D17).
         | _CONVERSATION_READ
+        # Sets the box her own prices move in, and approves what comes out of it. The one
+        # place an owner *manages* rather than only reads — D11 argues it from PRD §19
+        # Mode 1 and from whose money the guardrails bound.
+        | _PRICING_RULE_MANAGE
+        | _PRICE_RECOMMENDATION_MANAGE
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -283,6 +319,10 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         | _INCIDENT_EXECUTE
         # PRD §6: "operar reservas, limpiezas, incidencias, **conversaciones**".
         | _CONVERSATION_MANAGE
+        # Operates pricing day to day: writes the rules and forces a regeneration after
+        # changing one. Same bundles as the owner, which is the divergence D11 records.
+        | _PRICING_RULE_MANAGE
+        | _PRICE_RECOMMENDATION_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     # Until `maintenance` this role held `_SELF_SERVICE` and nothing else: it existed and

@@ -32,8 +32,10 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyCleaningChecklistTemplateRepository,
     SqlAlchemyCleaningPhotoRepository,
     SqlAlchemyCleaningTaskRepository,
+    SqlAlchemyUnscopedCleaningPhotoLocationQuery,
 )
-from app.core.tenancy import CrossTenantWriteError
+from app.core.db import bind_session_to_tenant
+from app.core.tenancy import CrossTenantWriteError, TenantMarkedSessionError
 from tests.cleaning.conftest import insert_task, insert_template
 
 NOW = datetime(2026, 8, 6, 12, 0, tzinfo=UTC)
@@ -700,3 +702,50 @@ async def test_adding_a_photo_to_an_unknown_task_raises_the_same_error(
 
     with pytest.raises(CleaningTaskNotFoundError):
         await SqlAlchemyCleaningPhotoRepository(db_session).add(tenant_a.id, photo)
+
+
+@pytest.mark.asyncio
+async def test_the_unscoped_photo_location_resolves_the_tenant_out_of_the_row(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """The anonymous serving route's read: no tenant in, the tenant comes out (design D7b)."""
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    photo = _photo(task, users_by_role_a[UserRole.CLEANER])
+    await SqlAlchemyCleaningPhotoRepository(db_session).add(tenant_a.id, photo)
+    await db_session.flush()
+
+    located = await SqlAlchemyUnscopedCleaningPhotoLocationQuery(
+        db_session
+    ).locate_without_tenant_scoping(photo.id)
+
+    assert located is not None
+    assert located.tenant_id == tenant_a.id
+    assert located.storage_key == photo.storage_key
+
+
+@pytest.mark.asyncio
+async def test_the_unscoped_photo_location_refuses_a_marked_session(
+    db_session, tenant_a, property_a, template_a, users_by_role_a
+):
+    """R6.2/R6.3: the session contract of this query, executable.
+
+    Asserting the raise and not the absence of a row is the whole point here. On a marked
+    session the listener scopes the `JOIN cleaning_tasks`, so the query would come back empty
+    for every photo of every other tenant — and an empty result is what an unknown photo id
+    returns, so a silent failure would be reported as a broken signature instead of as the
+    wiring mistake it is.
+    """
+    from app.auth.domain.enums import UserRole
+
+    task = await insert_task(db_session, tenant_a, property_a, template_a)
+    photo = _photo(task, users_by_role_a[UserRole.CLEANER])
+    await SqlAlchemyCleaningPhotoRepository(db_session).add(tenant_a.id, photo)
+    await db_session.flush()
+    bind_session_to_tenant(db_session, tenant_a.id)
+
+    with pytest.raises(TenantMarkedSessionError, match="locate_without_tenant_scoping"):
+        await SqlAlchemyUnscopedCleaningPhotoLocationQuery(
+            db_session
+        ).locate_without_tenant_scoping(photo.id)

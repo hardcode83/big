@@ -326,7 +326,11 @@ class SqlAlchemyIncidentRepository:
 
 
 class SqlAlchemyOwnerApprovalRepository:
-    """`OwnerApprovalRepository` — the first writer `owner_approvals` has ever had."""
+    """`OwnerApprovalRepository` — the adapter behind the owner-approval port.
+
+    `owner_approvals.reason` and `response_notes` are rule 11 cleartext sinks; who writes them
+    is declared in that rule's table (`sdd/steering/security.md`) and nowhere else.
+    """
 
     def __init__(self, session: AsyncSession) -> None:
         self._session = session

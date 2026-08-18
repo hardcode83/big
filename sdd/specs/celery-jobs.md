@@ -22,6 +22,11 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL registrar los cuatro nombres literales de PRD §8.3 con sus cadencias:
   `check_checkin_windows`, `process_checkouts` y `mark_occupied_estimated` cada 5 minutos, y
   `check_sla_breaches` cada minuto.
+- THE SYSTEM SHALL registrar el quinto nombre de PRD §8.3, `generate_price_recommendations`,
+  **a una hora del día y no a una cadencia**: es el único job del calendario que corre «diario
+  06:00» y no cada N minutos ([`revenue-pricing`](revenue-pricing.md) R4.1). Un
+  `timedelta(days=1)` no serviría: dispararía 24 h después de arrancar beat en vez de a la hora
+  que el PRD nombra.
 - THE SYSTEM SHALL registrar además las cuatro tareas que PRD §8.3 no nombra: `dispatch_notifications`
   cada minuto y `provision_access_records` cada 5 minutos, las dos de `access-notifications`,
   `process_webhook_events` cada 60 segundos, de `reservations-webhooks`, y `classify_incidents`
@@ -35,8 +40,22 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   (`specs/reservations-webhooks.md`), así que su cadencia **es** el techo de llamadas al proveedor y
   acortarla lo sube. Los 60 segundos van holgados frente al techo de cuota medido en
   `specs/pms-beds24-spike.md` (un ciclo de sync por cuenta cada 30 s).
-- THE SYSTEM SHALL derivar tanto el `beat_schedule` como el TTL del lock de cada tarea de una
-  única tabla de cadencias, de modo que no puedan desincronizarse.
+- THE SYSTEM SHALL sostener el calendario sobre **dos tablas y un solo derivador**: `CADENCES`
+  para los jobs periódicos y `DAILY_JOBS` para los de hora del día, con `beat_schedule()`
+  derivado de las dos. La partición no es cosmética: un job periódico saca el TTL de su lock del
+  **mismo** número que usa beat mediante `lock_ttl_for`, así que una cadencia no puede cambiarse
+  en un sitio y quedar rancia en el otro.
+- THE SYSTEM SHALL derivar el `beat_schedule` y el TTL del lock de cada tarea periódica de
+  `CADENCES`, de modo que no puedan desincronizarse.
+- THE SYSTEM SHALL declarar el TTL del lock de un job diario **explícitamente** y no por la
+  derivación de `lock_ttl_for`: esa función devuelve cadencia x 3, que sobre un job diario son
+  tres días, y un worker muerto a mitad de ejecución dejaría el job encallado hasta el jueves.
+  `generate_price_recommendations` lleva 3 h — holgado frente a una ejecución de minutos y muy
+  por debajo de la ventana siguiente.
+- THE SYSTEM SHALL interpretar la hora de un job diario en **UTC**, porque el proceso fija
+  `celery_app.conf.timezone = "UTC"` y nunca interpreta zonas; las horas locales se derivan de
+  la zona de cada vivienda. Una fila de calendario por zona de tenant serían N filas compradas
+  para nada en un job que planifica un horizonte de 60 días.
 - WHEN se ejecuta `make up`, THE SYSTEM SHALL arrancar un servicio `beat` junto a `worker`, con
   la misma imagen y las mismas dependencias de arranque.
 - THE SYSTEM SHALL declarar `beat` también en el compose de despliegue, en la red `private` y
@@ -154,9 +173,14 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   `CHECKOUT_TIME_REACHED` y **antes de su único `commit`**, de modo que la transición y la tarea
   son una escritura o ninguna. Los otros dos jobs de reloj lo reciben a `None` y se comportan
   exactamente igual que antes. `AWAITING_CLEANING` ha dejado de ser terminal en la práctica.
-- **Dos jobs de PRD §8.3 no están aquí**: `generate_price_recommendations` (→ `revenue`) y
-  `send_checkin_reminders` (→ `messaging-ai` / `access-notifications`), que son mensajes al
-  huésped y no estado dependiente del reloj.
+- **Sólo un job de PRD §8.3 sigue sin estar aquí**: `send_checkin_reminders`
+  (→ `messaging-ai` / `access-notifications`), que es un mensaje al huésped y no estado
+  dependiente del reloj. Lo que le falta no es el reloj —esa es la mitad trivial— sino el
+  adapter de canal y la plantilla; una entrada de beat apuntando a una tarea que nadie ha
+  escrito falla una vez, a las 03:00, en un log de worker que nadie está leyendo.
+  **`generate_price_recommendations` sí está** desde
+  [`revenue-pricing`](revenue-pricing.md) (2026-08-18), y es quien estrenó `DAILY_JOBS`: hasta
+  entonces el calendario sólo sabía expresar intervalos.
 - **No hay sync periódico del PMS.** La cadencia sería función del presupuesto de créditos, ya
   medido contra Beds24, pero su adapter no existe: programarlo hoy sincronizaría el mock. Llega
   con `pms-beds24-adapter`, dueño de la `PMSAdapterFactory`. `pms_sync` sigue siendo la única

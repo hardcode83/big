@@ -25,7 +25,12 @@ from pathlib import Path
 
 import pytest
 
-from app.core.db import TENANT_ID_SESSION_KEY, bind_session_to_tenant
+from app.core.db import (
+    TENANT_ID_SESSION_KEY,
+    bind_session_to_tenant,
+    require_unmarked_session,
+)
+from app.core.tenancy import TenantMarkedSessionError
 
 APP_ROOT = Path(__file__).resolve().parents[1] / "app"
 
@@ -150,3 +155,39 @@ async def test_binding_twice_to_the_same_tenant_is_allowed(db_session) -> None:
     bind_session_to_tenant(db_session, tenant_id)
 
     assert db_session.info[TENANT_ID_SESSION_KEY] == tenant_id
+
+
+@pytest.mark.asyncio
+async def test_an_unmarked_session_passes_the_unscoped_read_guard(db_session) -> None:
+    """The normal case: nothing has bound the session, so the read may run."""
+    require_unmarked_session(db_session, read="find_by_email_globally")
+
+
+@pytest.mark.asyncio
+async def test_a_marked_session_is_refused_by_the_unscoped_read_guard(db_session) -> None:
+    """The other half of limit 2, executable (R6.1, R6.2).
+
+    The message has to carry both the read and the precondition: the diagnosis a reader
+    needs is "this lookup ran after something bound the session", and neither half alone
+    says that.
+    """
+    tenant_id = uuid.uuid4()
+    bind_session_to_tenant(db_session, tenant_id)
+
+    with pytest.raises(TenantMarkedSessionError) as raised:
+        require_unmarked_session(db_session, read="find_by_email_globally")
+
+    message = str(raised.value)
+    assert "find_by_email_globally" in message
+    assert "NOT marked with a tenant" in message
+    assert str(tenant_id) in message
+
+
+def test_the_unscoped_read_guard_does_not_share_an_error_class_with_the_binder() -> None:
+    """Design D8's rejected alternative, pinned.
+
+    A `ValueError` would be indistinguishable from `bind_session_to_tenant`'s two
+    refusals, so a `pytest.raises(ValueError)` in one of the per-read tests would pass on
+    the wrong failure.
+    """
+    assert not issubclass(TenantMarkedSessionError, ValueError)

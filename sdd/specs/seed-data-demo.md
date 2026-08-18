@@ -535,9 +535,9 @@ Las seis variables son **obligatorias y sin default en el árbol**, declaradas v
   `backend/tests/maintenance/test_free_text_sink_contract.py` — sigue a quien nombre
   `ReportIncidentUseCase` o `IncidentRepository`, precisamente porque este comando vive fuera de
   `maintenance/` y el guardián anterior no lo veía.
-- Controles de auditoría que lo enumeran: docstring de `find_by_email_globally`
-  (`backend/app/auth/infrastructure/repositories.py`) y límite 2 del listener de
-  `backend/app/core/db.py`.
+- Controles de auditoría que lo enumeran: `backend/tests/test_unscoped_reads.py`, que afirma
+  que el conjunto de llamantes de `require_unmarked_session` es exactamente el declarado, y
+  límite 2 del listener de `backend/app/core/db.py`.
 - Tests: `backend/tests/cli/test_seed_demo.py` (directorio nuevo a propósito — el seed no pertenece
   a un dominio, atraviesa cinco).
 - Documentación: `docs/seed-demo.md` (dataset, credenciales como *lo que pones en tu `.env`*,
