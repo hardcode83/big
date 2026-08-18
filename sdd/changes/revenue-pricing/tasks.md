@@ -368,9 +368,10 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
       lock, y una ejecución repetida es idempotente (forma del `test_repeated_execution.py` ya
       existente). [R4.1, R4.2, R4.7]
 
-## 8. Steering, notas corregidas y documentación
+## 8. Steering, notas corregidas y documentación <!-- panel: PASS 2026-08-18 (arquitectura y documentación PASS; tenancy N/A; seguridad y QA PASS con un hallazgo no bloqueante cada uno, los dos arreglados). Seguridad: la excepción 5 prometía «un sumidero hecho a medida» y ese sumidero cubre solo las inserciones —un día reprecio no emite timeline y la tabla no tiene `updated_at`, así que de 59 precios reescritos no queda rastro en ninguna tabla—; la frase era literalmente cierta y se leía más ancha de lo que es, así que ahora lo dice. QA: `design.md` seguía diciendo «fila 14» en dos sitios, un ordinal que mi propia nota de 8.2 declaraba falso sin cerrarlo; corregido con el porqué. Arquitectura comprobó contra el código las afirmaciones del README y de `docs/pricing.md` (cuatro capas, nueve tareas de beat, 17 dominios, orden de guardrails, precedencia de reglas, sin migración) y seguridad las seis de la excepción, más la aritmética del censo (22 filas, 18 columnas). -->
 
-- [ ] 8.1 `sdd/steering/security.md`: **quinta excepción nombrada de la regla 9** (OQ1, aprobada en
+
+- [x] 8.1 `sdd/steering/security.md`: **quinta excepción nombrada de la regla 9** (OQ1, aprobada en
       el gate de `/sdd:design` el 2026-08-16 y **estrechada el 2026-08-17**). Alcance literal y sin
       margen: **solo la generación de recomendaciones por el job del reloj**; **no** exime
       `POST /generate`, **no** exime ninguna decisión humana sobre una recomendación, **no** exime
@@ -392,7 +393,7 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
       El comentario de `app/audit/domain/actions.py` **cita** esta entrada y no la reformula, así
       que la formulación normativa —el volumen incluido— vive aquí y en ningún otro sitio. Lo
       condicionó el panel de seguridad de la sección 4.
-- [ ] 8.2 `sdd/steering/security.md`: **fila 14 del censo de la regla 11** para
+- [x] 8.2 `sdd/steering/security.md`: **fila 14 del censo de la regla 11** para
       `price_recommendations.explanation`, con excepción propia con la forma de la excepción 3
       —el valor no es nuestro y no lo hemos ido a buscar: lo teclea un usuario autenticado con
       RBAC, sobre el precio de su propia vivienda, acotado a 100 caracteres por 2.2— y la nota
@@ -505,7 +506,28 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
 
       Y su change está **FAIL en review con hallazgos abiertos** a 2026-08-18, o sea que esa
       forma todavía puede moverse: una razón más para escribir contra `main` y no contra ella.
-- [ ] 8.3 `backend/app/integrations/domain/ports.py` líneas 93-94: corregir la nota de ARI —
+
+      **EJECUTADO el 2026-08-18. Lo que salió distinto de lo planeado, y por qué:**
+      - **«Fila 14» no existe.** El censo real de `main` tenía ya 20 filas, así que las dos
+        nuevas son la 21 y la 22, y las columnas pasan de dieciséis a dieciocho. El ordinal
+        del título de esta tarea (y el de `design.md`, tabla de ficheros afectados) se escribió
+        cuando se creía que el censo tenía trece columnas. **Y el número se había filtrado al
+        código**: seis sitios —`audit/domain/value_objects.py`, `pricing/api/schemas.py` y
+        cuatro tests— decían literalmente «sink 14 of rule 11». Todos corregidos para citar la
+        tabla y no una posición: el censo crece y un ordinal caduca en silencio sin dejar de
+        sonar preciso. Es la misma lección que la sesión de `rule11-ownership-single-source`
+        aplica a la propiedad de las columnas.
+      - **`explanation` es excepción 5, no «la forma de la excepción 3».** Las excepciones 3 y
+        4 ya estaban tomadas (`messaging-ai` ensanchó la 3 y abrió la 4), y sobre todo: la
+        excepción 3 dice de sí misma «**no autoriza a un escritor nuestro**», y `explanation`
+        **la escribe nuestra plantilla cerrada**. Lo único que no componemos es el `name` que
+        la manager teclea en su regla de temporada o de evento. Así que la excepción se enuncia
+        sobre **el valor incrustado** y no sobre la columna, que es lo que la hace cierta.
+      - **`pricing_rules.name` va sin excepción**, como ya anticipaba la tarea: se censa porque
+        el criterio es quién escribe la columna, y se deja fuera del alcance de la regla 11
+        porque esta gobierna valores de la regla 3 y la etiqueta de una regla de precios no lo
+        es. La fila dice explícitamente que **sí propaga** a `audit_logs.changes`.
+- [x] 8.3 `backend/app/integrations/domain/ports.py` líneas 93-94: corregir la nota de ARI —
       `update_price`, `block_dates` y `get_availability` llegan con **un change de ARI propio,
       cuando exista quien las consuma**, no con `revenue` (D19). Grep por la redacción vieja en
       todo el árbol para que no quede ninguna copia prometiendo lo mismo. [R4.7]
@@ -516,13 +538,17 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
       están aquí … → `revenue`»), que **NO se toca aquí**: es spec viva, y la regla 7 del flujo
       reserva `sdd/specs/` a `/sdd:archive`, post-merge. Queda anotada para que ese paso la
       encuentre en vez de descubrirla el siguiente change.
+      **Y una tercera, del panel de arquitectura de la sección 8**: `sdd/specs/local-environment.md`
+      (~línea 270) habla de «las ocho tareas periódicas». **No es falsa** —ocho siguen siendo las
+      periódicas, y la novena va por hora del día— pero queda incompleta ahora que beat despacha
+      nueve. Misma regla 7: es spec viva, la toca `/sdd:archive`.
 - [x] 8.4 Regenerar **las dos mitades del puente** del contrato (`steering/documentation.md`):
       `make openapi` para `backend/openapi.json`, y el artefacto derivado del frontend
       `frontend/lib/api/generated/openapi.d.ts`. Desde un worktree el comando documentado
       (`cd frontend && npm run api:generate`) **no funciona**: usar la secuencia verificada de
       `sdd/project.md` (`mkdir -p /backend` → `docker compose cp` → `ln -sfn /app /frontend` →
       `npm run api:generate`) y commitear los dos ficheros en el mismo PR. [R1.1, R5.1]
-- [ ] 8.5 `docs/pricing.md` *(nuevo)* — página de capability orientada a *cómo se usa y se opera*:
+- [x] 8.5 `docs/pricing.md` *(nuevo)* — página de capability orientada a *cómo se usa y se opera*:
       qué es Modo 1 (el sistema recomienda, nunca publica), cómo se escribe una regla y qué
       significa cada uno de los cinco JSONB, cómo referenciar el catálogo `ES_NATIONAL`, cuándo
       corre el job y cómo forzarlo, y cómo se lee una `explanation`. Enlazar a las specs, no
@@ -542,22 +568,23 @@ Todos los tests nuevos viven en `backend/tests/pricing/` salvo donde se indique 
       red que #98 reescribe en el README. Si esa redacción cambia, citar la vieja es
       exactamente el fallo de «corregir una afirmación sin grepear la redacción vieja».
 
-## 9. Verification
+## 9. Verification <!-- verificada 2026-08-18, y AUDITADA por el panel de QA de la sección 8, que reprodujo las cifras por su cuenta contra el stack vivo en vez de creérselas: suite 7937/39 skipped, las cuatro guardas 1263, `alembic check` sin operaciones nuevas, `api:check` limpio y `test_the_committed_contract_matches_the_code` en verde. Confirmó también que no quedó residuo de sonda (los tres scripts fuera del contenedor, `tasks.py` sin diff) y cerró la objeción que más importaba sobre 9.5: un barrido que no hubiera tocado nada daría `{created:0, updated:0}`, y el del reloj dio `updated:59, preserved:1` con `audit_logs` en 6→6 — hizo trabajo sin auditar, que es exactamente lo que la excepción 5 promete. -->
 
-- [ ] 9.1 Suite completa en verde desde el worktree:
+
+- [x] 9.1 Suite completa en verde desde el worktree:
       `docker compose exec backend uv run pytest` (con el stack parado,
       `docker compose run --rm backend uv run pytest`).
-- [ ] 9.2 `docker compose exec backend uv run pytest tests/test_layering.py
+- [x] 9.2 `docker compose exec backend uv run pytest tests/test_layering.py
       tests/test_openapi_contract.py tests/test_route_authorization.py
       tests/test_tenant_filter.py` — las cuatro guardas transversales que un módulo nuevo con
       routers puede romper sin que se note en sus propios tests.
-- [ ] 9.3 `docker compose exec backend uv run alembic check` — confirma que **no hace falta
+- [x] 9.3 `docker compose exec backend uv run alembic check` — confirma que **no hace falta
       migración**: `pricing_rules`, `price_recommendations` y el enum ya están en
       `96d526599bc1_domain_foundation_financial` y este change no toca modelos.
-- [ ] 9.4 Sin deriva de contrato: `backend/openapi.json` y
+- [x] 9.4 Sin deriva de contrato: `backend/openapi.json` y
       `frontend/lib/api/generated/openapi.d.ts` regenerados y commiteados (8.4); comprobación del
       lado del frontend con `npm run api:check` dentro del contenedor, por la misma razón que 8.4.
-- [ ] 9.5 Comprobación manual del flujo extremo a extremo contra el stack del worktree (sin
+- [x] 9.5 Comprobación manual del flujo extremo a extremo contra el stack del worktree (sin
       navegador: solo API, `docker compose exec` y `psql`): crear una regla → `POST
       /price-recommendations/generate` → leer el horizonte de 60 días y su `explanation` →
       aprobar una → marcarla `APPLIED_EXTERNAL` → verificar los dos `TimelineEvent`, los

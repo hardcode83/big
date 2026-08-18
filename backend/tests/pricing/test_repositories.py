@@ -237,7 +237,7 @@ async def test_the_same_property_day_twice_in_one_call_is_a_validation_error(
 async def test_the_stored_explanation_is_exactly_what_was_rendered(
     rules, recommendations, world
 ) -> None:
-    """Sink 14 of rule 11 gets its test at its first writer.
+    """This sink of rule 11 gets its test at its first writer.
 
     `steering/security.md`: "El contrato lo hereda el change que primero escribe en cada
     una, **con su propio test**." Raised by the section-3 security panel.

@@ -410,7 +410,7 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     #
     # A recommendation's only human-moved column is its status (PRD §7.18 gives the table no
     # `updated_at` either). Everything else — `recommended_price`, `pricing_rule_id`,
-    # `confidence` — is rewritten by a job nobody attributes, and `explanation` is sink 14 of
+    # `confidence` — is rewritten by a job nobody attributes, and `explanation` is a censused sink of
     # rule 11: it holds the manager's own `name` text, so listing it here would carry that
     # text into `audit_logs.changes`, which is itself a rule-11 sink. `ChangeSet` therefore
     # rejects every other field of this entity by construction, which is what

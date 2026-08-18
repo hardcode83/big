@@ -167,7 +167,7 @@ class PriceRecommendationResponse(BaseModel):
     """One recommended price, with the sentence that explains it.
 
     `explanation` **is** here, and that is the point of R6: the owner approves with
-    criterion instead of blind. It is sink 14 of rule 11 in `steering/security.md`, and its
+    criterion instead of blind. It carries its own row in rule 11's census in `steering/security.md`, and its
     audience is exactly this surface — an authenticated `TENANT_OWNER` or
     `PROPERTY_MANAGER`, reading a price for their own flat.
 

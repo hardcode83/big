@@ -30,8 +30,10 @@ from app.pricing.domain.holidays import SUPPORTED_HOLIDAY_CATALOGS
 MAX_RULE_NAME_LENGTH = 200
 
 #: The `name` of a season or an event is the ONE piece of `explanation` our template does
-#: not compose (design D13), and `price_recommendations.explanation` is sink 14 of rule 11
-#: in `steering/security.md`. Bounding it is that row's stated mitigation.
+#: not compose (design D13), and `price_recommendations.explanation` carries a row of its own
+#: in rule 11's census in `steering/security.md`. Bounding it is that row's stated mitigation.
+#: Cited by name and not by its position in the table: the census grows, and an ordinal goes
+#: stale silently while still reading as precise.
 MAX_MODIFIER_NAME_LENGTH = 100
 
 #: A ceiling on each JSONB array, asked for by the section-1 security panel. Seasons and

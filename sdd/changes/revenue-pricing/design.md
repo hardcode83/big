@@ -651,7 +651,7 @@ de pertenencia de `upsert_many` se vuelve redundante y se puede quitar.
 | Integrations | `app/integrations/domain/ports.py` | nota de ARI corregida (D19) |
 | App | `app/main.py`, `app/core/error_codes.py` | montaje de routers y handler; `pricing` en la guarda de contrato (D15) |
 | Contrato | `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts` | regenerados (las dos mitades del puente, `steering/documentation.md`) |
-| Steering | `sdd/steering/security.md` | 5.ª excepción de la regla 9 (OQ1) y fila 14 del censo de la regla 11 (OQ2) |
+| Steering | `sdd/steering/security.md` | 5.ª excepción de la regla 9 (OQ1) y dos filas nuevas del censo de la regla 11 (OQ2) |
 | Docs | `docs/pricing.md` *(nuevo)*, `README.md` | página de capability y módulo nuevo |
 
 ## Data & interfaces
@@ -739,11 +739,26 @@ en `security.md`, que escribe una tarea de este change. Su alcance es el que D12
 solo la generación por el job, y no exime `POST /generate`, ni ninguna decisión humana sobre una
 recomendación, ni nada de `PricingRule`.
 
-**OQ2 — Fila 14 del censo de la regla 11 para `price_recommendations.explanation`, con excepción
-propia. → APROBADA.** La `explanation` echa el `name` que la manager teclea en sus reglas de
-temporada y evento, bajo la forma de la excepción 3: el valor no es nuestro y no lo hemos ido a
-buscar. Rechazado: renderizar solo el tipo de modificador («Season +30%», sin decir cuál), que
-cumple R6.1 a medias. La escribe una tarea de este change, igual que OQ1.
+**OQ2 — Fila propia en el censo de la regla 11 para `price_recommendations.explanation`, con
+excepción propia. → APROBADA.** La `explanation` echa el `name` que la manager teclea en sus reglas
+de temporada y evento: el valor no es nuestro y no lo hemos ido a buscar. Rechazado: renderizar
+solo el tipo de modificador («Season +30%», sin decir cuál), que cumple R6.1 a medias. La escribe
+una tarea de este change, igual que OQ1.
+
+**Dos cosas de este párrafo salieron distintas al ejecutarlo el 2026-08-18, y se corrigen aquí
+porque el documento tiene que seguir siendo cierto** (lo levantó el panel de QA de la sección 8, que
+vio la corrección anotada en `tasks.md` y este fichero sin tocar):
+
+- **«Fila 14» nunca existió.** El censo de `main` ya tenía dieciséis columnas y veinte filas, así
+  que las dos que añade este change son la 21 y la 22, y las columnas quedan en dieciocho. El
+  ordinal se escribió cuando se creía que el censo tenía trece columnas, y **se había filtrado a
+  seis sitios del código** que decían «sink 14 of rule 11»; todos citan ahora la tabla y no una
+  posición, porque un ordinal caduca en silencio sin dejar de sonar preciso.
+- **No va «bajo la forma de la excepción 3», sino con excepción propia, la 5.** La excepción 3 dice
+  de sí misma que **no autoriza a un escritor nuestro**, y `explanation` la escribe nuestra
+  plantilla cerrada: lo único que no componemos es ese `name`. Así que la excepción se enuncia
+  sobre **el valor incrustado** y no sobre la columna, que es lo que la hace cierta. Además las
+  excepciones 3 y 4 ya estaban ocupadas — `messaging-ai` ensanchó la 3 y abrió la 4.
 
 **OQ3 — Dos reglas activas para la misma propiedad. → Desempate determinista, sin migración.**
 `resolve_rule` gana por `updated_at` más reciente con `id` como desempate final (D6). Rechazado:

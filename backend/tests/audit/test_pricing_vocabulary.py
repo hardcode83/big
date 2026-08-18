@@ -109,7 +109,7 @@ def test_the_recommendation_allowlist_is_only_status() -> None:
 def test_no_other_recommendation_field_can_be_audited(field: str) -> None:
     """D13's "no se propaga", enforced by `ChangeSet` rather than by each use case.
 
-    `explanation` is sink 14 of rule 11 and carries the `name` the manager typed into her
+    `explanation` is a censused sink of rule 11 and carries the `name` the manager typed into her
     own seasonality/event rules. `audit_logs.changes` is itself a rule-11 sink, so her text
     must not travel from one to the other.
     """

@@ -3073,7 +3073,7 @@
         "type": "object"
       },
       "PriceRecommendationResponse": {
-        "description": "One recommended price, with the sentence that explains it.\n\n`explanation` **is** here, and that is the point of R6: the owner approves with\ncriterion instead of blind. It is sink 14 of rule 11 in `steering/security.md`, and its\naudience is exactly this surface — an authenticated `TENANT_OWNER` or\n`PROPERTY_MANAGER`, reading a price for their own flat.\n\n`current_price` is always `null` while Mode 1 never calls the PMS (R5.5, D19); it is\npublished anyway because the column exists and a client that omitted it would have to\nchange shape the day ARI arrives.",
+        "description": "One recommended price, with the sentence that explains it.\n\n`explanation` **is** here, and that is the point of R6: the owner approves with\ncriterion instead of blind. It carries its own row in rule 11's census in `steering/security.md`, and its\naudience is exactly this surface — an authenticated `TENANT_OWNER` or\n`PROPERTY_MANAGER`, reading a price for their own flat.\n\n`current_price` is always `null` while Mode 1 never calls the PMS (R5.5, D19); it is\npublished anyway because the column exists and a client that omitted it would have to\nchange shape the day ARI arrives.",
         "properties": {
           "confidence": {
             "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",

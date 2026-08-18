@@ -253,7 +253,7 @@ async def test_a_decision_writes_its_audit_row_with_the_actor(api, world, db_ses
     assert rows[0].actor_user_id == world.manager.id
     assert rows[0].actor_ip
     # `status` is the entity's whole auditable surface (D12), which is what keeps the rendered
-    # `explanation` — sink 14 of rule 11 — out of `audit_logs.changes`.
+    # `explanation` — a censused sink of rule 11 — out of `audit_logs.changes`.
     assert set(rows[0].changes) == {"status"}
 
 
@@ -458,7 +458,7 @@ async def test_marking_applied_external_puts_the_event_on_the_timeline(
     assert rows[0].property_id == world.property.id
     assert rows[0].actor_type == TimelineActorType.USER
     assert rows[0].actor_user_id == world.manager.id
-    # Identifiers and a price, and nothing else (D14): the rendered `explanation` is sink 14
+    # Identifiers and a price, and nothing else (D14): the rendered `explanation` is a censused sink
     # of rule 11 and `timeline_events` is append-only, so anything landing here could never
     # be redacted afterwards.
     assert set(rows[0].metadata_) == {"recommendation_id", "date", "recommended_price"}
