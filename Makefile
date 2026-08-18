@@ -27,7 +27,7 @@ COMPOSE_ARGS := $(if $(IS_WORKTREE),-f docker-compose.yml -f docker-compose.work
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity compose-stacks db-clean-test
+.PHONY: up down logs ps sh bootstrap seed-demo openapi check-version-parity compose-stacks check-compose-ports db-clean-test
 
 up:
 	@if [ -n "$(IS_WORKTREE)" ] && [ ! -f docker-compose.worktree.yml ]; then \
@@ -86,8 +86,10 @@ up:
 		echo "       Para empezar de cero a sabiendas: borra la línea de .env y vuelve a lanzar make up."; \
 		exit 1; \
 	fi
-# Comprobar ANTES de intentar el bind, y después de crear `.env` (tres servicios declaran
-# `env_file: .env`, así que `config` no resuelve sin él). Caza dos cosas de una: un servicio con
+# Comprobar ANTES de intentar el bind. Queda después de crear `.env` por orden de la receta, no
+# porque haga falta: con las dos banderas de abajo `config` sale con código 0 sin `.env` de ninguna
+# clase (medido). La redacción anterior decía que sin `.env` no resolvía —cierto de `config` a
+# secas, que es lo que esta línea usaba antes de `compose-ports-guard`—. Caza dos cosas de una: un servicio con
 # `ports:` que nadie añadió al overlay, y un Docker Compose anterior a 2.24, que ignora el tag
 # `!reset` y dejaría los cuatro mapeos en pie. Sin esto el síntoma sería un "port is already
 # allocated" que se lee como otra cosa.
@@ -105,8 +107,15 @@ up:
 # verde mientras el stack publicaba. Con el overlay aplicado no queda ninguna clave `ports` en la
 # configuración resuelta (medido: 4 sin overlay, 0 con él), así que ausencia de `ports` es la
 # aserción correcta y además cubre formas de mapeo que aún no existen.
+#
+# Las dos banderas de `config` son obligatorias por la regla que `compose-ports-guard` (2026-08-18)
+# dejó escrita en specs/local-environment.md: inspeccionar la postura con `config` exige
+# `--no-interpolate --no-env-resolution`. Aquí no era un riesgo teórico — sin ellas esta línea
+# materializa el `.env` entero resuelto (JWT_SECRET_KEY, POSTGRES_PASSWORD, ENCRYPTION_KEY) en
+# `$$cfg`, y bastaría un `set -x` o un `echo` de depuración para volcarlo. Medido al añadirlas: el
+# `!reset []` sigue dejando CERO claves `ports` con y sin banderas, así que la aserción no cambia.
 	@if [ -n "$(IS_WORKTREE)" ]; then \
-		cfg=$$($(COMPOSE) config --format json) || { \
+		cfg=$$($(COMPOSE) config --no-interpolate --no-env-resolution --format json) || { \
 			echo "error: 'docker compose config' falló, así que no se ha podido comprobar que este"; \
 			echo "       worktree no publica puertos. Se aborta en rojo a propósito: sin esa"; \
 			echo "       comprobación, arrancar puede chocar con el stack del principal."; \
@@ -157,12 +166,33 @@ check-version-parity:
 # de este diagnóstico es la máquina y no este proyecto, así que pasarlo por `$(COMPOSE)` lo
 # acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca.
 #
-# Y queda prohibido «mejorarlo» con `docker compose config` o con un `docker inspect` sin
-# `--format`: el primero resuelve e imprime los valores del `.env` (`JWT_SECRET_KEY`,
-# `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`) y la salida por defecto del segundo incluye
-# `.Config.Env`.
+# Y queda prohibido «mejorarlo» con `docker compose config` SIN `--no-interpolate
+# --no-env-resolution`, o con un `docker inspect` sin `--format`: el primero, desnudo, resuelve e
+# imprime los valores del `.env` (`JWT_SECRET_KEY`, `POSTGRES_PASSWORD`, `ENCRYPTION_KEY`) y la
+# salida por defecto del segundo incluye `.Config.Env`. La primera mitad se acotó por forma en el
+# change `compose-ports-guard`, cuando la guardia de puertos necesitó `config` como única fuente
+# correcta; este script sigue sin necesitarlo, porque le basta `docker compose ls`.
 compose-stacks:
 	python3 scripts/compose-stacks.py
+
+# Comprueba la postura de red del compose local: ningún puerto publicado fuera de 127.0.0.1,
+# salvo los dos pares servicio+puerto exentos a propósito (backend:8000, frontend:3000). Es la
+# guardia que sostiene la exención de POSTGRES_PASSWORD de steering/security.md regla 8, y corre
+# también en CI (.github/workflows/compose-ports.yml).
+#
+# Deliberadamente **fuera de $(COMPOSE)**, y es el tercer target host-side que no lo usa — pero
+# por un motivo distinto del de compose-stacks, así que no se lee del de arriba. Aquí no es que
+# el ámbito sea la máquina: es que pasar por $(COMPOSE) añadiría docker-compose.worktree.yml en
+# un worktree enlazado, que retira los cuatro mapeos, y entonces la guardia vería CERO claves
+# `ports` y daría verde sin haber comprobado nada. Invocando Compose desnudo da el mismo
+# veredicto en el principal, en un worktree enlazado y en CI, que es lo que la hace función solo
+# del repositorio.
+#
+# El script invoca `docker compose config` con `--no-interpolate --no-env-resolution` SIEMPRE, y
+# eso es lo que lo saca de la prohibición de más arriba: con las dos banderas la salida no
+# contiene ningún valor del `.env` (medido), así que no hace falta `.env` ni lo hay que crear.
+check-compose-ports:
+	python3 scripts/compose-ports.py
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
 # `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y

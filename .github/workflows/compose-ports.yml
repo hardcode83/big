@@ -1,0 +1,70 @@
+name: compose-ports
+
+# La postura de red del compose local, comprobada en cada Pull Request: ningún servicio publica
+# un puerto en el host fuera de `127.0.0.1`, salvo los dos pares servicio+puerto exentos a
+# propósito (`backend:8000` y `frontend:3000`, que se abren a la LAN porque el proyecto es
+# mobile-first). Lo que esto protege no es higiene: el Redis del stack local guarda los
+# contadores del throttle de login y corre sin `requirepass`, y este bind es lo que sostiene la
+# exención de `POSTGRES_PASSWORD` de steering/security.md regla 8. Antes de este workflow la
+# postura la afirmaban tres documentos y no la comprobaba nadie.
+#
+# **Sin `.env`, sin secrets, sin servicios**, y eso es verificable leyendo este fichero — que es
+# justo el punto de R1.6. No hace falta ninguno: la guardia invoca `docker compose config` con
+# `--no-interpolate --no-env-resolution`, y así sale con código 0 en un clon limpio y su salida
+# no contiene ningún valor del `.env` (medido). El runner de `ubuntu-latest` ya trae Docker con
+# el plugin `compose`, y `config` no habla con el daemon.
+#
+# Workflow propio y de UN SOLO job, copiando la forma de `api-contract.yml` y no el patrón de
+# tres jobs de `backend-tests.yml` (R1.2): esto tarda segundos, así que la complejidad de tres
+# jobs no se paga. El job se llama igual que el workflow **a propósito**: el check run toma el
+# nombre del *job*, no el del workflow.
+#
+# SIN filtro `paths:` (R1.3), prohibido por specs/backend-ci.md: un required check con filtro de
+# rutas no se ejecuta en los PR que no las tocan, y GitHub deja esos PR esperando para siempre un
+# check que no llegará.
+#
+# Y fuera de `backend/tests/` (R1.4): `backend-tests.yml` decide el área con
+# `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así que un PR que solo toque
+# `docker-compose.yml` no ejecutaría esa suite — justo el PR donde esta guardia tiene que hablar.
+
+on:
+  pull_request: {}
+  push:
+    branches: [main]
+  workflow_dispatch: {}
+
+concurrency:
+  group: compose-ports-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  compose-ports:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+
+      # Solo para correr la suite del paso siguiente: la guardia es stdlib y va con el `python3`
+      # del runner. Misma acción y mismo SHA que `api-contract.yml` y `backend-tests.yml`.
+      - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+
+      - name: La postura de red del compose local
+        # El mismo target que se ejecuta en local, y el mismo script: un workflow con su propia
+        # invocación fallaría por un motivo que nadie puede reproducir en su máquina. El target
+        # queda fuera de `$(COMPOSE)` a propósito (D10) — pasar por ahí añadiría el overlay de
+        # worktree, la guardia vería cero mapeos y daría verde en vacío.
+        run: make check-compose-ports
+
+      - name: La suite de la guardia
+        # R6.4: si la guardia deja de detectar una vía, esto rompe el check. Hasta este change
+        # NINGÚN workflow recogía `scripts/test_*.py` — `backend-tests.yml` invoca pytest con
+        # `working-directory: backend`—, así que estas pruebas solo corrían a mano.
+        #
+        # `--no-project` porque no hay `pyproject.toml` en la raíz y no queremos sincronizar el
+        # árbol de dependencias del backend para probar scripts de la stdlib; el `pytest` va
+        # **pinneado** y alineado con el `pytest>=9.1.1` de `backend/pyproject.toml`.
+        run: uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q

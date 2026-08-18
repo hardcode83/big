@@ -70,28 +70,35 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
   con el puerto abierto a la LAN, la cabecera la suministra quien llama. Consecuencia aceptada
   en local: el límite por IP degrada a un contador único (spec `auth-tenancy`
   §Identificación del cliente).
-- **Esta postura no tiene comprobación automática todavía.** Si alguien publica un puerto sin el
-  prefijo, hoy solo lo atrapa la revisión del diff. La guardia que lo comprobaría en cada PR es la
-  entrada `compose-ports-guard` del roadmap, separada del change que estableció esta postura
-  porque construirla bien resultó tener más fondo del que aparenta — su enunciado lleva el censo de
-  vías de elusión ya demostradas.
+- **Esta postura se comprueba sola, en local y en cada Pull Request**, con
+  `make check-compose-ports` y el workflow `compose-ports` (ver §«Guardia de la postura de red»).
+  Un mapeo al que se le caiga el prefijo `127.0.0.1:` sale en rojo nombrando servicio y mapeo, en
+  vez de depender de que alguien lo vea en el diff. Lo añadió el change `compose-ports-guard`,
+  separado del que estableció esta postura porque construir la guardia bien resultó tener más
+  fondo del que aparenta: su entrada de roadmap lleva el censo de vías de elusión ya demostradas.
 - **Conjunto de ficheros canónico, que es lo que esa guardia tiene que mirar**: en el worktree
   principal, `docker-compose.yml` **a secas** — el `Makefile` lo invoca sin `-f`, así que lo que
   Compose descubre por sí solo *es* la postura real y una comprobación desnuda no puede quedarse
   corta. En un worktree enlazado, `docker-compose.yml` **+** `docker-compose.worktree.yml`, en ese
   orden. Los mapeos siguen declarados en el fichero base a propósito: sacarlos a un fichero aparte
   habría dejado la vista desnuda sin puertos y la guardia pasando en vacío.
-- WHERE se inspeccione la postura con `docker compose config`, THE SYSTEM SHALL exigir un `.env`
-  presente **y completo**: tres servicios declaran `env_file: .env` y el compose interpola
-  `${POSTGRES_DB:?...}`, `${POSTGRES_PASSWORD:?...}` y `${JWT_SECRET_KEY:?...}`, así que en un clon
-  limpio falla — y copiar `.env.example` **no basta**, porque su `JWT_SECRET_KEY` va vacía a propósito
-  y la genera `make up`. Es requisito de existencia *y* de interpolación.
+- WHERE se inspeccione la postura con `docker compose config`, THE SYSTEM SHALL invocarlo con
+  `--no-interpolate --no-env-resolution`, y entonces **no hace falta `.env` de ninguna clase**:
+  medido, sale con código 0 en un clon limpio y normaliza igual los mapeos de puertos. Redacciones
+  anteriores de este criterio exigían un `.env` presente **y completo**, razonando que tres
+  servicios declaran `env_file: .env` y que el compose interpola `${POSTGRES_DB:?...}`,
+  `${POSTGRES_PASSWORD:?...}` y `${JWT_SECRET_KEY:?...}`. Eso es cierto de `config` **a secas** —y
+  sigue siendo el motivo por el que `make up` crea el fichero—, pero no de esta invocación. La
+  diferencia no es cosmética: con interpolación activada, un `BIND=0.0.0.0` en el `.env` de alguien
+  daría rojo en su máquina y verde en CI, y el veredicto sería función del entorno en vez de del
+  repositorio.
 - **Qué NO detecta una comprobación que busque un puerto de host publicado**: hay formas legales de
   `ports:` que no declaran ninguno —la corta con solo el puerto del contenedor (`ports: ["5432"]`) y
   la larga sin `published` (`{target: 6379, mode: ingress}`)— y Docker las publica en un puerto
   **efímero y en todas las interfaces**. La aserción fiable es sobre la **presencia de la clave
-  `ports`**, no sobre `published` ni `host_ip`. Fuera del alcance de cualquiera de las dos:
-  `network_mode: host`, que publica sin declarar mapeo alguno y que hoy ningún servicio usa.
+  `ports`**, no sobre `published` ni sobre `host_ip`. Y `network_mode: host` no lo detecta ninguna
+  de las dos, porque publica **sin generar ninguna entrada `ports`**: quien lo cubre es la guardia,
+  con una lista blanca de `network_mode` (ver §«Guardia de la postura de red»).
 
 ### Stacks en paralelo por worktree
 
@@ -128,9 +135,18 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 - IF git no está disponible o el directorio no es un repositorio, THEN THE SYSTEM SHALL comportarse
   como el worktree principal —publicar— y decirlo. Es deliberado: una colisión de puertos aborta
   nombrando el puerto, mientras que no publicar en silencio se manifiesta como «la app no carga».
-- THE SYSTEM SHALL requerir **Docker Compose ≥ 2.24** (por el tag `!reset`) y **git ≥ 2.31** (por
-  `--path-format`). Por debajo del suelo de git la detección falla hacia publicar, así que un worktree
-  chocaría de puertos en vez de arrancar sin ellos.
+- THE SYSTEM SHALL requerir **Docker Compose ≥ 2.35.0** y **git ≥ 2.31** (por `--path-format`). Por
+  debajo del suelo de git la detección falla hacia publicar, así que un worktree chocaría de puertos
+  en vez de arrancar sin ellos.
+
+  El suelo de Compose lo fijan **dos** cosas, y manda la mayor. El tag `!reset` de
+  `docker-compose.worktree.yml` pide ≥ **2.24**; la bandera `--no-env-resolution` que usa la guardia
+  de puertos pide ≥ **2.35.0**, y ese es el suelo efectivo. La segunda cifra está **medida** y no
+  estimada: la bandera la introdujo el PR 12665 de `docker/compose`, mergeado el 2025-03-24 y
+  publicado por primera vez en **v2.35.0** (2025-04-10); en v2.34.0 no existe. Hasta el change
+  `compose-ports-guard` aquí ponía 2.24, que era el suelo correcto de entonces y se quedó corto al
+  añadir la guardia. Por debajo del suelo, la guardia sale en **rojo** nombrando el paso y avisando
+  de `unknown flag` — no en verde (ver §«Guardia de la postura de red»).
 - **Lo que un worktree enlazado no tiene**: nada alcanzable desde el navegador del host, ni un cliente
   gráfico contra `localhost:5432`. Si alguna vez hace falta, la salida es parametrizar los cuatro
   puertos con un desplazamiento (`PORT_OFFSET`), no volver a publicarlos sin más.
@@ -201,11 +217,22 @@ de la máquina y marca cuáles quedaron huérfanos. Informa; no actúa.
   no distingue una base huérfana de una viva.
 - THE SYSTEM SHALL usar **exactamente dos fuentes**, una invocación cada una, con lista de argumentos
   y nunca por shell: `git worktree list --porcelain` y `docker compose ls -a --format json`. Quedan
-  **prohibidos** `docker compose config` en cualquier forma y `docker inspect` sin `--format`: el
-  primero resuelve e imprime los valores del `.env` y la salida por defecto del segundo incluye
-  `.Config.Env` — medido sobre el stack vivo, con `JWT_SECRET_KEY`, `POSTGRES_PASSWORD` y
-  `ENCRYPTION_KEY` dentro (regla 8 de `steering/security.md`). La prohibición está escrita en tres
-  sitios —docstring del script, comentario del `Makefile` y aquí— porque es portante, no cosmética.
+  **prohibidos** `docker compose config` **sin `--no-interpolate --no-env-resolution`** y
+  `docker inspect` sin `--format`: el primero, en su forma desnuda, resuelve e imprime los valores
+  del `.env` y la salida por defecto del segundo incluye `.Config.Env` — medido sobre el stack vivo,
+  con `JWT_SECRET_KEY`, `POSTGRES_PASSWORD` y `ENCRYPTION_KEY` dentro (regla 8 de
+  `steering/security.md`). La prohibición está escrita en tres sitios —docstring del script,
+  comentario del `Makefile` y aquí— porque es portante, no cosmética.
+
+  **La primera mitad se acotó por forma en `compose-ports-guard` (2026-08-18), y el cómo importa.**
+  Antes decía «`docker compose config` en cualquier forma», y la guardia de puertos —para la que
+  `config` es la única fuente correcta— habría necesitado exceptuarse **por sujeto**: «prohibido
+  salvo para este script», que es una excepción nominal que el siguiente script pediría también. La
+  forma acotada es **mecánica y verificable**: es una lista de banderas, y con las dos la salida no
+  contiene ningún valor del `.env` (medido — sin ellas inlina el fichero entero en `environment`,
+  incluidas variables que el compose no menciona). `scripts/test_compose_ports.py` la comprueba
+  sobre el propio código del script, por AST y no por `grep`. `docker inspect` sin `--format` sigue
+  prohibido **sin excepción**: ahí no hay bandera que acote nada.
 - THE SYSTEM SHALL atribuir cruzando **rutas**, nunca etiquetas de contenedor
   (`com.docker.compose.project.working_dir` y compañía): cualquier contenedor de la máquina las pone
   con `docker run --label` y admiten cualquier byte. Atribuir por etiquetas es lo que hizo fracasar el
@@ -243,12 +270,114 @@ de la máquina y marca cuáles quedaron huérfanos. Informa; no actúa.
   únicos aciertos aceptables están bajo `sdd/changes/archive/`, que es registro histórico y no se
   reescribe.
 
+### Guardia de la postura de red
+
+`make check-compose-ports` ejecuta `python3 scripts/compose-ports.py`, que comprueba que ningún
+servicio del compose local publique un puerto en el host fuera de `127.0.0.1`. Corre también en cada
+Pull Request (`.github/workflows/compose-ports.yml`). A diferencia del diagnóstico de stacks, **esto
+sí es una guardia de CI**: sale con código distinto de cero cuando hay hallazgo.
+
+**Estado del check.** WHILE el repositorio no disponga de protección de rama compatible, THE SYSTEM
+SHALL ejecutar y reportar `compose-ports` **sin** configurarlo como check obligatorio para fusionar
+— igual que `api-contract` y `frontend-tests`, y por el mismo motivo de plan de GitHub
+(`specs/backend-ci.md` §Estado, `docs/adr/0002-github-org-hosting.md`). Conviene decirlo aquí porque
+la regla 8 de `steering/security.md` apoya en esta guardia la exención de `POSTGRES_PASSWORD`: lo que
+la sostiene es un rojo **visible** en cada Pull Request, no una puerta que impida fusionar. El día
+que haya protección de rama, éste es de los checks que deben pasar a obligatorios.
+
+- THE SYSTEM SHALL tomar su dato de `docker compose config --no-interpolate --no-env-resolution
+  --format json` y **no** del YAML a pelo, porque Compose es quien normaliza las cuatro formas de
+  escribir un mapeo. Las dos banderas son obligatorias y viven en una única constante del script;
+  ver §«Diagnóstico de stacks de Compose» para la prohibición que acotan.
+- THE SYSTEM SHALL **delegar en Compose el descubrimiento de ficheros** —invocarlo sin `--file`— y
+  construir el entorno del hijo **desde cero por lista blanca** (`PATH` y nada más), de modo que ni
+  un `COMPOSE_FILE` exportado en el shell ni un `compose.yaml` que sustituya a `docker-compose.yml`
+  desvíen la comprobación. Lista blanca y no desinfección por lista negra: una lista blanca
+  demasiado estrecha falla en **rojo**, una lista negra demasiado estrecha falla en **verde** y se
+  reabre con cada variable nueva que Docker añada.
+- THE SYSTEM SHALL decidir cada mapeo con **seis reglas en este orden**: (1) `network_mode` fuera de
+  `{ausente, bridge, none}` → infracción; (2) `ports` ausente → conforme; (3) entrada de `ports` que
+  no es objeto → infracción; (4) objeto sin `published` → infracción **siempre**, incluso en un
+  servicio exento; (5) `(servicio, published)` en la exención → conforme; (6) `host_ip` igual a
+  `127.0.0.1` → conforme, cualquier otra cosa → infracción. El orden es normativo: intercambiar (4)
+  y (5) eximiría en silencio un mapeo sin puerto de host.
+- THE SYSTEM SHALL eximir exactamente **dos pares servicio+puerto** —`backend:8000` y
+  `frontend:3000`—, nunca servicios enteros ni puertos sueltos: un puerto extra en un servicio
+  exento y el mismo puerto en un servicio no exento son infracción.
+- THE SYSTEM SHALL evaluar los servicios declarados bajo `profiles:` **estén o no activos**,
+  enumerándolos con `config --profiles` y activándolos con un `--profile` **por nombre**, nunca
+  unidos por comas: la bandera viaja por `argv` sin separador, mientras que unir los nombres pierde
+  el que lleve una coma dentro, que es un carácter legítimo del dato.
+- THE SYSTEM SHALL **afirmar en positivo** antes de dar verde, con dos igualdades, y fallar si no
+  puede confirmar cualquiera de ellas: el conjunto de servicios del modelo es exactamente el
+  inventario que el script declara (`EXPECTED_SERVICES`) y exactamente el que devuelve
+  `config --services`; y la unión de los `profiles` del modelo es igual a lo que enumeró
+  `config --profiles`. Es una aserción positiva en lugar de varias guardas negativas, y con ella un
+  `config` que salga con **éxito** devolviendo `{}` da conjunto vacío ≠ inventario, y es rojo.
+- THE SYSTEM SHALL comparar el inventario por **igualdad** y no por contención: un servicio nuevo
+  deja la guardia en rojo hasta que alguien lo añada a `EXPECTED_SERVICES`, y ese momento —el Pull
+  Request que lo introduce— es precisamente cuando hay que decidir qué publica. El mensaje de fallo
+  dice qué añadir y dónde. Es la misma disciplina que `docker-compose.worktree.yml` ya impone.
+- THE SYSTEM SHALL comprobar el estado de salida de cada invocación **aparte** de su contenido y
+  antes de mirarlo, sin `2>/dev/null` y sin quedar detrás de un pipe. Medido mientras se diseñaba:
+  `docker compose config --services 2>&1 | tail -2` imprime el error y devuelve **`rc=0`**, porque
+  en un pipe el estado de salida es el del último comando.
+- THE SYSTEM SHALL **no volcar nunca** la salida de `config`: el hallazgo se compone solo de nombre
+  de servicio y mapeo, del fallo se relata **solo la primera línea de `stderr`** saneada y acotada, y
+  `stdout` no se relata jamás. En Actions `stdout` es un log persistido.
+- THE SYSTEM SHALL imprimir **una etiqueta y un valor por línea**, un bloque por hallazgo, en orden
+  determinista y con el mismo escape inyectivo de `compose-stacks.py` — y por el mismo motivo: los
+  nombres de servicio y de profile son dato ajeno al formato.
+- WHEN no hay ninguna infracción, THE SYSTEM SHALL salir con código cero **nombrando y contando** lo
+  inspeccionado —servicios, mapeos y profiles—, para que el verde se lea como «vio esto» y no como
+  «no vio nada». Hoy: 7 servicios, 4 mapeos, 0 profiles.
+- IF cualquier paso de la cadena falla —`config` con error, JSON no parseable, enumeración rota,
+  Compose por debajo del suelo de versión— THEN THE SYSTEM SHALL terminar en rojo con un mensaje
+  propio que nombre el paso, y **nunca** en verde. No hay lógica de comparación de versiones: una
+  bandera desconocida ya sale con código distinto de cero, y el mensaje lleva la pista.
+
+**Qué NO es, y por qué no duplica la comprobación de `make up`.** La de `make up`
+(§«Stacks en paralelo por worktree») asierta la **ausencia** de la clave `ports` en la configuración
+**con overlay**, antes de levantar **un stack concreto**, para que un worktree no choque de puertos.
+Ésta asierta la **postura del repositorio** sobre la configuración **desnuda**, en CI. Sujetos
+distintos, ficheros distintos, momentos distintos, y direcciones opuestas: allí lo correcto es cero
+mapeos, aquí lo correcto son cuatro. No se deben fundir.
+
+**Limitaciones conocidas, las dos deliberadas:**
+
+- **`::1` (loopback IPv6) sale en rojo.** Es loopback y por tanto seguro, pero no es la postura
+  escrita. Fallar y dejar que una persona ensanche la regla a sabiendas es la dirección correcta.
+- **Un mapeo construido con interpolación sale en rojo**, porque con `--no-interpolate` no se
+  normaliza y llega como cadena cruda. No es una limitación que se acepte a regañadientes: es el
+  mecanismo que hace verdadero que el veredicto sea función **solo del repositorio**. Un mapeo cuyo
+  valor sale del entorno no es una postura del repositorio. Consecuencia declarada para
+  `worktree-port-offset`: un desplazamiento escrito como `"127.0.0.1:${PORT_OFFSET}..."` daría rojo,
+  y aquel change tendrá que generar mapeos literales o reabrir esta regla a sabiendas.
+
+**Fuera de alcance, y por qué**: `docker-compose.deploy.yml`. Lo carga solo el CD, que le pasa `-f`,
+así que un `docker compose` desnudo nunca lo ve; incluirlo exigiría un `--file` explícito, que es la
+vía de elusión que esta guardia cierra. Y su regla es la **inversa** — allí `backend` y `frontend`
+publican en `127.0.0.1` obligatoriamente (`specs/app-deploy-dev.md` R4.3) —, así que los dos pares
+que aquí se eximen allí serían infracción. Dos conjuntos de exenciones opuestos no caben en una
+guardia.
+
+El script vive en `scripts/compose-ports.py` con `scripts/test_compose_ports.py` al lado, cargado por
+`importlib` como los demás de `scripts/`. Su suite **sí** la recoge un workflow —`compose-ports.yml`,
+con `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q`—, y es el primer
+workflow del repositorio que ejecuta `scripts/test_*.py`: hasta entonces solo corrían a mano, porque
+el `pytest` de `backend-tests.yml` va con `working-directory: backend`. En local sigue siendo
+`python3 -m pytest scripts/`.
+
 ### Makefile como entrypoint único
 
 - WHEN se ejecuta `make up` y no existe `.env`, THE SYSTEM SHALL crearlo automáticamente copiando `.env.example` antes de levantar el stack — cero pasos manuales para arrancar por primera vez.
 - WHEN se ejecuta `make up` y falta `JWT_SECRET_KEY` en `.env` (o está vacía), THE SYSTEM SHALL generarla con `openssl rand -hex 32` bajo `umask 077`, escribirla en el `.env` local y dejar el fichero en `600`, de forma idempotente y también sobre un `.env` preexistente. Es la forma de cumplir a la vez la regla 8 de `steering/security.md` —la clave de firma nunca lleva valor por defecto en el repositorio— y el arranque sin pasos manuales: el valor se genera en la máquina del desarrollador (ver spec `auth-tenancy`).
 - WHEN se ejecuta `make up`, `make down`, `make logs`, `make ps` o `make sh`, THE SYSTEM SHALL delegar en el comando `docker compose` equivalente.
-- THE SYSTEM SHALL hacer que **los nueve targets que invocan `docker compose` desde el `Makefile`** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»). Siguen siendo nueve: los dos targets que delegan en un script host-side —`check-version-parity` y `compose-stacks`— no invocan `docker compose` desde el `Makefile` y por tanto no entran en la cuenta. En `compose-stacks` quedar fuera de `$(COMPOSE)` es **deliberado y no un olvido que arreglar**: su ámbito es la máquina y no este proyecto, así que pasarlo por la definición común lo acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca (ver §«Diagnóstico de stacks de Compose»).
+- THE SYSTEM SHALL hacer que **los nueve targets que invocan `docker compose` desde el `Makefile`** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»). Siguen siendo nueve: los **tres** targets que delegan en un script host-side —`check-version-parity`, `compose-stacks` y `check-compose-ports`— no invocan `docker compose` desde el `Makefile` y por tanto no entran en la cuenta. La cuenta mide targets que lo invocan **desde el `Makefile`** y garantiza que todos pasen por una única definición; `check-compose-ports` lo invoca su script, desde Python, con entorno propio y deliberadamente desnudo, que es lo contrario de lo que la cuenta garantiza — meterlo dentro la haría medir dos cosas distintas.
+
+  En los dos que quedan fuera **por decisión y no por olvido**, el motivo es distinto en cada uno y no se lee del otro:
+  - `compose-stacks`: su ámbito es la máquina y no este proyecto, así que pasarlo por la definición común lo acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca (ver §«Diagnóstico de stacks de Compose»).
+  - `check-compose-ports`: pasar por `$(COMPOSE)` añadiría `docker-compose.worktree.yml` en un worktree enlazado, que retira los cuatro mapeos; la guardia vería **cero** claves `ports` y daría **verde en vacío**, que es precisamente el fallo contra el que existe. Medido en un worktree enlazado: desnudo ve 4 mapeos, con el overlay ve 0 (ver §«Guardia de la postura de red»).
 - WHERE se invoque `docker compose` **desnudo** en lugar de por el `Makefile`, THE SYSTEM SHALL comportarse igual en el worktree principal —ahí `make` tampoco pasa `-f`— y **distinto** en un worktree enlazado, donde el comando desnudo carga solo el fichero base. Los que **no crean** contenedores (`exec`, `logs`, `ps`, `down`) funcionan igual en los dos sitios; los que crean o **recrean** (`up`, y `run` cuando arrastra dependencias) publicarían los cuatro puertos. Medido, porque la intuición dice lo contrario: tener las dependencias ya levantadas **no** protege — Compose recrea la que tenga un hash de configuración distinto, así que un `run` desnudo en un worktree las recrea publicando. Desde un worktree: `make`, o `--no-deps` cuando el comando no necesita la base de datos (por eso `make openapi` lo lleva).
 - `make bootstrap` crea el tenant y los usuarios iniciales ejecutando `python -m app.cli.bootstrap` dentro del contenedor `backend` — deliberadamente **no** forma parte de `make up`, porque necesita valores que elige una persona (ver spec `auth-tenancy`). Usa `python -m` y no `uv run` para que el mismo comando valga contra la imagen `prod`, que no lleva `uv`.
 - `make seed-demo` llena el tenant que `bootstrap` dejó con el dataset de demo de PRD §27 ejecutando `python -m app.cli.seed_demo` dentro del contenedor `backend` — igual que `bootstrap`, **no** forma parte de `make up` porque necesita valores que elige una persona, y **exige que el tenant ya exista**: sin él sale con error nombrando `make bootstrap` y sin escribir nada (ver spec `seed-data-demo`).
