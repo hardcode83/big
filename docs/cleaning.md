@@ -280,4 +280,4 @@ el código:
   §«Las fotos de la limpieza».
 - `access-notifications` — **entregado**: trajo el emisor que marca `SENT` y el cierre del plazo al responder.
 - `maintenance` — creación de incidencias, incluida la que bloquea el cierre.
-- `field-apps` — la app mobile-first de la limpiadora que consume todo esto.
+- `cleaner-app` — la app mobile-first de la limpiadora que consume todo esto.
