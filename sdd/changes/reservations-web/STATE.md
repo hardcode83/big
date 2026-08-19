@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: ACTIVE
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
