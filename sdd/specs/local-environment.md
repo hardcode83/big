@@ -32,6 +32,15 @@ Scaffold de monorepo y stack de desarrollo local para AutoHostAI: estructura de 
 Los cuatro mapeos que describe esta sección son los del **worktree principal**. Un worktree enlazado
 de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por worktree».
 
+Y **la postura se conserva desplazada**. Con `make up PORT_OFFSET=<n>` cambia el **puerto de host** de
+los cuatro mapeos, nunca la interfaz ni el puerto de destino: `postgres` y `redis` siguen acotados a
+`127.0.0.1` —ese bind es la única defensa de los contadores del throttle, ver abajo— y `backend` y
+`frontend` siguen en **todas** las interfaces, que es lo que permite abrir la app desde un móvil de la
+LAN y el motivo entero de que el desplazamiento exista. Ningún servicio que hoy no publique empieza a
+publicar: `worker`, `beat` y `migrate` siguen sin mapeos. La **sede única** de esa aritmética es la
+tabla `SERVICES` de `scripts/compose-offset.py`, con su suite al lado — ni el `Makefile` ni ningún otro
+sitio vuelven a sumar puertos.
+
 - THE SYSTEM SHALL publicar `postgres` y `redis` **únicamente en la interfaz de loopback**
   (`127.0.0.1:5432:5432` y `127.0.0.1:6379:6379` en `docker-compose.yml`), de forma que no sean
   alcanzables desde otros equipos de la red a la que esté conectada la máquina.
@@ -122,16 +131,24 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
 - WHEN se ejecuta la suite del backend dentro del contenedor desde un worktree enlazado, THE SYSTEM
   SHALL resolver Postgres y Redis por nombre de servicio a través de la red de compose y dar el mismo
   resultado que en solitario: los puertos publicados nunca estuvieron en ese camino.
-- WHEN `make up` arranca, THE SYSTEM SHALL anunciar en qué modo lo hace (publicando puertos, o sin
-  publicarlos y por tanto sin UI ni API alcanzables desde el navegador del host).
-- IF el modo es worktree, THEN THE SYSTEM SHALL comprobar **antes de levantar** que la configuración
-  resuelta no contiene ninguna clave `ports`, y abortar en rojo si la hay — cubre a la vez un servicio
-  con puerto que nadie añadió al overlay y un Compose anterior a 2.24 que ignore `!reset`. El estado
-  de salida de `config` se comprueba aparte del contenido: un `config` que falle aborta con mensaje
-  propio en vez de degradar la comprobación a verde.
-- IF el modo es worktree y `docker-compose.worktree.yml` no existe, THEN THE SYSTEM SHALL abortar con
-  un mensaje que diga que esa rama es anterior al soporte de stacks en paralelo, en vez del error de
-  fichero no encontrado de Compose.
+- WHEN `make up` arranca, THE SYSTEM SHALL anunciar en qué modo lo hace: publicando puertos; sin
+  publicarlos y por tanto sin UI ni API alcanzables desde el navegador del host; o **desplazado**, y en
+  ese caso enumerando los **cuatro puertos efectivos** con su interfaz y añadiendo cómo abrirlo desde
+  un móvil de la LAN. La IP de la máquina **no** se calcula en el anuncio, a propósito: resolverla es
+  específico de plataforma y falla de formas que se leen como un fallo del stack.
+- IF el modo es worktree **y no se pidió desplazamiento**, THEN THE SYSTEM SHALL comprobar **antes de
+  levantar** que la configuración resuelta no contiene ninguna clave `ports`, y abortar en rojo si la
+  hay — cubre a la vez un servicio con puerto que nadie añadió al overlay y un Compose anterior a 2.24
+  que ignore `!reset`. El estado de salida de `config` se comprueba aparte del contenido: un `config`
+  que falle aborta con mensaje propio en vez de degradar la comprobación a verde.
+- WHERE se pidió desplazamiento, THE SYSTEM SHALL sustituir esa aserción de **ausencia** por una de
+  **igualdad numérica**: cada mapeo de la configuración resuelta es exactamente el esperado para ese
+  desplazamiento, con su prefijo de interfaz, y ningún otro servicio publica nada. Las dos mitades
+  hacen falta —la primera caza el overlay que no llegó a aplicarse, la segunda un servicio que publique
+  por su cuenta— y la aserción es **numérica** porque los mapeos generados son literales.
+- IF el modo es worktree, no se pidió desplazamiento y `docker-compose.worktree.yml` no existe, THEN
+  THE SYSTEM SHALL abortar con un mensaje que diga que esa rama es anterior al soporte de stacks en
+  paralelo, en vez del error de fichero no encontrado de Compose.
 - IF git no está disponible o el directorio no es un repositorio, THEN THE SYSTEM SHALL comportarse
   como el worktree principal —publicar— y decirlo. Es deliberado: una colisión de puertos aborta
   nombrando el puerto, mientras que no publicar en silencio se manifiesta como «la app no carga».
@@ -139,17 +156,74 @@ de git levanta su stack **sin publicar ninguno**: ver §«Stacks en paralelo por
   debajo del suelo de git la detección falla hacia publicar, así que un worktree chocaría de puertos
   en vez de arrancar sin ellos.
 
-  El suelo de Compose lo fijan **dos** cosas, y manda la mayor. El tag `!reset` de
-  `docker-compose.worktree.yml` pide ≥ **2.24**; la bandera `--no-env-resolution` que usa la guardia
+  El suelo de Compose lo fijan **tres** cosas, y manda la mayor. El tag `!reset` de
+  `docker-compose.worktree.yml` pide ≥ **2.24**; el tag `!override` del overlay que genera
+  `make up PORT_OFFSET=<n>` pide ≥ **2.24.4**; la bandera `--no-env-resolution` que usa la guardia
   de puertos pide ≥ **2.35.0**, y ese es el suelo efectivo. La segunda cifra está **medida** y no
   estimada: la bandera la introdujo el PR 12665 de `docker/compose`, mergeado el 2025-03-24 y
   publicado por primera vez en **v2.35.0** (2025-04-10); en v2.34.0 no existe. Hasta el change
   `compose-ports-guard` aquí ponía 2.24, que era el suelo correcto de entonces y se quedó corto al
   añadir la guardia. Por debajo del suelo, la guardia sale en **rojo** nombrando el paso y avisando
   de `unknown flag` — no en verde (ver §«Guardia de la postura de red»).
-- **Lo que un worktree enlazado no tiene**: nada alcanzable desde el navegador del host, ni un cliente
-  gráfico contra `localhost:5432`. Si alguna vez hace falta, la salida es parametrizar los cuatro
-  puertos con un desplazamiento (`PORT_OFFSET`), no volver a publicarlos sin más.
+- **Lo que un worktree enlazado no publica por defecto**: nada alcanzable desde el navegador del host,
+  ni un cliente gráfico contra `localhost:5432`. La salida existe, es explícita y está descrita justo
+  abajo —desplazar los cuatro puertos—; el **defecto sigue siendo no publicar**, porque lo que se añadió
+  es una salida bajo petición, no la vuelta atrás de la decisión de 2026-08-05.
+- WHEN se ejecuta `make up PORT_OFFSET=<n>`, THE SYSTEM SHALL publicar los cuatro puertos desplazados
+  por `<n>` —`postgres 5432+n`, `redis 6379+n`, `backend 8000+n`, `frontend 3000+n`—, un **único
+  sumando para los cuatro** y no uno por servicio, de modo que un solo número describa el stack entero.
+- THE SYSTEM SHALL aceptar el desplazamiento **también en el worktree principal**, para que el principal
+  pueda apartarse en vez de obligar a bajarlo. WHERE hay desplazamiento, la elección de ficheros deja de
+  mirar si el directorio es principal o enlazado: los dos cargan la base más el overlay desplazado, y
+  `docker-compose.worktree.yml` **no** se añade.
+
+  Consecuencia que se lee mal si no está escrita: en el principal, desplazar **no crea un segundo
+  stack, mueve el que hay**. El nombre de proyecto sale del directorio, así que `make up PORT_OFFSET=<n>`
+  recrea los cuatro servicios en los puertos nuevos. Es exactamente el «apartarse» que se pidió, no un
+  fallo; y el anuncio de arranque lo dice.
+- WHILE dos stacks están levantados con desplazamientos distintos, THE SYSTEM SHALL arrancar ambos sin
+  fallar por puerto ocupado.
+- THE SYSTEM SHALL escribir el desplazamiento en un overlay **generado** —`.make/docker-compose.offset.yml`,
+  gitignorado y regenerado en cada invocación con desplazamiento—, con `!override` y **números
+  literales**, cargado solo con un `-f` explícito.
+
+  Las tres propiedades son deliberadas y cada una cierra una vía distinta. **Fuera de la raíz y sin
+  llamarse `docker-compose.override.yml`**, para que Compose no lo descubra por sí solo y la guardia de
+  la postura —que invoca Compose desnudo— no pueda verlo: su veredicto sigue siendo función **solo del
+  repositorio** (ver §«Guardia de la postura de red»). **Números literales y no `${...}`**, porque con
+  `--no-interpolate` un mapeo interpolado llega como cadena cruda y la aserción previa a levantar tiene
+  que ser numérica; de paso, ningún `ports` del repositorio queda dependiendo del entorno. **Regenerado
+  siempre**, para que no exista ruta por la que se lea el `<n>` de una invocación anterior.
+
+  THE SYSTEM SHALL mantener **prohibido** renombrar ese overlay, moverlo a la raíz o añadir un `-f` al
+  target de la guardia: cualquiera de las tres la deja ciega. Es la misma familia de prohibiciones que
+  ya viven en §«Diagnóstico de stacks de Compose».
+- **La postura de red se conserva desplazada** —interfaces y servicios que no publican, intactos—: ver
+  §«Postura de red del stack local».
+- WHEN `make up` arranca con desplazamiento, THE SYSTEM SHALL ejecutar, **todo antes de levantar y en
+  este orden**: generar el overlay → asertar la configuración resuelta → sondear los binds del host →
+  anunciar. El orden no es indiferente: sondear antes de asertar diría «el puerto está libre» sobre una
+  configuración que quizá no publica lo que creemos, y sondear **después** de levantar es justamente el
+  síntoma ilegible que esto existe para evitar —Compose fallando a medio arrancar con `port is already
+  allocated` y contenedores a medias— en vez de un error que nombra puerto y servicio.
+- IF `PORT_OFFSET` no es un entero no negativo, THEN THE SYSTEM SHALL abortar antes de levantar nada,
+  nombrando el valor recibido. El rechazo va **antes** de cualquier normalización: al revés, normalizar
+  podía convertir un valor inservible en uno válido y el rechazo no llegaba nunca. Se rechazan por igual
+  un valor con espacios y un `10` con salto de línea final.
+- IF `PORT_OFFSET` vale `0` o está vacío, THEN THE SYSTEM SHALL comportarse como si no se hubiera
+  pasado. Un valor de **solo espacios** no equivale a vacío y aborta nombrándolo, con un mensaje que
+  dice cómo salir: dos capas que se contradijeran sobre el mismo valor es lo que se evita.
+- IF algún puerto desplazado supera `65535`, THEN THE SYSTEM SHALL abortar nombrando cuál.
+- IF algún puerto desplazado ya está ocupado en el host, THEN THE SYSTEM SHALL abortar **antes** de
+  arrancar, nombrando puerto y servicio, excluyendo del sondeo los puertos que ya publica el propio
+  stack. Cubre también el choque contra un puerto **no** desplazado de otro stack —`PORT_OFFSET=2432`
+  lleva el frontend al `5432` del Postgres del principal—, porque el sondeo es general y no una regla
+  especial. Va **sin `SO_REUSEADDR`** (falla hacia abortar, que es la dirección correcta) y es **solo
+  IPv4**: un puerto ocupado únicamente en `::` lo atraviesa y degrada al error de Compose, que también
+  nombra el puerto. Residual aceptado y escrito.
+- IF el overlay desplazado no pudo combinarse con la base, THEN THE SYSTEM SHALL abortar con mensaje
+  propio: si `!override` no se aplicó, la configuración resuelta trae los dos mapeos y la aserción de
+  igualdad sale en rojo. **Nunca** se degrada a «publicar lo que salga».
 - **Coste, que no desaparece**: los volúmenes van por proyecto, así que el stack de un worktree
   arranca con base de datos **vacía**, reinstala dependencias la primera vez y ocupa sus propios gigas.
   Se siembra con `make bootstrap`, y con `make seed-demo` detrás si se quiere un stack recorrible
@@ -350,9 +424,17 @@ mapeos, aquí lo correcto son cuatro. No se deben fundir.
 - **Un mapeo construido con interpolación sale en rojo**, porque con `--no-interpolate` no se
   normaliza y llega como cadena cruda. No es una limitación que se acepte a regañadientes: es el
   mecanismo que hace verdadero que el veredicto sea función **solo del repositorio**. Un mapeo cuyo
-  valor sale del entorno no es una postura del repositorio. Consecuencia declarada para
-  `worktree-port-offset`: un desplazamiento escrito como `"127.0.0.1:${PORT_OFFSET}..."` daría rojo,
-  y aquel change tendrá que generar mapeos literales o reabrir esta regla a sabiendas.
+  valor sale del entorno no es una postura del repositorio. `worktree-port-offset` (2026-08-19) tomó la
+  primera de las dos salidas que aquí se le dejaron declaradas: **genera mapeos literales** y no reabrió
+  esta regla. Y lo hizo **sin tocar esta guardia en absoluto** —ni el script ni su workflow—, porque el
+  overlay del desplazamiento vive fuera del conjunto que Compose descubre por sí solo, así que esta
+  guardia no lo ve y su `EXEMPT` sigue nombrando los dos pares literales `backend:8000` y
+  `frontend:3000` en vez de tener que expresarse por desplazamiento.
+
+  **La contrapartida, que se dice aquí para que nadie lea esta guardia como cobertura total**: el modo
+  desplazado **no lo cubre ella**. Lo cubre la tabla `SERVICES` de `scripts/compose-offset.py` con sus
+  tests —que asertan `5432+n`/`6379+n` únicamente en `127.0.0.1`— y los recoge el **mismo** workflow.
+  La postura está sostenida en los dos modos, pero por dos mecanismos distintos y no por uno.
 
 **Fuera de alcance, y por qué**: `docker-compose.deploy.yml`. Lo carga solo el CD, que le pasa `-f`,
 así que un `docker compose` desnudo nunca lo ve; incluirlo exigiría un `--file` explícito, que es la
@@ -373,14 +455,20 @@ el `pytest` de `backend-tests.yml` va con `working-directory: backend`. En local
 - WHEN se ejecuta `make up` y no existe `.env`, THE SYSTEM SHALL crearlo automáticamente copiando `.env.example` antes de levantar el stack — cero pasos manuales para arrancar por primera vez.
 - WHEN se ejecuta `make up` y falta `JWT_SECRET_KEY` en `.env` (o está vacía), THE SYSTEM SHALL generarla con `openssl rand -hex 32` bajo `umask 077`, escribirla en el `.env` local y dejar el fichero en `600`, de forma idempotente y también sobre un `.env` preexistente. Es la forma de cumplir a la vez la regla 8 de `steering/security.md` —la clave de firma nunca lleva valor por defecto en el repositorio— y el arranque sin pasos manuales: el valor se genera en la máquina del desarrollador (ver spec `auth-tenancy`).
 - WHEN se ejecuta `make up`, `make down`, `make logs`, `make ps` o `make sh`, THE SYSTEM SHALL delegar en el comando `docker compose` equivalente.
-- THE SYSTEM SHALL hacer que **los nueve targets que invocan `docker compose` desde el `Makefile`** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»). Siguen siendo nueve: los **tres** targets que delegan en un script host-side —`check-version-parity`, `compose-stacks` y `check-compose-ports`— no invocan `docker compose` desde el `Makefile` y por tanto no entran en la cuenta. La cuenta mide targets que lo invocan **desde el `Makefile`** y garantiza que todos pasen por una única definición; `check-compose-ports` lo invoca su script, desde Python, con entorno propio y deliberadamente desnudo, que es lo contrario de lo que la cuenta garantiza — meterlo dentro la haría medir dos cosas distintas.
+- THE SYSTEM SHALL hacer que **los nueve targets que invocan `docker compose` desde el `Makefile`** (`up`, `down`, `logs`, `ps`, `sh`, `bootstrap`, `seed-demo`, `openapi`, `db-clean-test`) pasen por una única definición del comando, para que ninguno opere sobre un conjunto de ficheros distinto del que levantó el stack (ver §«Stacks en paralelo por worktree»). Siguen siendo nueve: los **cuatro** targets que delegan en un script host-side —`check-version-parity`, `compose-stacks`, `check-compose-ports` y `ports`— no invocan `docker compose` desde el `Makefile` y por tanto no entran en la cuenta. La cuenta mide targets que lo invocan **desde el `Makefile`** y garantiza que todos pasen por una única definición; `check-compose-ports` lo invoca su script, desde Python, con entorno propio y deliberadamente desnudo, que es lo contrario de lo que la cuenta garantiza — meterlo dentro la haría medir dos cosas distintas.
 
-  En los dos que quedan fuera **por decisión y no por olvido**, el motivo es distinto en cada uno y no se lee del otro:
+  En los tres que quedan fuera **por decisión y no por olvido**, el motivo es distinto en cada uno y no se lee de los demás:
   - `compose-stacks`: su ámbito es la máquina y no este proyecto, así que pasarlo por la definición común lo acotaría a los ficheros de este directorio y dejaría fuera justo los stacks que busca (ver §«Diagnóstico de stacks de Compose»).
   - `check-compose-ports`: pasar por `$(COMPOSE)` añadiría `docker-compose.worktree.yml` en un worktree enlazado, que retira los cuatro mapeos; la guardia vería **cero** claves `ports` y daría **verde en vacío**, que es precisamente el fallo contra el que existe. Medido en un worktree enlazado: desnudo ve 4 mapeos, con el overlay ve 0 (ver §«Guardia de la postura de red»).
+  - `ports`: pasar por `$(COMPOSE)` no cambiaría la respuesta —`ps` direcciona el proyecto por su **nombre**— pero ataría la consulta al conjunto de ficheros de la invocación, y entonces preguntar por el desplazamiento exigiría saberlo ya.
 - WHERE se invoque `docker compose` **desnudo** en lugar de por el `Makefile`, THE SYSTEM SHALL comportarse igual en el worktree principal —ahí `make` tampoco pasa `-f`— y **distinto** en un worktree enlazado, donde el comando desnudo carga solo el fichero base. Los que **no crean** contenedores (`exec`, `logs`, `ps`, `down`) funcionan igual en los dos sitios; los que crean o **recrean** (`up`, y `run` cuando arrastra dependencias) publicarían los cuatro puertos. Medido, porque la intuición dice lo contrario: tener las dependencias ya levantadas **no** protege — Compose recrea la que tenga un hash de configuración distinto, así que un `run` desnudo en un worktree las recrea publicando. Desde un worktree: `make`, o `--no-deps` cuando el comando no necesita la base de datos (por eso `make openapi` lo lleva).
 - `make bootstrap` crea el tenant y los usuarios iniciales ejecutando `python -m app.cli.bootstrap` dentro del contenedor `backend` — deliberadamente **no** forma parte de `make up`, porque necesita valores que elige una persona (ver spec `auth-tenancy`). Usa `python -m` y no `uv run` para que el mismo comando valga contra la imagen `prod`, que no lleva `uv`.
 - `make seed-demo` llena el tenant que `bootstrap` dejó con el dataset de demo de PRD §27 ejecutando `python -m app.cli.seed_demo` dentro del contenedor `backend` — igual que `bootstrap`, **no** forma parte de `make up` porque necesita valores que elige una persona, y **exige que el tenant ya exista**: sin él sale con error nombrando `make bootstrap` y sin escribir nada (ver spec `seed-data-demo`).
+- WHEN se ejecuta `make ports`, THE SYSTEM SHALL informar del desplazamiento vigente y de los cuatro mapeos efectivos **sin volver a arrancar nada**, derivándolo del **stack vivo** (`docker compose ps`) y no del overlay generado. Esa es la decisión: el fichero describe la última *intención* —la del último `make up` que pasó un número—, mientras que el stack describe lo que está corriendo, así que la respuesta es verdad aunque alguien levantara con otro número, y existe también en el worktree principal, donde no hay overlay ninguno. El stack **parado** y el stack **sin puertos publicados** son estados normales: se informan y salen en verde. Un stack con desplazamientos incoherentes entre servicios se informa como tal, **sin inventar** un número que lo describa.
+- WHERE se pasa `PORT_OFFSET=<n>`, THE SYSTEM SHALL exigirlo **solo en `up`**: `down`, `logs`, `ps` y `sh` dan con el mismo stack sin que se les repita el número, y nunca acaban hablando con otro. Conviene saberlo porque la lectura ingenua dice lo contrario; lo que lo hace cierto es que direccionan el proyecto por su **nombre** —que Compose saca del directorio, y el de cada worktree es distinto—, no por sus puertos. Un `up` con desplazamiento y un `down` posterior sin él operan sobre conjuntos de ficheros distintos, y es seguro precisamente porque el segundo no **crea** contenedores: los para y los borra por proyecto.
+
+  El filo único, porque `up` es el único target que **crea** los mapeos: un **`make up SERVICE=<x>` parcial sin repetir el desplazamiento** recrearía ese servicio sin puertos. Ahí sí hay que repetir el número, y la aserción previa no lo cubre porque en ese caso no llega a ejecutarse.
+- `PORT_OFFSET` es variable de **`make`**, no configuración de la aplicación: no está en `.env.example` ni en `Settings`, y el overlay generado lleva números literales, así que nada del `.env` puede desplazar el stack. `make` sí toma sus variables del entorno, de modo que un `export PORT_OFFSET=10` en la shell de un worktree desplaza todos sus `make up` sin repetirlo — deliberado y útil. Lo que **no** puede es mover a la guardia: `check-compose-ports` no pasa por `$(COMPOSE)` y su script construye el entorno del hijo por lista blanca, así que un `PORT_OFFSET` exportado no cambia su veredicto.
 - `make db-clean-test` borra las bases de datos de test huérfanas que deje una ejecución de pytest interrumpida, sin tocar la de desarrollo (ver spec `backend-ci`).
 - WHERE se pasa `SERVICE=<nombre>` a cualquiera de esos targets, THE SYSTEM SHALL limitar la operación a ese servicio — Compose arranca automáticamente sus dependencias declaradas (p.ej. `SERVICE=backend` trae `postgres`+`redis`; `SERVICE=frontend` trae además `backend`).
 - `make sh` sin `SERVICE=` abre shell en `backend` por defecto.
@@ -405,7 +493,7 @@ el `pytest` de `backend-tests.yml` va con `working-directory: backend`. En local
 
 ## Key files
 
-- Raíz: `docker-compose.yml`, `docker-compose.worktree.yml`, `Makefile`, `.env.example`, `.gitignore`, `README.md`.
-- Herramienta host-side (fuera de `$(COMPOSE)`, ejecutada con el `python3` del host y sin dependencias): `scripts/compose-stacks.py` + `scripts/test_compose_stacks.py` (diagnóstico de stacks huérfanos, `make compose-stacks`); `scripts/check-version-parity.py` + `scripts/test_check_version_parity.py`.
+- Raíz: `docker-compose.yml`, `docker-compose.worktree.yml`, `Makefile`, `.env.example`, `.gitignore`, `README.md`. `.make/docker-compose.offset.yml` es **generado y gitignorado** (lo escribe `make up PORT_OFFSET=<n>`), y vive fuera de la raíz a propósito para que Compose no lo descubra por sí solo.
+- Herramienta host-side (fuera de `$(COMPOSE)`, ejecutada con el `python3` del host y sin dependencias): `scripts/compose-stacks.py` + `scripts/test_compose_stacks.py` (diagnóstico de stacks huérfanos, `make compose-stacks`); `scripts/check-version-parity.py` + `scripts/test_check_version_parity.py`; `scripts/compose-offset.py` + `scripts/test_compose_offset.py` (desplazamiento de los cuatro puertos publicados, detrás de `make up PORT_OFFSET=<n>` y `make ports`).
 - Backend: `backend/devops/Dockerfile`, `backend/app/main.py`, `backend/app/core/config.py`, `backend/app/worker.py`, `backend/pyproject.toml` + `backend/uv.lock`, `backend/tests/test_health.py`.
 - Frontend: `frontend/devops/Dockerfile`, `frontend/devops/docker-entrypoint.sh` (sincroniza `node_modules` con el lockfile en dev), `frontend/devops/test-entrypoint.sh` (test del entrypoint, `npm run test:entrypoint`), `frontend/app/(workspace)/page.tsx` (redirige `/` a `/dashboard`), `frontend/app/layout.tsx`, `frontend/next.config.ts`, `frontend/app/route-wiring.test.tsx` (verifica el wiring de la ruta raíz).

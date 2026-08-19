@@ -340,6 +340,13 @@ garantiza el sistema.
   `PASSWORD_RESET_MAX_LIVE_TOKENS` (3, `1 ≤ n ≤ 10`), `PASSWORD_RESET_GRACE_MINUTES`
   (2, `1 ≤ n ≤ 60`) y `FRONTEND_BASE_URL` (`http://localhost:3000`), que compone el enlace como
   `{FRONTEND_BASE_URL}/reset-password?token=<token>`.
+
+  **`FRONTEND_BASE_URL` no se desplaza sola**, y conviene saberlo desde `worktree-port-offset`
+  (2026-08-19): un stack levantado con `make up PORT_OFFSET=<n>` sirve el frontend en `3000+n`, pero
+  este ajuste sigue valiendo `http://localhost:3000`, así que el enlace de recuperación apuntaría al
+  frontend **de otro** stack hasta que se ajuste en el `.env`. Es una decisión y no un olvido: el
+  overlay del desplazamiento se queda estrictamente en `ports`, e inyectar esto habría resuelto medio
+  caso —para un móvil de la LAN un `localhost` tampoco vale— a cambio de ensanchar el overlay.
 - IF `PASSWORD_RESET_GRACE_MINUTES >= PASSWORD_RESET_TOKEN_MINUTES`, THEN THE SYSTEM SHALL
   negarse a arrancar: un margen de gracia igual o mayor que la vida del token haría irrevocable
   todo enlace vivo. La vida coherente mínima del token es, por tanto, de 2 minutos.
