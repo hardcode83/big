@@ -1,6 +1,11 @@
-# field-apps
+# cleaner-app
 
-[FE] apps mobile-first de limpiadora y técnico + bandeja de conversaciones (PRD §26.18-21, §24).
+[FE] la app de la limpiadora, mobile-first: `/cleaner` y `/cleaner/tasks/[id]` (PRD §26.19, §24).
+
+> Esta nota se escribió para `field-apps`, que el 2026-08-18 se partió en cuatro
+> (`cleaning-manager-view`, `cleaner-app`, `tech-app`, `conversations-inbox`).
+> La decisión que describe es de la app de la limpiadora —es la que muestra accesos a un
+> rol que hoy no los ve—, así que viaja aquí entera y no a las otras tres.
 
 ## Hereda de `access-notifications` una decisión de steering pendiente
 
@@ -14,7 +19,7 @@ notas —normalizando caja y separadores, tras dos rondas del panel de seguridad
 caso del operador descuidado. Lo que **no** cierra, y ninguna comprobación dentro de la petición
 puede cerrar, es que alguien escriba *otro* código en `notes` más tarde.
 
-Por qué cae aquí: mientras `notes` solo lo vean el owner y el manager, el radio es el de quien ya
+Por qué cae aquí (razonamiento original, escrito cuando la entrada era `field-apps`): mientras `notes` solo lo vean el owner y el manager, el radio es el de quien ya
 puede registrar el código. En cuanto la app de la limpiadora muestre accesos, la superficie crece
 a un rol que hoy no tiene `READ_ACCESS_RECORDS` — y ahí el residual deja de ser aceptable.
 

@@ -132,7 +132,7 @@ consumidor y no hay ninguno.
 `steering/security.md`. La comprobación de arriba cierra el caso del operador descuidado dentro de
 la propia petición; el caso general —escribir *otro* código más tarde— no lo puede cerrar ninguna
 comprobación intra-petición, y ampliar el contrato de un sumidero es una decisión de steering.
-Anotado en la entrada de roadmap de `field-apps`, que es quien ampliará la superficie de `notes`.
+Anotado en la entrada de roadmap de `cleaner-app`, que es quien ampliará la superficie de `notes`.
 
 ### El puerto del proveedor de acceso
 
@@ -548,7 +548,7 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   `needs: access-notifications` precisamente por esto. Por esta vía los datos los introduce el
   operador o llegan del PMS.
 - **No hay frontend**: las pantallas de accesos, la bandeja de notificaciones y los formularios de
-  registro legal son `field-apps` y `dashboard-web`.
+  registro legal son `cleaner-app` y `dashboard-web`.
 - **No hay endpoints de listado de huéspedes**: las tres rutas legales son de entidad única.
 - **Ninguna tabla nueva ni enum ampliado**: las seis implicadas (`access_records`,
   `notification_logs`, `guests`, `reservations`, `audit_logs`, `timeline_events`) ya existían con

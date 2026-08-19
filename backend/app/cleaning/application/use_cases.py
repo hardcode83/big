@@ -60,8 +60,15 @@ from app.cleaning.domain.repositories import (
     TemplatePage,
     UnscopedCleaningPhotoLocationQuery,
 )
+from app.cleaning.domain.read_models import CleaningTaskContext
 from app.cleaning.domain.templates import resolve_template
 from app.cleaning.domain.value_objects import parse_template_content
+from app.cleaning.domain.windows import (
+    NEXT_ARRIVAL_HORIZON,
+    next_arrival_after,
+    next_arrival_within_horizon,
+    resolve_checkout,
+)
 from app.core.unit_of_work import UnitOfWork
 from app.integrations.domain.storage import (
     MAGIC_BYTES_LENGTH,
@@ -97,7 +104,6 @@ from app.properties.domain.value_objects import (
     TransitionEvidenceIds,
 )
 from app.reservations.domain.entities import Reservation
-from app.reservations.domain.enums import ReservationStatus
 from app.reservations.domain.repositories import ReservationRepository
 from app.tenants.domain.repositories import TenantConfigRepository
 from app.timeline.domain.repositories import TimelineEventRepository
@@ -266,8 +272,18 @@ class ProvisionCleaningTaskUseCase:
             updated_at=now,
             reservation_id=reservation.id,
             scheduled_start=scheduled_start,
-            scheduled_end=_next_checkin(
-                property, known_reservations, reservation, scheduled_start or now
+            # `next_arrival_after` is the former `_next_checkin`, moved to `domain/windows.py`
+            # when the cleaner's context became its second caller (`cleaner-task-context` D5).
+            #
+            # The anchor is the effective checkout, **not `now`**: this job is built to recover
+            # a backlog (`CANDIDATE_LOOKBEHIND` is 30 days), so filtering on `now` made a
+            # same-day turnover processed late drop a deadline that was sitting right there in
+            # `known_reservations`. The QA panel of section 4 reproduced it.
+            scheduled_end=next_arrival_after(
+                property,
+                known_reservations,
+                scheduled_start or now,
+                exclude_id=reservation.id,
             ),
         )
         try:
@@ -1067,6 +1083,140 @@ class GetCleaningTaskUseCase:
         return task
 
 
+class GetCleaningTaskContextUseCase:
+    """The context a cleaner needs to do the task: where to go, and by when (design D1, D2).
+
+    **Composition, not a projection adapter.** Three repositories that already exist, each `get`
+    carrying its own explicit `tenant_id` — `dashboard-api` D2's rule, that a bespoke reader would
+    be "el segundo sitio donde se escribe el scope de tenant". Here the composition is also
+    *stricter* than a `JOIN` would be: a task pointing at another tenant's property resolves to
+    `None` and becomes a `404`, which is the row `guest-portal-api`'s security panel had to close
+    by hand with a second `WHERE` inside its join.
+
+    **The row-level rule is `GetCleaningTaskUseCase`'s, unchanged** (design D7): the task is
+    loaded within the tenant and, for a `CLEANER`, within her own assignments, with
+    `CleaningTaskNotFoundError` for both failures. An unknown task, another tenant's task and
+    another cleaner's task are one indistinguishable outcome (R3.2, R3.3). Nothing here reads a
+    request field to decide scope: `restrict_to_cleaner_id` derives from the actor's role, and that
+    role is re-read from the user's row on every request (`auth/api/dependencies.py` — "the
+    effective role is the one stored now"), so the token identifies the caller without carrying the
+    authority.
+
+    **Up to four** statements per call (`tasks.get`, `properties.get`, `reservations.get`,
+    `reservations.list_for_properties`), on one task — three when the task has no reservation,
+    because then there is no `reservations.get` to make. No unit of work and no audit repository:
+    this is a read, like `ListCleaningPhotosUseCase`.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+    ) -> None:
+        self._tasks = tasks
+        self._properties = properties
+        self._reservations = reservations
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        now: datetime,
+    ) -> CleaningTaskContext:
+        task = await self._tasks.get(tenant_id, task_id)
+        if task is None:
+            raise CleaningTaskNotFoundError()
+        restrict = actor.restrict_to_cleaner_id
+        if restrict is not None and task.assigned_cleaner_id != restrict:
+            # R3.2: for this cleaner the task does not exist. Same error, same body.
+            raise CleaningTaskNotFoundError()
+
+        property = await self._properties.get(tenant_id, task.property_id)
+        if property is None:
+            # A task whose property does not resolve **inside this tenant** is either a
+            # cross-tenant pointer or a deleted row, and neither may answer with data. The task's
+            # own 404 is the right shape: it keeps "you cannot have this" indistinguishable from
+            # "it does not exist" (R3.3) instead of inventing a second failure the contract would
+            # have to declare.
+            raise CleaningTaskNotFoundError()
+
+        checkout_at, anchor = await self._checkout_and_anchor(tenant_id, task, property, now)
+        candidates = await self._reservations.list_for_properties(
+            tenant_id,
+            [task.property_id],
+            anchor.date(),
+            (anchor + NEXT_ARRIVAL_HORIZON).date(),
+        )
+        return CleaningTaskContext(
+            property_name=property.name,
+            property_internal_code=property.internal_code,
+            address_line1=property.address_line1,
+            address_line2=property.address_line2,
+            city=property.city,
+            province=property.province,
+            postal_code=property.postal_code,
+            country=property.country,
+            timezone=property.timezone,
+            checkout_at=checkout_at,
+            # The horizon bounds the fetch above and the value here, and the second is not
+            # redundant — `next_arrival_within_horizon` says why, and owns the rule so that
+            # `application/` is left with the orchestration (R2.2, R2.3, D10).
+            next_checkin_deadline=next_arrival_within_horizon(
+                property, candidates, anchor, exclude_id=task.reservation_id
+            ),
+        )
+
+    async def _checkout_and_anchor(
+        self,
+        tenant_id: uuid.UUID,
+        task: CleaningTask,
+        property: Property,
+        now: datetime,
+    ) -> tuple[datetime | None, datetime]:
+        """`checkout_at`, and the instant the next arrival is measured from (R2.1, design D6).
+
+        With no reservation the task is a manual one: there is no outgoing guest, so `checkout_at`
+        is `None` — the honest answer, neither an error nor an invented time — and the deadline is
+        measured from `now`.
+
+        ASSUMPTION (R2.1, design D6 addendum of 2026-08-18): a `reservation_id` that is **set but
+        does not resolve inside the tenant** — a deleted row, or a pointer to another tenant —
+        degrades the same way, and is logged. D6 as first written reasoned only about
+        `reservation_id is None`; this third state came up in implementation and was decided in the
+        section 2 panel.
+
+        Not a `404`, though an unresolvable *property* is one (D2), because the two do not weigh
+        the same: the property supplies nine of the eleven fields, while the reservation feeds only
+        `checkout_at`. Refusing the whole context over a dangling pointer would cost the cleaner
+        the address, which is half of what PRD §11 wants from this route. But it is an anomaly a
+        person should see, so it does not pass silently — the same log-and-continue
+        `ProvisionCleaningTaskUseCase.provision_for_checkout` makes for a property with no
+        template.
+        """
+        if task.reservation_id is None:
+            return None, now
+        reservation = await self._reservations.get(tenant_id, task.reservation_id)
+        if reservation is None:
+            logger.warning(
+                "cleaning.task_context_reservation_missing",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "task_id": str(task.id),
+                    "reservation_id": str(task.reservation_id),
+                },
+            )
+            return None, now
+        checkout_at = resolve_checkout(property, reservation)
+        # When `effective_bounds` could not materialise the stay, `checkout_at` is `None` (design
+        # D5) and there is no checkout to measure from, so the deadline anchors on `now` rather
+        # than on a guess.
+        return checkout_at, checkout_at or now
+
+
 class ListCleaningTasksUseCase:
     def __init__(self, *, tasks: CleaningTaskRepository) -> None:
         self._tasks = tasks
@@ -1652,53 +1802,14 @@ def _extension_of(storage_key: str) -> str:
 
 def _effective_checkout(
     property: Property, reservation: Reservation, now: datetime
-) -> datetime | None:
-    """R2.6 — the cleaning can start when the guest is out, not when the job noticed."""
-    from app.properties.domain.clock_triggers import effective_bounds
+) -> datetime:
+    """R2.6 — the cleaning can start when the guest is out, not when the job noticed.
 
-    try:
-        _, end = effective_bounds(property, reservation)
-    except IncompatibleTransitionContextError:
-        # Unreachable in practice: the caller only gets here after the machine accepted this
-        # reservation, which materialises the same bounds. Degrading to `now` rather than
-        # raising keeps a scheduling hint from breaking the creation of the task.
-        return now
-    return end
-
-
-def _next_checkin(
-    property: Property,
-    known_reservations: Sequence[Reservation],
-    current: Reservation,
-    after: datetime,
-) -> datetime | None:
-    """R2.6 — the deadline is the next guest's arrival, when there is one.
-
-    Reads the reservations the job already loaded (design D1) instead of querying: the
-    scheduler's window is `candidate_window(now)`, so a stay further out simply leaves
-    `scheduled_end` unset rather than being guessed at.
-
-    **`after` is the effective checkout, not `now`.** A first version filtered on `now` and
-    the QA panel of section 4 reproduced what that costs: `process_checkouts` is explicitly
-    built to recover a backlog — `CANDIDATE_LOOKBEHIND` is 30 days
-    (`properties/domain/clock_triggers.py:41-51`) — so a same-day turnover processed late had
-    its next check-in already in the past relative to `now` and `scheduled_end` came back
-    `None`, silently dropping a deadline that was sitting in `known_reservations`. The
-    cleaning's window is `[checkout, next arrival]`; neither end of it is a function of when
-    the job happened to run.
+    The resolution itself is `resolve_checkout` in `cleaning/domain/windows.py`
+    (`cleaner-task-context` design D5). What stays here is the **degradation to `now`**, which
+    is deliberately not shared with the projection: unreachable in practice (the caller only
+    gets here after the machine accepted this reservation, which materialises the same bounds),
+    and for a scheduling hint approximate beats absent. A departure time shown to a cleaner is
+    the opposite case, so `resolve_checkout` answers `None` and the projection reports it.
     """
-    from app.properties.domain.clock_triggers import effective_bounds
-
-    starts: list[datetime] = []
-    for candidate in known_reservations:
-        if candidate.id == current.id:
-            continue
-        if candidate.status is not ReservationStatus.CONFIRMED:
-            continue
-        try:
-            start, _ = effective_bounds(property, candidate)
-        except IncompatibleTransitionContextError:
-            continue
-        if start >= after:
-            starts.append(start)
-    return min(starts) if starts else None
+    return resolve_checkout(property, reservation) or now

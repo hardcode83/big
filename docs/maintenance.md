@@ -155,5 +155,5 @@ Cada transición deja su fila en `audit_logs` y su hito en el timeline de la pro
 
 Fotos de la incidencia (el patrón es el de `cleaning-photos-storage`), el `Expense` al
 resolver (es de `revenue`), la expiración automática de una aprobación, la UI del técnico
-(`field-apps`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
+(`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
 cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change.

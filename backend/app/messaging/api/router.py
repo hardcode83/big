@@ -10,7 +10,7 @@
 | `POST /conversations/{id}/escalate` | `MANAGE_CONVERSATIONS` |
 | `POST /conversations/{id}/resolve` | `MANAGE_CONVERSATIONS` |
 
-Seven and no more: the PRD declares these, and the inbox of `field-apps` is built against
+Seven and no more: the PRD declares these, and the inbox of `conversations-inbox` is built against
 them. Thin by contract — map Pydantic → use case → Pydantic, and nothing else. Every route
 declares its permission with `require(...)`, which `tests/test_route_authorization.py` walks.
 
