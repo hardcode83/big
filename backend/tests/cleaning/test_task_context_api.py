@@ -27,6 +27,8 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import TASK_NOT_FOUND_MESSAGE
+from app.core.openapi import build_openapi
+from app.main import create_app
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 from tests.cleaning.conftest import auth_header, insert_task
@@ -350,10 +352,21 @@ async def test_the_404_uses_the_prd_error_envelope(api, task_a, other_cleaner_a)
 
 @pytest.mark.asyncio
 async def test_another_tenants_task_is_a_404(api, task_b, cleaner_a):
-    """R3.3, and the isolation test rule 1 of `steering/security.md` makes mandatory.
+    """R3.3 at the wire — a wiring check, **not** the test that discharges isolation.
 
-    `cleaner_a` belongs to tenant A and asks for a task of tenant B. The neighbour tenant is not
-    optional here: an isolation test with nothing to fail to reach proves nothing.
+    `cleaner_a` belongs to tenant A and asks for a task of tenant B, and the neighbour tenant is
+    not optional: an isolation test with nothing to fail to reach proves nothing. But be honest
+    about what this one can prove. Every authenticated request marks the session
+    (`bind_session_to_tenant`, `app/auth/api/dependencies.py`), and `_scope_statement_to_tenant`
+    (`app/core/db.py`) then injects the tenant predicate into every ORM select regardless of what
+    the use case passes explicitly — so this assertion would still see a `404` even if
+    `GetCleaningTaskContextUseCase` dropped its own `tenant_id` filter entirely. Measured: a probe
+    that removed the filter from `SqlAlchemyPropertyRepository.get` left this test green.
+
+    The test that actually discharges rule 1 of `steering/security.md` for this composition runs
+    on fakes with no session in play, where no defence-in-depth net can rescue it:
+    `tests/cleaning/test_task_context_use_case.py::TestTheRowLevelRule`
+    `::test_a_task_pointing_at_another_tenants_property_is_not_found`.
     """
     response = await _context(api, task_b.id, cleaner_a)
 
@@ -396,3 +409,28 @@ async def test_a_manager_or_owner_reads_a_task_that_is_not_theirs(
 
     assert response.status_code == 200, response.text
     assert response.json()["property_internal_code"] == "REDES11"
+
+
+# --- what the contract has to say ----------------------------------------------------------
+
+
+def test_the_published_description_states_the_three_things_r4_3_requires():
+    """R4.3 — the description is a *requirement*, so it is asserted and not just written.
+
+    Everything else in this module tests behaviour, which means the description could be dropped
+    or garbled by a refactor and all 8000-odd tests would stay green: nothing else reads the
+    string. The three clauses below are the ones R4.3 and design D4/D10 put in the contract rather
+    than only in the design, so they are the three that must survive.
+
+    Asserted against the generated document, not the decorator, because R4.3 is about what the
+    published operation declares — that is what `cleaner-app` will read.
+    """
+    document = build_openapi(create_app())
+    description = document["paths"][f"{TASKS}/{{task_id}}/context"]["get"]["description"]
+
+    # R4.3: role-derived scope, not widenable by parameter.
+    assert "no request parameter can widen it" in description
+    # D4: the plan and the answer-as-of-now are different things.
+    assert "scheduled_start" in description and "scheduled_end" in description
+    # D10: what `null` means, with the horizon named.
+    assert "within the 14 days following the anchor" in description

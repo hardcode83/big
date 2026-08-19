@@ -313,6 +313,35 @@ class TestTheTwoInstants:
             "cleaning.task_context_reservation_missing"
         ]
 
+    @pytest.mark.asyncio
+    async def test_a_reservation_that_resolves_in_another_tenant_degrades_the_same_way(
+        self, caplog
+    ) -> None:
+        """The other half of the D6 addendum: a *crossed* pointer, not just a missing one.
+
+        The addendum's security argument is that "una reserva de otro tenant y una inexistente
+        producen el mismo `None`, así que la rama no es un oráculo de existencia". That only holds
+        if the tenant-scoped `get` is what produces the `None`, so it is asserted here rather than
+        inferred from the missing-id case above: the repository is asked with the *caller's*
+        tenant, the foreign row does not come back, and the outcome is byte-identical to a
+        reservation that never existed.
+        """
+        prop = _property()
+        foreign = _reservation(_property(OTHER_TENANT), check_in=date(2026, 8, 10))
+        task = _task(prop, reservation=foreign)
+        use_case, _, reservations = _use_case(task, prop, reservation=foreign)
+
+        with caplog.at_level(logging.WARNING, logger="app.cleaning.application.use_cases"):
+            context = await _execute(use_case, task, _actor(CLEANER, UserRole.CLEANER))
+
+        # The caller's tenant is what went to the repository — never the row's own.
+        assert reservations.got == [(TENANT, foreign.id)]
+        assert context.checkout_at is None
+        assert context.address_line1 == "Calle de Redes 11"
+        assert [record.message for record in caplog.records] == [
+            "cleaning.task_context_reservation_missing"
+        ]
+
 
 class TestTheProjectedFields:
     @pytest.mark.asyncio
