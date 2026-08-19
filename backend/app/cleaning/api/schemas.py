@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.cleaning.application.use_cases import UploadedCleaningPhoto
 from app.cleaning.domain.entities import CleaningChecklistTemplate, CleaningTask
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.read_models import CleaningTaskContext
 from app.cleaning.domain.value_objects import (
     MAX_ITEMS,
     MAX_KEY_LENGTH,
@@ -188,6 +189,44 @@ class CleaningTaskResponse(BaseModel):
             created_at=task.created_at,
             updated_at=task.updated_at,
         )
+
+
+class CleaningTaskContextResponse(BaseModel):
+    """What `GET /cleaning-tasks/{task_id}/context` returns — exactly `CleaningTaskContext` (D3).
+
+    A field-for-field mirror on purpose, the `StayInfoResponse` construction
+    (`app/guests/api/portal_schemas.py`). The projection is where R1.4 and R2.5 are enforced
+    structurally, so this model earning its own opinion about which fields to include would
+    reintroduce the very decision the read model exists to remove — and would make the router the
+    owner of the denylist, which design D3 rejects by name.
+
+    **`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That is
+    what makes it safe where a dump of `Property` would not be: `access_notes`, `cleaning_notes`
+    and `emergency_notes` are fields of that entity and are not fields of the projection.
+
+    No `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a `NULL`
+    address travels as `null` **with its key**, rather than the key vanishing. That is inherited
+    pydantic behaviour rather than something this model states, so it carries its own test against
+    the serialised body (`tests/cleaning/test_task_context_api.py`) instead of being assumed.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    property_name: str
+    property_internal_code: str
+    address_line1: str | None
+    address_line2: str | None
+    city: str | None
+    province: str | None
+    postal_code: str | None
+    country: str
+    timezone: str
+    checkout_at: datetime | None
+    next_checkin_deadline: datetime | None
+
+    @classmethod
+    def from_domain(cls, context: CleaningTaskContext) -> "CleaningTaskContextResponse":
+        return cls.model_validate(context)
 
 
 class CleaningTaskPageResponse(BaseModel):

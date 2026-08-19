@@ -162,6 +162,19 @@ export interface paths {
      */
     post: operations["complete_cleaning_task_api_v1_cleaning_tasks__task_id__complete_post"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/context": {
+    /**
+     * Where the cleaning is and the window it has to happen in
+     * @description The operating context of one cleaning task: the property's name, internal code, postal address and timezone, plus the two instants that bound the work. It exists so a `CLEANER` can be told **which flat to go to** without holding `READ_PROPERTIES` or `READ_RESERVATIONS`.
+     *
+     * A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and **no request parameter can widen it**.
+     *
+     * `checkout_at` and `next_checkin_deadline` are resolved **now**, against the current reservations — they are not the task's `scheduled_start`/`scheduled_end`, which are the plan the scheduler committed to and what the assignment and the SLA were built on. The two pairs can legitimately disagree, and are named differently so the difference does not read as a contradiction.
+     *
+     * Both instants are ISO 8601 with an explicit offset, in the property's timezone. Either can be `null`, and each `null` means something specific: `checkout_at` is `null` for a manual task with no outgoing reservation, or when the stay's local bounds cannot be resolved; `next_checkin_deadline` is `null` when there is **no `CONFIRMED` arrival within the 14 days following the anchor** — not merely when no arrival exists. A `PENDING` arrival imposes no deadline.
+     */
+    get: operations["get_cleaning_task_context_api_v1_cleaning_tasks__task_id__context_get"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/photos": {
     /**
      * List a cleaning task's photos
@@ -951,6 +964,49 @@ export interface components {
     CleaningPhotoListResponse: {
       /** Data */
       data: components["schemas"]["app__cleaning__api__schemas__CleaningPhotoResponse"][];
+    };
+    /**
+     * CleaningTaskContextResponse
+     * @description What `GET /cleaning-tasks/{task_id}/context` returns — exactly `CleaningTaskContext` (D3).
+     *
+     * A field-for-field mirror on purpose, the `StayInfoResponse` construction
+     * (`app/guests/api/portal_schemas.py`). The projection is where R1.4 and R2.5 are enforced
+     * structurally, so this model earning its own opinion about which fields to include would
+     * reintroduce the very decision the read model exists to remove — and would make the router the
+     * owner of the denylist, which design D3 rejects by name.
+     *
+     * **`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That is
+     * what makes it safe where a dump of `Property` would not be: `access_notes`, `cleaning_notes`
+     * and `emergency_notes` are fields of that entity and are not fields of the projection.
+     *
+     * No `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a `NULL`
+     * address travels as `null` **with its key**, rather than the key vanishing. That is inherited
+     * pydantic behaviour rather than something this model states, so it carries its own test against
+     * the serialised body (`tests/cleaning/test_task_context_api.py`) instead of being assumed.
+     */
+    CleaningTaskContextResponse: {
+      /** Address Line1 */
+      address_line1: string | null;
+      /** Address Line2 */
+      address_line2: string | null;
+      /** Checkout At */
+      checkout_at: string | null;
+      /** City */
+      city: string | null;
+      /** Country */
+      country: string;
+      /** Next Checkin Deadline */
+      next_checkin_deadline: string | null;
+      /** Postal Code */
+      postal_code: string | null;
+      /** Property Internal Code */
+      property_internal_code: string;
+      /** Property Name */
+      property_name: string;
+      /** Province */
+      province: string | null;
+      /** Timezone */
+      timezone: string;
     };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
@@ -3999,6 +4055,55 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Where the cleaning is and the window it has to happen in
+   * @description The operating context of one cleaning task: the property's name, internal code, postal address and timezone, plus the two instants that bound the work. It exists so a `CLEANER` can be told **which flat to go to** without holding `READ_PROPERTIES` or `READ_RESERVATIONS`.
+   *
+   * A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and **no request parameter can widen it**.
+   *
+   * `checkout_at` and `next_checkin_deadline` are resolved **now**, against the current reservations — they are not the task's `scheduled_start`/`scheduled_end`, which are the plan the scheduler committed to and what the assignment and the SLA were built on. The two pairs can legitimately disagree, and are named differently so the difference does not read as a contradiction.
+   *
+   * Both instants are ISO 8601 with an explicit offset, in the property's timezone. Either can be `null`, and each `null` means something specific: `checkout_at` is `null` for a manual task with no outgoing reservation, or when the stay's local bounds cannot be resolved; `next_checkin_deadline` is `null` when there is **no `CONFIRMED` arrival within the 14 days following the anchor** — not merely when no arrival exists. A `PENDING` arrival imposes no deadline.
+   */
+  get_cleaning_task_context_api_v1_cleaning_tasks__task_id__context_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskContextResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably. */
+      404: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

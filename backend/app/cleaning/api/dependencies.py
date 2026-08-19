@@ -25,6 +25,7 @@ from app.cleaning.application.use_cases import (
     CreateChecklistTemplateUseCase,
     CreateCleaningTaskUseCase,
     GetChecklistUseCase,
+    GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
     ListChecklistTemplatesUseCase,
     ListCleaningPhotosUseCase,
@@ -264,6 +265,20 @@ def get_upload_cleaning_photo_use_case(
         audit=SqlAlchemyAuditLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         max_bytes=settings.photo_upload_max_bytes,
+    )
+
+
+def get_cleaning_task_context_use_case(session: SessionDep) -> GetCleaningTaskContextUseCase:
+    """R1.1 — a read, so no unit of work and no audit repository (design D2).
+
+    The three repositories the module already hands out elsewhere. Composing them here rather than
+    wiring a bespoke reader is what keeps the tenant scope written in one place: each `get` takes
+    its `tenant_id` explicitly, and `app/core/db.py`'s listener is defence in depth behind it.
+    """
+    return GetCleaningTaskContextUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
     )
 
 

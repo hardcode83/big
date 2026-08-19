@@ -27,6 +27,7 @@ from app.cleaning.api.dependencies import (
     get_accept_cleaning_task_use_case,
     get_assign_cleaning_task_use_case,
     get_checklist_use_case,
+    get_cleaning_task_context_use_case,
     get_cleaning_task_use_case,
     get_complete_checklist_item_use_case,
     get_complete_cleaning_task_use_case,
@@ -46,6 +47,7 @@ from app.cleaning.api.schemas import (
     ChecklistResponse,
     CleaningPhotoListResponse,
     CleaningPhotoResponse,
+    CleaningTaskContextResponse,
     CleaningTaskPageResponse,
     CleaningTaskResponse,
     CreateCleaningTaskRequest,
@@ -60,6 +62,7 @@ from app.cleaning.application.use_cases import (
     CreateCleaningTaskCommand,
     CreateCleaningTaskUseCase,
     GetChecklistUseCase,
+    GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
@@ -472,6 +475,75 @@ async def upload_cleaning_photo(
         now=now_utc(),
     )
     return CleaningPhotoResponse.from_upload(uploaded)
+
+
+# Same criterion as the photo listing below: a row of `_MAPPING` reached from this handler's own
+# raise site, not a guess.
+#
+#   404 ← `CleaningTaskNotFoundError`, for an unknown task, another tenant's task, another
+#         cleaner's task, and a task whose property does not resolve inside the tenant alike.
+_CONTEXT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task does not exist for this caller — an unknown id, another tenant's task "
+            "and another cleaner's task are all answered this way, indistinguishably."
+        ),
+    },
+}
+
+
+@router.get(
+    "/{task_id}/context",
+    response_model=CleaningTaskContextResponse,
+    summary="Where the cleaning is and the window it has to happen in",
+    responses=_CONTEXT_RESPONSES,
+    description=(
+        "The operating context of one cleaning task: the property's name, internal code, postal "
+        "address and timezone, plus the two instants that bound the work. It exists so a "
+        "`CLEANER` can be told **which flat to go to** without holding `READ_PROPERTIES` or "
+        "`READ_RESERVATIONS`.\n\n"
+        "A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every "
+        "task of their tenant. That restriction comes from the token's persisted role and **no "
+        "request parameter can widen it**.\n\n"
+        "`checkout_at` and `next_checkin_deadline` are resolved **now**, against the current "
+        "reservations — they are not the task's `scheduled_start`/`scheduled_end`, which are the "
+        "plan the scheduler committed to and what the assignment and the SLA were built on. The "
+        "two pairs can legitimately disagree, and are named differently so the difference does "
+        "not read as a contradiction.\n\n"
+        "Both instants are ISO 8601 with an explicit offset, in the property's timezone. Either "
+        "can be `null`, and each `null` means something specific: `checkout_at` is `null` for a "
+        "manual task with no outgoing reservation, or when the stay's local bounds cannot be "
+        "resolved; `next_checkin_deadline` is `null` when there is **no `CONFIRMED` arrival "
+        "within the 14 days following the anchor** — not merely when no arrival exists. A "
+        "`PENDING` arrival imposes no deadline."
+    ),
+)
+async def get_cleaning_task_context(
+    authenticated: ReadDep,
+    task_id: uuid.UUID,
+    use_case: Annotated[
+        GetCleaningTaskContextUseCase, Depends(get_cleaning_task_context_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningTaskContextResponse:
+    """`READ_CLEANING_TASKS`, plus the row-level rule derived inside the use case.
+
+    `ReadDep` and not `ExecuteDep`: a manager and an owner read this too (R3.5). The half that
+    keeps a cleaner to her own tasks is not declared here and cannot be — it comes from
+    `CleaningActor.restrict_to_cleaner_id`, off the role persisted on the user's row (R3.1).
+
+    `now` is the server's clock, never a request field: it anchors the deadline window when the
+    task has no outgoing reservation, so a caller who could set it could shift what the response
+    reports.
+    """
+    context = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        now=now_utc(),
+    )
+    return CleaningTaskContextResponse.from_domain(context)
 
 
 # The listing's only added status, on the same criterion as `_PHOTO_UPLOAD_RESPONSES` above:

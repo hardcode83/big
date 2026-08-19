@@ -588,6 +588,121 @@
         "title": "CleaningPhotoListResponse",
         "type": "object"
       },
+      "CleaningTaskContextResponse": {
+        "description": "What `GET /cleaning-tasks/{task_id}/context` returns — exactly `CleaningTaskContext` (D3).\n\nA field-for-field mirror on purpose, the `StayInfoResponse` construction\n(`app/guests/api/portal_schemas.py`). The projection is where R1.4 and R2.5 are enforced\nstructurally, so this model earning its own opinion about which fields to include would\nreintroduce the very decision the read model exists to remove — and would make the router the\nowner of the denylist, which design D3 rejects by name.\n\n**`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That is\nwhat makes it safe where a dump of `Property` would not be: `access_notes`, `cleaning_notes`\nand `emergency_notes` are fields of that entity and are not fields of the projection.\n\nNo `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a `NULL`\naddress travels as `null` **with its key**, rather than the key vanishing. That is inherited\npydantic behaviour rather than something this model states, so it carries its own test against\nthe serialised body (`tests/cleaning/test_task_context_api.py`) instead of being assumed.",
+        "properties": {
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "checkout_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Checkout At"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "next_checkin_deadline": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Next Checkin Deadline"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "property_internal_code": {
+            "title": "Property Internal Code",
+            "type": "string"
+          },
+          "property_name": {
+            "title": "Property Name",
+            "type": "string"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_name",
+          "property_internal_code",
+          "address_line1",
+          "address_line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "timezone",
+          "checkout_at",
+          "next_checkin_deadline"
+        ],
+        "title": "CleaningTaskContextResponse",
+        "type": "object"
+      },
       "CleaningTaskPageResponse": {
         "properties": {
           "data": {
@@ -8113,6 +8228,85 @@
           }
         ],
         "summary": "Finish a cleaning",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/context": {
+      "get": {
+        "description": "The operating context of one cleaning task: the property's name, internal code, postal address and timezone, plus the two instants that bound the work. It exists so a `CLEANER` can be told **which flat to go to** without holding `READ_PROPERTIES` or `READ_RESERVATIONS`.\n\nA `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and **no request parameter can widen it**.\n\n`checkout_at` and `next_checkin_deadline` are resolved **now**, against the current reservations — they are not the task's `scheduled_start`/`scheduled_end`, which are the plan the scheduler committed to and what the assignment and the SLA were built on. The two pairs can legitimately disagree, and are named differently so the difference does not read as a contradiction.\n\nBoth instants are ISO 8601 with an explicit offset, in the property's timezone. Either can be `null`, and each `null` means something specific: `checkout_at` is `null` for a manual task with no outgoing reservation, or when the stay's local bounds cannot be resolved; `next_checkin_deadline` is `null` when there is **no `CONFIRMED` arrival within the 14 days following the anchor** — not merely when no arrival exists. A `PENDING` arrival imposes no deadline.",
+        "operationId": "get_cleaning_task_context_api_v1_cleaning_tasks__task_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Where the cleaning is and the window it has to happen in",
         "tags": [
           "cleaning"
         ]
