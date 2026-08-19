@@ -243,6 +243,18 @@ de estados en un hub que importa a los otros siete.
 - THE SYSTEM SHALL decidir la autorización **antes** de consultar el recurso, de modo que un rol
   sin permiso reciba la misma respuesta para un `id` real y para uno inventado.
 
+**Alcance de esta regla, acotado el 2026-08-19 por `cleaner-task-context`.** Su sujeto es un
+**agregado sobre una raíz que el llamante ya puede leer entera**: `GET /properties/{id}/dashboard`
+entrega la propiedad, sus reservas, su dinero y sus huéspedes, así que la unión de cuatro permisos
+*es* la respuesta, y ahí anular por permiso de origen es lo único que impide la fuga. No alcanza a
+una **proyección que estrecha**: [`cleaner-task-context`](cleaner-task-context.md) sirve nueve
+campos de `Property` y dos instantes derivados a un rol sin `READ_PROPERTIES`, sin importes, sin
+huésped, sin notas y sin códigos de acceso, y sobre un conjunto de filas más estrecho que el que
+ese permiso daría. La regla que sobrevive a las dos y que hay que citar la próxima vez: **una
+proyección puede estrechar, nunca unir.** Un change que quiera añadir a una proyección un campo
+que un permiso guarda *como un todo* —un importe de reserva, el nombre de un huésped— no lo añade
+allí: pasa por esta sección.
+
 ### Aislamiento por tenant
 
 - THE SYSTEM SHALL pasar el `tenant_id` explícito a cada método de repositorio, derivado

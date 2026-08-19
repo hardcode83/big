@@ -39,6 +39,13 @@ hace*.
   conjunto distinto del que viaja en `data`.
 - WHEN se solicita `GET /api/v1/properties/{id}` dentro del tenant del token, THE SYSTEM SHALL
   devolver la propiedad completa salvo lo que la sección «Secretos» excluye.
+- **Estas rutas no son la única lectura de campos de `Property`, y la segunda no pasa por aquí.**
+  [`cleaner-task-context`](cleaner-task-context.md) sirve nueve campos —`name`, `internal_code`,
+  los seis de dirección postal y `timezone`— a un rol que **no** tiene `READ_PROPERTIES`, con su
+  propia lista cerrada y sobre un conjunto de filas más estrecho que el que este permiso daría: la
+  propiedad de una tarea de limpieza, y solo mientras esa tarea sea alcanzable por el llamante. La
+  regla que separa las dos es que **una proyección puede estrechar, nunca unir**: un campo que este
+  permiso guarda *como un todo* no se añade allí.
 
 ### Alta
 
@@ -169,6 +176,13 @@ fila de `property_state_transitions` junto a un cambio de estado es la **regla 9
   de lectura devuelve y de lo que se construyen los esquemas de respuesta: viaja como parámetro
   tipado de los dos escritores que lo fijan, y ese tipo rechaza por construcción cualquier valor
   que no sea un token Fernet.
+- THE SYSTEM SHALL NOT llevar `wifi_password_encrypted`, `has_wifi_password`, `access_notes`,
+  `cleaning_notes` ni `emergency_notes` en la proyección de
+  [`cleaner-task-context`](cleaner-task-context.md). Allí la exclusión es **estructural** y no una
+  denylist: la respuesta se construye desde un dataclass de once campos y la entidad `Property` no
+  se serializa nunca, así que un campo que no está en él no tiene dónde aterrizar. Es lo que hace
+  que las tres columnas de notas —auditables pero no denylisted por la regla 11 de
+  `steering/security.md`— no ganen un lector nuevo al ganarlo la dirección.
 - WHEN se envía `wifi_password` en un `PATCH`, THE SYSTEM SHALL contarlo **siempre** como cambio y
   escribir su fila de auditoría, aunque el valor sea idéntico al almacenado.
 - THE SYSTEM SHALL registrar el cambio del secreto en `audit_logs` solo como que ocurrió, nunca su
