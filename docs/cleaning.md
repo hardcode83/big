@@ -81,6 +81,61 @@ Para una limpiadora, una tarea que no es suya responde **`404`**, no `403`, y co
 cuerpo que un id inexistente: un `403` convertiría el endpoint en una sonda para averiguar qué
 tareas existen.
 
+## El contexto de la tarea: a qué piso hay que ir, y con qué margen
+
+`GET /api/v1/cleaning-tasks/{task_id}/context` (change `cleaner-task-context`) existe para una
+razón concreta: el rol `CLEANER` tiene cinco permisos y **ni `READ_PROPERTIES` ni
+`READ_RESERVATIONS` están entre ellos**, así que las rutas de propiedades y reservas le
+contestan `403` y `CleaningTaskResponse` solo le da `property_id` y `reservation_id` como UUID
+pelados. Sin esta ruta, la app de la limpiadora no puede decirle a qué piso tiene que ir.
+
+Devuelve **once campos y ninguno más**: nombre y código interno de la propiedad, sus seis campos
+de dirección, el `timezone`, y los dos instantes de la ventana de trabajo. No es un volcado de
+`Property` ni de `Reservation` — es una proyección con lista cerrada, y eso es lo que mantiene
+fuera las notas en claro (`access_notes`, `cleaning_notes`, `emergency_notes`) y todo el dinero,
+el canal y el huésped de la reserva. El *qué devuelve* exactamente está en
+`sdd/specs/cleaning.md` y la forma en `backend/openapi.json`; aquí va lo que no se deduce de
+ninguno de los dos.
+
+**Quién ve qué es la regla de siempre**: una limpiadora alcanza solo sus tareas, un manager o
+una propietaria las de todo su tenant. Sale del rol persistido del token y **ningún parámetro de
+la petición lo ensancha**. Una tarea que no es suya responde `404` con el mismo cuerpo que un id
+inexistente, igual que el resto del módulo.
+
+### Los dos instantes son la respuesta de ahora, no el plan
+
+`checkout_at` y `next_checkin_deadline` se resuelven **en el momento de la lectura**, contra las
+reservas que haya. No son `scheduled_start` y `scheduled_end`, que son el **plan** con el que se
+creó la tarea y sobre el que se construyeron la asignación y el SLA.
+
+Los dos pares pueden discrepar, y no es un bug: se llaman distinto justo para que la
+discrepancia no se lea como una contradicción. La instantánea guardada la calcula el job con una
+ventana de dos días, así que una llegada a cinco días vista deja `scheduled_end` vacío **para
+siempre**; y una tarea creada a mano toma los dos valores del cuerpo de la petición sin resolver
+nada. La lectura viva no tiene ninguno de los dos problemas.
+
+### Qué significa `null` en cada uno, que no es lo mismo
+
+Los dos campos son anulables y cada `null` dice una cosa distinta:
+
+| Campo | `null` significa |
+|---|---|
+| `checkout_at` | La tarea **no tiene reserva saliente** —es una tarea manual creada por `POST /cleaning-tasks`—, o los límites locales de la estancia no se pueden materializar (una hora que no existe por el cambio de hora). Nunca es una hora inventada. |
+| `next_checkin_deadline` | **No hay ninguna llegada `CONFIRMED` en los 14 días siguientes** al ancla — que es el checkout, o `now` si no lo hay. Ojo: no es «no hay próxima llegada», es «no la hay dentro del horizonte». Una llegada `PENDING` tampoco impone deadline. |
+
+El horizonte de 14 días es una decisión declarada (`ASSUMPTION`, design D10), no una
+consecuencia de cómo se consultó: el deadline existe para que una limpiadora ordene su jornada, y
+una llegada a dos semanas no aprieta la limpieza de hoy.
+
+Un tercer caso, más raro: si la tarea apunta a una reserva que **ya no resuelve dentro del
+tenant** —borrada, o un puntero cruzado—, la respuesta degrada a `checkout_at: null` y deja un
+`warning` en el log, en vez de negar el contexto entero. La dirección es la mitad de lo que esta
+ruta existe para dar, y perderla por un puntero colgado sería el peor de los dos males (design
+D6, addendum del 2026-08-18).
+
+Ambos instantes viajan en ISO 8601 **con offset explícito**, en el timezone de la propiedad —que
+también viaja, para que el cliente pueda leer ese offset como un lugar.
+
 ## Las fotos de la limpieza
 
 Las tres cláusulas de PRD §11 se aplican ya: ítems `required`, **fotos `required`** e
@@ -280,4 +335,6 @@ el código:
   §«Las fotos de la limpieza».
 - `access-notifications` — **entregado**: trajo el emisor que marca `SENT` y el cierre del plazo al responder.
 - `maintenance` — creación de incidencias, incluida la que bloquea el cierre.
-- `field-apps` — la app mobile-first de la limpiadora que consume todo esto.
+- `cleaner-task-context` — **ya entregada**: la proyección de arriba, §«El contexto de la
+  tarea». Es lo que hace implementable la pantalla de la limpiadora sin ampliarle permisos.
+- `cleaner-app` — la app mobile-first de la limpiadora que consume todo esto.

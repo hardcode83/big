@@ -36,6 +36,12 @@ npm-debug.log*
 # SDD usage metrics
 .sdd-usage/
 
+# Overlay de desplazamiento de puertos que genera `make up PORT_OFFSET=<n>`. Se ignora el
+# directorio entero y no el fichero: lo que aquí vive es estado local de esta copia de trabajo,
+# derivado de un número que se pasa en la línea de comandos. Versionar un `docker-compose.*.yml`
+# con mapeos desplazados sería justo lo que la guardia de puertos tendría que rechazar.
+.make/
+
 # Terraform (el lock file .terraform.lock.hcl SÍ se versiona, a propósito)
 **/.terraform/
 **/*.tfstate

@@ -69,9 +69,20 @@ directorio padre en el destino, así que sin él la copia falla con *«Could not
 
 El arreglo de verdad es que el script acepte rutas por parámetro o que el contenedor monte la raíz del repo; no se hizo en `dashboard-api` porque es tooling del monorepo y no de esa capacidad. **Ojo**: la sección Verification de cualquier change que toque el contrato manda `cd frontend && npm run api:check`, y ese comando literal no funciona desde aquí.
 
-**Lo que no tendrás en un worktree: navegador.** Sin puertos publicados no hay UI ni API alcanzables desde el host — ni `localhost:3000` ni `localhost:8000` ni un cliente gráfico contra `localhost:5432`. La suite sí corre, porque va por la red de compose (`postgres:5432`, `redis:6379`), que es por donde ha ido siempre. Si algún día hace falta navegar la app desde un worktree, la salida es parametrizar los cuatro puertos con un desplazamiento (`make up PORT_OFFSET=10`); se añadirá cuando haga falta, no antes.
+**Navegador en un worktree: por defecto no, y hay una salida explícita.** Sin puertos publicados no hay UI ni API alcanzables desde el host — ni `localhost:3000` ni `localhost:8000` ni un cliente gráfico contra `localhost:5432`. La suite sí corre, porque va por la red de compose (`postgres:5432`, `redis:6379`), que es por donde ha ido siempre.
 
-**Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.35.0 y git ≥ 2.31 (por `--path-format`). El suelo de Compose lo fijan dos cosas y manda la mayor: 2.24 por el tag `!reset` de `docker-compose.worktree.yml`, y 2.35.0 por la bandera `--no-env-resolution` que usa `make check-compose-ports` (`specs/local-environment.md`).
+Cuando **sí** necesitas el navegador —comprobar la UI, abrirla desde un móvil real de la LAN, correr Playwright—, `make up PORT_OFFSET=<n>` publica los cuatro puertos desplazados por `<n>`:
+
+```bash
+make up PORT_OFFSET=10   # postgres 5442, redis 6389, backend 8010, frontend 3010
+make ports               # qué desplazamiento tiene el stack que está corriendo
+```
+
+La postura de red **se conserva**: `postgres` y `redis` siguen acotados a `127.0.0.1`, `backend` y `frontend` siguen en todas las interfaces (que es lo que permite abrirlo desde el móvil por la IP de esta máquina). Dos worktrees con desplazamientos distintos conviven publicando, y funciona también en el principal — con el matiz de que ahí no crea un segundo stack, **mueve el que hay**, porque el nombre de proyecto sale del directorio. Sin `PORT_OFFSET` —o con `PORT_OFFSET=0`— no cambia absolutamente nada.
+
+El número solo hay que pasarlo a `up`: `down`, `logs`, `ps` y `sh` direccionan el proyecto por su nombre, no por sus puertos, así que dan con el mismo stack sin repetirlo. El filo único es que `up` es el que **crea** los mapeos, así que un **`make up SERVICE=<x>` parcial sin repetir `PORT_OFFSET`** recrearía ese servicio sin puertos.
+
+**Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.35.0 y git ≥ 2.31 (por `--path-format`). El suelo de Compose lo fijan tres cosas y manda la mayor: 2.24 por el tag `!reset` de `docker-compose.worktree.yml`, 2.24.4 por el tag `!override` del overlay que genera `make up PORT_OFFSET=<n>`, y 2.35.0 por la bandera `--no-env-resolution` que usa `make check-compose-ports` (`specs/local-environment.md`).
 
 Aviso de coste, que no desaparece: los volúmenes con nombre van **por proyecto de compose**. El stack de un worktree arranca con **base de datos vacía** y reinstala dependencias la primera vez — es lento, no está roto. Re-siembra con `make bootstrap`. Y ocupa sus propios gigas de disco: dos stacks a la vez son dos Postgres, dos Redis y dos juegos de dependencias.
 

@@ -6,7 +6,7 @@ Capa operativa inteligente sobre un PMS/Channel Manager externo para viviendas t
 
 Requisitos: Docker + **Docker Compose ≥ 2.35.0**, **git ≥ 2.31**, `make`.
 
-De dónde salen los suelos: git 2.31 trae el `--path-format` con el que `make up` distingue un worktree enlazado del principal (por debajo, la detección falla hacia «publicar», así que un worktree chocaría de puertos en vez de arrancar sin ellos). El de Compose lo fijan dos cosas y manda la mayor: 2.24 introdujo el tag `!reset` que usa `docker-compose.worktree.yml`, y **2.35.0 la bandera `--no-env-resolution`** con la que `make check-compose-ports` inspecciona la postura de red sin necesitar `.env`. Por debajo del suelo esa guardia sale en rojo avisando de la versión, no en verde.
+De dónde salen los suelos: git 2.31 trae el `--path-format` con el que `make up` distingue un worktree enlazado del principal (por debajo, la detección falla hacia «publicar», así que un worktree chocaría de puertos en vez de arrancar sin ellos). El de Compose lo fijan tres cosas y manda la mayor: 2.24 introdujo el tag `!reset` que usa `docker-compose.worktree.yml`, 2.24.4 el tag `!override` que usa el overlay que genera `make up PORT_OFFSET=<n>`, y **2.35.0 la bandera `--no-env-resolution`** con la que `make check-compose-ports` inspecciona la postura de red sin necesitar `.env`. Por debajo del suelo esa guardia sale en rojo avisando de la versión, no en verde.
 
 ```bash
 make up   # levanta todo el stack: postgres, redis, backend, worker, beat, frontend
@@ -33,14 +33,48 @@ make check-compose-ports # comprueba la postura de red del compose local (ver ab
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores
+make ports               # desplazamiento vigente y los cuatro mapeos efectivos (ver abajo)
 ```
 
 `make down` conserva los volúmenes. **`docker compose down -v` no**: se lleva la base de datos *y* `backend_media`, es decir, todas las fotos subidas. Es un stack de desarrollo y no hay copia de seguridad de nada de eso, así que conviene leerlo aquí antes de descubrirlo (ver [`docs/cleaning.md`](docs/cleaning.md) §«Dónde viven las fotos»).
 
 Las URLs de arriba son las del **worktree principal**. Un worktree enlazado de git levanta su propio
-stack en paralelo, pero **sin publicar puertos**, así que allí no hay nada que abrir en el navegador
-del host — la suite sí corre, porque va por la red de compose. `make up` te dice en qué modo arranca.
-Detalle y coste en `sdd/project.md` §«Worktree bootstrap».
+stack en paralelo y **por defecto sin publicar puertos**, así que ahí no hay nada que abrir en el
+navegador del host — la suite sí corre, porque va por la red de compose. `make up` te dice en qué modo
+arranca. Detalle y coste en `sdd/project.md` §«Worktree bootstrap».
+
+Cuando sí necesitas el navegador desde un worktree —comprobar la UI, abrirla desde un móvil real de
+tu LAN— la salida es **desplazar los cuatro puertos**:
+
+```bash
+make up PORT_OFFSET=10   # postgres 5442, redis 6389, backend 8010, frontend 3010
+make ports               # qué desplazamiento tiene el stack que está corriendo
+```
+
+Un solo número describe el stack entero, la interfaz de cada servicio se conserva (`postgres` y
+`redis` siguen acotados a `127.0.0.1`; `backend` y `frontend` siguen en todas las interfaces, que es
+lo que permite abrirlo desde el móvil por la IP de esta máquina) y dos worktrees con desplazamientos
+distintos conviven publicando. Funciona también en el worktree principal, con un matiz que se lee mal
+si no está escrito: **ahí desplazar no crea un segundo stack, mueve el que hay** — el nombre de
+proyecto sale del directorio, así que `make up PORT_OFFSET=<n>` recrea esos servicios en los puertos
+nuevos. `make up` lo anuncia al arrancar.
+
+Sin `PORT_OFFSET` —o con `PORT_OFFSET=0`— no cambia absolutamente nada.
+
+Tres cosas que conviene saber antes de usarlo:
+
+- **`make down`, `logs`, `ps` y `sh` no necesitan que repitas el número.** Direccionan el proyecto por
+  su nombre, no por sus puertos. El único que lo necesita es `up`, porque es el único que crea los
+  mapeos — así que un **`make up SERVICE=<x>` parcial sin repetir `PORT_OFFSET`** recrearía ese
+  servicio **sin puertos**. Repítelo o levanta el stack entero.
+- **`FRONTEND_BASE_URL` no se desplaza sola.** Su valor por defecto es `http://localhost:3000`, así
+  que en un stack desplazado el enlace de recuperación de contraseña sigue apuntando al frontend del
+  puerto 3000 —el de otro stack— hasta que la ajustes en tu `.env`. Para un móvil de la LAN un
+  `localhost` tampoco valdría, así que ahí hay que ponerle la IP de la máquina de todas formas.
+- **El desplazamiento no toca la guardia de puertos.** El overlay que lo aplica se genera en
+  `.make/docker-compose.offset.yml`, gitignorado, y se carga **solo con `-f` explícito**, así que un
+  `docker compose` desnudo —que es como invoca `make check-compose-ports`— no lo ve nunca y su
+  veredicto sigue siendo función solo del repositorio.
 
 ### Postura de red del stack local
 
@@ -74,6 +108,18 @@ mapeo de puertos declarado** — no solo ninguno con puerto de host explícito, 
 declarados en `docker-compose.yml` a propósito, y no en un fichero aparte: es esa declaración la que
 describe la postura de red del proyecto, la que ve un `docker compose config` desnudo y la que
 `make check-compose-ports` comprueba en cada Pull Request.
+
+**Y la postura se conserva desplazada.** Con `make up PORT_OFFSET=<n>` cambia el puerto de host de los
+cuatro y **nada más**: `postgres` y `redis` siguen publicando únicamente en `127.0.0.1` —que es lo que
+sostiene todo el párrafo de arriba—, `backend` y `frontend` siguen en todas las interfaces, y
+`worker`, `beat` y `migrate` siguen sin publicar nada. `make up` lo comprueba **antes de levantar**,
+sobre la configuración resuelta y por igualdad exacta del conjunto de mapeos, y además sondea los
+cuatro puertos **en IPv4**: si uno está ocupado aborta nombrando puerto y servicio, en vez de dejar
+que Compose falle a medio arrancar. Que el sondeo sea solo IPv4 es una limitación aceptada y no un
+descuido — un puerto ocupado *únicamente* en `::` lo atraviesa y falla al levantar, con el error de
+Compose en vez del mensaje propio. La resolución por nombre de servicio dentro de la red de compose no ve el
+desplazamiento en absoluto (`backend:8000`, `redis:6379`), así que ni el proxy `/api/` del frontend ni
+la suite del backend cambian.
 
 **Consecuencia práctica para los `docker compose` desnudos de este README**, y conviene ser preciso
 porque no afecta a todos igual. En el worktree principal valen todos, porque ahí `make` tampoco pasa
@@ -236,7 +282,8 @@ A diferencia de la de firma, la de cifrado **no se regenera sola si ya hay un va
 - `backend/` — FastAPI + Celery (Python, `uv`). Dockerfile en `backend/devops/Dockerfile`. Código de dominio en `backend/app/<dominio>/` con las cuatro capas `domain/` → `application/` → `infrastructure/` → `api/` (regla de dependencia y fontanería en [`docs/adr/0004-backend-layering-pattern.md`](docs/adr/0004-backend-layering-pattern.md) y `sdd/steering/backend-architecture.md`). Son 17 dominios; los que todavía son **solo estructura de datos** —entidades y esquema, sin ningún caso de uso que los use— nacen con `domain/` + `infrastructure/` a secas, y ganan `application/`/`api/` cuando llega el primer caso de uso real: hoy `auth`, `properties`, `reservations`, `integrations`, `tenants`, `cleaning`, `access`, `guests`, `notifications`, `timeline`, `maintenance`, `messaging` y `pricing` son los que tienen las cuatro —`properties` ganó su `api/` con `properties-crud`; `access`, `guests` y `notifications` con `access-notifications`, que trajo la operación de accesos (PRD §15), el registro legal de huéspedes (§17) y la entrega de notificaciones (§14); y `timeline` con `dashboard-api`, que le añadió `application/` y `api/` de golpe: hasta entonces sus eventos los escribían los casos de uso de *otros* dominios y nadie los leía de vuelta (PRD §10). Ese mismo change añade el dominio **`dashboard`** —el decimoséptimo—, que es el lado de lectura del agregado de PRD §9 y el único con `domain/`, `application/` y `api/` pero **sin `infrastructure/` propia**: no tiene tabla ni entidad, compone los puertos de los otros siete dominios. **`maintenance` fue el caso simétrico y ya no lo es**: desde `guest-portal-api` tenía `domain/`, `application/` e `infrastructure/` y **ningún `api/`**, porque su único caso de uso —crear la incidencia que abre el huésped— se exponía por el router del portal. El change `maintenance` le da esa cuarta capa junto con el resto de su flujo: clasificación (automática por job y manual), triaje, aprobación de la propietaria por encima del umbral, asignación con plazo de SLA y el ciclo del técnico hasta el cierre. Son **dos routers y no uno** —`/incidents` y `/owner-approvals`— porque son dos agregados: una incidencia puede levantar dos aprobaciones, la del presupuesto y la del coste real (ver [`docs/maintenance.md`](docs/maintenance.md)). **`messaging` es el caso siguiente**: desde `domain-foundation-ops` tenía `domain/` + `infrastructure/` y ningún escritor, y el change `messaging-ai` le da `application/` y `api/` con la atención de primer nivel al huésped de PRD §13 — detección de idioma, clasificación de intent, seis condiciones de escalación, respuesta desde un catálogo cerrado de plantillas y los siete endpoints de bandeja de PRD §16, bajo un solo router `/conversations` porque `Conversation` es el agregado y un mensaje no tiene identidad fuera de su hilo. Los mensajes entran por el panel o por la API: **no hay ingesta automática desde OTA**, y una conversación de `AIRBNB_MSG`/`BOOKING_MSG` queda muda a propósito hasta que llegue `beds24-messaging-adapter` (ver [`docs/messaging-ai.md`](docs/messaging-ai.md)). **`pricing` es el último en ganar las cuatro capas**: desde `domain-foundation-financial` tenía `domain/` + `infrastructure/` y ningún escritor, y el change `revenue-pricing` le da `application/` y `api/` con el Modo 1 del PRD §19 — la fórmula determinista de PRD §7.17 con sus guardrails, un horizonte de 60 días por vivienda y la aprobación humana de cada precio. **El sistema recomienda y no publica**: quien aprueba sube el precio a la OTA a mano y lo marca `APPLIED_EXTERNAL`. Son **dos routers** —`/pricing-rules` y `/price-recommendations`— porque son dos agregados: la regla que edita una persona y el horizonte que reescribe el job nocturno (ver [`docs/pricing.md`](docs/pricing.md)). El **scheduler** vive en `backend/app/scheduler/` — capa de entrega para el reloj, el equivalente de `api/` para Celery beat: nueve tareas —las cuatro de PRD §8.3 más `dispatch_notifications`, `provision_access_records`, `process_webhook_events` y `classify_incidents`, que el PRD no nombra y declaran como divergencia `access-notifications`, `reservations-webhooks` y `maintenance`, más `generate_price_recommendations`, que **sí** es de PRD §8.3 y es la única que corre a una hora del día (06:00 UTC) en vez de por cadencia—, su calendario y el lock que evita solapes (ver [`docs/celery-jobs.md`](docs/celery-jobs.md)). Comandos operativos en `backend/app/cli/` y `backend/app/integrations/cli/`; adapters de sistemas externos en `backend/app/integrations/`, que además guarda las tablas `webhook_endpoints` y `webhook_events`; migraciones en `backend/alembic/`. Dentro de `integrations` vive también **`app/integrations/infrastructure/storage/`** — el almacenamiento de ficheros, con `LocalFileStorage` (escribe en el volumen `/app/media`) y `S3FileStorage` detrás del mismo puerto, y la factoría que elige uno u otro por el `storage_type` del tenant. Está en `integrations` y no en `cleaning` porque el puerto es compartido: las fotos de limpieza son hoy su único llamante, pero `maintenance` y `revenue` servirán sus propios objetos por él (ver [`docs/cleaning.md`](docs/cleaning.md)). **`backend/scripts/`** queda deliberadamente **fuera de `app/`**: son herramientas de un solo uso contra servicios externos (provisión y sondeo del sandbox de Channex — ver [`docs/channex-staging.md`](docs/channex-staging.md)) o de medición puntual (`measure_tenant_filter.py`) que no deben viajar en el paquete desplegado.
 - `frontend/` — Next.js App Router (TypeScript strict, Tailwind, shadcn/ui, TanStack Query, Zustand, react-i18next ES/EN). Application Shell organizado por capas `app/` → `features/` → `components/`·`lib/`. En `app/` vive además la **única pieza de servidor del frontend**: `app/api/[...path]/route.ts`, el proxy same-origin que reenvía `/api/` al backend por la red interna — es lo que hace que el navegador alcance la API sin exponer el backend, y su alcance está fijado por `app/proxy-scope.test.ts` ([`docs/ingress-https.md`](docs/ingress-https.md)). Convenciones detalladas en [`frontend/README.md`](frontend/README.md). Dockerfile en `frontend/devops/Dockerfile`.
 - `docker-compose.yml` / `Makefile` — orquestación del stack **local** (build local, hot-reload), en la raíz.
-- `docker-compose.worktree.yml` — overlay que **retira la publicación de puertos** en el host. `make up` lo añade solo cuando detecta un worktree enlazado de git, para que varios stacks de desarrollo convivan sin chocar. El worktree principal no lo usa y el CD no lo ve nunca.
+- `docker-compose.worktree.yml` — overlay que **retira la publicación de puertos** en el host. `make up` lo añade solo cuando detecta un worktree enlazado de git **y no se pidió desplazamiento**, para que varios stacks de desarrollo convivan sin chocar. El worktree principal no lo usa y el CD no lo ve nunca.
+- `.make/` — **generado y gitignorado**. Ahí escribe `make up PORT_OFFSET=<n>` el overlay con los cuatro mapeos desplazados (`docker-compose.offset.yml`), con números literales y regenerado en cada invocación. Vive fuera de la raíz y **no** se llama `docker-compose.override.yml` a propósito: así Compose no lo descubre por sí solo y el desplazamiento no puede cambiar el veredicto de `make check-compose-ports`.
 - `docker-compose.deploy.yml` / `.env.deploy.example` — orquestación del **deploy a dev**: imágenes de GHCR por SHA (sin build), consumido por el CD en la VM.
 - `sdd/` — flujo de Spec-Driven Development: specs, changes en curso, steering, roadmap.
 

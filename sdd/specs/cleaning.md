@@ -66,6 +66,19 @@ no declara las rutas.
 - THE SYSTEM SHALL derivar `scheduled_start` del checkout **efectivo** y `scheduled_end` de la
   llegada de la siguiente reserva confirmada, anclados a la estancia y **no** al instante en que
   el job se ejecutó: un checkout procesado con retraso conserva su plazo.
+- THE SYSTEM SHALL tomar la regla de la llegada siguiente de `domain/windows.py`
+  (`next_arrival_after`) y no de una copia en `application/`. Se extrajo allí al aparecer su
+  segundo llamante —la proyección de
+  [`cleaner-task-context`](cleaner-task-context.md)— y `process_checkouts` le pasa el id de la
+  reserva actual como exclusión; su comportamiento no cambió.
+- **Los dos valores son la instantánea del momento de creación, y eso es deliberado.**
+  `scheduled_start`/`scheduled_end` son el **plan** sobre el que se construyen la asignación y el
+  SLA, así que ninguna lectura posterior los refresca. Su lookahead es el
+  `candidate_window(now)` del job, de modo que una llegada más allá de él deja `scheduled_end` en
+  `None` de forma permanente, y una tarea creada por `POST /cleaning-tasks` toma los dos valores
+  del cuerpo de la petición sin resolver nada. Quien necesite los instantes **de ahora** los pide
+  a [`cleaner-task-context`](cleaner-task-context.md), que los resuelve en la lectura y los llama
+  distinto para que la discrepancia no se lea como una contradicción.
 - THE SYSTEM SHALL impedir que una reserva tenga dos limpiezas vivas a la vez mediante el índice
   único parcial `uq_cleaning_tasks_live_reservation`, no mediante una comprobación previa.
 
@@ -268,6 +281,19 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 llegó el emisor de `access-notifications` nadie escribía ese valor. La cadena
 funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 
+### Contexto operativo de la tarea
+
+- THE SYSTEM SHALL ofrecer el contexto de una tarea —identificación y dirección de la propiedad,
+  hora de salida del huésped anterior y plazo del siguiente check-in— por el sub-recurso
+  `GET /api/v1/cleaning-tasks/{task_id}/context`, y **no** ampliando `CleaningTaskResponse`, que
+  devuelven nueve rutas incluidas las de escritura y las de ciclo de vida.
+- THE SYSTEM SHALL servirlo con `READ_CLEANING_TASKS` y el mismo acotamiento por fila que el resto
+  de esta capacidad, sin conceder `READ_PROPERTIES` ni `READ_RESERVATIONS` a ningún rol.
+
+Su comportamiento completo —los once campos, lo que nunca lleva, el horizonte de la llegada
+siguiente y el significado de cada `null`— vive en
+[`cleaner-task-context.md`](cleaner-task-context.md).
+
 ### Aislamiento y autorización
 
 - THE SYSTEM SHALL devolver únicamente las tareas y plantillas del tenant del token, con el
@@ -317,7 +343,9 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 
 - `backend/app/cleaning/domain/` — `entities.py` (las tres cláusulas de PRD §11 en
   `CleaningTask.complete`), `templates.py` (resolución y ambigüedad), `assignment.py`
-  (`resolve_auto_assignee`), `value_objects.py` (validación del contenido de plantilla y
+  (`resolve_auto_assignee`), `windows.py` (los dos extremos de la ventana de una limpieza, con
+  `process_checkouts` y la proyección de contexto como llamantes), `read_models.py`
+  (`CleaningTaskContext`), `value_objects.py` (validación del contenido de plantilla y
   `CleaningCompletionEvidence`), `notifications.py`, `ports.py`, `repositories.py`
   (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del

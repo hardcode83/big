@@ -130,7 +130,7 @@ entrante sin firma sobre datos de registro policial. Nada de eso está hecho.
 ## Entradas de roadmap relacionadas
 
 - `guest-portal-api` — la captura de los datos por el propio huésped (token web, check-in).
-- `field-apps` / `dashboard-web` — las pantallas que consumen todo esto.
+- `cleaner-app` / `dashboard-web` — las pantallas que consumen todo esto.
 - `hardening-release` — SMTP y WhatsApp reales, settings de integraciones.
 - `maintenance` — **ya aterrizó** (2026-08-15) y usó esta maquinaria en lugar de construir una
   segunda: `TECHNICIAN_ASSIGNED` abre su plazo de SLA según la severidad de la incidencia y escala

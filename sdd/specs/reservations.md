@@ -74,6 +74,16 @@ no las dispara; aporta el dato del que cuelgan.
 - THE SYSTEM SHALL exponer del huésped solo identidad de contacto y `document_status`, y
   no SHALL exponer `document_number_encrypted`, `document_expiry_date`, `date_of_birth` ni
   `nationality` por ninguna de sus respuestas.
+- **Hay una segunda vía de lectura de las horas de una reserva, y no pasa por estas rutas.**
+  [`cleaner-task-context`](cleaner-task-context.md) resuelve `check_out_time` de la reserva
+  saliente y `check_in_time` de la siguiente llegada `CONFIRMED` —las dos con fallback a los
+  valores por defecto de la propiedad— para un rol que **no** tiene `READ_RESERVATIONS`. Lleva
+  únicamente esos dos instantes derivados: THE SYSTEM SHALL NOT exponer allí el importe bruto, la
+  comisión de la OTA, el importe neto, el estado de pago, el canal, el `guest_id`,
+  `special_requests` ni `internal_notes` de ninguna reserva, y la exclusión es estructural —
+  `Reservation` no se serializa nunca en esa proyección.
+- THE SYSTEM SHALL tratar una reserva de otro tenant y una inexistente como el mismo `None` en esa
+  proyección, de modo que su rama de degradación no sea un oráculo de existencia.
 
 ### Edición y cancelación
 

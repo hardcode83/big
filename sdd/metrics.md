@@ -51,4 +51,6 @@
 | revenue-pricing | new, design, tasks, run, review, ship, archive | 1000364 | 2386224 | 533545258 | 361.8554 | 2026-08-16 | 2026-08-18 |
 | rule11-ownership-single-source | new, design, tasks, run, review, ship, archive | 657928 | 1194264 | 289632353 | 194.9298 | 2026-08-17 | 2026-08-18 |
 | compose-ports-guard | new, design, tasks, run, review, ship, archive | 242042 | 674109 | 161324018 | 117.3315 | 2026-08-18 | 2026-08-18 |
+| worktree-port-offset | new, design, tasks, run, review, ship, archive | 280817 | 682388 | 129188290 | 97.6098 | 2026-08-18 | 2026-08-19 |
+| cleaner-task-context | new, design, tasks, run, review, ship, archive | 284101 | 822245 | 166612611 | 112.8963 | 2026-08-18 | 2026-08-19 |
 | reservations-web | new, design, tasks, run, review | 2911440 | 410858 | 50286325 | 51.8306 | 2026-08-17 | — |

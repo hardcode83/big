@@ -224,4 +224,4 @@ frases que un cambio bienintencionado usaría.
   parámetro `since`, y los trae quien los necesite.
 - **La bandeja no tiene índice** para su orden (`last_message_at DESC`). A la escala del MVP
   es irrelevante; se revisa cuando un tenant pase de unos pocos miles de conversaciones.
-- **No hay frontend todavía**: la bandeja de `/conversations` es de `field-apps`.
+- **No hay frontend todavía**: la bandeja de `/conversations` es de `conversations-inbox`.

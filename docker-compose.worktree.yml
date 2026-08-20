@@ -19,9 +19,17 @@
 # leer. Se comprueba la ausencia de `ports`, y no la de un puerto de host concreto: dos formas legales
 # de `ports:` no declaran puerto de host y Docker las publica en uno efímero, en todas las interfaces.
 #
-# Consecuencia asumida: en un worktree NO hay UI ni API alcanzables desde el navegador del host.
-# Si algún día hace falta, la salida es parametrizar los cuatro puertos con un desplazamiento
-# (`PORT_OFFSET`), no volver a publicarlos a pelo.
+# Consecuencia asumida: SIN desplazamiento, en un worktree NO hay UI ni API alcanzables desde el
+# navegador del host. Cuando hace falta el navegador, la salida existe y es `make up PORT_OFFSET=<n>`
+# (change `worktree-port-offset`, 2026-08-18): publica los cuatro puertos desplazados por `<n>`,
+# conservando la interfaz de cada uno.
+#
+# Con desplazamiento este overlay NO se carga en absoluto. El overlay generado usa `ports: !override`,
+# que SUSTITUYE la lista del fichero base, así que combinarlo con el `!reset []` de aquí sería
+# redundante y dependería del orden de los `-f`; se midió además que las dos configuraciones resueltas
+# difieren solo en `ports`, y que el `volumes` extra de `backend` de más abajo ya está en el fichero
+# base. El defecto de un worktree sigue siendo este fichero: el desplazamiento es una salida
+# explícita, no una inversión de la decisión de 2026-08-05.
 services:
   postgres:
     ports: !reset []

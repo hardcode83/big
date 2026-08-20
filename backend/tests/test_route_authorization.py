@@ -337,6 +337,12 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     **anonymous** portal routes are the same case as the webhook receiver and join
     `ANONYMOUS_ENDPOINTS` instead — the token in the path is the credential, so there is no
     permission to declare.
+
+    And by `cleaner-task-context` with the task context path (`GET`, `READ_CLEANING_TASKS`),
+    asserted per role in `tests/cleaning/test_task_context_api.py`. It declares no new permission
+    on purpose (its design D7): the gate is the one the sibling read routes already use, and the
+    row-level half — a `CLEANER` reaches only her own tasks — is derived inside the use case from
+    the persisted role, which is precisely the kind of restriction this snapshot cannot see.
     """
     routes, _ = _api_routes(create_app())
     protected = {path for path, route in routes if _declares_authorisation(route)}
@@ -364,6 +370,7 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/checklist",
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",
+        "/api/v1/cleaning-tasks/{task_id}/context",
         "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
