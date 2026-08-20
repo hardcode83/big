@@ -70,14 +70,40 @@
 
 ## 11. Verification
 
-- [ ] 11.1 Suite completa del frontend: `cd frontend && npm test -- --run` — verde. [R5.6]
-- [ ] 11.2 Typecheck: `cd frontend && npx tsc --noEmit` — verde. (Ya está cubierto por `frontend-ci`; el comando exacto de `project.md`.) [R2.6, R3.4, R5.1]
-- [ ] 11.3 Lint: `cd frontend && npm run lint` — verde. [R5.6]
-- [ ] 11.4 Verificación en-worktree ejecutable desde la red de compose (sin navegador, sin login manual, sin publicar puertos). El worktree no expone puertos al host por diseño (`sdd/project.md` §Worktree bootstrap); toda la verificación se hace con `docker compose exec -T ...` contra los servicios de la red interna: (a) **BE endpoints sirven el seed**: `docker compose exec -T backend uv run pytest tests/maintenance -k "list or get" -q` — verifica que `GET /api/v1/incidents` y `GET /api/v1/incidents/{id}` devuelven las tres incidencias sembradas (WIFI LOW CLASSIFIED en REDES11, ACCESS HIGH ASSIGNED en REDES11, APPLIANCE MEDIUM CLASSIFIED en PAJARITOS8) y respetan `tenant_id`/RBAC; no se modifica la BD ni los seeds. (b) **FE mapea la API real**: `docker compose exec -T frontend npm test -- --run features/incidents` — los mappers y los hooks quedan cubiertos contra el shape vivo del backend; el wiring con `retry: retryPolicy` está en 5.4. (c) **Rendering visual, i18n, 404/403/422, description texto plano, paginación y ausencia de payload backend** se cubren por los tests de componente ya definidos en 8.2 (lista) y 9.3 (detalle), ejecutados por el mismo comando de (b) — sin reescribirlos aquí: 8.2 cubre (a) carga con datos, (b) 6 columnas, (c) vacío, (d) 5xx, (e) 403, (f) 422 sin payload, (g) 404 → error genérico, (h–i) filtros, (j) ausencia de columna de propiedad, (k) botones de paginación, (l–m) bordes de paginación; 9.3 cubre (a) carga, (b) bloques del detalle, (c–d) `assignedTechnicianId` secundario, (e) `description` texto plano, (f) `description: null`, (g) `ownerApprovalRequired` sin botones, (h) 404 → `notFound` + enlace de vuelta, (i) 403, (j) 422 sin payload, (k) 5xx, (l) costes sin moneda, (m) i18n desde `es/incidents.json`. **No se fabrican 403/422**: los `ApiError` se construyen en los tests con `new ApiError({ status: ..., code: ..., message: ..., details: ... })` y se inyectan vía mock del hook (8.2, 9.3). **No se hace hot-patch del runtime**, ni se modifica BD/seeds. (d) **Smoke de tipos**: `docker compose exec -T frontend npx tsc --noEmit` — verde (R2.6, R3.4). (e) **Smoke de lint**: `docker compose exec -T frontend npm run lint` — verde. (f) **Smoke de contrato**: `docker compose exec -T frontend npm run api:check` — verde (no regenera `openapi.d.ts`; el contrato ya lo incluye desde `maintenance`). (g) **Smoke de hardcodeos**: `docker compose exec -T frontend sh -c "grep -RnE '\"(Limpiar|Página anterior|Página siguiente|Reintentar|Sin resultados|Incidencia no encontrada|Volver al listado|No tienes permiso|Los datos enviados|Técnico asignado|Copiar)\"' frontend/features/incidents frontend/app/\\(workspace\\)/incidents"` — cero coincidencias. [R1.1, R2.1, R2.2, R2.4, R2.5, R3.1, R3.2, R3.3, R3.5, R3.6, R3.7, R3.8, R4.1, R4.2, R4.3, R4.4, R4.6, R5.2, R5.4, R5.6, R5.7]
+> Tres categorías de evidencia, separadas por lo que cada una demuestra. **Ningún comando de pytest o vitest equivale a un probe del stack vivo.** El worktree no expone puertos al host (`sdd/project.md` §Worktree bootstrap), y los tests de FE mockean `HttpIncidentsSource` / los hooks; los tests de BE corren en el contenedor backend con `AsyncioClient` y su base transaccional de test — ninguno hace una petición HTTP real contra el stack levantado. Los comandos `docker compose exec -T` corren dentro del WORKDIR de cada contenedor (`/app`), con rutas relativas a ese WORKDIR.
 
-  **Recomendación no bloqueante pre-merge / pre-staging** *(no es una tarea [ ]; se ejecuta después de `mark-local-verified` si el revisor lo considera útil)*: smoke visual humano en navegador contra `make up PORT_OFFSET=<n>` con un usuario seed. Cubrir: (a) la lista carga con las tres incidencias del seed; (b) los filtros `status` y `severity` cambian la lista; (c) la paginación avanza/retrocede sin reusar cache; (d) el detalle muestra todos los campos; (e) `description` con `<script>` o saltos de línea se ve como texto; (f) `ownerApprovalRequired: true` muestra el bloque destacado sin botones; (g) `assignedTechnicianId` aparece bajo una sección secundaria con la nota; (h) los tres campos de coste son decimal con dos cifras, sin símbolo; (i) un id inexistente muestra "Incidencia no encontrada" en el detalle y error genérico en la lista; (j) ES/EN cambian los textos (las 9 de `status`, 4 de `severity`, 13 de `category`, 6 de `source`). Esta recomendación **no** es necesaria para `mark-local-verified`: las verificaciones (a)–(g) de arriba son la fuente de verdad y se ejecutan dentro del worktree.
-- [ ] 11.5 `cd frontend && npm run api:check` (verificación del contrato) — verde. El change no regenera `openapi.d.ts` (el contrato ya lo incluye desde `maintenance`), así que el check debe pasar sin diff. [R5.3]
-- [ ] 11.6 Grep de hardcodeos en el código nuevo: `grep -RnE '"(Limpiar|Página anterior|Página siguiente|Reintentar|Sin resultados|Incidencia no encontrada|Volver al listado|No tienes permiso|Los datos enviados|Técnico asignado|Copiar)"' frontend/features/incidents frontend/app/\(workspace\)/incidents` — debe devolver cero coincidencias. Si devuelve alguna, se reemplaza por la clave i18n correspondiente en el mismo commit. [R5.2, R3.8]
+### 11.A — Backend automated verification (read-only, contra fixtures)
+
+- [ ] 11.1 Backend automated verification: `docker compose exec -T backend uv run pytest tests/maintenance -k "list or get" -q` desde `/app` — la suite del módulo verifica el **contrato** (`IncidentPageResponse`/`IncidentResponse`, enums, sobre del backend), el **RBAC/tenant isolation** (`backend/tests/maintenance/test_api_authorization.py`) y el **comportamiento de list/get** (`backend/tests/maintenance/test_api_incidents.py`) usando las **fixtures internas** del módulo. **Lo que esta verificación demuestra**: las respuestas cumplen el contrato, los permisos y el aislamiento por tenant. **Lo que NO demuestra**: que el stack vivo sirve las tres filas de `make seed-demo`. Las fixtures no son las filas de `seed-data-demo`/`seed-data-demo-extension`, y la suite no hace una petición HTTP real contra los contenedores vivos — corre en el contenedor backend con su propio `AsyncioClient` y su base transaccional de test. [R2.1, R2.3, R3.1, R5.3, R5.4]
+
+### 11.B — Frontend automated verification (read-only, contra dobles/mocks)
+
+- [ ] 11.2 Frontend automated verification: `docker compose exec -T frontend npm test -- --run features/incidents` desde `/app` — la suite verifica los **mappers** (`features/incidents/data/http/http-incidents-source.test.ts`), el **query wiring** con `retryPolicy` y la query key normalizada (`features/incidents/hooks/use-incidents.test.tsx`, `features/incidents/components/list/incidents-filters.test.tsx`), los **errores** discriminados (`features/incidents/lib/error-mapping.test.ts`), la **i18n** desde `locales/{es,en}/incidents.json` y el **rendering** (`features/incidents/components/list/incidents-view.test.tsx`, `features/incidents/components/detail/incident-detail-view.test.tsx`) con `ApiError` controlados y `useIncidents`/`useIncident` mockeados vía `vi.mock("../hooks/use-incidents")`. **Lo que esta verificación demuestra**: la UI mapea el contrato, discrimina errores, aplica i18n y renderiza correctamente con `ApiError` controlados. **Lo que NO demuestra**: que el stack vivo responde como esperan los mappers; los tests no hacen una petición HTTP real al backend. Cobertura detallada por sub-caso: 8.2 cubre (a) carga con datos, (b) 6 columnas, (c) vacío, (d) 5xx, (e) 403, (f) 422 sin payload, (g) 404 → error genérico, (h–i) filtros, (j) ausencia de columna de propiedad, (k) botones de paginación, (l–m) bordes de paginación; 9.3 cubre (a) carga, (b) bloques del detalle, (c–d) `assignedTechnicianId` secundario, (e) `description` texto plano, (f) `description: null`, (g) `ownerApprovalRequired` sin botones, (h) 404 → `notFound` + enlace de vuelta, (i) 403, (j) 422 sin payload, (k) 5xx, (l) costes sin moneda, (m) i18n desde `es/incidents.json`. **No se fabrican 403/422**: los `ApiError` se construyen con `new ApiError({ status: ..., code: ..., message: ..., details: ... })` y se inyectan vía mock del hook. [R2.1, R2.2, R2.5, R3.1, R3.3, R3.5, R3.6, R4.1, R4.2, R4.3, R4.4, R5.2, R5.4, R5.6]
+
+- [ ] 11.3 Frontend full suite: `docker compose exec -T frontend npm test -- --run` desde `/app` — verde. Confirma que la feature `incidents` no rompe tests preexistentes del shell, dashboard o reservations. [R5.6]
+
+- [ ] 11.4 Typecheck: `docker compose exec -T frontend npx tsc --noEmit` desde `/app` — verde. [R2.6, R3.4]
+
+- [ ] 11.5 Lint: `docker compose exec -T frontend npm run lint` desde `/app` — verde. [R5.6]
+
+- [ ] 11.6 `docker compose exec -T frontend npm run api:check` desde `/app` — verde. El change no regenera `openapi.d.ts` (el contrato ya lo incluye desde `maintenance`); el check pasa sin diff y sella R5.7. [R5.3, R5.7]
+
+- [ ] 11.7 Grep de hardcodeos: `docker compose exec -T frontend sh -c "grep -RnE '\"(Limpiar|Página anterior|Página siguiente|Reintentar|Sin resultados|Incidencia no encontrada|Volver al listado|No tienes permiso|Los datos enviados|Técnico asignado|Copiar)\"' features/incidents 'app/(workspace)/incidents'"` desde `/app` — cero coincidencias. Las rutas son relativas al WORKDIR `/app` del contenedor frontend (no `frontend/...`, que sería relativo al host). [R5.2, R3.8]
+
+### 11.C — Real stack probe — NO EJECUTABLE EN WORKTREE, registrado y NO BLOQUEANTE
+
+**Limitación documentada (no se implementa nada).** El worktree **no tiene credenciales seed utilizables** para autenticar una petición HTTP real a `GET /api/v1/incidents` desde la red interna de compose. Precedent inmediato: `reservations-web` 11.4(a) ya documentó esto — `make seed-demo` exige `BOOTSTRAP_TENANT_*` y `SEED_CLEANER_*`/`SEED_TECHNICIAN_*` en `.env`; el `.env` del worktree no las trae; modificarlas queda fuera del scope del change; el login no puede completarse y `AuthGuard` deja la vista en blanco.
+
+**Consecuencia explícita**: `docker compose exec -T backend uv run pytest ...` (11.1) **NO equivale** a un probe real del stack vivo — corre en el contenedor backend con `AsyncioClient` y fixtures internas, no hace una petición HTTP real contra los contenedores levantados. `docker compose exec -T frontend npm test ...` (11.2) **NO equivale** a un probe real — los tests mockean `HttpIncidentsSource` y los hooks, no hacen una petición HTTP real al backend. **Ninguna** de las dos tareas (11.1, 11.2) es evidencia de que el stack vivo sirve las tres filas de `make seed-demo`.
+
+**Sin tarea `[ ]` aquí.** La evidencia de "el stack vivo sirve los seeds" se difiere a staging post-merge y se registra en la recomendación no bloqueante siguiente.
+
+### 11.D — Recomendaciones no bloqueantes (NO son tareas `[ ]`)
+
+> Estas recomendaciones se ejecutan **después** de `mark-local-verified`, en staging post-merge, si el revisor lo considera útil. **Ninguna** es necesaria para `mark-local-verified`: las tareas 11.1–11.7 son la fuente de verdad y se ejecutan dentro del worktree.
+
+- **Smoke visual humano contra staging** con un usuario seed real: la lista carga con las tres incidencias del seed; los filtros `status` y `severity` cambian la lista; la paginación avanza/retrocede sin reusar cache; el detalle muestra todos los campos; `description` con `<script>` o saltos de línea se ve como texto; `ownerApprovalRequired: true` muestra el bloque destacado sin botones; `assignedTechnicianId` aparece bajo una sección secundaria con la nota; los tres campos de coste son decimal con dos cifras, sin símbolo; un id inexistente muestra "Incidencia no encontrada" en el detalle y error genérico en la lista; ES/EN cambian los textos (las 9 de `status`, 4 de `severity`, 13 de `category`, 6 de `source`).
+- **Real stack probe con credenciales reales** en staging, una vez mergeado y con la BD poblada por `make seed-demo`: `docker compose exec -T frontend sh -c "curl -H 'Authorization: Bearer <token>' http://backend:8000/api/v1/incidents | jq '.items | length, .total'"` desde la red interna de compose — confirma que el stack vivo sirve las tres filas del seed. La **obtención del `<token>`** requiere un seed completo con `BOOTSTRAP_TENANT_*`/`SEED_*` en `.env`, fuera del scope de este change; se delega a la cadena de staging. Esta recomendación **tampoco** es necesaria para `mark-local-verified`.
 
 ## Cobertura de requirements (matriz de verificación)
 
@@ -88,38 +114,38 @@
 | R1.3 (claves i18n del descriptor) | 1.2, 1.4, 10.2 |
 | R1.4 (detalle navegable) | 10.3, 10.4 |
 | R1.5 (`PRD_24_SURFACES` extendido) | 1.3, 1.4 |
-| R2.1 (lista llama al endpoint) | 3.2, 4.1, 4.2, 4.3, 5.2, 5.3, 5.4, 5.5, 8.1, 8.2, 8.3, 11.4 |
-| R2.2 (filtros v1: status + severity + page + per_page; sin property_id) | 4.1, 4.2 (caso b, c, d), 6.1, 6.2, 6.3, 8.2 (caso h, i, j), 11.4 |
+| R2.1 (lista llama al endpoint) | 3.2, 4.1, 4.2, 4.3, 5.2, 5.3, 5.4, 5.5, 8.1, 8.2, 8.3, 11.1, 11.2 |
+| R2.2 (filtros v1: status + severity + page + per_page; sin property_id) | 4.1, 4.2 (caso b, c, d), 6.1, 6.2, 6.3, 8.2 (caso h, i, j), 11.2 |
 | R2.3 (sobre `{items, total, page, per_page}`) | 3.1, 4.1, 4.2, 4.3 |
-| R2.4 (estados localizados carga/error/vacío) | 8.1, 8.2, 8.3, 11.4 |
-| R2.5 (paginación con `lastPage` derivado) | 3.1, 8.1, 8.2 (caso l, m), 11.4 |
+| R2.4 (estados localizados carga/error/vacío) | 8.1, 8.2, 8.3, 11.2 |
+| R2.5 (paginación con `lastPage` derivado) | 3.1, 8.1, 8.2 (caso l, m), 11.2 |
 | R2.6 (status/severity como enums tipados) | 3.1, 4.2, 5.2, 6.1, 6.2, 8.2, 11.2 |
 | R2.7 (query key con objeto normalizado) | 5.2 |
-| R3.1 (detalle llama y renderiza) | 4.1, 4.2, 4.3, 5.3, 5.4, 5.5, 9.1, 9.2, 9.3, 9.4, 10.3, 11.4 |
-| R3.2 (18 campos del detalle) | 3.1, 4.1, 4.2, 9.1, 9.2, 9.3, 9.4, 11.4 |
+| R3.1 (detalle llama y renderiza) | 4.1, 4.2, 4.3, 5.3, 5.4, 5.5, 9.1, 9.2, 9.3, 9.4, 10.3, 11.1, 11.2 |
+| R3.2 (18 campos del detalle) | 3.1, 4.1, 4.2, 9.1, 9.2, 9.3, 9.4, 11.2 |
 | R3.3 (no PII: no `reported_by_*`, no `ai_classification`) | 9.1, 9.2, 9.3, 9.4, 11.2, 11.4 |
 | R3.4 (404 distinguido en detalle, no en lista) | 7.1, 7.2, 8.1 (404 → error), 8.2 (caso g), 9.2, 9.3 (caso h) |
 | R3.5 (`owner_approval_required` destacado, sin botones) | 9.1, 9.2, 9.3 (caso g) |
 | R3.6 (`description` texto plano, una sola vez en detalle) | 4.2 (caso f), 9.1, 9.2, 9.3 (caso e) |
 | R3.7 (costes formateados sin moneda, `null` como `—`) | 9.1, 9.2, 9.3 (caso l) |
-| R3.8 (`assignedTechnicianId` en sección secundaria, sin UX específica) | 9.1, 9.2, 9.3 (caso c, d), 11.6 |
-| R4.1 (9 etiquetas `IncidentStatus`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.4 |
-| R4.2 (4 etiquetas `IncidentSeverity`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.4 |
-| R4.3 (13 etiquetas `IncidentCategory`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.4 |
-| R4.4 (6 etiquetas `IncidentSource`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.4 |
+| R3.8 (`assignedTechnicianId` en sección secundaria, sin UX específica) | 9.1, 9.2, 9.3 (caso c, d), 11.7 |
+| R4.1 (9 etiquetas `IncidentStatus`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.2 |
+| R4.2 (4 etiquetas `IncidentSeverity`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.2 |
+| R4.3 (13 etiquetas `IncidentCategory`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.2 |
+| R4.4 (6 etiquetas `IncidentSource`) | 2.1, 2.2, 2.4, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 11.2 |
 | R4.5 (claves en locales + registro en `resources.ts`) | 2.1, 2.2, 2.3, 2.4 |
-| R4.6 (misma etiqueta en lista y detalle) | 8.1, 8.2, 9.1, 9.2, 9.3, 11.4 |
+| R4.6 (misma etiqueta en lista y detalle) | 8.1, 8.2, 9.1, 9.2, 9.3, 11.2 |
 | R5.1 (TanStack Query, sin Zustand) | 5.1, 5.2, 5.3, 5.4, 5.5, 6.1, 6.2, 11.2 |
-| R5.2 (i18n sin hardcode) | 2.1, 2.2, 2.4, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 9.4, 11.2, 11.4, 11.6 |
-| R5.3 (cliente HTTP centralizado) | 3.2, 4.1, 4.2, 4.3, 11.5 |
+| R5.2 (i18n sin hardcode) | 2.1, 2.2, 2.4, 6.1, 6.2, 6.3, 8.1, 8.2, 8.3, 9.1, 9.2, 9.3, 9.4, 11.2, 11.7 |
+| R5.3 (cliente HTTP centralizado) | 3.2, 4.1, 4.2, 4.3, 11.6 |
 | R5.4 — 401 delegado a sesión | 3.2, 7.1 (caso a), 7.2 (caso a) |
 | R5.4 — 403 falta de permiso | 2.1, 2.2, 7.1 (caso b), 7.2 (caso b), 8.1, 8.2 (caso e), 9.2, 9.3 (caso i) |
 | R5.4 — 404 incidencia no encontrada (sólo en detalle) | 2.1, 2.2, 7.1 (caso c), 7.2 (caso c), 8.1 (404 → error), 8.2 (caso g), 9.2, 9.3 (caso h) |
 | R5.4 — 422 validación, sólo texto localizado, sin payload | 2.1, 2.2, 7.1 (caso d), 7.2 (caso d), 8.1, 8.2 (caso f), 9.2, 9.3 (caso j) |
 | R5.4 — 5xx / red error genérico | 7.1 (caso e), 7.2 (caso e, f), 8.1, 8.2 (caso d), 9.2, 9.3 (caso k) |
 | R5.5 (costes sin moneda, separadores del locale) | 9.1, 9.2, 9.3 (caso l) |
-| R5.6 (tests con Testing Library) | 5.4, 5.5, 6.2, 6.3, 7.2, 8.2, 8.3, 9.3, 9.4, 10.4, 11.1 |
-| R5.7 (regenerar openapi.json / openapi.d.ts sólo si el contrato cambia) | 11.5 |
+| R5.6 (tests con Testing Library) | 5.4, 5.5, 6.2, 6.3, 7.2, 8.2, 8.3, 9.3, 9.4, 10.4, 11.2, 11.3 |
+| R5.7 (regenerar openapi.json / openapi.d.ts sólo si el contrato cambia) | 11.6 |
 
 ## Cobertura de design decisions (matriz de verificación)
 
