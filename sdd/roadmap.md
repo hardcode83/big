@@ -128,7 +128,7 @@ Categorías:
   needs: properties-crud · size: M · kind: feature
 - [x] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` … → changes/archive/2026-08-11-dashboard-web/
   needs: dashboard-api, frontend-auth-session · size: S · kind: feature
-- [ ] reservations-web — [FE] **la primera pantalla real de reservas: lista y detalle, sólo lectura**, consumiendo `GET /api/v1/reservations` y `GET /api/v1/reservations/{id}`. La ruta existe pero hoy es un `RoutePlaceholder`; el contrato ya está congelado y el cliente tipado ya lo conoce, así que el trabajo es la pantalla, no la negociación de formas. **Fuera de alcance**: `POST`, `PATCH` y `DELETE` —que la API sí sirve—, edición y cancelación desde la web, y cualquier PMS real …
+- [x] reservations-web — [FE] **la primera pantalla real de reservas: lista y detalle, sólo lectura**, consumiendo `GET /api/v1/reservations` y `GET /api/v1/reservations/{id}`. La ruta existe pero hoy es un `RoutePlaceholder`; el contrato ya está congelado y el cliente tipado ya lo conoce, así que el trabajo es la pantalla, no la negociación de formas. **Fuera de alcance**: `POST`, `PATCH` y `DELETE` —que la API sí sirve—, edición y cancelación desde la web, y cualquier PMS real … → changes/archive/2026-08-20-reservations-web/
   needs: reservations, frontend-auth-session · size: S · kind: feature
 - [x] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal). → changes/archive/2026-08-08-api-ingress-routing/
   size: S · kind: infra
