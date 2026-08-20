@@ -78,7 +78,7 @@ const SAMPLE = {
 } as const;
 
 describe("IncidentsView", () => {
-  it("renders the loading state without a table", async () => {
+  it("renders the loading state without a table (R2.4, R5.6)", async () => {
     await setupI18n();
     mockUseIncidents.mockReturnValue({
       isPending: true,
@@ -87,7 +87,10 @@ describe("IncidentsView", () => {
       data: undefined,
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof hooks.useIncidents>);
-    render(<></>, { wrapper: freshWrapper() });
+    const { IncidentsView } = await import("./incidents-view");
+    render(<IncidentsView />, { wrapper: freshWrapper() });
+    expect(screen.getByText(esStates.loading.label)).toBeInTheDocument();
+    expect(screen.queryByRole("table")).toBeNull();
   });
 
   it("renders six columns and a row per item when data is present", async () => {
@@ -284,7 +287,7 @@ describe("IncidentsView", () => {
     ).toBeDisabled();
   });
 
-  it("renders internal_notes / special_requests NOT in the table (only detail)", async () => {
+  it("does NOT render the description field in the table (D5, D7 — description lives only in the detail)", async () => {
     await setupI18n();
     mockUseIncidents.mockReturnValue({
       isPending: false,

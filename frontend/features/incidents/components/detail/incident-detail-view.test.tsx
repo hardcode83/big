@@ -166,14 +166,14 @@ describe("IncidentDetailView", () => {
       isPending: false,
       isError: false,
       isSuccess: true,
-      data: { ...DETAIL, description: "" },
+      data: { ...DETAIL, description: null as unknown as string },
       refetch: vi.fn(),
     } as unknown as ReturnType<typeof hooks.useIncident>);
     const { IncidentDetailView } = await import("./incident-detail-view");
     const { container } = render(<IncidentDetailView incidentId="i1" />, {
       wrapper: freshWrapper(),
     });
-    // description: "" is falsy → no <section> for description
+    // description: null is falsy → no <section> for description
     expect(
       Array.from(container.querySelectorAll("h2")).find(
         (h) => h.textContent === esIncidents.fields.description,

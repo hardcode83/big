@@ -66,7 +66,6 @@
     "prevPage": "Página anterior",
     "nextPage": "Página siguiente",
     "forbidden": "No tienes permiso para ver esta incidencia",
-    "validation": "Los datos enviados no son válidos",
-    "secondaryData": "Datos secundarios"
+    "validation": "Los datos enviados no son válidos"
   }
 }

@@ -66,7 +66,6 @@
     "prevPage": "Previous page",
     "nextPage": "Next page",
     "forbidden": "You don't have permission to view this incident",
-    "validation": "The submitted data is not valid",
-    "secondaryData": "Secondary data"
+    "validation": "The submitted data is not valid"
   }
 }
