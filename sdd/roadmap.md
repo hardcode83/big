@@ -128,6 +128,8 @@ Categorías:
   needs: properties-crud · size: M · kind: feature
 - [x] dashboard-web — [FE] **el consumo real del dashboard**: `HttpDashboardSource` y el cambio del mock, que es una línea en un solo fichero. La UI ya existe desde `dashboard-web-frontend` … → changes/archive/2026-08-11-dashboard-web/
   needs: dashboard-api, frontend-auth-session · size: S · kind: feature
+- [ ] reservations-web — [FE] **la primera pantalla real de reservas: lista y detalle, sólo lectura**, consumiendo `GET /api/v1/reservations` y `GET /api/v1/reservations/{id}`. La ruta existe pero hoy es un `RoutePlaceholder`; el contrato ya está congelado y el cliente tipado ya lo conoce, así que el trabajo es la pantalla, no la negociación de formas. **Fuera de alcance**: `POST`, `PATCH` y `DELETE` —que la API sí sirve—, edición y cancelación desde la web, y cualquier PMS real …
+  needs: reservations, frontend-auth-session · size: S · kind: feature
 - [x] api-ingress-routing — [INFRA] **APLAZADA con condición de disparo explícita** (revisada el 2026-08-02, al abrir su `/sdd:new` y cerrarlo sin proposal). → changes/archive/2026-08-08-api-ingress-routing/
   size: S · kind: infra
 - [ ] cleaning-manager-view — [FE] **la vista de limpieza del manager**: `/cleaning`, lista de tareas de limpieza con su estado y su asignación, para manager/owner (PRD §26.18, §24). Hoy es un `RoutePlaceholder`. No estrena rol ni toca la app móvil (no está en el plan original: `field-apps` se partió en cuatro el 2026-08-18, porque agrupaba cuatro superficies de frontend sobre tres dominios distintos —limpieza, mantenimiento, mensajería— y estrenaba dos roles nuevos, así que no cabía en un solo change; mismo criterio que partió `revenue` en tres el 2026-08-16)

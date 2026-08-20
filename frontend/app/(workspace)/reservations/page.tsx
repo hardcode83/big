@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { ReservationsView } from "@/features/reservations";
 import { routeMetadata } from "@/features/shell";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("reservations");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="reservations" />;
+  return <ReservationsView />;
 }
