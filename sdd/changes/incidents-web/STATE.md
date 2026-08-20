@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/incidents-web
 implementation_sha: 8152a494d98c0b424d6f4675d8bd0890906dc0fe
 pr_number: 
 pr_url: 
