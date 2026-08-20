@@ -1,49 +1,25 @@
-import type { ReactNode } from "react";
-import { I18nextProvider } from "react-i18next";
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 
-import esCommon from "@/locales/es/common.json";
+import { fireEvent, render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 import esIncidents from "@/locales/es/incidents.json";
-import esNavigation from "@/locales/es/navigation.json";
-import esStates from "@/locales/es/states.json";
-import i18n from "@/lib/i18n";
 
 import { IncidentsFilters } from "./incidents-filters";
 
-function Wrapper({ children }: { children: ReactNode }) {
-  return (
-    <I18nextProvider i18n={i18n}>
-      <>{children}</>
-    </I18nextProvider>
+function renderFilters(
+  value: Parameters<typeof IncidentsFilters>[0]["value"] = {},
+  onChange: Parameters<typeof IncidentsFilters>[0]["onChange"] = () => undefined,
+) {
+  return render(
+    <I18nProvider locale="es">
+      <IncidentsFilters value={value} onChange={onChange} />
+    </I18nProvider>,
   );
 }
 
-async function setupI18n() {
-  await i18n.init({
-    lng: "es",
-    fallbackLng: "es",
-    defaultNS: "common",
-    ns: ["common", "navigation", "states", "incidents"],
-    resources: {
-      es: {
-        common: esCommon,
-        navigation: esNavigation,
-        states: esStates,
-        incidents: esIncidents,
-      },
-    },
-    interpolation: { escapeValue: false },
-  });
-}
-
 describe("IncidentsFilters", () => {
-  it("renders the status and severity selects and the clear button", async () => {
-    await setupI18n();
-    render(<IncidentsFilters value={{}} onChange={() => undefined} />, {
-      wrapper: Wrapper,
-    });
+  it("renders the status and severity selects and the clear button", () => {
+    renderFilters();
     expect(screen.getByLabelText(esIncidents.fields.status)).toBeInTheDocument();
     expect(
       screen.getByLabelText(esIncidents.fields.severity),
@@ -53,86 +29,50 @@ describe("IncidentsFilters", () => {
     ).toBeInTheDocument();
   });
 
-  it("calls onChange with the new status when status changes", async () => {
-    await setupI18n();
+  it("calls onChange with the new status when status changes", () => {
     let captured: unknown = null;
-    render(
-      <IncidentsFilters
-        value={{}}
-        onChange={(next) => {
-          captured = next;
-        }}
-      />,
-      { wrapper: Wrapper },
-    );
-    const user = userEvent.setup();
-    await user.selectOptions(
-      screen.getByLabelText(esIncidents.fields.status),
-      "OPEN",
-    );
+    renderFilters({}, (next) => {
+      captured = next;
+    });
+    fireEvent.change(screen.getByLabelText(esIncidents.fields.status), {
+      target: { value: "OPEN" },
+    });
     expect(captured).toEqual({ status: "OPEN", page: 1 });
   });
 
-  it("calls onChange with the new severity when severity changes", async () => {
-    await setupI18n();
+  it("calls onChange with the new severity when severity changes", () => {
     let captured: unknown = null;
-    render(
-      <IncidentsFilters
-        value={{}}
-        onChange={(next) => {
-          captured = next;
-        }}
-      />,
-      { wrapper: Wrapper },
-    );
-    const user = userEvent.setup();
-    await user.selectOptions(
-      screen.getByLabelText(esIncidents.fields.severity),
-      "HIGH",
-    );
+    renderFilters({}, (next) => {
+      captured = next;
+    });
+    fireEvent.change(screen.getByLabelText(esIncidents.fields.severity), {
+      target: { value: "HIGH" },
+    });
     expect(captured).toEqual({ severity: "HIGH", page: 1 });
   });
 
-  it("calls onChange({}) when the clear-filters button is pressed", async () => {
-    await setupI18n();
+  it("calls onChange({}) when the clear-filters button is pressed", () => {
     let captured: unknown = "untouched";
-    render(
-      <IncidentsFilters
-        value={{ status: "OPEN" }}
-        onChange={(next) => {
-          captured = next;
-        }}
-      />,
-      { wrapper: Wrapper },
-    );
-    const user = userEvent.setup();
-    await user.click(
+    renderFilters({ status: "OPEN" }, (next) => {
+      captured = next;
+    });
+    fireEvent.click(
       screen.getByRole("button", { name: esIncidents.fields.clearFilters }),
     );
     expect(captured).toEqual({});
   });
 
-  it("does NOT include propertyId / property_id in the onChange payload", async () => {
-    await setupI18n();
+  it("does NOT include propertyId / property_id in the onChange payload", () => {
     let captured: unknown = null;
-    render(
-      <IncidentsFilters
-        value={{}}
-        onChange={(next) => {
-          captured = next;
-        }}
-      />,
-      { wrapper: Wrapper },
-    );
-    const user = userEvent.setup();
-    await user.selectOptions(
-      screen.getByLabelText(esIncidents.fields.status),
-      "OPEN",
-    );
-    await user.selectOptions(
-      screen.getByLabelText(esIncidents.fields.severity),
-      "HIGH",
-    );
+    renderFilters({}, (next) => {
+      captured = next;
+    });
+    fireEvent.change(screen.getByLabelText(esIncidents.fields.status), {
+      target: { value: "OPEN" },
+    });
+    fireEvent.change(screen.getByLabelText(esIncidents.fields.severity), {
+      target: { value: "HIGH" },
+    });
     expect(captured).not.toHaveProperty("propertyId");
     expect(captured).not.toHaveProperty("property_id");
   });

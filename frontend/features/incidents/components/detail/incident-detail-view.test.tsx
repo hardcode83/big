@@ -1,53 +1,24 @@
-import type { ReactNode } from "react";
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { I18nextProvider } from "react-i18next";
-import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ApiError } from "@/lib/api";
-import esCommon from "@/locales/es/common.json";
+import { render, screen } from "@/test/render";
+import { I18nProvider } from "@/lib/i18n/client-provider";
 import esIncidents from "@/locales/es/incidents.json";
-import esNavigation from "@/locales/es/navigation.json";
 import esStates from "@/locales/es/states.json";
-import i18n from "@/lib/i18n";
+import { ApiError } from "@/lib/api";
 
-import * as hooks from "../../hooks/use-incidents";
-
-vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+const useIncidentMock = vi.hoisted(() => vi.fn());
+vi.mock("../../hooks/use-incidents", () => ({
+  useIncident: useIncidentMock,
 }));
 
-const mockUseIncident = vi.spyOn(hooks, "useIncident");
+import { IncidentDetailView } from "./incident-detail-view";
 
-async function setupI18n() {
-  await i18n.init({
-    lng: "es",
-    fallbackLng: "es",
-    defaultNS: "common",
-    ns: ["common", "navigation", "states", "incidents"],
-    resources: {
-      es: {
-        common: esCommon,
-        navigation: esNavigation,
-        states: esStates,
-        incidents: esIncidents,
-      },
-    },
-    interpolation: { escapeValue: false },
-  });
-}
-
-function freshWrapper() {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
-  });
-  return function Wrapper({ children }: { children: ReactNode }) {
-    return (
-      <I18nextProvider i18n={i18n}>
-        <QueryClientProvider client={client}>{children}</QueryClientProvider>
-      </I18nextProvider>
-    );
-  };
+function renderDetail(incidentId = "i1") {
+  return render(
+    <I18nProvider locale="es">
+      <IncidentDetailView incidentId={incidentId} />
+    </I18nProvider>,
+  );
 }
 
 const DETAIL = {
@@ -72,31 +43,27 @@ const DETAIL = {
 } as const;
 
 describe("IncidentDetailView", () => {
-  it("renders the loading state", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders the loading state", () => {
+    useIncidentMock.mockReturnValue({
       isPending: true,
       isError: false,
       isSuccess: false,
       data: undefined,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(screen.getByText(esStates.loading.label)).toBeInTheDocument();
   });
 
-  it("renders all sections when data is present", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders all sections when data is present", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: DETAIL,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(screen.getByText(DETAIL.id)).toBeInTheDocument();
     expect(screen.getByText(DETAIL.propertyId)).toBeInTheDocument();
     expect(screen.getByText(DETAIL.reservationId!)).toBeInTheDocument();
@@ -104,17 +71,15 @@ describe("IncidentDetailView", () => {
     expect(screen.getByText(DETAIL.description)).toBeInTheDocument();
   });
 
-  it("does NOT render the assigned-technician block when assignedTechnicianId is null (R3.6)", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("does NOT render the assigned-technician block when assignedTechnicianId is null (R3.6)", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: DETAIL,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(
       screen.queryByText(esIncidents.fields.assignedTechnician),
     ).not.toBeInTheDocument();
@@ -123,19 +88,15 @@ describe("IncidentDetailView", () => {
     ).not.toBeInTheDocument();
   });
 
-  it("renders the assigned-technician block under a secondary section with the localized note when assignedTechnicianId is set (R3.6)", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders the assigned-technician block under a secondary section with the localized note when assignedTechnicianId is set (R3.6)", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: { ...DETAIL, assignedTechnicianId: "uuid-123" },
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    const { container } = render(<IncidentDetailView incidentId="i1" />, {
-      wrapper: freshWrapper(),
     });
+    const { container } = renderDetail();
     expect(
       screen.getByText(esIncidents.fields.assignedTechnicianNote),
     ).toBeInTheDocument();
@@ -144,35 +105,32 @@ describe("IncidentDetailView", () => {
     expect(container.querySelector("button[aria-label*='opiar']")).toBeNull();
   });
 
-  it("renders description as plain text (D7): no <script> from string payload", async () => {
-    await setupI18n();
+  it("renders description as plain text (D7): no <script> from string payload", () => {
     const dangerous = "<script>alert(1)</script>\nLínea 2";
-    mockUseIncident.mockReturnValue({
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: { ...DETAIL, description: dangerous },
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
+    const { container } = renderDetail();
     expect(document.querySelector("script")).toBeNull();
-    expect(screen.getByText(dangerous)).toBeInTheDocument();
+    // The text is fragmented across DOM nodes (a literal "<script>" tag + "Línea 2"),
+    // so we read the joined text content instead of using getByText.
+    expect(container.textContent).toContain(dangerous);
   });
 
-  it("does NOT render the description block when description is null", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("does NOT render the description block when description is null", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: { ...DETAIL, description: null as unknown as string },
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    const { container } = render(<IncidentDetailView incidentId="i1" />, {
-      wrapper: freshWrapper(),
     });
+    const { container } = renderDetail();
     // description: null is falsy → no <section> for description
     expect(
       Array.from(container.querySelectorAll("h2")).find(
@@ -181,19 +139,15 @@ describe("IncidentDetailView", () => {
     ).toBeUndefined();
   });
 
-  it("renders ownerApprovalRequired note WITHOUT approve/reject buttons (R3.5)", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders ownerApprovalRequired note WITHOUT approve/reject buttons (R3.5)", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
       data: { ...DETAIL, ownerApprovalRequired: true },
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    const { container } = render(<IncidentDetailView incidentId="i1" />, {
-      wrapper: freshWrapper(),
     });
+    const { container } = renderDetail();
     expect(
       screen.getByText(esIncidents.fields.ownerApprovalRequired),
     ).toBeInTheDocument();
@@ -205,40 +159,35 @@ describe("IncidentDetailView", () => {
     ).toBe(false);
   });
 
-  it("renders 404 → notFound with a back link", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders 404 → notFound with a back link", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: true,
       error: new ApiError({ status: 404, code: "not_found", message: "x" }),
       data: undefined,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(screen.getByText(esIncidents.fields.notFound)).toBeInTheDocument();
     expect(
       screen.getByText(esIncidents.fields.backToList),
     ).toBeInTheDocument();
   });
 
-  it("renders 403 → forbidden", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders 403 → forbidden", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: true,
       error: new ApiError({ status: 403, code: "forbidden", message: "x" }),
       data: undefined,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(screen.getByText(esIncidents.fields.forbidden)).toBeInTheDocument();
   });
 
-  it("renders 422 → validation without echoing backend payload", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders 422 → validation without echoing backend payload", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: true,
       error: new ApiError({
@@ -249,33 +198,27 @@ describe("IncidentDetailView", () => {
       }),
       data: undefined,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    const { container } = render(<IncidentDetailView incidentId="i1" />, {
-      wrapper: freshWrapper(),
     });
+    const { container } = renderDetail();
     expect(screen.getByText(esIncidents.fields.validation)).toBeInTheDocument();
     expect(container.textContent).not.toContain("cualquier cosa");
     expect(container.textContent).not.toContain("validation_error");
   });
 
-  it("renders 500 → generic error", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders 500 → generic error", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: true,
       error: new ApiError({ status: 500, code: "internal", message: "x" }),
       data: undefined,
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    render(<IncidentDetailView incidentId="i1" />, { wrapper: freshWrapper() });
+    });
+    renderDetail();
     expect(screen.getByText(esStates.error.title)).toBeInTheDocument();
   });
 
-  it("renders the three costs as two-decimal numbers without currency symbol (R5.5)", async () => {
-    await setupI18n();
-    mockUseIncident.mockReturnValue({
+  it("renders the three costs as two-decimal numbers without currency symbol (R5.5)", () => {
+    useIncidentMock.mockReturnValue({
       isPending: false,
       isError: false,
       isSuccess: true,
@@ -286,11 +229,8 @@ describe("IncidentDetailView", () => {
         finalCost: null,
       },
       refetch: vi.fn(),
-    } as unknown as ReturnType<typeof hooks.useIncident>);
-    const { IncidentDetailView } = await import("./incident-detail-view");
-    const { container } = render(<IncidentDetailView incidentId="i1" />, {
-      wrapper: freshWrapper(),
     });
+    const { container } = renderDetail();
     // No currency symbol anywhere
     expect(container.textContent).not.toMatch(/€|\$|EUR|USD|GBP/);
     // "—" for null final_cost

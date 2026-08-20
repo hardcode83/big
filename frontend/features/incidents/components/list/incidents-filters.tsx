@@ -62,10 +62,7 @@ export function IncidentsFilters({
   const { t } = useTranslation("incidents");
 
   return (
-    <div
-      className="flex flex-wrap items-end gap-3"
-      aria-label={t("fields.status")}
-    >
+    <div className="flex flex-wrap items-end gap-3">
       <div>
         <label
           className="mb-1 block text-xs font-medium text-muted-foreground"
@@ -80,7 +77,7 @@ export function IncidentsFilters({
           onChange={(e) => {
             const raw = e.target.value;
             const status = raw ? (raw as IncidentStatus) : undefined;
-            onChange(buildNext(value, { status, page: 1 }));
+            onChange(buildNext(value, { status }));
           }}
         >
           <option value="">{t("fields.status")}</option>
@@ -105,7 +102,7 @@ export function IncidentsFilters({
           onChange={(e) => {
             const raw = e.target.value;
             const severity = raw ? (raw as IncidentSeverity) : undefined;
-            onChange(buildNext(value, { severity, page: 1 }));
+            onChange(buildNext(value, { severity }));
           }}
         >
           <option value="">{t("fields.severity")}</option>

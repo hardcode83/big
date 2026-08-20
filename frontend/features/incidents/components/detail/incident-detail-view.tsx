@@ -66,6 +66,7 @@ export function IncidentDetailView({ incidentId }: { incidentId: string }) {
       </h1>
       <Link href="/incidents">{t("incidents:fields.backToList")}</Link>
       <DetailHeader
+        title={d.title}
         severity={d.severity}
         status={d.status}
         category={d.category}

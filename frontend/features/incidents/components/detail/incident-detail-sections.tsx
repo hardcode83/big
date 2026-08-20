@@ -29,6 +29,7 @@ function fmtCost(value: string | null): string {
 }
 
 export function DetailHeader({
+  title,
   severity,
   status,
   category,
@@ -36,11 +37,17 @@ export function DetailHeader({
   ownerApprovalRequired,
 }: Pick<
   IncidentDetailDto,
-  "severity" | "status" | "category" | "source" | "ownerApprovalRequired"
+  | "title"
+  | "severity"
+  | "status"
+  | "category"
+  | "source"
+  | "ownerApprovalRequired"
 >) {
   const { t } = useTranslation("incidents");
   return (
     <header>
+      <h2>{title}</h2>
       <span
         className={
           SEVERITY_COLOR[severity] ?? "bg-gray-100 text-gray-700"

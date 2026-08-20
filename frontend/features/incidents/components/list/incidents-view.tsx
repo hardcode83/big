@@ -41,6 +41,25 @@ export function IncidentsView() {
   if (state.kind === "validation") {
     return <p>{t("incidents:fields.validation")}</p>;
   }
+  if (state.kind === "not-found") {
+    // A 404 on the list is treated as a generic error per design (the list
+    // endpoint shouldn't produce 404). Reaching here means the BE gave 404;
+    // the dashboard precedent is to fall through to the generic error UI.
+    return (
+      <div>
+        <p>{t("states:error.title", { ns: "states" })}</p>
+        <p>{t("states:error.description", { ns: "states" })}</p>
+        <button
+          type="button"
+          onClick={() => {
+            void query.refetch();
+          }}
+        >
+          {t("states:error.retry", { ns: "states" })}
+        </button>
+      </div>
+    );
+  }
   if (state.kind === "error") {
     return (
       <div>
