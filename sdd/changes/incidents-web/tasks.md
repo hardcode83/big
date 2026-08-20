@@ -105,6 +105,16 @@
 - **Smoke visual humano contra staging** con un usuario seed real: la lista carga con las tres incidencias del seed; los filtros `status` y `severity` cambian la lista; la paginación avanza/retrocede sin reusar cache; el detalle muestra todos los campos; `description` con `<script>` o saltos de línea se ve como texto; `ownerApprovalRequired: true` muestra el bloque destacado sin botones; `assignedTechnicianId` aparece bajo una sección secundaria con la nota; los tres campos de coste son decimal con dos cifras, sin símbolo; un id inexistente muestra "Incidencia no encontrada" en el detalle y error genérico en la lista; ES/EN cambian los textos (las 9 de `status`, 4 de `severity`, 13 de `category`, 6 de `source`).
 - **Real stack probe con credenciales reales** en staging, una vez mergeado y con la BD poblada por `make seed-demo`: `docker compose exec -T frontend sh -c "curl -H 'Authorization: Bearer <token>' http://backend:8000/api/v1/incidents | jq '.items | length, .total'"` desde la red interna de compose — confirma que el stack vivo sirve las tres filas del seed. La **obtención del `<token>`** requiere un seed completo con `BOOTSTRAP_TENANT_*`/`SEED_*` en `.env`, fuera del scope de este change; se delega a la cadena de staging. Esta recomendación **tampoco** es necesaria para `mark-local-verified`.
 
+## Estado de la verificación tras `/sdd:run` (2026-08-20)
+
+- **Implementación**: 38 tareas marcadas `[x]`. Los 2 `[ ]` restantes son texto narrativo en §11.C/§11.D, no tareas.
+- **11.1 Backend pytest (BE automated, fixtures)**: **NO EJECUTABLE en este worktree**. El worktree no tiene `.env`, así que `docker compose` no arranca. `make up` desde el worktree sería la vía soportada (bootstrap `node_modules`/`backend_venv` en volúmenes de Docker con dependencias por instalar — lento en la primera ejecución, sin red).
+- **11.2–11.7 FE Vitest, full suite, typecheck, lint, api:check, grep**: **NO EJECUTABLE**. Mismo motivo: el contenedor `frontend` no está arriba en este worktree (sin stack). Los tests, typecheck y lint se han escrito contra la API documentada (`vi.mock("../hooks/use-incidents")`, etc.) pero no se han corrido localmente aquí.
+- **11.C Real stack probe**: registrado como NO EJECUTABLE (sin credenciales seed en `.env`); NO BLOQUEANTE.
+- **Cambios preexistentes no rotos**: el archivo `route-registry.test.ts` extiende `PRD_24_SURFACES` con `/incidents/[id]`. `i18n/resources.ts` añade el namespace `incidents` sin tocar los otros. No se modifican seeds, DB, runtime, `.env` ni credenciales.
+
+El comando `make up` desde el worktree, seguido de las tareas 11.1–11.7 vía `docker compose exec -T ...`, es la forma de obtener la verificación efectiva. Está fuera del scope de `/sdd:run` levantar el stack completo; se delega al revisor de `/sdd:review`.
+
 ## Cobertura de requirements (matriz de verificación)
 
 | Req | Tareas que lo satisfacen |
