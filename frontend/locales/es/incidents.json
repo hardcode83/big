@@ -1,0 +1,71 @@
+{
+  "status": {
+    "OPEN": "Abierta",
+    "CLASSIFIED": "Clasificada",
+    "AWAITING_OWNER_APPROVAL": "Esperando aprobación",
+    "ASSIGNED": "Asignada",
+    "ACCEPTED": "Aceptada",
+    "IN_PROGRESS": "En curso",
+    "WAITING_EXTERNAL_PARTS": "Esperando piezas",
+    "RESOLVED": "Resuelta",
+    "CANCELLED": "Cancelada"
+  },
+  "severity": {
+    "LOW": "Baja",
+    "MEDIUM": "Media",
+    "HIGH": "Alta",
+    "CRITICAL": "Crítica"
+  },
+  "category": {
+    "ACCESS": "Acceso",
+    "LOCK": "Cerradura",
+    "WIFI": "WiFi",
+    "ELECTRICITY": "Electricidad",
+    "WATER": "Agua",
+    "PLUMBING": "Fontanería",
+    "HVAC": "Climatización",
+    "APPLIANCE": "Electrodoméstico",
+    "NOISE": "Ruido",
+    "CLEANING": "Limpieza",
+    "DAMAGE": "Daño",
+    "SAFETY": "Seguridad",
+    "OTHER": "Otro"
+  },
+  "source": {
+    "GUEST": "Huésped",
+    "CLEANER": "Limpiadora",
+    "OWNER": "Propietaria",
+    "SYSTEM": "Sistema",
+    "PMS": "PMS",
+    "LOCK_ALERT": "Alerta de cerradura"
+  },
+  "fields": {
+    "severity": "Severidad",
+    "status": "Estado",
+    "title": "Título",
+    "category": "Categoría",
+    "source": "Origen",
+    "createdAt": "Creada",
+    "id": "Identificador",
+    "property": "Propiedad",
+    "reservation": "Reserva",
+    "assignedTechnician": "Técnico asignado",
+    "assignedTechnicianNote": "El identificador no se puede resolver a nombre dentro de esta vista",
+    "aiSummary": "Resumen del clasificador",
+    "description": "Descripción",
+    "estimatedCost": "Coste estimado",
+    "approvedCost": "Coste aprobado",
+    "finalCost": "Coste final",
+    "resolvedAt": "Resuelta el",
+    "createdAtFull": "Creada el",
+    "updatedAt": "Actualizada el",
+    "ownerApprovalRequired": "Requiere aprobación de la propietaria",
+    "notFound": "Incidencia no encontrada",
+    "backToList": "Volver al listado",
+    "clearFilters": "Limpiar filtros",
+    "prevPage": "Página anterior",
+    "nextPage": "Página siguiente",
+    "forbidden": "No tienes permiso para ver esta incidencia",
+    "validation": "Los datos enviados no son válidos"
+  }
+}
