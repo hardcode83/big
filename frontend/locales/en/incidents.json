@@ -1,0 +1,72 @@
+{
+  "status": {
+    "OPEN": "Open",
+    "CLASSIFIED": "Classified",
+    "AWAITING_OWNER_APPROVAL": "Awaiting owner approval",
+    "ASSIGNED": "Assigned",
+    "ACCEPTED": "Accepted",
+    "IN_PROGRESS": "In progress",
+    "WAITING_EXTERNAL_PARTS": "Waiting for parts",
+    "RESOLVED": "Resolved",
+    "CANCELLED": "Cancelled"
+  },
+  "severity": {
+    "LOW": "Low",
+    "MEDIUM": "Medium",
+    "HIGH": "High",
+    "CRITICAL": "Critical"
+  },
+  "category": {
+    "ACCESS": "Access",
+    "LOCK": "Lock",
+    "WIFI": "WiFi",
+    "ELECTRICITY": "Electricity",
+    "WATER": "Water",
+    "PLUMBING": "Plumbing",
+    "HVAC": "HVAC",
+    "APPLIANCE": "Appliance",
+    "NOISE": "Noise",
+    "CLEANING": "Cleaning",
+    "DAMAGE": "Damage",
+    "SAFETY": "Safety",
+    "OTHER": "Other"
+  },
+  "source": {
+    "GUEST": "Guest",
+    "CLEANER": "Cleaner",
+    "OWNER": "Owner",
+    "SYSTEM": "System",
+    "PMS": "PMS",
+    "LOCK_ALERT": "Lock alert"
+  },
+  "fields": {
+    "severity": "Severity",
+    "status": "Status",
+    "title": "Title",
+    "category": "Category",
+    "source": "Source",
+    "createdAt": "Created",
+    "id": "Identifier",
+    "property": "Property",
+    "reservation": "Reservation",
+    "assignedTechnician": "Assigned technician",
+    "assignedTechnicianNote": "The identifier cannot be resolved to a name in this view",
+    "aiSummary": "Classifier summary",
+    "description": "Description",
+    "estimatedCost": "Estimated cost",
+    "approvedCost": "Approved cost",
+    "finalCost": "Final cost",
+    "resolvedAt": "Resolved at",
+    "createdAtFull": "Created at",
+    "updatedAt": "Updated at",
+    "ownerApprovalRequired": "Owner approval required",
+    "notFound": "Incident not found",
+    "backToList": "Back to list",
+    "clearFilters": "Clear filters",
+    "prevPage": "Previous page",
+    "nextPage": "Next page",
+    "forbidden": "You don't have permission to view this incident",
+    "validation": "The submitted data is not valid",
+    "secondaryData": "Secondary data"
+  }
+}

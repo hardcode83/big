@@ -38,6 +38,10 @@
       "title": "Incidencias",
       "description": "Incidencias y mantenimiento de las propiedades."
     },
+    "incident-detail": {
+      "title": "Detalle de incidencia",
+      "description": "Información detallada de una incidencia."
+    },
     "conversations": {
       "title": "Conversaciones",
       "description": "Bandeja de mensajes con huéspedes y equipo."

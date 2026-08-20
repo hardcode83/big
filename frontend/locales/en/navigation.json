@@ -38,6 +38,10 @@
       "title": "Incidents",
       "description": "Property incidents and maintenance."
     },
+    "incident-detail": {
+      "title": "Incident detail",
+      "description": "Detailed information of an incident."
+    },
     "conversations": {
       "title": "Conversations",
       "description": "Message inbox with guests and team."

@@ -18,6 +18,7 @@ const PRD_24_SURFACES = [
   "/reservations/[id]",
   "/cleaning",
   "/incidents",
+  "/incidents/[id]",
   "/conversations",
   "/pricing",
   "/statements",
