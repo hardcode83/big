@@ -217,7 +217,13 @@ describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 
     expect(state.mutate).not.toHaveBeenCalled();
   });
 
-  it("restores the draft when the operator comes back to the conversation it was typed in", () => {
+  // The draft is a **single slot**, not one per conversation: typing in another
+  // conversation overwrites it, and no requirement asks otherwise (R4.5 names only
+  // the failed send as a reason to keep text). So this asserts the narrow property
+  // the code actually gives — a draft merely passed over, with nothing typed in
+  // between, is still addressed to its own conversation — and not a retention
+  // guarantee the implementation would not honour.
+  it("still addresses the draft to its own conversation when nothing is typed in between", () => {
     const { rerender } = renderAt("conversation-1");
     fireEvent.change(textarea(), { target: { value: "sigo escribiendo" } });
 
@@ -226,6 +232,19 @@ describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 
 
     switchTo(rerender, "conversation-1");
     expect(textarea()).toHaveValue("sigo escribiendo");
+  });
+
+  it("drops the earlier draft once another conversation's draft takes the slot", () => {
+    const { rerender } = renderAt("conversation-1");
+    fireEvent.change(textarea(), { target: { value: "para Ana" } });
+
+    switchTo(rerender, "conversation-2");
+    fireEvent.change(textarea(), { target: { value: "para Bruno" } });
+
+    switchTo(rerender, "conversation-1");
+    // Empty, never "para Bruno": losing a draft is acceptable, showing it under
+    // the wrong guest is the thing this whole block exists to prevent.
+    expect(textarea()).toHaveValue("");
   });
 
   it("does not refuse an identical reply to another conversation as a double submit", () => {

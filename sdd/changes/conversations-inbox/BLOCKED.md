@@ -1,43 +1,60 @@
 # Blocked / pending — conversations-inbox
 
-## 1. El panel de revisión de las secciones 7 y 8 no llegó a correr
+## 1. Hallazgos menores abiertos del panel de revisión
 
-- **phase**: run
+- **phase**: review
 - **type**: deferred
-- **what & why**: las secciones 1 a 6 pasaron su panel completo (7 reviewers cada
-  una, con los hallazgos aceptados corregidos y re-verificados por el propio
-  reviewer). El de la **sección 7** (compositor, transcripción, escalar/resolver,
-  puerta de rol) se lanzó con sus siete reviewers y **los siete murieron a la vez**
-  al agotarse el límite semanal de uso; ninguno emitió veredicto. El de la
-  **sección 8** (vista maestro-detalle, ruta y responsive) no se llegó a lanzar por
-  el mismo motivo.
+- **what & why**: el panel corrió el 2026-08-21 sobre el ancla `a1b348f` (siete
+  reviewers) con veredicto **FAIL**: dos mayores y seis menores. **Los dos mayores
+  están cerrados** en `a56fb2e` y re-verificados por los dos reviewers que los
+  levantaron (`sdd-security` y `sdd-review-cicd`, ambos PASS, cero hallazgos nuevos):
 
-  Lo que sí está verificado de esas dos secciones, y por eso esto es `deferred` y
-  no `decision`: la suite completa del frontend en verde (635/636, con el único
-  fallo siendo dos ficheros que ya fallaban por el montaje del contenedor),
-  `typecheck`, `lint` y `build` de producción limpios, el contrato generado sin
-  derivar, y el diff revisado contra el alcance declarado (tarea 9.5). Lo que falta
-  es el juicio de los siete lentes contra los referentes: arquitectura frente a
-  D5/D11/D12/D13/D16/D18/D19/D20, seguridad sobre la **primera superficie de este
-  change que escribe** (regla 11 y su excepción 4, con la transcripción como nuevo
-  escritor de `messages.content`), QA, i18n, tenancy, documentación y CI/CD.
+  1. *Borrador entre conversaciones* — `reply-composer.tsx` guardaba `content` y
+     `lastSent` sin reset al cambiar `conversationId`, así que con el hilo destino
+     cacheado el borrador de una conversación quedaba bajo el id de otra. Ahora el
+     borrador se guarda con su conversación y se deriva en render; cuatro tests de
+     regresión, verificados como fallidos si se revierte el fix.
+  2. *La guardia de `Suspense` no guardaba nada* — la justificación de D5 («sin
+     frontera, `next build` falla») era falsa: `getServerT()` lee `cookies()` en cada
+     página, así que las 24 rutas ya son dinámicas. La aserción solo hacía
+     `toContain("Suspense")`. Ahora se ignoran comentarios y se exige `fallback`,
+     que la frontera **envuelva** al componente cliente y que ese componente siga
+     llamando a `useSearchParams()`. Verificado con cuatro mutaciones distintas: las
+     cuatro hacen fallar el test. La afirmación falsa quedó corregida en `design.md`
+     (D5, Risks, tabla de cobertura), `tasks.md` (8.3), `proposal.md` y el comentario
+     de `page.tsx`, y no sobrevive ninguna copia viva en el árbol.
 
-  Tres cosas que el panel de la sección 7 debe mirar con calma, y que quedan
-  escritas aquí para que no se pierdan:
-  1. `use-conversation-actions.ts` **es código de la sección 4, ya aprobado**, y se
-     modificó en la 7: los cuatro hooks de escritura llevan ahora
-     `onError: refreshOnConflict`, que invalida las mismas tres claves **solo** en
-     un 409, porque D18 pide «refrescar el estado real tras un 409». Eso obligó a
-     cambiar un test que la sección 4 ya había aprobado (el que afirmaba que un
-     fallo no invalida nada usaba un 409; ahora usa un 500, y dos tests nuevos
-     cubren el 409).
-  2. `MAX_MESSAGE_LENGTH = 4000` vive en `reply-composer.tsx` y lo importa
-     `transcribe-dialog.tsx`, aunque es un dato del contrato y el resto de datos
-     del contrato viven en `lib/`.
-  3. `ConfirmDialog` es no controlado y cierra siempre al confirmar, así que
-     `transcribe-dialog.tsx` **no** lo reutiliza —un fallo tiene que dejar el
-     diálogo abierto para decir que no se guardó nada (D13)—, y eso duplica el
-     armazón de overlay/contenido entre los dos diálogos.
+  **Lo que sigue abierto son los seis menores**, ninguno tocado:
+  1. `transcribe-dialog.tsx:120-124` — el título de error afirma «no se ha guardado
+     nada» para **cualquier** fallo, cuando D13 solo lo deriva del 422; un 5xx tras el
+     commit miente al operador sobre prosa del huésped ya persistida
+     (`steering/security.md` regla 11 excepción 4, cuya única obligación en esta
+     superficie es precisamente decírselo).
+  2. `reply-composer.tsx:13` — `MAX_MESSAGE_LENGTH` es el único dato de contrato
+     exportado de componente a componente (lo importa `transcribe-dialog.tsx`) en vez
+     de vivir en `lib/` como el resto (D1).
+  3. `confirm-dialog.tsx` es no controlado y cierra siempre al confirmar, así que
+     `transcribe-dialog.tsx` duplica el armazón Radix en lugar de reutilizarlo, lo que
+     socava el motivo declarado de D20.
+  4. Cuatro claves i18n huérfanas en ambos catálogos —`composer.empty`, `filters.any`,
+     `message.sentAt`, `thread.channel`—, verificadas con 0 referencias en 254 ficheros
+     fuente (D7 prohíbe interpolar claves, así que no hay construcción dinámica que las
+     justifique).
+  5. La tabla *Changes by area* de `design.md` omite `lib/channels.ts`,
+     `lib/channels.test.ts`, `components/thread-role-gate.test.tsx` y
+     `components/ui/confirm-dialog.test.tsx`, y la tarea 9.5 afirma «dos ficheros más»
+     de los previstos cuando son cuatro.
+  6. `docs/conversations-inbox.md` no aparece en *Affected specs*, así que la
+     obligación de `steering/documentation.md` de dar página `docs/<capability>.md` a
+     una capability nueva de cara a usuario no tiene casa en ningún artefacto.
+
+  **Además, un hallazgo pre-existente descubierto al re-verificar el fix** (no es
+  regresión de `a56fb2e`; ya estaba en `a1b348f` y queda fuera del alcance del fix):
+  `send.isError` es estado de la instancia del hook, no del hilo, así que un fallo de
+  envío en la conversación A pinta su banner de error sobre el compositor de B tras un
+  cambio por el camino cacheado. No cruza prosa del huésped —la copia es una clave
+  localizada genérica— pero atribuye un fallo a la conversación equivocada. Mismo
+  patrón que el borrador, y la misma forma de arreglarlo.
 - **exact resume command**: `/sdd:review conversations-inbox`
 
 ## 2. La comprobación manual de la superficie (tarea 9.4) no se pudo completar
@@ -86,4 +103,11 @@
   `TENANT_OWNER` comprobando que lee sin ningún control de gestión. La lógica de
   todo eso está cubierta por 240 tests de componente, pero R7.6 y el recorrido de
   9.4 hablan de la superficie real.
+
+  **Nota del panel de review (2026-08-21)**: QA confirma que R7.6 queda *met* solo en
+  su cláusula de layout dirigido por estado (colapso a una columna sin `matchMedia`,
+  cubierto en `conversations-view.test.tsx:119-159`) y **sin verificar** en su cláusula
+  literal de usabilidad: desbordamiento horizontal real, anillo de foco computado y
+  orden de recorrido por teclado entre `ThreadActions`/`ReplyComposer`/
+  `TranscribeDialog`/`ConfirmDialog` no son observables sin viewport real.
 - **exact resume command**: `/sdd:review conversations-inbox`
