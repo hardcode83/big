@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/cleaning-manager-view
 implementation_sha: da30e8526a5a9e88a1a00733dfd9d42e19309f5c
 pr_number: 
 pr_url: 
