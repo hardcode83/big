@@ -1,0 +1,72 @@
+{
+  "list": {
+    "label": "Tareas de limpieza",
+    "empty": {
+      "title": "Sin tareas de limpieza",
+      "description": "No hay tareas que coincidan con los filtros seleccionados."
+    },
+    "error": {
+      "title": "No se pudieron cargar las limpiezas",
+      "description": "Vuelve a intentarlo en unos segundos."
+    }
+  },
+  "separator": "·",
+  "columns": {
+    "property": "Vivienda",
+    "cleaner": "Limpiadora",
+    "status": "Estado",
+    "scheduledStart": "Inicio previsto",
+    "scheduledEnd": "Fin previsto",
+    "createdAt": "Fecha de creación"
+  },
+  "status": {
+    "CREATED": "Creada",
+    "ASSIGNED": "Asignada",
+    "ACCEPTED": "Aceptada",
+    "REJECTED": "Rechazada",
+    "IN_PROGRESS": "En curso",
+    "PENDING_REVIEW": "Pendiente de revisión",
+    "COMPLETED": "Completada",
+    "FAILED": "Fallida",
+    "CANCELLED": "Cancelada"
+  },
+  "identity": {
+    "unassigned": "Sin asignar",
+    "unavailable": "Identidad no disponible",
+    "loading": "Cargando identidad…",
+    "notScheduled": "Sin programar"
+  },
+  "filters": {
+    "property": {
+      "label": "Vivienda",
+      "all": "Todas las viviendas",
+      "clear": "Quitar el filtro de vivienda"
+    },
+    "status": {
+      "label": "Estado",
+      "all": "Todos los estados",
+      "clear": "Quitar el filtro de estado"
+    }
+  },
+  "pagination": {
+    "label": "Paginación de tareas de limpieza",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalTasks": "{{total}} tareas en total"
+  },
+  "assign": {
+    "label": "Asignar limpiadora",
+    "placeholder": "Elige una limpiadora",
+    "confirm": "Asignar",
+    "sending": "Asignando…",
+    "success": "Tarea asignada a {{name}}.",
+    "error": {
+      "forbidden": "No tienes permiso para asignar limpiezas.",
+      "notFound": "Esa tarea de limpieza ya no existe.",
+      "conflict": "Esa tarea ya no admite un cambio de asignación.",
+      "invalid": "Esa persona ya no es una limpiadora activa de este tenant.",
+      "generic": "No se pudo asignar la limpieza. Vuelve a intentarlo."
+    }
+  }
+}

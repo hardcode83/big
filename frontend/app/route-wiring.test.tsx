@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 
+import { CleaningView } from "@/features/cleaning";
 import { PropertyDetailView } from "@/features/dashboard";
 import { GuestPortalView } from "@/features/guest-portal";
 
@@ -29,6 +30,12 @@ describe("route wiring (tasks 7.2–7.6)", () => {
     const element = await Page({ params: Promise.resolve({ token: "opaque-token" }) });
     expect(element.type).toBe(GuestPortalView);
     expect(element.props.token).toBe("opaque-token");
+  });
+
+  it("wires /cleaning to CleaningView and not to a placeholder (R1.1)", async () => {
+    const Page = (await import("@/app/(workspace)/cleaning/page")).default;
+    const element = Page();
+    expect(element.type).toBe(CleaningView);
   });
 
   it("wires the cleaner task page to the cleaner-task placeholder", async () => {
