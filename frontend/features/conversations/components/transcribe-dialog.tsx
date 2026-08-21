@@ -5,13 +5,14 @@ import * as DialogPrimitive from "@radix-ui/react-dialog";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
+import { DialogShell } from "@/components/ui/dialog-shell";
 
 import type { ConversationChannel } from "../data/dto";
 import { useTranscribeGuestMessage } from "../hooks/use-conversation-actions";
 import { isMuteChannel } from "../lib/channels";
-import { errorMessageKey } from "../lib/errors";
+import { errorMessageKey, rejectedWithoutStoring } from "../lib/errors";
+import { MAX_MESSAGE_LENGTH } from "../lib/limits";
 import type { ActionGate } from "../lib/transitions";
-import { MAX_MESSAGE_LENGTH } from "./reply-composer";
 
 const REASON_ID = "transcribe-reason";
 
@@ -29,7 +30,10 @@ const REASON_ID = "transcribe-reason";
  * - on a mute channel: the transcription can be lost **entirely**. The pipeline
  *   reaches `_reply`, finds no adapter, raises `PMSChannelUnavailableError` → 422,
  *   and because it all runs in one transaction the guest's message is not stored
- *   either. Hence the error state says explicitly that nothing was stored.
+ *   either. Hence the error state says explicitly that nothing was stored — but
+ *   **only for the failures where that is derivable** (a 4xx). A 5xx or a dropped
+ *   connection may have committed the row, and telling the operator otherwise
+ *   hides a guest's prose that is really there (review 2026-08-21).
  *
  * The dialog stays open on failure: closing it would hide the one sentence that
  * tells the operator their transcription did not survive.
@@ -64,65 +68,25 @@ export function TranscribeDialog({
   }
 
   return (
-    <DialogPrimitive.Root open={open} onOpenChange={handleOpenChange}>
-      <DialogPrimitive.Trigger asChild>
-        <Button
-          type="button"
-          variant="outline"
-          size="sm"
-          disabled={!gate.enabled}
-          aria-describedby={gate.enabled ? undefined : REASON_ID}
-        >
-          {t("transcribe.open")}
-        </Button>
-      </DialogPrimitive.Trigger>
-      {gate.enabled ? null : (
-        <p id={REASON_ID} className="text-xs text-muted-foreground">
-          {t(gate.reasonKey)}
-        </p>
-      )}
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 flex w-[90vw] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-md border bg-background p-6 shadow-lg">
-          <DialogPrimitive.Title className="text-lg font-semibold text-foreground">
-            {t("transcribe.title")}
-          </DialogPrimitive.Title>
-          <DialogPrimitive.Description className="text-sm text-muted-foreground">
-            {t("transcribe.description")}
-          </DialogPrimitive.Description>
-          {isMuteChannel(channel) ? (
-            <p className="text-sm text-muted-foreground">
-              {t("transcribe.muteWarning")}
-            </p>
-          ) : null}
-          <label className="sr-only" htmlFor="transcribe-content">
-            {t("transcribe.field")}
-          </label>
-          <textarea
-            id="transcribe-content"
-            className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
-            placeholder={t("transcribe.placeholder")}
-            value={content}
-            disabled={transcribe.isPending}
-            onChange={(event) => setContent(event.target.value)}
-          />
-          <span className="text-xs text-muted-foreground">
-            {t("composer.counter", {
-              current: content.length,
-              max: MAX_MESSAGE_LENGTH,
-            })}
-          </span>
-          {tooLong ? (
-            <p className="text-xs text-destructive">
-              {t("composer.tooLong", { max: MAX_MESSAGE_LENGTH })}
-            </p>
-          ) : null}
-          {transcribe.isError ? (
-            <p role="alert" className="text-xs text-destructive">
-              {t("transcribe.errorTitle")} {t(errorMessageKey(transcribe.error))}
-            </p>
-          ) : null}
-          <div className="flex flex-wrap justify-end gap-2">
+    <>
+      <DialogShell
+        open={open}
+        onOpenChange={handleOpenChange}
+        title={t("transcribe.title")}
+        description={t("transcribe.description")}
+        trigger={
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            disabled={!gate.enabled}
+            aria-describedby={gate.enabled ? undefined : REASON_ID}
+          >
+            {t("transcribe.open")}
+          </Button>
+        }
+        footer={
+          <>
             <DialogPrimitive.Close asChild>
               <Button type="button" variant="outline">
                 {t("transcribe.cancel")}
@@ -141,9 +105,50 @@ export function TranscribeDialog({
                 ? t("composer.sending")
                 : t("transcribe.submit")}
             </Button>
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+          </>
+        }
+      >
+        {isMuteChannel(channel) ? (
+          <p className="text-sm text-muted-foreground">
+            {t("transcribe.muteWarning")}
+          </p>
+        ) : null}
+        <label className="sr-only" htmlFor="transcribe-content">
+          {t("transcribe.field")}
+        </label>
+        <textarea
+          id="transcribe-content"
+          className="min-h-24 w-full rounded-md border border-input bg-background px-3 py-2 text-sm focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring"
+          placeholder={t("transcribe.placeholder")}
+          value={content}
+          disabled={transcribe.isPending}
+          onChange={(event) => setContent(event.target.value)}
+        />
+        <span className="text-xs text-muted-foreground">
+          {t("composer.counter", {
+            current: content.length,
+            max: MAX_MESSAGE_LENGTH,
+          })}
+        </span>
+        {tooLong ? (
+          <p className="text-xs text-destructive">
+            {t("composer.tooLong", { max: MAX_MESSAGE_LENGTH })}
+          </p>
+        ) : null}
+        {transcribe.isError ? (
+          <p role="alert" className="text-xs text-destructive">
+            {rejectedWithoutStoring(transcribe.error)
+              ? t("transcribe.errorTitle")
+              : t("transcribe.errorTitleUncertain")}{" "}
+            {t(errorMessageKey(transcribe.error))}
+          </p>
+        ) : null}
+      </DialogShell>
+      {gate.enabled ? null : (
+        <p id={REASON_ID} className="text-xs text-muted-foreground">
+          {t(gate.reasonKey)}
+        </p>
+      )}
+    </>
   );
 }

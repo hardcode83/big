@@ -252,6 +252,13 @@ descubierta y pasa a ser, si acaso, una comodidad de API que nadie ha pedido.
 
 ## Affected specs
 
+- `docs/conversations-inbox.md` — *(no existe aún — se creará al archivar)*: la página de
+  capability que `sdd/steering/documentation.md` exige para una superficie nueva de cara a
+  usuario/operación, orientada a **cómo se usa**: qué ve la propietaria frente al manager, el
+  recorrido de responder / transcribir / escalar / resolver, qué significan los dos ejes de
+  estado en las insignias, y las dos advertencias de canal mudo con su diferencia (se guarda y
+  no se envía, frente a se pierde entera). **Registrado en `/sdd:review` del 2026-08-21**: la
+  obligación no estaba en ningún artefacto, así que `/sdd:archive` no tenía de dónde deducirla.
 - `sdd/specs/conversations-inbox.md` — *(no existe aún — se creará al archivar)*: el
   comportamiento de esta superficie.
 - `sdd/specs/messaging-ai.md` — se anotará que su R7 tiene por fin un consumidor; que el hueco de

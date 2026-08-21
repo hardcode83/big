@@ -37,3 +37,20 @@ export function isNotFound(error: unknown): boolean {
 export function isConflict(error: unknown): boolean {
   return error instanceof ApiError && error.status === 409;
 }
+
+/**
+ * True when the backend rejected the write and we can say so: a 4xx is decided
+ * before or atomically with the transaction, so nothing was persisted.
+ *
+ * A 5xx, or anything that is not an `ApiError` at all (a dropped connection), says
+ * nothing about whether the row landed — the request may have committed and failed
+ * on the way back. Callers that promise the operator "nothing was stored" must ask
+ * this first: claiming it over a row that exists is worse than saying nothing,
+ * because nobody asks for the deletion of a record they were told does not exist
+ * (`steering/security.md` rule 11 exception 4, review 2026-08-21).
+ */
+export function rejectedWithoutStoring(error: unknown): boolean {
+  return (
+    error instanceof ApiError && error.status >= 400 && error.status < 500
+  );
+}

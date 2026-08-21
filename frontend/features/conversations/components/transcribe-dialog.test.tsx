@@ -162,6 +162,45 @@ describe("TranscribeDialog — a failure says nothing was stored (task 7.3, D13,
     fireEvent.change(field, { target: { value: "No hay agua caliente" } });
     expect(field).toHaveValue("No hay agua caliente");
   });
+
+  // Review 2026-08-21: the «nothing was stored» claim is only derivable from a 4xx.
+  // A 5xx, or a dropped connection, may have committed the guest's prose, and
+  // telling the operator it did not is what hides a record nobody will ask to
+  // delete (`steering/security.md` rule 11 exception 4).
+  it("does not claim nothing was stored when the failure cannot prove it (5xx)", () => {
+    const { open } = renderDialog(
+      "WHATSAPP",
+      transcribeState({
+        isError: true,
+        error: new ApiError({
+          code: "SERVER_ERROR",
+          message: "Request failed with status 502",
+          status: 502,
+        }),
+      }),
+    );
+    open();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Puede que la transcripción no se haya guardado.");
+    expect(alert).not.toHaveTextContent("No se ha guardado nada");
+    expect(alert).toHaveTextContent("No hemos podido completar la operación.");
+    expect(alert).not.toHaveTextContent("502");
+    expect(screen.getByRole("dialog")).toBeInTheDocument();
+  });
+
+  it("does not claim nothing was stored when the request never got an answer", () => {
+    const { open } = renderDialog(
+      "WHATSAPP",
+      transcribeState({ isError: true, error: new Error("network down") }),
+    );
+    open();
+
+    const alert = screen.getByRole("alert");
+    expect(alert).toHaveTextContent("Puede que la transcripción no se haya guardado.");
+    expect(alert).not.toHaveTextContent("No se ha guardado nada");
+    expect(alert).not.toHaveTextContent("network down");
+  });
 });
 
 describe("TranscribeDialog — gates (task 7.3, D10, D11)", () => {

@@ -8,6 +8,7 @@ import {
   isConflict,
   isForbidden,
   isNotFound,
+  rejectedWithoutStoring,
 } from "./errors";
 
 function apiError(status: number): ApiError {
@@ -63,5 +64,37 @@ describe("dedicated-screen predicates (task 2.5, D17)", () => {
       expect(predicate(new Error("network down"))).toBe(false);
       expect(predicate(null)).toBe(false);
     }
+  });
+});
+
+describe("rejectedWithoutStoring (review 2026-08-21)", () => {
+  // A 4xx is decided before or atomically with the transaction, so the caller may
+  // tell the operator nothing was persisted. Anything else may have committed.
+  it.each([400, 403, 404, 409, 422, 499])(
+    "is true for %i: the backend refused and wrote nothing",
+    (status) => {
+      expect(
+        rejectedWithoutStoring(
+          new ApiError({ code: "CONFLICT", message: "x", status }),
+        ),
+      ).toBe(true);
+    },
+  );
+
+  it.each([500, 502, 503])(
+    "is false for %i: the write may have landed before the failure",
+    (status) => {
+      expect(
+        rejectedWithoutStoring(
+          new ApiError({ code: "SERVER_ERROR", message: "x", status }),
+        ),
+      ).toBe(false);
+    },
+  );
+
+  it("is false for anything that is not an ApiError at all", () => {
+    expect(rejectedWithoutStoring(new Error("socket hang up"))).toBe(false);
+    expect(rejectedWithoutStoring(undefined)).toBe(false);
+    expect(rejectedWithoutStoring(null)).toBe(false);
   });
 });

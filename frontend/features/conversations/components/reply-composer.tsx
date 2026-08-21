@@ -7,10 +7,8 @@ import { Button } from "@/components/ui/button";
 
 import { useSendReply } from "../hooks/use-conversation-actions";
 import { errorMessageKey } from "../lib/errors";
+import { MAX_MESSAGE_LENGTH } from "../lib/limits";
 import type { ActionGate } from "../lib/transitions";
-
-/** `CreateMessageRequest.content` is capped at 4000 characters by the contract. */
-export const MAX_MESSAGE_LENGTH = 4000;
 
 const REASON_ID = "reply-composer-reason";
 const ERROR_ID = "reply-composer-error";

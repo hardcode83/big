@@ -289,6 +289,14 @@ diffea en revisión.
 
 ## Changes by area
 
+Esta tabla nombra **módulos de producción**; los tests colocados (`*.test.ts[x]` junto al
+módulo que prueban) van implícitos y no se enumeran — son 23 en este change, incluido
+`components/thread-role-gate.test.tsx`, que prueba la puerta de rol de 7.5 y no tiene módulo
+propio porque la puerta vive en `conversation-thread.tsx`. La convención se escribe aquí a
+raíz de la revisión del 2026-08-21, que leyó la tabla como un inventario exhaustivo de
+ficheros; lo que sí faltaban eran módulos de producción (`lib/channels.ts`) y un fichero
+modificado fuera de la feature (`app/error-architecture.test.ts`), ambos ya en la tabla.
+
 | Area | Files | Change |
 |---|---|---|
 | Feature: entrada | `frontend/features/conversations/index.ts` | **Nuevo**. Exporta solo `ConversationsView` |
@@ -301,14 +309,15 @@ diffea en revisión.
 | | `.../hooks/use-conversations.ts` | **Nuevo**. `useConversationList`, `useConversation`, `useThread`, `usePropertyLabels` |
 | | `.../hooks/use-conversation-actions.ts` | **Nuevo**. `useSendReply`, `useTranscribeGuestMessage`, `useEscalate`, `useResolve` + invalidación (D16) |
 | Feature: estado | `.../state/use-inbox-filters-store.ts` | **Nuevo**. Filtros + página en Zustand (D6, R2.5) |
-| Feature: lógica pura | `.../lib/labels.ts`, `.../lib/transitions.ts`, `.../lib/permissions.ts`, `.../lib/format.ts`, `.../lib/errors.ts` | **Nuevos** (D7, D10, D12, D9, D18) |
+| Feature: lógica pura | `.../lib/labels.ts`, `.../lib/transitions.ts`, `.../lib/permissions.ts`, `.../lib/format.ts`, `.../lib/errors.ts`, `.../lib/channels.ts`, `.../lib/limits.ts` | **Nuevos** (D7, D10, D12, D9, D18). `channels.ts` es el predicado `isMuteChannel` que **D13 exige** y que esta tabla omitió hasta la revisión del 2026-08-21; `limits.ts` recoge `MAX_MESSAGE_LENGTH`, que vivía en `reply-composer.tsx` y era el único dato de contrato viajando de componente a componente (D1) |
 | Feature: UI | `.../components/conversations-view.tsx` | **Nuevo**. Maestro-detalle, lee/escribe `?conversation=` (D5, D19) |
 | | `.../components/inbox-filters.tsx`, `inbox-list.tsx`, `inbox-row.tsx`, `page-nav.tsx` | **Nuevos**. R1, R2 |
 | | `.../components/thread-header.tsx`, `conversation-thread.tsx`, `message-bubble.tsx` | **Nuevos**. R3, D13, D14, D15 |
 | | `.../components/reply-composer.tsx`, `transcribe-dialog.tsx`, `thread-actions.tsx` | **Nuevos**. R4, R5, D11, D13 |
-| Primitivas compartidas | `frontend/components/ui/confirm-dialog.tsx` | **Nuevo** (D20) |
+| Primitivas compartidas | `frontend/components/ui/dialog-shell.tsx`, `frontend/components/ui/confirm-dialog.tsx` (+ `confirm-dialog.test.tsx`) | **Nuevos** (D20). `dialog-shell.tsx` sale de la revisión del 2026-08-21: `ConfirmDialog` cierra siempre al confirmar y no puede servir a la transcripción, que debe quedarse abierta para decir que no se guardó nada (D13), así que el armazón de overlay/contenido —la duplicación real— se extrae y lo componen los dos |
 | Ruta | `frontend/app/(workspace)/conversations/page.tsx` | **Modificado**. `RoutePlaceholder` → `<Suspense><ConversationsView/></Suspense>`; `generateMetadata` intacto |
 | | `frontend/app/route-coverage.test.ts` | **Modificado**. Entrada `"(workspace)/conversations/page.tsx": "conversations"` en `REAL_PAGE_ROUTE_IDS`, o el test falla al no encontrar `routeId="…"` |
+| | `frontend/app/error-architecture.test.ts` | **Modificado**. Su regla «ninguna `page.tsx` importa `Suspense`/`LoadingState`» pasa a llevar lista de exenciones con motivo (task 8.3). La revisión del 2026-08-21 reforzó sus aserciones: la frontera debe tener `fallback` y **envolver** al componente cliente, y ese componente seguir llamando a `useSearchParams()` |
 | i18n | `frontend/lib/i18n/resources.ts` | **Modificado**. Namespace `conversations` en `NAMESPACES` y en `resources` de ambos locales (R7.4) |
 | | `frontend/locales/es/conversations.json`, `frontend/locales/en/conversations.json` | **Nuevos**. El test de paridad exige juegos de claves idénticos |
 | Backend / contrato | — | **Sin cambios**. Ni `make openapi` ni `npm run api:generate` |

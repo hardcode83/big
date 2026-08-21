@@ -6,7 +6,8 @@ import { ApiError } from "@/lib/api";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { render, screen } from "@/test/render";
 
-import { MAX_MESSAGE_LENGTH, ReplyComposer } from "./reply-composer";
+import { MAX_MESSAGE_LENGTH } from "../lib/limits";
+import { ReplyComposer } from "./reply-composer";
 
 const useSendReply = vi.hoisted(() => vi.fn());
 const useTranscribeGuestMessage = vi.hoisted(() => vi.fn());

@@ -4,6 +4,7 @@ import type { ReactNode } from "react";
 import * as DialogPrimitive from "@radix-ui/react-dialog";
 
 import { Button } from "@/components/ui/button";
+import { DialogShell } from "@/components/ui/dialog-shell";
 
 export interface ConfirmDialogProps {
   /** The control that opens the dialog; it receives focus back on close. */
@@ -16,15 +17,12 @@ export interface ConfirmDialogProps {
 }
 
 /**
- * A generic confirmation dialog (design D20), built on `@radix-ui/react-dialog`,
- * which is already a dependency through `components/ui/sheet.tsx` — no new package
- * for a dialog the existing one covers.
+ * A generic confirmation dialog (design D20): two buttons, both of which dismiss,
+ * so Radix owns the open state and this component needs none.
  *
- * Radix owns focus: it traps focus inside the content while open and returns it to
- * the trigger on close. That is the whole reason this is not `window.confirm`,
- * which is neither localizable nor styleable nor focus-managed.
- *
- * Every string arrives by prop, so this file holds no copy and no feature logic.
+ * The chrome lives in `DialogShell`, which the transcription dialog also composes —
+ * that one has to stay open on failure, so it cannot reuse this component itself
+ * (design D13). Every string arrives by prop, so this file holds no copy.
  */
 export function ConfirmDialog({
   trigger,
@@ -35,31 +33,24 @@ export function ConfirmDialog({
   onConfirm,
 }: ConfirmDialogProps) {
   return (
-    <DialogPrimitive.Root>
-      <DialogPrimitive.Trigger asChild>{trigger}</DialogPrimitive.Trigger>
-      <DialogPrimitive.Portal>
-        <DialogPrimitive.Overlay className="fixed inset-0 z-50 bg-black/50" />
-        <DialogPrimitive.Content className="fixed left-1/2 top-1/2 z-50 flex w-[90vw] max-w-md -translate-x-1/2 -translate-y-1/2 flex-col gap-3 rounded-md border bg-background p-6 shadow-lg">
-          <DialogPrimitive.Title className="text-lg font-semibold text-foreground">
-            {title}
-          </DialogPrimitive.Title>
-          <DialogPrimitive.Description className="text-sm text-muted-foreground">
-            {description}
-          </DialogPrimitive.Description>
-          <div className="flex flex-wrap justify-end gap-2">
-            <DialogPrimitive.Close asChild>
-              <Button type="button" variant="outline">
-                {cancelLabel}
-              </Button>
-            </DialogPrimitive.Close>
-            <DialogPrimitive.Close asChild>
-              <Button type="button" onClick={onConfirm}>
-                {confirmLabel}
-              </Button>
-            </DialogPrimitive.Close>
-          </div>
-        </DialogPrimitive.Content>
-      </DialogPrimitive.Portal>
-    </DialogPrimitive.Root>
+    <DialogShell
+      trigger={trigger}
+      title={title}
+      description={description}
+      footer={
+        <>
+          <DialogPrimitive.Close asChild>
+            <Button type="button" variant="outline">
+              {cancelLabel}
+            </Button>
+          </DialogPrimitive.Close>
+          <DialogPrimitive.Close asChild>
+            <Button type="button" onClick={onConfirm}>
+              {confirmLabel}
+            </Button>
+          </DialogPrimitive.Close>
+        </>
+      }
+    />
   );
 }

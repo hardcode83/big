@@ -59,7 +59,6 @@
     "status": "Estado",
     "escalationStatus": "Escalación",
     "property": "Propiedad",
-    "any": "Todas",
     "closedNote": "Hoy ninguna acción produce el estado «Cerrada», así que este filtro no devuelve resultados."
   },
   "pagination": {
@@ -89,7 +88,6 @@
     },
     "back": "Volver a la bandeja",
     "language": "Idioma detectado",
-    "channel": "Canal",
     "muteWarning": "Este canal es mudo por diseño hasta que llegue el adaptador de mensajería del PMS: lo que escribas se guarda en el hilo, pero no se envía al huésped.",
     "notRealtime": "El hilo no se actualiza en tiempo real: se refresca al operar sobre él o al recargar la página.",
     "messages": "Mensajes de la conversación"
@@ -98,8 +96,7 @@
     "aiGenerated": "Generado por IA",
     "intent": "Intención",
     "confidence": "Confianza",
-    "notDelivered": "No entregado al huésped",
-    "sentAt": "Enviado"
+    "notDelivered": "No entregado al huésped"
   },
   "composer": {
     "label": "Responder al huésped",
@@ -108,7 +105,6 @@
     "sending": "Enviando…",
     "counter": "{{current}} de {{max}} caracteres",
     "tooLong": "La respuesta no puede pasar de {{max}} caracteres.",
-    "empty": "Escribe algo antes de enviar.",
     "errorTitle": "No se ha enviado la respuesta"
   },
   "transcribe": {
@@ -120,7 +116,8 @@
     "placeholder": "Lo que dijo el huésped…",
     "submit": "Transcribir",
     "cancel": "Cancelar",
-    "errorTitle": "No se ha guardado nada"
+    "errorTitle": "No se ha guardado nada",
+    "errorTitleUncertain": "Puede que la transcripción no se haya guardado."
   },
   "actions": {
     "legend": "Acciones de la conversación",
