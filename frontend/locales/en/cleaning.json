@@ -1,0 +1,72 @@
+{
+  "list": {
+    "label": "Cleaning tasks",
+    "empty": {
+      "title": "No cleaning tasks",
+      "description": "No tasks match the selected filters."
+    },
+    "error": {
+      "title": "Cleaning tasks could not be loaded",
+      "description": "Please try again in a few seconds."
+    }
+  },
+  "separator": "·",
+  "columns": {
+    "property": "Property",
+    "cleaner": "Cleaner",
+    "status": "Status",
+    "scheduledStart": "Scheduled start",
+    "scheduledEnd": "Scheduled end",
+    "createdAt": "Creation date"
+  },
+  "status": {
+    "CREATED": "Created",
+    "ASSIGNED": "Assigned",
+    "ACCEPTED": "Accepted",
+    "REJECTED": "Rejected",
+    "IN_PROGRESS": "In progress",
+    "PENDING_REVIEW": "Pending review",
+    "COMPLETED": "Completed",
+    "FAILED": "Failed",
+    "CANCELLED": "Cancelled"
+  },
+  "identity": {
+    "unassigned": "Unassigned",
+    "unavailable": "Identity unavailable",
+    "loading": "Loading identity…",
+    "notScheduled": "Not scheduled"
+  },
+  "filters": {
+    "property": {
+      "label": "Property",
+      "all": "All properties",
+      "clear": "Clear the property filter"
+    },
+    "status": {
+      "label": "Status",
+      "all": "All statuses",
+      "clear": "Clear the status filter"
+    }
+  },
+  "pagination": {
+    "label": "Cleaning task pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalTasks": "{{total}} tasks in total"
+  },
+  "assign": {
+    "label": "Assign cleaner",
+    "placeholder": "Choose a cleaner",
+    "confirm": "Assign",
+    "sending": "Assigning…",
+    "success": "Task assigned to {{name}}.",
+    "error": {
+      "forbidden": "You do not have permission to assign cleanings.",
+      "notFound": "That cleaning task no longer exists.",
+      "conflict": "That task no longer accepts an assignment change.",
+      "invalid": "That person is no longer an active cleaner in this tenant.",
+      "generic": "The cleaning could not be assigned. Please try again."
+    }
+  }
+}

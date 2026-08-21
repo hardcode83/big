@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { CleaningView } from "@/features/cleaning";
 import { routeMetadata } from "@/features/shell";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("cleaning");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="cleaning" />;
+  return <CleaningView />;
 }
