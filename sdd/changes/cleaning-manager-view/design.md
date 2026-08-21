@@ -223,7 +223,7 @@ Rejected: barrel por capa (uno para data, otro para components). Sobre-ingenier�
 | Shell | `frontend/features/shell/navigation/route-registry.test.ts` | **MODIFIED**. Inserta `"/cleaning/[id]"` en `PRD_24_SURFACES` (línea 19). |
 | i18n — navigation | `frontend/locales/es/navigation.json` | **MODIFIED**. Añade `routes.cleaning-detail.{title,description}`. |
 | i18n — navigation | `frontend/locales/en/navigation.json` | **MODIFIED**. Idem. |
-| i18n — cleaning (nuevo) | `frontend/locales/es/cleaning.json` | **NEW**. Estructura D16. |
+| i18n — cleaning (nuevo) | `frontend/locales/es/cleaning.json` | **NEW**. Estructura D15. |
 | i18n — cleaning (nuevo) | `frontend/locales/en/cleaning.json` | **NEW**. Idem. |
 
 ## Data & interfaces
