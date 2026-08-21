@@ -33,8 +33,24 @@ export function ReplyComposer({
   gate: ActionGate;
 }) {
   const { t } = useTranslation("conversations");
-  const [content, setContent] = useState("");
-  const [lastSent, setLastSent] = useState<string | null>(null);
+  // The draft is stored **with the conversation it was typed in** and derived
+  // during render, exactly as `ConversationThread` does with the page. Selecting
+  // another conversation does not unmount this component when the target thread
+  // is already cached (`useConversation` has no `placeholderData`, so there is no
+  // pending early return to remount it), and a draft left under someone else's id
+  // is one click away from a reply delivered to the wrong guest. `lastSent` is
+  // scoped the same way, or an identical legitimate reply to another guest would
+  // be refused as a double submit.
+  const [draft, setDraft] = useState<{
+    conversationId: string;
+    content: string;
+    lastSent: string | null;
+  }>({ conversationId, content: "", lastSent: null });
+  const mine = draft.conversationId === conversationId;
+  const content = mine ? draft.content : "";
+  const lastSent = mine ? draft.lastSent : null;
+  const setContent = (next: string) =>
+    setDraft({ conversationId, content: next, lastSent });
   const send = useSendReply(conversationId);
 
   const tooLong = content.length > MAX_MESSAGE_LENGTH;
@@ -50,10 +66,12 @@ export function ReplyComposer({
       return;
     }
     const sending = content;
+    // `conversationId` is the one captured at submit time, so a success that lands
+    // after the operator moved on records the sent text against the conversation it
+    // was actually sent to — never against whichever thread is on screen by then.
     send.mutate(sending, {
       onSuccess: () => {
-        setLastSent(sending);
-        setContent("");
+        setDraft({ conversationId, content: "", lastSent: sending });
       },
     });
   }

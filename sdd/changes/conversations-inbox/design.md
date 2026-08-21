@@ -78,9 +78,19 @@ sería una segunda fuente de verdad que envejece sola.
 **Chosen:** `/conversations` renderiza `ConversationsView`, un Client Component que lee la
 conversación seleccionada de `?conversation=<uuid>` con `useSearchParams()` y la escribe con
 `router.replace(...,{scroll:false})`. La página (Server Component) envuelve la vista en
-`<Suspense>` con el `LoadingState` compartido como fallback: con `output: "standalone"` y sin
-`force-dynamic`, una ruta prerenderizable que llama a `useSearchParams()` **sin** frontera de
-suspense rompe `next build`, y R7.5 exige que el build de producción pase sin backend.
+`<Suspense>` con el `LoadingState` compartido como fallback: `useSearchParams()` hace que Next
+abandone el prerender, y la frontera es lo que mantiene ese abandono **acotado al subárbol** en vez
+de a la ruta entera.
+
+**Corregido en `/sdd:review` (2026-08-21).** Esta decisión afirmaba que sin la frontera «rompe
+`next build`», y **es falso en este árbol**: cada página espera `getServerT()`, que lee `cookies()`,
+así que las 24 rutas ya son dinámicas y no queda camino estático que el build pueda rechazar.
+Comprobado empíricamente quitando la frontera: el build compila igual. La frontera sigue siendo
+obligatoria —por el acotado, y por que la ruta siga siendo correcta el día que la i18n de servidor
+deje de ser dependencia por petición— pero **`next build` no es el mecanismo que detecta su
+retirada**: lo es `app/error-architecture.test.ts`, cuyas aserciones se reforzaron en la misma
+revisión para comprobar que la frontera envuelve de verdad al consumidor y que ese consumidor sigue
+llamando a `useSearchParams()`.
 
 Rejected: guardar la selección en Zustand — R3.1 pide que el hilo sea enlazable y recargable.
 Rejected: una ruta anidada `/conversations/[id]` — R3.1 dice explícitamente «la misma ruta», y
@@ -344,8 +354,12 @@ generado (solo 401/403/422): los produce el backend a través del sobre §23 y l
 - **La antigüedad relativa depende del reloj** (D9): render no determinista en tests y potencial
   desajuste de hidratación. Mitigación: la vista es cliente bajo `AuthGuard` (no se prerenderiza
   con datos), y las suites que la comprueban fijan la hora.
-- **`useSearchParams()` sin `Suspense` rompe `next build`** (D5). Mitigación: la frontera está en la
-  página, y R7.5 (build de producción sin backend) es lo que lo detecta.
+- **`useSearchParams()` sin `Suspense` amplía el abandono de prerender a toda la ruta** (D5).
+  Mitigación: la frontera está en la página, y lo que detecta su retirada es
+  `app/error-architecture.test.ts` (aserciones reforzadas en la revisión del 2026-08-21), **no** el
+  build: con la i18n de servidor leyendo `cookies()` en cada página, `next build` pasa igual sin
+  frontera. Riesgo residual asumido y declarado: si algún día se quita esa dependencia por petición,
+  la ruta vuelve a ser prerenderizable y entonces sí sería el build quien fallara.
 - **`route-coverage.test.ts` deja de pasar en cuanto la página no tiene `routeId="…"`.** Mitigación:
   la entrada en `REAL_PAGE_ROUTE_IDS` es parte del cambio, no un arreglo posterior.
 - **El hilo no es tiempo real**: la respuesta de la IA aparece porque se genera **dentro** de la
@@ -383,7 +397,7 @@ generado (solo 401/403/422): los produce el backend a través del sobre §23 y l
 | R7.1, R7.2 | D2, D3 |
 | R7.3 | D4 + `boundary.test.ts` |
 | R7.4 | D7, cambios en `lib/i18n/resources.ts` y los dos catálogos |
-| R7.5 | D5 (la frontera de suspense es lo que hace pasar el build) |
+| R7.5 | D5 (la frontera acota el abandono de prerender; el build pasa por la i18n de servidor, y quien guarda la frontera es `error-architecture.test.ts`) |
 | R7.6 | D19 + nombres accesibles localizados y foco visible en los controles |
 | Seguridad | D12 (RBAC solo oculta), D15 (prosa verbatim como texto), D2 (notas de propiedad fuera de la caché), claves con ámbito de tenant en D16 |
 

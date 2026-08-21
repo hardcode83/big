@@ -1,4 +1,5 @@
 import { fireEvent } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
@@ -178,5 +179,73 @@ describe("ReplyComposer — the closed conversation (task 7.2, D10, D11)", () =>
     expect(send()).toBeDisabled();
     const reason = screen.getByText("Esta conversación está cerrada.");
     expect(textarea).toHaveAttribute("aria-describedby", reason.id);
+  });
+});
+
+describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 2026-08-21)", () => {
+  function renderAt(conversationId: string, state = sendState()) {
+    useSendReply.mockReturnValue(state);
+    const result = render(
+      <I18nProvider locale="es">
+        <ReplyComposer conversationId={conversationId} gate={{ enabled: true }} />
+      </I18nProvider>,
+    );
+    return { ...result, state };
+  }
+
+  function switchTo(rerender: (ui: ReactElement) => void, conversationId: string) {
+    // Same element type at the same position, which is what keeps the composer
+    // mounted when the target thread is already cached — the exact path in which a
+    // retained draft would surface under another guest's id.
+    rerender(
+      <I18nProvider locale="es">
+        <ReplyComposer conversationId={conversationId} gate={{ enabled: true }} />
+      </I18nProvider>,
+    );
+  }
+
+  const textarea = () => screen.getByLabelText("Responder al huésped");
+
+  it("does not carry a half-typed reply into another conversation", () => {
+    const { rerender, state } = renderAt("conversation-1");
+    fireEvent.change(textarea(), { target: { value: "Ana, el código del portal es 4821" } });
+    expect(textarea()).toHaveValue("Ana, el código del portal es 4821");
+
+    switchTo(rerender, "conversation-2");
+
+    expect(textarea()).toHaveValue("");
+    expect(state.mutate).not.toHaveBeenCalled();
+  });
+
+  it("restores the draft when the operator comes back to the conversation it was typed in", () => {
+    const { rerender } = renderAt("conversation-1");
+    fireEvent.change(textarea(), { target: { value: "sigo escribiendo" } });
+
+    switchTo(rerender, "conversation-2");
+    expect(textarea()).toHaveValue("");
+
+    switchTo(rerender, "conversation-1");
+    expect(textarea()).toHaveValue("sigo escribiendo");
+  });
+
+  it("does not refuse an identical reply to another conversation as a double submit", () => {
+    const state = sendState({
+      mutate: vi.fn((_content: string, opts?: { onSuccess?: () => void }) => {
+        opts?.onSuccess?.();
+      }),
+    });
+    const { rerender } = renderAt("conversation-1", state);
+
+    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
+    expect(state.mutate).toHaveBeenCalledTimes(1);
+    // Sent, so the same text is refused here — that guard is R4.5 and must survive.
+    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    expect(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ })).toBeDisabled();
+
+    switchTo(rerender, "conversation-2");
+
+    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    expect(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ })).toBeEnabled();
   });
 });
