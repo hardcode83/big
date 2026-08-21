@@ -134,6 +134,15 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     order: 1,
   },
   {
+    id: "reservation-detail",
+    pattern: "/reservations/[id]",
+    ...keysFor("reservation-detail"),
+    breadcrumbKeys: crumbs("reservations", "reservation-detail"),
+    icon: "CalendarCheck",
+    profile: "workspace",
+    match: "exact",
+  },
+  {
     id: "cleaning",
     pattern: "/cleaning",
     href: "/cleaning",
@@ -156,6 +165,15 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     match: "exact",
     navigationGroup: "work",
     order: 3,
+  },
+  {
+    id: "incident-detail",
+    pattern: "/incidents/[id]",
+    ...keysFor("incident-detail"),
+    breadcrumbKeys: crumbs("incidents", "incident-detail"),
+    icon: "Wrench",
+    profile: "workspace",
+    match: "exact",
   },
   {
     id: "conversations",

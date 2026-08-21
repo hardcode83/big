@@ -15,8 +15,10 @@ const PRD_24_SURFACES = [
   "/properties/[id]",
   "/timeline",
   "/reservations",
+  "/reservations/[id]",
   "/cleaning",
   "/incidents",
+  "/incidents/[id]",
   "/conversations",
   "/pricing",
   "/statements",
@@ -111,5 +113,27 @@ describe("route registry (D4 / PRD §24)", () => {
         expect(ALLOWED_KEYS.has(key as keyof ShellRouteDescriptor)).toBe(true);
       }
     }
+  });
+
+  // F7: per-property assertions for `reservation-detail` (R1.2). The generic
+  // "gives dynamic routes no href" test only covers the no-href invariant;
+  // it does not catch the regression of putting `reservation-detail` in
+  // the sidebar (which would add `navigationGroup`) or of breaking the
+  // exact-match breadcrumb link (which would change `breadcrumbKeys`).
+  it("reservation-detail mirrors the property-detail descriptor shape (R1.2)", () => {
+    const detail = getRouteById("reservation-detail");
+    expect(detail?.pattern).toBe("/reservations/[id]");
+    expect(detail?.match).toBe("exact");
+    expect(detail?.href).toBeUndefined();
+    expect(detail?.navigationGroup).toBeUndefined();
+    // breadcrumbKeys are `navigation:routes.<id>.title` strings; the
+    // shape is the same as `property-detail` (`crumbs("reservations",
+    // "reservation-detail")`) — the regression this guards against is
+    // changing the order, the count, or losing the root `reservations`
+    // crumb.
+    expect(detail?.breadcrumbKeys).toEqual([
+      "navigation:routes.reservations.title",
+      "navigation:routes.reservation-detail.title",
+    ]);
   });
 });
