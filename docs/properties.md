@@ -101,6 +101,28 @@ el mensaje lo distingue. Un lote no se aborta entero por una vivienda retirada.
 
 Volver a activarla es el mismo `PATCH` con `status: "ACTIVE"`.
 
+## Las tres notas de texto libre salen del listado, y siguen en el detalle
+
+`GET /api/v1/properties` **ya no devuelve** `access_notes`, `cleaning_notes` ni
+`emergency_notes`. `GET /api/v1/properties/{id}` las sigue devolviendo las tres, y el `POST` y el
+`PATCH` las siguen aceptando: lo que cambia es sólo el listado paginado.
+
+El motivo es de volumen, no de permisos. Quien tiene `READ_PROPERTIES` podía pedir una sola
+respuesta con las instrucciones de acceso de **todas** las viviendas del tenant, y ésa era la
+única superficie que las servía a granel. Sacarlas del listado es la forma que se eligió cuando
+`tech-incident-context` amplió el público de `access_notes` al rol `TECHNICIAN`; el contrato de la
+regla 11 de `sdd/steering/security.md` exige que la forma se implemente y no sólo se documente, y
+ésta es la implementación. El razonamiento completo, y por qué se rechazó cifrarlas en reposo
+—responde a otra amenaza, y cubre por igual a una cuarta columna que vive en otro módulo—, está
+en la excepción 6 de ese documento.
+
+**Las tres, no sólo `access_notes`**: es un solo esquema y el mismo coste, y un listado que
+esconde una nota y muestra dos no es una forma que nadie pueda explicar dentro de seis meses.
+
+Si una pantalla necesita una nota, pide el detalle de esa vivienda. Coste conocido: una pantalla
+que quisiera mostrar notas de varias viviendas a la vez pasa de una petición a N — y con dos
+viviendas en el MVP, N es dos.
+
 ## Qué queda registrado
 
 Cada alta y cada edición escriben una fila en `audit_logs`, en la misma transacción que el cambio:

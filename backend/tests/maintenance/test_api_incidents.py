@@ -286,6 +286,109 @@ async def test_the_second_gate_answers_with_the_parked_incident(
     assert approval.related_type is OwnerApprovalRelatedType.MAINTENANCE_COST
 
 
+# --- The optional note on `assign` (R3.2, R3.3) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body_extra", "expected"),
+    [
+        ({}, None),
+        ({"assignment_note": None}, None),
+        ({"assignment_note": "Portal code 4821."}, "Portal code 4821."),
+    ],
+)
+async def test_assign_accepts_the_note_as_an_optional_field(
+    api, world, db_session, body_extra: dict, expected: str | None
+) -> None:
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={"technician_id": str(world.technician.id), **body_extra},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 200
+    stored = await db_session.get(IncidentModel, incident.id)
+    await db_session.refresh(stored)
+    assert stored.assignment_note == expected
+
+
+async def test_a_note_over_the_bound_is_a_422(api, world, db_session) -> None:
+    """The pydantic half of D6's two-sided bound. The DDL is the other half
+    (`tests/maintenance/test_models.py`); without this the driver would raise instead of the
+    PRD §23 envelope answering."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={"technician_id": str(world.technician.id), "assignment_note": "x" * 2001},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_assign_body_still_forbids_an_unknown_field(api, world, db_session) -> None:
+    """R3.2 — `extra="forbid"` survives the new field, so a `tenant_id` is still refused."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={
+            "technician_id": str(world.technician.id),
+            "tenant_id": str(uuid.uuid4()),
+        },
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_incident_contract_does_not_gain_the_note(api, world, db_session) -> None:
+    """R3.3 — the note lives on the projection and nowhere else.
+
+    Asserted as the **exact** key set of both bodies, so a `from_attributes` slip or a field
+    appended to `IncidentResponse` reddens here rather than being noticed in a client.
+    """
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={
+            "technician_id": str(world.technician.id),
+            "assignment_note": "Portal code 4821.",
+        },
+        headers=auth_header(api, world.manager),
+    )
+    manager = auth_header(api, world.manager)
+
+    detail = await api.get(f"{INCIDENTS}/{incident.id}", headers=manager)
+    listing = await api.get(INCIDENTS, headers=manager)
+
+    expected = {
+        "id",
+        "property_id",
+        "reservation_id",
+        "source",
+        "category",
+        "severity",
+        "status",
+        "title",
+        "description",
+        "ai_summary",
+        "assigned_technician_id",
+        "owner_approval_required",
+        "estimated_cost",
+        "approved_cost",
+        "final_cost",
+        "resolved_at",
+        "created_at",
+        "updated_at",
+    }
+    assert set(detail.json()) == expected
+    assert set(listing.json()["items"][0]) == expected
+
+
 # --- There is no creation route (D14) ---------------------------------------------------
 
 

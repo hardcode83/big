@@ -101,6 +101,17 @@ SINK_TERMS = (
     "incidents.description",
     "incidents.ai_summary",
     "incidents.ai_classification",
+    # `tech-incident-context` (2026-08-21) added two columns to the census, and they go in here
+    # for the reason residual 3 below states: the sink axis is fed by this tuple, so a column the
+    # table governs and this does not is a blind spot the green would hide. That is the same
+    # blindness `webhook_events.event_type` had for two changes.
+    #
+    # `properties.access_notes` goes in **qualified**, not as the bare table name `properties`:
+    # the asymmetry documented above for `incidents` and `messages` applies to it too — the word
+    # appears all over this codebase's prose — and the other two notes of that table are not
+    # census columns, so a bare `properties` would fire on blocks about them.
+    "incidents.assignment_note",
+    "properties.access_notes",
     "messages.content",
     "messages.intent",
     "messages.metadata",

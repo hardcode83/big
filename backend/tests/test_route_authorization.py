@@ -375,9 +375,10 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
-        # `maintenance`: the twelve routes of its D14. Every one of them is authenticated —
-        # the module has no anonymous door, and the only surface that creates an incident
-        # without a session is the guest portal's, which is in `ANONYMOUS_ENDPOINTS`.
+        # `maintenance`: the thirteen routes of its D14, twelve here plus the owner approval
+        # below. Every one of them is authenticated — the module has no anonymous door, and the
+        # only surface that creates an incident without a session is the guest portal's, which
+        # is in `ANONYMOUS_ENDPOINTS`.
         # Asserted per role in `tests/maintenance/test_api_incidents.py`.
         "/api/v1/incidents",
         "/api/v1/incidents/{incident_id}",
@@ -385,6 +386,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/incidents/{incident_id}/assign",
         "/api/v1/incidents/{incident_id}/cancel",
         "/api/v1/incidents/{incident_id}/classify",
+        # `tech-incident-context` R4.1: `READ_INCIDENTS`, **no new permission**, and a
+        # `TECHNICIAN` narrowed to their own rows by the persisted role rather than by anything
+        # this table can see. Its own authorisation cases — `CLEANER` refused, guest token
+        # refused — are in `tests/maintenance/test_incident_context_api.py`.
+        "/api/v1/incidents/{incident_id}/context",
         "/api/v1/incidents/{incident_id}/resolve",
         "/api/v1/incidents/{incident_id}/resume",
         "/api/v1/incidents/{incident_id}/start",

@@ -440,6 +440,121 @@ async def test_free_text_notes_are_audited_only_as_changed(
     assert "4321" not in str(entry.changes)
 
 
+# --- R2.3 of `tech-incident-context`: the three notes leave the listing ---
+
+
+#: The three free-text columns of `properties` that `PropertyListItemResponse` drops.
+#: Written out rather than derived: a set computed from the schema would agree with any mistake
+#: in it, and this is the contract a client is written against.
+LISTING_OMITS = ("access_notes", "cleaning_notes", "emergency_notes")
+
+
+@pytest.mark.asyncio
+async def test_a_listing_item_carries_none_of_the_three_notes(
+    api, users_by_role_a, create_payload
+) -> None:
+    """`tech-incident-context` R2.3, design D5 — the mechanism half of excepción 6.
+
+    Asserted as the **exact** key set and not only as three absences: an exclusion that lets the
+    schema keep growing is how the two other notes would come back in one at a time.
+
+    The three are set on the created property on purpose. Asserting their absence from an item
+    that never had them would pass against a broken implementation.
+    """
+    await _create(
+        api,
+        users_by_role_a,
+        create_payload,
+        access_notes="el codigo del portal es 4321",
+        cleaning_notes="aspira debajo del sofa",
+        emergency_notes="fontanero 600000000",
+    )
+
+    response = await api.get(
+        "/api/v1/properties", headers=_manager(api, users_by_role_a)
+    )
+
+    assert response.status_code == 200
+    item = response.json()["data"][0]
+    assert set(item) == {
+        "id",
+        "name",
+        "internal_code",
+        "pms_external_id",
+        "pms_provider",
+        "address_line1",
+        "address_line2",
+        "city",
+        "province",
+        "postal_code",
+        "country",
+        "timezone",
+        "max_guests",
+        "bedrooms",
+        "bathrooms",
+        "current_operational_state",
+        "default_check_in_time",
+        "default_check_out_time",
+        "wifi_name",
+        "has_wifi_password",
+        "status",
+        "created_at",
+        "updated_at",
+    }
+    # And no value of any of the three survives under some other key.
+    raw = response.text
+    for leaked in ("4321", "aspira debajo del sofa", "600000000"):
+        assert leaked not in raw
+
+
+@pytest.mark.asyncio
+async def test_the_detail_still_carries_all_three_notes(
+    api, users_by_role_a, create_payload
+) -> None:
+    """The other half of D5, and the one that keeps the change bounded: leaving the listing is
+    not leaving the system. `GET /api/v1/properties/{id}` is where a manager who needs the
+    access instructions reads them, and it serves one flat rather than the whole portfolio."""
+    created = await _create(
+        api,
+        users_by_role_a,
+        create_payload,
+        access_notes="el codigo del portal es 4321",
+        cleaning_notes="aspira debajo del sofa",
+        emergency_notes="fontanero 600000000",
+    )
+    property_id = created.json()["id"]
+
+    detail = await api.get(
+        f"/api/v1/properties/{property_id}", headers=_manager(api, users_by_role_a)
+    )
+
+    body = detail.json()
+    assert body["access_notes"] == "el codigo del portal es 4321"
+    assert body["cleaning_notes"] == "aspira debajo del sofa"
+    assert body["emergency_notes"] == "fontanero 600000000"
+
+
+@pytest.mark.asyncio
+async def test_the_listing_and_the_detail_differ_in_exactly_those_three_keys(
+    api, users_by_role_a, create_payload
+) -> None:
+    """The relationship between the two schemas, asserted rather than left to two lists.
+
+    `PropertyListItemResponse` is `PropertyResponse` **minus the three notes** — no more, no
+    less. Without this, a field added to the detail and forgotten in the listing (or the reverse)
+    is a silent divergence between two hand-enumerated models, which is the cost of having two.
+    """
+    created = await _create(api, users_by_role_a, create_payload)
+    property_id = created.json()["id"]
+    headers = _manager(api, users_by_role_a)
+
+    listing = await api.get("/api/v1/properties", headers=headers)
+    detail = await api.get(f"/api/v1/properties/{property_id}", headers=headers)
+
+    assert set(detail.json()) - set(listing.json()["data"][0]) == set(LISTING_OMITS)
+    assert set(listing.json()["data"][0]) - set(detail.json()) == set()
+
+
 # The "a duplicate leaves no audit row" invariant is asserted in
 # `test_property_admin.py::test_a_duplicate_never_reaches_the_audit_writer`, at the use-case
 # level with fakes. Over HTTP it cannot be: the failed flush leaves the shared test session in

@@ -79,6 +79,7 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 | | propietaria | manager | técnico | limpiadora |
 |---|---|---|---|---|
 | Ver incidencias | ✔ | ✔ | ✔ sólo las suyas | — |
+| Ver el contexto de una incidencia (a qué piso y cómo entrar) | ✔ | ✔ | ✔ sólo las suyas | — |
 | Clasificar, triar, asignar, cancelar | — | ✔ | — | — |
 | Aceptar, empezar, esperar piezas, reanudar, resolver | — | ✔ | ✔ sólo las suyas | — |
 | Responder una aprobación | ✔ | — | — | — |
@@ -137,6 +138,49 @@ Ninguna de las cuatro entra en `audit_logs.changes` ni en el `metadata` del time
 descripción, ahí queda. Es texto que él eligió enviar, y lo verá el técnico que reciba el
 parte — la cara simétrica de la advertencia que `docs/guest-portal.md` da sobre
 `properties.access_notes`.
+
+## La pantalla del técnico: a qué piso va y cómo entra
+
+`GET /api/v1/incidents/{id}/context` es una proyección de solo lectura que responde las dos
+preguntas que el parte de incidencia no contestaba. Existe porque el rol `TECHNICIAN` tiene cinco
+permisos y `READ_PROPERTIES` no está entre ellos: hasta ahora recibía `property_id` como un UUID
+pelado y las rutas de propiedades le contestaban `403`.
+
+Devuelve once campos y ni uno más:
+
+| | de dónde sale |
+|---|---|
+| nombre y código interno de la vivienda | la propiedad |
+| dirección postal (calle, piso, ciudad, provincia, código postal, país) | la propiedad |
+| zona horaria | la propiedad |
+| instrucciones de acceso | la propiedad |
+| la nota que el manager dejó al asignar | la incidencia |
+
+Los cuatro primeros —nombre, código interno, país y zona horaria— siempre vienen. Los otros
+siete pueden venir a `null`, y un `null` ahí significa que la columna no está rellena, **no** que
+no se pudo resolver: si la propiedad de la incidencia no resuelve dentro del tenant, la respuesta
+es un `404` y nunca un contexto a medias.
+
+Quién la alcanza: el técnico **asignado**, y el manager o la propietaria para cualquier
+incidencia de su tenant. Un técnico que no es el asignatario recibe el mismo `404` que si la
+incidencia no existiera. La limpiadora recibe `403`.
+
+Lo que esta ruta **no** lleva, y conviene saberlo porque es deliberado: la contraseña del WiFi en
+ninguna forma, las notas de limpieza ni las de emergencia de la vivienda, y ningún dato de la
+reserva — ni importe, ni canal, ni huésped. PRD §12 no pide la reserva en esta pantalla.
+
+### Dos avisos para quien opera
+
+- **Lo que se escriba en las instrucciones de acceso se le enseña al técnico asignado tal cual.**
+  Igual que ya se le enseña al huésped (`docs/guest-portal.md`): es la misma columna. Si ahí hay
+  un código de portal, lo verán los dos. Como contrapartida, esa columna **ha salido del listado
+  paginado de propiedades** —`GET /api/v1/properties` ya no la devuelve, ni ella ni las notas de
+  limpieza y emergencia—, así que dejó de existir la respuesta que traía las instrucciones de
+  acceso de todas las viviendas de golpe. El detalle de una vivienda sí las sigue llevando.
+- **La nota de asignación se sustituye en cada asignación.** Pertenece a la asignación vigente,
+  no a la incidencia: si se reasigna la incidencia sin escribir nota, la anterior **se borra**.
+  Es a propósito — enseñarle al técnico B lo que el manager escribió para el técnico A es peor
+  que no enseñarle nada—, pero hay que saberlo antes de reasignar.
 
 ## Rastro
 

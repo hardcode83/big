@@ -105,6 +105,10 @@ class Incident:
     ai_summary: str | None = None
     ai_classification: dict[str, Any] | None = None
     assigned_technician_id: uuid.UUID | None = None
+    #: What the manager wrote for the technician when handing over the job. Belongs to the
+    #: **current** assignment, not to the incident: `assign` writes it every time, so a
+    #: reassignment that carries no note leaves none behind (D7).
+    assignment_note: str | None = None
     owner_approval_required: bool = False
     estimated_cost: Decimal | None = None
     approved_cost: Decimal | None = None
@@ -351,16 +355,31 @@ class Incident:
         self.approved_cost = approved_cost
         self._transition(operation, now)
 
-    def assign(self, *, technician_id: uuid.UUID, now: datetime) -> None:
+    def assign(
+        self,
+        *,
+        technician_id: uuid.UUID,
+        now: datetime,
+        assignment_note: str | None = None,
+    ) -> None:
         """Hand the incident to a technician, or to a different one (R3.1, R3.5).
 
         The assignee's role and tenant are checked by the use case against
         `UserRepository`: this entity cannot read users, and a domain object that took a
         `User` to validate one field would drag the `auth` aggregate in behind it.
+
+        `assignment_note` is written **every time**, so an assignment that carries none
+        leaves none behind (`tech-incident-context` D7). The note belongs to the assignment
+        in force, not to the incident: `assign` accepts five origins, so preserving it would
+        show technician B what the manager wrote for technician A, and an obsolete note
+        presented as current is worse than no note. It also avoids the "absent vs. sent as
+        null" sentinel `UpdatePropertyRequest._reject_explicit_nulls` had to build — this is
+        a complete operation, not a patch.
         """
         self._check_transition("assign")
 
         self.assigned_technician_id = technician_id
+        self.assignment_note = assignment_note
         self._transition("assign", now)
 
     def accept(self, *, now: datetime) -> None:

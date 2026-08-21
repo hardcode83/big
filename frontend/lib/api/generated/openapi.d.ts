@@ -337,6 +337,8 @@ export interface paths {
     /**
      * Assign or reassign a technician
      * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+     *
+     * `assignment_note` is optional free text the manager leaves for the technician, and belongs to the assignment **in force**: every call writes it, so reassigning without one clears whatever the previous assignment carried. It is returned by `GET /incidents/{incident_id}/context` and by no other route.
      */
     post: operations["assign_incident_api_v1_incidents__incident_id__assign_post"];
   };
@@ -353,6 +355,21 @@ export interface paths {
      * @description The manual door of design D2: the job classifies on its own cadence, and this is how a manager asks for it now. Below the tenant's confidence threshold the incident stays `OPEN` for human triage (R1.3).
      */
     post: operations["classify_incident_api_v1_incidents__incident_id__classify_post"];
+  };
+  "/api/v1/incidents/{incident_id}/context": {
+    /**
+     * Which flat the incident is in, and how to get into it
+     * @description The operating context of one incident: the property's name, internal code, postal address, timezone and access instructions, plus the note the manager left with the assignment. It exists so a `TECHNICIAN` can be told **which flat to go to and how to get in** without holding `READ_PROPERTIES`.
+     *
+     * A `TECHNICIAN` reaches only the incidents assigned to them; a manager or owner reaches every incident of their tenant. That restriction comes from the token's **persisted role** and **no request parameter can widen it** — there is no parameter for it at all.
+     *
+     * `property_name`, `property_internal_code`, `country` and `timezone` are always present. The other seven — `address_line1`, `address_line2`, `city`, `province`, `postal_code`, `access_notes` and `assignment_note` — can be `null`, and a `null` there means the column is not filled in, **not** that a value could not be resolved: a property that does not resolve inside the tenant is a `404`, never a partial answer.
+     *
+     * `assignment_note` is the note of the **assignment in force**. Every assignment writes it, so reassigning the incident without a note clears whatever the previous assignment carried.
+     *
+     * What this route never carries: the WiFi password in any form, the property's cleaning or emergency notes, and any field of a reservation.
+     */
+    get: operations["get_incident_context_api_v1_incidents__incident_id__context_get"];
   };
   "/api/v1/incidents/{incident_id}/resolve": {
     /**
@@ -798,8 +815,18 @@ export interface components {
        */
       assigned_cleaner_id: string;
     };
-    /** AssignIncidentRequest */
+    /**
+     * AssignIncidentRequest
+     * @description `POST /incidents/{id}/assign` (R3.2 of `tech-incident-context`).
+     *
+     * `assignment_note` is optional and **replaces** whatever the previous assignment carried:
+     * omitting it clears the note rather than preserving it (D7). That is why there is no
+     * "absent vs. explicit null" distinction to make here — this is a complete operation, not
+     * a patch, and `extra="forbid"` still refuses anything else.
+     */
     AssignIncidentRequest: {
+      /** Assignment Note */
+      assignment_note?: string | null;
       /**
        * Technician Id
        * Format: uuid
@@ -1706,6 +1733,51 @@ export interface components {
      * @enum {string}
      */
     IncidentCategory: "ACCESS" | "LOCK" | "WIFI" | "ELECTRICITY" | "WATER" | "PLUMBING" | "HVAC" | "APPLIANCE" | "NOISE" | "CLEANING" | "DAMAGE" | "SAFETY" | "OTHER";
+    /**
+     * IncidentContextResponse
+     * @description What `GET /incidents/{incident_id}/context` returns — exactly `IncidentContext` (D4).
+     *
+     * A field-for-field mirror on purpose, the `CleaningTaskContextResponse` construction. The
+     * projection is where R2.5, R5.2, R5.3 and R5.4 are enforced structurally, so this model
+     * earning its own opinion about which fields to include would reintroduce the very decision
+     * the read model exists to remove — and would make the router the owner of the denylist,
+     * which design D4 rejects by name.
+     *
+     * **`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That
+     * is what makes it safe where a dump of `Property` would not be: `cleaning_notes`,
+     * `emergency_notes` and `has_wifi_password` are fields of that entity and are not fields of
+     * the projection. No `Property` and no `Reservation` is ever serialised on this route.
+     *
+     * No `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a
+     * `NULL` address travels as `null` **with its key**, rather than the key vanishing. That is
+     * inherited pydantic behaviour rather than something this model states, so it carries its own
+     * test against the serialised body (`tests/maintenance/test_incident_context_api.py`) instead
+     * of being assumed.
+     */
+    IncidentContextResponse: {
+      /** Access Notes */
+      access_notes: string | null;
+      /** Address Line1 */
+      address_line1: string | null;
+      /** Address Line2 */
+      address_line2: string | null;
+      /** Assignment Note */
+      assignment_note: string | null;
+      /** City */
+      city: string | null;
+      /** Country */
+      country: string;
+      /** Postal Code */
+      postal_code: string | null;
+      /** Property Internal Code */
+      property_internal_code: string;
+      /** Property Name */
+      property_name: string;
+      /** Province */
+      province: string | null;
+      /** Timezone */
+      timezone: string;
+    };
     /** IncidentPageResponse */
     IncidentPageResponse: {
       /** Items */
@@ -2273,6 +2345,98 @@ export interface components {
       property_id: string;
     };
     /**
+     * PropertyListItemResponse
+     * @description One property **in a listing**: `PropertyResponse` minus the three free-text notes.
+     *
+     * Why a second model instead of one with an optional field: this is the mechanism half of
+     * `tech-incident-context` D5, and rule 11 of `steering/security.md` requires the chosen form to
+     * be *implemented*, not only documented. `GET /api/v1/properties` returned the access
+     * instructions of **every** flat of the tenant in one response, which is the only bulk surface
+     * those columns had — and a field a caller could ask for would not be an exclusion.
+     *
+     * **On the rule this borrows from, stated precisely because the loose version is tempting.**
+     * Rule 4 says "número de documento jamás en listados", and it says it about `document_number`
+     * and nothing else — these three columns are not named there, and rule 4 does not reach them on
+     * its own. What is borrowed is the *shape* of that remedy: keep the bulk surface from carrying
+     * the value at all, rather than masking it. Rule 11 is what applies that shape here, through
+     * excepción 6, which is the row that owns this decision. Citing rule 4 as if it governed these
+     * columns directly would be the kind of almost-true sentence rule 11 says of itself is worse
+     * than no census at all.
+     *
+     * **All three notes, not just `access_notes`.** Only `access_notes` earns a census row (D12
+     * says why: the other two do not carry a rule-3 value by purpose), but the exclusion is one
+     * schema and the same cost, and a listing that hides one note and shows two is a form nobody
+     * will be able to explain in six months. Approved in the design gate on 2026-08-19 (OQ3).
+     *
+     * What stays: `GET /api/v1/properties/{id}` still carries all three, and the guest portal still
+     * returns `access_notes` verbatim as `arrival_notes`. Leaving the listing is not leaving the
+     * system — it is leaving the one place where the whole portfolio arrived at once.
+     *
+     * Enumerated and built by `from_domain` like `PropertyResponse`, never dumped with
+     * `from_attributes`: a dump would re-acquire every field the entity gains later, which is the
+     * failure this class exists to prevent.
+     */
+    PropertyListItemResponse: {
+      /** Address Line1 */
+      address_line1: string | null;
+      /** Address Line2 */
+      address_line2: string | null;
+      /** Bathrooms */
+      bathrooms: number;
+      /** Bedrooms */
+      bedrooms: number;
+      /** City */
+      city: string | null;
+      /** Country */
+      country: string;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      current_operational_state: components["schemas"]["PropertyOperationalState"];
+      /**
+       * Default Check In Time
+       * Format: time
+       */
+      default_check_in_time: string;
+      /**
+       * Default Check Out Time
+       * Format: time
+       */
+      default_check_out_time: string;
+      /** Has Wifi Password */
+      has_wifi_password: boolean;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /** Internal Code */
+      internal_code: string;
+      /** Max Guests */
+      max_guests: number;
+      /** Name */
+      name: string;
+      /** Pms External Id */
+      pms_external_id: string | null;
+      pms_provider: components["schemas"]["PMSProvider"] | null;
+      /** Postal Code */
+      postal_code: string | null;
+      /** Province */
+      province: string | null;
+      status: components["schemas"]["PropertyStatus"];
+      /** Timezone */
+      timezone: string;
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Wifi Name */
+      wifi_name: string | null;
+    };
+    /**
      * PropertyOperationalState
      * @enum {string}
      */
@@ -2280,10 +2444,16 @@ export interface components {
     /**
      * PropertyPageResponse
      * @description The pagination envelope of PRD §23.
+     *
+     * `data` carries `PropertyListItemResponse` and not `PropertyResponse`: the three free-text
+     * notes leave the listing (`tech-incident-context` D5). It is an incompatible change to this
+     * contract, and the cost was measured before taking it — no component of the frontend reads any
+     * of the three; every appearance in `frontend/` is inside the generated
+     * `lib/api/generated/openapi.d.ts`.
      */
     PropertyPageResponse: {
       /** Data */
-      data: components["schemas"]["PropertyResponse"][];
+      data: components["schemas"]["PropertyListItemResponse"][];
       /** Page */
       page: number;
       /** Per Page */
@@ -5081,6 +5251,8 @@ export interface operations {
   /**
    * Assign or reassign a technician
    * @description `POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).
+   *
+   * `assignment_note` is optional free text the manager leaves for the technician, and belongs to the assignment **in force**: every call writes it, so reassigning without one clears whatever the previous assignment carried. It is returned by `GET /incidents/{incident_id}/context` and by no other route.
    */
   assign_incident_api_v1_incidents__incident_id__assign_post: {
     parameters: {
@@ -5182,6 +5354,57 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Which flat the incident is in, and how to get into it
+   * @description The operating context of one incident: the property's name, internal code, postal address, timezone and access instructions, plus the note the manager left with the assignment. It exists so a `TECHNICIAN` can be told **which flat to go to and how to get in** without holding `READ_PROPERTIES`.
+   *
+   * A `TECHNICIAN` reaches only the incidents assigned to them; a manager or owner reaches every incident of their tenant. That restriction comes from the token's **persisted role** and **no request parameter can widen it** — there is no parameter for it at all.
+   *
+   * `property_name`, `property_internal_code`, `country` and `timezone` are always present. The other seven — `address_line1`, `address_line2`, `city`, `province`, `postal_code`, `access_notes` and `assignment_note` — can be `null`, and a `null` there means the column is not filled in, **not** that a value could not be resolved: a property that does not resolve inside the tenant is a `404`, never a partial answer.
+   *
+   * `assignment_note` is the note of the **assignment in force**. Every assignment writes it, so reassigning the incident without a note clears whatever the previous assignment carried.
+   *
+   * What this route never carries: the WiFi password in any form, the property's cleaning or emergency notes, and any field of a reservation.
+   */
+  get_incident_context_api_v1_incidents__incident_id__context_get: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentContextResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The incident does not exist for this caller — an unknown id, another tenant's incident, an incident assigned to a different technician and an incident whose property does not resolve inside the tenant are all answered this way, indistinguishably. */
+      404: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

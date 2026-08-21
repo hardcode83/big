@@ -69,6 +69,23 @@ directorio padre en el destino, así que sin él la copia falla con *«Could not
 
 El arreglo de verdad es que el script acepte rutas por parámetro o que el contenedor monte la raíz del repo; no se hizo en `dashboard-api` porque es tooling del monorepo y no de esa capacidad. **Ojo**: la sección Verification de cualquier change que toque el contrato manda `cd frontend && npm run api:check`, y ese comando literal no funciona desde aquí.
 
+**Y `npm test` tiene el mismo problema, con más ficheros.** Dos ficheros de test leen el árbol por encima de `/app` y fallan con `ENOENT` en un worktree —`features/provenance/workflow-contract.test.ts` y `lib/config/build-identity-contract.test.ts`—, así que un `npm test` recién levantado da **2 ficheros en rojo que no son del change que estés haciendo**. Es la misma causa que lo de arriba (el contenedor monta sólo `./frontend`) y tiene la misma salida; la lista exacta la levantó `tech-incident-context` el 2026-08-22 siguiendo los `ENOENT` uno a uno, y con ella la suite pasa entera (63 ficheros, 415 tests):
+
+```bash
+docker compose exec -T frontend mkdir -p /backend/app/provenance/api /backend/tests/fixtures /.github/workflows /.github/scripts
+docker compose cp backend/app/provenance/provenance-contract.json  frontend:/backend/app/provenance/provenance-contract.json
+docker compose cp backend/app/provenance/api/router.py             frontend:/backend/app/provenance/api/router.py
+docker compose cp backend/tests/fixtures/build-identity-provenance.json frontend:/backend/tests/fixtures/build-identity-provenance.json
+docker compose cp backend/openapi.json                             frontend:/backend/openapi.json
+docker compose cp .github/workflows/deploy-dev.yml                 frontend:/.github/workflows/deploy-dev.yml
+docker compose cp .github/workflows/frontend-tests.yml             frontend:/.github/workflows/frontend-tests.yml
+docker compose cp .github/scripts/extract-pr.sh                    frontend:/.github/scripts/extract-pr.sh
+docker compose cp docker-compose.yml                               frontend:/docker-compose.yml
+docker compose cp docker-compose.deploy.yml                        frontend:/docker-compose.deploy.yml
+```
+
+Conviene saber **por qué importa copiar `backend/openapi.json`** y no sólo los ficheros de CI: uno de esos tests comprueba el esquema publicado contra el contrato de provenance, así que es el único de los dos que un change del backend puede romper de verdad. Los demás `ENOENT` son ruido del entorno; ése no. En el worktree principal no hace falta nada de esto, y en CI tampoco — allí el checkout está completo.
+
 **Navegador en un worktree: por defecto no, y hay una salida explícita.** Sin puertos publicados no hay UI ni API alcanzables desde el host — ni `localhost:3000` ni `localhost:8000` ni un cliente gráfico contra `localhost:5432`. La suite sí corre, porque va por la red de compose (`postgres:5432`, `redis:6379`), que es por donde ha ido siempre.
 
 Cuando **sí** necesitas el navegador —comprobar la UI, abrirla desde un móvil real de la LAN, correr Playwright—, `make up PORT_OFFSET=<n>` publica los cuatro puertos desplazados por `<n>`:
