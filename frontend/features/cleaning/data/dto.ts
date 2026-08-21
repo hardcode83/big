@@ -25,7 +25,9 @@ export interface PaginatedResponse<T> {
 
 /**
  * Alias of the generated union, never a hand-written copy (design D12): a tenth
- * status in the backend must become a type error here, not a silent grey row.
+ * status in the backend must break the build here as soon as the contract is
+ * regenerated. That guarantee is compile-time only — see `lib/task-status.ts`
+ * for the runtime fallback that covers the deploy-skew window.
  */
 export type CleaningTaskStatus = components["schemas"]["CleaningTaskStatus"];
 

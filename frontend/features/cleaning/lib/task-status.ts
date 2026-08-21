@@ -4,9 +4,12 @@ import type { CleaningTaskStatus } from "../data";
  * Colour group and badge classes for a cleaning task's status (design D12).
  *
  * The `Record` is exhaustive over the generated `CleaningTaskStatus` union, so a
- * tenth status in the backend is a **type error** here rather than a silent grey
- * row (R1.6). The label itself comes from the `cleaning` i18n namespace; the raw
- * enum identifier is never rendered.
+ * tenth status in the backend fails **at compile time** as soon as the contract is
+ * regenerated (R1.6). That is a build-time guarantee and not a runtime one: until
+ * the frontend is rebuilt against the new contract, such a status can still arrive
+ * over the wire, which is what the `?? "gray"` in `statusColorGroup()` below is for.
+ * The label itself comes from the `cleaning` i18n namespace; the raw enum
+ * identifier is never rendered.
  *
  * ASSUMPTION: PRD §9.1 fixes colours for a **property's** operational state, not
  * for a cleaning task's. This grouping is our reading of the same palette applied
