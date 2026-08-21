@@ -250,8 +250,17 @@ una urgencia. El error sí se marca `alert` dentro de la misma región (mismo pa
 **Chosen:** `features/cleaning/lib/task-status.ts` con `Record<CleaningTaskStatus,
 StatusColorGroup>` sobre los nueve valores, espejo de
 `features/dashboard/lib/state-color.ts`. Al ser un `Record` sobre la unión generada, **un décimo
-estado en el backend es un error de tipos** y no una fila gris silenciosa (R1.6). La etiqueta
-sale del namespace i18n; el identificador crudo no se pinta nunca.
+estado en el backend es un error de compilación** en cuanto se regenera el contrato (R1.6). La
+etiqueta sale del namespace i18n; el identificador crudo no se pinta nunca.
+
+Eso cubre el tiempo de compilación, no el de ejecución, y son dos cosas distintas: entre que el
+backend despliega un estado nuevo y que el frontend se reconstruye contra el contrato regenerado
+hay una ventana en la que llega por la red un valor que la unión no conoce. Por eso
+`statusColorGroup()` cierra con `?? "gray"` — **una fila gris es aquí el comportamiento deseado**,
+porque la alternativa es que una tarea reviente la lista entera. La garantía de exhaustividad la
+da el `Record`; el `??` sólo evita que la ventana de despliegue se lleve por delante la vista.
+Anotado en `/sdd:review` (2026-08-21) tras un hallazgo del panel de arquitectura: la primera
+redacción decía «y no una fila gris silenciosa», que se lee como si el `??` sobrara.
 
 Agrupación propuesta, marcada `ASSUMPTION` porque **PRD §9.1 fija colores para el estado
 operacional de la propiedad, no para el estado de una tarea de limpieza**:
@@ -397,6 +406,17 @@ Suite completa: `cd frontend && npm test` y `npx tsc --noEmit`.
   es imposible por construcción (solo se ofrece lo cacheado).
 - **Duplicación del mapa de clases de badge** entre esta feature y `property-card.tsx` (D12).
   Aceptada y comentada; el coste de la extracción es tocar una feature entregada.
+- **R5.2 (320 px sin scroll horizontal) no tiene guardia automática.** La suite corre en jsdom,
+  que no maqueta CSS, así que el único testigo es la comprobación manual de la tarea 10.3
+  (`tasks.md`, comentario del 2026-08-21: `scrollWidth == clientWidth`, ningún elemento
+  desbordado). Es un testigo concreto y fechado, y la maquetación lo respalda
+  (`cleaning-task-row.tsx` usa tarjetas con `min-w-0`/`break-words`, no una tabla), pero una
+  regresión de CSS —un badge de ancho fijo, un nombre de vivienda sin partir— no la detectaría
+  nadie hasta la siguiente pasada manual. Señalado por el panel de QA en `/sdd:review`
+  (2026-08-21) como riesgo residual, no como fallo. La mitigación natural es un test de viewport
+  cuando llegue Playwright con `hardening-release` (`sdd/project.md`, *Commands*: «E2E: `npx
+  playwright test` (previsto — llega con `hardening-release`)»); no se adelanta aquí porque
+  estrenar la infraestructura E2E entera desde esta feature es desproporcionado.
 - **Se copia el layering completo del dashboard para un módulo más pequeño.** El riesgo es
   ceremonia; se acota no replicando `data/mock/` ni sus dos tests de frontera (D1).
 
