@@ -292,7 +292,11 @@ diffea en revisión.
 Esta tabla nombra **módulos de producción**; los tests colocados (`*.test.ts[x]` junto al
 módulo que prueban) van implícitos y no se enumeran — son 23 en este change, incluido
 `components/thread-role-gate.test.tsx`, que prueba la puerta de rol de 7.5 y no tiene módulo
-propio porque la puerta vive en `conversation-thread.tsx`. La convención se escribe aquí a
+propio porque la puerta vive en `conversation-thread.tsx`. Dos se nombran igualmente, y por
+motivo: `data/boundary.test.ts` no está colocado junto a ningún módulo homónimo —es la
+verificación de R7.3 sobre la feature entera— y `ui/confirm-dialog.test.tsx` acompaña a una
+primitiva compartida fuera de la feature. Son las dos excepciones a la convención, no una
+contradicción de ella. La convención se escribe aquí a
 raíz de la revisión del 2026-08-21, que leyó la tabla como un inventario exhaustivo de
 ficheros; lo que sí faltaban eran módulos de producción (`lib/channels.ts`) y un fichero
 modificado fuera de la feature (`app/error-architecture.test.ts`), ambos ya en la tabla.
