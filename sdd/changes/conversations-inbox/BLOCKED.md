@@ -81,8 +81,25 @@
 
   **Por qué no es de este change**: la página que no hidrata es `/login`, que este
   change no toca. Se intentó vaciar `.next` y reiniciar el contenedor sin cambio.
-  Sin hidratación no hay ninguna superficie interactiva en la aplicación, ni la de
-  esta bandeja ni la del panel que ya existía.
+
+  **Acotado en `/sdd:review` el 2026-08-22, y la premisa de arriba era demasiado
+  amplia.** Se sirvió el **build de producción** en un puerto libre (`next start -p
+  3999`, sin contenedores ni backend) y se cargó `/login` con navegador headless:
+  **hidrata perfectamente**. `input` y `button[type=submit]` llevan
+  `__reactFiber$`/`__reactProps$`/`__reactEvents$`, el `<form>` tiene un `onSubmit` de
+  React adjunto —así que **no** puede enviarse como GET nativo, que era el síntoma
+  exacto reportado— y la única entrada de consola es un 404 de `favicon.ico`.
+
+  Conclusión: el fallo de hidratación es **del servidor de desarrollo**, no de la
+  aplicación, y la frase «sin hidratación no hay ninguna superficie interactiva» solo
+  vale para `next dev`. Ojo con el aviso que imprime Next al arrancar: `next start` no
+  soporta `output: "standalone"` y pide `node .next/standalone/server.js`; aun así
+  sirvió e hidrató, pero la receta correcta es la del aviso.
+
+  **Lo que esto cambia**: la 9.4 **no necesita** que se arregle el servidor de
+  desarrollo. Se puede recorrer contra un build de producción con el backend
+  levantado. Deja de ser «esperar a que alguien arregle el entorno» y pasa a ser
+  ejecutable con receta conocida.
 
   **Qué falta**, y por eso es `decision` y no `deferred`: que una persona recorra
   a mano, en un entorno con hidratación sana, lista → filtros (con la nota de
