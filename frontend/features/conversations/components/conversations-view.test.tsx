@@ -1,0 +1,175 @@
+import { fireEvent } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { I18nProvider } from "@/lib/i18n/client-provider";
+import { render, screen } from "@/test/render";
+
+import { useInboxFiltersStore } from "../state/use-inbox-filters-store";
+import { ConversationsView } from "./conversations-view";
+
+const replace = vi.hoisted(() => vi.fn());
+const params = vi.hoisted(() => ({ current: new URLSearchParams() }));
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace }),
+  usePathname: () => "/conversations",
+  useSearchParams: () => params.current,
+}));
+
+const session = vi.hoisted(() => ({
+  current: { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" as string },
+}));
+vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: session.current }) }));
+
+// The list, the filters and the thread each have their own suites; here they are
+// stubbed so this one is about the master-detail wiring and nothing else.
+vi.mock("./inbox-filters", () => ({
+  InboxFilters: () => <div data-testid="filters" />,
+}));
+vi.mock("./inbox-list", () => ({
+  InboxList: ({
+    selectedId,
+    onSelect,
+  }: {
+    selectedId: string | null;
+    onSelect: (id: string) => void;
+  }) => (
+    <div data-testid="list" data-selected={selectedId ?? ""}>
+      <button type="button" onClick={() => onSelect("conversation-7")}>
+        pick
+      </button>
+    </div>
+  ),
+}));
+vi.mock("./conversation-thread", () => ({
+  ConversationThread: ({ conversationId }: { conversationId: string }) => (
+    <div data-testid="thread">{conversationId}</div>
+  ),
+}));
+
+function renderView() {
+  return render(
+    <I18nProvider locale="es">
+      <ConversationsView />
+    </I18nProvider>,
+  );
+}
+
+beforeEach(() => {
+  replace.mockReset();
+  params.current = new URLSearchParams();
+  session.current = { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" };
+  useInboxFiltersStore.getState().reset();
+});
+
+describe("ConversationsView — selection lives in the URL (task 8.1, D5, R3.1)", () => {
+  it("shows the inbox and no thread when the parameter is absent", () => {
+    renderView();
+
+    expect(screen.getByTestId("list")).toBeInTheDocument();
+    expect(screen.queryByTestId("thread")).toBeNull();
+    expect(
+      screen.getByText("Ninguna conversación seleccionada"),
+    ).toBeInTheDocument();
+  });
+
+  it("writes the selection to the query string without scrolling or pushing history", () => {
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "pick" }));
+
+    expect(replace).toHaveBeenCalledWith(
+      "/conversations?conversation=conversation-7",
+      { scroll: false },
+    );
+  });
+
+  it("renders that conversation's thread on reload with the parameter present", () => {
+    params.current = new URLSearchParams("conversation=conversation-42");
+    renderView();
+
+    expect(screen.getByTestId("thread")).toHaveTextContent("conversation-42");
+    expect(screen.getByTestId("list")).toHaveAttribute(
+      "data-selected",
+      "conversation-42",
+    );
+    expect(
+      screen.queryByText("Ninguna conversación seleccionada"),
+    ).toBeNull();
+  });
+
+  it("keeps any other query parameter when it changes the selection", () => {
+    params.current = new URLSearchParams("foo=bar");
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "pick" }));
+
+    expect(replace).toHaveBeenCalledWith(
+      "/conversations?foo=bar&conversation=conversation-7",
+      { scroll: false },
+    );
+  });
+
+  it("drops the parameter entirely when the selection is cleared", () => {
+    params.current = new URLSearchParams("conversation=conversation-42");
+    renderView();
+    fireEvent.click(screen.getByRole("button", { name: "Volver a la bandeja" }));
+
+    expect(replace).toHaveBeenCalledWith("/conversations", { scroll: false });
+  });
+});
+
+describe("ConversationsView — one column on a small screen (task 8.2, D19, R7.6)", () => {
+  it("shows the list and hides the thread panel when nothing is selected", () => {
+    renderView();
+
+    const list = screen.getByLabelText("Bandeja");
+    expect(list.className).toContain("flex");
+    expect(list.className).not.toContain("hidden");
+
+    const thread = screen.getByTestId("filters").parentElement!.nextElementSibling!;
+    expect(thread.className).toContain("hidden");
+    expect(thread.className).toContain("lg:flex");
+  });
+
+  it("hides the list and shows the thread when one is selected", () => {
+    params.current = new URLSearchParams("conversation=conversation-42");
+    renderView();
+
+    const list = screen.getByLabelText("Bandeja");
+    expect(list.className).toContain("hidden");
+    expect(list.className).toContain("lg:flex");
+    expect(screen.getByTestId("thread")).toBeInTheDocument();
+  });
+
+  it("offers the back control only below lg, and it is localized", () => {
+    params.current = new URLSearchParams("conversation=conversation-42");
+    renderView();
+
+    const back = screen.getByRole("button", { name: "Volver a la bandeja" });
+    expect(back.parentElement!.className).toContain("lg:hidden");
+  });
+
+  it("decides from state, never from the viewport", () => {
+    // D19: no `matchMedia`, so the render is deterministic. jsdom does not even
+    // implement it — a component that reached for it would throw here.
+    expect(
+      (window as unknown as { matchMedia?: unknown }).matchMedia,
+    ).toBeUndefined();
+    params.current = new URLSearchParams("conversation=conversation-42");
+    expect(() => renderView()).not.toThrow();
+  });
+});
+
+describe("ConversationsView — the filters belong to a tenant (task 8.1)", () => {
+  it("clears them when the session's tenant changes", () => {
+    renderView();
+    useInboxFiltersStore.getState().setPropertyId("property-of-tenant-1");
+    expect(useInboxFiltersStore.getState().propertyId).toBe(
+      "property-of-tenant-1",
+    );
+
+    session.current = { tenant_id: "tenant-2", role: "PROPERTY_MANAGER" };
+    renderView();
+
+    expect(useInboxFiltersStore.getState().propertyId).toBeUndefined();
+    expect(useInboxFiltersStore.getState().page).toBe(1);
+  });
+});

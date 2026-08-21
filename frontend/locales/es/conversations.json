@@ -1,0 +1,142 @@
+{
+  "status": {
+    "OPEN": "Abierta",
+    "RESOLVED": "Resuelta",
+    "ESCALATED": "Escalada",
+    "CLOSED": "Cerrada"
+  },
+  "escalationStatus": {
+    "NONE": "Sin escalar",
+    "PENDING_HUMAN": "Esperando a una persona",
+    "HUMAN_HANDLING": "Atendida por una persona",
+    "RESOLVED": "Escalación resuelta"
+  },
+  "channel": {
+    "WHATSAPP": "WhatsApp",
+    "AIRBNB_MSG": "Mensajería de Airbnb",
+    "BOOKING_MSG": "Mensajería de Booking",
+    "EMAIL": "Correo electrónico",
+    "PHONE_TRANSCRIPT": "Transcripción telefónica",
+    "MANUAL": "Manual"
+  },
+  "senderType": {
+    "GUEST": "Huésped",
+    "OWNER": "Propietaria",
+    "MANAGER": "Manager",
+    "AI": "IA",
+    "SYSTEM": "Sistema"
+  },
+  "errors": {
+    "forbidden": "Tu rol no permite esta acción.",
+    "notFound": "Esto ya no existe.",
+    "conflict": "El estado de la conversación ha cambiado y la acción ya no cabe.",
+    "invalid": "Los datos enviados no son válidos.",
+    "generic": "No hemos podido completar la operación."
+  },
+  "inbox": {
+    "title": "Bandeja",
+    "loading": "Cargando conversaciones…",
+    "error": {
+      "title": "No se pudo cargar la bandeja",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "empty": {
+      "title": "Sin conversaciones",
+      "description": "No hay conversaciones para los filtros seleccionados."
+    },
+    "forbidden": {
+      "title": "Sin acceso a las conversaciones",
+      "description": "Tu rol no puede leer la bandeja de conversaciones."
+    },
+    "unknownProperty": "Propiedad no disponible",
+    "noProperty": "Sin propiedad",
+    "noMessages": "Sin mensajes",
+    "openConversation": "Abrir la conversación",
+    "list": "Conversaciones"
+  },
+  "filters": {
+    "legend": "Filtros",
+    "status": "Estado",
+    "escalationStatus": "Escalación",
+    "property": "Propiedad",
+    "any": "Todas",
+    "closedNote": "Hoy ninguna acción produce el estado «Cerrada», así que este filtro no devuelve resultados."
+  },
+  "pagination": {
+    "label": "Paginación",
+    "previous": "Anterior",
+    "next": "Siguiente",
+    "position": "Página {{page}} de {{totalPages}}"
+  },
+  "thread": {
+    "title": "Conversación",
+    "loading": "Cargando la conversación…",
+    "error": {
+      "title": "No se pudo cargar la conversación",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "empty": {
+      "title": "Sin mensajes",
+      "description": "Esta conversación todavía no tiene mensajes."
+    },
+    "notFound": {
+      "title": "Conversación no encontrada",
+      "description": "No existe ninguna conversación con ese identificador."
+    },
+    "none": {
+      "title": "Ninguna conversación seleccionada",
+      "description": "Elige una conversación de la bandeja para leer su hilo."
+    },
+    "back": "Volver a la bandeja",
+    "language": "Idioma detectado",
+    "channel": "Canal",
+    "muteWarning": "Este canal es mudo por diseño hasta que llegue el adaptador de mensajería del PMS: lo que escribas se guarda en el hilo, pero no se envía al huésped.",
+    "notRealtime": "El hilo no se actualiza en tiempo real: se refresca al operar sobre él o al recargar la página.",
+    "messages": "Mensajes de la conversación"
+  },
+  "message": {
+    "aiGenerated": "Generado por IA",
+    "intent": "Intención",
+    "confidence": "Confianza",
+    "notDelivered": "No entregado al huésped",
+    "sentAt": "Enviado"
+  },
+  "composer": {
+    "label": "Responder al huésped",
+    "placeholder": "Escribe tu respuesta…",
+    "send": "Enviar respuesta",
+    "sending": "Enviando…",
+    "counter": "{{current}} de {{max}} caracteres",
+    "tooLong": "La respuesta no puede pasar de {{max}} caracteres.",
+    "empty": "Escribe algo antes de enviar.",
+    "errorTitle": "No se ha enviado la respuesta"
+  },
+  "transcribe": {
+    "open": "Transcribir mensaje del huésped",
+    "title": "Transcribir un mensaje del huésped",
+    "description": "Guarda, palabra por palabra, lo que te ha dicho el huésped. La IA responderá automáticamente y la conversación puede escalar a una persona.",
+    "field": "Mensaje del huésped",
+    "muteWarning": "En este canal la transcripción puede perderse entera: si la IA intenta responder y no encuentra por dónde enviarlo, no se guarda nada.",
+    "placeholder": "Lo que dijo el huésped…",
+    "submit": "Transcribir",
+    "cancel": "Cancelar",
+    "errorTitle": "No se ha guardado nada"
+  },
+  "actions": {
+    "legend": "Acciones de la conversación",
+    "escalate": "Escalar a una persona",
+    "resolve": "Marcar como resuelta",
+    "disabled": {
+      "alreadyEscalated": "Esta conversación ya está escalada.",
+      "alreadyResolved": "Esta conversación ya está resuelta.",
+      "conversationClosed": "Esta conversación está cerrada.",
+      "conversationResolved": "Una conversación resuelta no se puede escalar."
+    },
+    "confirmResolve": {
+      "title": "¿Marcar la conversación como resuelta?",
+      "description": "Se cerrará también la escalación pendiente, si la hay. El huésped no recibe ningún aviso.",
+      "confirm": "Sí, resolver",
+      "cancel": "Cancelar"
+    }
+  }
+}

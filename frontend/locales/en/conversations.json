@@ -1,0 +1,142 @@
+{
+  "status": {
+    "OPEN": "Open",
+    "RESOLVED": "Resolved",
+    "ESCALATED": "Escalated",
+    "CLOSED": "Closed"
+  },
+  "escalationStatus": {
+    "NONE": "Not escalated",
+    "PENDING_HUMAN": "Waiting for a person",
+    "HUMAN_HANDLING": "Handled by a person",
+    "RESOLVED": "Escalation resolved"
+  },
+  "channel": {
+    "WHATSAPP": "WhatsApp",
+    "AIRBNB_MSG": "Airbnb messaging",
+    "BOOKING_MSG": "Booking messaging",
+    "EMAIL": "Email",
+    "PHONE_TRANSCRIPT": "Phone transcript",
+    "MANUAL": "Manual"
+  },
+  "senderType": {
+    "GUEST": "Guest",
+    "OWNER": "Owner",
+    "MANAGER": "Manager",
+    "AI": "AI",
+    "SYSTEM": "System"
+  },
+  "errors": {
+    "forbidden": "Your role does not allow this action.",
+    "notFound": "This no longer exists.",
+    "conflict": "The conversation's state changed and the action no longer applies.",
+    "invalid": "The data sent is not valid.",
+    "generic": "We could not complete the operation."
+  },
+  "inbox": {
+    "title": "Inbox",
+    "loading": "Loading conversations…",
+    "error": {
+      "title": "The inbox could not be loaded",
+      "description": "Try again in a few seconds."
+    },
+    "empty": {
+      "title": "No conversations",
+      "description": "There are no conversations for the selected filters."
+    },
+    "forbidden": {
+      "title": "No access to conversations",
+      "description": "Your role cannot read the conversations inbox."
+    },
+    "unknownProperty": "Property unavailable",
+    "noProperty": "No property",
+    "noMessages": "No messages",
+    "openConversation": "Open the conversation",
+    "list": "Conversations"
+  },
+  "filters": {
+    "legend": "Filters",
+    "status": "Status",
+    "escalationStatus": "Escalation",
+    "property": "Property",
+    "any": "All",
+    "closedNote": "No action produces the “Closed” status today, so this filter returns no results."
+  },
+  "pagination": {
+    "label": "Pagination",
+    "previous": "Previous",
+    "next": "Next",
+    "position": "Page {{page}} of {{totalPages}}"
+  },
+  "thread": {
+    "title": "Conversation",
+    "loading": "Loading the conversation…",
+    "error": {
+      "title": "The conversation could not be loaded",
+      "description": "Try again in a few seconds."
+    },
+    "empty": {
+      "title": "No messages",
+      "description": "This conversation has no messages yet."
+    },
+    "notFound": {
+      "title": "Conversation not found",
+      "description": "There is no conversation with that identifier."
+    },
+    "none": {
+      "title": "No conversation selected",
+      "description": "Pick a conversation from the inbox to read its thread."
+    },
+    "back": "Back to the inbox",
+    "language": "Detected language",
+    "channel": "Channel",
+    "muteWarning": "This channel is mute by design until the PMS messaging adapter arrives: what you write is stored in the thread, but it is not sent to the guest.",
+    "notRealtime": "The thread does not update in real time: it refreshes when you act on it or reload the page.",
+    "messages": "Conversation messages"
+  },
+  "message": {
+    "aiGenerated": "AI-generated",
+    "intent": "Intent",
+    "confidence": "Confidence",
+    "notDelivered": "Not delivered to the guest",
+    "sentAt": "Sent"
+  },
+  "composer": {
+    "label": "Reply to the guest",
+    "placeholder": "Write your reply…",
+    "send": "Send reply",
+    "sending": "Sending…",
+    "counter": "{{current}} of {{max}} characters",
+    "tooLong": "The reply cannot exceed {{max}} characters.",
+    "empty": "Write something before sending.",
+    "errorTitle": "The reply was not sent"
+  },
+  "transcribe": {
+    "open": "Transcribe a guest message",
+    "title": "Transcribe a guest message",
+    "description": "Stores, word for word, what the guest told you. The AI will reply automatically and the conversation may escalate to a person.",
+    "field": "Guest message",
+    "muteWarning": "On this channel the transcription can be lost entirely: if the AI tries to reply and finds no way to send it, nothing is stored.",
+    "placeholder": "What the guest said…",
+    "submit": "Transcribe",
+    "cancel": "Cancel",
+    "errorTitle": "Nothing was stored"
+  },
+  "actions": {
+    "legend": "Conversation actions",
+    "escalate": "Escalate to a person",
+    "resolve": "Mark as resolved",
+    "disabled": {
+      "alreadyEscalated": "This conversation is already escalated.",
+      "alreadyResolved": "This conversation is already resolved.",
+      "conversationClosed": "This conversation is closed.",
+      "conversationResolved": "A resolved conversation cannot be escalated."
+    },
+    "confirmResolve": {
+      "title": "Mark the conversation as resolved?",
+      "description": "It also closes the pending escalation, if there is one. The guest is not notified.",
+      "confirm": "Yes, resolve",
+      "cancel": "Cancel"
+    }
+  }
+}

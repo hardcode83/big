@@ -10,9 +10,19 @@ import enDashboard from "@/locales/en/dashboard.json";
 import enAuth from "@/locales/en/auth.json";
 import esGuest from "@/locales/es/guest.json";
 import enGuest from "@/locales/en/guest.json";
+import esConversations from "@/locales/es/conversations.json";
+import enConversations from "@/locales/en/conversations.json";
 
 /** i18next namespaces (design D13). */
-export const NAMESPACES = ["common", "navigation", "states", "dashboard", "auth", "guest"] as const;
+export const NAMESPACES = [
+  "common",
+  "navigation",
+  "states",
+  "dashboard",
+  "auth",
+  "guest",
+  "conversations",
+] as const;
 export const DEFAULT_NS = "common";
 
 /** Static translation resources shared by the server and client instances. */
@@ -24,6 +34,7 @@ export const resources = {
     dashboard: esDashboard,
     auth: esAuth,
     guest: esGuest,
+    conversations: esConversations,
   },
   en: {
     common: enCommon,
@@ -32,5 +43,6 @@ export const resources = {
     dashboard: enDashboard,
     auth: enAuth,
     guest: enGuest,
+    conversations: enConversations,
   },
 } as const;

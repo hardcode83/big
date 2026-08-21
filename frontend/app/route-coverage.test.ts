@@ -23,6 +23,7 @@ function findPageFiles(dir: string): string[] {
 // property-detail).
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/dashboard/page.tsx": "dashboard",
+  "(workspace)/conversations/page.tsx": "conversations",
   "(workspace)/properties/[id]/page.tsx": "property-detail",
   "(public)/login/page.tsx": "login",
   "(guest)/guest/[token]/page.tsx": "guest",
