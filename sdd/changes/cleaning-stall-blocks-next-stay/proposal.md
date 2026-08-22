@@ -37,17 +37,36 @@ Cero candidatas y cero de todo lo demás. El informe no miente: la vivienda nunc
 es la medición del punto 3, y la razón de que R1 no pueda resolverse añadiendo un cubo al informe
 —hay que detectar el desajuste **fuera** de la consulta de candidatas—.
 
-**Y un segundo hallazgo del mismo sitio.** `property_state_transitions` tiene cinco filas en total,
-y las dos de REDES11 son `triggered_by = USER` con **un segundo** de diferencia (asignar a las
-07:23:51, arrancar a las 07:23:52 del 2026-08-16: un script, no una persona). Falta la fila que
-tendría que precederlas: **no hay ninguna transición que lleve a REDES11 a `AWAITING_CLEANING`**, y
-sin embargo la asignación de las 07:23:51 solo es legal desde ahí. Así que ese estado se escribió
-por fuera de la máquina, y el principio 1 de `product.md` —toda transición genera un `TimelineEvent`
-auditable— quedó sin cumplir para ese salto. La lectura más consistente con todo lo demás es que
-alguien chocó con el `409` de `cleaning-assign-preconditions` y lo rodeó a mano; lo confirmaría
-`audit_logs` de ese día. Aquí importa como **prueba de que el atasco empuja a rodear la máquina**, y
-por eso R3 exige una salida legítima; auditar la columna contra el registro de transiciones es otra
-cosa y queda fuera (ver *Out of scope*).
+**Y un segundo hallazgo del mismo sitio: un estado escrito por fuera de la máquina.**
+`property_state_transitions` tiene **cinco filas en total**, y las dos de REDES11 son
+`triggered_by = USER` con un segundo de diferencia (asignar a las 07:23:51, arrancar a las 07:23:52
+del 2026-08-16: un script, no una persona). La primera declara `from_state = AWAITING_CLEANING`, así
+que a esa hora la vivienda estaba ahí — y **no existe ninguna fila que la haya llevado**. Debería
+haber cinco: las dos propiedades nacen `VACANT_READY` por defecto de DDL, y el único camino de la
+matriz hasta `AWAITING_CLEANING` pasa por `AWAITING_CHECKIN`, `OCCUPIED_ESTIMATED` y un checkout,
+cada uno con su fila.
+
+Las tres explicaciones benignas están descartadas:
+
+- **No fue el seed.** El `seed_demo` de esa fecha —el fichero anterior al merge de
+  `seed-data-demo-extension`— documenta lo contrario: «`CreatePropertyCommand` has no such field, on
+  purpose, so both homes take the DDL default `VACANT_READY` and the column stays where
+  `PropertyStateMachine` governs it». Y su ejecución está fechada: los cuatro `*_CREATED` de las
+  07:11:27.
+- **No fue el aprovisionador del checkout.** El `CLEANING_TASK_CREATED` de las 07:18:12 **lleva
+  actor**, así que es el `POST /cleaning-tasks` de una persona autenticada; el job escribe sin actor,
+  como los dos `ACCESS_RECORD_CREATED` de las 07:14:29 de ese mismo día.
+- **No fue la API de propiedades.** `current_operational_state` está deliberadamente fuera de sus
+  dos esquemas de escritura (`properties/api/schemas.py`).
+
+Queda que la columna se escribió a mano. Y el hueco de cinco minutos y medio entre crear la tarea
+(07:18:12) y asignarla con éxito (07:23:51) encaja con haber chocado contra el `409` de
+`cleaning-assign-preconditions` y haberlo rodeado por la base de datos — **eso último es inferencia,
+no medición**: una petición rechazada no deja fila de auditoría, así que el motivo no consta. Lo que
+sí está probado es que el estado se movió fuera de la máquina, contra el principio 1 de
+`product.md`. Cuenta aquí porque es la evidencia de que un atasco sin salida legítima se rodea, que
+es lo que R3 corrige; auditar la columna contra el registro de transiciones es otra cosa y queda
+fuera (ver *Out of scope*).
 
 Y no hay salida lateral. `reject` exige `ASSIGNED` o `ACCEPTED` y la tarea está `IN_PROGRESS`; las
 catorce rutas de `cleaning/api/tasks_router.py` no incluyen ninguna operación de cancelar o
