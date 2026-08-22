@@ -1,0 +1,97 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import { render, waitFor } from "@testing-library/react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import { ApiError } from "@/lib/api";
+import * as dataModule from "../../data";
+
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+}));
+
+vi.mock("@/lib/api/retry-policy", () => ({
+  retryPolicy: () => false,
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+  }),
+}));
+
+const getMock = vi.fn();
+const listMessagesMock = vi.fn();
+vi.spyOn(dataModule, "getConversationsDataSource").mockImplementation(
+  () =>
+    ({
+      getConversation: getMock,
+      listMessages: listMessagesMock,
+    }) as unknown as ReturnType<typeof dataModule.getConversationsDataSource>,
+);
+
+import { ConversationThreadView } from "./conversation-thread-view";
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
+const CONVERSATION = {
+  id: "c1",
+  propertyId: "p1",
+  reservationId: null,
+  guestId: null,
+  channel: "WHATSAPP" as const,
+  status: "OPEN" as const,
+  escalationStatus: "PENDING_HUMAN" as const,
+  language: "es",
+  aiEnabled: true,
+  lastMessageAt: "2026-08-22T10:00:00Z",
+  createdAt: "2026-08-22T09:00:00Z",
+  updatedAt: "2026-08-22T10:00:00Z",
+};
+
+const MESSAGES = {
+  items: [],
+  total: 0,
+  page: 1,
+  perPage: 20,
+};
+
+describe("ConversationThreadView (R3)", () => {
+  beforeEach(() => {
+    getMock.mockReset();
+    listMessagesMock.mockReset();
+    getMock.mockResolvedValue(CONVERSATION);
+    listMessagesMock.mockResolvedValue(MESSAGES);
+  });
+
+  it("renders the localized 'not found' state when the conversation is unknown or another tenant's", async () => {
+    getMock.mockRejectedValueOnce(
+      new ApiError({ status: 404, code: "not_found", message: "x" }),
+    );
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("fields.notFound")).toBeTruthy());
+  });
+
+  it("renders the generic error state with a retry button on 5xx (R3.7)", async () => {
+    getMock.mockRejectedValueOnce(new Error("boom"));
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("states:error.title")).toBeTruthy());
+    expect(view.getByText("states:error.retry")).toBeTruthy();
+  });
+
+  it("renders the loading state initially and the conversation header once the data resolves", async () => {
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("thread.title", { exact: false })).toBeTruthy());
+    expect(view.getByText("channel.WHATSAPP")).toBeTruthy();
+    expect(view.getByText("escalationStatus.PENDING_HUMAN")).toBeTruthy();
+  });
+
+  it("renders the empty messages state when the thread has no items yet", async () => {
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("thread.noMessages")).toBeTruthy());
+  });
+});
