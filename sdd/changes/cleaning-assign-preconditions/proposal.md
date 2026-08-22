@@ -27,15 +27,14 @@ Dos hechos más, medidos el mismo día, que delimitan el arreglo:
   (`backend/tests/cleaning/conftest.py`) fuerza `current_operational_state = AWAITING_CLEANING`
   antes de crear la tarea, que es el único estado en que la operación funciona.
 
-La otra mitad del contraste está preparada pero **no medida todavía**, y conviene decir qué es cada
-cosa: llevando PAJARITOS8 por el camino real el 2026-08-22 —reserva, checkout y aprovisionamiento,
-procedimiento en `infra/environments/dev/RUNBOOK-seed-demo.md` §5— la vivienda quedó en
-`AWAITING_CLEANING` con una tarea `CREATED` y sin asignar, que es la precondición que el diagnóstico
-predice. **Nadie ha confirmado aún que la asignación pase sobre ella**, así que eso es una
-predicción del análisis del código, no un hecho observado. La verificación pendiente es una sola
-acción en la pantalla y le corresponde a `/sdd:design` o a `/sdd:run` cerrarla antes de dar el
-diagnóstico por completo. Si fallara, el defecto es más ancho de lo que este proposal describe y hay
-que reabrirlo.
+**Y el contraste está cerrado por medición, no por análisis.** El mismo 2026-08-22, llevando
+PAJARITOS8 por el camino real —reserva, checkout y aprovisionamiento, procedimiento en
+`infra/environments/dev/RUNBOOK-seed-demo.md` §5— la vivienda quedó en `AWAITING_CLEANING` con una
+tarea `CREATED` sin asignar, y desde la misma pantalla y con el mismo usuario la asignación **pasó
+sin error** a las 08:47:43 UTC: la tarea quedó `ASSIGNED` y la vivienda en `CLEANING_SCHEDULED`, con
+su fila de transición escrita en la misma transacción. Dos operaciones idénticas, dos resultados
+opuestos, y la única variable es el estado operacional de la vivienda. El diagnóstico no depende de
+leer la matriz: está medido por los dos lados.
 
 Un tercer dato, este sí medido, sobre por qué esto importa más de lo que parece: en `dev` la vivienda
 REDES11 llegó a `AWAITING_CLEANING` el 2026-08-16 **sin ninguna fila en
