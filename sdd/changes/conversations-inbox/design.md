@@ -321,16 +321,34 @@ upgrade de React Query reintroduciría el fallo sin ninguna señal.
 **Costes asumidos y declarados**, los dos del mismo peso:
 
 1. Al cambiar de hilo se pierden **foco y scroll**, porque el subárbol es nuevo.
-2. **Un fallo de envío que sobreviva al cambio de hilo no deja ninguna señal.** Si la operadora
-   envía en A, se va a B mientras la petición vuela y el envío falla, al volver a A encuentra un
-   compositor limpio y vacío: se perdieron el texto conservado *y* el aviso de fallo, y un compositor
-   vacío es **indistinguible de una respuesta entregada**. El mensaje del huésped se queda sin
-   responder mientras la operadora cree haber respondido. Antes del `key` esa ruta conservaba las dos
-   cosas (con el banner mal atribuido mientras B estaba en pantalla, y correcto al volver a A), así
-   que el `key` cambió una señal **mal atribuida** por una señal **perdida**. Cerrarlo de verdad pide
-   subir el borrador y su señal de fallo por encima de la frontera keyed —un mapa por conversación en
-   el estado de `ConversationsView`, o un indicador de fallo en la fila de la bandeja— y eso es
-   alcance que este change no ha hecho: queda declarado aquí, no resuelto.
+2. ~~Un fallo de envío que sobreviva al cambio de hilo no deja ninguna señal.~~ **Cerrado el
+   2026-08-22**, en la misma revisión que lo encontró. El `key` había cambiado una señal *mal
+   atribuida* por una *perdida*: enviar en A, irse a B mientras la petición volaba y fallar dejaba,
+   al volver a A, un compositor limpio y vacío —perdidos el texto **y** el aviso—, y un compositor
+   vacío es **indistinguible de una respuesta entregada**, así que el mensaje del huésped se quedaba
+   sin responder mientras la operadora creía haber respondido.
+
+   **El borrador sube por encima de la frontera keyed**: `ConversationsView` guarda un
+   `Record<conversationId, string>` y el compositor pasa a ser **controlado**. El estado de la
+   mutación sigue muriendo con el remontaje —eso es inherente y deseado, es lo que impide la
+   atribución cruzada—, pero el **texto vuelve**, y un borrador sin enviar a la vista es por sí mismo
+   la señal que faltaba: un compositor vacío recupera su significado de «entregada». El éxito limpia
+   el borrador hacia arriba; el fallo no lo toca.
+
+   Vive en el estado del componente y **no** en un store de módulo, a propósito: un borrador es prosa
+   dirigida al huésped de **un** tenant, y un singleton indexado por id de conversación sobreviviría a
+   un cambio de sesión en la misma pestaña. Aquí no puede — y se guarda **con el tenant bajo el que se
+   escribió**, derivando en render, el mismo idioma que usan `lastSent` en el compositor y la página en
+   el hilo. Eso no es cosmético frente a limpiarlo en un efecto, que fue el primer intento: un efecto
+   se ejecuta *después* del render, así que habría entregado la prosa del tenant anterior al nuevo
+   durante un render antes de borrarla. Derivar no tiene esa ventana, y además `react-hooks/set-state-in-effect`
+   rechaza el efecto. Los tres tests que lo guardan —aislamiento entre conversaciones, recuperación al
+   volver, y borrado al cambiar de tenant— se comprobaron falsificables.
+
+   Efecto secundario bienvenido: la derivación `mine` del compositor deja de existir, así que la rama
+   inalcanzable que el re-review señaló desaparece en vez de quedarse como código muerto que parece
+   portante. `lastSent` sigue local y acotado, porque es un guard de doble envío y no una señal que
+   merezca sobrevivir a un cambio de hilo.
 
 ### D21 — Sin diagrama, y dicho a propósito
 

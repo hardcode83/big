@@ -1,4 +1,5 @@
 import { fireEvent } from "@testing-library/react";
+import type { ReactElement } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { I18nProvider } from "@/lib/i18n/client-provider";
@@ -45,13 +46,36 @@ vi.mock("./inbox-list", () => ({
 // `key` attribute React never puts in the DOM.
 const threadMounts = vi.hoisted(() => ({ ids: [] as string[] }));
 vi.mock("./conversation-thread", async () => {
-  const { useEffect } = await import("react");
+  const { useEffect, useRef } = await import("react");
   return {
-    ConversationThread: ({ conversationId }: { conversationId: string }) => {
+    ConversationThread: ({
+      conversationId,
+      draft,
+      onDraftChange,
+    }: {
+      conversationId: string;
+      draft: string;
+      onDraftChange: (next: string) => void;
+    }) => {
+      // Mount-only on purpose: this counts component instances, which is the whole
+      // assertion. Reading through a ref keeps the dependency list honestly empty
+      // instead of re-firing on a prop change, which would make the guard pass even
+      // with the `key` removed.
+      const idRef = useRef(conversationId);
       useEffect(() => {
-        threadMounts.ids.push(conversationId);
+        threadMounts.ids.push(idRef.current);
       }, []);
-      return <div data-testid="thread">{conversationId}</div>;
+      return (
+        <div data-testid="thread" data-draft={draft}>
+          {conversationId}
+          <button
+            type="button"
+            onClick={() => onDraftChange(`borrador de ${conversationId}`)}
+          >
+            escribir
+          </button>
+        </div>
+      );
     },
   };
 });
@@ -216,5 +240,67 @@ describe("ConversationsView — the thread is keyed by conversation (review 2026
       </I18nProvider>,
     );
     expect(threadMounts.ids).toEqual(["conversation-1"]);
+  });
+});
+
+describe("ConversationsView — it owns the reply drafts (D22, R4.5)", () => {
+  const thread = () => screen.getByTestId("thread");
+  const type = () => fireEvent.click(screen.getByRole("button", { name: "escribir" }));
+  const goTo = (id: string, rerender: (ui: ReactElement) => void) => {
+    params.current = new URLSearchParams(`conversation=${id}`);
+    rerender(
+      <I18nProvider locale="es">
+        <ConversationsView />
+      </I18nProvider>,
+    );
+  };
+
+  it("keeps each conversation's draft to itself", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    type();
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+
+    goTo("conversation-2", rerender);
+    // Not conversation-1's text: a draft under the wrong guest's id is one click
+    // from a reply delivered to the wrong person.
+    expect(thread()).toHaveAttribute("data-draft", "");
+  });
+
+  it("gives the draft back when the operator returns, which is what a failed send leaves behind", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    type();
+
+    goTo("conversation-2", rerender);
+    goTo("conversation-1", rerender);
+
+    // The thread subtree was remounted twice over (D22 keys it), so the mutation's own
+    // error state is long gone. The surviving text is the only thing left that says the
+    // reply was never sent — and its absence is what lets an empty composer mean
+    // "delivered" again.
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+    expect(threadMounts.ids).toEqual([
+      "conversation-1",
+      "conversation-2",
+      "conversation-1",
+    ]);
+  });
+
+  it("drops every draft when the session's tenant changes", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    type();
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+
+    // Guest-directed prose must not cross a tenant boundary, and a same-tab session
+    // switch does not reload the page.
+    session.current = { tenant_id: "tenant-2", role: "PROPERTY_MANAGER" };
+    rerender(
+      <I18nProvider locale="es">
+        <ConversationsView />
+      </I18nProvider>,
+    );
+    expect(thread()).toHaveAttribute("data-draft", "");
   });
 });

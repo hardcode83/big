@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
@@ -41,6 +41,34 @@ export function ConversationsView() {
   const { user } = useAuth();
   const tenantId = user?.tenant_id;
   const resetFilters = useInboxFiltersStore((state) => state.reset);
+
+  // Unsent reply drafts, per conversation, owned **here** because this component sits
+  // above the boundary that keys the thread (D22). Component state rather than a
+  // module-level store on purpose: a draft is prose addressed to one tenant's guest,
+  // and a singleton keyed by conversation id would outlive a same-tab session switch.
+  //
+  // Stored **with the tenant they were written under** and derived during render —
+  // the same idiom the composer uses for `lastSent` and the thread for its page — so
+  // a session switch drops them without an effect that would have to fire after one
+  // render had already handed the previous tenant's prose to the new one.
+  const [drafts, setDrafts] = useState<{
+    tenantId: string | undefined;
+    byConversation: Record<string, string>;
+  }>({ tenantId, byConversation: {} });
+  const currentDrafts =
+    drafts.tenantId === tenantId ? drafts.byConversation : {};
+  const setDraft = useCallback(
+    (conversationId: string, next: string) => {
+      setDrafts((current) => ({
+        tenantId,
+        byConversation: {
+          ...(current.tenantId === tenantId ? current.byConversation : {}),
+          [conversationId]: next,
+        },
+      }));
+    },
+    [tenantId],
+  );
 
   // Filters belong to the tenant whose inbox they were chosen in: a `propertyId`
   // picked under one tenant means nothing under the next. The store is a
@@ -116,7 +144,12 @@ export function ConversationsView() {
               trap, and the draft's failure mode — a reply delivered to the wrong
               guest — is severe enough to deserve two barriers.
             */}
-            <ConversationThread key={selectedId} conversationId={selectedId} />
+            <ConversationThread
+              key={selectedId}
+              conversationId={selectedId}
+              draft={currentDrafts[selectedId] ?? ""}
+              onDraftChange={(next) => setDraft(selectedId, next)}
+            />
           </>
         )}
       </div>

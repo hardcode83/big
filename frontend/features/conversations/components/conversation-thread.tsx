@@ -39,8 +39,13 @@ import { TranscribeDialog } from "./transcribe-dialog";
  */
 export function ConversationThread({
   conversationId,
+  draft,
+  onDraftChange,
 }: {
   conversationId: string;
+  /** Owned by `ConversationsView`, above the keyed boundary (D22). Forwarded, not held. */
+  draft: string;
+  onDraftChange: (next: string) => void;
 }) {
   const { t } = useTranslation("conversations");
   const { t: tStates } = useTranslation("states");
@@ -148,6 +153,8 @@ export function ConversationThread({
           <ReplyComposer
             conversationId={conversationId}
             gate={writeMessageGate(detail.data)}
+            draft={draft}
+            onDraftChange={onDraftChange}
           />
         </>
       ) : null}

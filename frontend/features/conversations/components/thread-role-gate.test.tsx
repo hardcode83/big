@@ -108,7 +108,11 @@ function renderThread(role: UserRole) {
   session.user = { tenant_id: "tenant-1", role };
   render(
     <I18nProvider locale="es">
-      <ConversationThread conversationId="conversation-1" />
+      <ConversationThread
+        conversationId="conversation-1"
+        draft=""
+        onDraftChange={() => undefined}
+      />
     </I18nProvider>,
   );
 }

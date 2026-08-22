@@ -26,31 +26,31 @@ const ERROR_ID = "reply-composer-error";
 export function ReplyComposer({
   conversationId,
   gate,
+  draft,
+  onDraftChange,
 }: {
   conversationId: string;
   gate: ActionGate;
+  /** The draft for this conversation, owned above the keyed boundary (D22). */
+  draft: string;
+  onDraftChange: (next: string) => void;
 }) {
   const { t } = useTranslation("conversations");
-  // The draft is stored **with the conversation it was typed in** and derived
-  // during render. Since the review of 2026-08-22 the primary reset is upstream:
-  // `ConversationsView` keys the thread by conversation, so this component is
-  // remounted on a switch and none of this state survives it. This derivation is
-  // kept as a deliberate second barrier, because a component that is only correct
-  // while its parent remembers a `key` is a trap, and this particular failure — a
-  // draft left under someone else's id, one click from a reply delivered to the
-  // wrong guest — is severe enough to deserve two. `lastSent` is scoped the same
-  // way, or an identical legitimate reply to another guest would be refused as a
-  // double submit.
-  const [draft, setDraft] = useState<{
+  // The draft is **not** this component's state: it is owned by `ConversationsView`,
+  // above the boundary that keys this subtree per conversation (D22). That is what
+  // makes a failed send survive the operator walking away — the mutation's own error
+  // state dies with the remount, so a restored draft is the only thing left that says
+  // "this was never sent", and an empty composer can go back to meaning "delivered".
+  const content = draft;
+  const setContent = onDraftChange;
+  // `lastSent` stays local and scoped to its conversation: it is a double-submit
+  // guard, not a signal worth surviving a switch, and a component that is only
+  // correct while its caller remembers a `key` is a trap.
+  const [sent, setSent] = useState<{
     conversationId: string;
-    content: string;
-    lastSent: string | null;
-  }>({ conversationId, content: "", lastSent: null });
-  const mine = draft.conversationId === conversationId;
-  const content = mine ? draft.content : "";
-  const lastSent = mine ? draft.lastSent : null;
-  const setContent = (next: string) =>
-    setDraft({ conversationId, content: next, lastSent });
+    value: string | null;
+  }>({ conversationId, value: null });
+  const lastSent = sent.conversationId === conversationId ? sent.value : null;
   const send = useSendReply(conversationId);
 
   const tooLong = content.length > MAX_MESSAGE_LENGTH;
@@ -69,9 +69,12 @@ export function ReplyComposer({
     // `conversationId` is the one captured at submit time, so a success that lands
     // after the operator moved on records the sent text against the conversation it
     // was actually sent to — never against whichever thread is on screen by then.
+    // Clearing the draft is what turns an empty composer back into "delivered": a
+    // failure leaves it untouched, so the text is still there on return.
     send.mutate(sending, {
       onSuccess: () => {
-        setDraft({ conversationId, content: "", lastSent: sending });
+        onDraftChange("");
+        setSent({ conversationId, value: sending });
       },
     });
   }

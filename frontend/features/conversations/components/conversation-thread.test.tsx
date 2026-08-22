@@ -71,7 +71,11 @@ function threadPage(
 function renderThread(conversationId = "conversation-1") {
   return render(
     <I18nProvider locale="es">
-      <ConversationThread conversationId={conversationId} />
+      <ConversationThread
+        conversationId={conversationId}
+        draft=""
+        onDraftChange={() => undefined}
+      />
     </I18nProvider>,
   );
 }
@@ -175,7 +179,11 @@ describe("ConversationThread — order preserved (task 6.3, R3.2, R3.5)", () => 
 
     rerender(
       <I18nProvider locale="es">
-        <ConversationThread conversationId="conversation-2" />
+        <ConversationThread
+        conversationId="conversation-2"
+        draft=""
+        onDraftChange={() => undefined}
+      />
       </I18nProvider>,
     );
     expect(useThread).toHaveBeenLastCalledWith("conversation-2", 1);

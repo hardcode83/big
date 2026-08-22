@@ -1,5 +1,5 @@
 import { fireEvent } from "@testing-library/react";
-import type { ReactElement } from "react";
+import { useState } from "react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { ApiError } from "@/lib/api";
@@ -26,6 +26,29 @@ function sendState(overrides: Record<string, unknown> = {}) {
   };
 }
 
+/**
+ * The draft is owned above the keyed boundary (D22), so the composer is controlled.
+ * This harness plays the part `ConversationsView` plays in the app: it holds the
+ * draft and hands it back down, which is what lets these suites type normally.
+ */
+function Harness({
+  conversationId = "conversation-1",
+  gate = { enabled: true } as Parameters<typeof ReplyComposer>[0]["gate"],
+}: {
+  conversationId?: string;
+  gate?: Parameters<typeof ReplyComposer>[0]["gate"];
+}) {
+  const [draft, setDraft] = useState("");
+  return (
+    <ReplyComposer
+      conversationId={conversationId}
+      gate={gate}
+      draft={draft}
+      onDraftChange={setDraft}
+    />
+  );
+}
+
 function renderComposer(
   state = sendState(),
   gate: Parameters<typeof ReplyComposer>[0]["gate"] = { enabled: true },
@@ -33,7 +56,7 @@ function renderComposer(
   useSendReply.mockReturnValue(state);
   const { container } = render(
     <I18nProvider locale="es">
-      <ReplyComposer conversationId="conversation-1" gate={gate} />
+      <Harness gate={gate} />
     </I18nProvider>,
   );
   return {
@@ -183,73 +206,88 @@ describe("ReplyComposer — the closed conversation (task 7.2, D10, D11)", () =>
   });
 });
 
-describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 2026-08-21)", () => {
-  function renderAt(conversationId: string, state = sendState()) {
-    useSendReply.mockReturnValue(state);
-    const result = render(
-      <I18nProvider locale="es">
-        <ReplyComposer conversationId={conversationId} gate={{ enabled: true }} />
-      </I18nProvider>,
-    );
-    return { ...result, state };
-  }
-
-  function switchTo(rerender: (ui: ReactElement) => void, conversationId: string) {
-    // Same element type at the same position, which is what keeps the composer
-    // mounted when the target thread is already cached — the exact path in which a
-    // retained draft would surface under another guest's id.
-    rerender(
-      <I18nProvider locale="es">
-        <ReplyComposer conversationId={conversationId} gate={{ enabled: true }} />
-      </I18nProvider>,
-    );
-  }
-
+describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
   const textarea = () => screen.getByLabelText("Responder al huésped");
 
-  it("does not carry a half-typed reply into another conversation", () => {
-    const { rerender, state } = renderAt("conversation-1");
-    fireEvent.change(textarea(), { target: { value: "Ana, el código del portal es 4821" } });
-    expect(textarea()).toHaveValue("Ana, el código del portal es 4821");
+  // The composer holds no draft of its own any more: `ConversationsView` owns a map
+  // per conversation, above the boundary that keys this subtree. That is what makes a
+  // failed send survive the operator walking away, and it is why an empty composer can
+  // mean "delivered" again. Isolation between conversations is asserted where it now
+  // lives, in `conversations-view.test.tsx`.
+  it("renders exactly the draft it is handed and reports every edit upward", () => {
+    useSendReply.mockReturnValue(sendState());
+    const onDraftChange = vi.fn();
+    const { rerender } = render(
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId="conversation-1"
+          gate={{ enabled: true }}
+          draft="lo que habia escrito"
+          onDraftChange={onDraftChange}
+        />
+      </I18nProvider>,
+    );
+    expect(textarea()).toHaveValue("lo que habia escrito");
 
-    switchTo(rerender, "conversation-2");
+    fireEvent.change(textarea(), { target: { value: "corregido" } });
+    expect(onDraftChange).toHaveBeenCalledWith("corregido");
+    // Controlled: it does not move on its own until the owner hands the new value back.
+    expect(textarea()).toHaveValue("lo que habia escrito");
 
-    expect(textarea()).toHaveValue("");
-    expect(state.mutate).not.toHaveBeenCalled();
+    rerender(
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId="conversation-1"
+          gate={{ enabled: true }}
+          draft="corregido"
+          onDraftChange={onDraftChange}
+        />
+      </I18nProvider>,
+    );
+    expect(textarea()).toHaveValue("corregido");
   });
 
-  // These exercise the component's **standalone contract**, not the app's behaviour.
-  // Since D22 `ConversationsView` keys this subtree by conversation, so in the running
-  // app the composer is remounted on every switch and none of this state survives —
-  // a returning operator never gets a draft back. What follows is what the component
-  // guarantees on its own, for a caller that does not key it; do not read it as
-  // integration coverage, and do not build recovery UX on top of it.
-  //
-  // The draft is also a **single slot**, not one per conversation: typing in another
-  // conversation overwrites it, and no requirement asks otherwise (R4.5 names only
-  // the failed send as a reason to keep text).
-  it("unkeyed, still addresses the draft to its own conversation when nothing is typed in between", () => {
-    const { rerender } = renderAt("conversation-1");
-    fireEvent.change(textarea(), { target: { value: "sigo escribiendo" } });
+  it("clears the draft upward on a successful send, and leaves it alone on a failure", () => {
+    const ok = sendState({
+      mutate: vi.fn((_c: string, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.()),
+    });
+    useSendReply.mockReturnValue(ok);
+    const cleared = vi.fn();
+    render(
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId="conversation-1"
+          gate={{ enabled: true }}
+          draft="Vamos a mirarlo"
+          onDraftChange={cleared}
+        />
+      </I18nProvider>,
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
+    expect(cleared).toHaveBeenCalledWith("");
 
-    switchTo(rerender, "conversation-2");
-    expect(textarea()).toHaveValue("");
-
-    switchTo(rerender, "conversation-1");
-    expect(textarea()).toHaveValue("sigo escribiendo");
-  });
-
-  it("drops the earlier draft once another conversation's draft takes the slot", () => {
-    const { rerender } = renderAt("conversation-1");
-    fireEvent.change(textarea(), { target: { value: "para Ana" } });
-
-    switchTo(rerender, "conversation-2");
-    fireEvent.change(textarea(), { target: { value: "para Bruno" } });
-
-    switchTo(rerender, "conversation-1");
-    // Empty, never "para Bruno": losing a draft is acceptable, showing it under
-    // the wrong guest is the thing this whole block exists to prevent.
-    expect(textarea()).toHaveValue("");
+    // A failure must not clear it: the surviving text is the only thing left saying
+    // "this was never sent" once the mutation's own error state dies with the remount.
+    const failing = sendState({
+      mutate: vi.fn((_c: string, _opts?: { onSuccess?: () => void }) => undefined),
+      isError: true,
+      error: new ApiError({ code: "SERVER_ERROR", message: "boom", status: 500 }),
+    });
+    useSendReply.mockReturnValue(failing);
+    const untouched = vi.fn();
+    render(
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId="conversation-2"
+          gate={{ enabled: true }}
+          draft="no se ha enviado"
+          onDraftChange={untouched}
+        />
+      </I18nProvider>,
+    );
+    const buttons = screen.getAllByRole("button", { name: /Enviar respuesta|Enviando/ });
+    fireEvent.click(buttons[buttons.length - 1]);
+    expect(untouched).not.toHaveBeenCalled();
   });
 
   it("does not refuse an identical reply to another conversation as a double submit", () => {
@@ -258,18 +296,26 @@ describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 
         opts?.onSuccess?.();
       }),
     });
-    const { rerender } = renderAt("conversation-1", state);
-
-    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    useSendReply.mockReturnValue(state);
+    const view = (conversationId: string, draft: string) => (
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId={conversationId}
+          gate={{ enabled: true }}
+          draft={draft}
+          onDraftChange={() => undefined}
+        />
+      </I18nProvider>
+    );
+    const { rerender } = render(view("conversation-1", "Gracias"));
     fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
     expect(state.mutate).toHaveBeenCalledTimes(1);
-    // Sent, so the same text is refused here — that guard is R4.5 and must survive.
-    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    // Sent here, so the same text is refused — that guard is R4.5 and must survive.
+    rerender(view("conversation-1", "Gracias"));
     expect(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ })).toBeDisabled();
 
-    switchTo(rerender, "conversation-2");
-
-    fireEvent.change(textarea(), { target: { value: "Gracias" } });
+    // Another conversation, same words: a legitimate reply, not a double submit.
+    rerender(view("conversation-2", "Gracias"));
     expect(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ })).toBeEnabled();
   });
 });
