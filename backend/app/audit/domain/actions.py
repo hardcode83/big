@@ -236,6 +236,15 @@ INCIDENT_CLASSIFIED = "INCIDENT_CLASSIFIED"
 INCIDENT_TRIAGED = "INCIDENT_TRIAGED"
 INCIDENT_ASSIGNED = "INCIDENT_ASSIGNED"
 INCIDENT_ACCEPTED = "INCIDENT_ACCEPTED"
+# The technician refused the job (`tech-cycle-completion` R5.2). Its own action rather than a
+# reuse of `INCIDENT_ASSIGNED`: an auditor reading the trail has to be able to tell "the
+# manager handed this to somebody" from "the person it was handed to said no", and the two
+# rows carry the same field in opposite directions (`assigned_technician_id` set versus
+# cleared).
+INCIDENT_REJECTED = "INCIDENT_REJECTED"
+# Written by `en_route` as well as by `resume_work`: the operational fact is the same move
+# into `IN_PROGRESS`, and an append-only trail should not carry two verbs for one transition
+# (`tech-cycle-completion` D4).
 INCIDENT_STARTED = "INCIDENT_STARTED"
 INCIDENT_WAITING_PARTS = "INCIDENT_WAITING_PARTS"
 INCIDENT_RESOLVED = "INCIDENT_RESOLVED"
@@ -370,6 +379,7 @@ ACTIONS = frozenset(
         INCIDENT_TRIAGED,
         INCIDENT_ASSIGNED,
         INCIDENT_ACCEPTED,
+        INCIDENT_REJECTED,
         INCIDENT_STARTED,
         INCIDENT_WAITING_PARTS,
         INCIDENT_RESOLVED,

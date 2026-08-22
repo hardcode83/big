@@ -380,8 +380,8 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
-        # `maintenance`: the thirteen routes of its D14, twelve here plus the owner approval
-        # below. Every one of them is authenticated — the module has no anonymous door, and the
+        # `maintenance`: fourteen routes now, thirteen here plus the owner approval below —
+        # thirteen/twelve until `tech-cycle-completion` added `reject`. Every one of them is authenticated — the module has no anonymous door, and the
         # only surface that creates an incident without a session is the guest portal's, which
         # is in `ANONYMOUS_ENDPOINTS`.
         # Asserted per role in `tests/maintenance/test_api_incidents.py`.
@@ -396,9 +396,17 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # this table can see. Its own authorisation cases — `CLEANER` refused, guest token
         # refused — are in `tests/maintenance/test_incident_context_api.py`.
         "/api/v1/incidents/{incident_id}/context",
+        # `tech-cycle-completion` R2.3: renamed from `/start`, same `EXECUTE_INCIDENTS`. The
+        # old path is gone rather than aliased — there was no consumer to protect.
+        "/api/v1/incidents/{incident_id}/en-route",
+        # `tech-cycle-completion` R1.6: `EXECUTE_INCIDENTS`, the same gate the rest of the
+        # technician's cycle uses, and **no new permission**. The row-level half — only the
+        # assignee, or a `PROPERTY_MANAGER` unblocking — is derived inside the use case from
+        # the persisted role, which is the kind of restriction this snapshot cannot see. Its
+        # per-role cases are in `tests/maintenance/test_api_authorization.py`.
+        "/api/v1/incidents/{incident_id}/reject",
         "/api/v1/incidents/{incident_id}/resolve",
         "/api/v1/incidents/{incident_id}/resume",
-        "/api/v1/incidents/{incident_id}/start",
         "/api/v1/incidents/{incident_id}/wait-parts",
         "/api/v1/owner-approvals/{approval_id}/respond",
         "/api/v1/reservations",

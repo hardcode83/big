@@ -26,7 +26,8 @@ from typing import Annotated
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.maintenance.domain.entities import Incident
+from app.core.storable_text import MultiLineText
+from app.maintenance.domain.entities import MAX_MATERIALS, Incident
 from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.enums import (
     IncidentCategory,
@@ -61,6 +62,16 @@ class IncidentResponse(BaseModel):
     is a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink
     whose audience is the flow, not a client. `ai_summary` stays: it is our own closed
     vocabulary, and it is what tells an operator the incident was looked at.
+
+    **`eta_at` and `materials` are here, and that includes the paginated listing** — this one
+    schema serves both the detail and the `items` of the page (`tech-cycle-completion` D8).
+    `properties.access_notes` paid the price of leaving the listing under **excepción 6**,
+    which is a different concession: that value is a note about how to get into a flat, and
+    `GET /api/v1/guest/info/{token}` hands it verbatim to an anonymous bearer. `materials` is
+    **excepción 3**, and its audience is exactly the one already reading `title`,
+    `description` and `ai_summary` in this same listing — `READ_INCIDENTS`, and if the caller
+    is a technician, only their own rows. Splitting the schema would remove no reader and
+    would take from the technician's own list the one column that explains the cost.
     """
 
     id: uuid.UUID
@@ -74,10 +85,12 @@ class IncidentResponse(BaseModel):
     description: str
     ai_summary: str | None
     assigned_technician_id: uuid.UUID | None
+    eta_at: datetime | None
     owner_approval_required: bool
     estimated_cost: Decimal | None
     approved_cost: Decimal | None
     final_cost: Decimal | None
+    materials: str | None
     resolved_at: datetime | None
     created_at: datetime
     updated_at: datetime
@@ -96,10 +109,12 @@ class IncidentResponse(BaseModel):
             description=incident.description,
             ai_summary=incident.ai_summary,
             assigned_technician_id=incident.assigned_technician_id,
+            eta_at=incident.eta_at,
             owner_approval_required=incident.owner_approval_required,
             estimated_cost=incident.estimated_cost,
             approved_cost=incident.approved_cost,
             final_cost=incident.final_cost,
+            materials=incident.materials,
             resolved_at=incident.resolved_at,
             created_at=incident.created_at,
             updated_at=incident.updated_at,
@@ -193,13 +208,61 @@ class AssignIncidentRequest(BaseModel):
     assignment_note: Annotated[str | None, Field(max_length=MAX_ASSIGNMENT_NOTE)] = None
 
 
-class ResolveIncidentRequest(BaseModel):
-    """R4.2 — `final_cost` is required, which is where "SHALL exigir `final_cost`" lands for
-    an HTTP caller. The entity requires it too, for callers that are not HTTP."""
+class IncidentEtaRequest(BaseModel):
+    """The body of `accept` and of `en-route` — **one schema for both** (R3.2, design D6).
+
+    One and not two because the field set is identical, and duplicating it would put R3.2's
+    "en ninguna otra ruta" in two places that could drift apart. The router takes it as
+    `payload: IncidentEtaRequest | None = None`, so a `POST` with no body at all keeps
+    working exactly as it did before this change.
+
+    **No validation of the instant lives here**, deliberately (D6): "una ETA no puede estar en
+    el pasado" is a business rule, its reference instant is the router's `now_utc()`, and a
+    rule written into a DTO would leave every non-HTTP caller — `seed_demo`, the tests —
+    without it. `Incident._apply_eta` is where it lives, and it also refuses a naïve
+    timestamp, which is what keeps the comparison from surfacing as an undeclared `500`.
+
+    `extra="forbid"` is what makes "no other route accepts an ETA" a `422` rather than a
+    convention: sending `eta_at` to `wait-parts` or `resume` is rejected because those routes
+    take no body at all, and sending anything else here is rejected by this line.
+    """
 
     model_config = ConfigDict(extra="forbid")
 
+    eta_at: datetime | None = None
+
+
+class ResolveIncidentRequest(BaseModel):
+    """R4.2 — `final_cost` is required, which is where "SHALL exigir `final_cost`" lands for
+    an HTTP caller. The entity requires it too, for callers that are not HTTP.
+
+    `materials` is optional and, when it comes, is written; when it does not, whatever was
+    there survives (R4.3, D7). That asymmetry with `assign`'s complete-operation semantics is
+    load-bearing rather than an inconsistency: the close that trips the owner-approval gate
+    writes `materials` and parks the incident, and when the owner answers the technician
+    repeats the close — so a "complete operation" reading would silently erase the description
+    of a spend R4.3 has just protected.
+
+    **The bound is imported, never re-derived** (D7). `MAX_MATERIALS` lives in
+    `app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next
+    door in that module's `infrastructure/models.py` — so a literal `2000` here would be a
+    copy nobody keeps in step with either.
+
+    `MultiLineText` is not decoration: without it a value carrying `U+0000` or an unpaired
+    surrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the
+    section-7 panel of `guest-portal-api` measured twice. Multi-line rather than single, since
+    a list of parts is prose a person types. `str_strip_whitespace=True` with `min_length=1` is
+    what makes a whitespace-only value a `422`, and it means the maximum counts characters
+    *after* stripping — so "no materials" is said by **omitting** the field, not by sending
+    `""`.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
     final_cost: Annotated[Decimal, Field(ge=0, le=MAX_COST, decimal_places=2)]
+    materials: Annotated[
+        MultiLineText, Field(min_length=1, max_length=MAX_MATERIALS)
+    ] | None = None
 
 
 class RespondOwnerApprovalRequest(BaseModel):

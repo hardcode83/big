@@ -23,6 +23,7 @@ from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
@@ -60,6 +61,7 @@ from app.maintenance.domain.exceptions import (
 )
 from app.maintenance.domain.notifications import (
     RELATED_TYPE_INCIDENT,
+    incident_rejection_notification,
     owner_approval_notification,
     sla_minutes_for,
     technician_assignment_notification,
@@ -367,6 +369,8 @@ _TIMELINE_TITLES: dict[TimelineEventType, str] = {
     TimelineEventType.OWNER_REJECTED_EXPENSE: "Owner rejected the expense",
     TimelineEventType.TECHNICIAN_ASSIGNED: "Technician assigned",
     TimelineEventType.TECHNICIAN_ACCEPTED: "Technician accepted the incident",
+    TimelineEventType.TECHNICIAN_EN_ROUTE: "Technician is on the way",
+    TimelineEventType.TECHNICIAN_REJECTED: "Technician rejected the incident",
     TimelineEventType.TECHNICIAN_STARTED: "Technician started work",
     TimelineEventType.INCIDENT_RESOLVED: "Incident resolved",
     TimelineEventType.INCIDENT_CANCELLED: "Incident cancelled",
@@ -558,6 +562,35 @@ def _creation_change_set(
     )
     if cleaning_task_id is not None:
         changes = changes.diff("cleaning_task_id", None, cleaning_task_id)
+    return changes
+
+
+def _assignment_change_set(
+    *,
+    previous_technician: uuid.UUID | None,
+    technician_id: uuid.UUID,
+    previous_status: IncidentStatus,
+    status: IncidentStatus,
+    previous_eta: datetime | None,
+) -> ChangeSet:
+    """The audited diff of an assignment: the assignee, the status, and the ETA it cleared.
+
+    `eta_at` joins conditionally (`tech-cycle-completion` R3.5): `Incident.assign` sets it to
+    `NULL` every time, but only a reassignment that actually had one is a change worth a
+    permanent row. Unconditional would stamp `{"old": null, "new": null}` on every first
+    assignment, and `audit_logs` is append-only — the same reasoning `_creation_change_set`
+    records for `cleaning_task_id`.
+
+    `assignment_note` is **not** here and must not be: it is a rule-11 sink, so naming it would
+    raise `AuditContractError`, which is the contract `test_free_text_sink_contract.py` pins.
+    """
+    changes = (
+        ChangeSet(audit_actions.ENTITY_INCIDENT)
+        .diff("assigned_technician_id", previous_technician, technician_id)
+        .diff("status", previous_status, status)
+    )
+    if previous_eta is not None:
+        changes = changes.diff("eta_at", previous_eta, None)
     return changes
 
 
@@ -1525,6 +1558,11 @@ class AssignIncidentUseCase(_IncidentFlowBase):
 
         previous_technician = incident.assigned_technician_id
         previous_status = incident.status
+        # R3.5: the entity clears the ETA unconditionally; what this use case owes is the audit
+        # row when that clearing actually changed something. Conditional for the reason
+        # `_creation_change_set` gives: `audit_logs` is append-only, so stamping
+        # `{"old": null, "new": null}` on every first assignment would be permanent noise.
+        previous_eta = incident.eta_at
         incident.assign(
             technician_id=technician_id, now=now, assignment_note=assignment_note
         )
@@ -1561,9 +1599,13 @@ class AssignIncidentUseCase(_IncidentFlowBase):
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
-            .diff("assigned_technician_id", previous_technician, technician_id)
-            .diff("status", previous_status, incident.status),
+            changes=_assignment_change_set(
+                previous_technician=previous_technician,
+                technician_id=technician_id,
+                previous_status=previous_status,
+                status=incident.status,
+                previous_eta=previous_eta,
+            ),
             now=now,
         )
         await self._record_timeline(
@@ -1595,6 +1637,28 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
     #: The entity method to call, the audit action, and the timeline event — or `None`.
     _STEP: tuple[str, str, TimelineEventType | None]
 
+    #: The fields whose movement this mixin audits, photographed before the entity mutates
+    #: and diffed after (`tech-cycle-completion` D5).
+    #:
+    #: **Derived rather than written by hand**, because the steps stopped having one shape: a
+    #: refusal moves `assigned_technician_id`, `accept`/`en_route` may move `eta_at`, and the
+    #: other four move only `status`. Writing the diff in each subclass would be five copies
+    #: of the same allowlist, and the fifth is the one that forgets a field.
+    #:
+    #: All three are in `AUDITABLE_FIELDS["INCIDENT"]`, so the derivation cannot escape the
+    #: allowlist — `ChangeSet` would raise. `assignment_note` is **deliberately absent**: it is
+    #: a rule-11 sink, naming it raises `AuditContractError`, and that refusal is the contract
+    #: `test_free_text_sink_contract.py` pins. `materials` is absent for the same reason.
+    #:
+    #: For the four steps that carry no ETA the result is byte for byte what it was before this
+    #: change: `status` moves in every transition and neither of the other two does.
+    _STEP_AUDITED_FIELDS: tuple[str, ...] = ("status", "assigned_technician_id", "eta_at")
+
+    #: Whether this step's body may carry an `eta_at` to hand to the entity (R3.2). Only
+    #: `accept` and `en_route` set it; every other step ignores the parameter, which is what
+    #: makes "en ninguna otra ruta" true in the application layer as well as in the schema.
+    _TAKES_ETA: bool = False
+
     async def execute(
         self,
         *,
@@ -1602,13 +1666,25 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
         incident_id: uuid.UUID,
         actor: IncidentActor,
         now: datetime,
+        eta_at: datetime | None = None,
     ) -> Incident:
         method, action, event_type = self._STEP
         incident = await self._load_incident(tenant_id, incident_id, actor)
 
-        previous_status = incident.status
-        getattr(incident, method)(now=now)
+        before = {
+            field: getattr(incident, field) for field in self._STEP_AUDITED_FIELDS
+        }
+        if self._TAKES_ETA:
+            getattr(incident, method)(now=now, eta_at=eta_at)
+        else:
+            getattr(incident, method)(now=now)
         await self._incidents.save(tenant_id, incident)
+
+        changes = ChangeSet(audit_actions.ENTITY_INCIDENT)
+        for field, previous in before.items():
+            current = getattr(incident, field)
+            if current != previous:
+                changes = changes.diff(field, previous, current)
 
         await self._audit.record(
             tenant_id=tenant_id,
@@ -1616,9 +1692,7 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT).diff(
-                "status", previous_status, incident.status
-            ),
+            changes=changes,
             now=now,
         )
         if event_type is not None:
@@ -1628,22 +1702,38 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
                 event_type=event_type,
                 actor=actor,
                 now=now,
+                extra=self._timeline_extra(before),
             )
 
         await self._after_step(tenant_id=tenant_id, incident=incident, now=now)
         await self._uow.commit()
         return incident
 
+    def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
+        """Extra `metadata` for this step's timeline event — identifiers only.
+
+        Takes the **pre-mutation** snapshot because the one step that needs it, the refusal,
+        has to name a technician the entity has already set to `NULL` by the time the event is
+        written (D11). Nothing here may return free text: `timeline_events` is append-only, so
+        a value that lands cannot be redacted afterwards.
+        """
+        return None
+
     async def _after_step(
         self, *, tenant_id: uuid.UUID, incident: Incident, now: datetime
     ) -> None:
-        """Nothing, for three of the four steps."""
+        """Nothing, for four of the six steps."""
 
 
 class AcceptIncidentUseCase(_TechnicianStepUseCase):
-    """R4.1 and R3.3 — taking the job closes the deadline it opened."""
+    """R4.1 and R3.3 — taking the job closes the deadline it opened.
+
+    One of the **two** steps that accept an `eta_at` (R3.2): the technician can say when they
+    will arrive at the moment they take the job.
+    """
 
     _STEP = ("accept", audit_actions.INCIDENT_ACCEPTED, TimelineEventType.TECHNICIAN_ACCEPTED)
+    _TAKES_ETA = True
 
     def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1662,10 +1752,133 @@ class AcceptIncidentUseCase(_TechnicianStepUseCase):
         )
 
 
-class StartIncidentUseCase(_TechnicianStepUseCase):
-    """`ACCEPTED → IN_PROGRESS` (R4.1)."""
+class RejectIncidentUseCase(_TechnicianStepUseCase):
+    """The technician refuses the job and it goes back to the manager (R1.3-R1.5, R1.9; D1).
 
-    _STEP = ("start", audit_actions.INCIDENT_STARTED, TimelineEventType.TECHNICIAN_STARTED)
+    A step of the mixin rather than a use case written by hand, because the mixin already
+    gives away exactly what R1.6, R1.7 and R1.8 ask for: `_load_incident_in_scope` produces
+    the `404` that is indistinguishable from "does not exist" for a technician who is not the
+    assignee, and `_check_transition` produces the three different refusals without a field
+    having moved. What is left is what this step alone does — cancel the deadline and tell the
+    manager.
+
+    `AcceptIncidentUseCase` already showed a step can bring its own collaborators and cancel
+    the deadline from `_after_step`; this one does the same plus one notification.
+    """
+
+    _STEP = (
+        "reject",
+        audit_actions.INCIDENT_REJECTED,
+        TimelineEventType.TECHNICIAN_REJECTED,
+    )
+
+    def __init__(
+        self,
+        *,
+        users: UserRepository,
+        notifications: NotificationLogRepository,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._users = users
+        self._notifications = notifications
+
+    def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
+        """Name the technician who refused — read from the **pre-mutation** snapshot (D11).
+
+        It has to come from the snapshot: by the time this runs, `Incident.reject` has already
+        set `assigned_technician_id` to `NULL`, so reading the entity would put `None` in an
+        append-only row. Identifiers only, and the title is a constant, which is what keeps
+        `timeline_events` clear of anything that could never be redacted.
+
+        `None` rather than a half-filled dict when there is no assignee to name, because
+        inventing one would be a permanent claim — the table is append-only — that somebody
+        refused when nobody did.
+
+        **That state is reachable, and it is worth writing down how**, because two review
+        panels independently concluded it was not. The reasoning that says it cannot happen
+        goes: `reject` admits only `ASSIGNED` and `ACCEPTED`, and both are only reached
+        through `assign`, which always sets an assignee — so the field is never `NULL` here.
+        The step it misses is that `incidents.assigned_technician_id` carries
+        `ondelete="SET NULL"` (`maintenance/infrastructure/models.py`), so **deleting the
+        technician's user row leaves the incident in `ASSIGNED` with a `NULL` assignee**.
+        Measured against a live database, not argued. A `PROPERTY_MANAGER` then rejecting
+        that incident lands here with nothing to name, and without this branch the event
+        would carry the string `"None"` in a row nobody can ever redact.
+        `test_a_refusal_with_no_assignee_names_nobody` is what keeps that true.
+        """
+        technician_id = before.get("assigned_technician_id")
+        if technician_id is None:
+            return None
+        return {"technician_id": str(technician_id)}
+
+    async def _after_step(
+        self, *, tenant_id: uuid.UUID, incident: Incident, now: datetime
+    ) -> None:
+        """Cancel the SLA deadline (R1.3) and tell the manager (R1.4, R1.5).
+
+        The deadline goes for the reason R1.3 gives and `AcceptIncidentUseCase` gives for
+        `accept`: a refusal is a **response**, so nobody is late, and leaving the deadline
+        standing would have `check_sla_breaches` escalate a ticket that has already been
+        answered.
+        """
+        await self._notifications.cancel_sla_deadline(
+            tenant_id,
+            related_type=RELATED_TYPE_INCIDENT,
+            related_id=incident.id,
+            notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+        )
+
+        managers = await self._users.list(
+            tenant_id,
+            UserFilters(role=UserRole.PROPERTY_MANAGER, status=UserStatus.ACTIVE),
+            page=1,
+            per_page=1,
+        )
+        if not managers.items:
+            # R1.5: the refusal stands and the run is not failed over it — the incident is
+            # back in `CLASSIFIED` where any manager will find it, and the `AuditLog` and the
+            # timeline both record what happened. Logged rather than swallowed, because a
+            # tenant in this state has an unassigned incident nobody was told about. Same
+            # criterion `_notify_owner` applies to an approval with no owner.
+            logger.warning(
+                "maintenance.incident_rejection_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident.id),
+                },
+            )
+            return
+
+        manager = managers.items[0]
+        await self._notifications.add(
+            tenant_id,
+            incident_rejection_notification(
+                tenant_id=tenant_id,
+                incident_id=incident.id,
+                property_id=incident.property_id,
+                manager_id=manager.id,
+                recipient_contact=manager.email,
+                now=now,
+            ),
+        )
+
+
+class EnRouteIncidentUseCase(_TechnicianStepUseCase):
+    """The technician is on their way: `ACCEPTED → IN_PROGRESS` (R2.1, R2.2; D4).
+
+    `StartIncidentUseCase` until `tech-cycle-completion` renamed it. The audit action stays
+    `INCIDENT_STARTED` — the operational fact is the same and an append-only trail should not
+    have two verbs for one move — while the timeline event becomes `TECHNICIAN_EN_ROUTE`,
+    which had no writer at all. `ResumeWorkUseCase` keeps `TECHNICIAN_STARTED`, so no member
+    of the vocabulary is orphaned by the swap (R2.4) — which matters because PostgreSQL
+    cannot drop a label from an enum.
+    """
+
+    _STEP = ("en_route", audit_actions.INCIDENT_STARTED, TimelineEventType.TECHNICIAN_EN_ROUTE)
+    #: The other of the two steps that accept an `eta_at` (R3.2) — and the one where it is most
+    #: natural, since the technician is setting off.
+    _TAKES_ETA = True
 
 
 class WaitForPartsUseCase(_TechnicianStepUseCase):
@@ -1697,6 +1910,11 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
     This is D11's **second** gate, and the reason it exists is in the proposal's own
     `ASSUMPTION`: the PRD sets the threshold on the *estimated* cost, so without this,
     estimating 90 EUR and spending 500 walks straight past the approval rule.
+
+    `materials` (`tech-cycle-completion` R4.3, D7) travels down **both** branches — the one
+    that closes and the one that opens the second gate — and **never** reaches the audited
+    diff or the timeline `metadata` of the resolution: it is a rule-11 sink, so naming it in a
+    `ChangeSet` raises `AuditContractError`, and `timeline_events` is append-only (R4.6).
     """
 
     def __init__(
@@ -1722,6 +1940,7 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
         final_cost: Decimal,
         actor: IncidentActor,
         now: datetime,
+        materials: str | None = None,
     ) -> Incident:
         incident = await self._load_incident(tenant_id, incident_id, actor)
         config = await self._configs.get_or_create(tenant_id, now)
@@ -1733,7 +1952,12 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
         if needs_approval:
             # D11: the cost is written and the incident parks **without `resolved_at`** —
             # the technician said what it cost and the system did not accept the close.
-            incident.require_owner_approval(final_cost=final_cost, now=now)
+            # R4.3: `materials` goes down **this** branch too. The technician declared the
+            # spend; losing its description because the amount crossed the threshold would
+            # make them type it again when they repeat the close after the owner answers.
+            incident.require_owner_approval(
+                final_cost=final_cost, now=now, materials=materials
+            )
             await self._incidents.save(tenant_id, incident)
             await self._audit.record(
                 tenant_id=tenant_id,
@@ -1758,7 +1982,7 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
             await self._uow.commit()
             return incident
 
-        incident.resolve(final_cost=final_cost, now=now)
+        incident.resolve(final_cost=final_cost, now=now, materials=materials)
         await self._incidents.save(tenant_id, incident)
         await self._audit.record(
             tenant_id=tenant_id,

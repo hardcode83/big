@@ -18,6 +18,14 @@ differs from the other two in **which** exception covers it and in nothing this 
 mechanism that keeps it out of `audit_logs.changes` and out of `timeline_events` is the same
 allowlist and the same constant title, so it rides the same assertions rather than getting a
 file of its own.
+
+`materials` joined them in `tech-cycle-completion` (R4.6, design D7, D10) on exactly that
+precedent — a fourth column, the same two mechanisms, the same assertions. What is new about it
+is only who types it: a `TECHNICIAN` with `EXECUTE_INCIDENTS` closing an incident that is
+already theirs, which is the fifth writer of the census's **excepción 3**. It is also the first
+sink on this table whose value sits beside a number it explains, so the one thing worth stating
+separately is what it is not: `final_cost` is never derived from it nor validated against it
+(that change's R4.4), so nothing reads `materials` back as an amount.
 """
 
 import ast
@@ -52,7 +60,7 @@ from tests.maintenance.conftest import (  # noqa: F401
 )
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
-SINK_COLUMNS = ("title", "description", "assignment_note")
+SINK_COLUMNS = ("title", "description", "assignment_note", "materials")
 
 
 def _writes_incidents_in_raw_sql(tree: ast.Module) -> bool:
@@ -119,6 +127,10 @@ def test_the_three_columns_are_free_text_which_is_why_they_need_this_file() -> N
     assert columns["title"].type.length == 300
     assert columns["description"].type.length is None
     assert columns["assignment_note"].type.length == 2000
+    # `tech-cycle-completion` R4.1 — the fourth sink, bounded like `assignment_note` and for
+    # the same reason: a value that does not fit dies at the driver and aborts the
+    # transaction. The real DDL is read back in `tests/test_migrations.py`.
+    assert columns["materials"].type.length == 2000
 
 
 def test_what_the_reporter_writes_cannot_reach_the_audit_sink() -> None:
@@ -169,11 +181,21 @@ def test_the_note_is_excluded_by_absence_and_not_by_the_denylist() -> None:
     """
     assert "assignment_note" not in REDACTED_FIELDS
     assert "assignment_note" not in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+    # `materials` enters by the same door and for the same reason (`tech-cycle-completion`
+    # R4.6): absence from the allowlist, never presence in the denylist.
+    assert "materials" not in REDACTED_FIELDS
     # `maintenance` R9 said eleven; `cleaner-incident-report` (D10) made it twelve by adding
     # `cleaning_task_id` — an identifier, not free text, which is why it lands in the allowlist
     # while `assignment_note` stays out by absence. The count is asserted rather than left
     # implicit so a *thirteenth* field is a deliberate act; R9's wording is rewritten at archive.
-    assert len(AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]) == 12
+    #
+    # The thirteenth arrived, deliberately: `tech-cycle-completion` R5.1 adds `eta_at`, a
+    # timestamp on the same footing as `resolved_at`. Its sibling `materials` did **not** enter,
+    # which is the whole point of that change's R4.6 — a 2000-character field a person types
+    # stays out by absence, exactly as `assignment_note` does.
+    assert len(AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]) == 13
+    assert "eta_at" in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+    assert "materials" not in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
     assert "cleaning_task_id" in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
 
 
@@ -331,17 +353,38 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
     # incident's text. Comparing the mapping costs nothing and keeps each entry as narrow as the
     # reason that earned it.
     assert offenders == {
-        "maintenance/application/use_cases.py": {"title", "description", "assignment_note"},
+        # `materials` joins three of the four entries below as a **genuine** writer of the
+        # column — `tech-cycle-completion` R4.3/R4.6, censused under excepción 3 — and two more
+        # as the same kind of pass-through the note already had. Each is narrowed to the column
+        # that earned it, which is what the mapping form is for.
+        "maintenance/application/use_cases.py": {
+            "title",
+            "description",
+            "assignment_note",
+            # `ResolveIncidentUseCase` forwards `materials=` to both branches of the close
+            # (R4.3). It composes nothing: the value is what the technician typed, arriving
+            # from the request schema and going straight to the entity.
+            "materials",
+        },
         "maintenance/infrastructure/repositories.py": {
             "title",
             "description",
             "assignment_note",
+            # The adapter persists it, like the other three. Still the only module in the tree
+            # with an `IncidentModel(...)` in it.
+            "materials",
         },
         # `tech-incident-context` (R3.5, D7): the entity is where the value is actually
         # assigned — `self.assignment_note = assignment_note` inside `Incident.assign`, written
         # unconditionally so the note belongs to the assignment in force. Same contract as the
         # two modules above, so it is the same census row and not a new one.
-        "maintenance/domain/entities.py": {"assignment_note"},
+        #
+        # `materials` is assigned here too, by `resolve` and `require_owner_approval`
+        # (`tech-cycle-completion` R4.3) — and **conditionally**, which is the difference worth
+        # recording: the note replaces on every `assign`, while `materials` is written only when
+        # the body carries it, so the repeat close after an owner approval cannot erase it (D7).
+        # `Incident.reject` also sets both to `None`, which is a clear and not a write of text.
+        "maintenance/domain/entities.py": {"assignment_note", "materials"},
         # The three `maintenance` adds are the false positives this docstring predicts, and
         # each is named rather than waved through:
         #
@@ -359,8 +402,23 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         # these three would no longer be reported. It would still have to reach the database
         # through the adapter, which is still gated, still allowlisted, and still the only
         # module with an `IncidentModel(...)` in it.
-        "maintenance/api/schemas.py": {"title", "description"},
-        "maintenance/api/incidents_router.py": {"description", "assignment_note"},
+        # `api/schemas.py` gains `materials` for **two** reasons at once, and only one of them
+        # is a read: `IncidentResponse` declares and fills it on the way out (a read of the
+        # column, like `title`/`description` above), and `ResolveIncidentRequest` declares it on
+        # the way **in**. The inbound half is where the value is actually bounded — the strip,
+        # `min_length=1`, `max_length=MAX_MATERIALS` and the `storable_text` guard the census row
+        # names — so this entry is the schema being the boundary, not a producer of text. A DTO
+        # still has no session; the adapter above is the only writer of the row.
+        "maintenance/api/schemas.py": {"title", "description", "materials"},
+        # The router matches on FastAPI's own `description=` route metadata, plus two
+        # pass-throughs of a request field to a use case: `assignment_note=payload.assignment_note`
+        # and now `materials=payload.materials`. Forwarding a validated field is not producing
+        # text.
+        "maintenance/api/incidents_router.py": {
+            "description",
+            "assignment_note",
+            "materials",
+        },
         "maintenance/api/approvals_router.py": {"description"},
         # `seed-data-demo-extension`: the demo seed is the third writer of both columns and the
         # first one outside `maintenance/`. It is here rather than waved through because its
@@ -395,7 +453,8 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         # need an entry saying so rather than a reviewer hunting for a writer that is not there.
         "cleaning/api/schemas.py": {"title", "description"},
     }, (
-        "a module names one of incidents.title/description/assignment_note in a writing "
+        "a module names one of incidents.title/description/assignment_note/materials in a "
+        "writing "
         "position: the census declares these columns writer by writer — the anonymous reporter "
         "under excepción 2, the authenticated cleaner and the assigning manager under "
         "excepción 3, and text our own code composes under the structured form by default — so "

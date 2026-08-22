@@ -126,6 +126,7 @@
       "INCIDENT_CLASSIFIED": "Incident classified",
       "TECHNICIAN_ASSIGNED": "Technician assigned",
       "TECHNICIAN_ACCEPTED": "Technician accepted",
+      "TECHNICIAN_REJECTED": "Technician rejected",
       "TECHNICIAN_EN_ROUTE": "Technician en route",
       "TECHNICIAN_STARTED": "Technician started",
       "INCIDENT_RESOLVED": "Incident resolved",

@@ -179,8 +179,14 @@ _OPERATIONS: list[tuple[str, Operation, frozenset[IncidentStatus], IncidentStatu
         IncidentStatus.ACCEPTED,
     ),
     (
-        "start",
-        lambda i: i.start(now=LATER),
+        "reject",
+        lambda i: i.reject(now=LATER),
+        frozenset({IncidentStatus.ASSIGNED, IncidentStatus.ACCEPTED}),
+        IncidentStatus.CLASSIFIED,
+    ),
+    (
+        "en_route",
+        lambda i: i.en_route(now=LATER),
         frozenset({IncidentStatus.ACCEPTED}),
         IncidentStatus.IN_PROGRESS,
     ),
@@ -310,6 +316,197 @@ def test_reassigning_with_a_note_replaces_the_previous_one() -> None:
     incident.assign(technician_id=uuid.uuid4(), now=LATER, assignment_note="Code 4821.")
 
     assert incident.assignment_note == "Code 4821."
+
+
+# --- The materials the technician declares on closing (R4.1-R4.4; design D7) ------------
+
+
+def test_the_cost_gate_keeps_the_materials_the_technician_declared() -> None:
+    """R4.3 — the close that opens the second approval gate writes `materials` anyway.
+
+    The technician declared the spend; losing its description because the amount crossed the
+    threshold would make them type it twice.
+    """
+    incident = make_incident(IncidentStatus.IN_PROGRESS)
+
+    incident.require_owner_approval(
+        now=LATER, final_cost=Decimal("500.00"), materials="Dos codos de 22 mm y teflón"
+    )
+
+    assert incident.materials == "Dos codos de 22 mm y teflón"
+    assert incident.final_cost == Decimal("500.00")
+    assert incident.status is IncidentStatus.AWAITING_OWNER_APPROVAL
+
+
+def test_a_second_close_without_materials_does_not_erase_them() -> None:
+    """D7 — the semantics that **preserve** rather than replace, and the reason for them.
+
+    After the owner approves, the technician repeats the close. With `assign`'s
+    complete-operation semantics a body arriving without `materials` would silently wipe what
+    R4.3 has just protected.
+    """
+    incident = make_incident(IncidentStatus.IN_PROGRESS)
+    incident.require_owner_approval(
+        now=LATER, final_cost=Decimal("500.00"), materials="Dos codos de 22 mm"
+    )
+    incident.resume_after_approval(
+        related_type=OwnerApprovalRelatedType.MAINTENANCE_COST,
+        approved_cost=Decimal("500.00"),
+        now=LATER,
+    )
+
+    incident.resolve(final_cost=Decimal("500.00"), now=LATER)
+
+    assert incident.materials == "Dos codos de 22 mm"
+
+
+def test_resolve_writes_the_materials_it_was_given() -> None:
+    incident = make_incident(IncidentStatus.IN_PROGRESS)
+
+    incident.resolve(
+        final_cost=Decimal("120.00"), materials="Una junta y medio metro de tubo", now=LATER
+    )
+
+    assert incident.materials == "Una junta y medio metro de tubo"
+
+
+def test_materials_never_touches_the_final_cost() -> None:
+    """R4.4 — no derivation and no cross-validation between the two."""
+    incident = make_incident(IncidentStatus.IN_PROGRESS)
+
+    incident.resolve(final_cost=Decimal("0.00"), materials="Nada, solo mano de obra", now=LATER)
+
+    assert incident.final_cost == Decimal("0.00")
+
+
+# --- The estimated time of arrival (R3.1, R3.3, R3.4, R3.5; design D6) ------------------
+
+
+@pytest.mark.parametrize("operation", ["accept", "en_route"])
+def test_an_eta_in_the_past_is_refused_without_writing_anything(operation: str) -> None:
+    """R3.4 — "estrictamente anterior … y NEVER SHALL escribir nada".
+
+    The whole dataclass is compared, not just `eta_at`: the refusal has to land before
+    `_transition`, so `status` and `updated_at` must be untouched too.
+    """
+    source = (
+        IncidentStatus.ASSIGNED if operation == "accept" else IncidentStatus.ACCEPTED
+    )
+    incident = make_incident(source)
+    before = dataclasses.asdict(incident)
+
+    with pytest.raises(MaintenanceValidationError):
+        getattr(incident, operation)(now=LATER, eta_at=LATER - timedelta(minutes=1))
+
+    assert dataclasses.asdict(incident) == before
+
+
+def test_an_eta_exactly_now_is_accepted() -> None:
+    """"Estrictamente anterior" is the wording, so the boundary itself passes — a technician
+    saying "I am here now" is not an error."""
+    incident = make_incident(IncidentStatus.ASSIGNED)
+
+    incident.accept(now=LATER, eta_at=LATER)
+
+    assert incident.eta_at == LATER
+
+
+@pytest.mark.parametrize("operation", ["accept", "en_route"])
+def test_a_naive_eta_is_refused(operation: str) -> None:
+    """Not in R3.4's letter, and load-bearing anyway (D6): without it the comparison with
+    `now` raises `TypeError` and surfaces as an undeclared `500` instead of a `422`. The same
+    check `properties`, `timeline`, `auth` and `cleaning` already make at their edges."""
+    source = (
+        IncidentStatus.ASSIGNED if operation == "accept" else IncidentStatus.ACCEPTED
+    )
+    incident = make_incident(source)
+    before = dataclasses.asdict(incident)
+
+    with pytest.raises(MaintenanceValidationError):
+        getattr(incident, operation)(now=LATER, eta_at=datetime(2026, 8, 16, 9, 0))
+
+    assert dataclasses.asdict(incident) == before
+
+
+@pytest.mark.parametrize("operation", ["accept", "en_route"])
+def test_an_eta_in_the_future_is_written(operation: str) -> None:
+    source = (
+        IncidentStatus.ASSIGNED if operation == "accept" else IncidentStatus.ACCEPTED
+    )
+    incident = make_incident(source)
+    eta = LATER + timedelta(hours=3)
+
+    getattr(incident, operation)(now=LATER, eta_at=eta)
+
+    assert incident.eta_at == eta
+
+
+def test_an_absent_eta_preserves_whatever_was_there() -> None:
+    """R3.3 — "IF el cuerpo no lo trae, THEN … dejar el valor anterior intacto". Falls out of
+    `_apply_eta` returning early on `None`, which is what makes "absent" and "cleared" two
+    different things without a sentinel."""
+    incident = make_incident(IncidentStatus.ACCEPTED)
+    eta = LATER + timedelta(hours=3)
+    incident.eta_at = eta
+
+    incident.en_route(now=LATER)
+
+    assert incident.eta_at == eta
+
+
+def test_assigning_clears_the_eta_unconditionally() -> None:
+    """R3.5 — the ETA belongs to the assignment in force, exactly like `assignment_note`, so
+    a reassignment does not inherit the previous technician's promised hour."""
+    incident = make_incident(IncidentStatus.ACCEPTED)
+    incident.eta_at = LATER + timedelta(hours=3)
+    incident.assignment_note = "Sube por la escalera B"
+
+    incident.assign(technician_id=uuid.uuid4(), now=LATER)
+
+    assert incident.eta_at is None
+    assert incident.assignment_note is None
+
+
+# --- The technician's refusal (R1.1, R1.2, R1.8; design D2) -----------------------------
+
+
+@pytest.mark.parametrize(
+    "source", [IncidentStatus.ASSIGNED, IncidentStatus.ACCEPTED], ids=lambda s: s.value
+)
+def test_reject_clears_all_three_fields_of_the_current_assignment(
+    source: IncidentStatus,
+) -> None:
+    """D2 — the three, and not only the one R1.2 names.
+
+    `assigned_technician_id`, `eta_at` and `assignment_note` all belong to the assignment in
+    force rather than to the incident. A `CLASSIFIED` incident with no owner that kept the
+    note written for whoever said no — or the hour that technician promised — is the same
+    "fila que miente" the `ASSUMPTION` of R1 rejects for the assignee. Who refused survives
+    in the `AuditLog`, which audits `assigned_technician_id` with its previous value.
+    """
+    incident = make_incident(source)
+    incident.assigned_technician_id = uuid.uuid4()
+    incident.assignment_note = "El portal abre con el 4821"
+    incident.eta_at = LATER + timedelta(hours=2)
+
+    incident.reject(now=LATER)
+
+    assert incident.status is IncidentStatus.CLASSIFIED
+    assert incident.assigned_technician_id is None
+    assert incident.assignment_note is None
+    assert incident.eta_at is None
+    assert incident.updated_at == LATER
+
+
+def test_reject_leaves_the_incident_where_assign_can_pick_it_up() -> None:
+    """R1.2 — `CLASSIFIED` is an origin `assign` already admits, which is the whole point of
+    choosing it: the manager reassigns without a step in between."""
+    incident = make_incident(IncidentStatus.ASSIGNED)
+    incident.assigned_technician_id = uuid.uuid4()
+
+    incident.reject(now=LATER)
+
+    assert incident.status in Incident._TRANSITIONS["assign"][0]
 
 
 def test_the_note_does_not_reach_the_transition_table() -> None:

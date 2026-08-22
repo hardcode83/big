@@ -13,11 +13,12 @@ from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import func, select
+from sqlalchemy import delete, func, select
 
 from app.audit.domain import actions as audit_actions
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import UserRole
+from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.application.use_cases import (
     IncidentActor,
@@ -45,7 +46,10 @@ from app.notifications.domain.enums import NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.properties.domain.enums import PropertyOperationalState
 from app.properties.domain.transition_enums import PropertyStateTrigger
-from app.properties.infrastructure.models import PropertyModel
+from app.properties.infrastructure.models import (
+    PropertyModel,
+    PropertyStateTransitionModel,
+)
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.maintenance.conftest import (
@@ -94,6 +98,16 @@ async def audit_actions_for(session, entity_id: uuid.UUID) -> list[str]:
         select(AuditLogModel.action).where(AuditLogModel.entity_id == entity_id)
     )
     return sorted(rows.scalars())
+
+
+async def audit_changes_for(session, entity_id: uuid.UUID, action: str) -> dict:
+    """The `changes` payload of one audit row, for the derived-diff assertions of D5."""
+    rows = await session.execute(
+        select(AuditLogModel.changes).where(
+            AuditLogModel.entity_id == entity_id, AuditLogModel.action == action
+        )
+    )
+    return rows.scalars().one()
 
 
 async def timeline_types_for(session, tenant_id: uuid.UUID) -> list[str]:
@@ -837,7 +851,7 @@ async def test_the_technician_walks_the_whole_cycle(flow, world, db_session) -> 
     common = {"tenant_id": world.tenant.id, "incident_id": incident.id, "actor": actor}
 
     assert (await flow.accept.execute(**common, now=LATER)).status is IncidentStatus.ACCEPTED
-    assert (await flow.start.execute(**common, now=LATER)).status is IncidentStatus.IN_PROGRESS
+    assert (await flow.en_route.execute(**common, now=LATER)).status is IncidentStatus.IN_PROGRESS
     assert (
         await flow.wait_for_parts.execute(**common, now=LATER)
     ).status is IncidentStatus.WAITING_EXTERNAL_PARTS
@@ -876,7 +890,7 @@ async def test_waiting_for_parts_leaves_no_timeline_event(flow, world, db_sessio
         "now": LATER,
     }
     await flow.accept.execute(**common)
-    await flow.start.execute(**common)
+    await flow.en_route.execute(**common)
     before = await timeline_types_for(db_session, world.tenant.id)
 
     await flow.wait_for_parts.execute(**common)
@@ -884,6 +898,100 @@ async def test_waiting_for_parts_leaves_no_timeline_event(flow, world, db_sessio
     assert await timeline_types_for(db_session, world.tenant.id) == before
     assert audit_actions.INCIDENT_WAITING_PARTS in await audit_actions_for(
         db_session, incident.id
+    )
+
+
+async def test_going_en_route_writes_the_event_that_had_no_writer(
+    flow, world, db_session
+) -> None:
+    """R2.2 and D4 — the whole point of the rename.
+
+    `TECHNICIAN_EN_ROUTE` sat in `TimelineEventType` and in the ES/EN catalogue with nothing
+    writing it, which is what `sdd/specs/maintenance.md` §Estado said out loud. This is the
+    writer.
+    """
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    await flow.accept.execute(**common)
+
+    await flow.en_route.execute(**common)
+
+    assert TimelineEventType.TECHNICIAN_EN_ROUTE.value in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+    assert TimelineEventType.TECHNICIAN_STARTED.value not in await timeline_types_for(
+        db_session, world.tenant.id
+    )
+
+
+async def test_going_en_route_leaves_the_property_where_it_was(
+    flow, world, db_session
+) -> None:
+    """R2.6 — "NEVER SHALL disparar transición de estado de la propiedad por ponerse en ruta".
+
+    The negative claim gets its own test rather than resting on `_TechnicianStepUseCase` not
+    calling `_fire_trigger` today: raised by the QA panel of this section, which pointed out
+    that a stray trigger added to `EnRouteIncidentUseCase._after_step` later would ship green.
+    D11's reasoning is the one being pinned — "la avería sigue ahí", so a technician being on
+    their way changes nothing about the flat.
+
+    Asserted on the **state row and the transition table both**: the operational state could
+    also be left alone by a trigger the machine happened to refuse, and that would be the
+    same bug with a quieter symptom.
+    """
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    await flow.accept.execute(**common)
+    before = await state_of(db_session, world.property.id)
+    transitions_before = await db_session.scalar(
+        select(func.count()).select_from(PropertyStateTransitionModel)
+    )
+
+    await flow.en_route.execute(**common)
+
+    assert await state_of(db_session, world.property.id) is before
+    assert (
+        await db_session.scalar(
+            select(func.count()).select_from(PropertyStateTransitionModel)
+        )
+        == transitions_before
+    )
+
+
+async def test_resuming_after_parts_still_writes_technician_started(
+    flow, world, db_session
+) -> None:
+    """R2.4 — the half that keeps the rename from orphaning a member of the vocabulary.
+
+    PostgreSQL cannot drop a label from an enum, so leaving `TECHNICIAN_STARTED` without a
+    writer would mean dead code the database will not let anyone clean up (D4). `resume_work`
+    keeps it, and this is what says so.
+    """
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    await flow.accept.execute(**common)
+    await flow.en_route.execute(**common)
+    await flow.wait_for_parts.execute(**common)
+
+    await flow.resume_work.execute(**common)
+
+    assert TimelineEventType.TECHNICIAN_STARTED.value in await timeline_types_for(
+        db_session, world.tenant.id
     )
 
 
@@ -923,12 +1031,374 @@ async def test_a_step_out_of_order_is_refused(flow, world, db_session) -> None:
     incident = await _assigned(flow, world, db_session)
 
     with pytest.raises(InvalidIncidentTransitionError):
-        await flow.start.execute(
+        await flow.en_route.execute(
             tenant_id=world.tenant.id,
             incident_id=incident.id,
             actor=technician(world),
             now=LATER,
         )
+
+
+# --- The refusal, and the derived audited diff (R1.3-R1.5, R1.9, R5.2; D1, D3, D5, D11) --
+
+
+@pytest.mark.parametrize("origin", ["assigned", "accepted"])
+async def test_rejecting_returns_the_incident_to_the_manager(
+    flow, world, db_session, origin: str
+) -> None:
+    """R1.1, R1.2 — from both admitted origins, and the three assignment fields are cleared."""
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    if origin == "accepted":
+        await flow.accept.execute(**common)
+
+    result = await flow.reject.execute(**common)
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    assert result.assigned_technician_id is None
+    assert result.eta_at is None
+    assert result.assignment_note is None
+
+
+async def test_rejecting_cancels_the_pending_deadline(flow, world, db_session) -> None:
+    """R1.3 — a refusal is a response, so nobody is late. Same criterion as `accept`."""
+    incident = await _assigned(flow, world, db_session)
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assignment = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.notification_type
+            == NotificationType.TECHNICIAN_ASSIGNED.value
+        )
+    )
+    assert assignment.scalars().one().sla_deadline_at is None
+
+
+async def test_rejecting_notifies_the_manager_without_a_deadline(
+    flow, world, db_session
+) -> None:
+    """R1.4 — the manager gets a row, and that row carries no SLA deadline of its own."""
+    incident = await _assigned(flow, world, db_session)
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.notification_type == "INCIDENT_REJECTED"
+        )
+    )
+    notification = rows.scalars().one()
+    assert notification.recipient_user_id == world.manager.id
+    assert notification.sla_deadline_at is None
+
+
+async def test_a_tenant_with_no_active_manager_still_gets_the_rejection(
+    flow, world, db_session
+) -> None:
+    """R1.5 — "registrar el hecho y continuar sin fallar, dejando el rechazo aplicado".
+
+    The manager is deactivated rather than deleted, because the incident's own FK would refuse
+    the delete — and a deactivated account is the realistic version of this state anyway.
+    """
+    from app.auth.domain.enums import UserStatus as _UserStatus
+
+    incident = await _assigned(flow, world, db_session)
+    world.manager.status = _UserStatus.INACTIVE
+    await db_session.flush()
+
+    result = await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    assert result.assigned_technician_id is None
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.notification_type == "INCIDENT_REJECTED"
+        )
+    )
+    assert rows.scalars().all() == []
+
+
+async def test_the_rejection_writes_its_audit_row_and_its_timeline_event(
+    flow, world, db_session
+) -> None:
+    """R5.2, R1.9 — both, naming the actor, and the event's `metadata` is identifiers only.
+
+    The `technician_id` in that metadata is the one D11 says has to come from the pre-mutation
+    snapshot: the entity has already set `assigned_technician_id` to `NULL` by the time the
+    event is written, so reading the entity would record `None`.
+    """
+    incident = await _assigned(flow, world, db_session)
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assert audit_actions.INCIDENT_REJECTED in await audit_actions_for(
+        db_session, incident.id
+    )
+    rows = await db_session.execute(
+        select(AuditLogModel).where(
+            AuditLogModel.entity_id == incident.id,
+            AuditLogModel.action == audit_actions.INCIDENT_REJECTED,
+        )
+    )
+    entry = rows.scalars().one()
+    assert entry.actor_user_id == world.technician.id
+
+    events = await db_session.execute(
+        select(TimelineEventModel).where(
+            TimelineEventModel.event_type == TimelineEventType.TECHNICIAN_REJECTED
+        )
+    )
+    event = events.scalars().one()
+    assert set(event.metadata_) == {"incident_id", "technician_id"}
+    assert event.metadata_["technician_id"] == str(world.technician.id)
+    assert event.title == "Technician rejected the incident"
+
+
+async def test_a_refusal_with_no_assignee_names_nobody(
+    flow, world, db_session
+) -> None:
+    """D11's `None` branch of `_timeline_extra`, and it is **reachable** — measured, not argued.
+
+    Two review panels concluded independently that it could not be: `reject` admits only
+    `ASSIGNED`/`ACCEPTED`, both reached through `assign`, which always writes an assignee. What
+    that misses is `ondelete="SET NULL"` on `incidents.assigned_technician_id` — deleting the
+    technician's account leaves the incident `ASSIGNED` with the column at `NULL`. A manager
+    rejecting it then has nobody to name, and without the branch the event would carry the
+    literal string `"None"` in an append-only row.
+
+    Driven through the real FK rather than by assigning `None` to the entity, because it is the
+    database rule that makes the state reachable and a hand-set field would prove nothing.
+    """
+    incident = await _assigned(flow, world, db_session)
+    await db_session.execute(
+        delete(UserModel).where(UserModel.id == world.technician.id)
+    )
+    await db_session.flush()
+    db_session.expunge_all()
+
+    stored = await db_session.get(IncidentModel, incident.id)
+    assert stored.status is IncidentStatus.ASSIGNED
+    assert stored.assigned_technician_id is None, (
+        "the FK's SET NULL is what makes this state reachable; if this fails the premise of "
+        "the None branch has changed and its docstring needs revisiting"
+    )
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+    )
+
+    events = await db_session.execute(
+        select(TimelineEventModel).where(
+            TimelineEventModel.event_type == TimelineEventType.TECHNICIAN_REJECTED
+        )
+    )
+    event = events.scalars().one()
+    assert set(event.metadata_) == {"incident_id"}
+    assert "technician_id" not in event.metadata_
+    assert "None" not in str(event.metadata_)
+
+
+async def test_the_refusal_never_reaches_another_tenants_manager(
+    flow, world, neighbour, db_session
+) -> None:
+    """Rule 1 of `steering/security.md` — the isolation test the new cross-aggregate pair owes.
+
+    `RejectIncidentUseCase._after_step` added a **read** of `users` and a **write** of
+    `notification_logs` that did not exist before, and rule 1 asks for "tests automáticos que
+    demuestran que un tenant no accede a datos de otro" for exactly that. Raised by the tenancy
+    panel.
+
+    Built so it can actually fail: `world`'s own manager is deactivated, so the only **active**
+    `PROPERTY_MANAGER` in the database belongs to `neighbour`. A `users.list` that lost its
+    tenant scope would find that one and notify them — and the assertion below would catch it,
+    whereas a single-tenant version of this test could not.
+    """
+    from app.auth.domain.enums import UserStatus as _UserStatus
+
+    incident = await _assigned(flow, world, db_session)
+    world.manager.status = _UserStatus.INACTIVE
+    await db_session.flush()
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    rows = (
+        await db_session.execute(
+            select(NotificationLogModel).where(
+                NotificationLogModel.notification_type == "INCIDENT_REJECTED"
+            )
+        )
+    ).scalars().all()
+    assert rows == [], (
+        "the only active PROPERTY_MANAGER belongs to the neighbour tenant, so a scoped "
+        "lookup finds none and writes nothing"
+    )
+    every = (
+        await db_session.execute(select(NotificationLogModel))
+    ).scalars().all()
+    for row in every:
+        assert row.tenant_id == world.tenant.id
+        assert row.recipient_user_id != neighbour.manager.id
+
+
+async def test_the_rejection_audits_the_assignee_it_cleared(
+    flow, world, db_session
+) -> None:
+    """D5 — the derived diff is what makes this possible: `assigned_technician_id` moved, so
+    it appears; `assignment_note` never can, because naming it raises `AuditContractError`."""
+    incident = await _assigned(flow, world, db_session)
+
+    await flow.reject.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    changes = await audit_changes_for(
+        db_session, incident.id, audit_actions.INCIDENT_REJECTED
+    )
+    assert changes["assigned_technician_id"]["old"] == str(world.technician.id)
+    assert changes["assigned_technician_id"]["new"] is None
+    assert "assignment_note" not in changes
+    assert "materials" not in changes
+
+
+@pytest.mark.parametrize(
+    "step", ["accept", "en_route", "wait_for_parts", "resume_work"]
+)
+async def test_a_step_without_an_eta_audits_status_and_nothing_else(
+    flow, world, db_session, step: str
+) -> None:
+    """D5's compatibility claim, asserted rather than argued.
+
+    "Para los cuatro pasos actuales sin ETA el resultado es byte a byte el de hoy: `status`
+    cambia en toda transición, y ningún otro de los tres se mueve." The derived diff replaced
+    a hard-coded `.diff("status", ...)`, so this is what proves the replacement did not widen
+    what gets written.
+    """
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    ladder = {
+        "accept": [],
+        "en_route": ["accept"],
+        "wait_for_parts": ["accept", "en_route"],
+        "resume_work": ["accept", "en_route", "wait_for_parts"],
+    }[step]
+    for earlier in ladder:
+        await getattr(flow, earlier).execute(**common)
+
+    await getattr(flow, step).execute(**common)
+
+    action = {
+        "accept": audit_actions.INCIDENT_ACCEPTED,
+        "en_route": audit_actions.INCIDENT_STARTED,
+        "wait_for_parts": audit_actions.INCIDENT_WAITING_PARTS,
+        "resume_work": audit_actions.INCIDENT_STARTED,
+    }[step]
+    rows = await db_session.execute(
+        select(AuditLogModel.changes).where(
+            AuditLogModel.entity_id == incident.id, AuditLogModel.action == action
+        )
+    )
+    for changes in rows.scalars():
+        assert set(changes) == {"status"}, changes
+
+
+@pytest.mark.parametrize("step", ["accept", "en_route"])
+async def test_the_two_steps_that_take_an_eta_persist_and_audit_it(
+    flow, world, db_session, step: str
+) -> None:
+    """R3.2 and task 4.3 — written on the entity and present in the audited diff."""
+    incident = await _assigned(flow, world, db_session)
+    common = {
+        "tenant_id": world.tenant.id,
+        "incident_id": incident.id,
+        "actor": technician(world),
+        "now": LATER,
+    }
+    if step == "en_route":
+        await flow.accept.execute(**common)
+    eta = LATER + timedelta(hours=2)
+
+    result = await getattr(flow, step).execute(**common, eta_at=eta)
+
+    assert result.eta_at == eta
+    action = (
+        audit_actions.INCIDENT_ACCEPTED
+        if step == "accept"
+        else audit_actions.INCIDENT_STARTED
+    )
+    changes = await audit_changes_for(db_session, incident.id, action)
+    assert "eta_at" in changes
+
+
+async def test_assigning_clears_the_eta_and_records_it(flow, world, db_session) -> None:
+    """R3.5 and task 4.4 — the entity nulls it; the use case is what makes that visible."""
+    incident = await _assigned(flow, world, db_session)
+    eta = LATER + timedelta(hours=2)
+    await flow.accept.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=technician(world),
+        now=LATER,
+        eta_at=eta,
+    )
+
+    result = await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.other_technician.id,
+        actor=manager(world),
+        now=LATER,
+    )
+
+    assert result.eta_at is None
+    rows = await db_session.execute(
+        select(AuditLogModel.changes).where(
+            AuditLogModel.entity_id == incident.id,
+            AuditLogModel.action == audit_actions.INCIDENT_ASSIGNED,
+        )
+    )
+    assert any("eta_at" in changes for changes in rows.scalars())
 
 
 # --- Resolution and the real-cost gate (task 6.9; R4.2, R4.3) ---------------------------
@@ -943,8 +1413,123 @@ async def _in_progress(flow, world, db_session, **kwargs) -> IncidentModel:
         "now": LATER,
     }
     await flow.accept.execute(**common)
-    await flow.start.execute(**common)
+    await flow.en_route.execute(**common)
     return incident
+
+
+async def test_the_materials_travel_down_the_closing_branch(
+    flow, world, db_session
+) -> None:
+    """R4.3 and task 4.5, branch one: the close that actually resolves."""
+    incident = await _in_progress(flow, world, db_session)
+
+    result = await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("60.00"),
+        materials="Una junta y medio metro de tubo",
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.RESOLVED
+    assert result.materials == "Una junta y medio metro de tubo"
+
+
+async def test_the_materials_travel_down_the_approval_branch(
+    flow, world, db_session
+) -> None:
+    """R4.3 and task 4.5, branch two — the one R4.3 actually names.
+
+    A cost past the threshold parks the incident instead of resolving it, and the description
+    of the spend has to survive that, or the technician types it twice.
+    """
+    incident = await _in_progress(flow, world, db_session)
+
+    result = await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        materials="Caldera nueva y dos llaves de paso",
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.AWAITING_OWNER_APPROVAL
+    assert result.materials == "Caldera nueva y dos llaves de paso"
+    assert result.resolved_at is None
+
+
+async def test_the_materials_never_reach_the_audit_row_or_the_timeline(
+    flow, world, db_session
+) -> None:
+    """R4.6 — the structural half, driven end to end rather than read off the allowlist.
+
+    `materials` is a rule-11 sink: naming it in a `ChangeSet` raises `AuditContractError`, and
+    `timeline_events` is append-only so a value landing there could never be redacted. Both
+    are asserted on the **built rows**, because that is the half no allowlist protects — a
+    richer `metadata` payload would satisfy every assertion that only reads the allowlist.
+    """
+    incident = await _in_progress(flow, world, db_session)
+    secret = "Codigo del portal 4821 y una junta"
+
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("60.00"),
+        materials=secret,
+        actor=technician(world),
+        now=LATER,
+    )
+
+    rows = await db_session.execute(
+        select(AuditLogModel.changes).where(AuditLogModel.entity_id == incident.id)
+    )
+    for changes in rows.scalars():
+        assert "materials" not in changes
+        assert secret not in str(changes)
+
+    events = await db_session.execute(select(TimelineEventModel))
+    for event in events.scalars():
+        assert "materials" not in (event.metadata_ or {})
+        assert secret not in str(event.metadata_)
+        assert secret not in event.title
+
+
+async def test_a_second_close_after_approval_keeps_the_materials(
+    flow, world, db_session
+) -> None:
+    """D7's whole reason: the repeat close must not silently erase what the first declared."""
+    incident = await _in_progress(flow, world, db_session)
+    await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        materials="Caldera nueva",
+        actor=technician(world),
+        now=LATER,
+    )
+    approvals = await db_session.execute(select(OwnerApprovalModel))
+    approval = approvals.scalars().one()
+    await flow.respond.execute(
+        tenant_id=world.tenant.id,
+        approval_id=approval.id,
+        status=OwnerApprovalStatus.APPROVED,
+        response_notes=None,
+        actor=owner(world),
+        now=LATER,
+    )
+
+    result = await flow.resolve.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        final_cost=Decimal("500.00"),
+        actor=technician(world),
+        now=LATER,
+    )
+
+    assert result.status is IncidentStatus.RESOLVED
+    assert result.materials == "Caldera nueva"
 
 
 async def test_a_clean_resolution_closes_the_incident(flow, world, db_session) -> None:

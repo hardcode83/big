@@ -109,6 +109,15 @@ MAX_INCIDENT_TITLE = 300
 #: maximum, on a write it deliberately does not deduplicate. `title` was already capped against
 #: the same class of abuse; the asymmetry was the bug.
 MAX_INCIDENT_DESCRIPTION = 5000
+#: `incidents.materials` is `VARCHAR(2000)`, and the bound lives here for the reason the two
+#: above do: this module owns the column — the entity below and its DDL next door in
+#: `maintenance/infrastructure/models.py` — so this is where the width can be kept true to what
+#: the database will take. `api/schemas.py` imports it rather than repeating a literal.
+#:
+#: 2000 and not 5000: it is the figure `incidents.assignment_note` already uses for a bounded
+#: note a person types about one job, and a list of parts is shorter than a description of a
+#: fault.
+MAX_MATERIALS = 2000
 
 
 @dataclass
@@ -138,10 +147,19 @@ class Incident:
     #: **current** assignment, not to the incident: `assign` writes it every time, so a
     #: reassignment that carries no note leaves none behind (D7).
     assignment_note: str | None = None
+    #: When the technician says they will arrive (R3.1). Belongs to the **current**
+    #: assignment like `assignment_note`: `assign` and `reject` both clear it, so an hour
+    #: promised by whoever is no longer on the job cannot outlive them (R3.5, D2).
+    eta_at: datetime | None = None
     owner_approval_required: bool = False
     estimated_cost: Decimal | None = None
     approved_cost: Decimal | None = None
     final_cost: Decimal | None = None
+    #: What the technician says they put in, typed on closing (R4.1). Free text this module
+    #: stores verbatim — a rule-11 sink of `steering/security.md` under excepción 3 — so it is
+    #: deliberately **outside** `AUDITABLE_FIELDS["INCIDENT"]` and never reaches a timeline
+    #: `metadata` (R4.6). It explains `final_cost` and is never derived from it (R4.4).
+    materials: str | None = None
     resolved_at: datetime | None = None
 
     #: The legal moves of an incident, as `operation -> (origins it accepts, destination)`
@@ -152,9 +170,9 @@ class Incident:
     #: **Keyed by operation and not by `origin -> {destinations}`**, because two different
     #: operations legitimately share a destination and must not thereby inherit each
     #: other's origins: `AWAITING_OWNER_APPROVAL → CLASSIFIED` is `resume_after_approval`'s
-    #: and `classify` must still refuse it, exactly as `ACCEPTED → IN_PROGRESS` is `start`'s
-    #: and not `resume_work`'s. A pair-keyed table cannot express that and silently accepted
-    #: eight moves the flow forbids.
+    #: and `classify` must still refuse it, exactly as `ACCEPTED → IN_PROGRESS` is
+    #: `en_route`'s and not `resume_work`'s. A pair-keyed table cannot express that and
+    #: silently accepted eight moves the flow forbids.
     #:
     #: `resume_after_approval` appears twice because D11 derives its destination from the
     #: approval's `related_type`. Neither terminal status appears as an origin anywhere,
@@ -190,7 +208,18 @@ class Incident:
             IncidentStatus.ASSIGNED,
         ),
         "accept": (frozenset({IncidentStatus.ASSIGNED}), IncidentStatus.ACCEPTED),
-        "start": (frozenset({IncidentStatus.ACCEPTED}), IncidentStatus.IN_PROGRESS),
+        # R1.1: the technician says no and the incident goes back to where `assign` picks
+        # things up.
+        #
+        # ASSUMPTION: the destination is not in the PRD. `CLASSIFIED` is chosen because it is
+        # the origin `assign` already distributes from and because it is not terminal — that
+        # is `cancel`, which is the manager's, and the fault is still there for somebody else
+        # to fix. Recorded as the `ASSUMPTION` of R1 in the change's `proposal.md`.
+        "reject": (
+            frozenset({IncidentStatus.ASSIGNED, IncidentStatus.ACCEPTED}),
+            IncidentStatus.CLASSIFIED,
+        ),
+        "en_route": (frozenset({IncidentStatus.ACCEPTED}), IncidentStatus.IN_PROGRESS),
         "wait_for_parts": (
             frozenset({IncidentStatus.IN_PROGRESS}),
             IncidentStatus.WAITING_EXTERNAL_PARTS,
@@ -330,7 +359,11 @@ class Incident:
         self.updated_at = now
 
     def require_owner_approval(
-        self, *, now: datetime, final_cost: Decimal | None = None
+        self,
+        *,
+        now: datetime,
+        final_cost: Decimal | None = None,
+        materials: str | None = None,
     ) -> None:
         """Park the incident until the owner answers (R2.1, R4.3; design D11).
 
@@ -341,6 +374,10 @@ class Incident:
 
         The second gate passes `final_cost`: the technician's number is written, and
         `resolved_at` is **not** (D11) — the system did not accept the close.
+
+        It passes `materials` for the same reason and with the same shape (R4.3, D7): both are
+        optional and both **preserve** rather than replace, so the repeat close after the owner
+        answers cannot silently wipe the description of a spend already declared.
         """
         self._check_transition("require_owner_approval")
         if final_cost is not None and final_cost < 0:
@@ -348,6 +385,10 @@ class Incident:
 
         if final_cost is not None:
             self.final_cost = final_cost
+        # R4.3: the second gate keeps what the technician declared. Written only when it
+        # comes, so the repeat close after the owner's answer cannot erase it (D7).
+        if materials is not None:
+            self.materials = materials
         self.owner_approval_required = True
         self._transition("require_owner_approval", now)
 
@@ -384,6 +425,34 @@ class Incident:
         self.approved_cost = approved_cost
         self._transition(operation, now)
 
+    def _apply_eta(self, eta_at: datetime | None, now: datetime) -> None:
+        """Validate and write the technician's promised hour (R3.3, R3.4; design D6).
+
+        `None` means "the body did not carry one", so it returns without touching anything —
+        which is what makes R3.3 ("deja el valor anterior intacto") fall out rather than need
+        an absent-versus-null sentinel.
+
+        Two refusals, both `MaintenanceValidationError` so the router answers `422`:
+
+        * **Naïve or offsetless.** Not in R3.4's letter and load-bearing anyway: comparing an
+          aware `now` with a naïve value raises `TypeError`, which leaves the endpoint as an
+          undeclared `500`. `utcoffset()` is checked beside `tzinfo` because a `tzinfo`
+          returning `None` from it is just as unusable.
+        * **Strictly before `now`.** The boundary itself passes — a technician saying "I am
+          here now" is not an error.
+
+        The rule lives here and not in the request schema because the reference instant is the
+        router's `now_utc()` and a business rule in a DTO leaves every non-HTTP caller
+        (`seed_demo`, the tests) without it (D6).
+        """
+        if eta_at is None:
+            return
+        if eta_at.tzinfo is None or eta_at.utcoffset() is None:
+            raise MaintenanceValidationError("ETA must carry a timezone")
+        if eta_at < now:
+            raise MaintenanceValidationError("ETA cannot be in the past")
+        self.eta_at = eta_at
+
     def assign(
         self,
         *,
@@ -409,16 +478,60 @@ class Incident:
 
         self.assigned_technician_id = technician_id
         self.assignment_note = assignment_note
+        # R3.5, and unconditionally for `assignment_note`'s reason: the ETA belongs to the
+        # assignment in force, so technician B does not inherit the hour technician A promised.
+        self.eta_at = None
         self._transition("assign", now)
 
-    def accept(self, *, now: datetime) -> None:
-        """The technician takes the job (R4.1). Cancelling the SLA deadline is R3.3's, and
-        belongs to the use case that owns the notification rows."""
+    def accept(self, *, now: datetime, eta_at: datetime | None = None) -> None:
+        """The technician takes the job (R4.1), optionally saying when they will arrive (R3.2).
+
+        Cancelling the SLA deadline is R3.3's, and belongs to the use case that owns the
+        notification rows.
+
+        `_apply_eta` runs **after** `_check_transition` and **before** `_transition`: a step
+        out of order is refused before any field moves (R1.8's discipline), and a bad ETA is
+        refused before the status changes.
+        """
+        self._check_transition("accept")
+        self._apply_eta(eta_at, now)
         self._transition("accept", now)
 
-    def start(self, *, now: datetime) -> None:
-        """`ACCEPTED → IN_PROGRESS` (R4.1)."""
-        self._transition("start", now)
+    def reject(self, *, now: datetime) -> None:
+        """The technician refuses the job, and it goes back to the manager (R1.1, R1.2; D2).
+
+        Clears **all three** fields of the assignment in force, not only the assignee R1.2
+        names: `eta_at` and `assignment_note` belong to the assignment too, so an incident
+        that is `CLASSIFIED` and unowned must not keep the note written for whoever said no
+        nor the hour they promised. Who refused is not lost — the use case audits
+        `assigned_technician_id` with its previous value, and the timeline event carries the
+        identifier.
+
+        Ordered so R1.8 holds: `_check_transition` first, so a refusal from any other status
+        raises without a field having moved.
+        """
+        self._check_transition("reject")
+
+        self.assigned_technician_id = None
+        self.eta_at = None
+        self.assignment_note = None
+        self._transition("reject", now)
+
+    def en_route(self, *, now: datetime, eta_at: datetime | None = None) -> None:
+        """The technician is on their way: `ACCEPTED → IN_PROGRESS` (R2.1).
+
+        Called `start` until `tech-cycle-completion` renamed it (D4). Origins and destination
+        are untouched — PRD §12 draws this very move as "Técnico en ruta → status
+        IN_PROGRESS" — and what changed is the name and the timeline event the use case
+        writes, so `TECHNICIAN_EN_ROUTE` stops being a member of the vocabulary nobody
+        writes. `resume_work` keeps `TECHNICIAN_STARTED`, so nothing is orphaned.
+
+        Takes an optional `eta_at` (R3.2), applied in the same order `accept` uses: transition
+        checked, ETA validated, then the status moves.
+        """
+        self._check_transition("en_route")
+        self._apply_eta(eta_at, now)
+        self._transition("en_route", now)
 
     def wait_for_parts(self, *, now: datetime) -> None:
         """`IN_PROGRESS → WAITING_EXTERNAL_PARTS` (R4.1).
@@ -432,7 +545,9 @@ class Incident:
         """`WAITING_EXTERNAL_PARTS → IN_PROGRESS` (R4.1)."""
         self._transition("resume_work", now)
 
-    def resolve(self, *, final_cost: Decimal, now: datetime) -> None:
+    def resolve(
+        self, *, final_cost: Decimal, now: datetime, materials: str | None = None
+    ) -> None:
         """Close the incident with what it actually cost (R4.2).
 
         `final_cost` is mandatory — the signature is where R4.2 is enforced. Whether that
@@ -444,6 +559,8 @@ class Incident:
             raise MaintenanceValidationError("Final cost cannot be negative")
 
         self.final_cost = final_cost
+        if materials is not None:
+            self.materials = materials
         self.resolved_at = now
         self._transition("resolve", now)
 

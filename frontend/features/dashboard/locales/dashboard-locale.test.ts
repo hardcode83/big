@@ -10,7 +10,7 @@ import { TIMELINE_EVENT_TYPES } from "../lib/timeline-event-types";
  * `features/reservations/locales/reservations-locale.test.ts`.
  *
  * The type filter offers the closed enum, so a missing label is not a cosmetic
- * gap — the option would render blank (R2.5 removed the raw-enum fallback). 46
+ * gap — the option would render blank (R2.5 removed the raw-enum fallback). 47
  * labels × 2 locales is mechanical work, so the gap is checked rather than
  * trusted. Symmetry between es and en is already enforced by
  * `lib/i18n/catalog-parity.test.ts`; `TIMELINE_EVENT_TYPES` is pinned to the

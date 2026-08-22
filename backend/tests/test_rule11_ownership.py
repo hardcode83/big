@@ -111,6 +111,12 @@ SINK_TERMS = (
     # appears all over this codebase's prose — and the other two notes of that table are not
     # census columns, so a bare `properties` would fire on blocks about them.
     "incidents.assignment_note",
+    # `tech-cycle-completion` (2026-08-22) added one column to the census, and it goes in here
+    # for residual 3's reason, the same one `incidents.assignment_note` above entered on: the
+    # sink axis is fed by this tuple, so a column the table governs and this does not is a
+    # blind spot the green would hide. Qualified with its table, like its two siblings and for
+    # the identical reason — `incidents` is an ordinary English word all over this tree's prose.
+    "incidents.materials",
     "properties.access_notes",
     "messages.content",
     "messages.intent",
