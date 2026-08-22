@@ -27,10 +27,23 @@ Dos hechos más, medidos el mismo día, que delimitan el arreglo:
   (`backend/tests/cleaning/conftest.py`) fuerza `current_operational_state = AWAITING_CLEANING`
   antes de crear la tarea, que es el único estado en que la operación funciona.
 
-Y por contraste, la prueba de que el diagnóstico es completo: la misma pantalla, con el mismo
-usuario, asigna sin error cuando la vivienda está en `AWAITING_CLEANING` — verificado en `dev` el
-2026-08-22 llevando PAJARITOS8 por el camino real (procedimiento en
-`infra/environments/dev/RUNBOOK-seed-demo.md` §5).
+La otra mitad del contraste está preparada pero **no medida todavía**, y conviene decir qué es cada
+cosa: llevando PAJARITOS8 por el camino real el 2026-08-22 —reserva, checkout y aprovisionamiento,
+procedimiento en `infra/environments/dev/RUNBOOK-seed-demo.md` §5— la vivienda quedó en
+`AWAITING_CLEANING` con una tarea `CREATED` y sin asignar, que es la precondición que el diagnóstico
+predice. **Nadie ha confirmado aún que la asignación pase sobre ella**, así que eso es una
+predicción del análisis del código, no un hecho observado. La verificación pendiente es una sola
+acción en la pantalla y le corresponde a `/sdd:design` o a `/sdd:run` cerrarla antes de dar el
+diagnóstico por completo. Si fallara, el defecto es más ancho de lo que este proposal describe y hay
+que reabrirlo.
+
+Un tercer dato, este sí medido, sobre por qué esto importa más de lo que parece: en `dev` la vivienda
+REDES11 llegó a `AWAITING_CLEANING` el 2026-08-16 **sin ninguna fila en
+`property_state_transitions`**, cinco minutos y medio después de que alguien creara una tarea a mano
+y justo antes de asignarla con éxito. Es decir: la columna se escribió por fuera de la máquina de
+estados. El motivo no consta —una petición rechazada no deja auditoría—, pero el análisis completo
+está en la proposal de `cleaning-stall-blocks-next-stay`, y la hipótesis que encaja con la secuencia
+es que este mismo `409` ya bloqueó a alguien y la salida que encontró fue el `UPDATE`.
 
 Entrada de roadmap: `cleaning-assign-preconditions` (`completes: cleaning-manager-view`).
 
