@@ -53,4 +53,4 @@
 | compose-ports-guard | new, design, tasks, run, review, ship, archive | 242042 | 674109 | 161324018 | 117.3315 | 2026-08-18 | 2026-08-18 |
 | worktree-port-offset | new, design, tasks, run, review, ship, archive | 280817 | 682388 | 129188290 | 97.6098 | 2026-08-18 | 2026-08-19 |
 | cleaner-task-context | new, design, tasks, run, review, ship, archive | 284101 | 822245 | 166612611 | 112.8963 | 2026-08-18 | 2026-08-19 |
-| conversations-inbox | new, design, tasks, run, review | 473993 | 1237058 | 153704192 | 114.6148 | 2026-08-19 | — |
+| conversations-inbox | new, design, tasks, run, review | 559174 | 1486580 | 212876482 | 157.2932 | 2026-08-19 | — |
