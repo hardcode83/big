@@ -92,6 +92,18 @@ El precedente pesa: ese test existe en `reservations` porque una revisión anter
 Rejected: confiar en `catalog-parity.test.ts` — comprueba paridad entre idiomas, no cobertura del enum.
 Rejected: no añadirlo, como `incidents` — repetiría un defecto ya diagnosticado, y con un riesgo extra que aquellos no tenían.
 
+### D14 — Graduar la página de placeholder a real exige registrarla en `route-coverage.test.ts`
+
+**Chosen:** añadir `"(workspace)/properties/page.tsx": "properties"` al mapa `REAL_PAGE_ROUTE_IDS` de `frontend/app/route-coverage.test.ts`.
+
+**Descubierto durante la implementación, y corrige una afirmación falsa de este mismo diseño.** La sección «Trabajo de shell: ninguno» decía la verdad sobre `route-registry.ts` y `locales/*/navigation.json` —las dos rutas y sus cuatro claves ya existían— pero se dejó fuera un **tercer** fichero que toda página graduada tiene que tocar. `route-coverage.test.ts` deduce el `routeId` de cada página leyendo su prop `routeId="…"`, que sólo existe mientras la página es un `RoutePlaceholder`; en cuanto deja de serlo, la página queda «sin cubrir» y su segundo test —«no orphan pages», que espera exactamente 1, el redirect raíz de `(workspace)`— pasa a 2 y falla.
+
+No es un defecto del test: es su mecanismo previsto, documentado en su propio comentario («As modules graduate from placeholder to implemented, they are listed here») y ya usado por `dashboard-web-frontend`, `cleaning-manager-view`, `reservations-web` e `incidents-web`. Lo que faltaba era que este diseño lo nombrara.
+
+**Cómo se detectó, y por qué importa para el plan**: no lo vio ningún test de la feature —los 64 de `features/properties/` pasaban— sino la **suite completa**. Es un argumento concreto para no cerrar una sección con el subconjunto de tests de la feature: la tarea 7.2 existe por esto.
+
+Rejected: relajar la expectativa del test a 2 — convertiría en pasable cualquier página huérfana futura, que es justo lo que ese test vigila.
+
 ### D13 — R5.4 (renderizar como texto) no necesita diseño
 
 **Chosen:** nada que diseñar. La interpolación de texto de JSX escapa por defecto y el cumplimiento consiste en **no** introducir `dangerouslySetInnerHTML`, que no aparece hoy en ninguna parte de la feature ni de sus precedentes. Queda como comprobación de aceptación a nivel de tarea, no como decisión de arquitectura. Se declara explícitamente para que R5.4 no quede cubierto sólo por omisión.
@@ -117,6 +129,7 @@ Rejected: no añadirlo, como `incidents` — repetiría un defecto ya diagnostic
 | i18n | `frontend/locales/es/properties.json`, `frontend/locales/en/properties.json` | **Nuevos**: namespace `properties` (R6) |
 | | `frontend/lib/i18n/resources.ts` | Registro en sus tres puntos: import, array, tablas `es`/`en` |
 | Página | `frontend/app/(workspace)/properties/page.tsx` | `RoutePlaceholder` → `PropertiesView`; `generateMetadata` intacto |
+| Cobertura de rutas | `frontend/app/route-coverage.test.ts` | Registrar la página graduada en `REAL_PAGE_ROUTE_IDS` (ver D14) |
 
 ## Data & interfaces
 

@@ -1,0 +1,48 @@
+{
+  "status": {
+    "ACTIVE": "Activa",
+    "INACTIVE": "Inactiva"
+  },
+  "columns": {
+    "name": "Vivienda",
+    "internalCode": "Código",
+    "city": "Ciudad",
+    "capacity": "Capacidad",
+    "operationalState": "Estado",
+    "status": "Situación"
+  },
+  "filters": {
+    "status": "Situación",
+    "operationalState": "Estado operativo",
+    "all": "Todas",
+    "allStates": "Todos los estados"
+  },
+  "capacity": {
+    "summary": "{{guests}} huéspedes · {{bedrooms}} hab. · {{bathrooms}} baños"
+  },
+  "row": {
+    "openDetail": "Ver el detalle de {{name}}"
+  },
+  "pagination": {
+    "prev": "Página anterior",
+    "next": "Página siguiente",
+    "position": "Página {{page}} de {{totalPages}}"
+  },
+  "empty": {
+    "title": "No hay viviendas que mostrar",
+    "description": "Ninguna vivienda coincide con los filtros seleccionados."
+  },
+  "error": {
+    "title": "No se ha podido cargar el listado",
+    "description": "Vuelve a intentarlo en unos segundos."
+  },
+  "forbidden": {
+    "title": "Sin permiso",
+    "description": "Tu rol no puede consultar el listado de viviendas."
+  },
+  "validation": {
+    "title": "Filtros no válidos",
+    "description": "Revisa los filtros seleccionados y vuelve a intentarlo."
+  },
+  "cityEmpty": "Sin ciudad"
+}
