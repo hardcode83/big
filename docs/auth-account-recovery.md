@@ -116,6 +116,32 @@ Si Redis no responde, el comando avisa por `stderr` de que **la contraseña sí 
 el bloqueo caducará por su cuenta. Es la degradación buena: lo contrario sería informar de un
 fallo tras haber cambiado la credencial.
 
+### Después del rescate: el gate no se levanta desde la aplicación
+
+El frontend **no tiene pantalla** para ninguno de los tres endpoints exentos: `/forgot-password`
+está en el registro de rutas pero renderiza un `RoutePlaceholder`, no hay página que consuma el
+token del enlace y ningún componente lee `must_change_password`. Así que la cuenta rescatada entra
+por el navegador y recibe `403 PASSWORD_CHANGE_REQUIRED` en todo lo demás, sin salida visible.
+
+La salida es llamar al endpoint:
+
+```bash
+BASE=<origen>/api/v1/auth
+
+ACCESS=$(curl -sS "$BASE/login" -H 'Content-Type: application/json' \
+  -d '{"email":"<dirección>","password":"<temporal>"}' | jq -r .access_token)
+
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/change-password" \
+  -H "Authorization: Bearer $ACCESS" -H 'Content-Type: application/json' \
+  -d '{"current_password":"<temporal>","new_password":"<la nueva>"}'
+```
+
+`204` y a volver a entrar: el cambio revoca todas las familias de refresh, incluida la que hizo la
+llamada. `GET /auth/me` responde `must_change_password: false` cuando ha surtido efecto.
+
+El procedimiento completo contra el entorno `dev` —SSH, directorio del compose y comprobación—
+está en [`infra/environments/dev/RUNBOOK.md`](../infra/environments/dev/RUNBOOK.md) §8.
+
 ## Configuración
 
 | Variable | Defecto | Para qué |
