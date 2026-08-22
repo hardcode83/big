@@ -155,6 +155,13 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 
 - WHEN un manager asigna la incidencia, THE SYSTEM SHALL fijar `assigned_technician_id`, pasar a
   `ASSIGNED` y notificar al técnico con `TECHNICIAN_ASSIGNED`.
+- THE SYSTEM SHALL aceptar en el cuerpo de `assign` un `assignment_note` **opcional** acotado a 2000
+  caracteres —la nota que el manager le deja al técnico— y SHALL escribirlo **siempre**, de modo que
+  reasignar sin nota borra la anterior: pertenece a la asignación vigente y no a la incidencia. El
+  permiso, la tabla de transiciones y el `extra="forbid"` del cuerpo no cambian por ella, y la nota
+  NEVER SHALL aparecer en `IncidentResponse`. La sirve
+  [`tech-incident-context`](tech-incident-context.md), que es también donde vive el resto de su
+  contrato.
 - THE SYSTEM NEVER SHALL aceptar como asignatario un usuario que no sea `TECHNICIAN` **y** esté
   `ACTIVE` en el tenant del solicitante; el rechazo SHALL ser `InvalidTechnicianError`.
 - THE SYSTEM SHALL derivar el plazo de la severidad —`sla_critical_minutes`, `sla_high_minutes`,
@@ -204,10 +211,16 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 
 ### R8 — API del módulo, permisos y aislamiento
 
-- THE SYSTEM SHALL exponer doce rutas, todas autenticadas y todas con permiso declarado: once bajo
-  `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `PATCH` de triaje y los `POST` de
-  `classify`, `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve` y `cancel`) y
-  `POST /api/v1/owner-approvals/{approval_id}/respond`.
+- THE SYSTEM SHALL exponer trece rutas, todas autenticadas y todas con permiso declarado: doce bajo
+  `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `GET` de contexto operativo, `PATCH` de
+  triaje y los `POST` de `classify`, `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve` y
+  `cancel`) y `POST /api/v1/owner-approvals/{approval_id}/respond`.
+- THE SYSTEM SHALL servir el contexto operativo de una incidencia —a qué propiedad va el técnico y
+  cómo entra— en `GET /api/v1/incidents/{incident_id}/context`, bajo `READ_INCIDENTS` y con el mismo
+  acotamiento por fila que el resto del módulo. Es una capacidad con su propia spec
+  ([`tech-incident-context`](tech-incident-context.md)) y no se reenuncia aquí: lo que le toca a este
+  módulo es que **no creó permiso nuevo**, que no ensanchó ninguna fila alcanzable, y que
+  `IncidentResponse` **no** cambió por su causa.
 - THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo, y esa
   negativa SHALL sobrevivir a la aparición de un alta genérica: `ReportIncidentUseCase` es un caso
   de uso, no una ruta. Las superficies que crean incidencias son la anónima del portal del huésped,
@@ -300,10 +313,15 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 - THE SYSTEM SHALL auditar sobre `INCIDENT` exactamente once campos: `source`, `status`,
   `reservation_id`, `category`, `severity`, `assigned_technician_id`, `owner_approval_required`,
   `estimated_cost`, `approved_cost` y `final_cost`, más `resolved_at`.
-- THE SYSTEM NEVER SHALL auditar `title`, `description`, `ai_summary` ni `ai_classification`, y esa
-  exclusión SHALL ser **estructural**: nombrar cualquiera de los cuatro en un `ChangeSet` levanta
-  `AuditContractError`. Los dos primeros son texto libre de origen externo sobre una tabla
-  append-only; los otros dos son los sumideros que R2 acota.
+- THE SYSTEM NEVER SHALL auditar `title`, `description`, `ai_summary`, `ai_classification` ni
+  `assignment_note`, y esa exclusión SHALL ser **estructural**: nombrar cualquiera de los cinco en un
+  `ChangeSet` levanta `AuditContractError`, en las dos formas —`diff()` y `redacted()`—, por no ser
+  campo declarado de la entidad. Los dos primeros son texto libre de origen externo sobre una tabla
+  append-only; los dos siguientes son los sumideros que R2 acota; el último es la nota de la
+  asignación, que además SHALL quedar **fuera de `REDACTED_FIELDS`** de forma deliberada —denylistar
+  obligaría a añadirla al allowlist, que es estrictamente más superficie— y cuyo texto NEVER SHALL
+  viajar al `metadata` del `TimelineEvent` de la asignación, que lleva solo `incident_id` y
+  `technician_id`.
 - THE SYSTEM SHALL auditar sobre `OWNER_APPROVAL` exactamente cinco campos: `status`, `amount`,
   `related_type`, `responded_by` y `responded_at`, y NEVER SHALL auditar `reason` ni
   `response_notes`.
@@ -339,11 +357,14 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   hueco. Cerrarlo sólo aquí dejaría un rastro incoherente. Candidato con nombre propuesto:
   `property-transition-audit`.
 - **El aislamiento por tenant está implementado y verificado ruta por ruta, pero demostrado en dos
-  de sus tres puertas.** El detalle y las ocho transiciones comparten una única función; la tercera
-  —`RespondOwnerApprovalUseCase`— resuelve por su propio par de consultas y ningún test falla si
-  alguien enhebra mal su `tenant_id`. Lo que falta es estructural: un test que **enumere** los sitios
-  donde un caso de uso pide al repositorio, o pasar el tenant por un contexto tipado. Candidato:
-  `tenant-scoping-enumeration-guard`.
+  de sus tres puertas.** El detalle, el contexto operativo y las ocho transiciones comparten hoy una
+  única función —`_load_incident_in_scope`, una corrutina de módulo que
+  [`tech-incident-context`](tech-incident-context.md) extrajo cuando la regla estaba escrita dos
+  veces y añadir una tercera copia era la alternativa—; la tercera puerta
+  —`RespondOwnerApprovalUseCase`— sigue resolviendo por su propio par de consultas y ningún test
+  falla si alguien enhebra mal su `tenant_id`. Lo que falta es estructural: un test que **enumere**
+  los sitios donde un caso de uso pide al repositorio, o pasar el tenant por un contexto tipado.
+  Candidato: `tenant-scoping-enumeration-guard`.
 - **Sin comprobador estático en CI.** No hay `mypy` ni `pyright` en el backend, así que ninguna
   afirmación de la forma «lo garantiza el tipo» es sostenible: un `Protocol` no impone su anotación
   de retorno en ejecución. Vale para todo el backend, no sólo para este módulo. Candidato:
@@ -369,6 +390,8 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 
 - `backend/app/maintenance/domain/entities.py` — `Incident`, `OwnerApproval` y la tabla de
   transiciones.
+- `backend/app/maintenance/domain/read_models.py` — `IncidentContext`, la proyección de
+  [`tech-incident-context`](tech-incident-context.md).
 - `backend/app/maintenance/domain/ports.py` — `IncidentClassifier` y `LiveCleaningTaskQuery`.
 - `backend/app/maintenance/domain/value_objects.py` — `IncidentClassification` y sus invariantes.
 - `backend/app/maintenance/domain/notifications.py` — plazos de SLA y las dos notificaciones.

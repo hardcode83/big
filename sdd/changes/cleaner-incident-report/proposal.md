@@ -260,11 +260,12 @@ que el archivado no tenga que volver a buscarlo:
 
 | Fichero:línea | Lo que dice hoy | Por qué es falso después de este change |
 |---|---|---|
-| `sdd/specs/maintenance.md:214` | «Las superficies que crean incidencias son la anónima del portal del huésped, el pipeline de mensajería y el comando `make seed-demo`» | Falta la cuarta: la limpiadora desde su propia tarea (R7.3) |
-| `sdd/specs/maintenance.md:231` | «THE SYSTEM SHALL NOT aceptar `reservation_id` ni `reported_by_user_id`» | `ReportIncidentUseCase` acepta ya `reported_by_user_id` y `cleaning_task_id`, cada uno con su precondición descargada (R7.4, D4) |
-| `sdd/specs/maintenance.md:264` | Fila RBAC `` `CLEANER`, `SUPER_ADMIN` \| nada de este módulo `` | `SUPER_ADMIN` sigue sin nada; `CLEANER` pasa a «abrir una incidencia desde una tarea de limpieza suya, y nada más» (R7.1) |
-| `sdd/specs/maintenance.md:279` | «THE SYSTEM NEVER SHALL exponer estas rutas al rol `CLEANER`…» | Sigue siendo **cierta** de las once rutas de `/api/v1/incidents`, y hay que reescribirla para que se lea así en vez de como «CLEANER no puede nada» (R7.2) |
-| `sdd/specs/maintenance.md:300` | «auditar sobre `INCIDENT` exactamente **once** campos» | Son doce: entró `cleaning_task_id` (R7.4, D10) |
+| `sdd/specs/maintenance.md:227` | «Las superficies que crean incidencias son la anónima del portal del huésped, el pipeline de mensajería y el comando `make seed-demo`» | Falta la cuarta: la limpiadora desde su propia tarea (R7.3) |
+| `sdd/specs/maintenance.md:244` | «THE SYSTEM SHALL NOT aceptar `reservation_id` ni `reported_by_user_id`» | `ReportIncidentUseCase` acepta ya `reported_by_user_id` y `cleaning_task_id`, cada uno con su precondición descargada (R7.4, D4) |
+| `sdd/specs/maintenance.md:277` | Fila RBAC `` `CLEANER`, `SUPER_ADMIN` \| nada de este módulo `` | `SUPER_ADMIN` sigue sin nada; `CLEANER` pasa a «abrir una incidencia desde una tarea de limpieza suya, y nada más» (R7.1) |
+| `sdd/specs/maintenance.md:292` | «THE SYSTEM NEVER SHALL exponer estas rutas al rol `CLEANER`…» | Sigue siendo **cierta** de las once rutas de `/api/v1/incidents`, y hay que reescribirla para que se lea así en vez de como «CLEANER no puede nada» (R7.2) |
+| `sdd/specs/maintenance.md:313` | «auditar sobre `INCIDENT` exactamente **once** campos» | Son doce: entró `cleaning_task_id` (R7.4, D10) |
+| `sdd/specs/maintenance.md:96` | «las vías que crean incidencias por HTTP son una ruta **anónima desde internet** y un pipeline disparado por un webhook» | Son tres: esta ruta es una tercera vía HTTP y es **autenticada**. La frase sostiene el razonamiento de la regla 12(d) sobre por qué no se clasifica en la petición, así que hay que reescribirla sin romper ese argumento — que sigue en pie, porque lo que la 12(d) acota es el trabajo que un desconocido provoca desde fuera (R7.4) |
 
 Y **fuera** de `sdd/specs/`, ya arreglado aquí, anotado para que no se busque dos veces:
 `ReportIncidentUseCase`'s docstring (el «took no `reservation_id`»), el docstring de

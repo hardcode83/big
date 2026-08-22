@@ -213,7 +213,7 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 80 de las 91 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 82 de las 93 operaciones lo
   referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
@@ -227,9 +227,12 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   y no tiene sesión; las cuatro del portal, con `GuestPortalAuthenticator` sobre el token de la
   ruta (`specs/guest-portal-api.md`). Las once están nombradas **con su verbo** en el allowlist de
   `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para forzar.
-- **Las doce rutas de `maintenance` entraron todas autenticadas y con permiso declarado**: once
-  bajo `/api/v1/incidents` y `POST /api/v1/owner-approvals/{approval_id}/respond`. Ninguna tocó
-  el allowlist anónimo, que sigue teniendo las once entradas de arriba.
+- **Las trece rutas de `maintenance` entraron todas autenticadas y con permiso declarado**: doce
+  bajo `/api/v1/incidents` —la última, `GET /api/v1/incidents/{incident_id}/context`, entró el
+  2026-08-21 con [`tech-incident-context`](tech-incident-context.md)— y
+  `POST /api/v1/owner-approvals/{approval_id}/respond`. Ninguna tocó el allowlist anónimo, que
+  sigue teniendo las once entradas de arriba: la proyección de contexto del técnico exige
+  `READ_INCIDENTS` como el resto del módulo.
 - **Las siete rutas de `messaging` entraron igual** (2026-08-16), todas bajo
   `/api/v1/conversations` y repartidas entre `READ_CONVERSATIONS` y `MANAGE_CONVERSATIONS`
   ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación
