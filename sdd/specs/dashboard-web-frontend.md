@@ -115,6 +115,29 @@ changing the UI, hooks or query keys.
 - THE SYSTEM SHALL map each canonical `PropertyOperationalState` to its exact PRD
   §9.1 color group (green/blue/amber/red/gray), exhaustively over the state union,
   falling back to gray for an unrecognized value.
+- THE SYSTEM SHALL keep that map in **one** place in the tree — the cross-cutting
+  `components/property-state-badge.tsx`, which owns both halves (state → colour
+  group and colour group → Tailwind classes) and the gray fallback — and SHALL NOT
+  keep a copy inside this feature. `PropertyCard` consumes the component; the
+  feature no longer has a `lib/state-color.ts`.
+- THE SYSTEM SHALL type that shared component on the generated
+  `components["schemas"]["PropertyOperationalState"]` union and NEVER SHALL type it
+  on the hand-written union of `features/dashboard/data/dto.ts`, so that extracting
+  it does not leave one feature depending on another's internals.
+- THE SYSTEM SHALL give the shared component the signature `{ state, label }`: it
+  owns the colour and receives the label already translated, so it carries no i18n
+  namespace of its own and each consuming screen resolves the eleven labels from
+  the `dashboard` namespace where they live.
+- THE SYSTEM SHALL export from that component the runtime list
+  `PROPERTY_OPERATIONAL_STATES`, derived from the colour map's keys rather than
+  transcribed, so a consumer that offers the states as options inherits the
+  compiler's exhaustiveness instead of silently omitting a twelfth state.
+
+**El alcance de esa unicidad es la tabla de `PropertyOperationalState`, no «los
+colores del árbol».** `features/cleaning/lib/task-status.ts` mantiene una tercera
+tabla con los mismos valores Tailwind, y queda fuera a propósito: indexa otro enum
+(`CleaningTaskStatus`) y PRD §9.1 fija colores para el estado de la vivienda, no
+para el de la tarea.
 
 ### Quality
 
@@ -146,9 +169,13 @@ changing the UI, hooks or query keys.
 - `frontend/features/dashboard/components/` — `property-card.tsx`,
   `dashboard-view.tsx`, `detail/{property-detail-view,property-detail-sections,
   property-timeline}.tsx`.
-- `frontend/features/dashboard/lib/` — `state-color.ts` (PRD §9.1 map),
-  `format.ts` (localized dates); `state/use-timeline-filters-store.ts` (UI-only
-  Zustand filters); `index.ts` (feature public entry).
+- `frontend/features/dashboard/lib/` — `format.ts` (localized dates);
+  `state/use-timeline-filters-store.ts` (UI-only Zustand filters); `index.ts`
+  (feature public entry, exporting only `DashboardView` and `PropertyDetailView`).
+- `frontend/components/property-state-badge.tsx` — the single PRD §9.1 colour map
+  (`STATE_COLOR_GROUP`, `STATE_BADGE_CLASS`, `stateColorGroup()`,
+  `PROPERTY_OPERATIONAL_STATES`), shared with the `/properties` index
+  (`properties-crud.md`).
 - `frontend/app/(workspace)/dashboard/page.tsx`,
   `frontend/app/(workspace)/properties/[id]/page.tsx` — compose the feature.
 - `frontend/locales/{es,en}/dashboard.json`, registered in

@@ -58,4 +58,4 @@
 | cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
 | cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
-| properties-web | new, design, tasks, run, review | 123159 | 458598 | 112275563 | 67.2033 | 2026-08-22 | — |
+| properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
