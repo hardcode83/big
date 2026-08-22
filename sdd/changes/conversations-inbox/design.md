@@ -383,6 +383,19 @@ upgrade de React Query reintroduciría el fallo sin ninguna señal.
    `AuthGuard` desmonta este árbol mientras re-autentica; sellar por `tenantId` **y** `userId` no
    depende de que eso siga siendo verdad.
 
+   **Segundo límite declarado, y este sí puede llegarle al huésped**: queda un camino de respuesta
+   duplicada que **no** abre el `key` —existe igual sin remontaje— y que este change no cierra. Si el
+   envío falla **en el cliente después de que el servidor haya escrito** el mensaje (un timeout), la
+   petición se cuenta como error, y `onError` solo invalida en un 409 (D18: «de un 500 no hay nada
+   nuevo que aprender»). Así que el hilo no se re-consulta, la respuesta entregada es **invisible**, y
+   la operadora reenvía: el huésped la recibe dos veces. Con el remontaje además tampoco ve el banner
+   —muere con la instancia, y eso es deliberado—, así que no puede distinguir «no se envió» de «sí se
+   envió». La premisa de D18 es cierta para un 500 del servidor y **falsa para un timeout**, donde lo
+   que hay que aprender es justamente si la escritura llegó. Cerrarlo pide una de dos cosas, y las dos
+   son alcance propio: una clave de idempotencia en `POST /messages` (backend), o re-consultar el hilo
+   ante **cualquier** fallo de envío en vez de solo ante un 409, aceptando una petición extra por
+   fallo. Queda escrito, no resuelto.
+
    **Límite declarado, no resuelto**: la recuperación del borrador está acotada al montaje de **esta
    página**, que es más estrecho de lo que esta nota decía en su primera redacción. Dos caminos lo
    pierden, y el segundo es el común: (a) cualquier 401 de cualquier petición pone la sesión en

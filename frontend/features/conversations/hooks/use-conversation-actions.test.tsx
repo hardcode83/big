@@ -373,6 +373,29 @@ describe("useSendReply — an in-flight reply is visible after a remount (D22)",
     await waitFor(() => expect(second.result.current.isInFlight).toBe(false));
   });
 
+  // Reopening was pinned for success only; a regression that left the composer
+  // disabled after a failed send would have gone unnoticed.
+  it("reopens the composer after a failed send", async () => {
+    const { Wrapper } = harness();
+    let reject: (reason: unknown) => void = () => undefined;
+    source.createMessage.mockImplementation(
+      () => new Promise((_resolve, rejectFn) => {
+        reject = rejectFn;
+      }),
+    );
+    const { result } = renderHook(() => useSendReply(CONVERSATION), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate("no llega");
+    await waitFor(() => expect(result.current.isInFlight).toBe(true));
+
+    reject(new ApiError({ code: "SERVER_ERROR", message: "boom", status: 500 }));
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.isInFlight).toBe(false);
+  });
+
   it("does not report another conversation's send as in flight", async () => {
     const { Wrapper } = harness();
     source.createMessage.mockImplementation(() => new Promise(() => undefined));
