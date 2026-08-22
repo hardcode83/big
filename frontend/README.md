@@ -18,7 +18,7 @@ npm run api:check    # comprueba deriva sin modificar el artefacto
 
 La verificación no depende de un backend ni de datos de negocio.
 
-**Baseline del shell** (`next build`, Next 16.2.10 estable): 21 superficies de PRD §24 + redirect raíz, todas server-rendered on demand (la cookie de locale se resuelve por request). El bundle del shell no importa módulos de negocio (el único feature es `features/shell`); los módulos futuros quedan fuera hasta navegar su ruta. Sin APIs canary/experimentales.
+**Baseline del shell** (`next build`, Next 16.2.10 estable): 22 superficies de PRD §24 + redirect raíz, todas server-rendered on demand (la cookie de locale se resuelve por request). El bundle del shell no importa módulos de negocio (el único feature es `features/shell`); los módulos futuros quedan fuera hasta navegar su ruta. Sin APIs canary/experimentales.
 
 ## Estructura y reglas de dependencia
 

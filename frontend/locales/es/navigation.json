@@ -26,6 +26,10 @@
       "title": "Reservas",
       "description": "Listado y detalle de reservas."
     },
+    "reservation-detail": {
+      "title": "Detalle de reserva",
+      "description": "Información detallada de una reserva."
+    },
     "cleaning": {
       "title": "Limpieza",
       "description": "Tareas de limpieza y su coordinación."
@@ -33,6 +37,10 @@
     "incidents": {
       "title": "Incidencias",
       "description": "Incidencias y mantenimiento de las propiedades."
+    },
+    "incident-detail": {
+      "title": "Detalle de incidencia",
+      "description": "Información detallada de una incidencia."
     },
     "conversations": {
       "title": "Conversaciones",

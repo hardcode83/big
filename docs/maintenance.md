@@ -201,3 +201,29 @@ Fotos de la incidencia (el patrón es el de `cleaning-photos-storage`), el `Expe
 resolver (es de `revenue`), la expiración automática de una aprobación, la UI del técnico
 (`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
 cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change.
+
+## Cómo se ven desde la web
+
+La pantalla de **lista y detalle** de incidencias del workspace (`/incidents`,
+`/incidents/[id]`) está disponible en modo solo lectura desde `incidents-web` (archivado
+en `changes/archive/`). Cubre la consulta: la manager abre `/incidents`, filtra por `status`
+y `severity`, paginacliente (`lastPage = max(1, ceil(total / perPage))`, porque el endpoint
+no expone `total_pages`), y abre cada fila en `/incidents/[id]`. El detalle pinta los 18
+campos de `IncidentResponse` — incluido `description` como **texto plano** (regla 11 de
+`sdd/steering/security.md`: texto libre del huésped o de la limpiadora, nunca HTML) y
+`assigned_technician_id` bajo una sección secundaria etiquetada con su nota de limitación
+(no hay `GET /api/v1/users` en el contrato, así que el UUID no se resuelve a nombre aquí).
+
+Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
+
+- Las **once operaciones de mutación** de la incidencia (`classify`, `triage` vía `PATCH`,
+  `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve`, `cancel`): cada una lleva
+  su permiso (`MANAGE_INCIDENTS` o `EXECUTE_INCIDENTS`), su validación de transición
+  (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
+  `IncidentBlockedByPendingApprovalError`), su UX de confirmación y su auditoría.
+- **Responder una aprobación** (`POST /owner-approvals/{id}/respond`): la ruta `/approvals`
+  sigue como `RoutePlaceholder` y la regla 11 ata esa pantalla a una decisión de UX sobre
+  el flujo de la propietaria.
+- **Selector de propiedad** y **resolución nombre↔id de `assigned_technician_id`**: ambos
+  son `M` por derecho propio y dependen de capacidades (`tech-app`,
+  `tech-incident-context` `[BE]`) que viven en otras ramas del roadmap.
