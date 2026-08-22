@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/timeline-web
 implementation_sha: f046de40dfe3526a4fe84b92f59730613463f0d1
 pr_number: 
 pr_url: 
