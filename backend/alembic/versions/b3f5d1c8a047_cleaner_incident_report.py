@@ -13,7 +13,7 @@ seed never had a cleaning behind it. Nothing in this change queries by the colum
 index would be a cost with no reader.
 
 Revision ID: b3f5d1c8a047
-Revises: e7a3c419d82b
+Revises: b9d24e70c1af
 Create Date: 2026-08-19 00:00:00.000000
 
 """
