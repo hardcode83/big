@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 
 import {
+  PROPERTY_OPERATIONAL_STATES,
   PropertyStateBadge,
   stateColorGroup,
   type PropertyOperationalState,
@@ -63,20 +64,13 @@ function appliedColorClasses(element: HTMLElement): Set<string> {
   );
 }
 
-/** The canonical union, verified against `backend/app/properties/domain/enums.py`. */
-const ALL_STATES: readonly PropertyOperationalState[] = [
-  "VACANT_READY",
-  "READY_FOR_NEXT_GUEST",
-  "AWAITING_CHECKIN",
-  "OCCUPIED_ESTIMATED",
-  "CLEANING_IN_PROGRESS",
-  "AWAITING_CLEANING",
-  "CLEANING_SCHEDULED",
-  "MAINTENANCE_REQUIRED",
-  "CRITICAL_INCIDENT",
-  "BLOCKED_BY_OWNER",
-  "OUT_OF_SERVICE",
-];
+/**
+ * The canonical union as runtime values, from the module's own exported
+ * constant — which derives from the color map, so the compiler keeps it
+ * complete. Verified against `backend/app/properties/domain/enums.py`.
+ */
+const ALL_STATES: readonly PropertyOperationalState[] =
+  PROPERTY_OPERATIONAL_STATES;
 
 describe("stateColorGroup (PRD §9.1, design D2)", () => {
   it.each([

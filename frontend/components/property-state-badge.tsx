@@ -52,6 +52,26 @@ const STATE_COLOR_GROUP: Record<PropertyOperationalState, StateColorGroup> = {
 };
 
 /**
+ * The eleven canonical states, as runtime values, derived from the color map
+ * above rather than re-transcribed.
+ *
+ * This is the single runtime source for callers that need to enumerate the
+ * states — the filter's `<option>` list, and the tests. Hand-writing the list a
+ * second time is the failure mode design D10 names for label catalogs («dos
+ * catálogos del mismo enum es como divergen») and it applies just as well to
+ * the values: a manual list has no exhaustiveness check, so if the backend adds
+ * a twelfth state the filter would silently stop offering it and nothing would
+ * go red. Deriving it from `STATE_COLOR_GROUP` inherits that map's
+ * compiler-enforced exhaustiveness (`Record<PropertyOperationalState, …>`).
+ *
+ * Order is the map's declaration order, which is grouped by color on purpose
+ * (green → blue → amber → red → gray) and is the order the filter shows.
+ */
+export const PROPERTY_OPERATIONAL_STATES = Object.keys(
+  STATE_COLOR_GROUP,
+) as PropertyOperationalState[];
+
+/**
  * Color group for a state. Falls back to `gray` for an unrecognized value, so a
  * new backend state never crashes the screen — it renders neutrally until
  * mapped. Preserving this fallback was an explicit requirement of the move

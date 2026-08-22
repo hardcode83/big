@@ -92,6 +92,36 @@ El precedente pesa: ese test existe en `reservations` porque una revisión anter
 Rejected: confiar en `catalog-parity.test.ts` — comprueba paridad entre idiomas, no cobertura del enum.
 Rejected: no añadirlo, como `incidents` — repetiría un defecto ya diagnosticado, y con un riesgo extra que aquellos no tenían.
 
+### D15 — Dos layouts por breakpoint, no una tabla con scroll lateral
+
+**Chosen:** por debajo de `sm`, una tarjeta apilada por propiedad con pares etiqueta/valor (la forma que `Field` usa en `property-card.tsx`); desde `sm`, la tabla de seis columnas. Los dos se renderizan y Tailwind decide cuál se ve.
+
+**Corrige un incumplimiento real que el diseño original tenía.** La primera versión era una tabla a `min-w-[40rem]` dentro de un `overflow-x-auto`, y el panel de arquitectura lo señaló como bloqueante citando `steering/frontend.md`: «diseño responsive **mobile-first** — la propietaria opera desde el móvil». Tenía razón y el argumento es concreto: con scroll lateral, la propietaria tiene que desplazar horizontalmente para leer `status`, que es **el único dato que sólo existe en esta pantalla**. El precedente (`reservations-view.tsx`) es incluso peor —no tiene ni `overflow-x-auto`—, pero eso explica el origen, no lo justifica.
+
+Verificado en navegador real a dos anchos: a 375 px la tabla está oculta, las tarjetas visibles y el desbordamiento horizontal es **0 px**; a 1280 px, al revés.
+
+**Coste conocido y aceptado**: el DOM lleva las filas dos veces. Es el patrón estándar de tabla responsive en Tailwind, y en un navegador la mitad oculta sale del árbol de accesibilidad por `display:none`. Su única consecuencia práctica es de test: en jsdom no hay hoja de estilos, así que ambos layouts existen y toda consulta por texto tiene que acotarse a uno.
+
+Rejected: tabla con `overflow-x-auto` — incumple la regla citada, y precisamente sobre la columna que da valor a la pantalla.
+Rejected: reducir a tres columnas en móvil — esconde `status`, que es la razón de existir de la pantalla.
+
+### D16 — Una sola fuente en tiempo de ejecución para los once estados
+
+**Chosen:** `PROPERTY_OPERATIONAL_STATES`, exportada de `components/property-state-badge.tsx` y derivada de `Object.keys(STATE_COLOR_GROUP)`. La consumen el `<select>` del filtro y los tests.
+
+Lo pidió el panel de arquitectura, aplicando D10 por analogía de las etiquetas a los **valores**: `STATE_COLOR_GROUP` es un `Record<PropertyOperationalState, …>` cuya completitud fuerza el compilador, mientras que una lista escrita a mano no tiene esa red — si el backend añade un estado doce, el filtro dejaría de ofrecerlo **en silencio** y ningún test se pondría rojo, porque el test de locales validaba sus propios valores transcritos contra las traducciones, no contra el contrato.
+
+Rejected: mantener la lista transcrita en `properties-filters.tsx` — es la divergencia que D10 nombra, sólo que sobre valores en vez de etiquetas.
+
+### D17 — La capacidad se compone de tres fragmentos pluralizados
+
+**Chosen:** `capacity.summary` es una plantilla con el separador, y `capacity.guests`/`bedrooms`/`bathrooms` son claves con plural de i18next que el componente resuelve pasando `count`.
+
+**Arregla un bug que la comprobación en navegador enseñó y yo pasé por alto**: una sola cadena con tres contadores no puede pluralizar, porque i18next pluraliza sobre un único `count`. La pantalla decía literalmente «2 huéspedes · 1 hab. · **1 baños**». El panel de i18n señaló la asimetría de abreviaturas sin llegar al fallo de concordancia que la causaba.
+
+Rejected: unificar abreviaturas («1 hab. · 1 baños») — maquilla la asimetría y deja el plural mal.
+Rejected: el separador escrito en el componente — sería una cadena visible en código, contra R6.4.
+
 ### D14 — Graduar la página de placeholder a real exige registrarla en `route-coverage.test.ts`
 
 **Chosen:** añadir `"(workspace)/properties/page.tsx": "properties"` al mapa `REAL_PAGE_ROUTE_IDS` de `frontend/app/route-coverage.test.ts`.

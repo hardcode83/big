@@ -67,7 +67,27 @@ Va primero porque es lo único que toca código ajeno: si rompe algo, se ve ante
 - [x] 5.3 Crear `frontend/features/properties/locales/properties-locale.test.ts` calcado de `features/reservations/locales/reservations-locale.test.ts`: **los once** valores de `PropertyOperationalState` y **los dos** de `PropertyStatus` resuelven a una cadena no vacía en ES y en EN. `catalog-parity.test.ts` no cubre esto: compara conjuntos de claves entre idiomas, no cobertura por valor del enum. [R6]
 - [x] 5.4 Verificar que no queda ninguna cadena visible escrita en el código de la feature. [R6]
 
-## 6. Conectar la ruta
+## 6. Conectar la ruta <!-- panel: PASS 2026-08-22 -->
+<!-- Panel de las secciones 4–6 (la pantalla): architect FAIL→resuelto · qa FAIL→resuelto ·
+     i18n FAIL→resuelto. Cinco hallazgos aplicados, cuatro de ellos bugs reales:
+     (a) BLOQUEANTE mobile-first: la tabla era de ancho de escritorio con scroll lateral,
+         obligando a desplazarse para ver `status` — el único dato que sólo vive aquí.
+         Ahora hay dos layouts por breakpoint (design D15), verificado en navegador:
+         a 375px 0px de desbordamiento horizontal.
+     (b) BLOQUEANTE cobertura de R1.6: `province` valía «Madrid» igual que `city`, así que
+         una fuga de ese campo era ESTRUCTURALMENTE indetectable por lista negra. Fixture
+         con valores distintivos (`ZZ-PROVINCE`, `ZZ-COUNTRY`) más aserción de cardinalidad
+         de seis celdas por fila, que caza cualquier celda extra sea cual sea su valor.
+     (c) la cadena de capacidad no pluralizaba: decía «1 baños». Tres fragmentos con plural
+         de i18next (D17). Lo destapó la comprobación en navegador, no un test.
+     (d) los once valores del enum estaban transcritos a mano en el filtro; ahora salen de
+         `PROPERTY_OPERATIONAL_STATES`, con completitud forzada por el compilador (D16).
+     (e) terminología: «viviendas» frente a «propiedades» del resto del producto; alineado.
+     Y una corrección de mi propia medición: tras el copiado de nueve ficheros ejecuté
+     `make up`, que RECREÓ los contenedores y se llevó los ficheros por delante, así que la
+     cifra «97/790» que di era real cuando la medí y falsa cuando la cité. Lo detectó qa.
+     Rehecho el copiado: 97 ficheros / 798 tests en verde. -->
+
 
 - [x] 6.1 Cambiar `frontend/app/(workspace)/properties/page.tsx` para renderizar `PropertiesView` en vez de `RoutePlaceholder`, dejando `generateMetadata` con `routeMetadata("properties")` como está. No tocar `route-registry.ts` ni `locales/*/navigation.json`: las dos rutas y sus cuatro claves ya existen. [R1]
 - [x] 6.2 Confirmar que ningún componente de la feature usa `dangerouslySetInnerHTML`, de modo que `name`, `internal_code` y la ciudad se rendericen como texto por la interpolación de JSX (D13). [R5]

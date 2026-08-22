@@ -2,6 +2,8 @@
 
 import { useTranslation } from "react-i18next";
 
+import { PROPERTY_OPERATIONAL_STATES } from "@/components/property-state-badge";
+
 import type {
   PropertyFilters,
   PropertyOperationalState,
@@ -10,20 +12,18 @@ import type {
 
 const PROPERTY_STATUSES: PropertyStatus[] = ["ACTIVE", "INACTIVE"];
 
-/** The eleven canonical states, verified against `properties/domain/enums.py`. */
-const OPERATIONAL_STATES: PropertyOperationalState[] = [
-  "VACANT_READY",
-  "READY_FOR_NEXT_GUEST",
-  "AWAITING_CHECKIN",
-  "OCCUPIED_ESTIMATED",
-  "CLEANING_IN_PROGRESS",
-  "AWAITING_CLEANING",
-  "CLEANING_SCHEDULED",
-  "MAINTENANCE_REQUIRED",
-  "CRITICAL_INCIDENT",
-  "BLOCKED_BY_OWNER",
-  "OUT_OF_SERVICE",
-];
+/**
+ * The eleven states come from `PROPERTY_OPERATIONAL_STATES`, not from a list
+ * written out here again.
+ *
+ * That constant is derived from the `Record<PropertyOperationalState, …>` color
+ * map, so its completeness is enforced by the compiler: if the backend adds a
+ * twelfth state, the build breaks and this `<select>` picks it up for free. A
+ * hand-written list would silently stop offering the new state and no test
+ * would go red — the same divergence design D10 names for label catalogs.
+ */
+const OPERATIONAL_STATES: readonly PropertyOperationalState[] =
+  PROPERTY_OPERATIONAL_STATES;
 
 /**
  * The v1 filter bar for `/properties` (proposal R2, design D7). Controlled

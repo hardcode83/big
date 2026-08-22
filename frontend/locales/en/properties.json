@@ -18,12 +18,19 @@
     "allStates": "All states"
   },
   "capacity": {
-    "summary": "{{guests}} guests · {{bedrooms}} bd · {{bathrooms}} ba"
+    "summary": "{{guests}} · {{bedrooms}} · {{bathrooms}}",
+    "guests_one": "{{count}} guest",
+    "guests_other": "{{count}} guests",
+    "bedrooms_one": "{{count}} bedroom",
+    "bedrooms_other": "{{count}} bedrooms",
+    "bathrooms_one": "{{count}} bathroom",
+    "bathrooms_other": "{{count}} bathrooms"
   },
   "row": {
     "openDetail": "View details for {{name}}"
   },
   "pagination": {
+    "label": "List pagination",
     "prev": "Previous page",
     "next": "Next page",
     "position": "Page {{page}} of {{totalPages}}"
@@ -38,7 +45,7 @@
   },
   "forbidden": {
     "title": "Not allowed",
-    "description": "Your role cannot view the property list."
+    "description": "You don't have permission to view the property list"
   },
   "validation": {
     "title": "Invalid filters",

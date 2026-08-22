@@ -4,7 +4,7 @@
     "INACTIVE": "Inactiva"
   },
   "columns": {
-    "name": "Vivienda",
+    "name": "Propiedad",
     "internalCode": "Código",
     "city": "Ciudad",
     "capacity": "Capacidad",
@@ -18,27 +18,34 @@
     "allStates": "Todos los estados"
   },
   "capacity": {
-    "summary": "{{guests}} huéspedes · {{bedrooms}} hab. · {{bathrooms}} baños"
+    "summary": "{{guests}} · {{bedrooms}} · {{bathrooms}}",
+    "guests_one": "{{count}} huésped",
+    "guests_other": "{{count}} huéspedes",
+    "bedrooms_one": "{{count}} habitación",
+    "bedrooms_other": "{{count}} habitaciones",
+    "bathrooms_one": "{{count}} baño",
+    "bathrooms_other": "{{count}} baños"
   },
   "row": {
     "openDetail": "Ver el detalle de {{name}}"
   },
   "pagination": {
+    "label": "Paginación del listado",
     "prev": "Página anterior",
     "next": "Página siguiente",
     "position": "Página {{page}} de {{totalPages}}"
   },
   "empty": {
-    "title": "No hay viviendas que mostrar",
-    "description": "Ninguna vivienda coincide con los filtros seleccionados."
+    "title": "No hay propiedades que mostrar",
+    "description": "Ninguna propiedad coincide con los filtros seleccionados."
   },
   "error": {
-    "title": "No se ha podido cargar el listado",
+    "title": "No se pudo cargar el listado",
     "description": "Vuelve a intentarlo en unos segundos."
   },
   "forbidden": {
     "title": "Sin permiso",
-    "description": "Tu rol no puede consultar el listado de viviendas."
+    "description": "No tienes permiso para ver el listado de propiedades"
   },
   "validation": {
     "title": "Filtros no válidos",

@@ -21,6 +21,7 @@
 import { describe, expect, it } from "vitest";
 import i18next from "i18next";
 
+import { PROPERTY_OPERATIONAL_STATES } from "@/components/property-state-badge";
 import type { components } from "@/lib/api/generated/openapi";
 import enDashboard from "@/locales/en/dashboard.json";
 import esDashboard from "@/locales/es/dashboard.json";
@@ -35,22 +36,17 @@ type PropertyOperationalState =
 const STATUS_VALUES: PropertyStatus[] = ["ACTIVE", "INACTIVE"];
 
 /**
- * The eleven `PropertyOperationalState` values, verified against
- * `backend/app/properties/domain/enums.py`.
+ * The eleven `PropertyOperationalState` values, taken from the shared constant
+ * instead of transcribed here.
+ *
+ * That matters for what this file is FOR: a hand-written fixture would validate
+ * the translations against itself, so a state the backend adds and this list
+ * misses would look covered. `PROPERTY_OPERATIONAL_STATES` derives from a
+ * `Record<PropertyOperationalState, …>`, so the compiler keeps it complete and
+ * this test inherits that guarantee.
  */
-const STATE_VALUES: PropertyOperationalState[] = [
-  "VACANT_READY",
-  "READY_FOR_NEXT_GUEST",
-  "AWAITING_CHECKIN",
-  "OCCUPIED_ESTIMATED",
-  "CLEANING_IN_PROGRESS",
-  "AWAITING_CLEANING",
-  "CLEANING_SCHEDULED",
-  "MAINTENANCE_REQUIRED",
-  "CRITICAL_INCIDENT",
-  "BLOCKED_BY_OWNER",
-  "OUT_OF_SERVICE",
-];
+const STATE_VALUES: readonly PropertyOperationalState[] =
+  PROPERTY_OPERATIONAL_STATES;
 
 describe("properties locale — PropertyStatus (R6.1)", () => {
   it("localizes both status values in ES and EN", () => {
@@ -79,6 +75,12 @@ describe("properties locale — PropertyStatus (R6.1)", () => {
 });
 
 describe("properties locale — operational state read from `dashboard` (R6.3, design D10)", () => {
+  it("has eleven states to cover, matching the backend enum", () => {
+    // Guards the premise of the test below: if this ever stops being 11, the
+    // contract moved and the label catalogs need revisiting.
+    expect(STATE_VALUES).toHaveLength(11);
+  });
+
   it("localizes the eleven operational states in ES and EN", () => {
     // The screen reads these with `useTranslation("dashboard")` instead of
     // duplicating them, so this is where that cross-namespace decision is held
