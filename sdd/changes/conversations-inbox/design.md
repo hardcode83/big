@@ -28,20 +28,26 @@ fuera de alcance.
 
 ## Decisions
 
-### D1 — Feature nueva `features/conversations/`, sin seam `ConversationsDataSource`
+### D1 — `data/index.ts` como composition point único; sin seam `ConversationsDataSource` ni `MockConversationsSource`
 
 **Chosen:** módulo `frontend/features/conversations/` con `data/dto.ts`,
-`data/http/http-conversations-source.ts`, `data/index.ts` (composition point exportando
-`getConversationsDataSource()` que devuelve un singleton `HttpConversationsSource`),
-`hooks/query-keys.ts`, `hooks/use-conversations.ts`, `hooks/use-reply-to-conversation.ts`,
-`lib/error-mapping.ts`, `components/list/conversations-view.tsx`,
-`components/list/conversations-filters.tsx`, `components/thread/conversation-thread-view.tsx`,
+`data/http/http-conversations-source.ts`, `data/index.ts` (composition point que instancia
+un `HttpConversationsSource` y exporta `getConversationsDataSource()` que devuelve ese
+singleton), `hooks/query-keys.ts`, `hooks/use-conversations.ts`,
+`hooks/use-reply-to-conversation.ts`, `lib/error-mapping.ts`,
+`components/list/conversations-view.tsx`, `components/list/conversations-filters.tsx`,
+`components/thread/conversation-thread-view.tsx`,
 `components/thread/conversation-thread-messages.tsx`,
-`components/thread/conversation-reply-form.tsx`, `index.ts` (barrel). **Sin
-`data/mock/`**: el backend existe desde `messaging-ai` archivado, no hay nada que suplantar.
-**Sin seam interfaz + mock**: precedent de `incidents-web` D1 y `reservations-web` D1 — la
-interfaz estaba justificada en `dashboard-web` porque había una UI preexistente que dependía
-del mock, y aquí no hay UI previa.
+`components/thread/conversation-reply-form.tsx`, `index.ts` (barrel). **`data/index.ts`
+es el único punto de composición**: ahí se construye el `HttpConversationsSource` con el
+`ApiClient` autenticado (precedent: `features/incidents/data/index.ts:19-26`,
+`features/reservations/data/index.ts`). **No existe interfaz `ConversationsDataSource`**,
+**no existe `MockConversationsSource`** y **no existe `data/mock/`**: el backend existe
+desde `messaging-ai` archivado, no hay nada que suplantar, y el precedent de `incidents-web`
+D1 y `reservations-web` D1 lo desaconseja explícitamente — la interfaz estaba justificada
+en `dashboard-web` porque había una UI preexistente que dependía del mock, y aquí no hay
+UI previa. UI y hooks dependen SOLO de `getConversationsDataSource()`, y reemplazar la
+implementación (si llegara) es un cambio de una línea confinado a `data/index.ts`.
 
 **Why:** El precedent de `incidents-web` D1 lo discute y descarta para este caso: *"aquí
 no hay mock previo que sustituir ni UI previa que respetar: se va directo a HTTP contra
@@ -71,25 +77,35 @@ línea confinado a `data/index.ts`.
 `AIRBNB_MSG`, `BOOKING_MSG`, `EMAIL`, `PHONE_TRANSCRIPT`, `MANUAL`), `senderType` (cinco de
 `MessageSenderType`: `GUEST`, `OWNER`, `MANAGER`, `AI`, `SYSTEM`), `fields` (etiquetas de
 columnas de la lista + cabeceras del hilo + copy del formulario de respuesta + nota del UUID
-del sender) y `thread` (copy específico del hilo: «Mensajes», «Sin mensajes», «Responder»,
-«Enviar», «Cancelar», «Caracteres restantes», placeholders). Reutilizar
-`frontend/locales/{es,en}/states.json` para `loading.label`, `error.title`,
-`error.description`, `error.retry`, `empty.title`, `empty.description`, y `prevPage` /
-`nextPage` ya están en `incidents.json` (misma convención del workspace).
+del sender **+ las dos claves de paginación `prevPage` y `nextPage`**) y `thread` (copy
+específico del hilo: «Mensajes», «Sin mensajes», «Responder», «Enviar», «Cancelar»,
+«Caracteres restantes», placeholders). Reutilizar `frontend/locales/{es,en}/states.json`
+para `loading.label`, `error.title`, `error.description`, `error.retry`, `empty.title`,
+`empty.description` (son los textos comunes de carga / error / vacío del workspace y ya
+existen para todo el frontend).
 
 **Why:** Las seis secciones son específicas de esta capacidad — no las reutiliza otra
 feature — y mezclarlas en `states.json`, `incidents.json` o `navigation.json` haría que un
 futuro cambio de etiquetas aquí obligara a tocar un fichero que también mira el resto del
 workspace. `dashboard.json` ya contiene claves del dashboard agregado (`propertyCode`,
 `operationalState`), no de la pantalla de conversaciones. Los textos de carga / error /
-vacío **no** se duplican: `states.json` ya provee los tres, y `prevPage` / `nextPage` ya
-existen en `incidents.json` — añadir un nuevo par sería ceremonia sin beneficiario. La
+vacío **no** se duplican: `states.json` ya los provee para todo el frontend.
+`prevPage` / `nextPage` viven en `conversations.json` (sección `fields`) porque ningún
+namespace compartido los aloja con un caracter genuinamente genérico — `common.json` y
+`states.json` no los tienen, y `incidents.json` los tiene porque son del workspace de
+incidencias; reusar el de otro dominio impone una dependencia entre features que no
+existe, y crear un namespace nuevo solo por estas dos claves es ceremonia. La
 sección `thread` se separa de `fields` para que la lista (`fields`) y el hilo
 (`thread`)lean por separado cuando crezca cualquiera de los dos.
 
 **Rejected:**
-- *Reutilizar `incidents.json`* — el dominio es distinto (`incident.status` ≠
-  `conversation.status`), y renombrar aquí obligaría a coordinarse con el otro workspace.
+- *Reutilizar `incidents.json` para `prevPage` / `nextPage`* — el dominio es distinto
+  (`incident.status` ≠ `conversation.status`), y crear una dependencia cruzada entre
+  features por dos cadenas de paginación impone un acoplamiento sin beneficiario.
+- *Crear un namespace compartido nuevo (`pagination.json` o similar)* — solo por
+  `prevPage` / `nextPage` es ceremonia; dos claves no justifican un fichero transversal.
+  Cuando un tercer workspace necesite las mismas dos cadenas, ahí se decide el
+  namespace compartido (o no).
 - *Un fichero por enumeración (`status.json`, `channel.json`, etc.)* — seis ficheros para
   una entrada `size: M` es ceremonia.
 - *Un fichero por requisito (lista.json, thread.json, form.json)* — tres ficheros para una
@@ -320,8 +336,12 @@ de UI consistente con el resto del workspace.
   `conversationsKeys.messagesPrefix(tenantId, conversationId)` (el hilo para incluir el
   nuevo mensaje). **No patch optimista**: igual que `useAssignCleaningTask`, una fila
   con un mensaje que el backend no confirmó es peor que un refetch.
-- El texto escrito por el operador se preserva en estado local al fallar: el hook
-  devuelve el `content` que escribió el caller para que el formulario pueda repintarlo.
+
+El hook **no** almacena ni devuelve copia del draft: el contenido que el operador está
+escribiendo pertenece exclusivamente al estado local de `ConversationReplyForm`. En
+éxito el formulario limpia el campo por su cuenta; en error el formulario simplemente no
+lo modifica. Responsabilidades del hook: la mutación, `retry: false` y la invalidación de
+los tres keys. Una sola fuente de verdad para el draft (el `useState` del formulario).
 
 **Why:** `invalidateQueries` con `queryKey: conversationsKeys.listPrefix(tenantId)`
 alcanza cada combinación de filtros y página sin enumerarlas — precedent:
@@ -333,8 +353,10 @@ el huésped podría ver (en su canal, fuera del UI) un mensaje que el panel dice
 «enviado» pero el backend rechazó. `sender_type` se omite por construcción: el backend
 deriva el rol del caller (`messaging-ai.md` R7: «omitido, el llamante contesta él
 mismo y el `sender_type` se deriva de su rol»), y enviar cualquier valor no nulo
-responde `422`. El hook devuelve el `content` para que el formulario lo repinte en error
-sin reescribirlo: la UX del formulario queda atada al hook, no al componente.
+responde `422`. La responsabilidad sobre el draft queda en el formulario: el hook no
+conoce el contenido que está escribiendo el operador, y el formulario decide limpiarlo
+en éxito o preservarlo en error — evitar dos fuentes de verdad (hook + componente) es
+lo que mantiene el formulario trivial de leer y razonar.
 
 **Rejected:**
 - *Patch optimista + rollback en `onError`* — introduce el instante de mentira
@@ -348,6 +370,10 @@ sin reescribirlo: la UX del formulario queda atada al hook, no al componente.
   literalmente el contrato.
 - *`retry: true` con backoff* — `useAssignCleaningTask` ya discutió esto: una escritura
   rechazada no se reintenta, y un mensaje rechazado debe ver el error inmediatamente.
+- *El hook almacena o devuelve una copia del draft* — son dos fuentes de verdad
+  (hook + formulario) y propaga estado que pertenece al componente. El draft vive
+  exclusivamente en el `useState` del formulario; el hook solo dispara la mutación y
+  invalida cache.
 
 ## Changes by area
 
@@ -375,8 +401,8 @@ sin reescribirlo: la UX del formulario queda atada al hook, no al componente.
 | Components | `frontend/features/conversations/components/thread/conversation-thread-view.test.tsx` | New: tests (loading / loaded / not-found / error / `<script>` como texto plano, D7). |
 | Components | `frontend/features/conversations/components/thread/conversation-thread-messages.tsx` | New: bloque presentacional de mensajes con etiqueta de rol (D7, D8). |
 | Components | `frontend/features/conversations/components/thread/conversation-thread-messages.test.tsx` | New: tests de cada `sender_type` + `intent` cuando AI + `sender_user_id` nota localizada (D7, D8). |
-| Components | `frontend/features/conversations/components/thread/conversation-reply-form.tsx` | New: formulario con contador `4000`, estado de envío, error localizado, preservación de texto (D9). |
-| Components | `frontend/features/conversations/components/thread/conversation-reply-form.test.tsx` | New: tests de contador, deshabilitación mientras vuela, preservación en error, envío exitoso. |
+| Components | `frontend/features/conversations/components/thread/conversation-reply-form.tsx` | New: formulario con contador `4000`, estado de envío, error localizado, draft en estado local propio (D9). |
+| Components | `frontend/features/conversations/components/thread/conversation-reply-form.test.tsx` | New: tests de contador, deshabilitación mientras vuela, draft preservado en error, draft limpiado en éxito, envío exitoso. |
 | Components | `frontend/features/conversations/index.ts` | New: barrel export. |
 | Pages | `frontend/app/(workspace)/conversations/page.tsx` | Replace placeholder with `<ConversationsInboxView />`. |
 | Pages | `frontend/app/(workspace)/conversations/[id]/page.tsx` | New: detail page que llama `routeMetadata('conversation-detail')` y renderiza `<ConversationThreadView conversationId={id} />`. |
@@ -527,7 +553,7 @@ de backend que modifique un endpoint, según `sdd/specs/frontend-api-contract-co
   §Data & interfaces. Futura entrada con decisión de UI lo añade si llega a hacer
   falta.*
 - *Invalidación tras `POST /messages` → tres keys (lista, detalle, mensajes), D9. Sin
-  patch optimista. Texto preservado en error.*
+  patch optimista. El draft pertenece al formulario; el hook solo dispara y invalida.*
 
 *No queda ninguna abierta para `tasks.md`: la entrada puede pasar a tareas sin más
 gates.)*
