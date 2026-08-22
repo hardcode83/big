@@ -163,8 +163,9 @@ aparcada sobre `properties.access_notes`. El *cómo se opera* está en
 
 ### Las dos exclusiones de la nota son estructurales por ausencia del allowlist
 
-- THE SYSTEM SHALL mantener `assignment_note` **fuera** de `AUDITABLE_FIELDS["INCIDENT"]`, que sigue
-  con sus once campos, y esa exclusión SHALL ser **estructural**: nombrarla en un `ChangeSet` levanta
+- THE SYSTEM SHALL mantener `assignment_note` **fuera** de `AUDITABLE_FIELDS["INCIDENT"]` —que
+  pasó a **doce** campos en [`cleaner-incident-report`](cleaner-incident-report.md), al entrar
+  `cleaning_task_id`—, y esa exclusión SHALL ser **estructural**: nombrarla en un `ChangeSet` levanta
   `AuditContractError` por no ser un campo declarado de la entidad, en **las dos formas** —`diff()` y
   `redacted()`—. Es el mismo mecanismo exacto que ya excluye `title`, `description`, `ai_summary` y
   `ai_classification`.

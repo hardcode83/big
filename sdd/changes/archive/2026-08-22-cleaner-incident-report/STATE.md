@@ -1,6 +1,6 @@
 ---
 schema: 1
-state: MERGED
+state: ARCHIVED
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main

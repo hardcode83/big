@@ -213,7 +213,7 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 82 de las 93 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 83 de las 94 operaciones lo
   referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,

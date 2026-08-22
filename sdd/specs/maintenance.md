@@ -7,9 +7,9 @@ desde el `OPEN` que deja cualquier fuente hasta `RESOLVED` o `CANCELLED`: clasif
 por un puerto propio, aprobación de la propietaria cuando el gasto supera el umbral del tenant,
 asignación a un técnico con su plazo de SLA, el ciclo de transiciones que conduce el técnico, y la
 recomposición del estado operacional de la propiedad. Es el único escritor de mutaciones sobre
-`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por tres vías: la anónima
-del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)), desde el 2026-08-16 una
-conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
+`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por cuatro vías: la
+anónima del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)), desde el 2026-08-16
+una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ([`messaging-ai.md`](messaging-ai.md)), y desde el 2026-08-17 el alta **genérica** que abre
 `ReportIncidentUseCase` ([`seed-data-demo.md`](seed-data-demo.md)).
 
@@ -92,10 +92,14 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ### R3 — El job de clasificación
 
 - THE SYSTEM SHALL ejecutar la clasificación en un job periódico, `classify_incidents`, **cada 5
-  minutos**, y NEVER SHALL clasificar dentro de la **petición** que crea la incidencia: las dos
-  vías que crean incidencias por HTTP son una ruta **anónima desde internet** y un pipeline
-  disparado por un webhook, y colgar de ellas la llamada al clasificador es lo que prohíbe la
-  regla 12(d) de `steering/security.md`.
+  minutos**, y NEVER SHALL clasificar dentro de la **petición** que crea la incidencia. Las vías
+  que crean incidencias por HTTP son tres: una ruta **anónima desde internet**, un pipeline
+  disparado por un webhook, y —desde `cleaner-incident-report`— el alta **autenticada** de la
+  limpiadora sobre su propia tarea ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
+  Colgar de cualquiera de ellas la llamada al clasificador es lo que prohíbe la regla 12(d) de
+  `steering/security.md`, y la tercera no debilita ese argumento: lo que la regla acota es el
+  trabajo que un desconocido provoca desde fuera, y las dos primeras siguen siendo la razón por la
+  que la clasificación no puede vivir en la petición.
 - WHERE la creación no viene de una petición sino de un comando que una persona ejecuta —hoy sólo
   `make seed-demo`—, THE SYSTEM SHALL permitir clasificar en la misma transacción que crea la
   incidencia. Lo que la regla 12(d) acota es el trabajo que un desconocido puede provocar desde
@@ -223,8 +227,10 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `IncidentResponse` **no** cambió por su causa.
 - THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo, y esa
   negativa SHALL sobrevivir a la aparición de un alta genérica: `ReportIncidentUseCase` es un caso
-  de uso, no una ruta. Las superficies que crean incidencias son la anónima del portal del huésped,
-  el pipeline de mensajería y el comando `make seed-demo`.
+  de uso, no una ruta. Las superficies que crean incidencias son cuatro: la anónima del portal del
+  huésped, el pipeline de mensajería, el comando `make seed-demo` y el alta de la limpiadora desde
+  su propia tarea, que vive **bajo `cleaning`** y no aquí
+  ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
 
 **El alta genérica, y la precondición que tiene que descargar ella misma.** Desde el 2026-08-17
 `maintenance` ofrece `ReportIncidentUseCase` —`tenant_id`, `property_id`, `source`, `title`,
@@ -241,10 +247,17 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   abierto a cualquier llamante no tiene nada equivalente.
 - THE SYSTEM SHALL exigir actor: el alta no está en el conjunto de acciones que `_AuditWriter`
   exime, así que una creación sin actor se rechaza y no commitea nada.
-- THE SYSTEM SHALL NOT aceptar `reservation_id` ni `reported_by_user_id`. Se diseñaron y se
-  quitaron: arrastraban la misma precondición sin descargar y hoy no tienen llamante. Quien traiga
-  el primero —la alerta de cerradura que este módulo anuncia— añade el parámetro **junto con** la
-  búsqueda que lo hace seguro.
+- THE SYSTEM SHALL NOT aceptar `reservation_id`. Se diseñó y se quitó junto a
+  `reported_by_user_id`: arrastraban la misma precondición sin descargar y ninguno tenía llamante.
+  La regla que quedó es que quien traiga uno añade el parámetro **junto con** la búsqueda que lo
+  hace seguro.
+- THE SYSTEM SHALL aceptar `reported_by_user_id` y `cleaning_task_id`, ambos **opcionales** y por
+  palabra clave, de modo que ningún llamante existente cambie. Los trajo
+  [`cleaner-incident-report`](cleaner-incident-report.md) honrando esa regla y no derogándola: el
+  primero viene del token ya verificado, y el segundo de una tarea de limpieza que el llamante
+  cargó con `tenant_id` explícito. THE SYSTEM NEVER SHALL derivar uno del otro — «quién reportó» y
+  «quién actúa» son dos conceptos, y colapsarlos cambiaría en silencio lo que escribe
+  `app/cli/seed_demo.py`.
 - THE SYSTEM SHALL admitir cualquier miembro de `IncidentSource`, sin filtro, y SHALL dejar la
   incidencia en `OPEN` sin fijar `category`, `severity` ni `ai_classification` — que es lo que
   mantiene a `classify` como única puerta de salida de `OPEN` (R1).
@@ -274,7 +287,8 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   | `TENANT_OWNER` | leer incidencias; responder aprobaciones |
   | `PROPERTY_MANAGER` | leer, clasificar, triar, asignar, cancelar **y** todo el ciclo del técnico |
   | `TECHNICIAN` | leer y ejecutar el ciclo (aceptar, empezar, esperar piezas, reanudar, resolver) |
-  | `CLEANER`, `SUPER_ADMIN` | nada de este módulo |
+  | `CLEANER` | abrir una incidencia desde una tarea de limpieza suya, y nada más — y esa alta vive **bajo `cleaning`** ([`cleaner-incident-report.md`](cleaner-incident-report.md)), no en este módulo |
+  | `SUPER_ADMIN` | nada de este módulo |
 
 - THE SYSTEM SHALL conceder a `TECHNICIAN` exactamente lo que R5 y R6 necesitan y nada más: su
   conjunto completo es autoservicio (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`,
@@ -289,7 +303,11 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   existencia.
 - THE SYSTEM SHALL tomar el `tenant_id` únicamente del token verificado, SHALL pasarlo explícito a
   cada método de repositorio, y NEVER SHALL aceptarlo en ningún esquema de petición.
-- THE SYSTEM NEVER SHALL exponer estas rutas al rol `CLEANER` ni al portador de un token de huésped.
+- THE SYSTEM NEVER SHALL exponer **las once rutas de `/api/v1/incidents`** al rol `CLEANER` ni al
+  portador de un token de huésped: leer, listar, clasificar, triar, asignar, cancelar y el ciclo
+  del técnico siguen cerrados a los dos. Lo único que una `CLEANER` puede hacer con una incidencia
+  es abrirla desde su propia tarea de limpieza, y esa ruta pertenece a otro módulo
+  ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
 - THE SYSTEM SHALL paginar el listado con `?page&per_page` (por defecto 1 y 20, máximos 100.000 y
   100) y devolver `items`, `total`, `page` y `per_page`, y SHALL admitir los filtros `property_id`,
   `status` y `severity`, combinados con `AND`.
@@ -310,9 +328,13 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 
 - WHEN cambia el estado de una incidencia o se responde una aprobación, THE SYSTEM SHALL escribir su
   `AuditLog` y su `TimelineEvent` **en la misma transacción** que el cambio.
-- THE SYSTEM SHALL auditar sobre `INCIDENT` exactamente once campos: `source`, `status`,
-  `reservation_id`, `category`, `severity`, `assigned_technician_id`, `owner_approval_required`,
-  `estimated_cost`, `approved_cost` y `final_cost`, más `resolved_at`.
+- THE SYSTEM SHALL auditar sobre `INCIDENT` exactamente doce campos: `source`, `status`,
+  `reservation_id`, `cleaning_task_id`, `category`, `severity`, `assigned_technician_id`,
+  `owner_approval_required`, `estimated_cost`, `approved_cost` y `final_cost`, más `resolved_at`.
+  `cleaning_task_id` entró con [`cleaner-incident-report`](cleaner-incident-report.md): la fila de
+  auditoría registra contra qué está anclada la incidencia —para eso está `reservation_id`— y
+  «durante qué limpieza» es el ancla equivalente. Es un identificador y no texto, así que la
+  excepción 2 de la regla 11 no se toca.
 - THE SYSTEM NEVER SHALL auditar `title`, `description`, `ai_summary`, `ai_classification` ni
   `assignment_note`, y esa exclusión SHALL ser **estructural**: nombrar cualquiera de los cinco en un
   `ChangeSet` levanta `AuditContractError`, en las dos formas —`diff()` y `redacted()`—, por no ser
