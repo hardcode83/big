@@ -56,7 +56,7 @@ test acompaña a la tarea pero no la precede.
   puerta de aprobación conserva `materials`, y que un segundo cierre sin `materials` no lo
   borra. [R4.1, R4.2, R4.3, R4.4] (D7)
 
-## 2. Vocabulario compartido: timeline y auditoría
+## 2. Vocabulario compartido: timeline y auditoría <!-- panel: PASS 2026-08-22 -->
 
 - [x] 2.1 **`TECHNICIAN_REJECTED`.** Miembro nuevo en
   `backend/app/timeline/domain/enums.py` y su entrada ES/EN en
@@ -80,7 +80,7 @@ test acompaña a la tarea pero no la precede.
   campo que lo invalida. A la 6.2 le queda `SINK_COLUMNS` de tres a cuatro y lo que eso
   arrastra. [R5.1, R4.6]
 
-## 3. Persistencia y migración
+## 3. Persistencia y migración <!-- panel: PASS 2026-08-22 -->
 
 - [x] 3.1 **Las dos columnas en el modelo.**
   `backend/app/maintenance/infrastructure/models.py`: `eta_at` `TIMESTAMPTZ` nullable y
@@ -106,7 +106,7 @@ test acompaña a la tarea pero no la precede.
   `backend/tests/test_migrations.py`, que recorre la cadena en los dos sentidos.
   [R5.6] (D9)
 
-## 4. Aplicación — los casos de uso
+## 4. Aplicación — los casos de uso <!-- panel: PASS 2026-08-22 -->
 
 - [x] 4.1 **La mezcla de pasos del técnico deja de tener un diff fijo.**
   `backend/app/maintenance/application/use_cases.py`: `_TechnicianStepUseCase` gana
@@ -148,7 +148,7 @@ test acompaña a la tarea pero no la precede.
   `TimelineEvent` de la resolución. Tests en `test_use_cases.py` de las dos ramas y de la
   ausencia del texto en el `metadata`. [R4.3, R4.6] (D7)
 
-## 5. API — esquemas, rutas y dependencias
+## 5. API — esquemas, rutas y dependencias <!-- panel: PASS 2026-08-22 -->
 
 - [x] 5.1 **Los esquemas.** `backend/app/maintenance/api/schemas.py`: `IncidentEtaRequest`
   nuevo, **un solo esquema compartido** por `accept` y `en-route`, con
@@ -180,7 +180,7 @@ test acompaña a la tarea pero no la precede.
   `backend/tests/test_route_authorization.py` sigue verde y que su allowlist de rutas anónimas
   no cambia. [R1.6, R1.7]
 
-## 6. El censo de la regla 11 y sus dos guardianes
+## 6. El censo de la regla 11 y sus dos guardianes <!-- panel: PASS 2026-08-22 -->
 
 - [x] 6.1 **La fila del censo.** `sdd/steering/security.md`: fila propia para
   `incidents.materials` bajo la **excepción 3**, declarada como texto libre guardado tal cual.
