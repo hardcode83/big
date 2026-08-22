@@ -65,6 +65,20 @@ describe("useProperties — tenant-scoped query key (R1, design D6)", () => {
     expect(key[2]).toBe("properties-list");
   });
 
+  it("gives two tenants two different keys, for the same filters", () => {
+    // Rule 1 of `steering/security.md` asks every new module for its own
+    // tenant-isolation test. The guarantee is structural in `tenantScopedKey`,
+    // but the rule wants it asserted per module, not inherited: raised by the
+    // tenancy reviewer in /sdd:review.
+    const a = propertiesKeys.list("tenant-a", { status: "ACTIVE" });
+    const b = propertiesKeys.list("tenant-b", { status: "ACTIVE" });
+    expect(a).not.toEqual(b);
+    expect(a[1]).toBe("tenant-a");
+    expect(b[1]).toBe("tenant-b");
+    // And no key can be built that would be shared across tenants.
+    expect(JSON.stringify(a)).not.toContain("tenant-b");
+  });
+
   it("refuses to build a key without a tenant", () => {
     // `tenantScopedKey` throws rather than writing a global cache entry, so a
     // cross-tenant key cannot be produced by accident.
