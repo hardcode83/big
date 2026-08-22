@@ -112,6 +112,7 @@ function renderThread(role: UserRole) {
         conversationId="conversation-1"
         draft=""
         onDraftChange={() => undefined}
+        onDraftSent={() => undefined}
       />
     </I18nProvider>,
   );

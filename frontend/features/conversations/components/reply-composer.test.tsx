@@ -20,6 +20,9 @@ function sendState(overrides: Record<string, unknown> = {}) {
   return {
     mutate: vi.fn(),
     isPending: false,
+    // Derived from the mutation cache, not from the hook instance, so a remount still
+    // sees a reply that is still travelling (D22).
+    isInFlight: false,
     isError: false,
     error: null,
     ...overrides,
@@ -44,7 +47,8 @@ function Harness({
       conversationId={conversationId}
       gate={gate}
       draft={draft}
-      onDraftChange={setDraft}
+      onDraftSent={() => undefined}
+        onDraftChange={setDraft}
     />
   );
 }
@@ -115,7 +119,9 @@ describe("ReplyComposer — the limit and the empty case (task 7.2, R4.3)", () =
 
 describe("ReplyComposer — in flight (task 7.2, R4.5)", () => {
   it("disables the composer and says it is sending", () => {
-    const { textarea, send } = renderComposer(sendState({ isPending: true }));
+    const { textarea, send } = renderComposer(
+      sendState({ isPending: true, isInFlight: true }),
+    );
     expect(textarea).toBeDisabled();
     expect(send()).toBeDisabled();
     expect(screen.getByRole("button", { name: "Enviando…" })).toBeInTheDocument();
@@ -223,7 +229,8 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
           conversationId="conversation-1"
           gate={{ enabled: true }}
           draft="lo que habia escrito"
-          onDraftChange={onDraftChange}
+          onDraftSent={() => undefined}
+        onDraftChange={onDraftChange}
         />
       </I18nProvider>,
     );
@@ -240,7 +247,8 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
           conversationId="conversation-1"
           gate={{ enabled: true }}
           draft="corregido"
-          onDraftChange={onDraftChange}
+          onDraftSent={() => undefined}
+        onDraftChange={onDraftChange}
         />
       </I18nProvider>,
     );
@@ -252,8 +260,14 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
   // switch — the one case that ends in a duplicate reply. The composer therefore hands
   // the retirement to the mutation itself, and this asserts the handing-over; that the
   // mutation honours it on success is `use-conversation-actions.test.tsx`'s job.
-  it("hands the draft's retirement to the mutation, not to a mutate-level callback", () => {
+  // The retirement does NOT ride on `mutate(…, { onSuccess })`: React Query drops those
+  // once the observer has no listeners, and the keyed subtree unsubscribes on a thread
+  // switch — the one case that ends in a duplicate reply. The composer hands the job to
+  // the mutation and passes the delivered text along, so the owner can refuse to clear a
+  // draft the operator has since edited.
+  it("hands the retirement to the mutation, with the text that was delivered", () => {
     useSendReply.mockReturnValue(sendState());
+    const onDraftSent = vi.fn();
     const onDraftChange = vi.fn();
     render(
       <I18nProvider locale="es">
@@ -262,19 +276,40 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
           gate={{ enabled: true }}
           draft="Vamos a mirarlo"
           onDraftChange={onDraftChange}
+          onDraftSent={onDraftSent}
         />
       </I18nProvider>,
     );
 
-    const options = useSendReply.mock.calls[0][1] as { onSent?: () => void };
-    expect(options?.onSent).toBeTypeOf("function");
-    options.onSent?.();
-    expect(onDraftChange).toHaveBeenCalledWith("");
+    const options = useSendReply.mock.calls[0][1] as {
+      onSent?: (sent: string) => void;
+    };
+    expect(options?.onSent).toBe(onDraftSent);
 
-    // And the submit path itself must not clear it: that is the mutation's job now.
-    onDraftChange.mockClear();
+    // Submitting must not clear anything itself: that is the mutation's job now.
     fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
     expect(onDraftChange).not.toHaveBeenCalledWith("");
+    expect(onDraftSent).not.toHaveBeenCalled();
+  });
+
+  it("blocks a second send while the first is still travelling, even after a remount", () => {
+    // `isInFlight` comes from the mutation cache, so a fresh component instance still
+    // sees the reply in flight. Reading `isPending` off this instance would show false
+    // and let the operator send the guest a duplicate.
+    useSendReply.mockReturnValue(sendState({ isPending: false, isInFlight: true }));
+    render(
+      <I18nProvider locale="es">
+        <ReplyComposer
+          conversationId="conversation-1"
+          gate={{ enabled: true }}
+          draft="Vamos a mirarlo"
+          onDraftChange={() => undefined}
+          onDraftSent={() => undefined}
+        />
+      </I18nProvider>,
+    );
+    expect(screen.getByLabelText("Responder al huésped")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Enviando…" })).toBeDisabled();
   });
 
   it("leaves the draft untouched when the send fails", () => {
@@ -292,7 +327,8 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
           conversationId="conversation-2"
           gate={{ enabled: true }}
           draft="no se ha enviado"
-          onDraftChange={untouched}
+          onDraftSent={() => undefined}
+        onDraftChange={untouched}
         />
       </I18nProvider>,
     );
@@ -317,6 +353,7 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
           gate={{ enabled: true }}
           draft={draft}
           onDraftChange={() => undefined}
+          onDraftSent={() => undefined}
         />
       </I18nProvider>
     );

@@ -82,6 +82,27 @@ export function ConversationsView() {
     [tenantId, userId],
   );
 
+  // Retires a draft **only if it is still the text that was delivered**. The send
+  // mutation outlives the composer (D22 keys the subtree), so a success can land after
+  // the operator returned and started editing; clearing unconditionally would discard
+  // that new text with no signal (review 2026-08-22).
+  const retireDraft = useCallback(
+    (conversationId: string, sent: string) => {
+      setDrafts((current) => {
+        if (current.tenantId !== tenantId || current.userId !== userId) {
+          return current;
+        }
+        if (current.byConversation[conversationId] !== sent) {
+          return current;
+        }
+        const remaining = { ...current.byConversation };
+        delete remaining[conversationId];
+        return { tenantId, userId, byConversation: remaining };
+      });
+    },
+    [tenantId, userId],
+  );
+
   // Filters belong to the tenant whose inbox they were chosen in: a `propertyId`
   // picked under one tenant means nothing under the next. The store is a
   // module-level singleton and a same-tab session switch does not reload the page,
@@ -161,6 +182,7 @@ export function ConversationsView() {
               conversationId={selectedId}
               draft={currentDrafts[selectedId] ?? ""}
               onDraftChange={(next) => setDraft(selectedId, next)}
+              onDraftSent={(sent) => retireDraft(selectedId, sent)}
             />
           </>
         )}

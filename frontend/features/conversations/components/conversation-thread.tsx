@@ -41,11 +41,13 @@ export function ConversationThread({
   conversationId,
   draft,
   onDraftChange,
+  onDraftSent,
 }: {
   conversationId: string;
   /** Owned by `ConversationsView`, above the keyed boundary (D22). Forwarded, not held. */
   draft: string;
   onDraftChange: (next: string) => void;
+  onDraftSent: (sent: string) => void;
 }) {
   const { t } = useTranslation("conversations");
   const { t: tStates } = useTranslation("states");
@@ -155,6 +157,7 @@ export function ConversationThread({
             gate={writeMessageGate(detail.data)}
             draft={draft}
             onDraftChange={onDraftChange}
+            onDraftSent={onDraftSent}
           />
         </>
       ) : null}

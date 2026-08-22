@@ -1,6 +1,7 @@
 "use client";
 
 import {
+  useIsMutating,
   useMutation,
   useQueryClient,
   type UseMutationResult,
@@ -74,24 +75,32 @@ function useConversationInvalidation(conversationId: string): {
  */
 export function useSendReply(
   conversationId: string,
-  options: { onSent?: () => void } = {},
-): UseMutationResult<ThreadMessage, Error, string> {
+  options: { onSent?: (sent: string) => void } = {},
+): UseMutationResult<ThreadMessage, Error, string> & { isInFlight: boolean } {
   const tenantId = useTenantId();
   const { invalidate, refreshOnConflict } =
     useConversationInvalidation(conversationId);
   const { onSent } = options;
-  return useMutation({
+  const mutationKey = conversationKeys.sendReply(tenantId, conversationId);
+  const mutation = useMutation({
+    mutationKey,
     mutationFn: (content: string) =>
       getConversationsDataSource().createMessage(tenantId, conversationId, {
         content,
       }),
     retry: false,
-    onSuccess: () => {
+    onSuccess: (_message, sent) => {
       invalidate();
-      onSent?.();
+      onSent?.(sent);
     },
     onError: refreshOnConflict,
   });
+  // Read from the mutation cache, not from this hook instance: a remount (D22 keys
+  // the subtree) gets a fresh observer whose `isPending` is false even though the
+  // first request is still travelling. `isPending` alone would let the operator
+  // send the guest a second copy just by leaving the thread and coming back.
+  const isInFlight = useIsMutating({ mutationKey }) > 0;
+  return { ...mutation, isInFlight };
 }
 
 /**

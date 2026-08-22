@@ -52,10 +52,12 @@ vi.mock("./conversation-thread", async () => {
       conversationId,
       draft,
       onDraftChange,
+      onDraftSent,
     }: {
       conversationId: string;
       draft: string;
       onDraftChange: (next: string) => void;
+      onDraftSent: (sent: string) => void;
     }) => {
       // Mount-only on purpose: this counts component instances, which is the whole
       // assertion. Reading through a ref keeps the dependency list honestly empty
@@ -73,6 +75,15 @@ vi.mock("./conversation-thread", async () => {
             onClick={() => onDraftChange(`borrador de ${conversationId}`)}
           >
             escribir
+          </button>
+          <button type="button" onClick={() => onDraftChange("editado")}>
+            editar
+          </button>
+          <button
+            type="button"
+            onClick={() => onDraftSent(`borrador de ${conversationId}`)}
+          >
+            entregado
           </button>
         </div>
       );
@@ -346,5 +357,34 @@ describe("ConversationsView — a draft belongs to the operator too (review 2026
     session.current = { tenant_id: "tenant-1", id: "user-1", role: "PROPERTY_MANAGER" };
     rerenderView(rerender);
     expect(thread()).toHaveAttribute("data-draft", "");
+  });
+});
+
+describe("ConversationsView — retiring a draft only when it is still the delivered text", () => {
+  const thread = () => screen.getByTestId("thread");
+  const click = (name: string) => fireEvent.click(screen.getByRole("button", { name }));
+
+  it("clears the draft when delivery matches what is still there", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    renderView();
+    click("escribir");
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+
+    click("entregado");
+    // Empty again, so an empty composer means "delivered" rather than "unknown".
+    expect(thread()).toHaveAttribute("data-draft", "");
+  });
+
+  it("keeps a draft the operator has edited since sending", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    renderView();
+    click("escribir");
+    click("editar");
+    expect(thread()).toHaveAttribute("data-draft", "editado");
+
+    // The send that is now landing carried the *earlier* text. Clearing here would
+    // discard the operator's new version with no signal at all.
+    click("entregado");
+    expect(thread()).toHaveAttribute("data-draft", "editado");
   });
 });

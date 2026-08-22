@@ -28,4 +28,14 @@ export const conversationKeys = {
     tenantScopedKey(tenantId, "conversation-messages", conversationId, page),
   propertyLabels: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "conversation-property-labels"),
+  /**
+   * Identity of the *send* mutation for one conversation. A mutation key is what
+   * makes an in-flight reply observable from outside the component that started it:
+   * the thread subtree is keyed per conversation (D22), so a remount gets a fresh
+   * `useMutation` whose `isPending` is false while the first request is still
+   * travelling — and without this the composer would happily send a second copy to
+   * the guest (review 2026-08-22).
+   */
+  sendReply: (tenantId: string, conversationId: string): QueryKey =>
+    tenantScopedKey(tenantId, "conversation-send-reply", conversationId),
 } as const;

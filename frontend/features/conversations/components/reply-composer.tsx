@@ -28,12 +28,19 @@ export function ReplyComposer({
   gate,
   draft,
   onDraftChange,
+  onDraftSent,
 }: {
   conversationId: string;
   gate: ActionGate;
   /** The draft for this conversation, owned above the keyed boundary (D22). */
   draft: string;
   onDraftChange: (next: string) => void;
+  /**
+   * Called with the text that was actually delivered. The owner retires the draft
+   * only if it still *is* that text, so a success landing after the operator has
+   * started editing again does not silently discard the new version.
+   */
+  onDraftSent: (sent: string) => void;
 }) {
   const { t } = useTranslation("conversations");
   // The draft is **not** this component's state: it is owned by `ConversationsView`,
@@ -55,15 +62,13 @@ export function ReplyComposer({
   // operator has already switched threads and this component is gone — see the note
   // on `useSendReply`. Doing it in `mutate(…, { onSuccess })` would silently skip
   // exactly that case, which is the one that ends in a duplicate reply.
-  const send = useSendReply(conversationId, {
-    onSent: () => onDraftChange(""),
-  });
+  const send = useSendReply(conversationId, { onSent: onDraftSent });
 
   const tooLong = content.length > MAX_MESSAGE_LENGTH;
   const isEmpty = content.trim().length === 0;
   // Re-sending the exact text we just sent is almost always a double submit.
   const isRepeat = lastSent !== null && content === lastSent;
-  const blocked = !gate.enabled || send.isPending;
+  const blocked = !gate.enabled || send.isInFlight;
   const canSend = !blocked && !isEmpty && !tooLong && !isRepeat;
 
   function handleSubmit(event: FormEvent<HTMLFormElement>) {
@@ -115,7 +120,7 @@ export function ReplyComposer({
           })}
         </span>
         <Button type="submit" size="sm" disabled={!canSend}>
-          {send.isPending ? t("composer.sending") : t("composer.send")}
+          {send.isInFlight ? t("composer.sending") : t("composer.send")}
         </Button>
       </div>
       {tooLong ? (

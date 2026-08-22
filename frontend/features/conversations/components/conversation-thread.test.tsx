@@ -75,6 +75,7 @@ function renderThread(conversationId = "conversation-1") {
         conversationId={conversationId}
         draft=""
         onDraftChange={() => undefined}
+        onDraftSent={() => undefined}
       />
     </I18nProvider>,
   );
@@ -183,6 +184,7 @@ describe("ConversationThread — order preserved (task 6.3, R3.2, R3.5)", () => 
         conversationId="conversation-2"
         draft=""
         onDraftChange={() => undefined}
+        onDraftSent={() => undefined}
       />
       </I18nProvider>,
     );

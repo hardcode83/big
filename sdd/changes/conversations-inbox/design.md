@@ -361,19 +361,39 @@ upgrade de React Query reintroduciría el fallo sin ninguna señal.
    portante. `lastSent` sigue local y acotado, porque es un guard de doble envío y no una señal que
    merezca sobrevivir a un cambio de hilo.
 
+   **El `key` abrió una ventana de duplicado, y cerrarla pide identidad de mutación.** Es la deuda
+   honesta de esta decisión: al remontar, el `useMutation` nuevo tiene `isPending` en falso aunque la
+   primera petición siga viajando, y `lastSent` nace vacío. Enviar en A → cambiar a B → volver a A
+   dejaba el compositor habilitado con el borrador puesto, así que un segundo `createMessage` salía y
+   **el huésped recibía la respuesta dos veces**. Antes del `key` esa ventana no existía, porque el
+   compositor no se remontaba: la decisión de keyear la creó. Se cierra dando **identidad** a la
+   mutación —`conversationKeys.sendReply(tenantId, conversationId)`— y derivando «en vuelo» del
+   *cache de mutaciones* (`useIsMutating`) en vez de de la instancia del hook, de modo que una
+   instancia recién montada sigue viendo el envío en curso. El estado de error sigue muriendo con el
+   remontaje, que es lo que se quería; lo que no podía morir era el guard de concurrencia.
+
+   **Y el éxito solo retira el borrador si sigue siendo el texto entregado.** La mutación sobrevive al
+   compositor, así que un éxito puede aterrizar cuando la operadora ya volvió y está reescribiendo;
+   limpiar sin comparar le borraba el texto nuevo sin ninguna señal. `onSent` lleva el texto que se
+   entregó y el dueño compara antes de borrar.
+
    **El sello incluye al operador, no solo al tenant.** Dos managers del mismo tenant son un cambio
    de operador dentro del mismo tenant, y entregarle a Y la prosa sin enviar que X estaba escribiendo
    a un huésped es la misma exposición que cruzar un tenant. Hoy es inalcanzable solo porque
    `AuthGuard` desmonta este árbol mientras re-autentica; sellar por `tenantId` **y** `userId` no
    depende de que eso siga siendo verdad.
 
-   **Límite declarado, no resuelto**: la recuperación del borrador está acotada al montaje del
-   subárbol de workspace. Cualquier 401 de cualquier petición pone la sesión en `refreshing`, y
-   `AuthGuard` sustituye el árbol por un panel de estado, así que el mapa muere y al volver el
-   compositor está limpio — la misma ambigüedad, alcanzada sin cambiar de hilo. No es una regresión
-   (el borrador local anterior moría en ese mismo desmontaje), pero significa que «el texto vuelve»
-   vale para el caso del cambio de hilo, no para toda la clase. Cerrarlo pediría sostener el mapa por
-   encima del condicional de `AuthGuard`, y eso es alcance de la superficie de sesión, no de esta.
+   **Límite declarado, no resuelto**: la recuperación del borrador está acotada al montaje de **esta
+   página**, que es más estrecho de lo que esta nota decía en su primera redacción. Dos caminos lo
+   pierden, y el segundo es el común: (a) cualquier 401 de cualquier petición pone la sesión en
+   `refreshing` y `AuthGuard` sustituye el árbol por un panel de estado —incluso si el refresco luego
+   va bien—; y (b) **navegar a otra ruta del workspace y volver**, porque `ConversationsView` es el
+   cuerpo de la página y se desmonta, sin que intervenga ningún 401. En los dos casos el mapa muere y
+   el compositor vuelve limpio: la misma ambigüedad, sin cambiar de hilo. No es una regresión —el
+   borrador local anterior moría en ese mismo desmontaje— pero significa que «el texto vuelve» vale
+   para el caso del cambio de hilo, no para toda la clase. Cerrarlo pediría sostener el mapa por
+   encima del condicional de `AuthGuard` o del cuerpo de la página, y eso es alcance de la superficie
+   de sesión y del shell, no de esta.
 
 ### D21 — Sin diagrama, y dicho a propósito
 

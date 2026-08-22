@@ -342,3 +342,45 @@ describe("useSendReply — retiring the draft survives the caller (D22, review 2
     );
   });
 });
+
+describe("useSendReply — an in-flight reply is visible after a remount (D22)", () => {
+  // The composer lives in a subtree keyed per conversation, so leaving the thread and
+  // coming back gives a brand-new `useMutation` whose `isPending` is false while the
+  // first request is still travelling. Reading that would let the operator send the
+  // guest a second copy, so the flag comes from the mutation cache instead.
+  it("still reports in-flight from a fresh hook instance", async () => {
+    const { Wrapper } = harness();
+    let settle: (value: unknown) => void = () => undefined;
+    source.createMessage.mockImplementation(
+      () => new Promise((resolve) => {
+        settle = resolve;
+      }),
+    );
+
+    const first = renderHook(() => useSendReply(CONVERSATION), { wrapper: Wrapper });
+    first.result.current.mutate("Vamos a mirarlo");
+    await waitFor(() => expect(first.result.current.isInFlight).toBe(true));
+
+    // The operator leaves the thread: the keyed subtree unmounts.
+    first.unmount();
+
+    // ...and comes back to a fresh instance, with the request still travelling.
+    const second = renderHook(() => useSendReply(CONVERSATION), { wrapper: Wrapper });
+    expect(second.result.current.isPending).toBe(false);
+    expect(second.result.current.isInFlight).toBe(true);
+
+    settle({ id: "message-1" });
+    await waitFor(() => expect(second.result.current.isInFlight).toBe(false));
+  });
+
+  it("does not report another conversation's send as in flight", async () => {
+    const { Wrapper } = harness();
+    source.createMessage.mockImplementation(() => new Promise(() => undefined));
+    const mine = renderHook(() => useSendReply(CONVERSATION), { wrapper: Wrapper });
+    mine.result.current.mutate("para esta");
+    await waitFor(() => expect(mine.result.current.isInFlight).toBe(true));
+
+    const other = renderHook(() => useSendReply("conversation-2"), { wrapper: Wrapper });
+    expect(other.result.current.isInFlight).toBe(false);
+  });
+});
