@@ -91,6 +91,9 @@ def test_incident_instantiates_with_defaults() -> None:
     assert incident.status == IncidentStatus.OPEN
     assert incident.owner_approval_required is False
     assert incident.reservation_id is None
+    # R3.1 — an incident nobody has assigned carries no note, and `None` is the honest
+    # answer rather than an empty string a client would have to tell apart from one.
+    assert incident.assignment_note is None
 
 
 def test_owner_approval_instantiates_with_defaults() -> None:
@@ -268,6 +271,78 @@ def test_terminal_statuses_are_the_origin_of_no_operation() -> None:
     """What makes `RESOLVED`/`CANCELLED` terminal: no row of the table admits them."""
     for sources, _ in Incident._TRANSITIONS.values():
         assert not sources & {IncidentStatus.RESOLVED, IncidentStatus.CANCELLED}
+
+
+# --- The note that rides with an assignment (R3.1, design D7) ---------------------------
+
+
+def test_assign_writes_the_note_it_was_given() -> None:
+    incident = make_incident(IncidentStatus.CLASSIFIED)
+
+    incident.assign(
+        technician_id=uuid.uuid4(),
+        now=LATER,
+        assignment_note="Portal code 4821, key in the entrance box.",
+    )
+
+    assert incident.assignment_note == "Portal code 4821, key in the entrance box."
+    assert incident.status is IncidentStatus.ASSIGNED
+
+
+def test_reassigning_without_a_note_clears_the_previous_one() -> None:
+    """D7 — the note belongs to the assignment in force, not to the incident.
+
+    This is the half a truthy-only write would get wrong, and getting it wrong shows
+    technician B what the manager wrote for technician A.
+    """
+    incident = make_incident(IncidentStatus.CLASSIFIED)
+    incident.assign(technician_id=uuid.uuid4(), now=LATER, assignment_note="Ask the porter.")
+
+    incident.assign(technician_id=uuid.uuid4(), now=LATER)
+
+    assert incident.assignment_note is None
+
+
+def test_reassigning_with_a_note_replaces_the_previous_one() -> None:
+    incident = make_incident(IncidentStatus.CLASSIFIED)
+    incident.assign(technician_id=uuid.uuid4(), now=LATER, assignment_note="Ask the porter.")
+
+    incident.assign(technician_id=uuid.uuid4(), now=LATER, assignment_note="Code 4821.")
+
+    assert incident.assignment_note == "Code 4821."
+
+
+def test_the_note_does_not_reach_the_transition_table() -> None:
+    """R3.2 — the legal moves of `assign` are exactly what they were.
+
+    `test_operation_table_matches_entity_table` pins the table against the test's own copy;
+    this pins that the note did not become a sixth origin or a condition on one.
+    """
+    origins, target = Incident._TRANSITIONS["assign"]
+
+    assert origins == frozenset(
+        {
+            IncidentStatus.CLASSIFIED,
+            IncidentStatus.ASSIGNED,
+            IncidentStatus.ACCEPTED,
+            IncidentStatus.IN_PROGRESS,
+            IncidentStatus.WAITING_EXTERNAL_PARTS,
+        }
+    )
+    assert target is IncidentStatus.ASSIGNED
+
+
+def test_an_illegal_assign_leaves_no_note_behind() -> None:
+    """A refusal must not be a write. `_check_transition` runs first, so the note never
+    lands on an incident the move was rejected for."""
+    incident = make_incident(IncidentStatus.RESOLVED)
+
+    with pytest.raises(IncidentAlreadyClosedError):
+        incident.assign(
+            technician_id=uuid.uuid4(), now=LATER, assignment_note="Code 4821."
+        )
+
+    assert incident.assignment_note is None
 
 
 # --- Classification against the confidence threshold (R1.2, R1.3, R1.5; design D3) ------

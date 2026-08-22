@@ -229,7 +229,20 @@
       },
       "AssignIncidentRequest": {
         "additionalProperties": false,
+        "description": "`POST /incidents/{id}/assign` (R3.2 of `tech-incident-context`).\n\n`assignment_note` is optional and **replaces** whatever the previous assignment carried:\nomitting it clears the note rather than preserving it (D7). That is why there is no\n\"absent vs. explicit null\" distinction to make here — this is a complete operation, not\na patch, and `extra=\"forbid\"` still refuses anything else.",
         "properties": {
+          "assignment_note": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Note"
+          },
           "technician_id": {
             "format": "uuid",
             "title": "Technician Id",
@@ -2403,6 +2416,119 @@
         "title": "IncidentCategory",
         "type": "string"
       },
+      "IncidentContextResponse": {
+        "description": "What `GET /incidents/{incident_id}/context` returns — exactly `IncidentContext` (D4).\n\nA field-for-field mirror on purpose, the `CleaningTaskContextResponse` construction. The\nprojection is where R2.5, R5.2, R5.3 and R5.4 are enforced structurally, so this model\nearning its own opinion about which fields to include would reintroduce the very decision\nthe read model exists to remove — and would make the router the owner of the denylist,\nwhich design D4 rejects by name.\n\n**`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That\nis what makes it safe where a dump of `Property` would not be: `cleaning_notes`,\n`emergency_notes` and `has_wifi_password` are fields of that entity and are not fields of\nthe projection. No `Property` and no `Reservation` is ever serialised on this route.\n\nNo `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a\n`NULL` address travels as `null` **with its key**, rather than the key vanishing. That is\ninherited pydantic behaviour rather than something this model states, so it carries its own\ntest against the serialised body (`tests/maintenance/test_incident_context_api.py`) instead\nof being assumed.",
+        "properties": {
+          "access_notes": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Access Notes"
+          },
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "assignment_note": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assignment Note"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "property_internal_code": {
+            "title": "Property Internal Code",
+            "type": "string"
+          },
+          "property_name": {
+            "title": "Property Name",
+            "type": "string"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_name",
+          "property_internal_code",
+          "address_line1",
+          "address_line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "timezone",
+          "access_notes",
+          "assignment_note"
+        ],
+        "title": "IncidentContextResponse",
+        "type": "object"
+      },
       "IncidentPageResponse": {
         "properties": {
           "items": {
@@ -3697,6 +3823,188 @@
         "title": "PropertyDetailResponse",
         "type": "object"
       },
+      "PropertyListItemResponse": {
+        "description": "One property **in a listing**: `PropertyResponse` minus the three free-text notes.\n\nWhy a second model instead of one with an optional field: this is the mechanism half of\n`tech-incident-context` D5, and rule 11 of `steering/security.md` requires the chosen form to\nbe *implemented*, not only documented. `GET /api/v1/properties` returned the access\ninstructions of **every** flat of the tenant in one response, which is the only bulk surface\nthose columns had — and a field a caller could ask for would not be an exclusion.\n\n**On the rule this borrows from, stated precisely because the loose version is tempting.**\nRule 4 says \"número de documento jamás en listados\", and it says it about `document_number`\nand nothing else — these three columns are not named there, and rule 4 does not reach them on\nits own. What is borrowed is the *shape* of that remedy: keep the bulk surface from carrying\nthe value at all, rather than masking it. Rule 11 is what applies that shape here, through\nexcepción 6, which is the row that owns this decision. Citing rule 4 as if it governed these\ncolumns directly would be the kind of almost-true sentence rule 11 says of itself is worse\nthan no census at all.\n\n**All three notes, not just `access_notes`.** Only `access_notes` earns a census row (D12\nsays why: the other two do not carry a rule-3 value by purpose), but the exclusion is one\nschema and the same cost, and a listing that hides one note and shows two is a form nobody\nwill be able to explain in six months. Approved in the design gate on 2026-08-19 (OQ3).\n\nWhat stays: `GET /api/v1/properties/{id}` still carries all three, and the guest portal still\nreturns `access_notes` verbatim as `arrival_notes`. Leaving the listing is not leaving the\nsystem — it is leaving the one place where the whole portfolio arrived at once.\n\nEnumerated and built by `from_domain` like `PropertyResponse`, never dumped with\n`from_attributes`: a dump would re-acquire every field the entity gains later, which is the\nfailure this class exists to prevent.",
+        "properties": {
+          "address_line1": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line1"
+          },
+          "address_line2": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Address Line2"
+          },
+          "bathrooms": {
+            "title": "Bathrooms",
+            "type": "integer"
+          },
+          "bedrooms": {
+            "title": "Bedrooms",
+            "type": "integer"
+          },
+          "city": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "City"
+          },
+          "country": {
+            "title": "Country",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_operational_state": {
+            "$ref": "#/components/schemas/PropertyOperationalState"
+          },
+          "default_check_in_time": {
+            "format": "time",
+            "title": "Default Check In Time",
+            "type": "string"
+          },
+          "default_check_out_time": {
+            "format": "time",
+            "title": "Default Check Out Time",
+            "type": "string"
+          },
+          "has_wifi_password": {
+            "title": "Has Wifi Password",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "internal_code": {
+            "title": "Internal Code",
+            "type": "string"
+          },
+          "max_guests": {
+            "title": "Max Guests",
+            "type": "integer"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "pms_external_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Pms External Id"
+          },
+          "pms_provider": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/PMSProvider"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "postal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Postal Code"
+          },
+          "province": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Province"
+          },
+          "status": {
+            "$ref": "#/components/schemas/PropertyStatus"
+          },
+          "timezone": {
+            "title": "Timezone",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "wifi_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Wifi Name"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "internal_code",
+          "pms_external_id",
+          "pms_provider",
+          "address_line1",
+          "address_line2",
+          "city",
+          "province",
+          "postal_code",
+          "country",
+          "timezone",
+          "max_guests",
+          "bedrooms",
+          "bathrooms",
+          "current_operational_state",
+          "default_check_in_time",
+          "default_check_out_time",
+          "wifi_name",
+          "has_wifi_password",
+          "status",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "PropertyListItemResponse",
+        "type": "object"
+      },
       "PropertyOperationalState": {
         "enum": [
           "VACANT_READY",
@@ -3715,11 +4023,11 @@
         "type": "string"
       },
       "PropertyPageResponse": {
-        "description": "The pagination envelope of PRD §23.",
+        "description": "The pagination envelope of PRD §23.\n\n`data` carries `PropertyListItemResponse` and not `PropertyResponse`: the three free-text\nnotes leave the listing (`tech-incident-context` D5). It is an incompatible change to this\ncontract, and the cost was measured before taking it — no component of the frontend reads any\nof the three; every appearance in `frontend/` is inside the generated\n`lib/api/generated/openapi.d.ts`.",
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/PropertyResponse"
+              "$ref": "#/components/schemas/PropertyListItemResponse"
             },
             "title": "Data",
             "type": "array"
@@ -10335,7 +10643,7 @@
     },
     "/api/v1/incidents/{incident_id}/assign": {
       "post": {
-        "description": "`POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).",
+        "description": "`POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — it is an operation, not an edit of a field (D14). Reassigning cancels the previous assignee's deadline (R3.5).\n\n`assignment_note` is optional free text the manager leaves for the technician, and belongs to the assignment **in force**: every call writes it, so reassigning without one clears whatever the previous assignment carried. It is returned by `GET /incidents/{incident_id}/context` and by no other route.",
         "operationId": "assign_incident_api_v1_incidents__incident_id__assign_post",
         "parameters": [
           {
@@ -10545,6 +10853,85 @@
           }
         ],
         "summary": "Force the classifier over one incident",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/context": {
+      "get": {
+        "description": "The operating context of one incident: the property's name, internal code, postal address, timezone and access instructions, plus the note the manager left with the assignment. It exists so a `TECHNICIAN` can be told **which flat to go to and how to get in** without holding `READ_PROPERTIES`.\n\nA `TECHNICIAN` reaches only the incidents assigned to them; a manager or owner reaches every incident of their tenant. That restriction comes from the token's **persisted role** and **no request parameter can widen it** — there is no parameter for it at all.\n\n`property_name`, `property_internal_code`, `country` and `timezone` are always present. The other seven — `address_line1`, `address_line2`, `city`, `province`, `postal_code`, `access_notes` and `assignment_note` — can be `null`, and a `null` there means the column is not filled in, **not** that a value could not be resolved: a property that does not resolve inside the tenant is a `404`, never a partial answer.\n\n`assignment_note` is the note of the **assignment in force**. Every assignment writes it, so reassigning the incident without a note clears whatever the previous assignment carried.\n\nWhat this route never carries: the WiFi password in any form, the property's cleaning or emergency notes, and any field of a reservation.",
+        "operationId": "get_incident_context_api_v1_incidents__incident_id__context_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentContextResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The incident does not exist for this caller — an unknown id, another tenant's incident, an incident assigned to a different technician and an incident whose property does not resolve inside the tenant are all answered this way, indistinguishably."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Which flat the incident is in, and how to get into it",
         "tags": [
           "maintenance"
         ]

@@ -77,6 +77,11 @@ class IncidentModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
     assigned_technician_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
+    # The width lives in the DDL and not only in pydantic, which is the pattern `properties`
+    # follows (`MAX_NAME`, `MAX_ADDRESS`…) and what `properties-crud` R2.4 had to retrofit on
+    # four columns that shipped without one. `MAX_ASSIGNMENT_NOTE` in `api/schemas.py` mirrors
+    # this number, and `tests/maintenance/test_models.py` pins it here.
+    assignment_note: Mapped[str | None] = mapped_column(String(2000), default=None)
     owner_approval_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     approved_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)

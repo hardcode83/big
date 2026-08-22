@@ -207,6 +207,20 @@ async def test_incident_cleaning_task_restrict_on_delete(db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_incident_assignment_note_is_a_nullable_bounded_column() -> None:
+    """R3.1, design D6 — the bound lives in the DDL, not only in pydantic.
+
+    `MAX_ASSIGNMENT_NOTE` in `app/maintenance/api/schemas.py` mirrors this number; asserting
+    it here is what keeps the two from drifting into the situation `properties-crud` R2.4 had
+    to repair on four columns that shipped with a pydantic-only bound.
+    """
+    column = IncidentModel.__table__.c.assignment_note
+
+    assert column.nullable is True
+    assert column.type.length == 2000
+
+
+@pytest.mark.asyncio
 async def test_incident_severity_is_distinct_postgres_enum_from_timeline_severity(db_session) -> None:
     incident_severity_values = await db_session.execute(
         text(

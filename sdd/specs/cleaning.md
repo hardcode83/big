@@ -323,6 +323,12 @@ siguiente y el significado de cada `null`— vive en
   del `CLEANER`: aceptar, rechazar, iniciar, cerrar y marcar el checklist son de la persona
   asignada, y lo que el manager necesita —crear, asignar y validar— va por
   `MANAGE_CLEANING_TASKS`.
+- THE SYSTEM SHALL seguir siendo la única autoridad sobre ese permiso ahora que la asignación
+  tiene consumidor de web (`/cleaning`, `cleaning-manager-view.md`): la vista **oculta** el control
+  a quien no tiene `MANAGE_CLEANING_TASKS` —el caso del `TENANT_OWNER`, que sí lista con
+  `READ_CLEANING_TASKS`—, pero eso es presentación y no control de acceso. El `403` de
+  `PATCH /api/v1/cleaning-tasks/{task_id}` se emite igual ante una petición directa, y esta
+  capacidad no relaja ninguna comprobación por el hecho de que exista una pantalla que ya filtre.
 - THE SYSTEM SHALL dejar `cleaning_tasks.notes` y `cleaning_checklist_completions.notes` fuera de
   toda superficie de escritura y de toda respuesta: son texto libre que la tabla de la regla 11
   de `steering/security.md` no enumera, y ampliarla es una decisión de steering.

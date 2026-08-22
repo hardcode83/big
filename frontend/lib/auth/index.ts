@@ -6,3 +6,5 @@ export {
   setSessionTokens,
 } from "./session-store";
 export type { SessionTokens } from "./session-store";
+export { ROLE_UI_PERMISSIONS, useHasPermission } from "./permissions";
+export type { Permission } from "./permissions";

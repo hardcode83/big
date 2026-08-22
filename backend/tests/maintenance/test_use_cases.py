@@ -19,7 +19,10 @@ from app.audit.domain import actions as audit_actions
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import UserRole
 from app.cleaning.domain.enums import CleaningTaskStatus
-from app.maintenance.application.use_cases import IncidentActor
+from app.maintenance.application.use_cases import (
+    IncidentActor,
+    _load_incident_in_scope,
+)
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentSeverity,
@@ -28,6 +31,7 @@ from app.maintenance.domain.enums import (
     OwnerApprovalStatus,
 )
 from app.maintenance.domain.exceptions import (
+    INCIDENT_NOT_FOUND_MESSAGE,
     IncidentAlreadyClosedError,
     IncidentNotFoundError,
     InvalidIncidentTransitionError,
@@ -137,6 +141,128 @@ async def test_no_action_but_the_job_may_be_audited_without_an_actor(flow) -> No
             changes=ChangeSet(audit_actions.ENTITY_INCIDENT),
             now=NOW,
         )
+
+
+# --- The row-level rule, written once (`tech-incident-context` R4.2-R4.4, D3) ------------
+
+
+async def test_the_scoped_load_returns_the_incident_to_its_own_technician(
+    flow, world, db_session
+) -> None:
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=manager(world),
+        now=LATER,
+    )
+
+    loaded = await _load_incident_in_scope(
+        flow.incidents, world.tenant.id, incident.id, technician(world)
+    )
+
+    assert loaded.id == incident.id
+
+
+@pytest.mark.parametrize(
+    "case",
+    ["another technician", "unknown incident", "another tenant"],
+)
+async def test_the_scoped_load_fails_identically_however_it_fails(
+    flow, world, db_session, case: str
+) -> None:
+    """R4.4 — one exception, one message, whichever of the three it was.
+
+    Parametrised over the three so the **sameness** is what is asserted, not three separate
+    refusals that could drift apart into distinguishable answers. The message is compared
+    against a literal rather than against another call's message: two calls returning the same
+    empty string would also satisfy that, and this is the assertion R4.4 rests on.
+    """
+    from app.tenants.infrastructure.models import TenantModel
+
+    if case == "another technician":
+        incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+        await flow.assign.execute(
+            tenant_id=world.tenant.id,
+            incident_id=incident.id,
+            technician_id=world.technician.id,
+            actor=manager(world),
+            now=LATER,
+        )
+        tenant_id, incident_id = world.tenant.id, incident.id
+        actor = other_technician(world)
+    elif case == "unknown incident":
+        tenant_id, incident_id = world.tenant.id, uuid.uuid4()
+        actor = technician(world)
+    else:
+        neighbour = TenantModel(name="TenantB", billing_email="b@example.com")
+        db_session.add(neighbour)
+        await db_session.flush()
+        incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+        tenant_id, incident_id = neighbour.id, incident.id
+        actor = technician(world)
+
+    with pytest.raises(IncidentNotFoundError) as raised:
+        await _load_incident_in_scope(flow.incidents, tenant_id, incident_id, actor)
+
+    assert str(raised.value) == INCIDENT_NOT_FOUND_MESSAGE
+
+
+async def test_the_scoped_load_does_not_restrict_a_manager_or_an_owner(
+    flow, world, db_session
+) -> None:
+    """R4.3 — `restrict_to_technician_id` is `None` for both, so neither is narrowed to rows
+    assigned to them. Driven on an incident assigned to somebody else, which is the only way
+    the absence of the restriction is visible."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=manager(world),
+        now=LATER,
+    )
+
+    for actor in (manager(world), owner(world)):
+        assert actor.restrict_to_technician_id is None
+        loaded = await _load_incident_in_scope(
+            flow.incidents, world.tenant.id, incident.id, actor
+        )
+        assert loaded.id == incident.id
+
+
+async def test_the_row_level_rule_is_written_in_exactly_one_place(flow, world, db_session) -> None:
+    """D3 — the two pre-existing callers delegate rather than carrying their own copy.
+
+    Asserted behaviourally, by driving both doors with the same unassigned technician and
+    requiring the same refusal: the mixin's `_load_incident` (through any transition use case)
+    and `GetIncidentUseCase.execute`. A copy that drifted would show up as one of the two
+    answering differently, which is the failure the extraction exists to prevent.
+    """
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=manager(world),
+        now=LATER,
+    )
+    intruder = other_technician(world)
+
+    with pytest.raises(IncidentNotFoundError) as through_the_mixin:
+        await flow.accept.execute(
+            tenant_id=world.tenant.id,
+            incident_id=incident.id,
+            actor=intruder,
+            now=LATER,
+        )
+    with pytest.raises(IncidentNotFoundError) as through_the_read:
+        await flow.get.execute(
+            tenant_id=world.tenant.id, incident_id=incident.id, actor=intruder
+        )
+
+    assert str(through_the_mixin.value) == str(through_the_read.value)
 
 
 # --- Classification (task 6.4; R1.2, R1.3, R1.6) ----------------------------------------
@@ -614,6 +740,80 @@ async def test_a_technician_of_another_tenant_cannot_be_assigned(
             actor=manager(world),
             now=LATER,
         )
+
+
+async def test_the_use_case_passes_the_note_through_and_a_reassignment_replaces_it(
+    flow, world, db_session
+) -> None:
+    """R3.2, D7 — the use case forwards the note; the entity decides it replaces.
+
+    Driven through two calls rather than one, because the replacement is what a caller could
+    get wrong and the first call alone cannot show it.
+    """
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    first = await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=manager(world),
+        now=LATER,
+        assignment_note="Portal code 4821, key in the entrance box.",
+    )
+    assert first.assignment_note == "Portal code 4821, key in the entrance box."
+
+    second = await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.other_technician.id,
+        actor=manager(world),
+        now=LATER + timedelta(minutes=10),
+    )
+
+    assert second.assignment_note is None
+    db_session.expunge_all()
+    stored = await db_session.get(IncidentModel, incident.id)
+    assert stored.assignment_note is None
+
+
+async def test_the_assignment_note_reaches_neither_the_audit_row_nor_the_timeline(
+    flow, world, db_session
+) -> None:
+    """R3.5, R3.6 — the note is written and does not propagate.
+
+    Asserted through the real flow and not against `AUDITABLE_FIELDS`, for the same reason
+    `test_the_owners_notes_stay_in_their_own_column` gives: the allowlist is what a future
+    change would edit without noticing it is also the boundary of a steering exception. The
+    `AuditLog` still carries exactly the two diffs the assignment has always carried, and the
+    `TimelineEvent` its constant title with identifiers only.
+    """
+    note = "El código del portal es 4821 y el DNI del propietario es 12345678Z"
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=manager(world),
+        now=LATER,
+        assignment_note=note,
+    )
+
+    db_session.expunge_all()
+    stored = await db_session.get(IncidentModel, incident.id)
+    assert stored.assignment_note == note
+
+    audit_rows = (await db_session.execute(select(AuditLogModel))).scalars().all()
+    assert [row.action for row in audit_rows] == [audit_actions.INCIDENT_ASSIGNED]
+    for row in audit_rows:
+        assert note not in str(row.changes)
+        assert set(row.changes) == {"assigned_technician_id", "status"}
+
+    events = (await db_session.execute(select(TimelineEventModel))).scalars().all()
+    for event in events:
+        assert note not in event.title
+        assert note not in str(event.metadata_)
+        assert note not in str(event.description)
 
 
 # --- The technician's cycle (task 6.8; R4.1, R4.5) --------------------------------------

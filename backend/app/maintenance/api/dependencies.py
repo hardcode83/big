@@ -25,6 +25,7 @@ from app.maintenance.application.use_cases import (
     AssignIncidentUseCase,
     CancelIncidentUseCase,
     ClassifyIncidentUseCase,
+    GetIncidentContextUseCase,
     GetIncidentUseCase,
     ListIncidentsUseCase,
     ResolveIncidentUseCase,
@@ -86,6 +87,20 @@ def get_list_incidents_use_case(session: SessionDep) -> ListIncidentsUseCase:
 
 def get_incident_use_case(session: SessionDep) -> GetIncidentUseCase:
     return GetIncidentUseCase(SqlAlchemyIncidentRepository(session))
+
+
+def get_incident_context_use_case(session: SessionDep) -> GetIncidentContextUseCase:
+    """R1.1 — a read, so no unit of work and no audit repository (design D2).
+
+    The two repositories `_flow_kwargs` already hands out. Composing them here rather than
+    wiring a bespoke reader is what keeps the tenant scope written in one place: each `get`
+    takes its `tenant_id` explicitly, and `app/core/db.py`'s listener is defence in depth
+    behind it.
+    """
+    return GetIncidentContextUseCase(
+        incidents=SqlAlchemyIncidentRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+    )
 
 
 def get_classify_incident_use_case(session: SessionDep) -> ClassifyIncidentUseCase:

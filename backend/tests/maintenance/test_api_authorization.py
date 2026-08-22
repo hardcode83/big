@@ -1,4 +1,4 @@
-"""Who may reach the twelve routes, and what they see when they do (R5.2, R5.3, R5.4).
+"""Who may reach the thirteen routes, and what they see when they do (R5.2, R5.3, R5.4).
 
 This is the file the RBAC of design D13 is proved in. `tests/auth/test_policy.py` fixes the
 role × permission matrix; what it cannot show is that each route hangs off the permission it
@@ -29,6 +29,10 @@ APPROVALS = "/api/v1/owner-approvals"
 ROUTES: tuple[tuple[str, str], ...] = (
     ("GET", INCIDENTS),
     ("GET", INCIDENTS + "/{incident_id}"),
+    # `tech-incident-context` R4.1/R4.7. It belongs in this census and not only in its own
+    # file: a route left out of a list that claims to be "every route of D14" is how the
+    # `CLEANER`-refused and anonymous-refused sweeps stop covering the surface.
+    ("GET", INCIDENTS + "/{incident_id}/context"),
     ("POST", INCIDENTS + "/{incident_id}/classify"),
     ("PATCH", INCIDENTS + "/{incident_id}"),
     ("POST", INCIDENTS + "/{incident_id}/assign"),

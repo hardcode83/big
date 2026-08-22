@@ -731,6 +731,46 @@ async def test_save_persists_what_the_entity_changed(db_session) -> None:
 
 
 @pytest.mark.asyncio
+async def test_the_assignment_note_survives_a_save_and_a_reassignment_clears_it(
+    db_session,
+) -> None:
+    """R3.1 — the column round-trips, and `None` reaches the row as SQL `NULL`.
+
+    The second half is the one worth writing: D7 makes `assign` write the note **every**
+    time, so an adapter that only persisted it when truthy would silently preserve what the
+    manager typed for the previous technician. Asserted through `text()` rather than through
+    the entity, because a hydrated `None` looks the same either way — and this is the same
+    trap `ai_classification` fell into on this very table.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop, status=IncidentStatus.CLASSIFIED)
+    repository = _incidents(db_session)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    incident.assignment_note = "Portal code 4821, key in the entrance box."
+    await repository.save(tenant.id, incident)
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.assignment_note == "Portal code 4821, key in the entrance box."
+
+    stored.assignment_note = None
+    await repository.save(tenant.id, stored)
+    db_session.expunge_all()
+
+    assert (
+        await db_session.scalar(
+            text("SELECT assignment_note IS NULL FROM incidents WHERE id = :id"),
+            {"id": row.id},
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_save_never_moves_a_row_between_tenants(db_session) -> None:
     tenant_a = await _tenant(db_session, "TenantA")
     tenant_b = await _tenant(db_session, "TenantB")

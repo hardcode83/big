@@ -344,6 +344,102 @@ el código:
 | `AIAdapter.validate_cleaning_photo()` | No existe. La foto se guarda y se sirve, pero nada la valida; `ai_validation_result` no se escribe ni se devuelve. Es de `messaging-ai`. |
 | `PropertyStateMachine` «crear CleaningTask» | La crea `ProvisionCleaningTaskUseCase`, invocado **dentro** de la transacción del caso de uso que mueve el estado (design D1). La máquina sigue decidiendo la transición y nada más — crear entidades no es su trabajo. |
 
+## Operar las limpiezas desde `/cleaning`
+
+Hasta el change `cleaning-manager-view` el backend de limpieza estaba entero y no había ninguna
+pantalla desde la que usarlo: la única forma de asignar una limpiadora era una llamada HTTP a
+mano, y el segundo paso del flujo de PRD §11 —cuando la asignación automática no encuentra
+limpiadora activa y la tarea «queda pendiente»— se rompía porque nadie tenía dónde recogerla.
+`/cleaning` es esa pantalla.
+
+Lo que **no** es: no valida limpiezas terminadas, no abre el detalle de una tarea (checklist,
+fotos), no crea tareas a mano y no edita plantillas. Todo eso sigue donde estaba —§«El ciclo»,
+§«Las fotos» y la app de la limpiadora— y las razones de dejarlo fuera están en el proposal del
+change.
+
+### Qué ve cada rol, y por qué
+
+| | Owner (`TENANT_OWNER`) | Manager (`PROPERTY_MANAGER`) |
+|---|---|---|
+| La lista, con filtros y paginación | sí | sí |
+| El nombre de la limpiadora asignada | sí | sí |
+| El control para asignar o reasignar | **no** | sí |
+
+La propietaria no ve el control porque **no tiene `MANAGE_CLEANING_TASKS`** — es la misma fila
+«Crear, asignar y validar» de §«Quién puede hacer qué», ahora visible en la UI. Las dos ven la
+misma lista porque las dos tienen `READ_CLEANING_TASKS`.
+
+Y conviene ser preciso sobre qué garantiza eso: **el frontend oculta, el backend decide.** El
+mapa rol→permiso del cliente (`frontend/lib/auth/permissions.ts`) es una pista de UX declarada
+como parcial, no una autoridad. Si alguna vez mostrase el control a quien no debe, la petición
+responde `403` y la pantalla lo cuenta como el fallo que es — nunca como un éxito. Por eso una
+asignación rechazada no se pinta jamás: la fila sigue diciendo lo que el servidor tiene por
+bueno.
+
+### Filtrar y paginar
+
+Se filtra **por vivienda y por estado**, y los dos filtros viajan en la petición
+(`property_id`, `status`) — no se recorta una página ya descargada, así que el resultado es el
+que el backend calcula con su propio `AND`. Cada filtro tiene su acción explícita de quitarlo, y
+cambiar cualquiera de los dos **vuelve a la página 1**, para que no aparezca una página vacía por
+un desplazamiento heredado del filtro anterior.
+
+La lista abre **sin filtrar**, en el orden del backend (`created_at` descendente, `id` de
+desempate) y en la página 1. Se descartó abrir pre-filtrada a `CREATED` + `ASSIGNED`: esconde
+tareas por omisión y hace que un vacío parezca un resultado que nadie pidió.
+
+Al asignar, la lista se **recarga**; no se parchea en memoria. Es lo que hace que una tarea que
+sale del filtro activo al asignarse —`CREATED` → `ASSIGNED` con el filtro puesto en `CREATED`—
+desaparezca de la página como debe, y que `total` y «página X de Y» sigan siendo ciertos. La
+respuesta del `PATCH` es una tarea suelta y no sabe nada de la página en la que estaba.
+
+### «Identidad no disponible», y por qué no es un error
+
+`CleaningTaskResponse` trae `property_id` y `assigned_cleaner_id` como UUID desnudos, así que los
+nombres se resuelven en el cliente contra `GET /properties` y `GET /users?role=CLEANER`. La celda
+distingue **tres** situaciones, no dos:
+
+- **«Sin asignar»** — la tarea no tiene limpiadora. Es un dato, no un fallo.
+- un marcador neutro — el catálogo todavía está en vuelo. No dice ninguna identidad porque
+  todavía no la sabe.
+- **«Identidad no disponible»** — el catálogo llegó (o falló) y ese id no está en él.
+
+La tercera es la que sorprende, así que merece decirse: **el resto de la fila se pinta igual**, y
+la caída del catálogo **no** convierte la vista en una pantalla de error. Estado y fechas son lo
+que importa para decidir, y ya están ahí. Un UUID no se pinta nunca.
+
+Se pide el catálogo de limpiadoras **sin filtrar por estado** a propósito. Una tarea antigua puede
+estar asignada a alguien ya desactivada: con el catálogo filtrado su nombre lo tendríamos y no lo
+encontraríamos, y convertiríamos un dato disponible en «identidad no disponible», que existe para
+lo contrario. Como candidata a una asignación nueva, en cambio, no se ofrece.
+
+### El límite de 100, que hay que rehacer antes de vender esto
+
+Los dos catálogos se piden en **una sola página de `per_page=100`**, que es el techo del backend
+en los tres listados. Consecuencia, marcada `ASSUMPTION` en el código: **un tenant con más de 100
+viviendas o más de 100 limpiadoras verá «identidad no disponible» a partir de la centésima.**
+
+No es un fallo silencioso —degrada exactamente por donde está especificado que degrade— pero deja
+de ser correcto como cobertura, y con dos viviendas y un puñado de limpiadoras no se nota. Hay que
+rehacerlo antes de la fase SaaS.
+
+### Asignar: hay que confirmar, y eso es deliberado
+
+El control es un desplegable de candidatas —solo limpiadoras **activas**— más un **botón de
+confirmación**. El botón no es adorno: en un desplegable navegado con las flechas el evento de
+cambio se dispara en cada opción por la que pasas, así que sin confirmación explícita se
+reasignarían tareas a quien solo estaba mirando la lista.
+
+Si la persona elegida ha dejado de ser una limpiadora activa del tenant entre que se cargó el
+catálogo y se confirma, el backend responde `422` y la pantalla lo dice con esas palabras — «esa
+persona ya no está» — en lugar de un «ha fallado» genérico. Las demás respuestas tienen su propio
+mensaje: `403` sin permiso, `404` si la tarea ya no existe, `409` si la tarea ya no admite un
+cambio de asignación (por ejemplo porque la limpiadora ya la aceptó). El texto lo elige el
+**código de estado**, nunca el mensaje del backend, que es técnico y está en inglés.
+
+Cada resultado —éxito o fallo— se anuncia en una **región viva**, de modo que un lector de
+pantalla lo perciba sin depender del color.
+
 ## Entradas de roadmap relacionadas
 
 - `cleaning-photos-storage` — **ya entregada**: fotos, almacenamiento (`LOCAL`/`S3`), URL
@@ -354,3 +450,6 @@ el código:
 - `cleaner-task-context` — **ya entregada**: la proyección de arriba, §«El contexto de la
   tarea». Es lo que hace implementable la pantalla de la limpiadora sin ampliarle permisos.
 - `cleaner-app` — la app mobile-first de la limpiadora que consume todo esto.
+- `cleaning-manager-view` — **ya entregada**: la pantalla del manager descrita arriba,
+  §«Operar las limpiezas desde `/cleaning`». Cero cambios de backend; consume los cuatro
+  endpoints que ya existían.
