@@ -7,6 +7,11 @@ from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from app.auth.infrastructure.models import UserModel
+from app.cleaning.domain.enums import CleaningTaskStatus
+from app.cleaning.infrastructure.models import (
+    CleaningChecklistTemplateModel,
+    CleaningTaskModel,
+)
 from app.maintenance.domain.enums import IncidentSource, OwnerApprovalRelatedType
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 from app.properties.infrastructure.models import PropertyModel
@@ -160,6 +165,45 @@ async def test_incident_reported_by_user_set_null_on_user_delete(db_session) -> 
 
     await db_session.refresh(incident)
     assert incident.reported_by_user_id is None
+
+
+@pytest.mark.asyncio
+async def test_incident_cleaning_task_restrict_on_delete(db_session) -> None:
+    """`RESTRICT` and not `SET NULL` (`cleaner-incident-report` D10): the link matters most
+    exactly when someone deletes the task it points at."""
+    tenant, prop = await _tenant_property(db_session)
+    template = CleaningChecklistTemplateModel(
+        tenant_id=tenant.id,
+        name="Standard",
+        items=[{"id": "kitchen", "label": "Kitchen", "required": True}],
+        required_photos=[],
+    )
+    db_session.add(template)
+    await db_session.flush()
+    task = CleaningTaskModel(
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        checklist_template_id=template.id,
+        status=CleaningTaskStatus.IN_PROGRESS,
+    )
+    db_session.add(task)
+    await db_session.flush()
+
+    db_session.add(
+        IncidentModel(
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            source=IncidentSource.CLEANER,
+            title="Broken boiler",
+            description="No hot water in the bathroom.",
+            cleaning_task_id=task.id,
+        )
+    )
+    await db_session.commit()
+
+    await db_session.delete(task)
+    with pytest.raises(IntegrityError):
+        await db_session.commit()
 
 
 @pytest.mark.asyncio

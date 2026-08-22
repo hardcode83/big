@@ -458,3 +458,117 @@ def test_pending_review_is_deliberately_not_live():
 def test_is_live_reflects_the_status():
     assert _task(CleaningTaskStatus.ASSIGNED).is_live
     assert not _task(CleaningTaskStatus.REJECTED).is_live
+
+
+# --- R6: what reporting an incident does, and does not do, to closing the task -------------
+#
+# `cleaner-incident-report` changes **not one line** of `complete()`. What it adds is a
+# surface that creates the very incidents this clause reads, so the coupling stops being
+# hypothetical — and the tests below are what keep the two halves of it honest.
+
+
+def test_the_blocking_message_names_the_cause_and_never_the_incident() -> None:
+    """R6.3, behaviourally.
+
+    `CLEANER` does not hold `READ_INCIDENTS`, so the body of this refusal is the one place a
+    cleaner could learn something about an incident she may not read. It names the cause — an
+    unresolved `CRITICAL` incident — and no identifier, no title and no description.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    with pytest.raises(BlockingIncidentError) as refusal:
+        task.complete(CLEANER, _evidence(required={"a"}, completed={"a"}, critical=True), LATER)
+
+    assert str(refusal.value) == (
+        "An unresolved CRITICAL incident blocks completing this cleaning"
+    )
+
+
+def test_the_incident_a_cleaner_reports_blocks_her_own_close_only_once_classified() -> None:
+    """R6.2 and R6.4 — the whole journey, as declared behaviour rather than as a surprise.
+
+    This is the coupling R6 exists to write down. Three moments:
+
+    1. **She reports.** The incident is born `MEDIUM` (`Incident.severity`'s default — the alta
+       sets no severity, R3.2), so at that instant it does not block anything.
+    2. **She closes the task.** It succeeds. Reporting a problem does not lock the cleaner out
+       of finishing her own work, which is the outcome a cleaner would otherwise learn by
+       hitting a `409` she could not explain.
+    3. **The classifier raises it to `CRITICAL`.** *Now* the property has an unresolved critical
+       incident, and the next `complete()` on that property is refused.
+
+    Run against the real `Incident` entity and the real `CleaningTask`, not a boolean flipped by
+    hand: the point is that `MEDIUM`-at-birth and `CRITICAL`-after-classification are the
+    entity's own behaviour, and a change to either default would break this rather than pass.
+    """
+    from decimal import Decimal
+
+    from app.maintenance.domain.entities import Incident
+    from app.maintenance.domain.enums import (
+        IncidentCategory,
+        IncidentSeverity,
+        IncidentSource,
+        IncidentStatus,
+    )
+    from app.maintenance.domain.value_objects import IncidentClassification
+
+    property_id = uuid.uuid4()
+    tenant_id = uuid.uuid4()
+
+    # 1. She reports, from a task she is working on.
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        property_id=property_id,
+        source=IncidentSource.CLEANER,
+        title="Caldera rota",
+        description="No sale agua caliente.",
+        created_at=NOW,
+        updated_at=NOW,
+        reported_by_user_id=CLEANER,
+        cleaning_task_id=uuid.uuid4(),
+    )
+    assert incident.severity is IncidentSeverity.MEDIUM
+    assert incident.status is IncidentStatus.OPEN
+
+    # 2. It does not block her own close: the evidence gatherer asks for unresolved *CRITICAL*
+    #    incidents, and hers is not one.
+    blocking_now = incident.severity is IncidentSeverity.CRITICAL
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+    task.complete(
+        CLEANER, _evidence(required={"a"}, completed={"a"}, critical=blocking_now), LATER
+    )
+    assert task.status is CleaningTaskStatus.COMPLETED
+
+    # 3. The classifier raises it. Same incident, same property.
+    incident.classify(
+        IncidentClassification(
+            category=IncidentCategory.PLUMBING,
+            severity=IncidentSeverity.CRITICAL,
+            confidence=Decimal("0.95"),
+            summary="Hot water supply failure",
+            vocabulary=frozenset({"Hot water supply failure"}),
+        ),
+        confidence_threshold=Decimal("0.7"),
+        adapter="deterministic",
+        now=LATER,
+    )
+    assert incident.severity is IncidentSeverity.CRITICAL
+
+    # The next cleaning of that property cannot be closed while it is unresolved.
+    blocking_later = incident.severity is IncidentSeverity.CRITICAL
+    next_task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+    with pytest.raises(BlockingIncidentError) as refusal:
+        next_task.complete(
+            CLEANER,
+            _evidence(required={"a"}, completed={"a"}, critical=blocking_later),
+            LATER,
+        )
+
+    # **The message and not only the code** (Risks): R2.5's `409`
+    # (`InvalidCleaningTransitionError`) and R6.3's arrive through the same `_MAPPING`, so a
+    # test asserting the status alone could not tell which refusal it got.
+    assert str(refusal.value) == (
+        "An unresolved CRITICAL incident blocks completing this cleaning"
+    )
+    assert next_task.status is CleaningTaskStatus.IN_PROGRESS

@@ -595,6 +595,60 @@ async def test_an_incident_written_by_the_real_writer_is_a_classification_candid
 
 
 @pytest.mark.asyncio
+async def test_an_incident_born_outside_a_cleaning_keeps_the_link_null(db_session) -> None:
+    """R4.2: the column is optional, and the writer must not turn its absence into anything
+    but SQL `NULL` — the failure mode `ai_classification` already had on this same table."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        source=IncidentSource.GUEST,
+        title="Fuga de agua",
+        description="Sale agua por debajo del lavabo.",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    await SqlAlchemyIncidentRepository(db_session).add(tenant.id, incident)
+
+    stored_is_sql_null = await db_session.scalar(
+        text("SELECT cleaning_task_id IS NULL FROM incidents WHERE id = :id"),
+        {"id": incident.id},
+    )
+    assert stored_is_sql_null is True
+
+    found = await SqlAlchemyIncidentRepository(db_session).get(tenant.id, incident.id)
+    assert found is not None
+    assert found.cleaning_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_incident_reported_from_a_cleaning_round_trips_the_link(db_session) -> None:
+    """R4.1/R4.3: the link survives write and re-read, which is what makes it usable when a
+    manager triages the incident against the photos of that same task."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    task = await _cleaning_task(db_session, tenant, prop, CleaningTaskStatus.IN_PROGRESS)
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        source=IncidentSource.CLEANER,
+        title="Caldera rota",
+        description="No sale agua caliente en el baño.",
+        created_at=NOW,
+        updated_at=NOW,
+        cleaning_task_id=task.id,
+    )
+    await SqlAlchemyIncidentRepository(db_session).add(tenant.id, incident)
+
+    found = await SqlAlchemyIncidentRepository(db_session).get(tenant.id, incident.id)
+    assert found is not None
+    assert found.cleaning_task_id == task.id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "closed", [IncidentStatus.CANCELLED, IncidentStatus.RESOLVED]
 )

@@ -213,14 +213,21 @@ class IncidentRepository(Protocol):
         """Append an incident for the acting tenant. Never commits — the use case owns the
         transaction, which is what makes the incident and its audit row atomic (R6.2).
 
-        **Precondition the caller must honour**: `property_id` and `reservation_id` must
-        already have been resolved *within* `tenant_id`. The foreign keys of `incidents` are
-        global rather than composite with `tenant_id`, so the database would accept an
-        incident of tenant A anchored to a property of tenant B, and this port cannot detect
-        it without a query of its own — the same precondition `TimelineEventRepository`
-        states, for the same schema reason. The one caller today satisfies it structurally:
-        both ids come from the `GuestSession` the portal's authoriser resolved from the token,
-        never from the request (R2.1).
+        **Precondition the caller must honour**: `property_id`, `reservation_id` and
+        `cleaning_task_id` must already have been resolved *within* `tenant_id`. The foreign
+        keys of `incidents` are global rather than composite with `tenant_id`, so the database
+        would accept an incident of tenant A anchored to a property — or a cleaning task — of
+        tenant B, and this port cannot detect it without a query of its own; the same
+        precondition `TimelineEventRepository` states, for the same schema reason.
+
+        `cleaning_task_id` joined the list in `cleaner-incident-report` and carries the
+        identical characteristic, which is why it is named here rather than left to be
+        inferred from the two beside it (raised by that change's tenancy panel of section 1).
+        Its caller discharges the precondition by composition: the id is that of a task the
+        cleaning use case already loaded with an explicit `tenant_id` before this port ever
+        sees it. The guest portal satisfies its own two structurally — both ids come from the
+        `GuestSession` the portal's authoriser resolved from the token, never from the
+        request (R2.1).
         """
         ...
 

@@ -12,6 +12,7 @@ touched by this change.
 """
 
 import uuid
+from collections.abc import Set as AbstractSet
 from dataclasses import dataclass
 from datetime import datetime
 from typing import Any
@@ -44,6 +45,36 @@ from app.cleaning.domain.value_objects import CleaningCompletionEvidence
 LIVE_STATUSES = frozenset(
     {
         CleaningTaskStatus.CREATED,
+        CleaningTaskStatus.ASSIGNED,
+        CleaningTaskStatus.ACCEPTED,
+        CleaningTaskStatus.IN_PROGRESS,
+    }
+)
+
+# The statuses from which a cleaner may open an incident (`cleaner-incident-report` R2.5,
+# design D6). PRD §12 says "durante checklist", and these are the three in which the task is
+# hers and the work is not over.
+#
+# **By inclusion, and deliberately not as `set(CleaningTaskStatus) - {the three terminal
+# ones}`** — the opposite of how `OPEN_INCIDENT_STATUSES` is built in `maintenance`. This is a
+# *write* surface belonging to the least privileged role, so a status added tomorrow must not
+# become reportable because nobody remembered to exclude it. The asymmetry with that constant
+# is the point: there, a status left out of the count is the safe direction; here it is not.
+#
+# The three that are neither here nor terminal, and why each is out:
+#
+# * `CREATED` — nobody has been handed the task, so there is no "durante" to speak of; and for
+#   the only role holding `EXECUTE_CLEANING_TASKS` it is a 404 before it is a 409 anyway,
+#   because `assigned_cleaner_id` is still NULL.
+# * `PENDING_REVIEW` and `FAILED` — members of the enum with **no writer** anywhere in the
+#   flow (`complete()` goes straight to `COMPLETED` with `validation_status = PASSED`), so
+#   they are out by construction rather than by judgement.
+#
+# Wider than the photo upload, which is `IN_PROGRESS` only, and that is deliberate: a photo is
+# evidence of the checklist and exists only while the work is happening, whereas a broken
+# boiler is a fact about the flat that the cleaner meets on opening the door.
+INCIDENT_REPORTABLE_STATUSES = frozenset(
+    {
         CleaningTaskStatus.ASSIGNED,
         CleaningTaskStatus.ACCEPTED,
         CleaningTaskStatus.IN_PROGRESS,
@@ -175,6 +206,25 @@ class CleaningTask:
         self.validation_status = CleaningValidationStatus.PASSED
         self.updated_at = now
 
+    def assert_incident_reportable(self, cleaner_id: uuid.UUID) -> None:
+        """May this cleaner open an incident from this task right now? (R2.5, design D6.)
+
+        A **query that raises** rather than a mutation: reporting an incident changes nothing
+        about the cleaning, so there is no state to move here. It lives in the entity all the
+        same, because which statuses admit the operation is a business rule and
+        `steering/backend-architecture.md` puts rules in `domain/` — the use case's job is to
+        ask, not to decide.
+
+        **`_require_assignee` first, `_require_status` second, and the order is the security
+        property.** A `409` reading "cannot report on a cleaning task in status COMPLETED"
+        tells a cleaner the task exists and what it is doing, which is exactly the probe the
+        `404` closes; checking the status first would leak that even when the assignee check
+        was going to refuse. `_require_assignee`'s own docstring makes the same argument for
+        `accept`, `reject` and `start`, and this is the fourth caller of it.
+        """
+        self._require_assignee(cleaner_id)
+        self._require_status(INCIDENT_REPORTABLE_STATUSES, "report an incident on")
+
     def record_manual_validation(
         self, *, validator_user_id: uuid.UUID, status: CleaningValidationStatus, now: datetime
     ) -> None:
@@ -191,7 +241,9 @@ class CleaningTask:
         self.validated_at = now
         self.updated_at = now
 
-    def _require_status(self, allowed: set[CleaningTaskStatus], operation: str) -> None:
+    def _require_status(
+        self, allowed: AbstractSet[CleaningTaskStatus], operation: str
+    ) -> None:
         if self.status not in allowed:
             raise InvalidCleaningTransitionError(
                 f"Cannot {operation} a cleaning task in status {self.status.value}"

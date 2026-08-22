@@ -7,7 +7,8 @@ contrato HTTP en `backend/openapi.json`.
 ## El ciclo, de principio a fin
 
 ```
-alguien reporta una avería            (hoy: el portal del huésped, anónimo)
+alguien reporta una avería            (el portal del huésped, la limpiadora,
+                                       una conversación, o `make seed-demo`)
         │
         ▼
 incidencia OPEN, sin categoría ni severidad
@@ -83,14 +84,51 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 | Clasificar, triar, asignar, cancelar | — | ✔ | — | — |
 | Aceptar, empezar, esperar piezas, reanudar, resolver | — | ✔ | ✔ sólo las suyas | — |
 | Responder una aprobación | ✔ | — | — | — |
+| Abrir una incidencia desde su propia limpieza | — | — | — | ✔ |
 
-Dos cosas que no se ven en la tabla y conviene saber:
+Tres cosas que no se ven en la tabla y conviene saber:
 
 - **El técnico sólo ve y opera las suyas**, y eso no es un filtro que la petición pida: sale
   del rol del token. Una incidencia asignada a otro técnico devuelve el **mismo `404`** que
   una que no existe — con el mismo cuerpo —, para que el endpoint no sirva de sonda.
 - **El manager también puede conducir el ciclo del técnico**, para desatascar. Es la única
   diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
+- **La limpiadora abre incidencias y no lee ninguna**, y esa fila de la tabla es toda su
+  relación con este módulo. Las once rutas de `/api/v1/incidents` le siguen respondiendo `403`;
+  lo que puede hacer vive en otro sitio y se describe abajo. **Con una señal indirecta que
+  conviene no negar**: al cerrar su limpieza puede recibir un `409` que le dice que en esa
+  vivienda hay una incidencia `CRITICAL` sin resolver. Es un bit —existe o no—, sin id, sin
+  título y sin descripción, y está descrito en [`cleaning.md`](cleaning.md).
+
+## Reportar una incidencia desde una limpieza
+
+`POST /api/v1/cleaning-tasks/{task_id}/incidents` — PRD §11 la pide entre los nueve elementos de
+la app de la limpiadora y PRD §12 la lista como una de las cinco fuentes de creación.
+
+**Cuelga de la tarea de limpieza, no de la incidencia**, y por eso la ruta no está bajo
+`/api/v1/incidents`: el sujeto es la limpieza que está haciendo. Este módulo sigue sin exponer
+ninguna ruta de creación propia.
+
+Cómo se opera, y qué decide el sistema en lugar de quien llama:
+
+- El cuerpo son **exactamente dos campos**, `title` y `description`. Cualquier otro —
+  `property_id`, `source`, `severity`, un coste— se rechaza con `422` en vez de ignorarse.
+- La vivienda **sale de la tarea**, nunca de la petición. La incidencia queda sellada
+  `source = CLEANER`, atribuida a su usuario y vinculada a esa limpieza.
+- Nace `OPEN` y **sin clasificar**: el job de arriba le pone categoría y severidad en su
+  siguiente vuelta, y desde ahí es del manager.
+- Solo alcanza **sus propias tareas**, por el rol persistido del token y sin que ningún campo
+  pueda ensancharlo. Una tarea inexistente, de otro tenant o de otra limpiadora dan el **mismo
+  `404`**, con el mismo cuerpo.
+- Se puede reportar mientras el trabajo está vivo — `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`. Sobre
+  una tarea ya cerrada, rechazada o cancelada responde `409`: PRD §12 dice «durante checklist».
+- La respuesta es un acuse de **tres campos** —`id`, `status`, `created_at`— y nada más. No
+  devuelve la descripción: no hay nada que aprender de ella y es texto libre.
+
+**Reportar no le bloquea cerrar la limpieza**, que es la duda inmediata en cuanto existe el botón.
+La incidencia nace `MEDIUM` y el cierre solo lo frena una `CRITICAL` sin resolver **en la
+vivienda**, así que empieza a bloquear si el clasificador la sube — o si ya había otra. El detalle
+está en [`cleaning.md`](cleaning.md).
 
 ## El job de clasificación
 
@@ -201,6 +239,13 @@ Fotos de la incidencia (el patrón es el de `cleaning-photos-storage`), el `Expe
 resolver (es de `revenue`), la expiración automática de una aprobación, la UI del técnico
 (`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
 cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change.
+
+De la ruta de la limpiadora falta **su pantalla**: la API existe y el botón lo pone `cleaner-app`,
+que declara `cleaner-incident-report` en su `needs`. Y ella sigue sin poder leer, listar ni seguir
+lo que abrió: el acuse de tres campos es toda la lectura que tiene de una incidencia. Lo único que
+aprende además es el bit del `409` de cierre —que en la vivienda hay una `CRITICAL` sin resolver—,
+y se dice aquí porque «toda su lectura» a secas invita a tratar ese cuerpo como si no revelase
+nada, que es justo el razonamiento con el que alguien lo ensancharía.
 
 ## Cómo se ven desde la web
 

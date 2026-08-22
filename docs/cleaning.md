@@ -271,14 +271,30 @@ se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta 
 genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
 `/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
-**El único límite vivo: las incidencias no se pueden crear todavía.** La precondición de cierre
-consulta la tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que
-en la práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
-limpiadora es de `maintenance` (PRD §26.11).
+**Ese límite ya no existe, y conviene leer lo que ocupó su sitio.** Esta página decía que las
+incidencias no se podían crear todavía, que `maintenance` no tenía capa de aplicación y que la
+precondición de cierre respondía siempre «ninguna abierta». Las tres cosas eran ciertas y ya no lo
+son: `maintenance` tiene su flujo desde el 2026-08-15, y `cleaner-incident-report` le da a la
+limpiadora una ruta para abrir una incidencia **desde la tarea que está haciendo** —
+`POST /api/v1/cleaning-tasks/{task_id}/incidents`, descrita en
+[`maintenance.md`](maintenance.md#reportar-una-incidencia-desde-una-limpieza).
 
-Los otros dos que esta página llegó a listar ya están cerrados: el escalado por SLA, arriba, y
-**las fotos requeridas al cerrar**, que este change entrega y se cuentan en §«Las fotos de la
-limpieza».
+**Y eso acopla reportar con cerrar, así que aquí va cómo se comporta de verdad**, porque es la
+pregunta que hace una limpiadora en cuanto usa el botón:
+
+- La incidencia que abre nace `MEDIUM`. **No le bloquea el cierre en ese momento**: puede reportar
+  la caldera rota y terminar la limpieza a continuación.
+- Solo empieza a bloquear si el job de clasificación la sube a `CRITICAL` — o si ya había una
+  `CRITICAL` sin resolver en esa vivienda por cualquier otra vía.
+- Cuando bloquea, el `409` dice la causa y nada más: «una incidencia CRITICAL sin resolver». No
+  lleva el identificador, ni el título, ni la descripción, porque el rol `CLEANER` no puede leer
+  incidencias y ese cuerpo sería justo esa lectura.
+- El acotamiento es **la vivienda, no la tarea**. Una `CRITICAL` abierta por un huésped, o durante
+  otra limpieza del mismo piso, bloquea igual. Estrecharlo a la tarea sería relajar la regla, no
+  afinarla, y es un cambio con su propia entrada de roadmap.
+
+Los otros dos límites que esta página llegó a listar ya están cerrados: el escalado por SLA,
+arriba, y **las fotos requeridas al cerrar**, en §«Las fotos de la limpieza».
 
 ## Operar el job
 

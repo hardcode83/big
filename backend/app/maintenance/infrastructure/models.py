@@ -32,6 +32,12 @@ class IncidentModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
     reported_by_user_id: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), default=None
     )
+    # `RESTRICT` like `property_id` and `reservation_id` above, not the `SET NULL` of the
+    # two FKs towards `users`: losing the link is worst precisely when someone deletes the
+    # task (`cleaner-incident-report` D10).
+    cleaning_task_id: Mapped[uuid.UUID | None] = mapped_column(
+        Uuid, ForeignKey("cleaning_tasks.id", ondelete="RESTRICT"), default=None
+    )
     reported_by_guest_token: Mapped[str | None] = mapped_column(String(200), default=None)
     source: Mapped[IncidentSource] = mapped_column(Enum(IncidentSource, name="incident_source", native_enum=True))
     category: Mapped[IncidentCategory] = mapped_column(
