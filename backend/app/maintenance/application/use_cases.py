@@ -31,6 +31,13 @@ from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
+# `maintenance` supplies the implementer of a port `cleaning` declares, so the import runs
+# that way round: `application/` here depends on another module's `domain/`, never on its use
+# cases. Same shape as `messaging/domain/ports.py`'s `IncidentReportingPort` (D2).
+from app.cleaning.domain.ports import (
+    IncidentReport,
+    IncidentReportedAcknowledgement,
+)
 from app.core.unit_of_work import UnitOfWork
 from app.maintenance.domain.entities import (
     CONVERSATION_INCIDENT_TITLES,
@@ -374,6 +381,33 @@ class IncidentActor:
     role: UserRole
     ip: str | None = None
 
+    def __post_init__(self) -> None:
+        """An actor without an identity is not an actor (rule 9 of `steering/security.md`).
+
+        `user_id` was already typed non-optional, and a type hint is not a check: Python
+        builds `IncidentActor(user_id=None, …)` happily, and from there `_AuditWriter.record`
+        waves it through — it refuses only `actor is None` — so an append-only
+        `INCIDENT_CREATED` row naming nobody would be committed, which is precisely the alta
+        rule 9's fourth exception does **not** cover. Raised by the security panel of
+        `cleaner-incident-report` sections 3-4, which found the guarantee was annotation-deep.
+
+        No caller in the tree passes `None` today; this is what keeps that true.
+
+        **What it does not close, measured rather than left implied** (security re-review of
+        sections 3-4): `__post_init__` guards *construction*, so it catches both reachable
+        paths — the constructor and `dataclasses.replace`, which re-enters it — but not
+        `object.__setattr__` on an existing instance nor `IncidentActor.__new__` with no
+        attribute set at all. Both of those need attacker-controlled Python running in this
+        process, at which point this is not the boundary being crossed; they are recorded so
+        that "refused by construction" is not read as more than it is.
+        """
+        if self.user_id is None:
+            raise MaintenanceValidationError(
+                "an incident actor must name the user acting: rule 9 exempts only the "
+                "automatic classification, and it passes no actor at all rather than an "
+                "anonymous one"
+            )
+
     @property
     def restrict_to_technician_id(self) -> uuid.UUID | None:
         """R5.3 — derived from the role **here**, never accepted from the request.
@@ -460,6 +494,33 @@ class _AuditWriter:
 _REPORTED_TIMELINE_TITLE = "Incident reported"
 
 
+def _creation_change_set(
+    source: IncidentSource, cleaning_task_id: uuid.UUID | None
+) -> ChangeSet:
+    """The audited diff of an alta: `source`, `status`, and the anchor when there is one.
+
+    `cleaning_task_id` joins them because an incident's audit row records **what it was
+    anchored against** — which is why `reservation_id` is in the allowlist at all — and
+    "during which cleaning" is the equivalent anchor (`cleaner-incident-report` D10). It is an
+    identifier and never text, so rule 11's excepción 2 is untouched by it.
+
+    **Conditional, and the alternative was measured rather than assumed.** `ChangeSet.diff`
+    always inserts the key, so calling it unconditionally would stamp
+    `{"old": null, "new": null}` on the audit row of every incident the guest portal, the
+    messaging pipeline and the demo seed create — three sources that can never have a cleaning
+    behind them. `audit_logs` is append-only, so that null is permanent once written. Same
+    discipline the timeline metadata below follows, and for the same reason.
+    """
+    changes = (
+        ChangeSet(audit_actions.ENTITY_INCIDENT)
+        .diff("source", None, source)
+        .diff("status", None, IncidentStatus.OPEN)
+    )
+    if cleaning_task_id is not None:
+        changes = changes.diff("cleaning_task_id", None, cleaning_task_id)
+    return changes
+
+
 class ReportIncidentUseCase:
     """Open an incident from any source, audit it, and put it on the timeline (D5).
 
@@ -487,10 +548,24 @@ class ReportIncidentUseCase:
     it discharges the precondition itself. Same idiom `AssignIncidentUseCase` uses for the
     technician, and for the same stated reason.
 
-    **It takes no `reservation_id` and no `reported_by_user_id`** (amended D5, 2026-08-16,
-    agreed at the section-2 panel): both would carry the same undischarged precondition, and
-    no caller has one. Whoever brings the first — the lock alert of `messaging-ai`, most
-    likely — adds the parameter together with the lookup that makes it safe.
+    **It took no `reservation_id` and no `reported_by_user_id`** (amended D5, 2026-08-16,
+    agreed at the section-2 panel): both carried the same undischarged precondition, and no
+    caller had one. The rule it set was that whoever brought the first would add the parameter
+    **together with the lookup that makes it safe**.
+
+    **`cleaner-incident-report` is that caller, and it honours the rule rather than repealing
+    it** (its D4). Two keyword-only parameters arrive, both defaulting to `None` so every
+    existing call site is unchanged:
+
+    * `reported_by_user_id` — the precondition is discharged because the value comes from the
+      verified token, so `auth/api/dependencies.py` has already resolved the user inside the
+      tenant, re-reading the role from the row on every request.
+    * `cleaning_task_id` — discharged by composition: the id is that of a cleaning task the
+      calling use case loaded with an explicit `tenant_id` before calling here.
+
+    Neither is derived from the other, and that is deliberate: "who reported" and "who is
+    acting" are two concepts, and collapsing `reported_by_user_id` into `actor.user_id` would
+    silently change what `app/cli/seed_demo.py` writes.
 
     **`actor.user_id` stays the caller's obligation**, and it is the one id of the timeline
     port's precondition this class does not discharge: it is the identity of whoever is
@@ -532,6 +607,8 @@ class ReportIncidentUseCase:
         description: str,
         actor: IncidentActor,
         now: datetime,
+        reported_by_user_id: uuid.UUID | None = None,
+        cleaning_task_id: uuid.UUID | None = None,
     ) -> Incident:
         if await self._properties.get(tenant_id, property_id) is None:
             raise MaintenanceValidationError(
@@ -547,6 +624,8 @@ class ReportIncidentUseCase:
             description=description,
             created_at=now,
             updated_at=now,
+            reported_by_user_id=reported_by_user_id,
+            cleaning_task_id=cleaning_task_id,
         )
         # `category`, `severity`, `status` and `ai_classification` are not passed, exactly as
         # the guest path leaves them: the classifier is what writes them, and an incident born
@@ -559,11 +638,19 @@ class ReportIncidentUseCase:
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
-            .diff("source", None, source)
-            .diff("status", None, IncidentStatus.OPEN),
+            changes=_creation_change_set(source, cleaning_task_id),
             now=now,
         )
+
+        # Identifiers only, for the reason the title is a constant.
+        #
+        # The key is **absent** rather than present-and-null when the incident did not come
+        # from a cleaning: `timeline_events` is append-only, so every key written here is
+        # permanent, and a `"cleaning_task_id": null` on the three sources that can never have
+        # one would be a column of nulls nobody can remove later.
+        event_metadata = {"incident_id": str(incident.id), "source": source.value}
+        if cleaning_task_id is not None:
+            event_metadata["cleaning_task_id"] = str(cleaning_task_id)
 
         await self._timeline.add(
             tenant_id,
@@ -577,14 +664,75 @@ class ReportIncidentUseCase:
                     event_type=TimelineEventType.INCIDENT_CREATED,
                     title=_REPORTED_TIMELINE_TITLE,
                     created_at=now,
-                    # Identifiers only, for the reason the title is a constant.
-                    metadata={"incident_id": str(incident.id), "source": source.value},
+                    metadata=event_metadata,
                 )
             ),
         )
 
         await self._uow.commit()
         return incident
+
+
+class CleanerIncidentReporter:
+    """`TaskIncidentReportingPort` of `cleaning`, implemented by delegation (D2, D3).
+
+    **Not called `…UseCase`, on purpose.** It is not a new business operation: opening an
+    incident is `ReportIncidentUseCase`'s, and R3.7 says that alta "existe precisamente para
+    esto y SHALL extenderse, no duplicarse". This is the adapter that marries the port
+    `cleaning` declares to the writer `maintenance` already has, and it performs none of the
+    three writes itself — which is what keeps the transaction, the audit row and the timeline
+    entry in exactly one place.
+
+    `messaging` took the other road (`ReportIncidentFromConversationUseCase` with its own three
+    writes), and that was justified there because `reporter_token_hash` did not exist on the
+    generic path. Nothing equivalent is missing here, so duplicating would be the thing R3.7
+    forbids.
+
+    **Two values are sealed rather than accepted**, and the port's signature is what makes that
+    true by construction rather than by care:
+
+    * `source` — always `IncidentSource.CLEANER` (R3.1). The port takes no `source`, so
+      `cleaning` cannot ask for another one.
+    * the actor's `role` — always `UserRole.CLEANER`. The port carries `actor_user_id` and an
+      IP, not a role, because this adapter exists for exactly one surface. Nothing on the alta
+      path reads the role — `_AuditWriter` records the user and the IP — so sealing it states
+      the fact rather than deciding anything.
+    """
+
+    def __init__(self, report_incident: ReportIncidentUseCase) -> None:
+        self._report_incident = report_incident
+
+    async def report(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        property_id: uuid.UUID,
+        cleaning_task_id: uuid.UUID,
+        report: IncidentReport,
+        actor_user_id: uuid.UUID,
+        ip: str | None,
+        now: datetime,
+    ) -> IncidentReportedAcknowledgement:
+        incident = await self._report_incident.execute(
+            tenant_id=tenant_id,
+            property_id=property_id,
+            source=IncidentSource.CLEANER,
+            title=report.title,
+            description=report.description,
+            actor=IncidentActor(
+                user_id=actor_user_id, role=UserRole.CLEANER, ip=ip
+            ),
+            now=now,
+            # "Who reported" and "who is acting" are the same person here, and they are still
+            # passed separately: `ReportIncidentUseCase` deliberately does not derive one from
+            # the other, because a caller where they differ would otherwise have no way to say
+            # so (D4).
+            reported_by_user_id=actor_user_id,
+            cleaning_task_id=cleaning_task_id,
+        )
+        return IncidentReportedAcknowledgement(
+            id=incident.id, status=incident.status, created_at=incident.created_at
+        )
 
 
 class _IncidentTransitionMixin:

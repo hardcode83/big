@@ -23,6 +23,10 @@ from pydantic import BaseModel, ConfigDict, Field
 from app.cleaning.application.use_cases import UploadedCleaningPhoto
 from app.cleaning.domain.entities import CleaningChecklistTemplate, CleaningTask
 from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.ports import (
+    IncidentReport,
+    IncidentReportedAcknowledgement,
+)
 from app.cleaning.domain.read_models import CleaningTaskContext
 from app.cleaning.domain.value_objects import (
     MAX_ITEMS,
@@ -30,6 +34,12 @@ from app.cleaning.domain.value_objects import (
     MAX_LABEL_LENGTH,
     MAX_REQUIRED_PHOTOS,
 )
+from app.core.storable_text import MultiLineText, SingleLineText
+from app.maintenance.domain.entities import (
+    MAX_INCIDENT_DESCRIPTION,
+    MAX_INCIDENT_TITLE,
+)
+from app.maintenance.domain.enums import IncidentStatus
 
 MAX_PER_PAGE = 100
 # `page` needs a ceiling too, not just `per_page`: the value becomes a SQL OFFSET and a
@@ -346,3 +356,80 @@ class CleaningPhotoListResponse(BaseModel):
         cls, uploaded: "Sequence[UploadedCleaningPhoto]"
     ) -> "CleaningPhotoListResponse":
         return cls(data=[CleaningPhotoResponse.from_upload(item) for item in uploaded])
+
+
+class ReportTaskIncidentRequest(BaseModel):
+    """What `POST /cleaning-tasks/{task_id}/incidents` accepts: a title and a description.
+
+    **Exactly two fields, and `extra="forbid"` is what makes that a contract** (R1.3). A body
+    carrying `property_id`, `reservation_id`, `tenant_id`, `source`, `category`, `severity`,
+    `status`, `assigned_technician_id` or any cost field is rejected rather than ignored: those
+    are derived or sealed by the system, and silently dropping one would leave a caller believing
+    it had been accepted. `test_task_incident_api.py` pins the set so that adding a third field is
+    a deliberate act rather than a drift.
+
+    **The bounds are imported, never re-derived** (D7). `MAX_INCIDENT_TITLE` and
+    `MAX_INCIDENT_DESCRIPTION` live in `app/maintenance/domain/entities.py`, the module that owns
+    the **bound** — the column's own DDL is next door in that module's
+    `infrastructure/models.py`. The guest portal's request schema binds the same two constants; a
+    local `300` here would be a copy nobody keeps in step with either.
+
+    **`storable_text` is not decoration**: without it a `title` carrying `U+0000` or an unpaired
+    surrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the
+    section-7 panel of `guest-portal-api` measured twice on these two columns. `SingleLineText`
+    for the title (no control characters at all — it is rendered into lists and logs) and
+    `MultiLineText` for the description (paragraphs and tabs are how a person describes a
+    problem).
+
+    `str_strip_whitespace=True` with `min_length=1` is what makes a whitespace-only report a
+    `422`, and it means the maxima count characters *after* stripping.
+    """
+
+    model_config = ConfigDict(extra="forbid", str_strip_whitespace=True)
+
+    title: Annotated[
+        SingleLineText, Field(min_length=1, max_length=MAX_INCIDENT_TITLE)
+    ]
+    description: Annotated[
+        MultiLineText, Field(min_length=1, max_length=MAX_INCIDENT_DESCRIPTION)
+    ]
+
+    def to_report(self) -> IncidentReport:
+        """Request → domain, **here and not in the router** (D9).
+
+        This is load-bearing for the rule-11 census guard, not tidiness: the guard in
+        `tests/maintenance/test_free_text_sink_contract.py` reports any gated module that names
+        `title` or `description` in a writing position. Because the mapping lives in this
+        schema, `tasks_router.py` never does — which is a property of the design rather than
+        luck, and the reason the router needs no allowlist entry.
+        """
+        return IncidentReport(title=self.title, description=self.description)
+
+
+class TaskIncidentReportedResponse(BaseModel):
+    """The acknowledgement, and **only** the acknowledgement (R4.4, D8).
+
+    Three fields: the id of the incident just created, its status and when. A mirror of the guest
+    portal's `IncidentReportedResponse`, and for the same reason — the cleaner does not read,
+    list, classify or resolve incidents (proposal §Out of scope), so this is the whole of what
+    this surface may ever say about one.
+
+    It carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill in
+    and returning their initial values would promise a shape that changes underneath the caller.
+    It does not echo the `description` back either — there is nothing to learn from it and it is
+    a rule-11 sink, so the round trip would be one more place the value travels to.
+    """
+
+    id: uuid.UUID
+    status: IncidentStatus
+    created_at: datetime
+
+    @classmethod
+    def from_acknowledgement(
+        cls, acknowledgement: IncidentReportedAcknowledgement
+    ) -> "TaskIncidentReportedResponse":
+        return cls(
+            id=acknowledgement.id,
+            status=acknowledgement.status,
+            created_at=acknowledgement.created_at,
+        )

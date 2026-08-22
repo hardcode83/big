@@ -175,6 +175,23 @@ export interface paths {
      */
     get: operations["get_cleaning_task_context_api_v1_cleaning_tasks__task_id__context_get"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/incidents": {
+    /**
+     * Report an incident found during a cleaning
+     * @description Opens a maintenance incident from the cleaning task the caller is working on — PRD §11's «reportar incidencia» and one of the five creation sources of §12.
+     *
+     * The body is **exactly** a `title` and a `description`. Everything else about the incident is decided by the system: it is sealed `source = CLEANER`, attributed to the authenticated user, linked to this task, and its property is taken from the task — never from the request.
+     *
+     * It is born `OPEN` and **unclassified**. The classification job gives it a category and a severity on a later tick, and from that point it is the manager's; the cleaner gets the acknowledgement of the one she just opened and nothing more.
+     *
+     * A `CLEANER` reaches only the tasks assigned to her. That restriction comes from the token's persisted role and **no request field can widen it**. An unknown task, another tenant's task and another cleaner's task are one indistinguishable `404`.
+     *
+     * Reportable while the work is live — `ASSIGNED`, `ACCEPTED` or `IN_PROGRESS`. A completed, rejected or cancelled task answers `409`: PRD §12 says «durante checklist», and a broken boiler found after the fact is not this surface's business.
+     *
+     * **Reporting does not block closing the cleaning by itself.** The incident is born `MEDIUM`, and `complete()` is refused only by an unresolved `CRITICAL` incident **anywhere in the property** — so it starts blocking only if the classifier raises it, or if such an incident already existed.
+     */
+    post: operations["report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/photos": {
     /**
      * List a cleaning task's photos
@@ -2418,6 +2435,39 @@ export interface components {
       /** Title */
       title: string;
     };
+    /**
+     * ReportTaskIncidentRequest
+     * @description What `POST /cleaning-tasks/{task_id}/incidents` accepts: a title and a description.
+     *
+     * **Exactly two fields, and `extra="forbid"` is what makes that a contract** (R1.3). A body
+     * carrying `property_id`, `reservation_id`, `tenant_id`, `source`, `category`, `severity`,
+     * `status`, `assigned_technician_id` or any cost field is rejected rather than ignored: those
+     * are derived or sealed by the system, and silently dropping one would leave a caller believing
+     * it had been accepted. `test_task_incident_api.py` pins the set so that adding a third field is
+     * a deliberate act rather than a drift.
+     *
+     * **The bounds are imported, never re-derived** (D7). `MAX_INCIDENT_TITLE` and
+     * `MAX_INCIDENT_DESCRIPTION` live in `app/maintenance/domain/entities.py`, the module that owns
+     * the **bound** — the column's own DDL is next door in that module's
+     * `infrastructure/models.py`. The guest portal's request schema binds the same two constants; a
+     * local `300` here would be a copy nobody keeps in step with either.
+     *
+     * **`storable_text` is not decoration**: without it a `title` carrying `U+0000` or an unpaired
+     * surrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the
+     * section-7 panel of `guest-portal-api` measured twice on these two columns. `SingleLineText`
+     * for the title (no control characters at all — it is rendered into lists and logs) and
+     * `MultiLineText` for the description (paragraphs and tabs are how a person describes a
+     * problem).
+     *
+     * `str_strip_whitespace=True` with `min_length=1` is what makes a whitespace-only report a
+     * `422`, and it means the maxima count characters *after* stripping.
+     */
+    ReportTaskIncidentRequest: {
+      /** Description */
+      description: string;
+      /** Title */
+      title: string;
+    };
     /** RequiredPhotoPayload */
     RequiredPhotoPayload: {
       /** Label */
@@ -2781,6 +2831,33 @@ export interface components {
       full_name: string;
       /** Nationality */
       nationality: string;
+    };
+    /**
+     * TaskIncidentReportedResponse
+     * @description The acknowledgement, and **only** the acknowledgement (R4.4, D8).
+     *
+     * Three fields: the id of the incident just created, its status and when. A mirror of the guest
+     * portal's `IncidentReportedResponse`, and for the same reason — the cleaner does not read,
+     * list, classify or resolve incidents (proposal §Out of scope), so this is the whole of what
+     * this surface may ever say about one.
+     *
+     * It carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill in
+     * and returning their initial values would promise a shape that changes underneath the caller.
+     * It does not echo the `description` back either — there is nothing to learn from it and it is
+     * a rule-11 sink, so the round trip would be one more place the value travels to.
+     */
+    TaskIncidentReportedResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      status: components["schemas"]["IncidentStatus"];
     };
     /**
      * TenantConfigPatch
@@ -4109,6 +4186,70 @@ export interface operations {
         };
       };
       /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Report an incident found during a cleaning
+   * @description Opens a maintenance incident from the cleaning task the caller is working on — PRD §11's «reportar incidencia» and one of the five creation sources of §12.
+   *
+   * The body is **exactly** a `title` and a `description`. Everything else about the incident is decided by the system: it is sealed `source = CLEANER`, attributed to the authenticated user, linked to this task, and its property is taken from the task — never from the request.
+   *
+   * It is born `OPEN` and **unclassified**. The classification job gives it a category and a severity on a later tick, and from that point it is the manager's; the cleaner gets the acknowledgement of the one she just opened and nothing more.
+   *
+   * A `CLEANER` reaches only the tasks assigned to her. That restriction comes from the token's persisted role and **no request field can widen it**. An unknown task, another tenant's task and another cleaner's task are one indistinguishable `404`.
+   *
+   * Reportable while the work is live — `ASSIGNED`, `ACCEPTED` or `IN_PROGRESS`. A completed, rejected or cancelled task answers `409`: PRD §12 says «durante checklist», and a broken boiler found after the fact is not this surface's business.
+   *
+   * **Reporting does not block closing the cleaning by itself.** The incident is born `MEDIUM`, and `complete()` is refused only by an unresolved `CRITICAL` incident **anywhere in the property** — so it starts blocking only if the classifier raises it, or if such an incident already existed.
+   */
+  report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["ReportTaskIncidentRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["TaskIncidentReportedResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task, another cleaner's task and a task whose property does not resolve inside the tenant are all answered this way, indistinguishably. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is no longer in a state the cleaner can report from: it has been completed, rejected or cancelled. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body is not exactly a non-empty `title` and `description` the database can store, or it carries a field this operation does not accept. */
       422: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];

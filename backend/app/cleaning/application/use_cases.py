@@ -60,6 +60,11 @@ from app.cleaning.domain.repositories import (
     TemplatePage,
     UnscopedCleaningPhotoLocationQuery,
 )
+from app.cleaning.domain.ports import (
+    IncidentReport,
+    IncidentReportedAcknowledgement,
+    TaskIncidentReportingPort,
+)
 from app.cleaning.domain.read_models import CleaningTaskContext
 from app.cleaning.domain.templates import resolve_template
 from app.cleaning.domain.value_objects import parse_template_content
@@ -1215,6 +1220,139 @@ class GetCleaningTaskContextUseCase:
         # D5) and there is no checkout to measure from, so the deadline anchors on `now` rather
         # than on a guess.
         return checkout_at, checkout_at or now
+
+
+class ReportTaskIncidentUseCase:
+    """The cleaner opens an incident from the task she is working on (`cleaner-incident-report`).
+
+    **Composition, in the shape `GetCleaningTaskContextUseCase` above already uses** (D5): three
+    collaborators, each `get` carrying its own explicit `tenant_id`, rather than a bespoke reader
+    with a `JOIN` — which would be "el segundo sitio donde se escribe el scope de tenant"
+    (`dashboard-api` D2). The composition is also stricter than a join: a task pointing at another
+    tenant's property resolves to `None` and becomes a `404`.
+
+    **This use case is where the tenant precondition of the whole feature is discharged**, and it
+    is worth saying plainly because nothing downstream repeats it. `incidents`' foreign keys are
+    global rather than composite with `tenant_id` (`IncidentRepository.add` states this), so the
+    database would accept an incident of tenant A anchored to tenant B's cleaning task. What stops
+    it is step 1: the task is loaded with an explicit `tenant_id`, and only *that* task's id and
+    `property_id` are ever passed on. The port cannot check it and `maintenance` deliberately does
+    not (D4's rejected alternative was injecting a `CleaningTaskRepository` there).
+
+    **Five steps, in this order** (D5), and the order is not cosmetic:
+
+    1. `tasks.get(tenant_id, task_id)` → `None` ⇒ `CleaningTaskNotFoundError`;
+    2. `restrict_to_cleaner_id` ≠ `task.assigned_cleaner_id` ⇒ the same error;
+    3. `task.assert_incident_reportable(...)` — the `409`, and it comes **after** the two `404`s
+       so that a conflict never describes a task the caller cannot see;
+    4. `properties.get(tenant_id, task.property_id)` → `None` ⇒ the same error again;
+    5. the port, with `property_id` taken from the resolved task and never from the request.
+
+    The four failure paths of R2.3 answer one indistinguishable `404`, so the route cannot be used
+    as a probe for which tasks exist.
+
+    **The second `SELECT` of the property is deliberate and its cost is known.** The alta in
+    `maintenance` resolves the property inside the tenant on its own account — a precondition its
+    port declares as the caller's and which serves its other callers. Letting that one fire
+    instead of doing step 4 would answer `MaintenanceValidationError` ⇒ `422`, a body
+    distinguishable from the other three, which is exactly the probe R2.3 closes. One extra
+    statement on one row buys an indistinguishable refusal.
+
+    A read plus one write: the unit of work belongs to the writer in `maintenance`, so there is no
+    `uow` here and no audit repository — the alta writes its own audit row and timeline entry.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        properties: PropertyRepository,
+        incidents: TaskIncidentReportingPort,
+    ) -> None:
+        self._tasks = tasks
+        self._properties = properties
+        self._incidents = incidents
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        report: IncidentReport,
+        now: datetime,
+    ) -> IncidentReportedAcknowledgement:
+        task = await self._tasks.get(tenant_id, task_id)
+        if task is None:
+            raise CleaningTaskNotFoundError()
+
+        restrict = actor.restrict_to_cleaner_id
+        if restrict is not None and task.assigned_cleaner_id != restrict:
+            # R2.2: derived from the **persisted** role, re-read from the user's row on every
+            # request, and never accepted or widened from the body. For this cleaner the task
+            # does not exist — same error, same body (R2.3).
+            #
+            # **This check is redundant with step 3, and that is worth stating rather than
+            # leaving for someone to rediscover.** For a `CLEANER`, `restrict` *is*
+            # `actor.user_id`, so `_require_assignee` two lines down makes exactly the same
+            # comparison and raises exactly the same error; for every other role `restrict` is
+            # `None` and this branch cannot fire at all. The QA panel of section 5 measured the
+            # consequence: deleting this block leaves the whole suite green, and no test in
+            # `test_task_incident_use_case.py` can distinguish the two — which is a property of
+            # the code, not a hole in the tests.
+            #
+            # It stays for two reasons. D5 lists it as step 2, and the sibling read
+            # (`GetCleaningTaskContextUseCase`) has the identical line, so removing it here
+            # alone would make two use cases that do the same job look like they disagree.
+            # And it is where R2.2 is *legible*: the requirement is about this layer deriving
+            # the restriction from the role, and a reader looking for that finds it here rather
+            # than having to know that an entity method happens to imply it.
+            raise CleaningTaskNotFoundError()
+
+        # R2.5, and the entity owns the rule (D6). `actor.user_id` and not `restrict`: a role
+        # that is not `CLEANER` has `restrict_to_cleaner_id is None` and would otherwise skip
+        # the assignee half of the gate entirely.
+        task.assert_incident_reportable(actor.user_id)
+
+        property = await self._properties.get(tenant_id, task.property_id)
+        if property is None:
+            # A task whose property does not resolve **inside this tenant** is a cross-tenant
+            # pointer or a deleted row; the task's own 404 keeps "you cannot have this"
+            # indistinguishable from "it does not exist" (R2.3).
+            raise CleaningTaskNotFoundError()
+
+        acknowledgement = await self._incidents.report(
+            tenant_id=tenant_id,
+            # R1.4 — off the resolved task, never off the request.
+            property_id=task.property_id,
+            cleaning_task_id=task.id,
+            report=report,
+            actor_user_id=actor.user_id,
+            ip=actor.ip,
+            now=now,
+        )
+
+        # R5.4: the two identifiers and nothing else. What the cleaner typed does not go to a
+        # log any more than it goes to `audit_logs.changes` or to `timeline_events`: rule 11's
+        # "no se propaga" clause means the value does not leave those two columns, and a log
+        # line is somewhere it would leave them to — one no later redaction can reach.
+        #
+        # **Excepción 3 and not 2**, which is the distinction D9 turns on and the reason the
+        # number is worth naming: the 2nd declares its writer to be whoever reports *from the
+        # portal*, an anonymous stranger, and says of itself that it does not authorise a
+        # writer of ours; the 3rd is what a person authenticated with RBAC types about their
+        # own scope, which is a cleaner with `EXECUTE_CLEANING_TASKS`. The census row of
+        # `sdd/steering/security.md` is where that lives; this comment only says which clause
+        # binds the code below it.
+        logger.info(
+            "cleaning.task_incident_reported",
+            extra={
+                "tenant_id": str(tenant_id),
+                "cleaning_task_id": str(task.id),
+                "incident_id": str(acknowledgement.id),
+            },
+        )
+        return acknowledgement
 
 
 class ListCleaningTasksUseCase:

@@ -71,10 +71,11 @@ _ECHO_RUN_LENGTH = 8
 #: guest's own words go to `description`, verbatim, where excepción 2 covers them because the
 #: value is not ours.
 #:
-#: **It lives here, and not in the module that opens the incident, because `maintenance` owns
-#: the column.** The census in `steering/security.md` is written by writer, and this module is
-#: the writer of `incidents.title`; a caller that could bring its own vocabulary would make the
-#: closed form unenforceable from the side that has to guarantee it. `messaging` still decides
+#: **It lives here, and not in the module that opens the incident.** The census in
+#: `steering/security.md` is organised by writer, and it is the only place that says which
+#: module that is for this column; what is local — and the reason the catalogue sits beside the
+#: entity — is that a caller free to bring its own vocabulary would make the closed form
+#: unenforceable from the side that has to guarantee it. `messaging` still decides
 #: *which* conversation intent opens an incident and therefore which of these titles it asks
 #: for — that mapping is its own, and `tests/maintenance/test_report_incident_from_conversation.py`
 #: pins the two together so neither can drift.
@@ -84,6 +85,30 @@ CONVERSATION_INCIDENT_TITLES: frozenset[str] = frozenset(
         "Access problem reported in a guest conversation",
     }
 )
+
+
+#: `incidents.title` is `VARCHAR(300)`, and a value that does not fit dies at the driver and
+#: aborts the transaction. Bounded so an over-long title is a `422` instead.
+#:
+#: **Here, and not inside a request schema that uses it** (`cleaner-incident-report` D7): this
+#: module is where the column lives — the entity below, and its DDL next door in
+#: `maintenance/infrastructure/models.py` — so this is where its width can be kept true to what
+#: the database will actually take. It began in `guests/api/portal_schemas.py`, back
+#: when a single schema was the only thing that needed it; a constant living inside one schema
+#: makes any second binder's copy one nobody keeps in step.
+MAX_INCIDENT_TITLE = 300
+#: `incidents.description` is unbounded `TEXT`, so nothing downstream refuses a large value —
+#: this constant is the whole bound. 5000 is the house figure for a free-text field a person
+#: writes (`properties.MAX_NOTES`, `reservations.MAX_TEXT`), and somebody describing a broken
+#: boiler needs far less.
+#:
+#: **Added by the security panel of section 7 of `guest-portal-api`, and the reasoning is worth
+#: keeping.** The first version left it unbounded, arguing the body ceiling was the bound. It is
+#: not the right bound: the ceiling is per *request*, while that change's per-token budget is 60
+#: requests a minute, so one link holder could sustain tens of MiB a minute into a column with no
+#: maximum, on a write it deliberately does not deduplicate. `title` was already capped against
+#: the same class of abuse; the asymmetry was the bug.
+MAX_INCIDENT_DESCRIPTION = 5000
 
 
 @dataclass
@@ -98,6 +123,10 @@ class Incident:
     updated_at: datetime
     reservation_id: uuid.UUID | None = None
     reported_by_user_id: uuid.UUID | None = None
+    #: The cleaning task during which the incident was reported, when it was reported from
+    #: one (`cleaner-incident-report` R4.1). `None` for every other source — the guest
+    #: portal, a conversation and the demo seed stay valid without it (R4.2).
+    cleaning_task_id: uuid.UUID | None = None
     reported_by_guest_token: str | None = None
     category: IncidentCategory = IncidentCategory.OTHER
     severity: IncidentSeverity = IncidentSeverity.MEDIUM

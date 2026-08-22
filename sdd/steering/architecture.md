@@ -4,13 +4,39 @@ phases: [design, tasks]
 
 # Architecture — AutoHostAI
 
-Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png`, `docs/diagrams/2026-08-11_autohost-er-entidades.png` y `docs/diagrams/2026-08-15_autohost-secuencia-mantenimiento.png`.
+Diagramas: `docs/diagrams/2026-07-13_autohost-{c4-contenedores,maquina-estados,secuencia-limpieza}.png`, `docs/diagrams/2026-08-09_autohost-hexagonal-dominios.png`, `docs/diagrams/2026-08-22_autohost-er-entidades.png` y `docs/diagrams/2026-08-15_autohost-secuencia-mantenimiento.png`.
 
 El de secuencia de mantenimiento se regeneró en `maintenance` y el `2026-07-13_...` se borró. No era una actualización cosmética: aquél dibujaba un participante `AIAdapter` clasificando **dentro de la petición que crea la incidencia**, y este change decidió lo contrario en sus dos decisiones de cabecera — D1 declara un puerto propio de `maintenance` (`IncidentClassifier`) para no colgar del `MockAIAdapter` que el repo ya asignó a `messaging-ai`, y D2 saca la clasificación a un job de Celery. Mostraba además «subir fotos», que el change deja fuera de alcance, y le faltaban el SLA, `WAITING_EXTERNAL_PARTS` y la segunda puerta de aprobación sobre `final_cost`. Un diagrama que enseña la arquitectura rechazada es peor que no tenerlo, porque nadie sospecha de él.
 
-El de entidades se regeneró en `guest-portal-api` al entrar `guest_access_tokens`: **31 entidades, 75 relaciones**. El anterior, `2026-08-10_...`, se borró; aquel salió de `auth-account-recovery` con 30 y 73 al entrar `password_reset_tokens` y `users.must_change_password`, y a su vez había sustituido al `2026-08-09_...` de `reservations-webhooks` (29 y 71, al entrar `webhook_endpoints`), que había sustituido al `2026-08-06_...` de `pms-provider-resolution` (28 y 67), y ése a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
+El de entidades se regeneró en `cleaner-incident-report` al entrar `incidents.cleaning_task_id`: **31 entidades, 78 relaciones** (74 pares de tablas distintos). Antes se regeneró en `guest-portal-api` al entrar `guest_access_tokens`, y aquel párrafo decía **75**. El anterior, `2026-08-11_...`, se borró — y aquél había borrado el `2026-08-10_...`; aquel salió de `auth-account-recovery` con 30 y 73 al entrar `password_reset_tokens` y `users.must_change_password`, y a su vez había sustituido al `2026-08-09_...` de `reservations-webhooks` (29 y 71, al entrar `webhook_endpoints`), que había sustituido al `2026-08-06_...` de `pms-provider-resolution` (28 y 67), y ése a `2026-07-31_...` y a `2026-07-30_..._-core`, cuyo sufijo nunca describió su alcance real. **Se genera desde la metadata de SQLAlchemy**, no a mano, así que refleja el esquema y no lo que alguien recordaba de él.
 
-**Qué cuenta «relaciones», que hasta ahora no estaba escrito**: una por **columna con clave ajena**. Conviene fijarlo porque la cifra se venía arrastrando sin regla y no había forma de saber si dos cifras eran comparables. Bajo esta regla la serie sí lo es —71 de `reservations-webhooks`, más las dos claves ajenas de `password_reset_tokens` son las 73 de `auth-account-recovery`, más las dos de `guest_access_tokens` (`tenant_id` y `reservation_id`) son las **75** de ahora— y sólo la de `pms-provider-resolution` queda fuera: aquel «67» contaba otra cosa, porque su propio esquema daba 70 con esta regla. Si se cuentan **pares de tablas distintos** en vez de columnas, hoy son **73**, no 75: hay dos columnas que participan cada una en dos claves ajenas, `guest_access_tokens.tenant_id` y `reservations.tenant_id`, por las compuestas que `guest-portal-api` estrenó.
+**El de secuencia de mantenimiento NO se regenera, y consta el criterio.** Lo que `maintenance`
+documentó al generarlo es lo que dibuja: el job de clasificación fuera de la petición, el SLA,
+`WAITING_EXTERNAL_PARTS` y la segunda puerta de aprobación sobre `final_cost`. Es decir, la
+secuencia **desde que la incidencia existe**, y eso `cleaner-incident-report` no lo toca: añade una
+puerta de entrada nueva, no un paso nuevo del ciclo. Nada de lo registrado dice que enumere las
+fuentes de creación, que es lo único que habría quedado obsoleto. Decidido así **sin abrir el PNG**
+— mirarlo cuesta ~140k de contexto, y la pregunta se contesta con lo que el change escribió cuando
+lo generó.
+
+**La serie tiene una rotura, y se documenta en vez de disimularla.** Medido contra la metadata el
+2026-08-22: el esquema tiene **77** columnas con clave ajena *antes* de este change y **78**
+después, y este change añade exactamente una (`incidents.cleaning_task_id → cleaning_tasks.id`).
+Los pares sí cuadran —73 antes, 74 ahora— pero las columnas no: el párrafo venía diciendo **75**,
+así que entre `guest-portal-api` y hoy entraron **dos** columnas con clave ajena sin que nadie
+actualizase esta cifra. No se inventa aquí cuál de los changes intermedios las trajo: lo que se
+puede afirmar de las dos cifras es que la diferencia existe y que la regla de abajo es la que hay
+que aplicar para reconciliarla.
+
+**Y una advertencia para quien compare con el proposal de un change**: `cleaner-incident-report`
+llegó con la cifra **76**, que sale de contar **restricciones** de clave ajena y no columnas. Las
+dos difieren en dos porque el esquema tiene dos claves ajenas compuestas
+(`fk_guest_access_tokens_reservation_within_tenant` y `fk_reservations_guest_within_tenant`), cada
+una sobre dos columnas. Bajo la regla de este documento —columnas— son 78. Si alguien prefiere
+contar restricciones, que cambie la regla aquí y renumere la serie entera; lo que no vale es
+mezclarlas.
+
+**Qué cuenta «relaciones», que hasta ahora no estaba escrito**: una por **columna con clave ajena**. Conviene fijarlo porque la cifra se venía arrastrando sin regla y no había forma de saber si dos cifras eran comparables. Bajo esta regla la serie sí lo es —71 de `reservations-webhooks`, más las dos claves ajenas de `password_reset_tokens` son las 73 de `auth-account-recovery`, más las dos de `guest_access_tokens` (`tenant_id` y `reservation_id`) son las **75** con las que `guest-portal-api` dejó esta serie— y sólo la de `pms-provider-resolution` queda fuera: aquel «67» contaba otra cosa, porque su propio esquema daba 70 con esta regla. Si se cuentan **pares de tablas distintos** en vez de columnas, aquellas 75 eran **73**: hay dos columnas que participan cada una en dos claves ajenas, `guest_access_tokens.tenant_id` y `reservations.tenant_id`, por las compuestas que `guest-portal-api` estrenó. **Las cifras vigentes son las de arriba —78 columnas y 74 pares—, no estas dos**, que son las del párrafo tal y como quedó en `guest-portal-api` y se conservan aquí porque son las que fijan la regla.
 
 El hexagonal se regeneró en `dashboard-api` (el `2026-07-13_...` se borró). Dibujaba **trece** cajas de dominio y ya le faltaban `reviews` y `audit` desde `domain-foundation-financial`; ahora dibuja **dieciséis**, con `dashboard` marcado aparte porque es el único de solo lectura y sin `infrastructure/` propia.
 

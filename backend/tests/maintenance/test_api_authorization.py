@@ -59,7 +59,15 @@ async def _call(api, method: str, path: str, headers: dict):
 
 async def test_a_cleaner_is_refused_on_every_route(api, world, db_session) -> None:
     """R5.4: "NEVER SHALL exponer estas rutas al rol `CLEANER`". Structural rather than
-    checked per route — the role holds none of the four permissions (D13)."""
+    checked per route — the role holds none of the four permissions (D13).
+
+    **Still true after `cleaner-incident-report`, and worth saying so here.** That change gives
+    a `CLEANER` her first incident-related surface, so a reader could reasonably wonder whether
+    this test survived it. It does, untouched: the alta lives under
+    `POST /api/v1/cleaning-tasks/{task_id}/incidents`, gated on `EXECUTE_CLEANING_TASKS`, whose
+    subject is the cleaning task. None of the four permissions of *this* module moved, and every
+    route below is still a `403` for her — which is exactly why that change could be built
+    without reopening R5.4."""
     incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
     approval = await make_approval(db_session, world, incident.id)
     cleaner = await _user(db_session, world.tenant, "CLEANER")

@@ -52,13 +52,15 @@ def test_the_incident_allowlist_is_exactly_what_it_should_be() -> None:
     The allowlist is the whole defence of rule 11 in this module — "by construction, not by
     care" — so a later change adding a free-text incident column to it (a resolution note,
     an operator comment) has to fail here rather than pass silently. The three names it
-    starts with are `guest-portal-api`'s; the eight after are this flow's.
+    starts with are `guest-portal-api`'s; the eight after are this flow's, and the twelfth is
+    `cleaner-incident-report`'s (D10) — an identifier, like the two it sits between.
     """
     assert AUDITABLE_FIELDS["INCIDENT"] == frozenset(
         {
             "source",
             "status",
             "reservation_id",
+            "cleaning_task_id",
             "category",
             "severity",
             "assigned_technician_id",

@@ -326,6 +326,11 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "source",
             "status",
             "reservation_id",
+            # `cleaner-incident-report` D10. The audit row of an incident records what it was
+            # anchored against — `reservation_id` is here for that reason — and "during which
+            # cleaning" is the equivalent anchor. It is an identifier and not text, so
+            # excepción 2 of rule 11 is untouched by it.
+            "cleaning_task_id",
             "category",
             "severity",
             "assigned_technician_id",

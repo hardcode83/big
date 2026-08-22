@@ -371,6 +371,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/context",
+        # `cleaner-incident-report`: the cleaner opens an incident from her own task. Gated on
+        # `EXECUTE_CLEANING_TASKS`, which no other role holds, so it needed no new permission —
+        # and it lives here rather than under `/api/v1/incidents` precisely so that module's
+        # "no creation route" invariant survives (R1.2).
+        "/api/v1/cleaning-tasks/{task_id}/incidents",
         "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",

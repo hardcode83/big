@@ -47,6 +47,35 @@ def _writes_incidents_in_raw_sql(tree: ast.Module) -> bool:
     )
 
 
+def _imports_the_cleaning_incident_port(tree: ast.Module) -> bool:
+    """Whether the module imports `app.cleaning.domain.ports`, read from the **AST**.
+
+    The fifth clause of the census gate, added by `cleaner-incident-report`, and the one this
+    file's own docstring predicted: "what would still evade it is a caller typed only against a
+    protocol alias that mentions none of the four names; if that ever appears, the fifth clause
+    is the import graph rather than another substring."
+
+    That caller arrived. `cleaning/api/schemas.py` builds an `IncidentReport` with
+    `title=`/`description=` keywords and names none of `IncidentModel`,
+    `ReportIncidentUseCase` or `IncidentRepository` — so before this clause it was an
+    **ungated writer of both columns**, which is exactly the hole the docstring anticipated.
+
+    The import graph and not a sixth substring: gating on the port's own name would be the
+    erosion this file has spent three rounds documenting, and it would still miss anything that
+    receives the port injected. One hop and not the transitive closure — that would drag in
+    `main.py`, the CLI and nearly every router (any of them with a FastAPI `description=`) and
+    turn the allowlist into noise.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").startswith("app.cleaning.domain.ports"):
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name.startswith("app.cleaning.domain.ports") for alias in node.names):
+                return True
+    return False
+
+
 def test_the_two_columns_are_free_text_which_is_why_they_need_this_file() -> None:
     """The premise. `title` is bounded by the DDL, `description` is not bounded at all.
 
@@ -90,21 +119,30 @@ def test_the_timeline_entry_carries_neither_of_them() -> None:
     )
     tree = ast.parse(source)
 
-    timeline_title = next(
-        node.value
+    # **Every** timeline title in the module, not one name. Raised by the security panel of
+    # `cleaner-incident-report` section 7: this resolved `_TIMELINE_TITLE` alone, so the
+    # constant the cleaner's alta uses — `_REPORTED_TIMELINE_TITLE` — was never pinned, and an
+    # edit deriving it from the reported text (a truncation, say) would have kept this green.
+    # The behavioural net next door is `TITLE not in event.title`, which a truncation slips
+    # straight past.
+    titles = {
+        target.id: node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "_TIMELINE_TITLE"
-            for target in node.targets
-        )
-    )
+        for target in node.targets
+        if isinstance(target, ast.Name) and target.id.endswith("_TIMELINE_TITLE")
+    }
 
-    assert isinstance(timeline_title, ast.Constant), (
-        "_TIMELINE_TITLE stopped being a literal: the timeline is immutable, so a value "
-        "assembled from the report cannot be redacted afterwards (design D12)"
+    assert len(titles) >= 2, (
+        "the module stopped declaring the timeline titles as module-level names, so this "
+        f"structural check no longer sees them: found {sorted(titles)}"
     )
-    assert isinstance(timeline_title.value, str) and timeline_title.value.strip()
+    for name, value in sorted(titles.items()):
+        assert isinstance(value, ast.Constant), (
+            f"{name} stopped being a literal: the timeline is immutable, so a value assembled "
+            "from the report cannot be redacted afterwards (design D12)"
+        )
+        assert isinstance(value.value, str) and value.value.strip()
 
 
 def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
@@ -178,6 +216,7 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
             or "IncidentModel" in source
             or "ReportIncidentUseCase" in source
             or "IncidentRepository" in source
+            or _imports_the_cleaning_incident_port(tree)
             or _writes_incidents_in_raw_sql(tree)
         ):
             continue
@@ -243,11 +282,34 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         # `ReportIncidentUseCase` accepts any `str`, so a future caller that composes text there
         # is under the structured form by default and owes this table a row of its own.
         "cli/seed_demo.py",
+        # `cleaner-incident-report`: the cleaner's request schema, and the module the fifth
+        # clause exists to catch. It builds `IncidentReport(title=…, description=…)` in
+        # `to_report()` and names none of the four gated strings, so until that clause it was an
+        # **ungated writer of both columns** — precisely the hole this docstring predicted.
+        #
+        # Its contract, written here as the allowlist demands: the value is what an authenticated
+        # cleaner typed about her own task, bounded by `min_length=1`, the two maxima of
+        # `maintenance/domain/entities.py`, a strip, and the storable-text guard of
+        # `app/core/storable_text.py`. It falls under **excepción 3** — a person authenticated
+        # with RBAC writing about their own scope — and not the 2nd, which is the anonymous
+        # portal reporter and says of itself that it does not authorise a writer of ours.
+        #
+        # The mapping lives in the schema rather than in the router, and that keeps **`title=`**
+        # out of `tasks_router.py` (design D9). What it does not do — measured, because D9 and
+        # an earlier version of this comment both claimed otherwise — is keep the router off
+        # this list: it carries **fifteen** `description=` keywords, every one of them FastAPI
+        # route metadata, and it is absent here only because no clause gates it (it names none
+        # of the four strings and imports no gated module). The day it acquires one, it will
+        # match on that metadata exactly as `maintenance`'s two routers already do, and it will
+        # need an entry saying so rather than a reviewer hunting for a writer that is not there.
+        "cleaning/api/schemas.py",
     }, (
-        "a module names incidents.title/description in a writing position: rule 11's second "
-        "exception is declared for the reporter's own prose and no other producer, so a new "
-        "writer needs its own trip through steering — or, if this is a false positive of a "
-        f"deliberately coarse census, its own allowlist entry here. Found {offenders}"
+        "a module names incidents.title/description in a writing position: the census declares "
+        "these two columns writer by writer — the anonymous reporter under excepción 2, the "
+        "authenticated cleaner under excepción 3, and text our own code composes under the "
+        "structured form by default — so a new writer needs its own trip through steering with "
+        "its own row, or, if this is a false positive of a deliberately coarse census, its own "
+        f"allowlist entry here. Found {offenders}"
     )
 
 
@@ -306,6 +368,69 @@ def test_the_census_catches_the_escapes_it_claims_to() -> None:
                 if isinstance(target, ast.Attribute) and target.attr in SINK_COLUMNS
             )
         assert found, f"the census would not see {snippet!r}"
+
+
+def test_the_fifth_clause_reads_the_import_graph_and_not_another_substring() -> None:
+    """The mechanism of the clause `cleaner-incident-report` added, pinned like the rest.
+
+    Both import forms, and — the half that matters — that it does **not** fire on a module which
+    merely mentions the port's names in prose or imports something else from `cleaning`. A clause
+    that fired on the name would be the substring erosion this file keeps refusing.
+    """
+    assert _imports_the_cleaning_incident_port(
+        ast.parse("from app.cleaning.domain.ports import IncidentReport")
+    )
+    assert _imports_the_cleaning_incident_port(
+        ast.parse("import app.cleaning.domain.ports")
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('"""Builds a TaskIncidentReportingPort somewhere else."""')
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse("from app.cleaning.domain.entities import CleaningTask")
+    )
+    # **The case that separates the AST from a substring**, and the only one that does.
+    # Raised by the QA panel of section 7, which showed the four assertions above are all
+    # satisfied by `return "app.cleaning.domain.ports" in ast.dump(tree)` — the precise erosion
+    # D9 rejected — because none of them puts the dotted path itself into a module that does
+    # not import it. This one does.
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('"""See app.cleaning.domain.ports for the protocol this mirrors."""')
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('PORT_MODULE = "app.cleaning.domain.ports"')
+    )
+
+
+def test_the_fifth_clause_admits_three_modules_and_moves_no_offender() -> None:
+    """What the clause costs, measured rather than predicted.
+
+    The design guessed it would also admit `scheduler/tasks.py`; it does not — that module does
+    not import the port. What it actually admits beyond the writer it was added for is
+    `cleaning/application/evidence.py` and `properties/application/use_cases.py`, and **neither
+    writes either column**, so the offender set is unchanged and the gate is strictly stronger
+    for free. That is the same argument the port clause entered on, and it is asserted here so
+    that a future module joining this list has to be looked at rather than absorbed.
+    """
+    admitted = {
+        relative
+        for relative, tree in (
+            (str(path.relative_to(APP_ROOT)), ast.parse(path.read_text(encoding="utf-8")))
+            for path in sorted(APP_ROOT.glob("**/*.py"))
+        )
+        if _imports_the_cleaning_incident_port(tree)
+    }
+
+    assert admitted == {
+        # The writer the clause exists for, allowlisted above with its contract.
+        "cleaning/api/schemas.py",
+        # Already gated by the `maintenance/` prefix; the clause changes nothing for it.
+        "maintenance/application/use_cases.py",
+        # Admitted and clean — they hold the port, they do not write the columns.
+        "cleaning/application/use_cases.py",
+        "cleaning/application/evidence.py",
+        "properties/application/use_cases.py",
+    }
 
 
 def test_the_anonymous_boundary_bounds_what_can_land_there() -> None:
