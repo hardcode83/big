@@ -126,6 +126,7 @@
       "INCIDENT_CLASSIFIED": "Incidencia clasificada",
       "TECHNICIAN_ASSIGNED": "Técnico asignado",
       "TECHNICIAN_ACCEPTED": "El técnico ha aceptado",
+      "TECHNICIAN_REJECTED": "El técnico ha rechazado",
       "TECHNICIAN_EN_ROUTE": "Técnico en camino",
       "TECHNICIAN_STARTED": "El técnico ha empezado",
       "INCIDENT_RESOLVED": "Incidencia resuelta",
