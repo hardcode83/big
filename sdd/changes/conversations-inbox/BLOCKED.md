@@ -1,63 +1,48 @@
 # Blocked / pending — conversations-inbox
 
-## 1. Dos especificaciones vivas para esta feature: la rama remota es de Marta
+## 1. Reconciliación pendiente con la línea de Marta (entrega paralela hecha)
 
 - **phase**: ship
 - **type**: decision
-- **what & why**: al ir a publicar, `origin/sdd/conversations-inbox` resultó **no ser
-  el bootstrap de esta línea de trabajo**, sino una línea independiente de **Marta
-  Reyes Ojeda**, con su propia especificación y sin implementar. No se publicó nada:
-  el remoto sigue en `98815ac` y no existe ningún PR.
+- **what & why**: `origin/sdd/conversations-inbox` **no es el bootstrap de esta línea**
+  sino una línea independiente de **Marta Reyes Ojeda**: 5 commits del 2026-08-22 con
+  proposal, design y tasks propios y correcciones de gate, en `ACTIVE` y sin
+  implementar. Esta línea planificó el 19-ago e implementó el 21-ago contra otra
+  especificación.
 
-  **Los hechos, para que nadie los reconstruya a mano:**
-
-  | | Línea local (esta) | Línea de Marta (remoto) |
+  | | Esta línea | La de Marta |
   |---|---|---|
-  | Commits | 17, ninguno publicado | 5, publicados |
-  | `/sdd:new`, `design`, `tasks` | 2026-08-19 | 2026-08-22 |
-  | `/sdd:run` | 2026-08-21 | — |
   | Requisitos | R1–R7 | R1–R6 |
   | Decisiones | D1–D22 | D1–D9 |
-  | Tareas | 42, secciones en español | 36, secciones en inglés |
-  | Estado | `READY_FOR_PR`, review aprobada | `ACTIVE` |
-  | Implementación | 678 tests en verde, build limpio | ninguna |
+  | Tareas | 42 (español) | 36 (inglés) |
+  | Implementación | 678 tests en verde | ninguna |
 
-  Sus commits incluyen correcciones de gate («CHANGES REQUESTED») en design y en
-  tasks, así que su especificación pasó por sus puertas de revisión.
+  **La causa raíz es de esta línea**: hizo todo el trabajo sin publicar nunca la
+  reclamación de rama, que es lo que la regla 10 usa para que el equipo vea una feature
+  en marcha. Sin ella, Marta no podía saberlo.
 
-  **La causa raíz es de esta línea, no de la suya**: hizo tres días de planificación
-  y uno de implementación **sin publicar nunca la reclamación de rama**. La regla 10
-  compartida dice que la rama remota `sdd/<feature>` es la reclamación del equipo; al
-  no existir, Marta no tenía forma de ver que la feature estaba en marcha y la
-  arrancó de cero. Cualquier arreglo de proceso va ahí: publicar la rama al crear el
-  change, no al publicar el PR.
+  **Acuerdo tomado (Jose ↔ Marta, 2026-08-22)**: Jose entrega en paralelo y Marta
+  reconcilia cuando cierre inbox, cogiendo lo mejor de cada línea. Hecho:
 
-  **Qué NO se hizo, y por qué queda para una persona:**
-  - No se empujó: sería non-fast-forward (17 por delante, 61 por detrás).
-  - No se forzó: `--force` habría borrado sus 5 commits.
-  - No se rebasó sobre la suya: reconciliaría en silencio dos especificaciones
-    distintas, y **el veredicto de review no transfiere** — verifica la
-    implementación contra R1–R7/D1–D22, no contra R1–R6/D1–D9. Sobre sus requisitos
-    habría que revisar de nuevo, y es previsible que aparezcan huecos reales porque
-    el código no se escribió contra ellos.
-  - No se renombró para publicar aparte: dejaría dos changes vivos para la misma
-    entrada de roadmap.
+  - Rama **`sdd/conversations-inbox-jose`**, empujada. La de Marta **no se tocó**
+    (sigue en `98815ac`); no se forzó nada.
+  - PR **https://github.com/autohostai-labs/AutoHostAI/pull/111** contra `main`,
+    titulado como implementación paralela y con el cuerpo escrito para reconciliar:
+    las dos tablas de especificación, lo verificado, y qué piezas son reutilizables
+    con independencia de qué especificación gane.
 
-  **Qué falta**: que Jose y Marta decidan cuál de las dos especificaciones se
-  queda, y si la implementación local se reutiliza contra ella, se rehace, o se
-  descarta. Es una decisión de producto y de equipo, no una fusión mecánica, y el
-  change es de ella.
+  **La evidencia de PR del lifecycle NO se registra, y es deliberado.** `STATE.md`
+  sigue en `READY_FOR_PR` con `head_branch: sdd/conversations-inbox`, y el `head` de
+  ese PR es otro: `record-pr` valida la identidad contra lo registrado y debe fallar.
+  Este PR no es el PR canónico del change. Registrarlo aquí sería afirmar que esta
+  línea *es* `conversations-inbox`, y eso es justo lo que está por decidir.
 
-  **Nota sobre el estado local**: `STATE.md` dice `READY_FOR_PR` con
-  `local_review: APPROVED`, y es cierto **de esta línea**: la implementación está
-  verificada contra la especificación local. Lo que no es cierto es que sea *la*
-  bandeja de conversaciones del proyecto. Este `BLOCKED.md` no vacío es lo que impide
-  que `/sdd:ship` la publique, y el commit que lo añade invalida a propósito el
-  sufijo autorizado del ancla: mientras esto no se resuelva, el change no es
-  publicable.
-- **exact resume command**: decisión humana; después, `/sdd:ship conversations-inbox`
-  (si se queda esta línea) o `/sdd:review conversations-inbox` (si se reconcilia
-  contra la especificación de Marta).
+  **Qué falta**: que Marta rebase o entresaque contra el PR 111 al cerrar inbox, y que
+  entre las dos líneas quede **una** especificación. Después, quien se quede conduce el
+  ship canónico sobre `sdd/conversations-inbox`.
+- **exact resume command**: tras la reconciliación, `/sdd:review conversations-inbox`
+  sobre la especificación que sobreviva (el veredicto actual verifica R1–R7/D1–D22 y
+  **no transfiere** a R1–R6/D1–D9).
 
 ## 2. Dos límites declarados en D22 que sobreviven a esta revisión
 
