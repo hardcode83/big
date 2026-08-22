@@ -123,6 +123,43 @@ Si una pantalla necesita una nota, pide el detalle de esa vivienda. Coste conoci
 que quisiera mostrar notas de varias viviendas a la vez pasa de una petición a N — y con dos
 viviendas en el MVP, N es dos.
 
+## Ver el portfolio desde `/properties`
+
+`properties-web` graduó la ruta: donde antes había un cartel de «en preparación» ahora está el
+índice del portfolio, **sólo lectura**, sobre `GET /api/v1/properties`. Es la única pantalla donde
+se ve el `status` de una vivienda —`ACTIVE` o `INACTIVE` no aparecía en ninguna parte del
+frontend— y el único sitio donde un UUID de propiedad, de los que `/reservations` e `/incidents`
+imprimen en crudo, se resuelve a un nombre.
+
+Cada fila lleva **seis** cosas y nada más: nombre (que es el enlace al detalle), código interno,
+ciudad, capacidad (huéspedes · habitaciones · baños), estado operacional con su color de PRD §9.1,
+y `status`. El resto de lo que el listado devuelve —dirección, país, zona horaria, horas de
+entrada/salida por defecto, WiFi, vínculo con el PMS, sellos de tiempo— son datos de ficha: están
+en el detalle, no en la lista.
+
+Hay **dos filtros**, que son exactamente los dos que el endpoint acepta: situación (`status`) y
+estado operacional, cada uno con un «todos». No hay búsqueda por texto, ni ordenación elegible, ni
+filtro por ciudad: harían falta cambios en el backend. Cambiar un filtro vuelve a la página 1 — sin
+eso, filtrar desde la página 3 puede caer en una página que el conjunto filtrado no tiene y devolver
+un vacío indistinguible de «no hay ninguna así».
+
+En móvil no hay que arrastrar la tabla de lado a lado: por debajo de `sm` cada vivienda es una
+tarjeta apilada con pares etiqueta/valor, y la tabla de seis columnas aparece desde `sm`. Se hizo
+así a propósito, porque con scroll lateral el dato que hay que desplazar para leer es justo `status`.
+
+**Las notas de texto libre y la contraseña del WiFi no salen ahí**, y no por omisión: el listado no
+las devuelve (ver la sección de arriba) y la pantalla no pide el detalle de cada fila para
+rellenarlas — eso reconstruiría la superficie de bulto que se cerró a propósito, y encima con una
+llamada por vivienda.
+
+Quién la ve es cosa del backend, no de la pantalla: no hay guarda de permiso en el frontend.
+`PROPERTY_MANAGER` y `TENANT_OWNER` ven el listado; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben
+un estado «prohibido» localizado, que es el `403` del backend con otra cara. Un `401` no se pinta
+como error sino como carga, para que la pantalla no parpadee mientras se rota el token.
+
+El *qué hace* con sus criterios verificables está en
+[`sdd/specs/properties-crud.md`](../sdd/specs/properties-crud.md) §«La pantalla del portfolio».
+
 ## Qué queda registrado
 
 Cada alta y cada edición escriben una fila en `audit_logs`, en la misma transacción que el cambio:
@@ -134,7 +171,8 @@ De los campos sensibles y de los de texto libre (`access_notes`, `cleaning_notes
 
 ## Lo que todavía no existe
 
-- **No hay pantalla**: esto es API. El frontend de propiedades llega con `dashboard-web`.
+- **No hay pantalla para dar de alta, editar ni retirar**: eso sigue siendo sólo API. La pantalla
+  que sí existe es de lectura y está arriba, en «Ver el portfolio desde `/properties`».
 - **Las credenciales del PMS no se tocan por API**, ni siquiera enmascaradas. Se gestionan con
   `python -m app.integrations.cli.pms_credentials`, y es a propósito: una credencial robada da
   escritura sobre la cuenta del cliente, así que no existe superficie HTTP que pueda filtrarla.
