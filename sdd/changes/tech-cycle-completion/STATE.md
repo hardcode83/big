@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/tech-cycle-completion
 implementation_sha: 1d8a6dc567929cc79da81566de4b9dcc19abe725
-pr_number: 
-pr_url: 
-pr_state: 
+pr_number: 116
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/116
+pr_state: OPEN
 merge_evidence: 
 merge_sha: 
 ---
