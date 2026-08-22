@@ -59,5 +59,5 @@
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
 | cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
 | properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
-| timeline-web | new, design, tasks, run, review | 221413 | 749086 | 110501276 | 70.9417 | 2026-08-22 | — |
+| timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
 | tech-cycle-completion | new, design, tasks, run, review | 285128 | 683942 | 166352283 | 94.9517 | 2026-08-22 | — |
