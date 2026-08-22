@@ -74,17 +74,77 @@
   "timeline": {
     "title": "Cronología",
     "empty": "No hay eventos para los filtros seleccionados.",
+    "picker": {
+      "label": "Vivienda",
+      "placeholder": "Sin seleccionar",
+      "empty": {
+        "title": "Elige una vivienda",
+        "description": "Selecciona una vivienda para ver su historial de eventos."
+      }
+    },
     "filters": {
       "type": "Tipo",
       "actor": "Actor",
       "severity": "Severidad"
     },
+    "range": {
+      "from": "Desde",
+      "to": "Hasta",
+      "errorInverse": "La fecha «hasta» es anterior a la fecha «desde»."
+    },
+    "pagination": {
+      "label": "Paginación de la cronología",
+      "prev": "Página anterior",
+      "next": "Página siguiente",
+      "position": "Página {{page}} de {{totalPages}}"
+    },
     "eventType": {
-      "CHECKOUT_WINDOW_REACHED": "Hora de checkout alcanzada",
+      "RESERVATION_IMPORTED": "Reserva importada",
+      "RESERVATION_CREATED_MANUAL": "Reserva creada manualmente",
+      "RESERVATION_UPDATED": "Reserva actualizada",
+      "RESERVATION_CANCELLED": "Reserva cancelada",
+      "CHECKIN_WINDOW_OPENED": "Ventana de entrada abierta",
+      "CHECKOUT_WINDOW_REACHED": "Hora de salida alcanzada",
+      "PROPERTY_STATE_CHANGED": "Estado de la vivienda actualizado",
+      "ACCESS_CODE_PENDING": "Acceso pendiente",
+      "ACCESS_CODE_CREATED_EXTERNAL": "Acceso gestionado por el proveedor",
+      "ACCESS_CODE_MANUAL_ADDED": "Código de acceso registrado",
+      "ACCESS_CODE_DELIVERED": "Instrucciones de acceso entregadas",
+      "GUEST_MESSAGE_RECEIVED": "Mensaje del huésped recibido",
+      "AI_RESPONSE_SENT": "Respuesta automática enviada",
+      "AI_ESCALATED_TO_HUMAN": "Conversación escalada a una persona",
+      "HUMAN_RESPONSE_SENT": "Respuesta enviada por una persona",
       "CLEANING_TASK_CREATED": "Tarea de limpieza creada",
-      "PROPERTY_STATE_CHANGED": "Cambio de estado",
-      "ACCESS_CODE_DELIVERED": "Código de acceso entregado",
-      "GUEST_MESSAGE_RECEIVED": "Mensaje del huésped recibido"
+      "CLEANER_ASSIGNED": "Limpiadora asignada",
+      "CLEANER_ACCEPTED": "La limpiadora ha aceptado",
+      "CLEANER_REJECTED": "La limpiadora ha rechazado",
+      "CLEANING_STARTED": "Limpieza iniciada",
+      "CLEANING_PHOTO_UPLOADED": "Foto de limpieza subida",
+      "CLEANING_COMPLETED": "Limpieza completada",
+      "CLEANING_FAILED_VALIDATION": "La limpieza no ha superado la validación",
+      "INCIDENT_CREATED": "Incidencia creada",
+      "INCIDENT_CLASSIFIED": "Incidencia clasificada",
+      "TECHNICIAN_ASSIGNED": "Técnico asignado",
+      "TECHNICIAN_ACCEPTED": "El técnico ha aceptado",
+      "TECHNICIAN_EN_ROUTE": "Técnico en camino",
+      "TECHNICIAN_STARTED": "El técnico ha empezado",
+      "INCIDENT_RESOLVED": "Incidencia resuelta",
+      "INCIDENT_CANCELLED": "Incidencia cancelada",
+      "OWNER_APPROVAL_REQUIRED": "Se requiere la aprobación del propietario",
+      "OWNER_APPROVED_EXPENSE": "El propietario ha aprobado el gasto",
+      "OWNER_REJECTED_EXPENSE": "El propietario ha rechazado el gasto",
+      "LOCK_ALERT_RECEIVED": "Alerta de la cerradura recibida",
+      "PRICE_RECOMMENDATION_CREATED": "Recomendación de precio creada",
+      "PRICE_UPDATED_EXTERNAL": "Precio actualizado en el canal",
+      "LEGAL_REGISTRATION_SUBMITTED": "Registro legal enviado",
+      "REVIEW_IMPORTED": "Reseña importada",
+      "REVIEW_RESPONSE_DRAFTED": "Borrador de respuesta a la reseña",
+      "REVIEW_RESPONSE_APPROVED": "Respuesta a la reseña aprobada",
+      "SLA_BREACH_WARNING": "Aviso de incumplimiento de SLA",
+      "NOTIFICATION_SENT": "Notificación enviada",
+      "NOTIFICATION_FAILED": "Notificación fallida",
+      "WEBHOOK_RECEIVED": "Webhook recibido",
+      "GUEST_CHECKIN_COMPLETED": "El huésped ha completado el check-in"
     },
     "actor": {
       "SYSTEM": "Sistema",

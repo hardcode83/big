@@ -189,6 +189,8 @@ export class HttpDashboardSource implements DashboardDataSource {
         : {}),
       ...(filters.from !== undefined ? { from: filters.from } : {}),
       ...(filters.to !== undefined ? { to: filters.to } : {}),
+      ...(filters.page !== undefined ? { page: filters.page } : {}),
+      ...(filters.perPage !== undefined ? { per_page: filters.perPage } : {}),
     };
     const response = await this.client.request(
       "/api/v1/timeline/{property_id}",

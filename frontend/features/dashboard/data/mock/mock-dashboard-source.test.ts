@@ -81,6 +81,31 @@ describe("MockDashboardSource (R3)", () => {
     expect(page.page).toBe(1);
   });
 
+  it("slices the timeline by page/perPage and reports the real envelope (R3.1, R3.3)", async () => {
+    // redes11 seeds three entries, so perPage 2 spans two pages.
+    const first = await source.getPropertyTimeline(TENANT, "redes11", {
+      page: 1,
+      perPage: 2,
+    });
+    expect(first.data).toHaveLength(2);
+    expect(first.total).toBe(3);
+    expect(first.page).toBe(1);
+    expect(first.per_page).toBe(2);
+    expect(first.total_pages).toBe(2);
+
+    const second = await source.getPropertyTimeline(TENANT, "redes11", {
+      page: 2,
+      perPage: 2,
+    });
+    expect(second.data).toHaveLength(1);
+    expect(second.page).toBe(2);
+    expect(second.total_pages).toBe(2);
+    // The second page is the remainder, not a repeat of the first.
+    expect(second.data.map((e) => e.id)).not.toEqual(
+      first.data.map((e) => e.id),
+    );
+  });
+
   it("rejects with a 404 for an unknown property timeline", async () => {
     const error = await source
       .getPropertyTimeline(TENANT, "unknown")
