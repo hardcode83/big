@@ -31,6 +31,7 @@ from app.cleaning.application.use_cases import (
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
     RejectCleaningTaskUseCase,
+    ReportTaskIncidentUseCase,
     ServeLocalCleaningPhotoUseCase,
     StartCleaningTaskUseCase,
     UploadCleaningPhotoUseCase,
@@ -45,6 +46,11 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyUnscopedCleaningPhotoLocationQuery,
 )
 from app.core.config import settings
+from app.maintenance.application.use_cases import (
+    CleanerIncidentReporter,
+    ReportIncidentUseCase,
+)
+from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.integrations.domain.storage import FileStorageFactory, derive_signing_key
@@ -265,6 +271,34 @@ def get_upload_cleaning_photo_use_case(
         audit=SqlAlchemyAuditLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         max_bytes=settings.photo_upload_max_bytes,
+    )
+
+
+def get_report_task_incident_use_case(session: SessionDep) -> ReportTaskIncidentUseCase:
+    """R3.7, D2 — the one place entitled to know both modules.
+
+    `cleaning` declares `TaskIncidentReportingPort` and `maintenance` supplies the implementer,
+    so somebody has to hold both ends. That somebody is `api/`: a use case importing another
+    module's use cases is what the dependency rule forbids, and it is the same division
+    `messaging/api/dependencies.py` makes for the port it declares.
+
+    `CleanerIncidentReporter` wraps the generic alta rather than reimplementing it (D3), so the
+    incident, its audit row and its timeline entry are written and committed by
+    `ReportIncidentUseCase` — which is why the unit of work is built here, for it, and not for
+    the cleaning use case that calls through the port.
+    """
+    return ReportTaskIncidentUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        incidents=CleanerIncidentReporter(
+            ReportIncidentUseCase(
+                incidents=SqlAlchemyIncidentRepository(session),
+                properties=SqlAlchemyPropertyRepository(session),
+                audit=SqlAlchemyAuditLogRepository(session),
+                timeline=SqlAlchemyTimelineEventRepository(session),
+                uow=SqlAlchemyUnitOfWork(session),
+            )
+        ),
     )
 
 

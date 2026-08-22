@@ -273,6 +273,7 @@ class SqlAlchemyIncidentRepository:
                 property_id=incident.property_id,
                 reservation_id=incident.reservation_id,
                 reported_by_user_id=incident.reported_by_user_id,
+                cleaning_task_id=incident.cleaning_task_id,
                 # The digest, never the token (R5.1). Nothing here can tell the difference —
                 # the column is a `VARCHAR(200)` that would hold either — so the guarantee
                 # lives where the value is produced: `GuestSession.token_hash` is what the
@@ -487,6 +488,7 @@ def _to_incident(model: IncidentModel) -> Incident:
         updated_at=model.updated_at,
         reservation_id=model.reservation_id,
         reported_by_user_id=model.reported_by_user_id,
+        cleaning_task_id=model.cleaning_task_id,
         category=model.category,
         severity=model.severity,
         status=model.status,

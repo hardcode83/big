@@ -57,3 +57,4 @@
 | incidents-web | new, design, tasks, run, review, ship, archive | 2581925 | 277525 | 109796724 | 74.7461 | 2026-08-20 | 2026-08-20 |
 | cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
+| cleaner-incident-report | new, design, tasks, run, review | 459623 | 1006559 | 263372976 | 193.6262 | 2026-08-19 | — |
