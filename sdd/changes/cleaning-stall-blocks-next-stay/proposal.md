@@ -24,6 +24,31 @@ explican, y el tercero es el que convierte un fallo en un silencio:
    `report.candidates` ni ningún cubo, `not_eligible` incluido. El informe del job es correcto y
    está vacío de ella. No es que la descarte: es que no la mira.
 
+**No es que el reloj no corra.** Comprobado el 2026-08-22 en `dev`: `beat` reparte sus tareas cada
+cinco minutos, el worker las consume y ninguna falla. El tick de las 08:18 UTC dejó esto, con la
+estancia del 19 al 23 sin aplicar desde tres días antes:
+
+```
+check_checkin_windows   → candidates: 0 … not_eligible: 0
+mark_occupied_estimated → candidates: 0 … not_eligible: 0
+```
+
+Cero candidatas y cero de todo lo demás. El informe no miente: la vivienda nunca entró en él. Esa
+es la medición del punto 3, y la razón de que R1 no pueda resolverse añadiendo un cubo al informe
+—hay que detectar el desajuste **fuera** de la consulta de candidatas—.
+
+**Y un segundo hallazgo del mismo sitio.** `property_state_transitions` tiene cinco filas en total,
+y las dos de REDES11 son `triggered_by = USER` con **un segundo** de diferencia (asignar a las
+07:23:51, arrancar a las 07:23:52 del 2026-08-16: un script, no una persona). Falta la fila que
+tendría que precederlas: **no hay ninguna transición que lleve a REDES11 a `AWAITING_CLEANING`**, y
+sin embargo la asignación de las 07:23:51 solo es legal desde ahí. Así que ese estado se escribió
+por fuera de la máquina, y el principio 1 de `product.md` —toda transición genera un `TimelineEvent`
+auditable— quedó sin cumplir para ese salto. La lectura más consistente con todo lo demás es que
+alguien chocó con el `409` de `cleaning-assign-preconditions` y lo rodeó a mano; lo confirmaría
+`audit_logs` de ese día. Aquí importa como **prueba de que el atasco empuja a rodear la máquina**, y
+por eso R3 exige una salida legítima; auditar la columna contra el registro de transiciones es otra
+cosa y queda fuera (ver *Out of scope*).
+
 Y no hay salida lateral. `reject` exige `ASSIGNED` o `ACCEPTED` y la tarea está `IN_PROGRESS`; las
 catorce rutas de `cleaning/api/tasks_router.py` no incluyen ninguna operación de cancelar o
 abandonar una tarea; y `current_operational_state` no es escribible por la API a propósito
@@ -145,6 +170,10 @@ Acceptance criteria:
 - **Desatascar REDES11 en el `dev` actual**, que es operación y no código: su reserva termina el 23
   de agosto y a partir de ahí la limpieza se puede cerrar por el camino normal.
 - **Rediseñar el informe de los jobs de reloj** más allá de lo que R1 exige.
+- **Auditar `properties.current_operational_state` contra el registro de transiciones**, que es lo
+  que delataría el salto sin fila del 2026-08-16. Es una garantía transversal de la máquina de
+  estados, no del ciclo de limpieza, y merece su propia entrada; aquí solo se retira el incentivo
+  para escribir esa columna a mano.
 
 ## Affected specs
 
