@@ -290,3 +290,55 @@ describe("write hooks send the right body and never retry (task 4.4, R4.1, R4.2)
     expect(source.createMessage).toHaveBeenCalledTimes(1);
   });
 });
+
+describe("useSendReply — retiring the draft survives the caller (D22, review 2026-08-22)", () => {
+  // The composer lives inside a subtree keyed per conversation, so switching threads
+  // while a reply is in flight unsubscribes its observer — and React Query then drops
+  // any `mutate(…, { onSuccess })` callback. `onSent` therefore has to live in the
+  // mutation's own options, or a success landing after the switch leaves the sent text
+  // in the composer and the next click sends the guest a duplicate.
+  it("calls onSent on success with no mutate-level callback in sight", async () => {
+    const { Wrapper } = harness();
+    source.createMessage.mockResolvedValue({ id: "message-1" });
+    const onSent = vi.fn();
+    const { result } = renderHook(() => useSendReply(CONVERSATION, { onSent }), {
+      wrapper: Wrapper,
+    });
+
+    // Deliberately no second argument: this is the path the observer would discard.
+    result.current.mutate("Vamos a mirarlo");
+
+    await waitFor(() => expect(onSent).toHaveBeenCalledTimes(1));
+  });
+
+  it("does not call onSent when the send fails", async () => {
+    const { Wrapper } = harness();
+    source.createMessage.mockRejectedValue(
+      new ApiError({ code: "SERVER_ERROR", message: "boom", status: 500 }),
+    );
+    const onSent = vi.fn();
+    const { result } = renderHook(() => useSendReply(CONVERSATION, { onSent }), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate("no se ha enviado");
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(onSent).not.toHaveBeenCalled();
+  });
+
+  it("still works for a caller that passes no options at all", async () => {
+    const { Wrapper, invalidateQueries } = harness();
+    source.createMessage.mockResolvedValue({ id: "message-1" });
+    const { result } = renderHook(() => useSendReply(CONVERSATION), {
+      wrapper: Wrapper,
+    });
+
+    result.current.mutate("hola");
+
+    await waitFor(() => expect(invalidateQueries).toHaveBeenCalled());
+    expect(invalidatedKeys(invalidateQueries as unknown as CallRecorder)).toContain(
+      JSON.stringify(conversationKeys.detail(TENANT, CONVERSATION)),
+    );
+  });
+});

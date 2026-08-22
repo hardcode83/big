@@ -40,6 +40,7 @@ export function ConversationsView() {
 
   const { user } = useAuth();
   const tenantId = user?.tenant_id;
+  const userId = user?.id;
   const resetFilters = useInboxFiltersStore((state) => state.reset);
 
   // Unsent reply drafts, per conversation, owned **here** because this component sits
@@ -47,27 +48,38 @@ export function ConversationsView() {
   // module-level store on purpose: a draft is prose addressed to one tenant's guest,
   // and a singleton keyed by conversation id would outlive a same-tab session switch.
   //
-  // Stored **with the tenant they were written under** and derived during render —
-  // the same idiom the composer uses for `lastSent` and the thread for its page — so
-  // a session switch drops them without an effect that would have to fire after one
-  // render had already handed the previous tenant's prose to the new one.
+  // Stored **with the session they were written under** — tenant *and* operator — and
+  // derived during render, the same idiom the composer uses for `lastSent` and the
+  // thread for its page. Deriving rather than clearing in an effect matters: an effect
+  // runs after the render commits, so it would hand the previous session's prose to the
+  // next one for one render, with the text sitting in the textarea, before wiping it.
+  //
+  // The operator half is not redundant with the tenant half. Two managers of the same
+  // tenant are a same-tenant, different-operator switch, and handing Y the unsent prose
+  // X was writing to a guest is the same exposure as crossing a tenant. It is
+  // unreachable today only because `AuthGuard` unmounts this tree while re-authenticating;
+  // stamping it here does not depend on that staying true (review 2026-08-22).
   const [drafts, setDrafts] = useState<{
     tenantId: string | undefined;
+    userId: string | undefined;
     byConversation: Record<string, string>;
-  }>({ tenantId, byConversation: {} });
-  const currentDrafts =
-    drafts.tenantId === tenantId ? drafts.byConversation : {};
+  }>({ tenantId, userId, byConversation: {} });
+  const sameSession = drafts.tenantId === tenantId && drafts.userId === userId;
+  const currentDrafts = sameSession ? drafts.byConversation : {};
   const setDraft = useCallback(
     (conversationId: string, next: string) => {
       setDrafts((current) => ({
         tenantId,
+        userId,
         byConversation: {
-          ...(current.tenantId === tenantId ? current.byConversation : {}),
+          ...(current.tenantId === tenantId && current.userId === userId
+            ? current.byConversation
+            : {}),
           [conversationId]: next,
         },
       }));
     },
-    [tenantId],
+    [tenantId, userId],
   );
 
   // Filters belong to the tenant whose inbox they were chosen in: a `propertyId`

@@ -247,33 +247,44 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
     expect(textarea()).toHaveValue("corregido");
   });
 
-  it("clears the draft upward on a successful send, and leaves it alone on a failure", () => {
-    const ok = sendState({
-      mutate: vi.fn((_c: string, opts?: { onSuccess?: () => void }) => opts?.onSuccess?.()),
-    });
-    useSendReply.mockReturnValue(ok);
-    const cleared = vi.fn();
+  // The clear does NOT ride on `mutate(…, { onSuccess })`: React Query drops those once
+  // the observer has no listeners, and the keyed subtree unsubscribes on a thread
+  // switch — the one case that ends in a duplicate reply. The composer therefore hands
+  // the retirement to the mutation itself, and this asserts the handing-over; that the
+  // mutation honours it on success is `use-conversation-actions.test.tsx`'s job.
+  it("hands the draft's retirement to the mutation, not to a mutate-level callback", () => {
+    useSendReply.mockReturnValue(sendState());
+    const onDraftChange = vi.fn();
     render(
       <I18nProvider locale="es">
         <ReplyComposer
           conversationId="conversation-1"
           gate={{ enabled: true }}
           draft="Vamos a mirarlo"
-          onDraftChange={cleared}
+          onDraftChange={onDraftChange}
         />
       </I18nProvider>,
     );
-    fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
-    expect(cleared).toHaveBeenCalledWith("");
 
-    // A failure must not clear it: the surviving text is the only thing left saying
-    // "this was never sent" once the mutation's own error state dies with the remount.
-    const failing = sendState({
-      mutate: vi.fn((_c: string, _opts?: { onSuccess?: () => void }) => undefined),
-      isError: true,
-      error: new ApiError({ code: "SERVER_ERROR", message: "boom", status: 500 }),
-    });
-    useSendReply.mockReturnValue(failing);
+    const options = useSendReply.mock.calls[0][1] as { onSent?: () => void };
+    expect(options?.onSent).toBeTypeOf("function");
+    options.onSent?.();
+    expect(onDraftChange).toHaveBeenCalledWith("");
+
+    // And the submit path itself must not clear it: that is the mutation's job now.
+    onDraftChange.mockClear();
+    fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
+    expect(onDraftChange).not.toHaveBeenCalledWith("");
+  });
+
+  it("leaves the draft untouched when the send fails", () => {
+    useSendReply.mockReturnValue(
+      sendState({
+        mutate: vi.fn(),
+        isError: true,
+        error: new ApiError({ code: "SERVER_ERROR", message: "boom", status: 500 }),
+      }),
+    );
     const untouched = vi.fn();
     render(
       <I18nProvider locale="es">
@@ -285,9 +296,11 @@ describe("ReplyComposer — the draft is owned above it (R4.5, D22)", () => {
         />
       </I18nProvider>,
     );
-    const buttons = screen.getAllByRole("button", { name: /Enviar respuesta|Enviando/ });
-    fireEvent.click(buttons[buttons.length - 1]);
-    expect(untouched).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: /Enviar respuesta|Enviando/ }));
+    // The surviving text is the only thing left saying "this was never sent" once the
+    // mutation's own error state dies with the remount.
+    expect(screen.getByLabelText("Responder al huésped")).toHaveValue("no se ha enviado");
+    expect(untouched).not.toHaveBeenCalledWith("");
   });
 
   it("does not refuse an identical reply to another conversation as a double submit", () => {

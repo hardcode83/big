@@ -60,20 +60,36 @@ function useConversationInvalidation(conversationId: string): {
   };
 }
 
-/** Reply as ourselves: no `sender_type`, so the backend derives it (R4.1). */
+/**
+ * Reply as ourselves: no `sender_type`, so the backend derives it (R4.1).
+ *
+ * `onSent` runs here, in the **mutation's** options, and not in a `mutate(…, {…})`
+ * callback at the call site — that is the whole point. React Query drops
+ * mutate-level callbacks once the observer has no listeners, and `ConversationsView`
+ * keys the thread subtree per conversation (D22), so switching threads while a reply
+ * is in flight unsubscribes it. A success landing after that switch still has to
+ * retire the draft: otherwise the operator comes back to a delivered reply sitting
+ * next to its own text in an enabled composer, and one click sends the guest a
+ * duplicate (review 2026-08-22).
+ */
 export function useSendReply(
   conversationId: string,
+  options: { onSent?: () => void } = {},
 ): UseMutationResult<ThreadMessage, Error, string> {
   const tenantId = useTenantId();
   const { invalidate, refreshOnConflict } =
     useConversationInvalidation(conversationId);
+  const { onSent } = options;
   return useMutation({
     mutationFn: (content: string) =>
       getConversationsDataSource().createMessage(tenantId, conversationId, {
         content,
       }),
     retry: false,
-    onSuccess: invalidate,
+    onSuccess: () => {
+      invalidate();
+      onSent?.();
+    },
     onError: refreshOnConflict,
   });
 }

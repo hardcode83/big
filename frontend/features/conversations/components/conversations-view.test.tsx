@@ -17,7 +17,7 @@ vi.mock("next/navigation", () => ({
 }));
 
 const session = vi.hoisted(() => ({
-  current: { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" as string },
+  current: { tenant_id: "tenant-1", id: "user-1", role: "PROPERTY_MANAGER" as string },
 }));
 vi.mock("@/lib/auth", () => ({ useAuth: () => ({ user: session.current }) }));
 
@@ -91,7 +91,7 @@ function renderView() {
 beforeEach(() => {
   replace.mockReset();
   params.current = new URLSearchParams();
-  session.current = { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" };
+  session.current = { tenant_id: "tenant-1", id: "user-1", role: "PROPERTY_MANAGER" };
   useInboxFiltersStore.getState().reset();
   threadMounts.ids.length = 0;
 });
@@ -201,7 +201,7 @@ describe("ConversationsView — the filters belong to a tenant (task 8.1)", () =
       "property-of-tenant-1",
     );
 
-    session.current = { tenant_id: "tenant-2", role: "PROPERTY_MANAGER" };
+    session.current = { tenant_id: "tenant-2", id: "user-2", role: "PROPERTY_MANAGER" };
     renderView();
 
     expect(useInboxFiltersStore.getState().propertyId).toBeUndefined();
@@ -295,12 +295,56 @@ describe("ConversationsView — it owns the reply drafts (D22, R4.5)", () => {
 
     // Guest-directed prose must not cross a tenant boundary, and a same-tab session
     // switch does not reload the page.
-    session.current = { tenant_id: "tenant-2", role: "PROPERTY_MANAGER" };
+    session.current = { tenant_id: "tenant-2", id: "user-2", role: "PROPERTY_MANAGER" };
     rerender(
       <I18nProvider locale="es">
         <ConversationsView />
       </I18nProvider>,
     );
+    expect(thread()).toHaveAttribute("data-draft", "");
+  });
+});
+
+describe("ConversationsView — a draft belongs to the operator too (review 2026-08-22)", () => {
+  const thread = () => screen.getByTestId("thread");
+  const type = () => fireEvent.click(screen.getByRole("button", { name: "escribir" }));
+  const rerenderView = (rerender: (ui: ReactElement) => void) =>
+    rerender(
+      <I18nProvider locale="es">
+        <ConversationsView />
+      </I18nProvider>,
+    );
+
+  // Two managers of the same tenant are a same-tenant, different-operator switch, and
+  // handing Y the unsent prose X was writing to a guest is the same exposure as
+  // crossing a tenant. Unreachable today only because `AuthGuard` unmounts this tree
+  // while re-authenticating — this does not lean on that staying true.
+  it("does not hand one operator's draft to another within the same tenant", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    type();
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+
+    session.current = { tenant_id: "tenant-1", id: "user-2", role: "PROPERTY_MANAGER" };
+    rerenderView(rerender);
+
+    expect(thread()).toHaveAttribute("data-draft", "");
+  });
+
+  it("does not resurrect a draft when the original operator comes back", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    type();
+
+    session.current = { tenant_id: "tenant-1", id: "user-2", role: "PROPERTY_MANAGER" };
+    rerenderView(rerender);
+    // The second operator writes, which is what drops the first one's entries for good
+    // rather than merely masking them behind the derivation.
+    type();
+    expect(thread()).toHaveAttribute("data-draft", "borrador de conversation-1");
+
+    session.current = { tenant_id: "tenant-1", id: "user-1", role: "PROPERTY_MANAGER" };
+    rerenderView(rerender);
     expect(thread()).toHaveAttribute("data-draft", "");
   });
 });

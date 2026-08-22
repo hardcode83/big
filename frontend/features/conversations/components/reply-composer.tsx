@@ -51,7 +51,13 @@ export function ReplyComposer({
     value: string | null;
   }>({ conversationId, value: null });
   const lastSent = sent.conversationId === conversationId ? sent.value : null;
-  const send = useSendReply(conversationId);
+  // Retiring the draft is handed to the mutation itself, so it happens even when the
+  // operator has already switched threads and this component is gone — see the note
+  // on `useSendReply`. Doing it in `mutate(…, { onSuccess })` would silently skip
+  // exactly that case, which is the one that ends in a duplicate reply.
+  const send = useSendReply(conversationId, {
+    onSent: () => onDraftChange(""),
+  });
 
   const tooLong = content.length > MAX_MESSAGE_LENGTH;
   const isEmpty = content.trim().length === 0;
@@ -71,9 +77,10 @@ export function ReplyComposer({
     // was actually sent to — never against whichever thread is on screen by then.
     // Clearing the draft is what turns an empty composer back into "delivered": a
     // failure leaves it untouched, so the text is still there on return.
+    // Only the local double-submit guard rides on the mutate-level callback: it is
+    // this component's own state, so it is worthless once this component is gone.
     send.mutate(sending, {
       onSuccess: () => {
-        onDraftChange("");
         setSent({ conversationId, value: sending });
       },
     });

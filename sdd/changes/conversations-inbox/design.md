@@ -332,8 +332,19 @@ upgrade de React Query reintroduciría el fallo sin ninguna señal.
    `Record<conversationId, string>` y el compositor pasa a ser **controlado**. El estado de la
    mutación sigue muriendo con el remontaje —eso es inherente y deseado, es lo que impide la
    atribución cruzada—, pero el **texto vuelve**, y un borrador sin enviar a la vista es por sí mismo
-   la señal que faltaba: un compositor vacío recupera su significado de «entregada». El éxito limpia
-   el borrador hacia arriba; el fallo no lo toca.
+   la señal que faltaba: un compositor vacío recupera su significado de «entregada». El fallo no lo
+   toca.
+
+   **Y el éxito lo retira desde la mutación, no desde el callsite** —corregido en el mismo
+   re-review—. Un `mutate(…, { onSuccess })` habría sido inútil justo en el caso que esto arregla:
+   React Query descarta los callbacks de `mutate` cuando el observer se queda sin suscriptores, y el
+   `key` desuscribe al cambiar de hilo. Un éxito que aterrizara después del cambio habría dejado la
+   respuesta entregada **y** su mismo texto en un compositor habilitado, a un click de enviarle al
+   huésped una respuesta **duplicada** —e invirtiendo la invariante recién ganada, porque «no vacío»
+   dejaría de significar «no enviado»—. Así que `useSendReply` acepta `onSent` y lo invoca en las
+   opciones de la mutación, donde ya vive la invalidación y donde el desmontaje no llega. El guard
+   local de doble envío (`sent`) sí se queda en el callback de `mutate`: es estado de ese componente y
+   no vale nada cuando el componente ya no está.
 
    Vive en el estado del componente y **no** en un store de módulo, a propósito: un borrador es prosa
    dirigida al huésped de **un** tenant, y un singleton indexado por id de conversación sobreviviría a
@@ -349,6 +360,20 @@ upgrade de React Query reintroduciría el fallo sin ninguna señal.
    inalcanzable que el re-review señaló desaparece en vez de quedarse como código muerto que parece
    portante. `lastSent` sigue local y acotado, porque es un guard de doble envío y no una señal que
    merezca sobrevivir a un cambio de hilo.
+
+   **El sello incluye al operador, no solo al tenant.** Dos managers del mismo tenant son un cambio
+   de operador dentro del mismo tenant, y entregarle a Y la prosa sin enviar que X estaba escribiendo
+   a un huésped es la misma exposición que cruzar un tenant. Hoy es inalcanzable solo porque
+   `AuthGuard` desmonta este árbol mientras re-autentica; sellar por `tenantId` **y** `userId` no
+   depende de que eso siga siendo verdad.
+
+   **Límite declarado, no resuelto**: la recuperación del borrador está acotada al montaje del
+   subárbol de workspace. Cualquier 401 de cualquier petición pone la sesión en `refreshing`, y
+   `AuthGuard` sustituye el árbol por un panel de estado, así que el mapa muere y al volver el
+   compositor está limpio — la misma ambigüedad, alcanzada sin cambiar de hilo. No es una regresión
+   (el borrador local anterior moría en ese mismo desmontaje), pero significa que «el texto vuelve»
+   vale para el caso del cambio de hilo, no para toda la clase. Cerrarlo pediría sostener el mapa por
+   encima del condicional de `AuthGuard`, y eso es alcance de la superficie de sesión, no de esta.
 
 ### D21 — Sin diagrama, y dicho a propósito
 
