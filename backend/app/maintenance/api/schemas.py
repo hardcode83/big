@@ -27,6 +27,7 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.maintenance.domain.entities import Incident
+from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.enums import (
     IncidentCategory,
     IncidentSeverity,
@@ -41,6 +42,9 @@ MAX_PER_PAGE = 100
 # in the PRD §23 envelope. Same bound and same reason as `cleaning` and `reservations`.
 MAX_PAGE = 100_000
 MAX_RESPONSE_NOTES = 2000
+# Mirrors the `VARCHAR(2000)` of `incidents.assignment_note`: the bound lives in the DDL
+# and in the schema, not only in the second (`tech-incident-context` D6).
+MAX_ASSIGNMENT_NOTE = 2000
 # Two decimals, because `Numeric(10, 2)` is what the three cost columns are: a third decimal
 # would be silently rounded by the driver, and the owner would approve a number the system
 # then stored as a different one.
@@ -102,6 +106,46 @@ class IncidentResponse(BaseModel):
         )
 
 
+class IncidentContextResponse(BaseModel):
+    """What `GET /incidents/{incident_id}/context` returns — exactly `IncidentContext` (D4).
+
+    A field-for-field mirror on purpose, the `CleaningTaskContextResponse` construction. The
+    projection is where R2.5, R5.2, R5.3 and R5.4 are enforced structurally, so this model
+    earning its own opinion about which fields to include would reintroduce the very decision
+    the read model exists to remove — and would make the router the owner of the denylist,
+    which design D4 rejects by name.
+
+    **`from_attributes` here reads a frozen dataclass of eleven fields, never an entity.** That
+    is what makes it safe where a dump of `Property` would not be: `cleaning_notes`,
+    `emergency_notes` and `has_wifi_password` are fields of that entity and are not fields of
+    the projection. No `Property` and no `Reservation` is ever serialised on this route.
+
+    No `exclude_none`, here or anywhere in `backend/app` — which is what satisfies R1.3: a
+    `NULL` address travels as `null` **with its key**, rather than the key vanishing. That is
+    inherited pydantic behaviour rather than something this model states, so it carries its own
+    test against the serialised body (`tests/maintenance/test_incident_context_api.py`) instead
+    of being assumed.
+    """
+
+    model_config = ConfigDict(from_attributes=True)
+
+    property_name: str
+    property_internal_code: str
+    address_line1: str | None
+    address_line2: str | None
+    city: str | None
+    province: str | None
+    postal_code: str | None
+    country: str
+    timezone: str
+    access_notes: str | None
+    assignment_note: str | None
+
+    @classmethod
+    def from_domain(cls, context: IncidentContext) -> "IncidentContextResponse":
+        return cls.model_validate(context)
+
+
 class IncidentPageResponse(BaseModel):
     items: list[IncidentResponse]
     total: int
@@ -135,9 +179,18 @@ class TriageIncidentRequest(BaseModel):
 
 
 class AssignIncidentRequest(BaseModel):
+    """`POST /incidents/{id}/assign` (R3.2 of `tech-incident-context`).
+
+    `assignment_note` is optional and **replaces** whatever the previous assignment carried:
+    omitting it clears the note rather than preserving it (D7). That is why there is no
+    "absent vs. explicit null" distinction to make here — this is a complete operation, not
+    a patch, and `extra="forbid"` still refuses anything else.
+    """
+
     model_config = ConfigDict(extra="forbid")
 
     technician_id: uuid.UUID
+    assignment_note: Annotated[str | None, Field(max_length=MAX_ASSIGNMENT_NOTE)] = None
 
 
 class ResolveIncidentRequest(BaseModel):

@@ -10,6 +10,12 @@ import enDashboard from "@/locales/en/dashboard.json";
 import enAuth from "@/locales/en/auth.json";
 import esGuest from "@/locales/es/guest.json";
 import enGuest from "@/locales/en/guest.json";
+import esReservations from "@/locales/es/reservations.json";
+import enReservations from "@/locales/en/reservations.json";
+import esIncidents from "@/locales/es/incidents.json";
+import enIncidents from "@/locales/en/incidents.json";
+import esCleaning from "@/locales/es/cleaning.json";
+import enCleaning from "@/locales/en/cleaning.json";
 import esConversations from "@/locales/es/conversations.json";
 import enConversations from "@/locales/en/conversations.json";
 
@@ -21,6 +27,9 @@ export const NAMESPACES = [
   "dashboard",
   "auth",
   "guest",
+  "reservations",
+  "incidents",
+  "cleaning",
   "conversations",
 ] as const;
 export const DEFAULT_NS = "common";
@@ -34,6 +43,9 @@ export const resources = {
     dashboard: esDashboard,
     auth: esAuth,
     guest: esGuest,
+    reservations: esReservations,
+    incidents: esIncidents,
+    cleaning: esCleaning,
     conversations: esConversations,
   },
   en: {
@@ -43,6 +55,9 @@ export const resources = {
     dashboard: enDashboard,
     auth: enAuth,
     guest: enGuest,
+    reservations: enReservations,
+    incidents: enIncidents,
+    cleaning: enCleaning,
     conversations: enConversations,
   },
 } as const;

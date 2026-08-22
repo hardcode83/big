@@ -17,7 +17,7 @@ type ConversationPageResponse = components["schemas"]["ConversationPageResponse"
 type MessageResponse = components["schemas"]["MessageResponse"];
 type MessagePageResponse = components["schemas"]["MessagePageResponse"];
 type PropertyPageResponse = components["schemas"]["PropertyPageResponse"];
-type PropertyResponse = components["schemas"]["PropertyResponse"];
+type PropertyListItem = PropertyPageResponse["data"][number];
 
 /** `per_page` ceiling of `GET /api/v1/properties`; R1.7 asks for a single query. */
 const PROPERTY_LABELS_PER_PAGE = 100;
@@ -79,7 +79,15 @@ function mapMessage(value: MessageResponse): ThreadMessage {
   };
 }
 
-function mapPropertyLabel(value: PropertyResponse): PropertyLabel {
+/**
+ * Typed from the **envelope's** element rather than from `PropertyResponse`. `main`
+ * split the list schema off (`PropertyListItemResponse`) while the detail kept the
+ * notes, so annotating the detail here stopped compiling — and deriving from
+ * `PropertyPageResponse` is what keeps this honest if the list slims down again.
+ * It also means the notes D2 worried about caching are not in this payload at all
+ * any more: the contract enforces what the mapper used to.
+ */
+function mapPropertyLabel(value: PropertyListItem): PropertyLabel {
   return { id: value.id, internalCode: value.internal_code, name: value.name };
 }
 

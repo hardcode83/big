@@ -53,4 +53,8 @@
 | compose-ports-guard | new, design, tasks, run, review, ship, archive | 242042 | 674109 | 161324018 | 117.3315 | 2026-08-18 | 2026-08-18 |
 | worktree-port-offset | new, design, tasks, run, review, ship, archive | 280817 | 682388 | 129188290 | 97.6098 | 2026-08-18 | 2026-08-19 |
 | cleaner-task-context | new, design, tasks, run, review, ship, archive | 284101 | 822245 | 166612611 | 112.8963 | 2026-08-18 | 2026-08-19 |
+| reservations-web | new, design, tasks, run, review, ship, archive | 6417003 | 730572 | 110301435 | 106.3682 | 2026-08-17 | 2026-08-20 |
+| incidents-web | new, design, tasks, run, review, ship, archive | 2581925 | 277525 | 109796724 | 74.7461 | 2026-08-20 | 2026-08-20 |
+| cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
+| tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
 | conversations-inbox | new, design, tasks, run, review, ship | 559218 | 1513048 | 224690369 | 164.1879 | 2026-08-19 | — |

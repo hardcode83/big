@@ -1,7 +1,10 @@
 """Incident endpoints (PRD §23, R1, R3, R4, R5; design D14).
 
-Eleven routes, and the twelfth — `POST /owner-approvals/{id}/respond` — lives in
-`approvals_router.py` because it acts on the other aggregate.
+Twelve routes, and the thirteenth — `POST /owner-approvals/{id}/respond` — lives in
+`approvals_router.py` because it acts on the other aggregate. The twelfth is
+`GET /{incident_id}/context`, the read-only projection `tech-incident-context` adds so a
+technician can be told which flat to go to and how to get in without holding
+`READ_PROPERTIES`.
 
 D14's table listed ten here and `cancel` was not among them; the architecture panel of
 sections 7-8 caught that. Its absence was a gap rather than a decision — task 6.11 mandates
@@ -24,18 +27,19 @@ parameter for it at all.
 """
 
 import uuid
-from typing import Annotated
+from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, Query
 
 from app.auth.api.dependencies import AuthenticatedRequest, get_client_ip, now_utc, require
 from app.auth.domain.policy import Permission
-from app.core.openapi import AUTHENTICATED_RESPONSES
+from app.core.openapi import AUTHENTICATED_RESPONSES, ErrorEnvelope
 from app.maintenance.api.dependencies import (
     get_accept_incident_use_case,
     get_assign_incident_use_case,
     get_cancel_incident_use_case,
     get_classify_incident_use_case,
+    get_incident_context_use_case,
     get_incident_use_case,
     get_list_incidents_use_case,
     get_resolve_incident_use_case,
@@ -48,6 +52,7 @@ from app.maintenance.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
     AssignIncidentRequest,
+    IncidentContextResponse,
     IncidentPageResponse,
     IncidentResponse,
     ResolveIncidentRequest,
@@ -58,6 +63,7 @@ from app.maintenance.application.use_cases import (
     AssignIncidentUseCase,
     CancelIncidentUseCase,
     ClassifyIncidentUseCase,
+    GetIncidentContextUseCase,
     GetIncidentUseCase,
     IncidentActor,
     ListIncidentsUseCase,
@@ -146,6 +152,76 @@ async def get_incident(
     return IncidentResponse.from_domain(incident)
 
 
+# The projection's only added status, on the same criterion `cleaning`'s `_CONTEXT_RESPONSES`
+# uses: a row of `_MAPPING` reached from this handler's own raise site, not a guess.
+#
+#   404 ← `IncidentNotFoundError`, for an unknown incident, another tenant's incident, an
+#         incident assigned to a different technician, and an incident whose property does not
+#         resolve inside the tenant alike.
+_INCIDENT_CONTEXT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The incident does not exist for this caller — an unknown id, another tenant's "
+            "incident, an incident assigned to a different technician and an incident whose "
+            "property does not resolve inside the tenant are all answered this way, "
+            "indistinguishably."
+        ),
+    },
+}
+
+
+@router.get(
+    "/{incident_id}/context",
+    response_model=IncidentContextResponse,
+    summary="Which flat the incident is in, and how to get into it",
+    responses=_INCIDENT_CONTEXT_RESPONSES,
+    description=(
+        "The operating context of one incident: the property's name, internal code, postal "
+        "address, timezone and access instructions, plus the note the manager left with the "
+        "assignment. It exists so a `TECHNICIAN` can be told **which flat to go to and how to "
+        "get in** without holding `READ_PROPERTIES`.\n\n"
+        "A `TECHNICIAN` reaches only the incidents assigned to them; a manager or owner reaches "
+        "every incident of their tenant. That restriction comes from the token's **persisted "
+        "role** and **no request parameter can widen it** — there is no parameter for it at "
+        "all.\n\n"
+        "`property_name`, `property_internal_code`, `country` and `timezone` are always "
+        "present. The other seven — `address_line1`, `address_line2`, `city`, `province`, "
+        "`postal_code`, `access_notes` and `assignment_note` — can be `null`, and a `null` "
+        "there means the column is not filled in, **not** that a value could not be resolved: "
+        "a property that does not resolve inside the tenant is a `404`, never a partial "
+        "answer.\n\n"
+        "`assignment_note` is the note of the **assignment in force**. Every assignment writes "
+        "it, so reassigning the incident without a note clears whatever the previous assignment "
+        "carried.\n\n"
+        "What this route never carries: the WiFi password in any form, the property's cleaning "
+        "or emergency notes, and any field of a reservation."
+    ),
+)
+async def get_incident_context(
+    incident_id: uuid.UUID,
+    authenticated: ReadDep,
+    use_case: Annotated[
+        GetIncidentContextUseCase, Depends(get_incident_context_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> IncidentContextResponse:
+    """`READ_INCIDENTS`, plus the row-level rule derived inside the use case.
+
+    `ReadDep` and not `ExecuteDep`: a manager and an owner read this too (R4.3). No new
+    permission is created — this route is reachable by exactly the roles that already hold
+    `READ_INCIDENTS`, over exactly the rows they already reach. The half that keeps a technician
+    to their own incidents is not declared here and cannot be: it comes from
+    `IncidentActor.restrict_to_technician_id`, off the role persisted on the user's row (R4.2).
+    """
+    context = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        incident_id=incident_id,
+        actor=_actor(authenticated, client_ip),
+    )
+    return IncidentContextResponse.from_domain(context)
+
+
 @router.post(
     "/{incident_id}/classify",
     response_model=IncidentResponse,
@@ -207,7 +283,11 @@ async def triage_incident(
     description=(
         "`POST` and not `PATCH`, because this opens an SLA deadline and notifies somebody — "
         "it is an operation, not an edit of a field (D14). Reassigning cancels the previous "
-        "assignee's deadline (R3.5)."
+        "assignee's deadline (R3.5).\n\n"
+        "`assignment_note` is optional free text the manager leaves for the technician, and "
+        "belongs to the assignment **in force**: every call writes it, so reassigning without "
+        "one clears whatever the previous assignment carried. It is returned by "
+        "`GET /incidents/{incident_id}/context` and by no other route."
     ),
 )
 async def assign_incident(
@@ -221,6 +301,7 @@ async def assign_incident(
         tenant_id=authenticated.context.tenant_id,
         incident_id=incident_id,
         technician_id=payload.technician_id,
+        assignment_note=payload.assignment_note,
         actor=_actor(authenticated, client_ip),
         now=now_utc(),
     )

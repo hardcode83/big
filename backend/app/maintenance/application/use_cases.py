@@ -58,6 +58,7 @@ from app.maintenance.domain.notifications import (
     technician_assignment_notification,
 )
 from app.maintenance.domain.ports import IncidentClassifier, LiveCleaningTaskQuery
+from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.repositories import (
     IncidentFilters,
     IncidentPage,
@@ -389,6 +390,45 @@ class IncidentActor:
         return self.user_id if self.role is UserRole.TECHNICIAN else None
 
 
+async def _load_incident_in_scope(
+    incidents: IncidentRepository,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    actor: IncidentActor,
+) -> Incident:
+    """Load one incident inside the tenant **and** inside the caller's own rows.
+
+    The row-level rule of R5.3/R5.4, written once (`tech-incident-context` D3). It had been
+    written **twice** — in `_IncidentTransitionMixin._load_incident` and in
+    `GetIncidentUseCase.execute`, which does not inherit the mixin because it only takes
+    `incidents` — and the context projection would have made it three copies in one file. R4.4
+    of that change requires the `404` to be identical in four cases, and a rule replicated three
+    times is the one that will diverge.
+
+    **The `404` is deliberately indistinguishable across every failure**, and that is the whole
+    reason this is one function: an incident that does not exist, one belonging to another
+    tenant, and one assigned to a different technician all raise the same
+    `IncidentNotFoundError` with the same message. Answering `403` for the third would turn any
+    of these routes into a probe for which incidents exist and whose they are.
+
+    A module-level coroutine rather than a method: `GetIncidentUseCase` holds only the
+    repository, so a mixin would have forced it to grow collaborators it has no use for, and
+    making one use case call another to reuse three lines is not how `application/` composes in
+    this repo.
+
+    This does not close `tenant-scoping-enumeration-guard`, the roadmap candidate
+    `sdd/specs/maintenance.md` names in its §Estado — it lowers this module from three copies to
+    one, at the only moment when the diff is three lines per caller.
+    """
+    incident = await incidents.get(tenant_id, incident_id)
+    if incident is None:
+        raise IncidentNotFoundError()
+    restrict = actor.restrict_to_technician_id
+    if restrict is not None and incident.assigned_technician_id != restrict:
+        raise IncidentNotFoundError()
+    return incident
+
+
 class _AuditWriter:
     """Builds and appends an audit entry, so no use case constructs one by hand.
 
@@ -609,16 +649,12 @@ class _IncidentTransitionMixin:
     async def _load_incident(
         self, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
     ) -> Incident:
-        incident = await self._incidents.get(tenant_id, incident_id)
-        if incident is None:
-            raise IncidentNotFoundError()
-        restrict = actor.restrict_to_technician_id
-        if restrict is not None and incident.assigned_technician_id != restrict:
-            # R5.3/R5.4: for this technician the incident does not exist. Same error, same
-            # message — a distinguishable 404 would confirm that it exists and is somebody
-            # else's.
-            raise IncidentNotFoundError()
-        return incident
+        """R5.3/R5.4, delegated to `_load_incident_in_scope` so the rule has one home.
+
+        Kept as a method because ten call sites in this file read better for it; the rule
+        itself is not written here (`tech-incident-context` D3).
+        """
+        return await _load_incident_in_scope(self._incidents, tenant_id, incident_id, actor)
 
     async def _record_timeline(
         self,
@@ -1290,7 +1326,14 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
 
 
 class AssignIncidentUseCase(_IncidentFlowBase):
-    """R3.1, R3.4, R3.5 — hand the incident to a technician and open their SLA deadline."""
+    """R3.1, R3.4, R3.5 — hand the incident to a technician and open their SLA deadline.
+
+    `assignment_note` (`tech-incident-context` R3.2) is passed straight to the entity, which
+    is what decides that it replaces rather than accumulates. Nothing else about this
+    operation changes: the permission is still `MANAGE_INCIDENTS`, the assignee is still
+    resolved inside the tenant, the previous deadline is still cancelled, and the note
+    reaches neither the audit row nor the timeline (R3.5, R3.6).
+    """
 
     def __init__(
         self,
@@ -1313,6 +1356,7 @@ class AssignIncidentUseCase(_IncidentFlowBase):
         technician_id: uuid.UUID,
         actor: IncidentActor,
         now: datetime,
+        assignment_note: str | None = None,
     ) -> Incident:
         incident = await self._load_incident(tenant_id, incident_id, actor)
 
@@ -1333,7 +1377,9 @@ class AssignIncidentUseCase(_IncidentFlowBase):
 
         previous_technician = incident.assigned_technician_id
         previous_status = incident.status
-        incident.assign(technician_id=technician_id, now=now)
+        incident.assign(
+            technician_id=technician_id, now=now, assignment_note=assignment_note
+        )
         await self._incidents.save(tenant_id, incident)
 
         if previous_technician is not None:
@@ -1644,6 +1690,87 @@ class CancelIncidentUseCase(_IncidentFlowBase):
         return incident
 
 
+class GetIncidentContextUseCase:
+    """The context a technician needs to do the job: which flat, and how to get in (D1, D2).
+
+    **Composition, not a projection adapter.** Two repositories that already exist, each `get`
+    carrying its own explicit `tenant_id` — `dashboard-api` D2's rule, that a bespoke reader
+    would be "el segundo sitio donde se escribe el scope de tenant". Here the composition is
+    also *stricter* than a `JOIN` would be: `incidents.property_id` is a plain foreign key to
+    `properties.id`, not composite with `tenant_id`, so the database accepts an incident of
+    tenant A hanging off a property of tenant B. Composed, that row resolves to `None` and
+    becomes a `404`; joined, it would need a second `WHERE` somebody had to remember — which is
+    the exact row `guest-portal-api`'s security panel had to close by hand.
+
+    **The row-level rule is `_load_incident_in_scope`'s, unchanged** (D3): the incident is loaded
+    within the tenant and, for a `TECHNICIAN`, within their own assignments, with
+    `IncidentNotFoundError` for both failures. An unknown incident, another tenant's incident and
+    another technician's incident are one indistinguishable outcome (R4.4). Nothing here reads a
+    request field to decide scope: `restrict_to_technician_id` derives from the actor's role, and
+    that role is re-read from the user's row on every request
+    (`auth/api/dependencies.py` — "the effective role is the one stored now"), so the token
+    identifies the caller without carrying the authority.
+
+    **Two statements per call** (`incidents.get`, `properties.get`), fewer on the paths that end
+    in a `404`. No unit of work and no audit repository: this is a read.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        properties: PropertyRepository,
+    ) -> None:
+        self._incidents = incidents
+        self._properties = properties
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
+    ) -> IncidentContext:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+
+        property = await self._properties.get(tenant_id, incident.property_id)
+        if property is None:
+            # R1.5, design D9: **no partial answer.** The property feeds ten of the eleven
+            # fields, so without it there is no context to give — which is why this does not
+            # degrade the way `cleaner-task-context` degrades a dangling reservation, where the
+            # missing row fed one field of eleven.
+            #
+            # An incident whose property does not resolve **inside this tenant** is either a
+            # cross-tenant pointer or a deleted row, and neither may answer with data. Reusing
+            # the incident's own `404` keeps "you cannot have this" indistinguishable from "it
+            # does not exist" (R4.4) instead of inventing a second failure the contract would
+            # have to declare.
+            #
+            # Logged, because a crossed pointer is an anomaly a person has to see: the database
+            # accepts it and nothing else in the flow would ever mention it.
+            logger.warning(
+                "maintenance.incident_context_property_unresolved",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident_id),
+                    "property_id": str(incident.property_id),
+                },
+            )
+            raise IncidentNotFoundError()
+
+        return IncidentContext(
+            property_name=property.name,
+            property_internal_code=property.internal_code,
+            address_line1=property.address_line1,
+            address_line2=property.address_line2,
+            city=property.city,
+            province=property.province,
+            postal_code=property.postal_code,
+            country=property.country,
+            timezone=property.timezone,
+            access_notes=property.access_notes,
+            assignment_note=incident.assignment_note,
+        )
+
+
 class ListIncidentsUseCase:
     """`GET /incidents` (R5.1, R5.3).
 
@@ -1676,7 +1803,9 @@ class GetIncidentUseCase:
 
     A technician who is not the assignee gets `IncidentNotFoundError` — the same error, with
     the same message, as an id that does not exist. Answering 403 there would turn the
-    endpoint into a probe for which incidents exist.
+    endpoint into a probe for which incidents exist. The rule lives in
+    `_load_incident_in_scope` and used to be a second copy here
+    (`tech-incident-context` D3).
     """
 
     def __init__(self, incidents: IncidentRepository) -> None:
@@ -1685,10 +1814,6 @@ class GetIncidentUseCase:
     async def execute(
         self, *, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
     ) -> Incident:
-        incident = await self._incidents.get(tenant_id, incident_id)
-        if incident is None:
-            raise IncidentNotFoundError()
-        restrict = actor.restrict_to_technician_id
-        if restrict is not None and incident.assigned_technician_id != restrict:
-            raise IncidentNotFoundError()
-        return incident
+        return await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )

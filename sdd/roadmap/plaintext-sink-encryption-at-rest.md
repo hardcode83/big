@@ -1,0 +1,72 @@
+# plaintext-sink-encryption-at-rest
+
+Nota larga de la entrada `[TECH]` del mismo nombre en `sdd/roadmap.md`. La escribe
+`tech-incident-context` (2026-08-21) al rechazar esta mitad en su OQ1, para que no quede como
+deuda tácita: el design encarga explícitamente que se anote con nombre, y lo que sigue es el
+razonamiento con el que se rechazó, no un recordatorio genérico de que «habría que cifrar cosas».
+
+## Qué cubre
+
+Cifrado en reposo, con Fernet y `ENCRYPTION_KEY`, de las cuatro columnas de texto libre del
+esquema por las que puede colarse un valor de la regla 3 de `sdd/steering/security.md` —un código
+de acceso, una contraseña, un número de documento— sin que el nombre de la columna lo anuncie:
+
+- `properties.access_notes`
+- `properties.cleaning_notes`
+- `properties.emergency_notes`
+- `access_records.notes`
+
+Las cuatro juntas, y eso es la mitad del argumento: es lo que separa esta entrada de un parche
+sobre una columna.
+
+## La amenaza que cubre, y la que no
+
+**Cubre**: lectura offline de la base de datos, de un backup o de una réplica. Quien obtenga un
+dump lee hoy las instrucciones de acceso de todas las viviendas en claro.
+
+**No cubre**: la exposición por API. Y esto hay que decirlo al dimensionarla, porque es la razón
+por la que la entrada es `M` y no `L` de valor: `GET /api/v1/guest/info/{token}` devuelve
+`access_notes` **verbatim** como `arrival_notes` a un portador anónimo de token, y el detalle de
+propiedades la devuelve a quien tenga `READ_PROPERTIES`. Cifrar la columna no cambia ninguna de
+las dos: se descifra para servirla. Quien venga a hacer este change y lo venda como «cerramos la
+exposición de las notas» estará describiendo mal lo que hizo.
+
+## Por qué `tech-incident-context` no la pagó
+
+Aquel change amplió el público de `access_notes` al rol `TECHNICIAN`, así que le tocaba decidir la
+forma de la regla 11 para esa columna. Eligió **excepción 6 más la salida del listado paginado**, y
+rechazó el cifrado con tres motivos que constan en su OQ1:
+
+1. El disparador era de **audiencia** —el conjunto de lectores crece—, y la salida del listado es
+   el remedio con la misma forma que el problema. El cifrado responde a otra amenaza, cuya
+   exposición aquel change no movía.
+2. No reduce la exposición por API, que es donde estaba el cambio.
+3. Su argumento cubre por igual a las cuatro columnas, así que pagarlo allí habría sido
+   arbitrario (una de cuatro) o habría arrastrado las cuatro y una migración de datos a un change
+   sobre la pantalla de un técnico.
+
+Lo que aquel change **sí** dejó hecho, y por eso esto es el resto y no el problema completo: las
+tres notas de `properties` salieron del listado paginado —que era la única superficie que las
+servía a granel—, y `access_notes` entró en el censo de la regla 11 con su forma decidida y su
+precio escrito.
+
+## Alcance, cuando se haga
+
+- Migración de datos sobre filas existentes, no sólo `ALTER TABLE`: las cuatro columnas tienen
+  contenido en dev desde el 2026-08-10.
+- Descifrado en cada camino de lectura vivo, que hoy son tres para `access_notes` (detalle de
+  propiedades, portal del huésped, proyección de contexto del técnico), uno para
+  `cleaning_notes`/`emergency_notes` (el detalle) y el de `cleaner-app` para
+  `access_records.notes`.
+- El patrón ya existe en el repo: `properties.wifi_password_encrypted` y las credenciales de
+  proveedor. Conviene calcarlo antes que inventar otro.
+- Las filas del censo de la regla 11 cambian de **forma** al hacerlo, así que la excepción 6 se
+  reescribe —no se borra: seguirá siendo texto libre de una persona autenticada, sólo que cifrado
+  en reposo—, y el resto de sus cláusulas «lo que NO concede» siguen aplicando.
+
+## De quién es qué
+
+`access_records.notes` sigue siendo de `cleaner-app`, que la tiene aparcada con su propio
+razonamiento; esta entrada es donde vive la mitad de cifrado de las cuatro, y la nota de
+`sdd/roadmap/cleaner-app.md` apunta aquí en vez de seguir describiendo la decisión de la regla 11
+como pendiente en su totalidad.
