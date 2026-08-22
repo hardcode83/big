@@ -209,6 +209,151 @@ async def test_the_revisions_can_be_reapplied_after_a_downgrade(migrations_datab
     assert await _constraint_exists(url, "uq_users_tenant_id_email") is False
 
 
+async def _column_shape(url: str, table: str, column: str) -> tuple[str, int | None] | None:
+    """`(data_type, character_maximum_length)` as the **real** DDL has it, not as a model says.
+
+    Needed because neither of the two things that look like they cover it does:
+    `tests/conftest.py` builds the suite's schema with `Base.metadata.create_all`, so every
+    other test in the tree measures the model; and `alembic check` compares presence and
+    nullability but **not** type, because `alembic/env.py` does not pass `compare_type=True`
+    and Alembic's default is `False`. So a revision declaring a different width from its model
+    kept the whole suite green. Raised by the QA panel of `tech-incident-context` sections 1-2.
+
+    **The type comes back with the width, and that is the second round of the same lesson.**
+    A first version returned the width alone, and the QA panel of the final round pointed out
+    that `sa.CHAR(length=2000)` reports `character_maximum_length = 2000` just like
+    `VARCHAR(2000)` — so a revision that silently became `CHAR` would have kept these tests
+    green while padding every stored value with trailing spaces. Asserting the width without
+    the type is measuring the half that cannot tell the two apart.
+
+    Returns `None` when the column does not exist, so a caller can tell "dropped" from
+    "present with an unexpected shape" instead of both looking like a `None` width.
+    """
+    parsed = make_url(url)
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        row = await conn.fetchrow(
+            "SELECT data_type, character_maximum_length FROM information_schema.columns "
+            "WHERE table_name = $1 AND column_name = $2",
+            table,
+            column,
+        )
+        return None if row is None else (row["data_type"], row["character_maximum_length"])
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_the_declared_column_widths_reach_the_real_ddl(migrations_database) -> None:
+    """A bound that lives in the model and not in the database is half a bound — and a width
+    without its type is half a measurement.
+
+    `tech-incident-context` D6 states the rule this asserts — "la cota vive en la base **y** en
+    el esquema, no sólo en el segundo" — and `properties-crud` R2.4 is the change that had to
+    repair four columns which shipped bounded on one side only.
+
+    Read from `information_schema` after a real `alembic upgrade head`, which is the only place
+    in this suite where the migration's own DDL is what answers. The **type** is asserted
+    alongside the width because `CHAR(2000)` reports the same `character_maximum_length` as
+    `VARCHAR(2000)` and would pad every stored value with trailing spaces (QA panel, final
+    round).
+    """
+    url = migrations_database
+    assert _alembic("upgrade", "head", database_url=url).returncode == 0
+
+    assert await _column_shape(url, "incidents", "assignment_note") == (
+        "character varying",
+        2000,
+    )
+    # A second column, so the helper is not pinned to one case: `incidents.title` is
+    # `String(300)` in the model and the baseline revision declares the same.
+    assert await _column_shape(url, "incidents", "title") == ("character varying", 300)
+
+
+@pytest.mark.asyncio
+async def test_an_added_column_unwinds_and_reapplies_over_existing_rows(
+    migrations_database,
+) -> None:
+    """`incidents.assignment_note` down and up again, with a row already in the table.
+
+    The chain test above walks revisions that create and drop whole tables; this walks the
+    other shape — an `ADD COLUMN` on a **populated** table — which is what
+    `tech-incident-context` R3.1 adds and what the dev database has been exposed to since it
+    got rows on 2026-08-10. Three things are proven that an empty-table run cannot: that the
+    `ADD COLUMN` does not fail on existing rows, that `downgrade` really drops the column
+    rather than leaving it behind, and that the re-upgrade brings it back `NULL` for the row
+    that was already there.
+
+    Written after the QA panel of sections 1-2 pointed out that no test executed the new
+    revision's `downgrade()` at all. It is what task 10.2 asks for, as a test rather than as a
+    manual pass.
+    """
+    url = migrations_database
+    assert _alembic("upgrade", "head", database_url=url).returncode == 0
+
+    parsed = make_url(url)
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        tenant_id = await conn.fetchval(
+            "INSERT INTO tenants (id, name, billing_email) "
+            "VALUES (gen_random_uuid(), 'MigrationTenant', 'm@example.com') RETURNING id"
+        )
+        property_id = await conn.fetchval(
+            "INSERT INTO properties (id, tenant_id, name, internal_code) "
+            "VALUES (gen_random_uuid(), $1, 'Redes 11', 'REDES11') RETURNING id",
+            tenant_id,
+        )
+        incident_id = await conn.fetchval(
+            "INSERT INTO incidents "
+            "(id, tenant_id, property_id, source, title, description, assignment_note) "
+            "VALUES (gen_random_uuid(), $1, $2, 'GUEST', 'Broken boiler', "
+            "'No hot water.', 'Portal code 4821.') RETURNING id",
+            tenant_id,
+            property_id,
+        )
+    finally:
+        await conn.close()
+
+    unwound = _alembic("downgrade", "e7a3c419d82b", database_url=url)
+    assert unwound.returncode == 0, unwound.stderr
+    assert await _column_shape(url, "incidents", "assignment_note") is None
+
+    reapplied = _alembic("upgrade", "head", database_url=url)
+    assert reapplied.returncode == 0, reapplied.stderr
+    assert await _column_shape(url, "incidents", "assignment_note") == (
+        "character varying",
+        2000,
+    )
+
+    conn = await asyncpg.connect(
+        user=parsed.username,
+        password=parsed.password,
+        host=parsed.host,
+        port=parsed.port,
+        database=parsed.database,
+    )
+    try:
+        # The row survived the round trip, and its note did not: a `DROP COLUMN` loses the
+        # data, which is what the revision's docstring says it means.
+        assert await conn.fetchval(
+            "SELECT assignment_note IS NULL FROM incidents WHERE id = $1", incident_id
+        ) is True
+    finally:
+        await conn.close()
+
+
 @pytest.mark.asyncio
 async def test_the_models_match_the_migrations(migrations_database) -> None:
     """An empty autogenerate diff: no model change left without a migration."""

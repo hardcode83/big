@@ -269,6 +269,91 @@ class PropertyResponse(BaseModel):
         )
 
 
+class PropertyListItemResponse(BaseModel):
+    """One property **in a listing**: `PropertyResponse` minus the three free-text notes.
+
+    Why a second model instead of one with an optional field: this is the mechanism half of
+    `tech-incident-context` D5, and rule 11 of `steering/security.md` requires the chosen form to
+    be *implemented*, not only documented. `GET /api/v1/properties` returned the access
+    instructions of **every** flat of the tenant in one response, which is the only bulk surface
+    those columns had — and a field a caller could ask for would not be an exclusion.
+
+    **On the rule this borrows from, stated precisely because the loose version is tempting.**
+    Rule 4 says "número de documento jamás en listados", and it says it about `document_number`
+    and nothing else — these three columns are not named there, and rule 4 does not reach them on
+    its own. What is borrowed is the *shape* of that remedy: keep the bulk surface from carrying
+    the value at all, rather than masking it. Rule 11 is what applies that shape here, through
+    excepción 6, which is the row that owns this decision. Citing rule 4 as if it governed these
+    columns directly would be the kind of almost-true sentence rule 11 says of itself is worse
+    than no census at all.
+
+    **All three notes, not just `access_notes`.** Only `access_notes` earns a census row (D12
+    says why: the other two do not carry a rule-3 value by purpose), but the exclusion is one
+    schema and the same cost, and a listing that hides one note and shows two is a form nobody
+    will be able to explain in six months. Approved in the design gate on 2026-08-19 (OQ3).
+
+    What stays: `GET /api/v1/properties/{id}` still carries all three, and the guest portal still
+    returns `access_notes` verbatim as `arrival_notes`. Leaving the listing is not leaving the
+    system — it is leaving the one place where the whole portfolio arrived at once.
+
+    Enumerated and built by `from_domain` like `PropertyResponse`, never dumped with
+    `from_attributes`: a dump would re-acquire every field the entity gains later, which is the
+    failure this class exists to prevent.
+    """
+
+    id: uuid.UUID
+    name: str
+    internal_code: str
+    pms_external_id: str | None
+    pms_provider: PMSProvider | None
+    address_line1: str | None
+    address_line2: str | None
+    city: str | None
+    province: str | None
+    postal_code: str | None
+    country: str
+    timezone: str
+    max_guests: int
+    bedrooms: int
+    bathrooms: int
+    current_operational_state: PropertyOperationalState
+    default_check_in_time: time
+    default_check_out_time: time
+    wifi_name: str | None
+    has_wifi_password: bool
+    status: PropertyStatus
+    created_at: datetime
+    updated_at: datetime
+
+    @classmethod
+    def from_domain(cls, property: Property) -> "PropertyListItemResponse":
+        return cls(
+            id=property.id,
+            name=property.name,
+            internal_code=property.internal_code,
+            pms_external_id=property.pms_external_id,
+            pms_provider=property.pms_provider,
+            address_line1=property.address_line1,
+            address_line2=property.address_line2,
+            city=property.city,
+            province=property.province,
+            postal_code=property.postal_code,
+            country=property.country,
+            timezone=property.timezone,
+            max_guests=property.max_guests,
+            bedrooms=property.bedrooms,
+            bathrooms=property.bathrooms,
+            current_operational_state=property.current_operational_state,
+            default_check_in_time=property.default_check_in_time,
+            default_check_out_time=property.default_check_out_time,
+            wifi_name=property.wifi_name,
+            has_wifi_password=property.has_wifi_password,
+            status=property.status,
+            created_at=property.created_at,
+            updated_at=property.updated_at,
+        )
+
+
 class PropertyStateResponse(BaseModel):
     """The light state endpoint of PRD §23:1942 (`dashboard-api` R3.1).
 
@@ -291,9 +376,16 @@ class PropertyStateResponse(BaseModel):
 
 
 class PropertyPageResponse(BaseModel):
-    """The pagination envelope of PRD §23."""
+    """The pagination envelope of PRD §23.
 
-    data: list[PropertyResponse]
+    `data` carries `PropertyListItemResponse` and not `PropertyResponse`: the three free-text
+    notes leave the listing (`tech-incident-context` D5). It is an incompatible change to this
+    contract, and the cost was measured before taking it — no component of the frontend reads any
+    of the three; every appearance in `frontend/` is inside the generated
+    `lib/api/generated/openapi.d.ts`.
+    """
+
+    data: list[PropertyListItemResponse]
     total: int
     page: int
     per_page: int
@@ -304,7 +396,7 @@ class PropertyPageResponse(BaseModel):
         cls, properties: tuple[Property, ...], *, total: int, page: int, per_page: int
     ) -> "PropertyPageResponse":
         return cls(
-            data=[PropertyResponse.from_domain(item) for item in properties],
+            data=[PropertyListItemResponse.from_domain(item) for item in properties],
             total=total,
             page=page,
             per_page=per_page,

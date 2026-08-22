@@ -13,8 +13,9 @@ name: backend-tests
 #
 # --- Por qué son tres jobs y no uno (change `ci-backend-tests-conditional-gate`) ---
 #
-# La suite tarda **~2m44s** (mediana de tres ejecuciones, medida el 2026-08-10 sobre
-# `sdd/backend-suite-runtime`; el paso dominante sigue siendo el de `pytest`). La misma
+# La suite tarda **~7m04s** (424s, medidos el 2026-08-22 en CI y reproducidos en local; el
+# paso dominante sigue siendo el de `pytest`). Tardó **~2m44s** el 2026-08-10 recién
+# optimizada, y de ese crecimiento se habla en el bloque de presupuesto de más abajo. La misma
 # medición sobre `main` ese día dio **15m30s**: la diferencia es el change
 # `backend-suite-runtime`, que dejó de construir y tirar el esquema de la base de datos en
 # cada test —eso solo ya la bajó a 4m03s— y después la paralelizó con `pytest-xdist`.
@@ -71,13 +72,32 @@ permissions:
 # No sustituyen a `timeout-minutes: 20` del job, que es otra cosa: una guillotina cuyo
 # incumplimiento se lee como avería de infraestructura, no como regresión de rendimiento.
 #
-# Dimensionadas sobre el **peor caso observado** (205s el 2026-08-10) y no sobre la mediana
-# (164s) ni sobre el mejor caso (145s), que es lo que evita que el presupuesto se vuelva
-# ruido. El aviso deja ~27 % de crecimiento sobre ese peor caso, bastante más que la
-# variabilidad medida del runner (±5-7 %), así que un aviso significa deriva y no mala suerte.
+# Dimensionadas sobre el **peor caso observado** y no sobre la mediana ni sobre el mejor
+# caso, que es lo que evita que el presupuesto se vuelva ruido. El aviso deja ~27 % de
+# crecimiento sobre ese peor caso, bastante más que la variabilidad medida del runner
+# (±5-7 %), así que un aviso significa deriva y no mala suerte.
+#
+# --- Re-baselinadas el 2026-08-22 (tercera vez que esta cifra envejece) -----------------
+#
+# Peor caso observado: **424s**, medido en CI sobre `sdd/tech-incident-context` y reproducido
+# en local con el mismo número. Las anteriores (260/400) estaban dimensionadas sobre los 205s
+# del 2026-08-10 y llevaban rotas un tiempo indeterminado: el techo de 400s se cruzó **sin que
+# ningún check se pusiera en rojo**, porque todos los changes intermedios eran de frontend y
+# `backend-tests-detect` se saltaba la suite entera. Aquellos ticks verdes lo eran por vacío
+# —«no había nada que verificar»—, no porque la suite pasara el presupuesto.
+#
+# Es exactamente el modo de fallo que el comentario de la cabecera describe dos veces, y es
+# la tercera: la cifra envejeció sin que nada fallara. Lo que lo hizo visible fue el primer PR
+# que volvió a tocar `backend/**`.
+#
+# **La regresión de runtime NO se investigó** (205s → 424s, peor incluso que los 375s de los
+# que partió `backend-suite-runtime` el 2026-08-10). Se decidió explícitamente re-baselinar y
+# no optimizar, así que estos números describen la suite que hay, no la que debería haber.
+# `pytest-xdist` ya está en su óptimo medido (`-n 2`, ver más abajo), así que la palanca de
+# paralelismo está agotada: lo que queda es coste real de tests.
 env:
-  BACKEND_SUITE_BUDGET_SECONDS: "260"   # ~4m20s — pasarlo avisa
-  BACKEND_SUITE_CEILING_SECONDS: "400"  # ~6m40s — pasarlo pone el check en rojo
+  BACKEND_SUITE_BUDGET_SECONDS: "540"   # ~9m — pasarlo avisa (424s +27 %, misma regla que antes)
+  BACKEND_SUITE_CEILING_SECONDS: "700"  # ~11m40s — pasarlo pone el check en rojo
 
 jobs:
   # --- ¿Hay que ejecutar la suite? Se decide una vez, aquí, y se publica. -----------

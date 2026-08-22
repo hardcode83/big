@@ -15,7 +15,8 @@ type TaskResponse = components["schemas"]["CleaningTaskResponse"];
 type UserPageResponse = components["schemas"]["UserPageResponse"];
 type UserResponse = components["schemas"]["UserResponse"];
 type PropertyPageResponse = components["schemas"]["PropertyPageResponse"];
-type PropertyResponse = components["schemas"]["PropertyResponse"];
+type PropertyListItemResponse =
+  components["schemas"]["PropertyListItemResponse"];
 
 /** One page of tasks per request; `page` is what the pagination control moves (R1.5). */
 const TASKS_PER_PAGE = 20;
@@ -70,7 +71,7 @@ function mapCleaner(value: UserResponse): CleanerSummary {
   };
 }
 
-function mapProperty(value: PropertyResponse): PropertySummary {
+function mapProperty(value: PropertyListItemResponse): PropertySummary {
   return {
     id: value.id,
     name: value.name,
