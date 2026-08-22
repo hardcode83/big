@@ -190,7 +190,12 @@ garantiza el sistema.
   `properties.default_check_in_time`/`default_check_out_time`.
 - THE SYSTEM SHALL exponer `properties.access_notes` como instrucciones de llegada, y el código
   de acceso **ya enmascarado** desde la base de datos —el sistema no almacena el código en claro
-  en ninguna parte—, tomando el registro vivo más reciente de la estancia.
+  en ninguna parte—, tomando el registro vivo más reciente de la estancia. Esa columna **está desde
+  el 2026-08-21 en el censo de sumideros de la regla 11** de `steering/security.md`, con la excepción
+  6 que le concedió [`tech-incident-context`](tech-incident-context.md), y esta ruta es uno de sus
+  tres lectores declarados —el único anónimo, y el motivo de que la fila diga «verbatim»—. Cuando se
+  decidió aquí (OQ2) el censo aún no la tenía, y aquella decisión se mitigó con un aviso al operador
+  en `docs/guest-portal.md` en vez de con una fila; la fila llegó un change después.
 - THE SYSTEM SHALL tomar la vía de soporte de la configuración y no de ningún dato de otro
   huésped.
 - THE SYSTEM SHALL filtrar `properties.tenant_id` **explícitamente** en esa consulta, además de

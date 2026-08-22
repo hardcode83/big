@@ -29,6 +29,18 @@ hace*.
 
 - WHEN se solicita `GET /api/v1/properties`, THE SYSTEM SHALL devolver únicamente las propiedades
   del tenant del token, con el envelope `{data, total, page, per_page, total_pages}` de PRD §23.
+- THE SYSTEM NEVER SHALL llevar en los items del listado paginado las tres notas de texto libre
+  —`access_notes`, `cleaning_notes` y `emergency_notes`—, y SHALL conseguirlo con un **esquema de
+  respuesta propio y más estrecho** (`PropertyListItemResponse`, 23 campos construidos
+  explícitamente) y no con una exclusión de campos ni con un campo opcional: un campo que el llamante
+  pudiera pedir no sería una exclusión. El detalle sí las conserva. Es el precio de la **excepción
+  6** de la regla 11 de `steering/security.md`, concedida a `access_notes` en
+  [`tech-incident-context`](tech-incident-context.md) el 2026-08-21, y la forma de la regla 4 —«jamás
+  en listados»—: este listado devolvía las instrucciones de acceso de **todas** las viviendas del
+  tenant en una sola respuesta, y era la única superficie de bulto que existía. La exclusión alcanza
+  a las tres y no solo a la censada porque es un solo esquema y el mismo coste, y un listado que
+  esconde una nota y muestra dos no es una forma explicable; salir del listado **no** mete a las
+  otras dos en el censo.
 - THE SYSTEM SHALL acotar `per_page` a 100 y `page` a 100.000, respondiendo `422` fuera de rango:
   `page` se convierte en un `OFFSET` de SQL y un valor sin cota desborda `int8` y sale como error
   de driver en vez de como respuesta del envelope.
@@ -39,13 +51,17 @@ hace*.
   conjunto distinto del que viaja en `data`.
 - WHEN se solicita `GET /api/v1/properties/{id}` dentro del tenant del token, THE SYSTEM SHALL
   devolver la propiedad completa salvo lo que la sección «Secretos» excluye.
-- **Estas rutas no son la única lectura de campos de `Property`, y la segunda no pasa por aquí.**
-  [`cleaner-task-context`](cleaner-task-context.md) sirve nueve campos —`name`, `internal_code`,
-  los seis de dirección postal y `timezone`— a un rol que **no** tiene `READ_PROPERTIES`, con su
-  propia lista cerrada y sobre un conjunto de filas más estrecho que el que este permiso daría: la
-  propiedad de una tarea de limpieza, y solo mientras esa tarea sea alcanzable por el llamante. La
-  regla que separa las dos es que **una proyección puede estrechar, nunca unir**: un campo que este
-  permiso guarda *como un todo* no se añade allí.
+- **Estas rutas no son la única lectura de campos de `Property`, y las otras no pasan por aquí.**
+  [`cleaner-task-context`](cleaner-task-context.md) sirve nueve campos —`name`, `internal_code`, los
+  seis de dirección postal y `timezone`— a un rol que **no** tiene `READ_PROPERTIES`, con su propia
+  lista cerrada y sobre un conjunto de filas más estrecho que el que este permiso daría: la propiedad
+  de una tarea de limpieza, y solo mientras esa tarea sea alcanzable por el llamante.
+  [`tech-incident-context`](tech-incident-context.md) sirve esos mismos nueve **más `access_notes`**
+  al rol `TECHNICIAN`, acotado a la incidencia que tiene asignada. Y el portal del huésped devuelve
+  `access_notes` verbatim como `arrival_notes` a un portador anónimo de token
+  ([`guest-portal-api`](guest-portal-api.md)). La regla que separa todas de este permiso es que **una
+  proyección puede estrechar, nunca unir**: un campo que este permiso guarda *como un todo* no se
+  añade allí.
 
 ### Alta
 
@@ -183,6 +199,10 @@ fila de `property_state_transitions` junto a un cambio de estado es la **regla 9
   se serializa nunca, así que un campo que no está en él no tiene dónde aterrizar. Es lo que hace
   que las tres columnas de notas —auditables pero no denylisted por la regla 11 de
   `steering/security.md`— no ganen un lector nuevo al ganarlo la dirección.
+- THE SYSTEM SHALL NOT llevar `wifi_password_encrypted`, `has_wifi_password`, `cleaning_notes` ni
+  `emergency_notes` en la proyección de [`tech-incident-context`](tech-incident-context.md), que **sí**
+  lleva `access_notes` por diseño y con su fila del censo. La exclusión es estructural por el mismo
+  mecanismo: un dataclass congelado de once campos, y ninguna entidad `Property` serializada.
 - WHEN se envía `wifi_password` en un `PATCH`, THE SYSTEM SHALL contarlo **siempre** como cambio y
   escribir su fila de auditoría, aunque el valor sea idéntico al almacenado.
 - THE SYSTEM SHALL registrar el cambio del secreto en `audit_logs` solo como que ocurrió, nunca su
@@ -205,9 +225,18 @@ no le concede forma enmascarada.
   propiedad, que solo admite sus campos declarados como auditables.
 - THE SYSTEM SHALL registrar los tres campos de texto libre —`access_notes`, `cleaning_notes` y
   `emergency_notes`— y la contraseña de wifi únicamente como que cambiaron. Los tres primeros no
-  están denegados por nombre en `ChangeSet`, así que esa disciplina vive en el caso de uso: son el
-  sitio donde un operador pega un código de puerta, y `audit_logs.changes` es un sumidero de texto
-  en claro bajo la regla 11 de `steering/security.md`.
+  están denegados por nombre en `ChangeSet`, así que esa disciplina vive en el caso de uso
+  (`REDACTED_ON_AUDIT` de `properties/application/property_admin.py`): son el sitio donde un operador
+  pega un código de puerta, y `audit_logs.changes` es un sumidero de texto en claro bajo la regla 11
+  de `steering/security.md`.
+- **Esa disciplina no es un invariante, y la diferencia está medida.** `access_notes` está **dentro**
+  de `AUDITABLE_FIELDS["PROPERTY"]` y **fuera** de `REDACTED_FIELDS`, así que un
+  `ChangeSet("PROPERTY").diff("access_notes", …)` es aceptado y **almacena el valor literal**;
+  comprobado el 2026-08-22 al concederle la excepción 6 en
+  [`tech-incident-context`](tech-incident-context.md), y anotado allí y en `steering/security.md` con
+  su medición. Es más débil que la exclusión de `incidents.assignment_note`, que `ChangeSet` rechaza
+  por construcción en las dos formas. Cerrarlo significa mover las tres notas a un conjunto de
+  solo-redacción, y no se hizo: consta como hueco con su forma, no como promesa cumplida.
 - THE SYSTEM SHALL registrar `actor_user_id` del token y `actor_ip` resuelta con el mismo
   mecanismo que el resto de la API.
 - WHERE el alta la hace `make seed-demo` en lugar de una petición, THE SYSTEM SHALL registrar el
