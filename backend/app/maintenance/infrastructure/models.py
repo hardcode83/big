@@ -82,6 +82,17 @@ class IncidentModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin
     # four columns that shipped without one. `MAX_ASSIGNMENT_NOTE` in `api/schemas.py` mirrors
     # this number, and `tests/maintenance/test_models.py` pins it here.
     assignment_note: Mapped[str | None] = mapped_column(String(2000), default=None)
+    # The hour the technician promised (`tech-cycle-completion` R3.1). `TIMESTAMPTZ` like every
+    # other instant in the schema, and nullable because most incidents never carry one — the
+    # column belongs to the assignment in force, and `assign`/`reject` return it to `NULL`.
+    eta_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    # What the technician says they put in (R4.1). `String(2000)` and not `Text` for
+    # `assignment_note`'s reason: the width lives in the DDL as well as in pydantic, so an
+    # over-long value is a `422` and not a driver error that aborts the transaction.
+    # `MAX_MATERIALS` in `maintenance/domain/entities.py` mirrors this number,
+    # `tests/maintenance/test_models.py` pins it here, and `tests/test_migrations.py` reads it
+    # back out of the real DDL.
+    materials: Mapped[str | None] = mapped_column(String(2000), default=None)
     owner_approval_required: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
     estimated_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)
     approved_cost: Mapped[Decimal | None] = mapped_column(Numeric(10, 2), default=None)

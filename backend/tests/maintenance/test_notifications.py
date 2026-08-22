@@ -5,8 +5,10 @@ import pytest
 
 from app.maintenance.domain.enums import IncidentSeverity
 from app.maintenance.domain.notifications import (
+    NOTIFICATION_TYPE_INCIDENT_REJECTED,
     RELATED_TYPE_INCIDENT,
     _SLA_FIELD_BY_SEVERITY,
+    incident_rejection_notification,
     owner_approval_notification,
     sla_minutes_for,
     technician_assignment_notification,
@@ -141,3 +143,66 @@ def test_neither_notification_carries_incident_free_text() -> None:
         for token in log.body.replace(",", " ").replace(".", " ").split():
             if len(token) == 36 and "-" in token:
                 assert uuid.UUID(token) in {incident_id, property_id, approval_id}
+
+
+# --- The refusal's notification (`tech-cycle-completion` R1.4, design D3) ----------------
+
+
+def test_the_rejection_notification_carries_no_sla_deadline() -> None:
+    """R1.4 — "esa notificación NEVER SHALL llevar plazo de SLA".
+
+    A refusal *is* the answer, so nobody is late; and there is no escalation policy for this
+    type, so a deadline here would produce a breach that escalates to nobody — the same
+    reasoning `owner_approval_notification` records for itself.
+    """
+    row = incident_rejection_notification(
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        manager_id=uuid.uuid4(),
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    assert row.sla_deadline_at is None
+    assert row.status is NotificationStatus.PENDING
+    assert row.related_type == RELATED_TYPE_INCIDENT
+
+
+def test_the_rejection_type_is_a_plain_string_and_not_a_notification_type() -> None:
+    """D3 — deliberately outside `NotificationType`.
+
+    That enum is the sixteen canonical names of PRD §14 and this is not one of them; the
+    column has been free text since `domain-foundation-financial`, so there is no migration;
+    and `escalation_for` returns `None` for a type it does not know, which is how R1.4's "no
+    deadline, no escalation" is obtained by construction rather than by an omission somebody
+    could fill in later.
+    """
+    assert NOTIFICATION_TYPE_INCIDENT_REJECTED == "INCIDENT_REJECTED"
+    assert NOTIFICATION_TYPE_INCIDENT_REJECTED not in {
+        member.value for member in NotificationType
+    }
+
+
+def test_the_rejection_notification_names_only_identifiers() -> None:
+    """Rule 11's contract for `notification_logs.subject`/`body`: a constant plus ids.
+
+    Asserted by driving the builder with a recognisable string in none of its inputs — every
+    argument is a UUID or the recipient's own address — and checking the body carries the two
+    identifiers and nothing that came from another row.
+    """
+    incident_id = uuid.uuid4()
+    property_id = uuid.uuid4()
+
+    row = incident_rejection_notification(
+        tenant_id=uuid.uuid4(),
+        incident_id=incident_id,
+        property_id=property_id,
+        manager_id=uuid.uuid4(),
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    assert str(incident_id) in row.body
+    assert str(property_id) in row.body
+    assert row.subject == "Incident rejected by the technician"

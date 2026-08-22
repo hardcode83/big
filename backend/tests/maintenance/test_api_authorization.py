@@ -37,7 +37,11 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("PATCH", INCIDENTS + "/{incident_id}"),
     ("POST", INCIDENTS + "/{incident_id}/assign"),
     ("POST", INCIDENTS + "/{incident_id}/accept"),
-    ("POST", INCIDENTS + "/{incident_id}/start"),
+    # `tech-cycle-completion` R1.6. In this census for the reason `context` is: a route left
+    # out of a list that claims to be "every route of D14" is how the `CLEANER`-refused and
+    # anonymous-refused sweeps quietly stop covering the surface.
+    ("POST", INCIDENTS + "/{incident_id}/reject"),
+    ("POST", INCIDENTS + "/{incident_id}/en-route"),
     ("POST", INCIDENTS + "/{incident_id}/wait-parts"),
     ("POST", INCIDENTS + "/{incident_id}/resume"),
     ("POST", INCIDENTS + "/{incident_id}/resolve"),
@@ -217,6 +221,96 @@ async def test_a_technician_cannot_drive_an_incident_that_is_not_theirs(
     )
 
     assert response.status_code == 404
+
+
+async def test_the_assigned_technician_may_reject(api, world, db_session) -> None:
+    """R1.6 — the assignee is exactly who this operation is for."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await _assign_to(api, world, incident.id, world.technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/reject", headers=auth_header(api, world.technician)
+    )
+
+    assert response.status_code == 200
+
+
+async def test_a_manager_may_reject_to_unblock(api, world, db_session) -> None:
+    """R1.6 — "y al `PROPERTY_MANAGER`", the same unblocking allowance the rest of the cycle
+    gives (spec `maintenance` R6). A manager holds `EXECUTE_INCIDENTS` and is not narrowed to
+    their own rows, because `restrict_to_technician_id` keys on the role."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await _assign_to(api, world, incident.id, world.technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/reject", headers=auth_header(api, world.manager)
+    )
+
+    assert response.status_code == 200
+
+
+async def test_rejecting_someone_elses_incident_is_the_same_404(
+    api, world, db_session
+) -> None:
+    """R1.7 — "esa negativa SHALL ser indistinguible de «no existe»: el **mismo `404` con el
+    mismo cuerpo**".
+
+    Both halves asserted, and the body comparison is the one that matters: a distinguishable
+    message would turn this route into a probe for which incidents exist and whose they are.
+
+    **Three cases, and all three are executed** — somebody else's, nonexistent, and another
+    tenant's — because R1.7 names all three as having to be identical. An earlier version of
+    this test claimed the three in prose and built only two requests; the tenancy and QA panels
+    both caught it, which is a fair reminder that a docstring is not coverage.
+
+    What the third case does and does not prove is worth stating, because the shape recurs in
+    this module: by the time it runs, the shared session is already bound to the caller's
+    tenant, so its 404 is guaranteed by the session-level listener regardless of what this
+    route does with `tenant_id`. It is here for the **body equality** — that the cross-tenant
+    refusal is worded identically to the other two — which is the half R1.7 asks for and the
+    half no session listener provides. The module's own scoping is pinned separately, and
+    fallibly, by `test_the_api_scopes_the_lookup_to_the_callers_own_tenant`.
+    """
+    from app.properties.infrastructure.models import PropertyModel
+    from app.tenants.infrastructure.models import TenantModel
+
+    theirs = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await _assign_to(api, world, theirs.id, world.other_technician)
+    headers = auth_header(api, world.technician)
+
+    neighbour_tenant = TenantModel(name="TenantR", billing_email="r@example.com")
+    db_session.add(neighbour_tenant)
+    await db_session.flush()
+    neighbour_property = PropertyModel(
+        tenant_id=neighbour_tenant.id, name="Theirs", internal_code="THEIRSR"
+    )
+    db_session.add(neighbour_property)
+    await db_session.flush()
+    from tests.maintenance.conftest import World
+
+    neighbour = World(
+        neighbour_tenant,
+        neighbour_property,
+        await _user(db_session, neighbour_tenant, "TENANT_OWNER"),
+        await _user(db_session, neighbour_tenant, "PROPERTY_MANAGER"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+        await _user(db_session, neighbour_tenant, "TECHNICIAN"),
+    )
+    elsewhere = await make_incident(
+        db_session, neighbour, status=IncidentStatus.CLASSIFIED
+    )
+
+    not_mine = await api.post(f"{INCIDENTS}/{theirs.id}/reject", headers=headers)
+    unknown = await api.post(f"{INCIDENTS}/{uuid.uuid4()}/reject", headers=headers)
+    other_tenant = await api.post(f"{INCIDENTS}/{elsewhere.id}/reject", headers=headers)
+
+    assert (
+        not_mine.status_code
+        == unknown.status_code
+        == other_tenant.status_code
+        == 404
+    )
+    assert not_mine.json() == unknown.json() == other_tenant.json()
 
 
 async def test_the_api_scopes_the_lookup_to_the_callers_own_tenant(

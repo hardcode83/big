@@ -1,7 +1,9 @@
 """Incident endpoints (PRD §23, R1, R3, R4, R5; design D14).
 
-Twelve routes, and the thirteenth — `POST /owner-approvals/{id}/respond` — lives in
-`approvals_router.py` because it acts on the other aggregate. The twelfth is
+Thirteen routes, and the fourteenth — `POST /owner-approvals/{id}/respond` — lives in
+`approvals_router.py` because it acts on the other aggregate. Twelve until
+`tech-cycle-completion` added `POST /{incident_id}/reject`, the operation PRD §6 asks for when
+it says the technician "acepta/rechaza" and only `accept` existed. The twelfth is
 `GET /{incident_id}/context`, the read-only projection `tech-incident-context` adds so a
 technician can be told which flat to go to and how to get in without holding
 `READ_PROPERTIES`.
@@ -39,12 +41,13 @@ from app.maintenance.api.dependencies import (
     get_assign_incident_use_case,
     get_cancel_incident_use_case,
     get_classify_incident_use_case,
+    get_en_route_incident_use_case,
     get_incident_context_use_case,
     get_incident_use_case,
     get_list_incidents_use_case,
+    get_reject_incident_use_case,
     get_resolve_incident_use_case,
     get_resume_work_use_case,
-    get_start_incident_use_case,
     get_triage_incident_use_case,
     get_wait_for_parts_use_case,
 )
@@ -53,6 +56,7 @@ from app.maintenance.api.schemas import (
     MAX_PER_PAGE,
     AssignIncidentRequest,
     IncidentContextResponse,
+    IncidentEtaRequest,
     IncidentPageResponse,
     IncidentResponse,
     ResolveIncidentRequest,
@@ -63,13 +67,14 @@ from app.maintenance.application.use_cases import (
     AssignIncidentUseCase,
     CancelIncidentUseCase,
     ClassifyIncidentUseCase,
+    EnRouteIncidentUseCase,
     GetIncidentContextUseCase,
     GetIncidentUseCase,
     IncidentActor,
     ListIncidentsUseCase,
+    RejectIncidentUseCase,
     ResolveIncidentUseCase,
     ResumeWorkUseCase,
-    StartIncidentUseCase,
     TriageIncidentUseCase,
     WaitForPartsUseCase,
 )
@@ -312,12 +317,51 @@ async def assign_incident(
     "/{incident_id}/accept",
     response_model=IncidentResponse,
     summary="The technician takes the job",
-    description="Cancels the SLA deadline the assignment opened (R3.3).",
+    description=(
+        "Cancels the SLA deadline the assignment opened (R3.3).\n\n"
+        "The body is **optional**: `POST` with nothing keeps working exactly as before. When "
+        "it carries an `eta_at`, that instant is recorded as when the technician says they "
+        "will arrive — it must carry a timezone and must not be in the past, or the answer is "
+        "`422`. The ETA belongs to the assignment in force, so a reassignment clears it."
+    ),
 )
 async def accept_incident(
     incident_id: uuid.UUID,
     authenticated: ExecuteDep,
     use_case: Annotated[AcceptIncidentUseCase, Depends(get_accept_incident_use_case)],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+    payload: IncidentEtaRequest | None = None,
+) -> IncidentResponse:
+    incident = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        incident_id=incident_id,
+        actor=_actor(authenticated, client_ip),
+        now=now_utc(),
+        eta_at=payload.eta_at if payload is not None else None,
+    )
+    return IncidentResponse.from_domain(incident)
+
+
+@router.post(
+    "/{incident_id}/reject",
+    response_model=IncidentResponse,
+    summary="The technician refuses the job",
+    description=(
+        "The incident goes back to `CLASSIFIED` for the manager to reassign (R1.1, R1.2) — it "
+        "is **not** closed, which is what `cancel` does and what only a manager may do. The "
+        "assignee, the ETA and the assignment note are all cleared, because all three belong "
+        "to the assignment that just ended; who refused survives in the audit trail and on "
+        "the timeline.\n\n"
+        "Cancels the SLA deadline the assignment opened — a refusal is an answer, so nobody "
+        "is late (R1.3) — and leaves the tenant's `PROPERTY_MANAGER` a notification with no "
+        "deadline of its own (R1.4). A tenant with no active manager still gets the refusal "
+        "applied (R1.5)."
+    ),
+)
+async def reject_incident(
+    incident_id: uuid.UUID,
+    authenticated: ExecuteDep,
+    use_case: Annotated[RejectIncidentUseCase, Depends(get_reject_incident_use_case)],
     client_ip: Annotated[str, Depends(get_client_ip)],
 ) -> IncidentResponse:
     incident = await use_case.execute(
@@ -330,21 +374,30 @@ async def accept_incident(
 
 
 @router.post(
-    "/{incident_id}/start",
+    "/{incident_id}/en-route",
     response_model=IncidentResponse,
-    summary="The technician starts work",
+    summary="The technician is on the way",
+    description=(
+        "`ACCEPTED → IN_PROGRESS`, and the milestone PRD §12 draws as \"Técnico en ruta\" "
+        "(R2.1, R2.2). This route was `POST /{incident_id}/start` until "
+        "`tech-cycle-completion` renamed it; the old path no longer exists (R2.3).\n\n"
+        "The body is **optional** and takes the same `eta_at` as `accept`, under the same "
+        "rules: a timezone is required and the past is refused with `422`."
+    ),
 )
-async def start_incident(
+async def en_route_incident(
     incident_id: uuid.UUID,
     authenticated: ExecuteDep,
-    use_case: Annotated[StartIncidentUseCase, Depends(get_start_incident_use_case)],
+    use_case: Annotated[EnRouteIncidentUseCase, Depends(get_en_route_incident_use_case)],
     client_ip: Annotated[str, Depends(get_client_ip)],
+    payload: IncidentEtaRequest | None = None,
 ) -> IncidentResponse:
     incident = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         incident_id=incident_id,
         actor=_actor(authenticated, client_ip),
         now=now_utc(),
+        eta_at=payload.eta_at if payload is not None else None,
     )
     return IncidentResponse.from_domain(incident)
 
@@ -401,7 +454,12 @@ async def resume_work(
         "`final_cost` is required (R4.2). If it goes past the tenant's threshold and no "
         "approved budget covers it, the incident is **not** resolved: it moves to "
         "`AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the "
-        "owner decides (R4.3)."
+        "owner decides (R4.3).\n\n"
+        "`materials` is optional free text describing what was fitted, bounded to 2000 "
+        "characters. It **preserves**: sending the field writes it, omitting it leaves "
+        "whatever was there — so the repeat close after an owner approval does not erase what "
+        "the first attempt declared. Send no field for \"none\"; an empty string is a `422`. "
+        "It explains `final_cost` and is never derived from or validated against it."
     ),
 )
 async def resolve_incident(
@@ -415,6 +473,7 @@ async def resolve_incident(
         tenant_id=authenticated.context.tenant_id,
         incident_id=incident_id,
         final_cost=payload.final_cost,
+        materials=payload.materials,
         actor=_actor(authenticated, client_ip),
         now=now_utc(),
     )

@@ -12,6 +12,7 @@ from app.cleaning.infrastructure.models import (
     CleaningChecklistTemplateModel,
     CleaningTaskModel,
 )
+from app.maintenance.domain.entities import MAX_MATERIALS
 from app.maintenance.domain.enums import IncidentSource, OwnerApprovalRelatedType
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
 from app.properties.infrastructure.models import PropertyModel
@@ -218,6 +219,38 @@ async def test_incident_assignment_note_is_a_nullable_bounded_column() -> None:
 
     assert column.nullable is True
     assert column.type.length == 2000
+
+
+@pytest.mark.asyncio
+async def test_incident_eta_at_is_a_nullable_timestamptz() -> None:
+    """R3.1 — `TIMESTAMPTZ` and nullable.
+
+    `timezone=True` is not decoration: `_apply_eta` refuses a naïve value at the domain edge,
+    and a column storing `timestamp without time zone` would silently drop the offset of
+    everything that got past it.
+    """
+    column = IncidentModel.__table__.c.eta_at
+
+    assert column.nullable is True
+    assert column.type.timezone is True
+
+
+@pytest.mark.asyncio
+async def test_incident_materials_is_a_nullable_bounded_column() -> None:
+    """R4.1 — the bound lives in the DDL, not only in pydantic.
+
+    `MAX_MATERIALS` in `app/maintenance/domain/entities.py` is the same number, imported by
+    `api/schemas.py`; asserting the width here is what keeps the two from drifting into the
+    situation `properties-crud` R2.4 had to repair on four columns that shipped with a
+    pydantic-only bound. The real DDL is read back in
+    `tests/test_migrations.py::test_the_declared_column_widths_reach_the_real_ddl`, which is
+    the half this assertion cannot see — the suite's schema comes from `create_all`, so a
+    model and a migration that disagreed would both look right from here.
+    """
+    column = IncidentModel.__table__.c.materials
+
+    assert column.nullable is True
+    assert column.type.length == MAX_MATERIALS
 
 
 @pytest.mark.asyncio

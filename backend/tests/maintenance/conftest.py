@@ -70,12 +70,13 @@ class Flow:
             AssignIncidentUseCase,
             CancelIncidentUseCase,
             ClassifyIncidentUseCase,
+            EnRouteIncidentUseCase,
             GetIncidentUseCase,
             ListIncidentsUseCase,
+            RejectIncidentUseCase,
             ResolveIncidentUseCase,
             RespondOwnerApprovalUseCase,
             ResumeWorkUseCase,
-            StartIncidentUseCase,
             TriageIncidentUseCase,
             WaitForPartsUseCase,
         )
@@ -115,7 +116,10 @@ class Flow:
             users=users, notifications=self.notifications, configs=configs, **common
         )
         self.accept = AcceptIncidentUseCase(notifications=self.notifications, **common)
-        self.start = StartIncidentUseCase(**common)
+        self.reject = RejectIncidentUseCase(
+            users=users, notifications=self.notifications, **common
+        )
+        self.en_route = EnRouteIncidentUseCase(**common)
         self.wait_for_parts = WaitForPartsUseCase(**common)
         self.resume_work = ResumeWorkUseCase(**common)
         self.resolve = ResolveIncidentUseCase(

@@ -25,13 +25,14 @@ from app.maintenance.application.use_cases import (
     AssignIncidentUseCase,
     CancelIncidentUseCase,
     ClassifyIncidentUseCase,
+    EnRouteIncidentUseCase,
     GetIncidentContextUseCase,
     GetIncidentUseCase,
     ListIncidentsUseCase,
+    RejectIncidentUseCase,
     ResolveIncidentUseCase,
     RespondOwnerApprovalUseCase,
     ResumeWorkUseCase,
-    StartIncidentUseCase,
     TriageIncidentUseCase,
     WaitForPartsUseCase,
 )
@@ -130,8 +131,21 @@ def get_accept_incident_use_case(session: SessionDep) -> AcceptIncidentUseCase:
     )
 
 
-def get_start_incident_use_case(session: SessionDep) -> StartIncidentUseCase:
-    return StartIncidentUseCase(**_flow_kwargs(session))
+def get_en_route_incident_use_case(session: SessionDep) -> EnRouteIncidentUseCase:
+    return EnRouteIncidentUseCase(**_flow_kwargs(session))
+
+
+def get_reject_incident_use_case(session: SessionDep) -> RejectIncidentUseCase:
+    """R1.6 — wired like `get_accept_incident_use_case` plus `users`.
+
+    It needs `users` because R1.4 tells the tenant's `PROPERTY_MANAGER`, and `notifications`
+    both to cancel the deadline the assignment opened (R1.3) and to leave that row.
+    """
+    return RejectIncidentUseCase(
+        users=SqlAlchemyUserRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        **_flow_kwargs(session),
+    )
 
 
 def get_wait_for_parts_use_case(session: SessionDep) -> WaitForPartsUseCase:

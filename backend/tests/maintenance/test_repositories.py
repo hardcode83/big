@@ -771,6 +771,63 @@ async def test_the_assignment_note_survives_a_save_and_a_reassignment_clears_it(
 
 
 @pytest.mark.asyncio
+async def test_the_eta_and_the_materials_round_trip_and_a_later_save_updates_them(
+    db_session,
+) -> None:
+    """R3.1, R4.1 — the two new columns persist, rehydrate, and can be changed again.
+
+    The second `save` is the half worth writing: `_MUTABLE_INCIDENT_COLUMNS` is an allowlist,
+    so a column added to the model and forgotten there would round-trip on the **insert** and
+    then silently refuse every later change — which is exactly the shape of the bug that
+    allowlist exists to prevent in the other direction.
+
+    `eta_at` is read back through `text()` as well, because a hydrated `None` and a stored
+    JSON-ish null look the same from the entity — the trap `ai_classification` fell into on
+    this very table.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop, status=IncidentStatus.ACCEPTED)
+    repository = _incidents(db_session)
+    eta = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    incident.eta_at = eta
+    incident.materials = "Dos codos de 22 mm y un metro de tubo"
+    await repository.save(tenant.id, incident)
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.eta_at == eta
+    assert stored.materials == "Dos codos de 22 mm y un metro de tubo"
+
+    later = eta + timedelta(hours=1)
+    stored.eta_at = later
+    stored.materials = "Y una junta"
+    await repository.save(tenant.id, stored)
+    db_session.expunge_all()
+
+    updated = await repository.get(tenant.id, row.id)
+    assert updated is not None
+    assert updated.eta_at == later
+    assert updated.materials == "Y una junta"
+
+    updated.eta_at = None
+    await repository.save(tenant.id, updated)
+    db_session.expunge_all()
+
+    assert (
+        await db_session.scalar(
+            text("SELECT eta_at IS NULL FROM incidents WHERE id = :id"),
+            {"id": row.id},
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
 async def test_save_never_moves_a_row_between_tenants(db_session) -> None:
     tenant_a = await _tenant(db_session, "TenantA")
     tenant_b = await _tenant(db_session, "TenantB")

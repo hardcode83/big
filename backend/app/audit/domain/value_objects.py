@@ -315,6 +315,11 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # was opened, by whom and against which stay — `source`, `status` and `reservation_id`
     # say that without carrying a word the guest typed into an append-only column.
     #
+    # `tech-cycle-completion` adds `eta_at` and, by not adding `materials`, makes that
+    # column's rule-11 contract structural: naming it in a `ChangeSet` raises
+    # `AuditContractError` in both `diff()` and `redacted()` rather than relying on nobody
+    # thinking of it (R4.6).
+    #
     # `maintenance` adds the fields its flow mutates, and **`ai_summary` and
     # `ai_classification` are absent for the same reason `title` and `description` are**:
     # excepción 2 of rule 11 says of itself that it does not propagate and does not
@@ -334,6 +339,12 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "category",
             "severity",
             "assigned_technician_id",
+            # `tech-cycle-completion` R5.1. A timestamp, not free text, so it enters by the
+            # same criterion as `resolved_at` — and it has to, because the technician steps
+            # now derive their audited diff over it (that change's D5). Its sibling column
+            # `materials` is deliberately **absent**: it is 2000 characters a person types,
+            # so it stays outside by the rule that keeps `assignment_note` outside.
+            "eta_at",
             "owner_approval_required",
             "estimated_cost",
             "approved_cost",

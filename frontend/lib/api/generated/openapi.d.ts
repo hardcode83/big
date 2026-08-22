@@ -347,6 +347,8 @@ export interface paths {
     /**
      * The technician takes the job
      * @description Cancels the SLA deadline the assignment opened (R3.3).
+     *
+     * The body is **optional**: `POST` with nothing keeps working exactly as before. When it carries an `eta_at`, that instant is recorded as when the technician says they will arrive — it must carry a timezone and must not be in the past, or the answer is `422`. The ETA belongs to the assignment in force, so a reassignment clears it.
      */
     post: operations["accept_incident_api_v1_incidents__incident_id__accept_post"];
   };
@@ -388,20 +390,36 @@ export interface paths {
      */
     get: operations["get_incident_context_api_v1_incidents__incident_id__context_get"];
   };
+  "/api/v1/incidents/{incident_id}/en-route": {
+    /**
+     * The technician is on the way
+     * @description `ACCEPTED → IN_PROGRESS`, and the milestone PRD §12 draws as "Técnico en ruta" (R2.1, R2.2). This route was `POST /{incident_id}/start` until `tech-cycle-completion` renamed it; the old path no longer exists (R2.3).
+     *
+     * The body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.
+     */
+    post: operations["en_route_incident_api_v1_incidents__incident_id__en_route_post"];
+  };
+  "/api/v1/incidents/{incident_id}/reject": {
+    /**
+     * The technician refuses the job
+     * @description The incident goes back to `CLASSIFIED` for the manager to reassign (R1.1, R1.2) — it is **not** closed, which is what `cancel` does and what only a manager may do. The assignee, the ETA and the assignment note are all cleared, because all three belong to the assignment that just ended; who refused survives in the audit trail and on the timeline.
+     *
+     * Cancels the SLA deadline the assignment opened — a refusal is an answer, so nobody is late (R1.3) — and leaves the tenant's `PROPERTY_MANAGER` a notification with no deadline of its own (R1.4). A tenant with no active manager still gets the refusal applied (R1.5).
+     */
+    post: operations["reject_incident_api_v1_incidents__incident_id__reject_post"];
+  };
   "/api/v1/incidents/{incident_id}/resolve": {
     /**
      * Close the incident with its real cost
      * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+     *
+     * `materials` is optional free text describing what was fitted, bounded to 2000 characters. It **preserves**: sending the field writes it, omitting it leaves whatever was there — so the repeat close after an owner approval does not erase what the first attempt declared. Send no field for "none"; an empty string is a `422`. It explains `final_cost` and is never derived from or validated against it.
      */
     post: operations["resolve_incident_api_v1_incidents__incident_id__resolve_post"];
   };
   "/api/v1/incidents/{incident_id}/resume": {
     /** Work resumes after the part arrived */
     post: operations["resume_work_api_v1_incidents__incident_id__resume_post"];
-  };
-  "/api/v1/incidents/{incident_id}/start": {
-    /** The technician starts work */
-    post: operations["start_incident_api_v1_incidents__incident_id__start_post"];
   };
   "/api/v1/incidents/{incident_id}/wait-parts": {
     /**
@@ -1795,6 +1813,29 @@ export interface components {
       /** Timezone */
       timezone: string;
     };
+    /**
+     * IncidentEtaRequest
+     * @description The body of `accept` and of `en-route` — **one schema for both** (R3.2, design D6).
+     *
+     * One and not two because the field set is identical, and duplicating it would put R3.2's
+     * "en ninguna otra ruta" in two places that could drift apart. The router takes it as
+     * `payload: IncidentEtaRequest | None = None`, so a `POST` with no body at all keeps
+     * working exactly as it did before this change.
+     *
+     * **No validation of the instant lives here**, deliberately (D6): "una ETA no puede estar en
+     * el pasado" is a business rule, its reference instant is the router's `now_utc()`, and a
+     * rule written into a DTO would leave every non-HTTP caller — `seed_demo`, the tests —
+     * without it. `Incident._apply_eta` is where it lives, and it also refuses a naïve
+     * timestamp, which is what keeps the comparison from surfacing as an undeclared `500`.
+     *
+     * `extra="forbid"` is what makes "no other route accepts an ETA" a `422` rather than a
+     * convention: sending `eta_at` to `wait-parts` or `resume` is rejected because those routes
+     * take no body at all, and sending anything else here is rejected by this line.
+     */
+    IncidentEtaRequest: {
+      /** Eta At */
+      eta_at?: string | null;
+    };
     /** IncidentPageResponse */
     IncidentPageResponse: {
       /** Items */
@@ -1843,6 +1884,16 @@ export interface components {
      * is a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink
      * whose audience is the flow, not a client. `ai_summary` stays: it is our own closed
      * vocabulary, and it is what tells an operator the incident was looked at.
+     *
+     * **`eta_at` and `materials` are here, and that includes the paginated listing** — this one
+     * schema serves both the detail and the `items` of the page (`tech-cycle-completion` D8).
+     * `properties.access_notes` paid the price of leaving the listing under **excepción 6**,
+     * which is a different concession: that value is a note about how to get into a flat, and
+     * `GET /api/v1/guest/info/{token}` hands it verbatim to an anonymous bearer. `materials` is
+     * **excepción 3**, and its audience is exactly the one already reading `title`,
+     * `description` and `ai_summary` in this same listing — `READ_INCIDENTS`, and if the caller
+     * is a technician, only their own rows. Splitting the schema would remove no reader and
+     * would take from the technician's own list the one column that explains the cost.
      */
     IncidentResponse: {
       /** Ai Summary */
@@ -1861,6 +1912,8 @@ export interface components {
       description: string;
       /** Estimated Cost */
       estimated_cost: string | null;
+      /** Eta At */
+      eta_at: string | null;
       /** Final Cost */
       final_cost: string | null;
       /**
@@ -1868,6 +1921,8 @@ export interface components {
        * Format: uuid
        */
       id: string;
+      /** Materials */
+      materials: string | null;
       /** Owner Approval Required */
       owner_approval_required: boolean;
       /**
@@ -2858,10 +2913,32 @@ export interface components {
      * ResolveIncidentRequest
      * @description R4.2 — `final_cost` is required, which is where "SHALL exigir `final_cost`" lands for
      * an HTTP caller. The entity requires it too, for callers that are not HTTP.
+     *
+     * `materials` is optional and, when it comes, is written; when it does not, whatever was
+     * there survives (R4.3, D7). That asymmetry with `assign`'s complete-operation semantics is
+     * load-bearing rather than an inconsistency: the close that trips the owner-approval gate
+     * writes `materials` and parks the incident, and when the owner answers the technician
+     * repeats the close — so a "complete operation" reading would silently erase the description
+     * of a spend R4.3 has just protected.
+     *
+     * **The bound is imported, never re-derived** (D7). `MAX_MATERIALS` lives in
+     * `app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next
+     * door in that module's `infrastructure/models.py` — so a literal `2000` here would be a
+     * copy nobody keeps in step with either.
+     *
+     * `MultiLineText` is not decoration: without it a value carrying `U+0000` or an unpaired
+     * surrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the
+     * section-7 panel of `guest-portal-api` measured twice. Multi-line rather than single, since
+     * a list of parts is prose a person types. `str_strip_whitespace=True` with `min_length=1` is
+     * what makes a whitespace-only value a `422`, and it means the maximum counts characters
+     * *after* stripping — so "no materials" is said by **omitting** the field, not by sending
+     * `""`.
      */
     ResolveIncidentRequest: {
       /** Final Cost */
       final_cost: number | string;
+      /** Materials */
+      materials?: string | null;
     };
     /**
      * RespondOwnerApprovalRequest
@@ -3169,7 +3246,7 @@ export interface components {
      * TimelineEventType
      * @enum {string}
      */
-    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED";
+    TimelineEventType: "RESERVATION_IMPORTED" | "RESERVATION_CREATED_MANUAL" | "RESERVATION_UPDATED" | "RESERVATION_CANCELLED" | "CHECKIN_WINDOW_OPENED" | "CHECKOUT_WINDOW_REACHED" | "PROPERTY_STATE_CHANGED" | "ACCESS_CODE_PENDING" | "ACCESS_CODE_CREATED_EXTERNAL" | "ACCESS_CODE_MANUAL_ADDED" | "ACCESS_CODE_DELIVERED" | "GUEST_MESSAGE_RECEIVED" | "AI_RESPONSE_SENT" | "AI_ESCALATED_TO_HUMAN" | "HUMAN_RESPONSE_SENT" | "CLEANING_TASK_CREATED" | "CLEANER_ASSIGNED" | "CLEANER_ACCEPTED" | "CLEANER_REJECTED" | "CLEANING_STARTED" | "CLEANING_PHOTO_UPLOADED" | "CLEANING_COMPLETED" | "CLEANING_FAILED_VALIDATION" | "INCIDENT_CREATED" | "INCIDENT_CLASSIFIED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_ACCEPTED" | "TECHNICIAN_REJECTED" | "TECHNICIAN_EN_ROUTE" | "TECHNICIAN_STARTED" | "INCIDENT_RESOLVED" | "INCIDENT_CANCELLED" | "OWNER_APPROVAL_REQUIRED" | "OWNER_APPROVED_EXPENSE" | "OWNER_REJECTED_EXPENSE" | "LOCK_ALERT_RECEIVED" | "PRICE_RECOMMENDATION_CREATED" | "PRICE_UPDATED_EXTERNAL" | "LEGAL_REGISTRATION_SUBMITTED" | "REVIEW_IMPORTED" | "REVIEW_RESPONSE_DRAFTED" | "REVIEW_RESPONSE_APPROVED" | "SLA_BREACH_WARNING" | "NOTIFICATION_SENT" | "NOTIFICATION_FAILED" | "WEBHOOK_RECEIVED" | "GUEST_CHECKIN_COMPLETED";
     /**
      * TimelinePageResponse
      * @description The pagination envelope of PRD §23.
@@ -5355,11 +5432,18 @@ export interface operations {
   /**
    * The technician takes the job
    * @description Cancels the SLA deadline the assignment opened (R3.3).
+   *
+   * The body is **optional**: `POST` with nothing keeps working exactly as before. When it carries an `eta_at`, that instant is recorded as when the technician says they will arrive — it must carry a timezone and must not be in the past, or the answer is `422`. The ETA belongs to the assignment in force, so a reassignment clears it.
    */
   accept_incident_api_v1_incidents__incident_id__accept_post: {
     parameters: {
       path: {
         incident_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["IncidentEtaRequest"] | null;
       };
     };
     responses: {
@@ -5559,8 +5643,93 @@ export interface operations {
     };
   };
   /**
+   * The technician is on the way
+   * @description `ACCEPTED → IN_PROGRESS`, and the milestone PRD §12 draws as "Técnico en ruta" (R2.1, R2.2). This route was `POST /{incident_id}/start` until `tech-cycle-completion` renamed it; the old path no longer exists (R2.3).
+   *
+   * The body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.
+   */
+  en_route_incident_api_v1_incidents__incident_id__en_route_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody?: {
+      content: {
+        "application/json": components["schemas"]["IncidentEtaRequest"] | null;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * The technician refuses the job
+   * @description The incident goes back to `CLASSIFIED` for the manager to reassign (R1.1, R1.2) — it is **not** closed, which is what `cancel` does and what only a manager may do. The assignee, the ETA and the assignment note are all cleared, because all three belong to the assignment that just ended; who refused survives in the audit trail and on the timeline.
+   *
+   * Cancels the SLA deadline the assignment opened — a refusal is an answer, so nobody is late (R1.3) — and leaves the tenant's `PROPERTY_MANAGER` a notification with no deadline of its own (R1.4). A tenant with no active manager still gets the refusal applied (R1.5).
+   */
+  reject_incident_api_v1_incidents__incident_id__reject_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * Close the incident with its real cost
    * @description `final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).
+   *
+   * `materials` is optional free text describing what was fitted, bounded to 2000 characters. It **preserves**: sending the field writes it, omitting it leaves whatever was there — so the repeat close after an owner approval does not erase what the first attempt declared. Send no field for "none"; an empty string is a `422`. It explains `final_cost` and is never derived from or validated against it.
    */
   resolve_incident_api_v1_incidents__incident_id__resolve_post: {
     parameters: {
@@ -5602,40 +5771,6 @@ export interface operations {
   };
   /** Work resumes after the part arrived */
   resume_work_api_v1_incidents__incident_id__resume_post: {
-    parameters: {
-      path: {
-        incident_id: string;
-      };
-    };
-    responses: {
-      /** @description Successful Response */
-      200: {
-        content: {
-          "application/json": components["schemas"]["IncidentResponse"];
-        };
-      };
-      /** @description Missing, malformed or expired credentials. */
-      401: {
-        content: {
-          "application/json": components["schemas"]["ErrorEnvelope"];
-        };
-      };
-      /** @description Authenticated, but the role lacks the required permission. */
-      403: {
-        content: {
-          "application/json": components["schemas"]["ErrorEnvelope"];
-        };
-      };
-      /** @description Validation Error */
-      422: {
-        content: {
-          "application/json": components["schemas"]["ErrorEnvelope"];
-        };
-      };
-    };
-  };
-  /** The technician starts work */
-  start_incident_api_v1_incidents__incident_id__start_post: {
     parameters: {
       path: {
         incident_id: string;
