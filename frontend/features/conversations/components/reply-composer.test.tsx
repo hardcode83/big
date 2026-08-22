@@ -218,13 +218,17 @@ describe("ReplyComposer — the draft belongs to its conversation (R4.5, review 
     expect(state.mutate).not.toHaveBeenCalled();
   });
 
-  // The draft is a **single slot**, not one per conversation: typing in another
+  // These exercise the component's **standalone contract**, not the app's behaviour.
+  // Since D22 `ConversationsView` keys this subtree by conversation, so in the running
+  // app the composer is remounted on every switch and none of this state survives —
+  // a returning operator never gets a draft back. What follows is what the component
+  // guarantees on its own, for a caller that does not key it; do not read it as
+  // integration coverage, and do not build recovery UX on top of it.
+  //
+  // The draft is also a **single slot**, not one per conversation: typing in another
   // conversation overwrites it, and no requirement asks otherwise (R4.5 names only
-  // the failed send as a reason to keep text). So this asserts the narrow property
-  // the code actually gives — a draft merely passed over, with nothing typed in
-  // between, is still addressed to its own conversation — and not a retention
-  // guarantee the implementation would not honour.
-  it("still addresses the draft to its own conversation when nothing is typed in between", () => {
+  // the failed send as a reason to keep text).
+  it("unkeyed, still addresses the draft to its own conversation when nothing is typed in between", () => {
     const { rerender } = renderAt("conversation-1");
     fireEvent.change(textarea(), { target: { value: "sigo escribiendo" } });
 

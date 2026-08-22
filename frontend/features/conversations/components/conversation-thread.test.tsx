@@ -155,6 +155,9 @@ describe("ConversationThread — order preserved (task 6.3, R3.2, R3.5)", () => 
     ]);
   });
 
+  // Exercises the component's own fallback: `ConversationsView` never reaches this
+  // path because it keys the subtree per conversation (D22), so this is a standalone
+  // contract for a caller that forgets the key, not integration coverage.
   it("asks for page 1 again when another conversation is selected", () => {
     useThread.mockReturnValue({
       isPending: false,

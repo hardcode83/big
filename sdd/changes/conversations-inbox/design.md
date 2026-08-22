@@ -297,17 +297,40 @@ en el panel y en su re-verificación:
 La tercera es la que fuerza la decisión: no hay derivación posible, así que o se remonta o se
 convive con el fallo. El `key` además reinicia la página del hilo, que tenía su propio apaño.
 
-**Las derivaciones por conversación se conservan igualmente.** Un componente que solo es correcto
-mientras su padre se acuerda de poner un `key` es una trampa, y el fallo del borrador —una respuesta
-entregada al huésped equivocado— merece dos barreras. La aserción que guarda el `key` cuenta
+**Las derivaciones por conversación se conservan igualmente**, pero **no como redundancia activa**:
+con `key` y `conversationId` recibiendo siempre el mismo valor, la rama `mine` del compositor y la de
+`selection` del hilo son **inalcanzables en la aplicación**. Lo que son es el contrato del componente
+por sí solo —correcto aunque un futuro llamador olvide el `key`—, y por eso sus tests lo ejercitan
+re-renderizando sin `key`. Decirlo como «dos barreras vivas» sobrevendría lo que protege hoy al
+operador (corregido tras el re-review del 2026-08-22). La aserción que guarda el `key` cuenta
 **montajes**, no atributos, y se comprobó que falla al quitarlo.
 
 Rejected: una tercera derivación puntual para `send.isError` — tres hallazgos de la misma forma no
-piden un tercer parche, piden atacar la causa; y `useMutation` no expone su estado de forma que se
-pueda acotar por conversación sin reimplementarlo.
+piden un tercer parche, piden atacar la causa. **Y el motivo que esta decisión dio primero era
+falso**: se escribió que el estado de `useMutation` «no se puede acotar por conversación sin
+reimplementarlo», y no es cierto —bastaba acotar su *pintado* con el mismo guard `mine` que ya usa
+`lastSent`—. El rechazo se sostiene por otra razón: la derivación habría tenido que guardar también
+`isPending` (un envío en vuelo en A deshabilitaba el compositor de B mostrando «Enviando»), así que
+el `key` es el corte más simple y más completo. Importa dejarlo escrito porque esa justificación
+falsa es la que **ocultaba el coste de abajo**.
 Rejected: `placeholderData` en `useConversation` para forzar el desmontaje — cambiaría el
-comportamiento de lectura de toda la superficie para arreglar un problema de estado de escritura.
-Coste asumido y declarado: al cambiar de hilo se pierden foco y scroll, porque el subárbol es nuevo.
+comportamiento de lectura de toda la superficie para arreglar un problema de estado de escritura, y
+ataría el reset de identidad a un efecto secundario de caché: un futuro ajuste de `staleTime` o un
+upgrade de React Query reintroduciría el fallo sin ninguna señal.
+
+**Costes asumidos y declarados**, los dos del mismo peso:
+
+1. Al cambiar de hilo se pierden **foco y scroll**, porque el subárbol es nuevo.
+2. **Un fallo de envío que sobreviva al cambio de hilo no deja ninguna señal.** Si la operadora
+   envía en A, se va a B mientras la petición vuela y el envío falla, al volver a A encuentra un
+   compositor limpio y vacío: se perdieron el texto conservado *y* el aviso de fallo, y un compositor
+   vacío es **indistinguible de una respuesta entregada**. El mensaje del huésped se queda sin
+   responder mientras la operadora cree haber respondido. Antes del `key` esa ruta conservaba las dos
+   cosas (con el banner mal atribuido mientras B estaba en pantalla, y correcto al volver a A), así
+   que el `key` cambió una señal **mal atribuida** por una señal **perdida**. Cerrarlo de verdad pide
+   subir el borrador y su señal de fallo por encima de la frontera keyed —un mapa por conversación en
+   el estado de `ConversationsView`, o un indicador de fallo en la fila de la bandeja— y eso es
+   alcance que este change no ha hecho: queda declarado aquí, no resuelto.
 
 ### D21 — Sin diagrama, y dicho a propósito
 
