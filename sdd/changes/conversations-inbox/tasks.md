@@ -50,9 +50,9 @@
 
 ## 8. Barrel & pages
 
-- [ ] 8.1 Crear `frontend/features/conversations/index.ts` (barrel) exportando `ConversationsInboxView`, `ConversationThreadView`, `useConversations`, `useConversation`, `useConversationMessages`, `useReplyToConversation`, `getConversationsDataSource`, los tipos `ConversationSummaryDto`, `ConversationDetailDto`, `MessageDto`, `ConversationFilters`, `ConversationPagination`, `ConversationStatus`, `ConversationEscalationStatus`, `ConversationChannel`, `MessageSenderType`. [D1, D3]
-- [ ] 8.2 Sustituir `frontend/app/(workspace)/conversations/page.tsx`: el archivo renderiza `<ConversationsInboxView />` en lugar del `RoutePlaceholder routeId="conversations"`. Conservar el `routeMetadata("conversations")`. [R1.1]
-- [ ] 8.3 Crear `frontend/app/(workspace)/conversations/[id]/page.tsx`: renderiza `<ConversationThreadView conversationId={id} />`, con `routeMetadata("conversation-detail")`. Lee `id` de `params` (Next.js App Router, type `Promise<{id: string}>`). [R1.4, R1.6]
+- [x] 8.1 Crear `frontend/features/conversations/index.ts` (barrel) exportando `ConversationsInboxView`, `ConversationThreadView`, `useConversations`, `useConversation`, `useConversationMessages`, `useReplyToConversation`, `getConversationsDataSource`, los tipos `ConversationSummaryDto`, `ConversationDetailDto`, `MessageDto`, `ConversationFilters`, `ConversationPagination`, `ConversationStatus`, `ConversationEscalationStatus`, `ConversationChannel`, `MessageSenderType`. [D1, D3]
+- [x] 8.2 Sustituir `frontend/app/(workspace)/conversations/page.tsx`: el archivo renderiza `<ConversationsInboxView />` en lugar del `RoutePlaceholder routeId="conversations"`. Conservar el `routeMetadata("conversations")`. [R1.1]
+- [x] 8.3 Crear `frontend/app/(workspace)/conversations/[id]/page.tsx`: renderiza `<ConversationThreadView conversationId={id} />`, con `routeMetadata("conversation-detail")`. Lee `id` de `params` (Next.js App Router, type `Promise<{id: string}>`). [R1.4, R1.6]
 
 ## 9. Verification
 
