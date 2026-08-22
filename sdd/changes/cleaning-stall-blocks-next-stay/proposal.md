@@ -59,6 +59,13 @@ Las tres explicaciones benignas están descartadas:
 - **No fue la API de propiedades.** `current_operational_state` está deliberadamente fuera de sus
   dos esquemas de escritura (`properties/api/schemas.py`).
 
+Y la pieza que convierte la eliminación en prueba directa: **una asignación legítima sí escribe su
+fila**. Medido el 2026-08-22 a las 08:47:43 UTC sobre PAJARITOS8 —la misma operación, por la misma
+pantalla— que dejó `AWAITING_CLEANING → CLEANING_SCHEDULED` con `triggered_by = USER` y el mismo
+sello de tiempo que el `updated_at` de la tarea, es decir en la misma transacción. Ese camino de
+código no puede mover la vivienda sin registrarlo; si el salto de REDES11 no tiene fila, no pasó por
+ahí.
+
 Queda que la columna se escribió a mano. Y el hueco de cinco minutos y medio entre crear la tarea
 (07:18:12) y asignarla con éxito (07:23:51) encaja con haber chocado contra el `409` de
 `cleaning-assign-preconditions` y haberlo rodeado por la base de datos — **eso último es inferencia,
