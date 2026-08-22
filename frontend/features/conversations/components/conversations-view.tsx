@@ -101,7 +101,22 @@ export function ConversationsView() {
                 {t("thread.back")}
               </Button>
             </div>
-            <ConversationThread conversationId={selectedId} />
+            {/*
+              Keyed by the conversation on purpose. Selecting another thread that is
+              already cached does NOT unmount this subtree — `useConversation` has no
+              `placeholderData`, so there is no pending early return to remount it —
+              and three separate pieces of per-conversation state turned out
+              mis-scoped for that one reason: the composer's draft, its `lastSent`
+              guard, and the send mutation's own error state, which is React Query
+              state on the hook instance and cannot be derived away in render.
+              The key resets all three at once (review 2026-08-21/22).
+
+              The components keep their own per-conversation derivations anyway: a
+              component that is only correct while its parent remembers a key is a
+              trap, and the draft's failure mode — a reply delivered to the wrong
+              guest — is severe enough to deserve two barriers.
+            */}
+            <ConversationThread key={selectedId} conversationId={selectedId} />
           </>
         )}
       </div>

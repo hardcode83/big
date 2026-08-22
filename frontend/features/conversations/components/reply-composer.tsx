@@ -32,13 +32,15 @@ export function ReplyComposer({
 }) {
   const { t } = useTranslation("conversations");
   // The draft is stored **with the conversation it was typed in** and derived
-  // during render, exactly as `ConversationThread` does with the page. Selecting
-  // another conversation does not unmount this component when the target thread
-  // is already cached (`useConversation` has no `placeholderData`, so there is no
-  // pending early return to remount it), and a draft left under someone else's id
-  // is one click away from a reply delivered to the wrong guest. `lastSent` is
-  // scoped the same way, or an identical legitimate reply to another guest would
-  // be refused as a double submit.
+  // during render. Since the review of 2026-08-22 the primary reset is upstream:
+  // `ConversationsView` keys the thread by conversation, so this component is
+  // remounted on a switch and none of this state survives it. This derivation is
+  // kept as a deliberate second barrier, because a component that is only correct
+  // while its parent remembers a `key` is a trap, and this particular failure — a
+  // draft left under someone else's id, one click from a reply delivered to the
+  // wrong guest — is severe enough to deserve two. `lastSent` is scoped the same
+  // way, or an identical legitimate reply to another guest would be refused as a
+  // double submit.
   const [draft, setDraft] = useState<{
     conversationId: string;
     content: string;

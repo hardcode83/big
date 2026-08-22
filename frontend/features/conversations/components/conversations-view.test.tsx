@@ -40,11 +40,21 @@ vi.mock("./inbox-list", () => ({
     </div>
   ),
 }));
-vi.mock("./conversation-thread", () => ({
-  ConversationThread: ({ conversationId }: { conversationId: string }) => (
-    <div data-testid="thread">{conversationId}</div>
-  ),
-}));
+// Counts **mounts**, not renders, so the keying below can be asserted by its
+// observable consequence (a fresh component instance) instead of by inspecting a
+// `key` attribute React never puts in the DOM.
+const threadMounts = vi.hoisted(() => ({ ids: [] as string[] }));
+vi.mock("./conversation-thread", async () => {
+  const { useEffect } = await import("react");
+  return {
+    ConversationThread: ({ conversationId }: { conversationId: string }) => {
+      useEffect(() => {
+        threadMounts.ids.push(conversationId);
+      }, []);
+      return <div data-testid="thread">{conversationId}</div>;
+    },
+  };
+});
 
 function renderView() {
   return render(
@@ -59,6 +69,7 @@ beforeEach(() => {
   params.current = new URLSearchParams();
   session.current = { tenant_id: "tenant-1", role: "PROPERTY_MANAGER" };
   useInboxFiltersStore.getState().reset();
+  threadMounts.ids.length = 0;
 });
 
 describe("ConversationsView — selection lives in the URL (task 8.1, D5, R3.1)", () => {
@@ -171,5 +182,39 @@ describe("ConversationsView — the filters belong to a tenant (task 8.1)", () =
 
     expect(useInboxFiltersStore.getState().propertyId).toBeUndefined();
     expect(useInboxFiltersStore.getState().page).toBe(1);
+  });
+});
+
+describe("ConversationsView — the thread is keyed by conversation (review 2026-08-22)", () => {
+  // Why this matters: selecting a cached conversation does not unmount the thread on
+  // its own, and the send mutation's error state lives on the hook instance, so a
+  // failure in one conversation was painting its banner over another's composer.
+  // Only a fresh instance clears that; no render-time derivation reaches it.
+  it("mounts a new thread instance when the selection changes", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    expect(threadMounts.ids).toEqual(["conversation-1"]);
+
+    params.current = new URLSearchParams("conversation=conversation-2");
+    rerender(
+      <I18nProvider locale="es">
+        <ConversationsView />
+      </I18nProvider>,
+    );
+
+    // Two mounts, not one mount plus a prop change: the second conversation gets a
+    // component with no state inherited from the first.
+    expect(threadMounts.ids).toEqual(["conversation-1", "conversation-2"]);
+  });
+
+  it("does not remount the thread when the selection is unchanged", () => {
+    params.current = new URLSearchParams("conversation=conversation-1");
+    const { rerender } = renderView();
+    rerender(
+      <I18nProvider locale="es">
+        <ConversationsView />
+      </I18nProvider>,
+    );
+    expect(threadMounts.ids).toEqual(["conversation-1"]);
   });
 });

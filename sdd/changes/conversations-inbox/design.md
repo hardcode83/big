@@ -280,6 +280,35 @@ Rejected: `AlertDialog` de shadcn — trae `@radix-ui/react-alert-dialog`, una d
 un diálogo que la que ya hay cubre.
 Rejected: `window.confirm` — no se localiza, no se estiliza y no gestiona el foco.
 
+### D22 — El subárbol del hilo va **keyed** por conversación (añadida en `/sdd:review`, 2026-08-22)
+
+**Chosen:** `ConversationsView` monta `<ConversationThread key={selectedId} …/>`. El motivo no es
+estético: seleccionar una conversación **ya cacheada** no desmonta ese subárbol —`useConversation`
+no lleva `placeholderData`, así que no hay early return pendiente que lo remonte— y **tres** piezas
+de estado por conversación resultaron mal acotadas por ese único motivo, descubiertas por separado
+en el panel y en su re-verificación:
+
+| Estado | Síntoma | Cómo se cerró |
+|---|---|---|
+| `content` del compositor | el borrador de una conversación aparecía bajo el id de otra, a un click de responder al huésped equivocado | derivación por conversación (`a56fb2e`) + este `key` |
+| `lastSent` | bloqueaba como doble envío una respuesta legítima idéntica a otra conversación | igual |
+| `send.isError` | el banner de fallo de una conversación se pintaba sobre el compositor de otra, y `aria-describedby` lo anunciaba como estado del hilo visible | **solo** este `key`: es estado de la instancia del hook de React Query y no se puede derivar en render |
+
+La tercera es la que fuerza la decisión: no hay derivación posible, así que o se remonta o se
+convive con el fallo. El `key` además reinicia la página del hilo, que tenía su propio apaño.
+
+**Las derivaciones por conversación se conservan igualmente.** Un componente que solo es correcto
+mientras su padre se acuerda de poner un `key` es una trampa, y el fallo del borrador —una respuesta
+entregada al huésped equivocado— merece dos barreras. La aserción que guarda el `key` cuenta
+**montajes**, no atributos, y se comprobó que falla al quitarlo.
+
+Rejected: una tercera derivación puntual para `send.isError` — tres hallazgos de la misma forma no
+piden un tercer parche, piden atacar la causa; y `useMutation` no expone su estado de forma que se
+pueda acotar por conversación sin reimplementarlo.
+Rejected: `placeholderData` en `useConversation` para forzar el desmontaje — cambiaría el
+comportamiento de lectura de toda la superficie para arreglar un problema de estado de escritura.
+Coste asumido y declarado: al cambiar de hilo se pierden foco y scroll, porque el subárbol es nuevo.
+
 ### D21 — Sin diagrama, y dicho a propósito
 
 **Chosen:** la máquina de estados de dos ejes ya tiene su casa en `sdd/specs/messaging-ai.md` y en

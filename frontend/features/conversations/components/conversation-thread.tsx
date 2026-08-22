@@ -49,7 +49,10 @@ export function ConversationThread({
   // The page is stored **with the conversation it belongs to** and derived during
   // render, so selecting another conversation starts at page 1 without an effect:
   // page 3 of a long thread does not exist in a short one, and resetting in an
-  // effect would render one query against the wrong page first.
+  // effect would render one query against the wrong page first. `ConversationsView`
+  // also keys this component by conversation (review 2026-08-22), which resets the
+  // page on its own; this derivation stays so the component does not depend on the
+  // caller remembering that key.
   const [selection, setSelection] = useState({ conversationId, page: 1 });
   const page = selection.conversationId === conversationId ? selection.page : 1;
   const setPage = (next: number) => setSelection({ conversationId, page: next });
