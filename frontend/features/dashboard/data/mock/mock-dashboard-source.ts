@@ -32,6 +32,30 @@ function singlePage<T>(items: readonly T[]): PaginatedResponse<T> {
   };
 }
 
+/**
+ * Slices `items` the way the §23 envelope describes. The mock honours
+ * `page`/`per_page` (design D9) because a mock that ignored them would let a test
+ * "prove" a pagination that never happens.
+ */
+function paginate<T>(
+  items: readonly T[],
+  page = 1,
+  perPage?: number,
+): PaginatedResponse<T> {
+  if (perPage === undefined) {
+    return singlePage(items);
+  }
+  const totalPages = Math.ceil(items.length / perPage);
+  const start = (page - 1) * perPage;
+  return {
+    data: items.slice(start, start + perPage),
+    total: items.length,
+    page,
+    per_page: perPage,
+    total_pages: totalPages,
+  };
+}
+
 function notFound(propertyId: string): ApiError {
   return new ApiError({
     code: "NOT_FOUND",
@@ -79,6 +103,8 @@ export class MockDashboardSource implements DashboardDataSource {
       return Promise.reject(notFound(propertyId));
     }
     const filtered = entries.filter((entry) => matchesFilters(entry, filters));
-    return Promise.resolve(singlePage(filtered));
+    return Promise.resolve(
+      paginate(filtered, filters.page ?? 1, filters.perPage),
+    );
   }
 }

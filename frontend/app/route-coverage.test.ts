@@ -20,12 +20,14 @@ function findPageFiles(dir: string): string[] {
 // Real (non-placeholder) pages that cover a registered route without a
 // `routeId` prop. As modules graduate from placeholder to implemented, they are
 // listed here by path suffix → route id (dashboard-web-frontend: dashboard,
-// property-detail; cleaning-manager-view: cleaning; properties-web: properties).
+// property-detail; cleaning-manager-view: cleaning; properties-web: properties;
+// timeline-web: timeline).
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/cleaning/page.tsx": "cleaning",
   "(workspace)/dashboard/page.tsx": "dashboard",
   "(workspace)/properties/page.tsx": "properties",
   "(workspace)/properties/[id]/page.tsx": "property-detail",
+  "(workspace)/timeline/page.tsx": "timeline",
   "(workspace)/reservations/page.tsx": "reservations",
   "(workspace)/reservations/[id]/page.tsx": "reservation-detail",
   "(workspace)/incidents/page.tsx": "incidents",

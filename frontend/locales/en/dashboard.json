@@ -74,17 +74,77 @@
   "timeline": {
     "title": "Timeline",
     "empty": "No events for the selected filters.",
+    "picker": {
+      "label": "Property",
+      "placeholder": "Not selected",
+      "empty": {
+        "title": "Choose a property",
+        "description": "Select a property to see its event history."
+      }
+    },
     "filters": {
       "type": "Type",
       "actor": "Actor",
       "severity": "Severity"
     },
+    "range": {
+      "from": "From",
+      "to": "To",
+      "errorInverse": "The “to” date is earlier than the “from” date."
+    },
+    "pagination": {
+      "label": "Timeline pagination",
+      "prev": "Previous page",
+      "next": "Next page",
+      "position": "Page {{page}} of {{totalPages}}"
+    },
     "eventType": {
-      "CHECKOUT_WINDOW_REACHED": "Checkout window reached",
+      "RESERVATION_IMPORTED": "Reservation imported",
+      "RESERVATION_CREATED_MANUAL": "Reservation created manually",
+      "RESERVATION_UPDATED": "Reservation updated",
+      "RESERVATION_CANCELLED": "Reservation cancelled",
+      "CHECKIN_WINDOW_OPENED": "Check-in window opened",
+      "CHECKOUT_WINDOW_REACHED": "Check-out window reached",
+      "PROPERTY_STATE_CHANGED": "Property state changed",
+      "ACCESS_CODE_PENDING": "Access pending",
+      "ACCESS_CODE_CREATED_EXTERNAL": "Access managed by the provider",
+      "ACCESS_CODE_MANUAL_ADDED": "Access code registered",
+      "ACCESS_CODE_DELIVERED": "Access instructions delivered",
+      "GUEST_MESSAGE_RECEIVED": "Guest message received",
+      "AI_RESPONSE_SENT": "AI response sent",
+      "AI_ESCALATED_TO_HUMAN": "Conversation escalated to a human",
+      "HUMAN_RESPONSE_SENT": "Human response sent",
       "CLEANING_TASK_CREATED": "Cleaning task created",
-      "PROPERTY_STATE_CHANGED": "State changed",
-      "ACCESS_CODE_DELIVERED": "Access code delivered",
-      "GUEST_MESSAGE_RECEIVED": "Guest message received"
+      "CLEANER_ASSIGNED": "Cleaner assigned",
+      "CLEANER_ACCEPTED": "Cleaner accepted",
+      "CLEANER_REJECTED": "Cleaner rejected",
+      "CLEANING_STARTED": "Cleaning started",
+      "CLEANING_PHOTO_UPLOADED": "Cleaning photo uploaded",
+      "CLEANING_COMPLETED": "Cleaning completed",
+      "CLEANING_FAILED_VALIDATION": "Cleaning failed validation",
+      "INCIDENT_CREATED": "Incident created",
+      "INCIDENT_CLASSIFIED": "Incident classified",
+      "TECHNICIAN_ASSIGNED": "Technician assigned",
+      "TECHNICIAN_ACCEPTED": "Technician accepted",
+      "TECHNICIAN_EN_ROUTE": "Technician en route",
+      "TECHNICIAN_STARTED": "Technician started",
+      "INCIDENT_RESOLVED": "Incident resolved",
+      "INCIDENT_CANCELLED": "Incident cancelled",
+      "OWNER_APPROVAL_REQUIRED": "Owner approval required",
+      "OWNER_APPROVED_EXPENSE": "Owner approved the expense",
+      "OWNER_REJECTED_EXPENSE": "Owner rejected the expense",
+      "LOCK_ALERT_RECEIVED": "Lock alert received",
+      "PRICE_RECOMMENDATION_CREATED": "Price recommendation created",
+      "PRICE_UPDATED_EXTERNAL": "Price updated in the channel",
+      "LEGAL_REGISTRATION_SUBMITTED": "Legal registration submitted",
+      "REVIEW_IMPORTED": "Review imported",
+      "REVIEW_RESPONSE_DRAFTED": "Review response drafted",
+      "REVIEW_RESPONSE_APPROVED": "Review response approved",
+      "SLA_BREACH_WARNING": "SLA breach warning",
+      "NOTIFICATION_SENT": "Notification sent",
+      "NOTIFICATION_FAILED": "Notification failed",
+      "WEBHOOK_RECEIVED": "Webhook received",
+      "GUEST_CHECKIN_COMPLETED": "Guest completed check-in"
     },
     "actor": {
       "SYSTEM": "System",
