@@ -20,6 +20,7 @@ const PRD_24_SURFACES = [
   "/incidents",
   "/incidents/[id]",
   "/conversations",
+  "/conversations/[id]",
   "/pricing",
   "/statements",
   "/reviews",

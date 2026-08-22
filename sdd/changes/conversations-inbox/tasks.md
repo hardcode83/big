@@ -2,11 +2,11 @@
 
 ## 1. Shell, navigation & locales
 
-- [ ] 1.1 Registrar `conversation-detail` en `frontend/features/shell/navigation/route-registry.ts` con `pattern: "/conversations/[id]"`, `match: "exact"`, **sin** `href` y **sin** `navigationGroup`, replicando la forma de `property-detail`, `reservation-detail` e `incident-detail` — `breadcrumbs: crumbs("conversations", "conversation-detail")`. [R1.2, D6]
-- [ ] 1.2 Extender `PRD_24_SURFACES` en `frontend/features/shell/navigation/route-registry.test.ts` con `/conversations/[id]`, junto a `/incidents/[id]`, `/properties/[id]` y `/reservations/[id]`. El test "covers exactly the PRD §24 surfaces" debe seguir verde. [R1.5, D6]
-- [ ] 1.3 Crear `frontend/locales/{es,en}/conversations.json` con las seis secciones declaradas en D2: `status` (4), `escalationStatus` (4), `channel` (6), `senderType` (5), `fields` (etiquetas de columnas + cabeceras + copy del formulario + nota del UUID del sender + **`prevPage` y `nextPage`**), `thread` (copy específico del hilo: «Mensajes», «Sin mensajes», «Responder», «Enviar», «Cancelar», «Caracteres restantes», placeholders). **No** se reutilizan claves de `incidents.json`. [R1.3, R5.1-5.5, D2]
-- [ ] 1.4 Añadir las dos claves `routes.conversation-detail.{title,description}` a `frontend/locales/{es,en}/navigation.json`, sin hardcodear la cadena en ningún componente. [R1.3]
-- [ ] 1.5 Registrar el namespace `conversations` en `frontend/lib/i18n/resources.ts` (alta en `NAMESPACES`, import del JSON ES/EN, alta en `resources.es` y `resources.en`). [D2]
+- [x] 1.1 Registrar `conversation-detail` en `frontend/features/shell/navigation/route-registry.ts` con `pattern: "/conversations/[id]"`, `match: "exact"`, **sin** `href` y **sin** `navigationGroup`, replicando la forma de `property-detail`, `reservation-detail` e `incident-detail` — `breadcrumbs: crumbs("conversations", "conversation-detail")`. [R1.2, D6]
+- [x] 1.2 Extender `PRD_24_SURFACES` en `frontend/features/shell/navigation/route-registry.test.ts` con `/conversations/[id]`, junto a `/incidents/[id]`, `/properties/[id]` y `/reservations/[id]`. El test "covers exactly the PRD §24 surfaces" debe seguir verde. [R1.5, D6]
+- [x] 1.3 Crear `frontend/locales/{es,en}/conversations.json` con las seis secciones declaradas en D2: `status` (4), `escalationStatus` (4), `channel` (6), `senderType` (5), `fields` (etiquetas de columnas + cabeceras + copy del formulario + nota del UUID del sender + **`prevPage` y `nextPage`**), `thread` (copy específico del hilo: «Mensajes», «Sin mensajes», «Responder», «Enviar», «Cancelar», «Caracteres restantes», placeholders). **No** se reutilizan claves de `incidents.json`. [R1.3, R5.1-5.5, D2]
+- [x] 1.4 Añadir las dos claves `routes.conversation-detail.{title,description}` a `frontend/locales/{es,en}/navigation.json`, sin hardcodear la cadena en ningún componente. [R1.3]
+- [x] 1.5 Registrar el namespace `conversations` en `frontend/lib/i18n/resources.ts` (alta en `NAMESPACES`, import del JSON ES/EN, alta en `resources.es` y `resources.en`). [D2]
 
 ## 2. Data layer
 

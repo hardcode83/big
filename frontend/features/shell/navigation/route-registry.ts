@@ -188,6 +188,15 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     order: 4,
   },
   {
+    id: "conversation-detail",
+    pattern: "/conversations/[id]",
+    ...keysFor("conversation-detail"),
+    breadcrumbKeys: crumbs("conversations", "conversation-detail"),
+    icon: "MessagesSquare",
+    profile: "workspace",
+    match: "exact",
+  },
+  {
     id: "approvals",
     pattern: "/approvals",
     href: "/approvals",
