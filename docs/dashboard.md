@@ -67,6 +67,13 @@ Lo que conviene saber al operarlas:
 - **`/properties/[id]`** — detalle (PRD §9.2): reserva, huésped, acceso, limpieza,
   incidencias, financiero, notas, aprobaciones pendientes, fotos de la última
   limpieza, y la **cronología** de la propiedad.
+- **`/timeline`** — la cronología como pantalla propia: un selector elige la
+  vivienda y debajo se monta **el mismo** componente de cronología que el detalle.
+  Hasta que elijas una vivienda no se pide nada al servidor, y no hay
+  autoselección: con varias viviendas cualquier elección automática sería
+  arbitraria. La elección vive **solo en memoria** y se descarta si cambia el
+  tenant. **No hay cronología global** de todas las viviendas a la vez: el backend
+  sirve una por petición.
 
 ## Lectura rápida de las tarjetas
 
@@ -90,9 +97,19 @@ teclado, foco visible y nombre localizado en ES/EN.
 ## Cronología
 
 La cronología de una propiedad se muestra en orden inmutable y en el idioma
-activo. Se puede filtrar por **tipo de evento**, **actor** y **severidad**; las
-opciones de tipo se derivan de los eventos que tiene esa propiedad. Cambiar de
-propiedad reinicia los filtros.
+activo. Se puede filtrar por **tipo de evento**, **actor**, **severidad** y
+**rango de fechas**, y se recorre por páginas de 20.
+
+- El desplegable de tipos ofrece siempre **los 46 tipos** del contrato, traducidos
+  — no solo los que trajo la página que estás viendo. Que un tipo no devuelva nada
+  es una respuesta correcta: 19 de los 46 todavía no tienen quien los escriba.
+- El **rango de fechas** es inclusivo en los dos extremos y se manda con zona
+  horaria (el día local que elegiste, de su principio a su final). Si pones un
+  «hasta» anterior al «desde», sale un error junto al campo y **no se pide nada**.
+- La **barra de páginas** solo aparece si hay más de una página. Cambiar cualquier
+  filtro vuelve a la página 1; un rango inverso, que no llega a aplicarse, no la
+  mueve.
+- Cambiar de propiedad reinicia los filtros y la página.
 
 ## Idiomas
 
@@ -109,12 +126,20 @@ make up SERVICE=frontend   # o: cd frontend && npm run dev
 - `http://localhost:3000/dashboard` — las dos tarjetas.
 - `http://localhost:3000/properties/redes11` — detalle + cronología.
 - `http://localhost:3000/properties/<id-inexistente>` — estado "no encontrado".
+- `http://localhost:3000/timeline` — la cronología como pantalla: elige vivienda en
+  el selector.
 
 ## Deuda pendiente
 
 - **Tiempo real**: la API entrega lectura con filtros y paginación. Empujar cambios
   al cliente (WebSocket/SSE) no lo cubre `dashboard-api` y no tiene todavía entrada
   propia.
+- **Cronología global**: `GET /api/v1/timeline` (PRD §23) no existe, así que
+  `/timeline` pide vivienda. Servir varias a la vez sería trabajo de backend y no
+  tiene entrada.
+- **Barra de páginas repetida**: la cronología, el portfolio y las reservas tienen
+  cada uno su propia navegación de páginas. Unificarlas tocaría features ya
+  archivadas y ninguna entrada lo ha decidido.
 - **Hora de entrada y salida**: `check_in`/`check_out` viajan como fecha, no como
   instante — combinar la fecha con la hora exige resolver la zona horaria de la
   vivienda, y equivocarse ahí son horas de diferencia en la pantalla de un operador.
