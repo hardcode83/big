@@ -262,3 +262,70 @@ El `TENANT_OWNER` **no puede** crear tareas: recibe `403 FORBIDDEN`. Y el manage
 ejecutarlas — `EXECUTE_CLEANING_TASKS` es de la limpiadora sola, y la entidad responde `404` a
 cualquiera que no sea la asignada. No es un descuido de la matriz de permisos: PRD §6 reparte
 *leer*, *administrar* y *hacer* entre personas distintas a propósito.
+
+> ⚠️ **El segundo paso de esa tabla falla casi siempre, y no por permisos.** `POST /cleaning-tasks`
+> (`CreateCleaningTaskUseCase`) **no toca el estado de la vivienda**, y la primera asignación de una
+> tarea `CREATED` dispara `CLEANER_ASSIGNED`, que la matriz solo admite desde `AWAITING_CLEANING`
+> (`properties/domain/state_machine.py`, única fila de ese trigger). Sobre una vivienda en cualquier
+> otro estado el `PATCH` responde `409` y la UI lo pinta como «Esa tarea ya no admite un cambio de
+> asignación» — un mensaje que habla de la tarea cuando quien bloquea es la vivienda. Medido en
+> `dev` el 2026-08-22. Para una tarea que **sí** se pueda asignar, §5.
+
+---
+
+## 5. Conseguir una limpieza *asignable* (probar la vista de gestión)
+
+Para ejercitar el control de asignación de `/cleaning` no sirve una tarea creada a mano (§4): hace
+falta una nacida de un checkout, sobre una vivienda en `AWAITING_CLEANING`. Recorrido verificado en
+`dev` el **2026-08-22**, con los cuatro tropiezos que tiene.
+
+**Primero, una segunda limpiadora.** Con una sola activa la auto-asignación del checkout se queda la
+tarea (`resolve_auto_assignee` exige exactamente una activa) y el control nunca se habilita, porque
+pide elegir a alguien **distinto** del ya asignado. Se crea con el **owner** — `MANAGE_USERS` no lo
+tiene el manager, que solo lee usuarios:
+
+```bash
+jq -nc '{name:"Cleaner Dos", email:"josegascon+cleaner2@gmail.com", role:"CLEANER"}' \
+  | curl -sS -X POST "$BASE/users" -H "Authorization: Bearer $OWNER" \
+      -H 'Content-Type: application/json' -d @-
+```
+
+Nace con contraseña temporal y `must_change_password`, y **no hace falta cambiarla**: para ser
+asignable basta con ser `CLEANER` y estar `ACTIVE`.
+
+**Después, una estancia que termine.** Aquí están los cuatro tropiezos:
+
+1. **No existe la reserva de un solo día.** `check_out_date` tiene que ser estrictamente posterior a
+   `check_in_date` (`reservations/domain/entities.py`), y a la vez el trigger `CHECKIN_WINDOW_OPENED`
+   exige que el check-in sea **hoy** (`state_machine.py`). Así que se crea hoy→mañana y luego se
+   mueven las fechas un día atrás con un `PATCH`, cuando la vivienda ya está ocupada y el trigger de
+   check-in ya no hace falta.
+2. **Las horas se interpretan en la zona de la vivienda** (`Europe/Madrid`), no en UTC. La VM está en
+   UTC: calcúlalas con `TZ=Europe/Madrid date`, o en verano te salen dos horas en el pasado y la
+   cadena no arranca.
+3. **La reserva nace `PENDING`.** El `POST` no acepta `status`; hay que confirmarla con un `PATCH`.
+   Sin `CONFIRMED` ningún trigger de reloj la mira.
+4. **`channel` debe ser `DIRECT` o `MANUAL`**: un canal de OTA se rechaza porque esa vía es la del
+   PMS y su clave de idempotencia.
+
+**Y los tres jobs, a mano.** No hay que esperar a `beat`: son tareas Celery cuya lógica corre
+síncrona, así que se invocan directamente y además devuelven su informe, que es lo que dice si la
+transición se rechazó y por qué.
+
+```bash
+docker compose -f docker-compose.deploy.yml exec -T backend python - <<'JOBS'
+from app.scheduler.tasks import check_checkin_windows, mark_occupied_estimated, process_checkouts
+print(check_checkin_windows())
+print(mark_occupied_estimated())
+print(process_checkouts())
+JOBS
+```
+
+La secuencia de la vivienda es `VACANT_READY` → `AWAITING_CHECKIN` → `OCCUPIED_ESTIMATED` →
+`AWAITING_CLEANING`, y en ese último salto `process_checkouts` crea la tarea en la misma
+transacción: `transitioned: 1` con `transitioned_without_task: 0` es la prueba de las dos mitades.
+Con dos limpiadoras activas la tarea queda **`CREATED` sin asignar** — y entonces sí, el botón de
+`/cleaning` se habilita y la asignación pasa.
+
+Un `not_eligible: 1` en `process_checkouts` no es un fallo del job: es que la hora de salida aún no
+ha pasado. Mueve `check_out_time` al pasado y vuelve a lanzarlo.
