@@ -4,14 +4,23 @@ Change de **frontend puro**: ningún fichero de `backend/`, ninguna migración, 
 
 > **Antes de correr `npm test` en este worktree**: el contenedor `frontend` monta sólo `./frontend`, así que dos ficheros de test leen por encima de `/app` y fallan con `ENOENT` sin tener nada que ver con este change. Hay que hacer el copiado que documenta `sdd/project.md` (§ Worktree bootstrap) una vez por contenedor. Sin él, la cifra de la suite no es interpretable. Y `npm run api:generate` / `api:check` **no funcionan** en un worktree enlazado — no hacen falta: este change no toca el backend y los tipos ya están generados y commiteados.
 
-## 1. El componente transversal del badge, y la mudanza del panel
+## 1. El componente transversal del badge, y la mudanza del panel <!-- panel: PASS 2026-08-22 -->
+<!-- Panel: architect PASS · security PASS · qa PASS · i18n PASS · documentation PASS.
+     No se lanzaron cicd (el diff no toca .github/ ni infra/) ni tenancy (no toca backend/).
+     Dos recomendaciones de QA aplicadas en 1.2: el aserto de clases pasó de pertenencia
+     por token a igualdad exacta sobre el vocabulario de color, y el test de exhaustividad
+     tautológico (`toBeDefined()` bajo un fallback `?? "gray"`) se reescribió para exigir
+     que los cinco grupos sigan alcanzados. Verificado por mutación: cambiar
+     CRITICAL_INCIDENT a amber hace fallar 3 tests; añadir una clase sobrante hace fallar 5.
+     Antes del arreglo, ambos casos habrían pasado. -->
+
 
 Va primero porque es lo único que toca código ajeno: si rompe algo, se ve antes de haber construido nada encima.
 
-- [ ] 1.1 Crear `frontend/components/property-state-badge.tsx` con `PropertyStateBadge({ state, label })`, llevándose **los dos** mapas desde el panel: el de estado → grupo de color (hoy `features/dashboard/lib/state-color.ts`) y el de grupo → clases Tailwind (hoy `STATE_BADGE_CLASS` en `features/dashboard/components/property-card.tsx:19-27`), **incluido el fallback `?? "gray"`**. Tipar `state` sobre `components["schemas"]["PropertyOperationalState"]` del generado, nunca sobre la unión de `features/dashboard/data/dto.ts`. Copiar las cadenas de clases **carácter a carácter**, variantes `dark:` incluidas. [R4]
-- [ ] 1.2 Crear `frontend/components/property-state-badge.test.tsx` que fije, para cada uno de los cinco grupos de color, la cadena de clases exacta que el componente aplica, más el caso de un valor no mapeado cayendo a `gray`. **Es la única red que van a tener esos colores**: se verificó que ni `property-card.test.tsx` ni `dashboard-view.test.tsx` assertan sobre ellos. [R4]
-- [ ] 1.3 Refactorizar `frontend/features/dashboard/components/property-card.tsx` para consumir `PropertyStateBadge`, borrando su `STATE_BADGE_CLASS` local, y retirar `frontend/features/dashboard/lib/state-color.ts` junto con sus importaciones. No añadir nada a `features/dashboard/index.ts`. [R4]
-- [ ] 1.4 Verificar que `property-card.test.tsx` y `dashboard-view.test.tsx` pasan **sin editar ni una expectativa**. Si alguna hay que tocar, el refactor cambió comportamiento: pararse y revisarlo, no ajustar el test. [R4]
+- [x] 1.1 Crear `frontend/components/property-state-badge.tsx` con `PropertyStateBadge({ state, label })`, llevándose **los dos** mapas desde el panel: el de estado → grupo de color (hoy `features/dashboard/lib/state-color.ts`) y el de grupo → clases Tailwind (hoy `STATE_BADGE_CLASS` en `features/dashboard/components/property-card.tsx:19-27`), **incluido el fallback `?? "gray"`**. Tipar `state` sobre `components["schemas"]["PropertyOperationalState"]` del generado, nunca sobre la unión de `features/dashboard/data/dto.ts`. Copiar las cadenas de clases **carácter a carácter**, variantes `dark:` incluidas. [R4]
+- [x] 1.2 Crear `frontend/components/property-state-badge.test.tsx` que fije, para cada uno de los cinco grupos de color, la cadena de clases exacta que el componente aplica, más el caso de un valor no mapeado cayendo a `gray`. **Es la única red que van a tener esos colores**: se verificó que ni `property-card.test.tsx` ni `dashboard-view.test.tsx` assertan sobre ellos. [R4]
+- [x] 1.3 Refactorizar `frontend/features/dashboard/components/property-card.tsx` para consumir `PropertyStateBadge`, borrando su `STATE_BADGE_CLASS` local, y retirar `frontend/features/dashboard/lib/state-color.ts` junto con sus importaciones. No añadir nada a `features/dashboard/index.ts`. [R4]
+- [x] 1.4 Verificar que `property-card.test.tsx` y `dashboard-view.test.tsx` pasan **sin editar ni una expectativa**. Si alguna hay que tocar, el refactor cambió comportamiento: pararse y revisarlo, no ajustar el test. [R4]
 
 ## 2. La capa de datos de la feature
 

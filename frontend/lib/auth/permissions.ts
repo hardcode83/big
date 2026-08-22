@@ -33,7 +33,7 @@ export function useHasPermission(permission: Permission): boolean {
   if (!user) {
     return false;
   }
-  // `?? []` for the same reason `features/dashboard/lib/state-color.ts` falls back
+  // `?? []` for the same reason `components/property-state-badge.tsx` falls back
   // to grey: `role` crosses the API boundary, and a role the generated union does
   // not know must hide the control, not crash the view.
   return (ROLE_UI_PERMISSIONS[user.role] ?? []).includes(permission);
