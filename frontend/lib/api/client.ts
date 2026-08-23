@@ -83,7 +83,16 @@ export interface RequestOptions<Body, Method extends string> {
   body?: Body;
   headers?: HeadersInit;
   pathParams?: Record<string, string | number>;
-  query?: Record<string, string | number | null | undefined>;
+  /**
+   * `boolean` is in here because the argument is the **intersection** of this
+   * `Record` with the operation's own `QueryFor<…>`: a query parameter the
+   * contract declares as `boolean | null` — `active` on
+   * `GET /api/v1/pricing-rules` is the first in the tree — satisfies the second
+   * half and not the first, so it fails to compile without it. Runtime never
+   * needed the change: `appendQuery` has always done `String(value)`, and
+   * FastAPI parses `true`/`false` (`pricing-web` design D20).
+   */
+  query?: Record<string, string | number | boolean | null | undefined>;
   signal?: AbortSignal;
 }
 
@@ -139,7 +148,7 @@ function resolvePath(path: string, pathParams: Record<string, string | number> =
 
 function appendQuery(
   path: string,
-  query: Record<string, string | number | null | undefined> = {},
+  query: Record<string, string | number | boolean | null | undefined> = {},
 ): string {
   const params = new URLSearchParams();
   for (const [key, value] of Object.entries(query)) {

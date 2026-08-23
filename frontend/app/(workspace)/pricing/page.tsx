@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { PricingView } from "@/features/pricing";
 import { routeMetadata } from "@/features/shell";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("pricing");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="pricing" />;
+  return <PricingView />;
 }
