@@ -89,6 +89,8 @@ y el técnico repite el cierre. Cerrarla por él haría que `resolved_at` dejara
 | Ver el contexto de una incidencia (a qué piso y cómo entrar) | ✔ | ✔ | ✔ sólo las suyas | — |
 | Clasificar, triar, asignar, cancelar | — | ✔ | — | — |
 | Aceptar, empezar, esperar piezas, reanudar, resolver | — | ✔ | ✔ sólo las suyas | — |
+| Ver las fotos de una incidencia | ✔ | ✔ | ✔ sólo las suyas | — |
+| Subir fotos a una incidencia (antes / después) | — | ✔ | ✔ sólo las suyas | — |
 | Responder una aprobación | ✔ | — | — | — |
 | Abrir una incidencia desde su propia limpieza | — | — | — | ✔ |
 
@@ -100,7 +102,7 @@ Tres cosas que no se ven en la tabla y conviene saber:
 - **El manager también puede conducir el ciclo del técnico**, para desatascar. Es la única
   diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
 - **La limpiadora abre incidencias y no lee ninguna**, y esa fila de la tabla es toda su
-  relación con este módulo. Las once rutas de `/api/v1/incidents` le siguen respondiendo `403`;
+  relación con este módulo. Las quince rutas de `/api/v1/incidents` le siguen respondiendo `403`;
   lo que puede hacer vive en otro sitio y se describe abajo. **Con una señal indirecta que
   conviene no negar**: al cerrar su limpieza puede recibir un `409` que le dice que en esa
   vivienda hay una incidencia `CRITICAL` sin resolver. Es un bit —existe o no—, sin id, sin
@@ -135,6 +137,58 @@ Cómo se opera, y qué decide el sistema en lugar de quien llama:
 La incidencia nace `MEDIUM` y el cierre solo lo frena una `CRITICAL` sin resolver **en la
 vivienda**, así que empieza a bloquear si el clasificador la sube — o si ya había otra. El detalle
 está en [`cleaning.md`](cleaning.md).
+
+## Las fotos de la incidencia
+
+`POST` y `GET /api/v1/incidents/{incident_id}/photos`. PRD §6 le concede al técnico «subir fotos
+(antes y después)» y PRD §12 lo pide dos veces; esto es esa evidencia, y nada más. El *qué hace*
+está en [`sdd/specs/incident-photos.md`](../sdd/specs/incident-photos.md).
+
+**Dos etapas y sólo dos**: `BEFORE` (la de llegada) y `AFTER` (la de cierre). Es un enum cerrado,
+no un texto: cualquier otro valor responde `422`. A diferencia de las fotos de limpieza, aquí no
+hay plantilla que declare los tipos admisibles, así que el conjunto lo fija el dominio.
+
+Cómo se opera:
+
+- **Sube el técnico asignado**, y también el manager para desatascar. Se pide `EXECUTE_INCIDENTS`,
+  el mismo permiso que el resto de su ciclo — no hay permiso nuevo. La propietaria **no** sube.
+- **Lee quien puede leer la incidencia**: propietaria, manager y el técnico asignado
+  (`READ_INCIDENTS`). Leer la evidencia es lo que hacen los dos primeros; subirla es del técnico.
+- **Sólo mientras el trabajo está vivo**: con la incidencia en `IN_PROGRESS` o
+  `WAITING_EXTERNAL_PARTS`. Sobre una incidencia esperando la aprobación de la propietaria, o ya
+  resuelta o cancelada, responde `409` — con tres mensajes distintos, para que se sepa cuál de los
+  tres casos es— y **no escribe nada**: ni fila ni objeto.
+- **Varias fotos de la misma etapa valen.** Dos ángulos de la misma avería es el caso normal, no un
+  error.
+- **El formato se decide por los bytes**, nunca por lo que declare el cliente: fuera de la
+  allowlist es `422`, y por encima de 10 MB es `413` (el mismo tope que las fotos de limpieza,
+  aplicado **antes** de leer el cuerpo).
+- **El listado va de la más antigua a la más reciente**, y cada foto llega con una `url` firmada
+  **acuñada para esa respuesta**, con caducidad. No se guarda ni se comparte: cuando caduque, se
+  vuelve a listar. La clave interna del objeto (`storage_key`) no sale en ningún cuerpo.
+- Una incidencia inexistente, de otro tenant, o asignada a otro técnico dan el **mismo `404`**, con
+  el mismo cuerpo, igual que el resto del módulo.
+
+**La URL firmada se abre en el navegador sin sesión, y eso es a propósito.** Con el tenant en
+`storage_type = LOCAL` los bytes los sirve `GET /api/v1/incident-photos/{photo_id}`, que es
+**anónima**: un `<img src>` no manda cabecera `Authorization`, así que exigir el token haría la URL
+inservible para lo único que existe. **La firma es la credencial** — cubre la clave completa, que
+empieza por el `tenant_id`. Una firma inválida, caducada, manipulada o que nombre una foto que no
+existe dan todas el **mismo `403`**, con el mismo cuerpo, para que la ruta no sirva de sonda de qué
+fotos hay. Con el tenant en `S3` esa ruta responde `404`: el navegador va directo al proveedor.
+
+Dos avisos para quien opera:
+
+- **No hay borrado.** Ninguna ruta de la API borra una foto. Una subida por error se queda, y el
+  único borrado que existe es el compensatorio interno cuando la transacción falla después de
+  escribir el objeto. Habrá superficie de borrado cuando haya una decisión de retención, no antes.
+- **Cerrar no exige foto.** `resolve` sigue pidiendo únicamente `final_cost`, así que una incidencia
+  puede resolverse sin ninguna `AFTER`. Es una decisión, no un olvido: poner la puerta cambia la
+  tabla de transiciones y el contrato publicado.
+
+Cada subida deja su fila en `audit_logs` con actor e IP, contra la **propia foto** y no contra la
+incidencia — y **sin** la clave de almacenamiento. No genera evento de timeline: el vocabulario de
+PRD §10 no tiene un tipo para una foto de incidencia, y la subida de limpieza tampoco escribe uno.
 
 ## El job de clasificación
 
@@ -241,10 +295,15 @@ Cada transición deja su fila en `audit_logs` y su hito en el timeline de la pro
 
 ## Lo que este change no trae
 
-Fotos de la incidencia (el patrón es el de `cleaning-photos-storage`), el `Expense` al
-resolver (es de `revenue`), la expiración automática de una aprobación, la UI del técnico
-(`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
-cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change.
+El `Expense` al resolver (es de `revenue`), la expiración automática de una aprobación, la UI del
+técnico (`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
+cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change. **Las fotos de la
+incidencia sí llegaron**, con `incident-photos` (2026-08-23), y están descritas arriba: el patrón
+fue el de `cleaning-photos-storage`, como estaba previsto, y la capa de servido firmado se extrajo
+a `app/integrations/` para que los dos dominios la compartan en vez de duplicarla. Lo que **no**
+trajeron es validación por IA de la foto (`ai_validation_result` sigue sin escritor) ni foto en el
+alta de la incidencia: «fotos del incidente» de PRD §12 son las `BEFORE` que sube el propio
+técnico, no las de quien reportó.
 
 De la ruta de la limpiadora falta **su pantalla**: la API existe y el botón lo pone `cleaner-app`,
 que declara `cleaner-incident-report` en su `needs`. Y ella sigue sin poder leer, listar ni seguir
