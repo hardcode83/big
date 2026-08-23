@@ -7,13 +7,20 @@ two ports into one and gives S3 a `read` that raises `NotImplementedError`, whic
 violation `steering/backend-architecture.md` names by hand (design D1).
 """
 
+import dataclasses
+import uuid
+
+import pytest
+
 from app.integrations.domain.storage import (
     FileStorageFactory,
     FileStoragePort,
     InvalidSignatureError,
     LocalFileReadPort,
     LocalFileReadUnsupportedError,
+    ObjectLocation,
     StorageWriteError,
+    UnscopedObjectLocationQuery,
 )
 from app.integrations.infrastructure.storage import LocalFileStorage, S3FileStorage
 
@@ -71,3 +78,34 @@ def test_the_errors_are_distinct_and_catchable() -> None:
     # is a 403 and not a 502.
     assert not issubclass(LocalFileReadUnsupportedError, StorageWriteError)
     assert not issubclass(InvalidSignatureError, StorageWriteError)
+
+
+def test_the_unscoped_location_query_has_exactly_one_method() -> None:
+    """`incident-photos` R4, design D5: the shared port the anonymous serving route resolves
+    through, declared once in `app/integrations/` instead of once per consuming domain.
+
+    One method, and its name says what it does not do. A second method here would be a second
+    way to read without a tenant, and the whole value of this port is that the set of such
+    reads is enumerable (`tests/test_unscoped_reads.py`).
+    """
+    surface = {name for name in vars(UnscopedObjectLocationQuery) if not name.startswith("_")}
+
+    assert surface == {"locate_without_tenant_scoping"}
+
+
+def test_the_object_location_carries_the_key_and_the_tenant_and_nothing_else() -> None:
+    """Two facts, because two is what the anonymous route needs to serve bytes.
+
+    Not the owning entity: that would carry `uploaded_by`, the stage and the timestamps of a
+    tenant nobody authenticated against into a request that returns an image.
+    """
+    fields = {field.name for field in dataclasses.fields(ObjectLocation)}
+
+    assert fields == {"storage_key", "tenant_id"}
+
+
+def test_the_object_location_is_frozen() -> None:
+    location = ObjectLocation(storage_key="tenants/x/incidents/y/z.jpg", tenant_id=uuid.uuid4())
+
+    with pytest.raises(dataclasses.FrozenInstanceError):
+        location.storage_key = "tenants/other/incidents/y/z.jpg"  # type: ignore[misc]

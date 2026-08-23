@@ -101,12 +101,14 @@ class TestSigning:
 
 class TestUnambiguousEncoding:
     """The signed payload maps distinct `(key, expiry)` pairs to distinct messages — **by
-    construction**, not because the current single producer of keys happens to be well behaved.
+    construction**, not because the producers of keys happen to be well behaved.
 
-    `storage_key_for_photo` only ever emits literal segments, UUIDs and allowlisted extensions,
-    so no key today contains the `|` delimiter. But that is a property of the CALLER, and design
-    D2 already names `maintenance` and `revenue` as the next signers, with keys built some other
-    way. The length prefix moves the guarantee into the primitive.
+    Both producers — `storage_key_for_photo` and, since `incident-photos`,
+    `storage_key_for_incident_photo` — emit only literal segments, UUIDs and allowlisted
+    extensions, so no key today contains the `|` delimiter. But that is a property of the
+    CALLERS, and `revenue` is still named as a future signer with keys built some other way.
+    The length prefix moves the guarantee into the primitive, which is why this class tests the
+    primitive against adversarial pairs no current caller can produce.
     """
 
     #: Pairs chosen to sit on top of each other under any encoding that lets a field boundary

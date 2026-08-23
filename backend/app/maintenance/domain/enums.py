@@ -69,3 +69,27 @@ class OwnerApprovalStatus(str, enum.Enum):
     APPROVED = "APPROVED"
     REJECTED = "REJECTED"
     EXPIRED = "EXPIRED"
+
+
+class IncidentPhotoStage(str, enum.Enum):
+    """When in the job a photo of an incident was taken (`incident-photos` D3, R1.2).
+
+    `ASSUMPTION`: **the name is invented and the entity is not in the PRD.** PRD §6 grants the
+    `TECHNICIAN` only "subir fotos (antes y después)", and PRD §7 declares `CleaningPhoto`
+    (§7.12) but no incident-photo entity at all — §7.13 `Incident` has no photo column. So both
+    this enum's name and its two members are this project's, derived from that one phrase.
+
+    **Two members, closed, and that is a decision rather than a starting point** (R1.2). A
+    cleaning photo's kind is `cleaning_photos.photo_type`, a `String(100)`, because the task's
+    checklist template declares which values are admissible — the template bounds it. An
+    incident has no template, so a free-text stage coming from the caller would be a **new
+    free-text sink** under rule 11 of `steering/security.md`, with no screen that ever displays
+    it and nothing to close the set. The enum is what makes R6.5 true by construction instead of
+    by review: there is no third value to send and no text field to fill.
+
+    A third stage is a schema migration and a decision, deliberately. That is the cost of
+    closing the set, and it is the cost worth paying here.
+    """
+
+    BEFORE = "BEFORE"
+    AFTER = "AFTER"

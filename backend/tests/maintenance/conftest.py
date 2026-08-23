@@ -273,15 +273,32 @@ async def make_reservation(
 
 
 @pytest_asyncio.fixture
-async def api(db_session):
+async def api(db_session, tmp_path):
     """The real app over the test session, so the endpoint tests exercise `require(...)`,
-    the error handlers and the response schemas rather than a use case behind them."""
+    the error handlers and the response schemas rather than a use case behind them.
+
+    **The storage overrides are not optional and were added after they were missed.** Without
+    them the photo-upload tests run through the real `ConfiguredFileStorageFactory`, whose
+    `MEDIA_ROOT` is `/app/media` — the container's shared volume. The section 7-9 architecture
+    panel caught it, and the damage was measurable: 85 files, including `incidents/` trees, left
+    behind in a developer's environment by a test run. `tests/cleaning/conftest.py` had carried
+    the same overrides from the start, with the reason written on them ("a suite that wrote
+    there would leave a growing pile of orphaned objects... and two tests could see each other's
+    files"); this fixture simply did not have photos to write when it was authored.
+    """
     from httpx import ASGITransport, AsyncClient
 
     from app.auth.api.dependencies import get_token_codec
     from app.auth.infrastructure.token_codec import JwtTokenCodec
     from app.core.db import get_db_session
+    from app.integrations.api.dependencies import get_url_signing_key
+    from app.integrations.domain.storage import derive_signing_key
+    from app.integrations.infrastructure.storage import (
+        INCIDENT_PHOTO_URL_PREFIX,
+        ConfiguredFileStorageFactory,
+    )
     from app.main import create_app
+    from app.maintenance.api.dependencies import get_incident_photo_storage_factory
 
     app = create_app()
     codec = JwtTokenCodec(secret=SECRET, access_minutes=15, refresh_days=7)
@@ -291,10 +308,30 @@ async def api(db_session):
 
     app.dependency_overrides[get_db_session] = _session_override
     app.dependency_overrides[get_token_codec] = lambda: codec
+    # `LOCAL` storage rooted in this test's own directory, and the SAME key on both halves —
+    # the factory that signs and the dependency that verifies. Overriding only one would make
+    # every signed URL fail as a `403` that reads like a broken signing scheme.
+    app.dependency_overrides[get_incident_photo_storage_factory] = (
+        lambda: ConfiguredFileStorageFactory(
+            signing_key=derive_signing_key(SECRET),
+            local_root=tmp_path / "media",
+            url_prefix=INCIDENT_PHOTO_URL_PREFIX,
+        )
+    )
+    app.dependency_overrides[get_url_signing_key] = lambda: derive_signing_key(SECRET)
 
     transport = ASGITransport(app=app)
     async with AsyncClient(transport=transport, base_url="http://test") as client:
         client.codec = codec  # type: ignore[attr-defined]
+        # The app itself, so a test can add an override of its own — the photo tests replace
+        # the byte ceiling and the storage adapter to reach paths this fixture cannot pose.
+        # Named `asgi_app` rather than `app`: httpx has carried a constructor parameter of that
+        # name across versions, and shadowing it would be a bug that only shows up on an
+        # upgrade. Same choice, same reason, as `tests/cleaning/conftest.py`.
+        client.asgi_app = app  # type: ignore[attr-defined]
+        # Where this fixture's `LOCAL` adapter writes, so a test can delete what landed on disk
+        # and drive the unreadable-object path.
+        client.media_root = tmp_path / "media"  # type: ignore[attr-defined]
         yield client
 
 

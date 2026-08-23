@@ -510,7 +510,11 @@ async def test_a_storage_failure_is_a_502_and_leaves_no_row():
 
 @pytest.mark.asyncio
 async def test_a_failed_commit_deletes_the_object():
-    """Design D4 — the compensating delete, and the only caller `FileStoragePort.delete` has.
+    """Design D4 — the compensating delete, which is why `FileStoragePort.delete` has a caller.
+
+    It was `cleaning`'s *only* caller until `incident-photos` gave `maintenance` the same
+    compensating delete; both are still the same shape, and there is still no deletion surface
+    on any API.
 
     The accepted failure mode is an orphaned object; the forbidden one is a row pointing at
     nothing, because that is a broken `GET` for ever.
