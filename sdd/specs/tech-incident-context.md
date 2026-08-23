@@ -269,9 +269,10 @@ lectura de una incidencia, no en un listado; hay tests que lo fijan por número 
   entrada en su `needs`. El andamio (`frontend/app/(field)/tech/`, `TechnicianShell`, `AuthGuard`) ya
   existía y no se tocó.
 - **Fotos de la incidencia**, y el par antes/después: son de `incident-photos`.
-- **`reject`, ETA, materiales y «en ruta».** Son de `tech-cycle-completion`, que es quien toca la
-  tabla de transiciones de [`maintenance`](maintenance.md) R1 y decide si `TECHNICIAN_EN_ROUTE` es
-  estado nuevo o si `start` pasa a significarlo.
+- **`reject`, ETA, materiales y «en ruta».** Fueron de `tech-cycle-completion`, que las entregó el
+  2026-08-22 tocando la tabla de transiciones de [`maintenance`](maintenance.md) R1: `start` pasó a
+  llamarse `en_route` y a escribir `TECHNICIAN_EN_ROUTE`, sin cambiar orígenes ni destino, y
+  `resume_work` conservó `TECHNICIAN_STARTED`, así que no se retiró ningún miembro del vocabulario.
 - **Cifrado en reposo de las cuatro columnas de texto libre.** Rechazado con su motivo escrito y
   aplazado con nombre a `plaintext-sink-encryption-at-rest`.
 - **Conceder `READ_PROPERTIES` o `READ_RESERVATIONS` a `TECHNICIAN`.** El conjunto de permisos del

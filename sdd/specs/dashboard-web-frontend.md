@@ -107,7 +107,7 @@ changing the UI, hooks or query keys.
 - THE SYSTEM SHALL offer filtering by event type, actor, severity and date range;
   the selected filters are threaded into the tenant-scoped query key so each
   combination is cached distinctly.
-- THE SYSTEM SHALL populate the event-type filter from the closed 46-value
+- THE SYSTEM SHALL populate the event-type filter from the closed 47-value
   vocabulary `TIMELINE_EVENT_TYPES`, typed off the generated
   `components["schemas"]["TimelineEventType"]` union, and SHALL NOT derive the
   options from the entries a query happened to return — a derived list is wrong as
@@ -119,7 +119,7 @@ changing the UI, hooks or query keys.
   `timeline.eventType.<TYPE>` key, present in both locales, and NEVER SHALL use the
   raw enum literal as visible fallback text.
 - IF a selected filter combination matches no entry, THEN THE SYSTEM SHALL render
-  the timeline empty state: 19 of the 46 types have no production writer, so an
+  the timeline empty state: 18 of the 47 types have no production writer, so an
   empty page is a correct answer rather than a failure.
 - THE SYSTEM SHALL hold the timeline filter selections as lightweight UI state in
   Zustand and SHALL NOT store timeline entries (server state) there; filters reset
@@ -284,7 +284,7 @@ para el de la tarea.
   property-timeline}.tsx`, `timeline/timeline-view.tsx` (the `/timeline` screen:
   selector + the shared timeline).
 - `frontend/features/dashboard/lib/` — `format.ts` (localized dates),
-  `timeline-event-types.ts` (the closed 46-value vocabulary and its compile-time
+  `timeline-event-types.ts` (the closed 47-value vocabulary and its compile-time
   exhaustiveness guard), `timeline-range.ts` (`startOfDayIso`, `endOfDayIso`,
   `isInverseRange` — the only arithmetic on this screen and where the 422 trap is);
   `state/use-timeline-filters-store.ts` (UI-only Zustand filters, including `page`

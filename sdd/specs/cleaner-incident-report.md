@@ -185,7 +185,7 @@ igual que [`cleaner-task-context`](cleaner-task-context.md). El *cómo se opera*
   `MAX_INCIDENT_TITLE`, `MAX_INCIDENT_DESCRIPTION`.
 - `backend/app/maintenance/infrastructure/models.py` — la columna y su FK.
 - `backend/alembic/versions/b3f5d1c8a047_cleaner_incident_report.py` — la migración.
-- `backend/app/audit/domain/value_objects.py` — `AUDITABLE_FIELDS["INCIDENT"]`, doce campos.
+- `backend/app/audit/domain/value_objects.py` — `AUDITABLE_FIELDS["INCIDENT"]`, trece campos.
 - Tests: `backend/tests/cleaning/test_task_incident_api.py`,
   `test_task_incident_use_case.py`, `test_completion_clause_contract.py`,
   `backend/tests/maintenance/test_cleaner_incident_reporter.py`,

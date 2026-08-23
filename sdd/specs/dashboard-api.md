@@ -153,7 +153,7 @@ de estados en un hub que importa a los otros siete.
   resuelto en el `RequestContext` (ver [`auth-tenancy.md`](auth-tenancy.md)) y no cuesta
   ninguna consulta adicional.
 - THE SYSTEM SHALL derivar el `title` de cada entrada de su `event_type` y de su `metadata`
-  contra un catálogo que cubre **los 46 valores de `TimelineEventType` en ambos idiomas**, y un
+  contra un catálogo que cubre **los 47 valores de `TimelineEventType` en ambos idiomas**, y un
   test SHALL fallar si el enum crece sin que el catálogo lo siga.
 - IF un `event_type` no tiene entrada en el catálogo, o le falta un dato de sustitución, THEN
   THE SYSTEM SHALL degradar al `title` almacenado en vez de fallar la petición.
@@ -325,7 +325,7 @@ allí: pasa por esta sección.
 - `backend/app/timeline/api/` — `router.py`, `schemas.py`, `errors.py`, `dependencies.py`: la
   capa `api/` que el módulo estrena.
 - `backend/app/timeline/application/use_cases.py` — `GetPropertyTimelineUseCase`.
-- `backend/app/timeline/domain/rendering.py` — el catálogo de 46 tipos × 2 idiomas, la lista
+- `backend/app/timeline/domain/rendering.py` — el catálogo de 47 tipos × 2 idiomas, la lista
   blanca de metadata sustituible y `render`.
 - `backend/app/timeline/domain/repositories.py` — `TimelineEventReader`, separado del escritor
   (ver [`timeline-state-machine.md`](timeline-state-machine.md)).

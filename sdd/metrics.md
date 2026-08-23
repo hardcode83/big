@@ -60,4 +60,4 @@
 | cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
 | properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
 | timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
-| tech-cycle-completion | new, design, tasks, run, review, ship | 286370 | 719362 | 177217450 | 101.7943 | 2026-08-22 | — |
+| tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
