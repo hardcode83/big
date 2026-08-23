@@ -14,6 +14,10 @@ no participa en el cálculo ni en la redacción (`steering/product.md` principio
 quien da a `pricing` sus capas `application/` y `api/`: hasta este change las dos tablas
 existían sin ningún escritor.
 
+Desde `pricing-web` tiene además **pantalla propia**: `/pricing`, dos pestañas —la cola de
+recomendaciones, que decide, y las reglas que la producen, en sólo lectura—. Las tres transiciones
+del Modo 1 se cierran desde el navegador; escribir una regla sigue siendo cosa de la API.
+
 Cómo se opera: [`docs/pricing.md`](../../docs/pricing.md).
 
 ## Requirements
@@ -315,6 +319,195 @@ Cómo se opera: [`docs/pricing.md`](../../docs/pricing.md).
   ancla son del tenant — una guarda la fila en mano, la otra la fila ya en la tabla, y las dos
   se quedan.
 
+### La pantalla de precios (`/pricing`)
+
+`frontend/features/pricing/` sirve la ruta como **dos pestañas bajo una sola ruta** — la cola de
+recomendaciones, que decide, y las reglas que la producen, en sólo lectura. No estrena ruta ni
+clave de navegación: el registro ya declaraba `pricing` con `match: "exact"`, y la página sólo
+dejó de ser un `RoutePlaceholder`. Es la primera pantalla de propietario/manager cuyo valor **es**
+una mutación, y con ella el Modo 1 se cierra desde el navegador: hasta aquí las tres transiciones
+sólo eran alcanzables por `curl`.
+
+- WHEN una usuaria autorizada abre `/pricing`, THE SYSTEM SHALL renderizar **Recomendaciones**
+  como pestaña activa inicial y **Reglas** alcanzable desde la misma ruta, y NEVER SHALL dar de
+  alta un descriptor nuevo, cambiar `match` a `"prefix"` ni añadir claves a
+  `locales/{es,en}/navigation.json`.
+- THE SYSTEM SHALL montar **sólo el panel activo** (render condicional, no `hidden` por CSS), de
+  modo que la query de la pestaña Reglas no salga hasta que alguien la abre.
+- THE SYSTEM SHALL mantener la pestaña activa en el store de UI de la feature y NEVER SHALL
+  reflejarla en la URL ni en un parámetro de query: sin enlace entrante que lo justifique, `?tab=`
+  sería una segunda fuente de verdad sobre la misma cosa.
+- THE SYSTEM SHALL guardar en Zustand (`state/use-pricing-ui-store.ts`) **dos rebanadas
+  independientes** —`recommendations {propertyId, dateFrom, dateTo, status, page}` y
+  `rules {propertyId, active, page}`— que no comparten `propertyId` ni `page`, SHALL volver a la
+  página 1 dentro de cada setter, SHALL devolver el store entero al estado inicial cuando cambia
+  el tenant (`adoptTenant`), y NEVER SHALL duplicar estado de servidor.
+
+#### El sobre de paginación de pricing no es el de los demás módulos
+
+- THE SYSTEM SHALL leer las dos listas del sobre **`{items, total, page, per_page}`** —`items`, no
+  `data`— y, dado que la respuesta **no** trae `total_pages`, THE SYSTEM SHALL calcular las páginas
+  en el cliente como `perPage > 0 ? Math.ceil(total / perPage) : 0`, y NEVER SHALL leer un
+  `total_pages` de la respuesta ni reutilizar el `PaginatedResponse` del resto del árbol (el tipo
+  propio se llama `PricingPage<T>` precisamente para que no se confundan).
+- IF `total` es `0`, THEN THE SYSTEM SHALL renderizar el estado vacío localizado y NEVER SHALL
+  renderizar «página 1 de 0»; la paginación aparece **sólo** cuando hay más de una página, con cada
+  control deshabilitado en su extremo.
+- THE SYSTEM SHALL paginar **en el servidor** con un tamaño de página fijo de **20** —el `per_page`
+  por omisión del backend—, con el número de página dentro de la clave de caché, y NEVER SHALL
+  ofrecer un selector de tamaño de página ni traer el horizonte entero para paginarlo en memoria.
+
+#### La cola de recomendaciones
+
+- WHEN se muestra la pestaña Recomendaciones, THE SYSTEM SHALL pedir
+  `GET /api/v1/price-recommendations` con `page`, `per_page` y los filtros activos `property_id`,
+  `date_from`, `date_to` y `status` — este último con el nombre de query **`status`** y nunca
+  `status_filter`, que es el nombre del parámetro de Python detrás de su `Query(alias="status")`.
+- THE SYSTEM SHALL pintar por fila exactamente cinco cosas: vivienda, `date`, `recommended_price`,
+  `status` con su insignia y `explanation`.
+- THE SYSTEM NEVER SHALL pintar `current_price` —siempre `null` mientras el Modo 1 no llame al
+  PMS— ni `confidence` —fijado a `1.00` porque el cálculo es determinista—, aunque los dos lleguen
+  en la respuesta; el DTO de la feature los omite, así que no hay nada que un componente pueda
+  pintar por descuido.
+- Dado que `PriceRecommendationResponse` no expone `updated_at`, THE SYSTEM NEVER SHALL mostrar
+  marca temporal alguna de la decisión («aprobado hace X», «decidido el …»): la pantalla no puede
+  fecharla y una fecha inventada sería peor que su ausencia.
+- THE SYSTEM SHALL renderizar `explanation` **como texto y nunca como HTML**, literal, sin traducir
+  ni parsear, plegada en un `<details>` cerrado por defecto con `<summary>` localizado. Llega en
+  inglés desde la plantilla cerrada del backend y es sumidero de texto libre de la regla 11 de
+  `steering/security.md`: el `name` que la manager escribió en una temporada o un evento es la
+  única parte que la plantilla no compone. No hay un solo `dangerouslySetInnerHTML` en la feature.
+- WHEN el nombre de una vivienda no se puede resolver, THE SYSTEM SHALL distinguir en pantalla
+  «catálogo en vuelo», «no está en el catálogo» y «resuelto», y un fallo del catálogo de viviendas
+  NEVER SHALL propagar al estado de error de la vista ni marcar error en las otras dos consultas.
+
+#### La decisión: los tres movimientos legales, y nada más
+
+- WHEN la fila está en `RECOMMENDED`, THE SYSTEM SHALL ofrecer **Aprobar** (`APPROVED`) y
+  **Rechazar** (`REJECTED`); WHEN está en `APPROVED`, SHALL ofrecer **Marcar como publicada**
+  (`APPLIED_EXTERNAL`); y en `DRAFT`, `APPLIED_EXTERNAL` y `REJECTED` SHALL no ofrecer ninguno.
+  Sin ese tercer botón una fila aprobada es un callejón sin salida y el hecho que cierra el Modo 1
+  —«ya subí este precio a la OTA»— es inalcanzable desde la pantalla.
+- THE SYSTEM SHALL derivar los movimientos de un `Record` exhaustivo sobre los cinco estados
+  (`lib/decision-moves.ts`) y SHALL devolver la lista vacía ante un estado desconocido, para que un
+  desfase de despliegue no ofrezca una transición que el backend rechazaría. La consulta SHALL ir
+  por `Object.hasOwn` y NEVER por `?? []`: con el segundo, un estado que llegase por el cable
+  llamándose `toString` o `constructor` devolvería la **función heredada** del prototipo en vez de
+  una lista. La exhaustividad sobre la unión generada es garantía de compilación, no de ejecución,
+  así que los tres derivadores del enum —movimientos, tono y orden— llevan su propio suelo.
+- THE SYSTEM SHALL tratar esos movimientos como **affordance y no como autoridad**: el backend
+  valida la transición y contesta `409` si no es una de las tres.
+- WHEN una decisión se envía, THE SYSTEM SHALL pedir confirmación **en dos pasos dentro de la
+  propia fila**, con texto distinto por movimiento, y SHALL disparar la mutación sólo al confirmar.
+- WHILE una escritura vuela, THE SYSTEM SHALL deshabilitar los controles de decisión de **todas**
+  las filas y el de regenerar, y NEVER SHALL deshabilitar los `<select>` de filtro: no hay razón
+  para impedir mirar otra cosa mientras se guarda.
+- THE SYSTEM SHALL enviar `PATCH /api/v1/price-recommendations/{id}` con el cuerpo `{status}` y
+  nada más, porque el esquema es `extra="forbid"`.
+- THE SYSTEM SHALL configurar las dos escrituras con `retry: false`, NEVER SHALL parchear la caché
+  de forma optimista, y SHALL invalidar el **prefijo** de la clave de recomendaciones en
+  `onSettled` —también cuando la petición falla—, de modo que una fila desaparezca del filtro que
+  ya no la contiene sin enumerar combinaciones de filtro y página. La respuesta del `PATCH` es una
+  recomendación suelta y no sabe nada de `total` ni de la página en la que estaba.
+- THE SYSTEM SHALL invalidar **sólo** el prefijo de recomendaciones y NEVER el de reglas: ni
+  decidir ni regenerar escriben una regla.
+
+#### Regenerar ahora
+
+- WHEN la usuaria pulsa **Regenerar ahora**, THE SYSTEM SHALL llamar a
+  `POST /api/v1/price-recommendations/generate` con `{"property_id": <filtro activo> | null}`,
+  tomando la vivienda de la rebanada de **recomendaciones** y nunca de la de reglas, y NEVER SHALL
+  ofrecer un segundo selector de vivienda. El endpoint corre sincrónicamente en la petición: no hay
+  `202`, ni identificador de job, ni sondeo.
+- WHEN la generación responde, THE SYSTEM SHALL anunciar los **cuatro** contadores de
+  `GenerationReportResponse` (`created`, `updated`, `preserved`, `skipped`) en una única región viva
+  `role="status" aria-live="polite"` compartida con los errores.
+- THE SYSTEM NEVER SHALL afirmar que el barrido fue completo ni correcto: el contrato publicado no
+  expone el contador `failed`, así que un barrido con agujeros se ve verde desde la API y la
+  pantalla sólo puede repetir los cuatro números que llegaron.
+
+#### Las reglas, en sólo lectura y sin abrir el JSONB
+
+- WHEN se muestra la pestaña Reglas, THE SYSTEM SHALL pedir `GET /api/v1/pricing-rules` con `page`,
+  `per_page` y los filtros `property_id` y `active`, leyendo el mismo sobre `items`.
+- THE SYSTEM SHALL pintar por regla `name`, el ámbito, `active`, la banda
+  `min_price`/`base_price`/`max_price`, `max_daily_change_pct` y **cuántas** entradas hay en cada
+  una de las cinco columnas JSONB.
+- WHERE `property_id` es `null`, THE SYSTEM SHALL presentar la regla como de toda la cartera
+  («Toda la cartera» / «Whole portfolio») y NEVER como una vivienda sin nombre.
+- THE SYSTEM NEVER SHALL interpretar ni renderizar el interior de `weekday_modifiers`,
+  `lead_time_rules`, `occupancy_rules`, `seasonality_rules` ni `event_rules`. Contar entradas es
+  seguro —`Object.keys(value).length` para el objeto, `value.length` para los cuatro arrays, `0`
+  para cualquier otra cosa— y pintar su interior sería reimplementar el esquema de PRD §7.17 en el
+  cliente. El DTO de la feature no lleva las cinco columnas, sólo sus recuentos.
+- THE SYSTEM NEVER SHALL consumir `GET /api/v1/pricing-rules/{rule_id}`: devuelve el mismo
+  `PricingRuleResponse` que ya viene en cada `items[]`, así que no hay detalle que pedir. La
+  interfaz `PricingDataSource` no declara el método, que es lo que lo hace inalcanzable y no una
+  convención.
+- THE SYSTEM NEVER SHALL escribir una regla desde la web. `POST /api/v1/pricing-rules` y
+  `PATCH /api/v1/pricing-rules/{rule_id}` se quedan sin superficie de frontend, y no por simetría:
+  el formulario arrastra **toda** la validación de PRD §7.17, que el backend hace cumplir en el
+  dominio y no en el esquema de petición, y la norma del proyecto prohíbe pintar el cuerpo del
+  `422`, así que la pantalla no podría decir cuál de las cinco columnas falló. Sería o lógica de
+  negocio en el componente o un formulario cuyo único feedback es «no se pudo guardar».
+
+#### Dinero sin moneda, y los cinco estados con etiqueta
+
+- THE SYSTEM SHALL tratar todo importe (`recommended_price`, `base_price`, `min_price`,
+  `max_price`, `max_daily_change_pct`) como la **cadena decimal** que el contrato declara, usando
+  conversión numérica **sólo para formatear** y nunca para calcular ni comparar, y SHALL devolver la
+  cadena original si el número no es finito.
+- Dado que ninguna respuesta de pricing lleva campo `currency`, THE SYSTEM SHALL formatear los
+  importes **sin símbolo ni código de moneda**, con dos decimales fijos y el separador decimal del
+  locale **activo de i18next** (coma en ES, punto en EN). El locale viaja como parámetro explícito
+  (`i18n.language`) y NEVER SHALL quedar en `undefined`, que es el locale del runtime y no el de la
+  interfaz.
+- THE SYSTEM SHALL formatear `date` como día del locale con `timeZone: "UTC"`, sin hora y sin
+  conversión de zona, de modo que un navegador al oeste de UTC no retroceda la noche un día.
+- THE SYSTEM SHALL proveer etiqueta localizada en ES y EN para los **cinco** valores de
+  `PriceRecommendationStatus` —incluido `DRAFT`, que hoy nadie produce ni consume—, y SHALL derivar
+  tanto el orden como los tonos de `Record` exhaustivos sobre el enum de los tipos generados, nunca
+  de una lista transcrita a mano.
+- THE SYSTEM SHALL reutilizar la paleta de tonos compartida y NEVER SHALL aplicar los colores de
+  estado operacional de PRD §9.1: son de estado de vivienda, no de recomendación.
+- IF una clave falta en cualquiera de los dos locales, o el namespace `pricing` no está registrado
+  en los cuatro puntos de `lib/i18n/resources.ts`, THEN THE SYSTEM SHALL fallar la prueba de
+  paridad de catálogos. El registro entró en la prueba porque no estaba cubierto: quitar `"pricing"`
+  de `NAMESPACES` dejaba el typecheck limpio y la paridad pasaba de 12 tests a 11, **todos verdes**.
+
+#### Errores por status, permisos y aislamiento
+
+- THE SYSTEM SHALL elegir la copia de error por **status HTTP** —decidir (`403`, `404`, `409`,
+  `422`, genérico), regenerar (`403`, `422`, genérico), leer (`403`, genérico)— y NEVER SHALL leer,
+  mapear ni exponer `ApiError.message`, `code` ni `details`, ni el cuerpo del backend.
+- IF el `PATCH` responde `409`, THEN THE SYSTEM SHALL mostrar copia localizada **propia** de ese
+  caso, distinta del error genérico: el movimiento ya no es legal porque el estado cambió debajo.
+- IF cualquier operación responde `403`, THEN THE SYSTEM SHALL mostrarlo como error localizado y
+  NEVER SHALL tratarlo como éxito ni caer en el mensaje genérico.
+- THE SYSTEM SHALL no tener rama `401` en ninguna de las tres tablas: lo resuelve el cliente HTTP
+  con su refresco de un intento y, si no, con la expiración de sesión.
+- THE SYSTEM SHALL no tener rama `404` en la tabla de regenerar, porque un `property_id`
+  desconocido, de otro tenant o no `ACTIVE` llega como **`422`** y no como recurso ausente; el
+  `404` sí existe al decidir, sobre una recomendación concreta.
+- THE SYSTEM SHALL enrutar las tres lecturas por TanStack Query v5 con claves de ámbito de tenant
+  (`pricing-recommendations`, `pricing-rules`, `pricing-properties`), emitiendo los filtros en
+  **orden fijo** y canonizando `page`, de modo que dos estados de interfaz equivalentes no produzcan
+  dos entradas de caché, y SHALL garantizar que el prefijo de recomendaciones es prefijo de
+  cualquier clave de recomendaciones para cualquier filtro y página.
+- THE SYSTEM SHALL descartar los filtros de la sesión anterior antes de la primera petición, para
+  que no salga con el `propertyId` de otro tenant; el guardia de la vista cubre las **lecturas** y
+  el hook de regeneración lleva el suyo propio, porque lee el filtro del store y su escritura no
+  pasa por la vista.
+- THE SYSTEM SHALL conceder `MANAGE_PRICE_RECOMMENDATIONS` en el espejo de permisos del frontend a
+  **`TENANT_OWNER` y `PROPERTY_MANAGER`** —los dos que lo tienen en el backend— y NEVER SHALL copiar
+  la forma de `MANAGE_CLEANING_TASKS` (`TENANT_OWNER: []`), que dejaría a la propietaria mirando una
+  cola que no puede decidir con los botones ocultos por el propio frontend mientras el backend se
+  los concedía. Es la divergencia consciente del patrón «la owner ve, el manager opera»:
+  `min_price`/`max_price` son los límites de su propio dinero.
+- THE SYSTEM SHALL tratar ese espejo como pista de UX y no como autoridad — oculta controles, no
+  autoriza —, y el RBAC del backend SHALL seguir siendo quien decide. Un `CLEANER` que llega a
+  `/pricing` desde el sidebar recibe `403` en la lectura y ve su copia localizada, sin ningún botón.
+
 ## Estado y deuda conocida
 
 - **Dos filas persistidas adyacentes pueden romper el tope diario cuando una está preservada**,
@@ -363,8 +556,22 @@ Cómo se opera: [`docs/pricing.md`](../../docs/pricing.md).
   construya un `AuditLog` a mano escribe lo que quiera. Ningún call site lo hace, así que no
   hay exposición viva; lo levantó el panel de QA de este change y pertenece a `app/audit/`:
   entrada `audit-changes-repository-guard` del roadmap.
-- **Sin UI.** La página `/pricing` de PRD §24 es una entrada de frontend propia; esta capacidad
-  es sólo backend.
+- **Dos claves de traducción están muertas** y ninguna prueba lo delata: `decide.success` —la
+  región viva no anuncia nada al acertar una decisión, sólo el informe de generación— y
+  `rules.columns.band`, porque la fila pinta mínimo, base y máximo como tres campos y nunca una
+  banda con etiqueta. Están en los dos locales, así que la paridad las da por buenas: la paridad
+  demuestra que las dos lenguas dicen lo mismo, no que alguien lo lea.
+- **El CRUD de reglas no tiene superficie web.** La pantalla lee las reglas y no las escribe, así
+  que crear o editar una regla sigue siendo cosa de la API: entrada propia de roadmap, con el
+  motivo en la sección de la pantalla.
+- **El sidebar no filtra por rol**, así que un `CLEANER` ve la entrada «Precios» y sólo descubre
+  que no le corresponde al entrar y recibir el `403`. Es una carencia del shell y no de esta
+  capacidad; consta aquí porque es donde se mide.
+- **A partir de la vivienda 100 la identidad de la fila degrada.** El catálogo de nombres se pide
+  con `per_page: 100` en una sola página, así que en una cartera mayor las viviendas que se queden
+  fuera se presentan como «no está en el catálogo» en vez de por su nombre. Anotado como
+  `ASSUMPTION` en el código; es el mismo techo que arrastran las demás pantallas que resuelven
+  nombres así.
 - **Modos 2 y 3 de PRD §19** (aprobación automática, push a la OTA) y con ellos
   `PMSAdapter.update_price`, `block_dates` y `get_availability` van a un change de ARI propio,
   cuando exista quien los consuma.
@@ -396,3 +603,34 @@ Cómo se opera: [`docs/pricing.md`](../../docs/pricing.md).
   `test_use_cases.py` son los que fijan la fórmula, los validadores y el horizonte.
 - `backend/tests/scheduler/test_generate_price_recommendations.py` — el job, su lock y su
   exención de auditoría.
+- `frontend/app/(workspace)/pricing/page.tsx` — la página: `generateMetadata` desde
+  `routeMetadata("pricing")` y `<PricingView />`; ya no un `RoutePlaceholder`.
+- `frontend/features/pricing/data/` — `dto.ts` (los tipos de la feature, sin `current_price`,
+  `confidence`, `created_at` ni las cinco columnas JSONB), `pricing-source.ts` (el puerto con sus
+  cinco operaciones, sin detalle de regla), `http/http-pricing-source.ts`, `index.ts`.
+- `frontend/features/pricing/hooks/` — `query-keys.ts` (las tres claves de tenant, su
+  normalización de filtros y el prefijo), `use-pricing-data.ts`, `use-decide-recommendation.ts`,
+  `use-generate-recommendations.ts`.
+- `frontend/features/pricing/lib/` — `decision-moves.ts` (los tres movimientos legales),
+  `format.ts` (decimal sin moneda, día en UTC), `pricing-error.ts` (las tres tablas por status),
+  `property-directory.ts`, `recommendation-status.ts` (orden y tonos de los cinco estados).
+- `frontend/features/pricing/state/use-pricing-ui-store.ts` — las dos rebanadas de filtros, la
+  pestaña activa y `adoptTenant`.
+- `frontend/features/pricing/components/` — `pricing-view.tsx` (orquesta, posee las dos
+  mutaciones), `pricing-tabs.tsx`, `recommendations-panel.tsx`, `recommendation-row.tsx`,
+  `recommendation-filters.tsx`, `decision-controls.tsx`, `rules-panel.tsx`, `rule-row.tsx`,
+  `rule-filters.tsx`, `pricing-pagination.tsx`.
+- `frontend/lib/ui/status-tone.ts` — la paleta `Tone`/`TONE_BADGE_CLASS`, extraída aquí de las dos
+  copias idénticas que vivían en `components/property-state-badge.tsx` y
+  `features/cleaning/lib/task-status.ts`, que ahora la importan.
+- `frontend/lib/auth/permissions.ts` — el espejo parcial de permisos y sus dos roles.
+- `frontend/locales/{es,en}/pricing.json` — el namespace de la pantalla.
+- `frontend/features/pricing/**/*.test.*` — 20 ficheros de test (227 tests en la ejecución medida
+  el 2026-08-23). `locales/pricing-locale.test.ts` es el que enumera los cinco estados desde los
+  tipos generados; `components/pricing-view.test.tsx` es el que cubre `recommendations-panel.tsx` y
+  `rules-panel.tsx`, que no tienen fichero propio, e incluye una comprobación de accesibilidad con
+  axe.
+- `frontend/lib/i18n/catalog-parity.test.ts` — la paridad por namespace y, desde este change, el
+  registro: compara los ficheros de `locales/{es,en}/` **leídos del disco** contra `NAMESPACES`.
+- `frontend/app/route-coverage.test.ts` — donde `/pricing` pasó del conjunto de placeholders al de
+  rutas implementadas.
