@@ -649,7 +649,7 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
 
 
 class _AnswersAnAssignmentBase(_TaskLifecycleBase):
-    """The two operations that answer an assignment, and therefore close its SLA.
+    """The operations that must close an assignment's SLA when they run.
 
     Added by `access-notifications` (its R5, design D7) to pay a debt this module recorded
     when it shipped: `cleaning`'s own R6.4 asked for the deadline to be closed on an answer
@@ -661,9 +661,14 @@ class _AnswersAnAssignmentBase(_TaskLifecycleBase):
     a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
     four hours and escalate to the manager for a task that was answered immediately.
 
-    Only two use cases inherit this, not the six of `_TaskLifecycleBase`: starting,
-    completing and validating happen *after* an answer, so the deadline is already closed by
-    then, and giving them the port would be handing out a write nobody needs.
+    Three use cases inherit this, not the six of `_TaskLifecycleBase`: starting, completing
+    and validating happen *after* an answer, so the deadline is already closed by then, and
+    giving them the port would be handing out a write nobody needs.
+
+    Accepting and rejecting *are* answers. Cancelling is not — it is a manager withdrawing the
+    task (`cleaning-stall-blocks-next-stay`, design D8) — and it inherits anyway because it can
+    fire from `ASSIGNED`, where that assignment's deadline is still live: without closing it,
+    `check_sla_breaches` would escalate a task that no longer exists.
     """
 
     def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:

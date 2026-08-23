@@ -134,7 +134,7 @@ diagrama nuevo.
 - [x] 5.2 `audit_actions.CLEANING_TASK_CANCELLED` en
   `backend/app/audit/domain/actions.py`: la constante y su alta en el `frozenset` `ACTIONS`,
   que es exhaustivo. [R3.3]
-- [x] 5.3 `CancelCleaningTaskUseCase` sobre `_TaskLifecycleBase` en
+- [x] 5.3 `CancelCleaningTaskUseCase` sobre `_AnswersAnAssignmentBase` en
   `backend/app/cleaning/application/use_cases.py`, con la plantilla exacta de
   `RejectCleaningTaskUseCase` y este orden en una sola transacción: `task.cancel()` → tarea de
   reemplazo si procede → `self._transition(..., trigger=CLEANING_CANCELLED,

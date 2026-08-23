@@ -78,8 +78,9 @@ Lo que hay que saber para operarla:
   checkout.
 - **La evidencia parcial se conserva entera**: ni los ítems de checklist marcados ni las fotos
   subidas se borran. Las fotos son objetos en un almacén que ninguna transacción deshace, así que
-  un borrado a medias dejaría huérfanos de un lado o del otro; y el trabajo que sí se hizo es
-  justo lo que hace falta para decidir si la limpieza se repite. La tarea cancelada sigue
+  un borrado a medias dejaría huérfanos de un lado o del otro; el trabajo que sí se hizo es
+  justo lo que hace falta para decidir si la limpieza se repite; y borrar evidencia por cancelar
+  contradiría el timeline inmutable del principio 1 de `product.md`. La tarea cancelada sigue
   consultable con sus ítems y sus fotos por las rutas de siempre.
 - **Si la vivienda no se mueve** —cancelar la única tarea `CREATED` de una que ya estaba en
   `AWAITING_CLEANING`— no es un error: la tarea se cancela igual y queda su fila de `AuditLog`.

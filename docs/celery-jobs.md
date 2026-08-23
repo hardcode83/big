@@ -135,9 +135,10 @@ en lugar de sin límite.
 ## Viviendas atascadas (`blocked`)
 
 Una vivienda está **atascada** cuando el calendario exige una transición de reloj, su estado
-operacional no admite ese trigger, y **no consta que esa transición se haya aplicado ya para esa
-reserva**. Las tres condiciones hacen falta: sin la tercera, el contador acaba siendo el tamaño
-de la cartera activa (ver abajo).
+operacional no admite ese trigger, **no consta que esa transición se haya aplicado ya para esa
+reserva** y **su estado no es ya el destino de ese trigger**, siendo ésta la única estancia
+vencida para él. Las cuatro condiciones hacen falta: sin la tercera, el contador acaba siendo el
+tamaño de la cartera activa; sin la cuarta, un atasco ya resuelto sigue apareciendo (ver abajo).
 
 El caso que lo motivó, medido en `dev` el 2026-08-22: REDES11 llevaba en `CLEANING_IN_PROGRESS`
 desde el 16 con una limpieza que nadie cerró, y la reserva del 19 al 23 nunca pasó a
@@ -159,6 +160,16 @@ transición. Con sólo esas dos, una vivienda `OCCUPIED_ESTIMATED` a mitad de es
 tick. La evidencia que las distingue ya estaba guardada: `property_state_transitions.metadata`
 lleva `reservation_id` y `trigger`, así que «¿se aplicó ya el check-in de *esta* reserva?» es una
 lectura, no una inferencia.
+
+**Por qué la cuarta condición.** La encontró la verificación del flujo real contra el stack, no
+un test: cancelar la limpieza deja la vivienda en `OCCUPIED_ESTIMATED`, que es exactamente donde
+el check-in la habría llevado, pero la transición que lo registra es de la **tarea** y no lleva
+`reservation_id`, así que la tercera condición no la ve. Con sólo tres, la colección seguía
+listando la vivienda que se acababa de arreglar. Estar **en el destino** del trigger significa que
+la exigencia del calendario está satisfecha, llegara la vivienda como llegara. Va acotada a **la
+reserva**, no al trigger: con dos estancias solapadas `current_operational_state` es una sola
+columna y no puede decir a cuál se refiere, así que el atajo se abstiene y cada estancia se juzga
+por su propia evidencia — sin esa acotación, resolver una ocultaba el atasco real de la otra.
 
 **La ventana, y lo que queda fuera.** La detección usa la misma `candidate_window` que las
 candidatas: **30 días atrás y 2 adelante**. No hay un horizonte propio a propósito —dos ventanas

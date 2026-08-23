@@ -512,7 +512,7 @@ reconstruirlo:
 | Puerto de config | `backend/app/tenants/domain/repositories.py`, `infrastructure/repositories.py` | `+ TenantConfigRepository.checkin_window_hours()` — lectura de una columna con su default, para que «nada se guarda» sea cierto en un `GET` (D5) |
 | API de propiedades | `backend/app/properties/api/router.py`, `schemas.py`, `dependencies.py`, `backend/app/main.py` | `GET /api/v1/blocked-transitions` + su sobre paginado (D5, D6). **Router propio** en el mismo módulo: el `router` que ya está tiene `prefix="/properties"`, y colgar de él un segmento literal es exactamente la colisión que D5 rechaza. Se registra en `main.py` como un segundo `include_router`, igual que `dashboard` sirve sus dos prefijos desde un módulo |
 | Limpieza — entidad | `backend/app/cleaning/domain/entities.py` | `+ CleaningTask.cancel()` (D9) |
-| Limpieza — caso de uso | `backend/app/cleaning/application/use_cases.py` | `+ CancelCleaningTaskUseCase` sobre `_TaskLifecycleBase` (D7, D8) |
+| Limpieza — caso de uso | `backend/app/cleaning/application/use_cases.py` | `+ CancelCleaningTaskUseCase` sobre `_AnswersAnAssignmentBase` (D7, D8) |
 | Limpieza — API | `backend/app/cleaning/api/tasks_router.py`, `schemas.py`, `dependencies.py` | `POST /api/v1/cleaning-tasks/{id}/cancel`, `ManageDep` |
 | Auditoría | `backend/app/audit/domain/actions.py` | `+ CLEANING_TASK_CANCELLED` (constante y registro exhaustivo) |
 | Contrato | `backend/openapi.json`, `frontend/lib/api/generated/openapi.d.ts` | regenerar **las dos mitades** (`steering/documentation.md`) |
