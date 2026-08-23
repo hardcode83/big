@@ -263,6 +263,18 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos, por el mismo
   motivo: el `AIAdapter` que entregó `messaging-ai` no declara `validate_cleaning_photo`, y
   `cleaning` no tiene puerto propio para ello. No hay borrado de fotos por ninguna vía de la API.
+- THE SYSTEM SHALL construir esa ruta anónima con la **factoría compartida** de
+  `app/integrations/api/signed_media.py`, y su caso de uso con `ServeSignedObjectUseCase`, en vez de
+  con una implementación propia: desde que el almacén tiene un segundo consumidor
+  ([`incident-photos`](incident-photos.md), 2026-08-23) el cuerpo `403` constante, el `nosniff`, el
+  `Cache-Control` y el orden resolver→verificar→servir viven **una sola vez**
+  ([`file-storage`](file-storage.md) §La capa de servido firmado). La migración fue **sin cambio de
+  comportamiento**, y lo que lo sostiene es que la suite de esta capability compara los cuerpos de
+  refusal literalmente y fija el orden de los middlewares.
+- THE SYSTEM SHALL pasar el prefijo de la URL firmada de esta capability
+  (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
+  NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
+  es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
 
 ### Notificación y SLA
 
@@ -393,7 +405,14 @@ Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el víncul
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
-  ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
+  ruta anónima firmada, hoy construida con la factoría compartida), `schemas.py`, `dependencies.py`,
+  `errors.py`.
+- `backend/app/integrations/application/signed_serving.py` y
+  `backend/app/integrations/api/signed_media.py` — el caso de uso y la factoría de router que esta
+  capability estrenó y que hoy comparte con [`incident-photos`](incident-photos.md).
+- `backend/app/integrations/api/dependencies.py` — `get_url_signing_key` y
+  `storage_factory_for(url_prefix)`, que salieron de
+  `backend/app/cleaning/api/dependencies.py` el 2026-08-23.
 - `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
   almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
 - `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con
