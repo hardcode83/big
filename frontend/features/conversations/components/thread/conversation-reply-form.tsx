@@ -5,8 +5,6 @@ import { useTranslation } from "react-i18next";
 
 import { useReplyToConversation } from "../../hooks/use-reply-to-conversation";
 
-const MAX_MESSAGE_CONTENT_LENGTH = 4000;
-
 /**
  * The reply form of a conversation (proposal R4, design D9).
  *
@@ -18,17 +16,28 @@ const MAX_MESSAGE_CONTENT_LENGTH = 4000;
  * backend's `422` is surfaced as a localized copy).
  *
  * The visible character counter is **information**, not a hard stop:
- * the button is **never** disabled by proximity to `MAX_MESSAGE_CONTENT_LENGTH`.
- * The length rejection (`length(content) > 4000` ⇒ backend `422`) lives
- * in the backend and surfaces as a localized error after the mutation
- * resolves — the draft is preserved in the field, ready for the operator
- * to trim. The button is disabled **only** while the mutation is in
- * flight (a single, explicit reason that matches `useMutation`'s state).
+ * the button is **never** disabled by proximity to the 4000-char cap
+ * (`MAX_MESSAGE_CONTENT_LENGTH`, declared in `messaging-ai.md` R3 and
+ * enforced by the `CreateMessageRequest` Pydantic schema). The length
+ * rejection lives in the backend and surfaces as a localized error after
+ * the mutation resolves — the draft is preserved in the field, ready
+ * for the operator to trim. The button is disabled **only** while the
+ * mutation is in flight (a single, explicit reason that matches
+ * `useMutation`'s state).
  */
 export function ConversationReplyForm({
   conversationId,
+  onReplySuccess,
 }: {
   conversationId: string;
+  /**
+   * Called once, after a successful submission, so the parent can
+   * reset any thread-local state (e.g. the page of a paginated thread).
+   * The hook itself does NOT call this — it owns the mutation and the
+   * cache invalidation, but the form is the only owner of the draft
+   * and the parent's `useState` for the page is not visible here.
+   */
+  onReplySuccess?: () => void;
 }) {
   const { t } = useTranslation("conversations");
   const [draft, setDraft] = useState("");
@@ -42,14 +51,16 @@ export function ConversationReplyForm({
     mutation.mutate({ content: draft });
   };
 
-  // On success, clear the draft. `useEffect` is not strictly needed for
-  // state synchronization with mutation events here, because the form
-  // is the **only** place that owns the draft. We listen via `isSuccess`
-  // and clear on the next render where the form is mounted with the
-  // success flag — once. This avoids two sources of truth.
+  // On success, clear the draft and notify the parent. `useEffect` is
+  // not strictly needed for state synchronization with mutation events
+  // here, because the form is the **only** place that owns the draft.
+  // We listen via `isSuccess` and clear on the next render where the
+  // form is mounted with the success flag — once. This avoids two
+  // sources of truth.
   if (mutation.isSuccess && draft !== "" && !isInFlight) {
     // schedule a clear: defer to avoid set-state-during-render warnings.
     setDraft("");
+    onReplySuccess?.();
   }
 
   return (
@@ -88,8 +99,3 @@ export function ConversationReplyForm({
     </form>
   );
 }
-
-// `MAX_MESSAGE_CONTENT_LENGTH` is referenced by the test that exercises
-// the length-validation path. Keeping the constant in this file (where the
-// counter is built) makes the source of truth local.
-void MAX_MESSAGE_CONTENT_LENGTH;

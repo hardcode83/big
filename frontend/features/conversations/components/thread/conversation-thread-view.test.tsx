@@ -60,6 +60,26 @@ const MESSAGES = {
   perPage: 20,
 };
 
+const MESSAGES_WITH_PAGES = {
+  items: [
+    {
+      id: "m1",
+      conversationId: "c1",
+      senderType: "GUEST" as const,
+      senderUserId: null,
+      content: "Hola",
+      language: "es",
+      aiGenerated: false,
+      confidenceScore: null,
+      intent: null,
+      createdAt: "2026-08-22T10:00:00Z",
+    },
+  ],
+  total: 45, // > perPage (20) → pagination controls must render
+  page: 1,
+  perPage: 20,
+};
+
 describe("ConversationThreadView (R3)", () => {
   beforeEach(() => {
     getMock.mockReset();
@@ -93,5 +113,35 @@ describe("ConversationThreadView (R3)", () => {
   it("renders the empty messages state when the thread has no items yet", async () => {
     const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
     await waitFor(() => expect(view.getByText("thread.noMessages")).toBeTruthy());
+  });
+
+  it("renders the 'back to inbox' link in the header (R1.4 — deep-linkable thread)", async () => {
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("fields.backToList")).toBeTruthy());
+    const link = view.getByRole("link", { name: "fields.backToList" });
+    expect(link.getAttribute("href")).toBe("/conversations");
+  });
+
+  it("does NOT render pagination controls when the messages fit in a single page (R3.3)", async () => {
+    listMessagesMock.mockResolvedValue(MESSAGES); // total: 0 — no pagination
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("thread.noMessages")).toBeTruthy());
+    expect(view.queryByRole("button", { name: "fields.prevPage" })).toBeNull();
+    expect(view.queryByRole("button", { name: "fields.nextPage" })).toBeNull();
+  });
+
+  it("renders prev/next pagination controls when total > perPage (R3.3)", async () => {
+    listMessagesMock.mockResolvedValue(MESSAGES_WITH_PAGES);
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    // The first message has content "Hola" — wait for that to render
+    // (proves the messages branch was taken, not the empty branch).
+    await waitFor(() => expect(view.getByText("Hola")).toBeTruthy());
+    const prev = view.getByRole("button", { name: "fields.prevPage" });
+    const next = view.getByRole("button", { name: "fields.nextPage" });
+    expect(prev).toBeTruthy();
+    expect(next).toBeTruthy();
+    // First page: prev disabled, next enabled.
+    expect(prev.hasAttribute("disabled")).toBe(true);
+    expect(next.hasAttribute("disabled")).toBe(false);
   });
 });

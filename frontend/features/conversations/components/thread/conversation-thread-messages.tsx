@@ -58,7 +58,20 @@ export function ConversationThreadMessages({ messages }: { messages: MessageDto[
           <p className="whitespace-pre-wrap break-words max-w-prose">
             {message.content}
           </p>
-          <ConversationThreadSenderMeta senderUserId={message.senderUserId} />
+          {/*
+            R3.5: render `sender_user_id` only for messages written by one
+            of our own actors (`OWNER` / `MANAGER`) and **not** marked as
+            AI-generated. `sender_user_id` is `null` for guest/system
+            messages on the wire — the additional guards are belt-and-
+            braces against future changes that might populate the field
+            for non-actor senders.
+          */}
+          {message.senderUserId !== null &&
+            !message.aiGenerated &&
+            (message.senderType === "OWNER" ||
+              message.senderType === "MANAGER") && (
+              <ConversationThreadSenderMeta senderUserId={message.senderUserId} />
+            )}
         </li>
       ))}
     </ol>

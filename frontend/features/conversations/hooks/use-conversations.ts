@@ -66,7 +66,7 @@ export function useConversationMessages(
 ): UseQueryResult<MessageList> {
   const tenantId = useTenantId();
   return useQuery({
-    queryKey: conversationsKeys.messages(tenantId, conversationId),
+    queryKey: conversationsKeys.messages(tenantId, conversationId, page),
     queryFn: () =>
       getConversationsDataSource().listMessages(tenantId, conversationId, page, perPage),
     retry: retryPolicy,

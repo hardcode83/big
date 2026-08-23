@@ -25,8 +25,8 @@ export const conversationsKeys = {
     tenantScopedKey(tenantId, "conversations-list", filters),
   detail: (tenantId: string, conversationId: string): QueryKey =>
     tenantScopedKey(tenantId, "conversations-detail", conversationId),
-  messages: (tenantId: string, conversationId: string): QueryKey =>
-    tenantScopedKey(tenantId, "conversations-messages", conversationId),
+  messages: (tenantId: string, conversationId: string, page: number): QueryKey =>
+    tenantScopedKey(tenantId, "conversations-messages", conversationId, page),
   listPrefix: (tenantId: string): QueryKey =>
     tenantScopedKey(tenantId, "conversations-list"),
   messagesPrefix: (tenantId: string, conversationId: string): QueryKey =>

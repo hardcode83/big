@@ -82,10 +82,17 @@ describe("ConversationThreadMessages (D7, D8)", () => {
     expect(view.getByText("thread.noMessages")).toBeTruthy();
   });
 
-  it("renders ConversationThreadSenderMeta for messages with a non-null senderUserId", () => {
+  it("renders ConversationThreadSenderMeta for MANAGER messages with a non-null senderUserId (R3.5)", () => {
     const view = render(
       <ConversationThreadMessages
-        messages={[message({ id: "m1", senderUserId: "u1" })]}
+        messages={[
+          message({
+            id: "m1",
+            senderType: "MANAGER",
+            aiGenerated: false,
+            senderUserId: "u1",
+          }),
+        ]}
       />,
     );
     // The section heading is split across the <strong> and ":" tail —
@@ -98,5 +105,53 @@ describe("ConversationThreadMessages (D7, D8)", () => {
       <ConversationThreadMessages messages={[message({ id: "m1", senderUserId: null })]} />,
     );
     expect(view.queryByText("fields.senderUserIdSection")).toBeNull();
+  });
+
+  it("does NOT render the sender-meta section when sender_type is AI even if senderUserId is non-null (R3.5)", () => {
+    const view = render(
+      <ConversationThreadMessages
+        messages={[
+          message({
+            id: "m1",
+            senderType: "AI",
+            aiGenerated: true,
+            senderUserId: "system-1",
+          }),
+        ]}
+      />,
+    );
+    expect(view.queryByText("fields.senderUserIdSection")).toBeNull();
+  });
+
+  it("does NOT render the sender-meta section when sender_type is GUEST even if senderUserId is non-null (R3.5)", () => {
+    const view = render(
+      <ConversationThreadMessages
+        messages={[
+          message({
+            id: "m1",
+            senderType: "GUEST",
+            aiGenerated: false,
+            senderUserId: "guest-1",
+          }),
+        ]}
+      />,
+    );
+    expect(view.queryByText("fields.senderUserIdSection")).toBeNull();
+  });
+
+  it("renders the sender-meta section when sender_type is MANAGER and aiGenerated is false (R3.5)", () => {
+    const view = render(
+      <ConversationThreadMessages
+        messages={[
+          message({
+            id: "m1",
+            senderType: "MANAGER",
+            aiGenerated: false,
+            senderUserId: "u1",
+          }),
+        ]}
+      />,
+    );
+    expect(view.getByText("fields.senderUserIdSection", { exact: false })).toBeTruthy();
   });
 });
