@@ -285,6 +285,17 @@ en el cliente desde `current_operational_state` del catálogo) violaría de fren
   ahí es obligatoria en la sección de verificación, y `npm test` necesita además la lista de copias
   de `tech-incident-context` para no dar dos ficheros en rojo ajenos al change.
 
+- **Deuda con disparador: la pasada visual de `/cleaning` a 320 px sigue pendiente, y se hace en
+  `dev`.** Ningún criterio de aceptación depende de ella —R2.1/R3.1/R3.3/R3.4 están fijados por
+  tests de componente con aserciones de DOM reales y por la API medida contra Postgres real—, así
+  que es acabado y no cobertura. No se hizo en el worktree porque `PORT_OFFSET` sirve la página sin
+  hidratarla (`next dev` sin `allowedDevOrigins`, recogido en `sdd/project.md`) y porque
+  `AWAITING_CLEANING` no es alcanzable por el camino real en un mismo día. **Disparador**: el
+  primer despliegue de este change en `dev`. **Qué mirar allí**: la fila bloqueada con el botón
+  deshabilitado y el `<select>` vivo, el `409` de la carrera anunciándose con el mensaje de la
+  vivienda, los dos idiomas, 320 px sin scroll horizontal y la consola limpia. `dev` es además
+  donde se midió el fallo original el 2026-08-22, así que es el sitio natural para cerrarlo.
+
 ## Requirement coverage
 
 | Req | Dónde se resuelve |

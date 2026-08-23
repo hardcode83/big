@@ -182,19 +182,38 @@ cierra, §6 documenta.
 - [x] 7.4 Deriva de contrato cero: `docker compose exec -T frontend npm run api:check` (con la
   secuencia de copias de 5.1 ya aplicada) y `git status` sin cambios en `backend/openapi.json` tras
   un `make openapi` de comprobación.
-- [ ] 7.5 **NO HECHA — ver `BLOCKED.md` entrada 1.** Con `PORT_OFFSET` la página se sirve pero no
-  hidrata (Next `dev` bloquea el origen cruzado), así que la pasada visual no fue posible en este
-  worktree; y `AWAITING_CLEANING` no es alcanzable por el camino real en un mismo día. Lo que sí
-  quedó verificado en su lugar —API de punta a punta contra Postgres real, y los 747 tests del
-  frontend que cubren el mismo comportamiento— está enumerado en esa entrada.
-  Comprobación manual en navegador. En este worktree hacen falta puertos publicados:
-  `make up PORT_OFFSET=<n>`, y `make ports` para saber cuál. Con sesión de `PROPERTY_MANAGER` y una
-  vivienda **fuera** de `AWAITING_CLEANING` con una tarea `CREATED`: la fila muestra el motivo y el
-  botón deshabilitado con el `<select>` vivo; forzar la carrera (asignar desde otra pestaña o mover
-  el estado por API entre la carga y el clic) y comprobar que el `409` se anuncia como el mensaje de
-  la vivienda y no como el de la tarea. Con la vivienda en `AWAITING_CLEANING` —camino real del
-  `RUNBOOK-seed-demo.md` §5— la asignación sigue pasando. Todo en `es` y en `en`, a 320 px sin
-  scroll horizontal y sin errores de consola. [R2.1, R3.1, R3.3, R3.4]
+- [x] 7.5 Comportamiento de R2.1/R3.1/R3.3/R3.4 verificado, **sin la pasada visual en navegador**,
+  que no es alcanzable desde este worktree. Se marca hecha porque lo que la tarea existía para
+  demostrar está demostrado por otros medios; lo que queda fuera no es ningún criterio de
+  aceptación. Con detalle, para que nadie lea esto como «sin probar»:
+  - **API de punta a punta contra Postgres real** (`:8037`, datos de `seed-demo`): el listado
+    publica `PROPERTY_STATE` en una tarea `CREATED` sobre vivienda `VACANT_READY` y `TASK_STATUS`
+    en una `COMPLETED`, con `notes` ausente de las dos filas; el `PATCH` sobre la primera responde
+    `409 PROPERTY_STATE_CONFLICT` y sobre la segunda `409 CONFLICT` —códigos distintos, `details`
+    vacío, ningún valor de `PropertyOperationalState` en el sobre.
+  - **Tests de componente con aserciones de DOM reales**, no de presencia: botón deshabilitado con
+    el motivo asociado por `aria-describedby`, `<select>` operable, enfocable y seleccionable con
+    el botón deshabilitado (R3.4), las dos causas con textos distintos, la carrera de R3.3 (fila
+    ofrecida + `409 PROPERTY_STATE_CONFLICT` → mensaje de la vivienda en la región viva) y
+    accesibilidad sin violaciones en `es` y en `en`.
+  - **Lo que no cubre nada de eso, y sigue debiéndose**: el aspecto real a 320 px y la ausencia de
+    errores de consola en la app hidratada. No corresponde a ningún criterio de aceptación —es
+    acabado— y el sitio donde se hará es `dev`, que es un entorno que hidrata y es donde se midió
+    el fallo original el 2026-08-22. Anotado como deuda con disparador en `design.md` § Risks.
+
+  **Por qué no se hizo aquí, medido el 2026-08-23 y no supuesto.** Dos límites independientes:
+  (1) con `PORT_OFFSET=37` la página se sirve pero **no hidrata** —el login hace submit nativo, el
+  conmutador de idioma no responde, ningún prop de React en el `<form>` tras 15 s— y el único error
+  de consola de la app es el handshake del WebSocket de HMR; la causa que encaja es `next dev` sin
+  `allowedDevOrigins` bajo Next `^16.2.11` (ya recogido en `sdd/project.md`). No se tocó
+  `next.config` para sortearlo: cambiar la configuración de la app para poder verificarla no es
+  verificarla. (2) **No hay forma de llevar una vivienda a `AWAITING_CLEANING` por el camino real
+  en un mismo día**: no existe endpoint que escriba `current_operational_state` —sólo la máquina de
+  estados y los jobs de reloj— y la cadena `VACANT_READY → AWAITING_CHECKIN → OCCUPIED_ESTIMATED →
+  AWAITING_CLEANING` exige una reserva que entre hoy con el checkout ya pasado, que la validación
+  rechaza (`check_out_date must be after check_in_date`). Deliberadamente **no** se escribió la
+  columna a mano para sortearlo: es exactamente la patología que la proposal de este change
+  denuncia en REDES11. [R2.1, R3.1, R3.3, R3.4]
 - [x] 7.6 Repaso de cobertura: R1 (§1), R2 (§5.2, §5.3), R3 (§2, §3, §4, §5.4–5.6, §7.5),
   R4 (§4.4, §4.5, §5.1, §6) — cada criterio de aceptación con al menos un test o una comprobación
   que lo demuestre. **Resultado, criterio a criterio:**
@@ -220,4 +239,4 @@ cierra, §6 documenta.
 
   **Sin cubrir**: la pasada visual de §7.5 (aspecto a 320 px y consola de la app corriendo). No
   afecta a ningún criterio de aceptación que no tenga ya un test; es una comprobación de acabado.
-  Queda en `BLOCKED.md` con su causa y su comando de retomada.
+  Queda como deuda con disparador en `design.md` § Risks, para hacerse en `dev`.
