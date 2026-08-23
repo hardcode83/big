@@ -168,6 +168,10 @@ Categorías:
   needs: design-system-tokens · size: M · kind: feature
 - [ ] visual-restyle-workspace — [FE] **aplicar los tokens nuevos a las pantallas ya entregadas**: solo piel, sin arquitectura de información ni datos ni endpoints. Deja fuera, con motivo escrito, la reducción del sidebar de 13 destinos a 6, la rejilla con foto de `/properties` y los cuatro bloques agregados del dashboard …
   needs: design-system-tokens · size: L · kind: feature
+- [ ] reservation-amount-empty-render — [TECH] **la lista de reservas pinta un código de divisa suelto cuando no hay importe**: `{row.grossAmount ?? ""} {row.currency}` sale como « EUR». Replicado en cuatro sitios, y el propio fichero ya usa el idioma correcto (`?? "—"`) diez líneas antes. Se entregó así porque ningún test renderiza el caso nulo. Descubierto analizando el export de Stitch …
+  size: S · kind: tech
+- [ ] reservation-property-identity — [BE] **la lista de reservas identifica la vivienda con un UUID pelado**, porque `ReservationResponse` tiene 27 campos y de la propiedad solo `property_id`: sin nombre ni código interno. Mismo problema y misma forma que ya resolvieron `cleaner-task-context` y `tech-incident-context`. Descubierto analizando el export de Stitch …
+  needs: reservations, properties-crud · size: M · kind: feature
 - [ ] dashboard-operational-kpis — [BE] **las tres tarjetas de KPI del dashboard rediseñado** (limpiezas de hoy, próximos check-ins, incidencias abiertas con su desglose de urgentes): conteos a nivel de tenant que hoy no sirve ninguna ruta. Salió de `visual-restyle-workspace` D4, que censa los agregados existentes y por qué no llegan.
   needs: dashboard-api, cleaning, maintenance, reservations · size: M · kind: feature
 - [ ] dashboard-occupancy-series — [BE] **la serie de ocupación semanal** del dashboard rediseñado: no existe ninguna serie temporal ni tasa de ocupación en el contrato. La decisión de entrada es qué cuenta como noche ocupada (reserva confirmada, bloqueo del propietario, fuera de servicio). Salió de `visual-restyle-workspace` D4.

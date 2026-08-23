@@ -52,10 +52,19 @@ porque están en la pantalla:
    no un nombre de vivienda.
 2. La columna **Amount** pinta `EUR` sin cifra en tres de las cuatro filas.
 
-Ninguno de los dos se arregla aquí —esto es un restyle y arreglarlos toca datos—, pero
-tampoco se dejan sin registrar: al abrir el `/sdd:new` de esta entrada hay que comprobar si
-son bugs vivos o artefactos del seed, y si son vivos, sacarlos a su entrada. Un restyle que
-repinta un UUID más bonito no ha mejorado nada.
+**Comprobados el 2026-08-23: los dos están vivos, y tienen entrada propia.**
+
+- `reservation-amount-empty-render` [TECH] — el `?? ""` está en **cuatro** sitios (la
+  celda de la lista y los tres importes del detalle), y ningún test renderiza el caso
+  nulo. Presentación pura, no toca contrato.
+- `reservation-property-identity` [BE] — `ReservationResponse` tiene 27 campos y de la
+  propiedad solo `property_id`: no hay nombre que pintar. El frontend no puede arreglarlo.
+  Y la columna **Guest** de al lado tiene el mismo defecto.
+
+Ninguno se arregla aquí: esto es un restyle. Pero conviene tener presente por qué se
+registraron en vez de dejarlos pasar — **un restyle que repinta un UUID más bonito no ha
+mejorado nada**, y la tabla de reservas rediseñada seguiría sin decir a qué vivienda se
+refiere cada fila.
 
 ## Decisión 2: la reducción del sidebar a 6 ítems se RECHAZA
 
