@@ -337,6 +337,18 @@ async def test_closing_a_cleaning_while_a_guest_is_in_is_a_conflict(
     # discriminator is `PropertyStateBlocksCleaningError` and not the route — the alternative
     # was naming the cause after whoever asked.
     assert blocked.json()["error"]["code"] == "PROPERTY_STATE_CONFLICT"
+    # D3 on this path too, and this is the path that makes D3 necessary at all: the caller
+    # here is a `CLEANER`, who does not hold `READ_PROPERTIES`. The assignment test of the
+    # same guarantee (`test_the_property_conflict_does_not_leak_the_operational_state`) only
+    # covers the `PROPERTY_MANAGER`, who could read the state anyway — so without these two
+    # asserts the leak D3 forbids would be unguarded on the only route where it would
+    # actually widen what the caller can see.
+    error = blocked.json()["error"]
+    assert not error["details"]
+    # Non-empty first: "no state name appears in the message" passes for free on an empty
+    # message, and a guarantee that holds vacuously guards nothing.
+    assert error["message"]
+    assert not any(state.value in error["message"] for state in PropertyOperationalState)
 
 
 @pytest.mark.asyncio
