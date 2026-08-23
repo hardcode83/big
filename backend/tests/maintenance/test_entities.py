@@ -6,9 +6,10 @@ from decimal import Decimal
 
 import pytest
 
-from app.maintenance.domain.entities import Incident, OwnerApproval
+from app.maintenance.domain.entities import Incident, IncidentPhoto, OwnerApproval
 from app.maintenance.domain.enums import (
     IncidentCategory,
+    IncidentPhotoStage,
     IncidentSeverity,
     IncidentSource,
     IncidentStatus,
@@ -924,3 +925,221 @@ def test_approval_answer_must_be_approved_or_rejected(
         )
 
     assert dataclasses.asdict(approval) == before
+
+
+# --- incident photos (`incident-photos` sections 3.1-3.4) -----------------------------
+#
+# The enum, the entity, and the state gate that decides whether an incident will take a
+# photo at all. The gate is the only real invariant of the three, so it carries most of the
+# tests: it has to produce *three distinguishable* refusals, in a fixed order, and R2.4/R2.5/
+# R2.6 each name a different one.
+
+
+def test_the_photo_stage_enum_has_exactly_two_members() -> None:
+    """R1.2 — `BEFORE` and `AFTER`, closed.
+
+    Asserted as an exact set, not with two `in` checks, so that adding a third member fails
+    here. That is the point of the closed enum: a third stage must be a deliberate schema
+    change, not a one-line addition, because the closedness is what keeps this off the
+    free-text-sink census of rule 11 (R6.5).
+    """
+    assert {stage.value for stage in IncidentPhotoStage} == {"BEFORE", "AFTER"}
+
+
+def test_the_photo_stage_values_are_their_own_names() -> None:
+    """The PRD convention: enum values are the exact tokens, so the wire, the database enum
+    and the Python member cannot drift apart."""
+    for stage in IncidentPhotoStage:
+        assert stage.value == stage.name
+
+
+def test_incident_photo_instantiates_with_the_seven_fields_it_declares() -> None:
+    """R1.1 — and no more than those.
+
+    `IncidentPhoto` deliberately has no `content_type` and no client file name (R1.5): the
+    served `Content-Type` is derived from the storage key's extension, and the client's file
+    name never touches the key. Asserted as an exact field set so neither can be added
+    without this failing.
+    """
+    photo = IncidentPhoto(
+        id=uuid.uuid4(),
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        uploaded_by=uuid.uuid4(),
+        stage=IncidentPhotoStage.BEFORE,
+        storage_key="tenants/t/incidents/i/p.jpg",
+        created_at=NOW,
+    )
+
+    assert {field.name for field in dataclasses.fields(photo)} == {
+        "id",
+        "tenant_id",
+        "incident_id",
+        "uploaded_by",
+        "stage",
+        "storage_key",
+        "created_at",
+    }
+
+
+def test_incident_photo_carries_its_own_tenant_id() -> None:
+    """R1.3/D2 — the deviation from `cleaning_photos`, which has none.
+
+    The column is what puts `incident_photos` under the global tenant filter and what lets
+    the isolation test of R6.3 exist without going through the incident.
+    """
+    tenant = uuid.uuid4()
+    photo = IncidentPhoto(
+        id=uuid.uuid4(),
+        tenant_id=tenant,
+        incident_id=uuid.uuid4(),
+        uploaded_by=uuid.uuid4(),
+        stage=IncidentPhotoStage.AFTER,
+        storage_key="tenants/t/incidents/i/p.png",
+        created_at=NOW,
+    )
+
+    assert photo.tenant_id == tenant
+
+
+# --- the state gate: `Incident.ensure_accepts_photo()` (R2.4, R2.5, R2.6, D6) ----------
+
+
+@pytest.mark.parametrize(
+    "status", [IncidentStatus.IN_PROGRESS, IncidentStatus.WAITING_EXTERNAL_PARTS]
+)
+def test_the_two_working_statuses_accept_a_photo(status: IncidentStatus) -> None:
+    """R2.4 — the two states in which the technician's work is under way.
+
+    `WAITING_EXTERNAL_PARTS` is included on purpose: the flat still has a broken thing in it
+    and the technician may well photograph what is missing.
+    """
+    incident = make_incident(status)
+
+    incident.ensure_accepts_photo()
+
+
+@pytest.mark.parametrize("status", [IncidentStatus.RESOLVED, IncidentStatus.CANCELLED])
+def test_a_closed_incident_refuses_a_photo_as_already_closed(
+    status: IncidentStatus,
+) -> None:
+    """R2.6 — and specifically `IncidentAlreadyClosedError`, not the generic refusal.
+
+    First in the order, because a closed incident will never admit anything: answering "out
+    of order" would suggest waiting for a state that is never coming.
+    """
+    incident = make_incident(status)
+
+    with pytest.raises(IncidentAlreadyClosedError):
+        incident.ensure_accepts_photo()
+
+
+def test_an_incident_awaiting_the_owner_refuses_a_photo_with_its_own_error() -> None:
+    """R2.5 — `IncidentBlockedByPendingApprovalError`, distinguishable from R2.4's refusal.
+
+    Second in the order. It means something different from "out of order": the work is
+    blocked on a specific answer from a specific person, which is actionable.
+    """
+    incident = make_incident(IncidentStatus.AWAITING_OWNER_APPROVAL)
+
+    with pytest.raises(IncidentBlockedByPendingApprovalError):
+        incident.ensure_accepts_photo()
+
+
+@pytest.mark.parametrize(
+    "status",
+    [
+        IncidentStatus.OPEN,
+        IncidentStatus.CLASSIFIED,
+        IncidentStatus.ASSIGNED,
+        IncidentStatus.ACCEPTED,
+    ],
+)
+def test_any_other_status_refuses_a_photo_as_out_of_order(
+    status: IncidentStatus,
+) -> None:
+    """R2.4 — `InvalidIncidentTransitionError` for everything that is neither closed nor
+    awaiting the owner and is not one of the two working states.
+
+    Third and last in the order, so it is the residue rather than a case that shadows the
+    two specific ones.
+    """
+    incident = make_incident(status)
+
+    with pytest.raises(InvalidIncidentTransitionError):
+        incident.ensure_accepts_photo()
+
+
+def test_the_three_refusals_are_distinguishable_from_each_other() -> None:
+    """The assertion the proposal actually asks for: not "a 409", but *which* 409.
+
+    Each of the three parametrised tests above catches one error class, but `pytest.raises`
+    accepts a subclass, so three separate tests could all be passing on a common ancestor if
+    the hierarchy were ever flattened wrongly. This pins that the three are distinct types,
+    which is what makes the API's three distinct messages (D6) possible.
+    """
+    errors = set()
+    for status in (
+        IncidentStatus.RESOLVED,
+        IncidentStatus.AWAITING_OWNER_APPROVAL,
+        IncidentStatus.OPEN,
+    ):
+        try:
+            make_incident(status).ensure_accepts_photo()
+        except Exception as exc:  # noqa: BLE001 - the type is the assertion
+            errors.add(type(exc))
+
+    assert errors == {
+        IncidentAlreadyClosedError,
+        IncidentBlockedByPendingApprovalError,
+        InvalidIncidentTransitionError,
+    }
+
+
+def test_the_shared_helper_answers_the_photo_gate_and_a_real_transition_alike() -> None:
+    """D6's "una sola casa" for the refusal order, asserted as cross-caller consistency.
+
+    **This test does not observe the order, and an earlier name of it claimed to.** The two
+    extracted branches are mutually exclusive on one row — an incident cannot be both closed
+    and awaiting the owner — so no single scenario can watch one check run before the other.
+    The order is a fact about the code's structure, and what actually exercises it across all
+    eleven operations is the pre-existing `_REJECTED_CASES` matrix above, together with
+    `test_operation_table_matches_entity_table`, which fails if a row is ever added to
+    `_TRANSITIONS` without being declared here — including the pseudo-transition D6 rejected.
+
+    What this *does* verify is the thing the extraction could actually have broken: that
+    `ensure_accepts_photo` and a genuine transition are answered by the **same** helper, so
+    they cannot drift into disagreeing about what a closed incident means.
+    """
+    resolved = make_incident(IncidentStatus.RESOLVED)
+
+    with pytest.raises(IncidentAlreadyClosedError):
+        resolved.ensure_accepts_photo()
+
+    # And the same entity refuses a real transition with the same error, which is the
+    # evidence that one helper answers for both callers rather than two copies agreeing today.
+    with pytest.raises(IncidentAlreadyClosedError):
+        resolved.en_route(now=NOW)
+
+
+@pytest.mark.parametrize("status", list(IncidentStatus))
+def test_ensure_accepts_photo_never_mutates(status: IncidentStatus) -> None:
+    """D6 — the method does not move the incident. Every status, accepted or refused.
+
+    Uploading a photo is evidence, not a lifecycle step: `_TRANSITIONS` has no row for it and
+    the entity must come out of this call byte-identical.
+    """
+    incident = make_incident(status)
+    before = dataclasses.asdict(incident)
+
+    try:
+        incident.ensure_accepts_photo()
+    except (
+        IncidentAlreadyClosedError,
+        IncidentBlockedByPendingApprovalError,
+        InvalidIncidentTransitionError,
+    ):
+        pass
+
+    assert dataclasses.asdict(incident) == before
+

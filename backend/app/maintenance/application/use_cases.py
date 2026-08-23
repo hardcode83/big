@@ -20,6 +20,7 @@ rather than dressed up as a feature.
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
@@ -40,12 +41,22 @@ from app.cleaning.domain.ports import (
     IncidentReportedAcknowledgement,
 )
 from app.core.unit_of_work import UnitOfWork
+from app.integrations.domain.storage import (
+    MAGIC_BYTES_LENGTH,
+    FileStorageFactory,
+    FileStoragePort,
+    StorageWriteError,
+    detect_image_type,
+    storage_key_for_incident_photo,
+)
 from app.maintenance.domain.entities import (
+    IncidentPhoto,
     CONVERSATION_INCIDENT_TITLES,
     Incident,
     OwnerApproval,
 )
 from app.maintenance.domain.enums import (
+    IncidentPhotoStage,
     IncidentCategory,
     IncidentSeverity,
     IncidentSource,
@@ -54,6 +65,9 @@ from app.maintenance.domain.enums import (
     OwnerApprovalStatus,
 )
 from app.maintenance.domain.exceptions import (
+    IncidentPhotoStorageUnavailableError,
+    IncidentPhotoTooLargeError,
+    UnsupportedIncidentPhotoFormatError,
     IncidentNotFoundError,
     InvalidTechnicianError,
     MaintenanceValidationError,
@@ -69,6 +83,7 @@ from app.maintenance.domain.notifications import (
 from app.maintenance.domain.ports import IncidentClassifier, LiveCleaningTaskQuery
 from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.repositories import (
+    IncidentPhotoRepository,
     IncidentFilters,
     IncidentPage,
     IncidentQuery,
@@ -2188,4 +2203,329 @@ class GetIncidentUseCase:
     ) -> Incident:
         return await _load_incident_in_scope(
             self._incidents, tenant_id, incident_id, actor
+        )
+
+
+#: How much of an upload is read at a time. Small enough that the peak this holds is the
+#: ceiling plus one chunk, which is what makes "abort on exceeding" mean something rather than
+#: "abort after buffering everything". Same value `cleaning` uses.
+_UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+class IncidentPhotoUpload(Protocol):
+    """What `UploadIncidentPhotoUseCase` needs from an uploaded file: bytes, on demand.
+
+    Declared here rather than typed as Starlette's `UploadFile` because
+    `tests/test_layering.py` forbids `application/` from importing `fastapi` — and the reason
+    behind that rule bites here in particular: the use case must be able to consume a **stream**
+    it did not buffer, so what it depends on is the read contract, not the web framework's
+    object. `UploadFile` satisfies this Protocol as it is, and so does a four-line test fake.
+
+    **Declared in `maintenance` rather than shared with `cleaning`'s identical `ChunkedUpload`,
+    and that is a deliberate departure from how design D5 treated the serving route.** D5 shared
+    ~400 lines of security prose because two copies of that argument are two places it can
+    diverge. This is four lines of structural typing with no invariant inside it, so there is no
+    guarantee here that could drift apart.
+
+    What decides it is the **direction of the import**: sharing `cleaning`'s would make this
+    module's `application/` depend on another domain's `application/`, which is a sideways
+    dependency this file has no other instance of — distinct from, and worse than, the
+    established pattern of depending on a sibling domain's `domain/` ports (see the note above
+    about `app.cleaning.domain.ports`).
+
+    **The zero-duplication alternative, recorded because it is legitimate and a third consumer
+    should not have to rediscover it** (raised by the section 6 architecture panel): put the
+    Protocol in `app/integrations/domain/storage.py`, beside `FileStoragePort`. Both domains
+    already depend on that module by design (D4/D5), so it removes the duplication without
+    introducing any new dependency direction. It was not done here because two four-line copies
+    are cheaper than widening the shared storage module for a type it does not use itself — but
+    when `revenue` arrives as the third consumer, that is where this belongs.
+    """
+
+    async def read(self, size: int = -1) -> bytes:
+        """Up to `size` bytes, or `b""` once the file is exhausted."""
+        ...
+
+
+@dataclass(frozen=True)
+class UploadedIncidentPhoto:
+    """The stored photo and the signed URL that reads it back.
+
+    Two fields rather than one entity because the URL is not a property of the row: it is minted
+    per response, expires, and depends on the tenant's storage backend. The entity carries
+    `storage_key`, which R3.3 forbids as a **field** of any response — enumerating the response
+    fields at the schema, never dumping this, is what keeps that true.
+    """
+
+    photo: IncidentPhoto
+    url: str
+
+
+class UploadIncidentPhotoUseCase:
+    """R2 — the assigned technician uploads one photo of the incident (design D7, D10).
+
+    **Two guarantees live here and nowhere else:**
+
+    * Every `storage_key` is built by `storage_key_for_incident_photo` from the **session's**
+      `tenant_id`. No key, fragment or file name from the client reaches it, and none is ever
+      returned. `FileStoragePort.put` takes an arbitrary `key` on purpose — the port is shared
+      with `cleaning` — so the port cannot enforce this and this is the only place that can.
+    * `uploaded_by` is `actor.user_id`, from the verified token, never from the body.
+      `incident_photos.uploaded_by` is a plain FK to `users.id` with no tenant restriction and
+      the repository writes it verbatim, so an id taken from a request would record a
+      neighbour's user as the author. That precondition is documented on
+      `IncidentPhotoRepository.add`; this is the caller that keeps it.
+
+    **Order of operations is design D7 and it is not interchangeable: object first, row second**,
+    and a failed commit deletes the object. R2.7 forbids a row pointing at an object that is not
+    there — that is a broken `GET` for ever — while the opposite failure leaves an orphaned
+    object, which is recoverable rubbish.
+
+    The state gate is `Incident.ensure_accepts_photo()` and lives in the entity (design D6), so
+    the three distinguishable refusals of R2.4/R2.5/R2.6 are the entity's rule rather than this
+    use case's. Resolution goes through `_load_incident_in_scope`, which is what makes the `404`
+    of a technician who is not the assignee byte-identical to one for an incident that does not
+    exist (R2.3).
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        photos: IncidentPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+        max_bytes: int,
+    ) -> None:
+        self._incidents = incidents
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+        self._audit = _AuditWriter(audit)
+        self._uow = uow
+        # Passed in rather than read from `app.core.config` here: `application/` receives its
+        # configuration the same way it receives its ports, which is what lets a test drive the
+        # 413 path with a two-byte ceiling instead of a 10 MB fixture.
+        self._max_bytes = max_bytes
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        stage: IncidentPhotoStage,
+        upload: IncidentPhotoUpload,
+        actor: IncidentActor,
+        now: datetime,
+    ) -> UploadedIncidentPhoto:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+        # R2.4/R2.5/R2.6 — three distinguishable `409`s, in the entity, before anything is read
+        # or written. `stage` is already an `IncidentPhotoStage` by the time it arrives (D11:
+        # FastAPI refuses an unknown value with a `422` before this use case exists), so there
+        # is no stage validation to do here and deliberately none written.
+        incident.ensure_accepts_photo()
+
+        content = await self._read_within_limit(upload)
+        # R2.9: the format comes from the BYTES. Whatever `Content-Type` the client declared is
+        # not consulted anywhere in this module.
+        image = detect_image_type(content[:MAGIC_BYTES_LENGTH])
+        if image is None:
+            raise UnsupportedIncidentPhotoFormatError(
+                "The uploaded file is not a JPEG, PNG or WebP image"
+            )
+
+        photo_id = uuid.uuid4()
+        storage_key = storage_key_for_incident_photo(
+            # The tenant of the verified token, never a value that travelled with the request.
+            # This call is the only producer of keys in the maintenance module.
+            tenant_id=tenant_id,
+            incident_id=incident.id,
+            photo_id=photo_id,
+            # From the detected MIME, so the client's file name never reaches the key.
+            extension=image.extension,
+        )
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        # Which backend this is stays unknown here; the factory answers from the tenant's
+        # stored `storage_type`.
+        storage = self._storage.storage_for(config.storage_type)
+        try:
+            await storage.put(storage_key, content, content_type=image.mime)
+        except StorageWriteError as exc:
+            # Nothing has been inserted yet, so there is nothing to compensate: this is why the
+            # object goes first (D7). R2.8 turns this into a `502`.
+            raise IncidentPhotoStorageUnavailableError(
+                "The photo could not be stored; please try again"
+            ) from exc
+
+        photo = IncidentPhoto(
+            id=photo_id,
+            tenant_id=tenant_id,
+            incident_id=incident.id,
+            uploaded_by=actor.user_id,
+            stage=stage,
+            storage_key=storage_key,
+            created_at=now,
+        )
+        try:
+            await self._photos.add(tenant_id, photo)
+            await self._audit.record(
+                tenant_id=tenant_id,
+                action=audit_actions.INCIDENT_PHOTO_UPLOADED,
+                entity_type=audit_actions.ENTITY_INCIDENT_PHOTO,
+                # The photo, not the incident (R6.1): `entity_id` is what
+                # `ix_audit_logs_tenant_id_entity_type_entity_id` indexes.
+                entity_id=photo.id,
+                actor=actor,
+                changes=_incident_photo_change_set(photo),
+                now=now,
+            )
+            await self._uow.commit()
+        except Exception:
+            # The compensating delete of design D7, and the reason `FileStoragePort.delete` has
+            # a caller at all. Best effort by contract: it must not replace the real failure
+            # with one of its own on the way out.
+            await self._delete_quietly(storage, storage_key)
+            raise
+
+        return UploadedIncidentPhoto(
+            photo=photo, url=storage.signed_url(storage_key)
+        )
+
+    async def _read_within_limit(self, upload: IncidentPhotoUpload) -> bytes:
+        """Consume the upload in chunks, counting, and abort the moment it is too big.
+
+        **What this does NOT do: it does not protect against a lying `Content-Length` or a
+        chunked upload, and it does not satisfy "reject before reading the body".** By the time
+        this loop asks for its first chunk the upload has already been received in full and
+        spooled. Why that is mechanically the case is **rule 14 of `sdd/steering/security.md`**,
+        the single home of that contract — do not re-derive it here.
+
+        The check that genuinely stops an oversized or dishonest body is
+        `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
+        (`app/core/http_limits.py`). **So do not "simplify" the middleware branch on the grounds
+        that the use case already counts.** Deleting the middleware's counter would leave an
+        anonymous caller able to make the backend spool an arbitrary volume to disk before
+        authentication ever runs.
+
+        What this loop does buy, and why it stays:
+
+        * It bounds the **in-process copy**. `content` ends up in memory, and the ceiling plus
+          one chunk is the peak this holds regardless of how large the spooled file is.
+        * It is the ceiling for any wiring that has no middleware in front — a direct call from
+          a test, a worker, or a future non-HTTP caller. The use case cannot assume an ASGI
+          stack it does not own.
+
+        R5.1 ("comprobado antes de leer el cuerpo entero") is satisfied by the middleware; this
+        is defence in depth behind it, not a second enforcement of the same guarantee.
+        """
+        chunks: list[bytes] = []
+        received = 0
+        while True:
+            chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            received += len(chunk)
+            if received > self._max_bytes:
+                # Raised before the chunk is kept, so the peak held is the ceiling plus one
+                # chunk — not the size of whatever the client decided to send.
+                raise IncidentPhotoTooLargeError(
+                    f"The photo exceeds the {self._max_bytes} byte limit"
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    @staticmethod
+    async def _delete_quietly(storage: FileStoragePort, storage_key: str) -> None:
+        """Delete, and swallow whatever that costs — the caller is already failing.
+
+        The key IS logged, and that is deliberate rather than an oversight of R3.3: that rule
+        governs API responses, and an orphaned object is only recoverable by someone who can
+        find it. This log line is the whole recovery procedure for design D7's accepted failure
+        mode, and `steering/security.md` rule 5 says in as many words that the prohibition on
+        publishing internal paths "no alcanza a los logs".
+        """
+        try:
+            await storage.delete(storage_key)
+        except Exception:
+            logger.warning(
+                "maintenance.orphaned_incident_photo_object",
+                extra={"storage_key": storage_key},
+            )
+
+
+def _incident_photo_change_set(photo: IncidentPhoto) -> ChangeSet:
+    """The audited diff of an upload: stage, incident, uploader — and never the key (R6.2).
+
+    The three names are exactly `AUDITABLE_FIELDS["INCIDENT_PHOTO"]`, and `ChangeSet` refuses
+    anything outside it, so this function cannot widen the row even by mistake.
+    """
+    return (
+        ChangeSet(audit_actions.ENTITY_INCIDENT_PHOTO)
+        .diff("stage", None, photo.stage)
+        .diff("incident_id", None, photo.incident_id)
+        .diff("uploaded_by", None, photo.uploaded_by)
+    )
+
+
+class ListIncidentPhotosUseCase:
+    """R3.1 — the photos of one incident, oldest first, each with a freshly minted signed URL.
+
+    Resolves the incident through `_load_incident_in_scope` first, exactly as the upload does
+    and for the same two rules: the incident is resolved **inside the tenant**, and a
+    `TECHNICIAN` only reaches the incidents assigned to them (R3.2). A manager or owner sees
+    every photo of every incident of their tenant, and neither role can name a technician
+    through any request field — `IncidentActor.restrict_to_technician_id` derives it from the
+    persisted role.
+
+    **Resolving the incident first is also what makes the listing's `404` the shared,
+    byte-identical `IncidentNotFoundError`** (R3.4): an incident of another tenant, one that
+    never existed, and one assigned to a different technician are one outcome. Reading
+    `list_for_incident` on its own would answer an empty list for all three, which leaks nothing
+    but says "this incident exists and has no photos" to a caller who owns neither.
+
+    **`storage_key` leaves this use case inside `UploadedIncidentPhoto.photo` and stops at the
+    schema.** It has to: `signed_url` is what turns it into the one thing a client may see, and
+    the port takes the key. R3.3 is enforced by `IncidentPhotoResponse` enumerating its fields
+    (never `model_validate`/`from_attributes` over the entity), asserted against the
+    **serialised body** rather than the field list.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        photos: IncidentPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+    ) -> None:
+        self._incidents = incidents
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        actor: IncidentActor,
+        now: datetime,
+    ) -> tuple[UploadedIncidentPhoto, ...]:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+        photos = await self._photos.list_for_incident(tenant_id, incident.id)
+        config = await self._configs.get_or_create(tenant_id, now)
+        # Which backend answers stays unknown here. `LOCAL` mints a URL of this API's own
+        # serving route, `S3` a presigned one straight at the provider — the caller gets a URL
+        # either way and cannot tell from this code which it is.
+        storage = self._storage.storage_for(config.storage_type)
+        return tuple(
+            UploadedIncidentPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
+            for photo in photos
         )

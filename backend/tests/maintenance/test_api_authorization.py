@@ -46,6 +46,13 @@ ROUTES: tuple[tuple[str, str], ...] = (
     ("POST", INCIDENTS + "/{incident_id}/resume"),
     ("POST", INCIDENTS + "/{incident_id}/resolve"),
     ("POST", INCIDENTS + "/{incident_id}/cancel"),
+    # `incident-photos` R2.2/R3.2. In this census for the reason the `context` note above
+    # gives: a route left out of a list that claims to sweep every route of the module is how
+    # the `CLEANER`-refused, anonymous-refused and guest-token-refused sweeps quietly stop
+    # covering the surface. The upload needs a multipart body rather than JSON, which `_call`
+    # handles — see `_MULTIPART`.
+    ("POST", INCIDENTS + "/{incident_id}/photos"),
+    ("GET", INCIDENTS + "/{incident_id}/photos"),
 )
 
 _BODIES: dict[str, dict] = {
@@ -61,7 +68,32 @@ def _body(path: str) -> dict:
     return {}
 
 
+#: Paths whose body is `multipart/form-data`, not JSON (`incident-photos` D11).
+#:
+#: Sending JSON to these would produce a `422` from body validation, which would make an
+#: authorisation sweep pass for the wrong reason — the caller would be refused for the shape of
+#: its request rather than for its role. The sweeps assert a specific refusal code, so the
+#: request has to be well-formed in every respect except the credential.
+_MULTIPART: dict[str, tuple[dict, dict]] = {
+    "/photos": (
+        {"file": ("x.jpg", b"\xff\xd8\xffpadding", "image/jpeg")},
+        {"stage": "BEFORE"},
+    ),
+}
+
+
+def _multipart(path: str) -> tuple[dict, dict] | None:
+    for suffix, payload in _MULTIPART.items():
+        if path.endswith(suffix):
+            return payload
+    return None
+
+
 async def _call(api, method: str, path: str, headers: dict):
+    multipart = _multipart(path) if method == "POST" else None
+    if multipart is not None:
+        files, data = multipart
+        return await api.request(method, path, files=files, data=data, headers=headers)
     return await api.request(method, path, json=_body(path) or None, headers=headers)
 
 
@@ -96,8 +128,13 @@ async def test_a_cleaner_is_refused_on_every_route(api, world, db_session) -> No
 
 
 async def test_an_anonymous_caller_is_refused_on_every_route(api, world, db_session) -> None:
-    """R5.4's other half: there is no anonymous door into this module. The guest portal is
-    the only surface that creates an incident without a session, and it is not here."""
+    """R5.4's other half: none of the routes below opens an anonymous door into this module.
+
+    The module has exactly one, and it is deliberately not in `ROUTES`:
+    `GET /api/v1/incident-photos/{photo_id}`, whose HMAC signature is its credential
+    (`incident-photos` R4.1/R4.6, pinned in `tests/maintenance/test_serve_photo_api.py`).
+    The guest portal remains the only surface that creates an incident without a session,
+    and it is not here either."""
     incident = await make_incident(db_session, world)
 
     for method, template in ROUTES:
@@ -431,3 +468,97 @@ async def test_an_incident_of_another_tenant_is_a_404(api, world, db_session) ->
     )
 
     assert response.status_code == 404
+
+
+# --- the photo routes, per role (`incident-photos` R2.2, R3.2, task 7.5) ---------------
+#
+# The sweeps above prove nobody unauthorised reaches them. These prove the positive half: the
+# upload and the listing hang off **different** existing permissions, which is the whole reason
+# `ROLE_PERMISSIONS` needed no change.
+
+
+async def _assigned_in_progress(api, world, db_session):
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    incident.assigned_technician_id = world.technician.id
+    await db_session.flush()
+    return incident
+
+
+def _photo_body():
+    return (
+        {"file": ("x.jpg", b"\xff\xd8\xffpadding", "image/jpeg")},
+        {"stage": "BEFORE"},
+    )
+
+
+async def _upload_as(api, world, incident, user):
+    files, data = _photo_body()
+    return await api.post(
+        f"{INCIDENTS}/{incident.id}/photos",
+        files=files,
+        data=data,
+        headers=auth_header(api, user),
+    )
+
+
+async def test_the_assigned_technician_and_the_manager_may_upload(
+    api, world, db_session
+) -> None:
+    """R2.2 — `EXECUTE_INCIDENTS`, which is exactly `TECHNICIAN` and `PROPERTY_MANAGER`.
+
+    The manager is allowed on purpose: `maintenance` R6 already authorises them to drive the
+    whole technician cycle "para desatascar", so excluding them here would make the photo the
+    one step of that cycle they cannot unblock.
+    """
+    incident = await _assigned_in_progress(api, world, db_session)
+
+    technician = await _upload_as(api, world, incident, world.technician)
+    manager = await _upload_as(api, world, incident, world.manager)
+
+    assert technician.status_code == 201
+    assert manager.status_code == 201
+
+
+async def test_the_owner_may_not_upload_but_may_list(api, world, db_session) -> None:
+    """R2.2/R3.2 — the asymmetry that makes the two permissions worth being different.
+
+    Reading the evidence is what an owner does; producing it is the technician's job. A single
+    permission over both routes would have handed the owner an upload surface for no reason.
+    """
+    incident = await _assigned_in_progress(api, world, db_session)
+    await _upload_as(api, world, incident, world.technician)
+
+    upload = await _upload_as(api, world, incident, world.owner)
+    listing = await api.get(
+        f"{INCIDENTS}/{incident.id}/photos", headers=auth_header(api, world.owner)
+    )
+
+    assert upload.status_code == 403
+    assert listing.status_code == 200
+    assert len(listing.json()["items"]) == 1
+
+
+async def test_a_technician_cannot_list_the_photos_of_an_incident_that_is_not_theirs(
+    api, world, db_session
+) -> None:
+    """R3.2 — the row-level half of `READ_INCIDENTS`, and it is a `404` rather than a `403`.
+
+    `other_technician` holds the permission, so a permission check alone would let them in;
+    what stops them is `IncidentActor.restrict_to_technician_id`, derived from the persisted
+    role. The `404` is what makes the refusal indistinguishable from an incident that does not
+    exist (R3.4).
+    """
+    incident = await _assigned_in_progress(api, world, db_session)
+    await _upload_as(api, world, incident, world.technician)
+
+    theirs = await api.get(
+        f"{INCIDENTS}/{incident.id}/photos",
+        headers=auth_header(api, world.other_technician),
+    )
+    ghost = await api.get(
+        f"{INCIDENTS}/{uuid.uuid4()}/photos",
+        headers=auth_header(api, world.other_technician),
+    )
+
+    assert theirs.status_code == 404
+    assert theirs.json() == ghost.json()

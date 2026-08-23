@@ -37,7 +37,7 @@ from collections.abc import Sequence
 from dataclasses import dataclass
 from typing import Protocol
 
-from app.maintenance.domain.entities import Incident, OwnerApproval
+from app.maintenance.domain.entities import Incident, IncidentPhoto, OwnerApproval
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
 
@@ -294,5 +294,67 @@ class OwnerApprovalRepository(Protocol):
         technician closes with a `final_cost`. A sequence and not one row: the budget gate
         and the real-cost gate can both have been approved, and which one covers the bill
         is the caller's arithmetic, not this port's.
+        """
+        ...
+
+
+class IncidentPhotoRepository(Protocol):
+    """The photos of one incident: append one, list that incident's (`incident-photos` R1, R3).
+
+    **Two methods, and each has a caller in this change** — `add` from
+    `UploadIncidentPhotoUseCase`, `list_for_incident` from `ListIncidentPhotosUseCase`. No
+    `get`, no `delete`: the proposal keeps every deletion surface out of scope, and the only
+    caller of `FileStoragePort.delete` remains the compensating delete of a failed transaction,
+    which works from a key it already holds and never needs to read a row back. A port sized
+    for what the table could eventually support is the Interface Segregation failure
+    `steering/backend-architecture.md` names by hand.
+
+    **Every method takes `tenant_id` first**, like every other port here. That is the mechanism;
+    the global filter of `app/core/db.py` — which `incident_photos` is inside, because the row
+    carries its own `tenant_id` (design D2) — is the net behind it.
+
+    The one read that does *not* take a tenant is deliberately not on this port: it is
+    `UnscopedObjectLocationQuery` in `app/integrations/domain/storage.py`, implemented by a
+    class of its own so that no authenticated use case holding this repository can reach it by
+    accident (design D13). Putting it here would be the fifth-method mistake `cleaning`'s
+    equivalent port documents.
+    """
+
+    async def add(self, tenant_id: uuid.UUID, photo: IncidentPhoto) -> None:
+        """Append one photo. **Never commits** — the row, the object and the audit entry are
+        one transaction, and the use case owns its boundary (design D7).
+
+        Several photos of the same incident and the same `stage` are legal and expected (R1.4):
+        a technician photographs two angles of the same fault, so there is no uniqueness to
+        violate and this never raises for a duplicate.
+
+        **Precondition the caller owns, stated because nothing here can check it**:
+        `photo.uploaded_by` must be a user of `tenant_id`. It is a plain `uuid.UUID` and the
+        column is a plain foreign key to `users.id` with no tenant qualification — the same
+        shape, and the same deliberate omission, as `cleaning_photos.uploaded_by` — so a value
+        from another tenant would be persisted verbatim. What makes it safe is that the only
+        caller derives it from the **verified token** (`IncidentActor.user_id`) and never from
+        the request body, exactly as `IncidentRepository.add` documents its own preconditions
+        on `property_id` and `cleaning_task_id`. Raised by the tenancy panel of section 3, so
+        that the guarantee is written where an implementer of this port will read it rather
+        than inferred from the one call site that happens to be correct today.
+        """
+        ...
+
+    async def list_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID
+    ) -> Sequence[IncidentPhoto]:
+        """That incident's photos, **oldest first** (R3.1).
+
+        The order is part of the contract and not a convenience: the two stages are `BEFORE`
+        and `AFTER`, so upload order is what tells the story, and a reader comparing the first
+        photo with the last is doing the thing the listing exists for. Ordered in the database
+        by `created_at` then `id`, because `created_at` is written by the use case and two
+        photos of one upload burst can share a timestamp.
+
+        An empty sequence for an incident with no photos — and also for one that is not this
+        tenant's, though the caller never gets that far: it resolves the incident through
+        `_load_incident_in_scope` first, which is what makes the `404` of R3.4
+        indistinguishable across its three cases.
         """
         ...
