@@ -97,16 +97,16 @@ diagrama nuevo.
   satisface «identificando la vivienda, la reserva, el trigger y el estado que lo impide» en
   el lado del job. [R1.1]
 
-## 4. La colección consultable: llega a quien puede actuar
+## 4. La colección consultable: llega a quien puede actuar <!-- panel: PASS 2026-08-23 -->
 
-- [ ] 4.1 `ListBlockedTransitionsUseCase` en
+- [x] 4.1 `ListBlockedTransitionsUseCase` en
   `backend/app/properties/application/use_cases.py`: `PropertyRepository.list_all` +
   `TenantConfigRepository.get_or_create` para la ventana de check-in + `detect` sobre los tres
   triggers de reloj, **sin persistir nada**, y paginación del **resultado** (no de la fuente).
   Tests de caso de uso en `backend/tests/properties/test_stalls.py` o fichero propio: el
   desajuste aparece; al cancelar la tarea deja de aparecer sin ninguna escritura (R2.4); una
   vivienda atascada que caería en la página 3 de la fuente sigue apareciendo. [R2.1, R2.4]
-- [ ] 4.2 `GET /api/v1/blocked-transitions`: **router propio** en
+- [x] 4.2 `GET /api/v1/blocked-transitions`: **router propio** en
   `backend/app/properties/api/router.py` (el que ya está lleva `prefix="/properties"` y un
   segmento literal ahí colisiona con `/properties/{id}`), su respuesta y sobre paginado en
   `backend/app/properties/api/schemas.py` con la forma `build(...)` y el `MAX_PER_PAGE` que ya
@@ -114,7 +114,7 @@ diagrama nuevo.
   un segundo `include_router` en `backend/app/main.py`. Permiso `READ_PROPERTIES` (D6, que
   enmienda R2.1). `trigger` y `blocking_state` viajan como literales canónicos, sin prosa.
   [R2.1, R2.2]
-- [ ] 4.3 Nuevo `backend/tests/properties/test_blocked_transitions_api.py`: `PROPERTY_MANAGER`
+- [x] 4.3 Nuevo `backend/tests/properties/test_blocked_transitions_api.py`: `PROPERTY_MANAGER`
   y `TENANT_OWNER` la leen; una `CLEANER` recibe `403`; **un usuario del tenant B no ve el
   desajuste del tenant A** (regla 1 de `steering/security.md`, DoD §28.18); el cuerpo lleva
   `trigger`, `blocking_state` y `due_since`; el sobre paginado tiene el `total` de desajustes.
@@ -159,7 +159,11 @@ diagrama nuevo.
 
 ## 6. Contrato y documentación
 
-- [ ] 6.1 Regenerar las **dos mitades** del contrato y commitearlas en el mismo PR
+- [ ] 6.1 Regenerar las **dos mitades** del contrato. **La rama está en rojo hasta que esto corra**:
+  `frontend-api-contract` no está filtrado por rutas, así que corre en cada PR y falla desde que la
+  sección 4 estrenó ruta y regeneró sólo la mitad del backend (medido en el panel de la sección 4).
+  Se aplaza aquí a propósito —la sección 5 estrena una segunda ruta y habría que rehacerlo— y no se
+  pierde porque esta tarea es la que lo declara. y commitearlas en el mismo PR
   (`steering/documentation.md`): `make openapi` para `backend/openapi.json`, y
   `frontend/lib/api/generated/openapi.d.ts` con el procedimiento de worktree de
   `sdd/project.md` §Worktree bootstrap (el `cd frontend && npm run api:generate` literal no

@@ -409,6 +409,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/properties",
         "/api/v1/properties/{property_id}",
         "/api/v1/properties/{property_id}/state",
+        # `cleaning-stall-blocks-next-stay` D5: a path of its own rather than a literal segment
+        # under `/properties`, which would collide with `/properties/{property_id}`. Read with
+        # `READ_PROPERTIES` (D6), so the owner sees her own stalled flat; asserted per role in
+        # `tests/properties/test_blocked_transitions_api.py`.
+        "/api/v1/blocked-transitions",
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",

@@ -255,6 +255,85 @@
         "title": "AssignIncidentRequest",
         "type": "object"
       },
+      "BlockedTransitionPageResponse": {
+        "description": "The pagination envelope of PRD §23, over the stalls rather than over the flats.\n\n`total` is how many stalls the tenant has, not how many properties were examined — see\n`ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot\nhide on page 3 of the source.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedTransitionResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "BlockedTransitionPageResponse",
+        "type": "object"
+      },
+      "BlockedTransitionResponse": {
+        "description": "One transition the calendar required and the flat's state refused (R2.2).\n\n`trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same\ntreatment `dashboard-api` gives `operational_state` (\"carries no colour: the colour mapping\nbelongs to the client\"). Translating them here would open a catalogue of strings for a\nconsumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.\n\n`due_since` answers \"since when\", which is the number an operator actually wants: for REDES11,\nthe 19th of August and not the day somebody happened to look.",
+        "properties": {
+          "blocking_state": {
+            "title": "Blocking State",
+            "type": "string"
+          },
+          "due_since": {
+            "format": "date-time",
+            "title": "Due Since",
+            "type": "string"
+          },
+          "property_code": {
+            "title": "Property Code",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "format": "uuid",
+            "title": "Reservation Id",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "property_code",
+          "reservation_id",
+          "trigger",
+          "blocking_state",
+          "due_since"
+        ],
+        "title": "BlockedTransitionResponse",
+        "type": "object"
+      },
       "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post": {
         "properties": {
           "file": {
@@ -7691,6 +7770,89 @@
         "summary": "Set a new password using a recovery token",
         "tags": [
           "auth"
+        ]
+      }
+    },
+    "/api/v1/blocked-transitions": {
+      "get": {
+        "description": "Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).",
+        "operationId": "list_blocked_transitions_api_v1_blocked_transitions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedTransitionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's blocked transitions",
+        "tags": [
+          "properties"
         ]
       }
     },

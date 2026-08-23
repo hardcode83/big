@@ -43,6 +43,7 @@ from app.properties.domain.repositories import (
     PropertyRepository,
     PropertyStateTransitionRepository,
 )
+from app.properties.domain.stalls import BlockedTransition
 from app.properties.domain.stalls import detect
 from app.properties.domain.state_machine import PropertyStateMachine
 from app.properties.domain.transition_enums import PropertyStateTrigger
@@ -411,11 +412,137 @@ class AdvancePropertyStatesUseCase:
     async def _reservations_by_property(
         self, tenant_id: uuid.UUID, candidates: Sequence[Property], now: datetime
     ) -> dict[uuid.UUID, list[Reservation]]:
-        date_from, date_to = candidate_window(now)
-        rows = await self._reservations.list_for_properties(
-            tenant_id, [property.id for property in candidates], date_from, date_to
+        return await reservations_by_property(self._reservations, tenant_id, candidates, now)
+
+
+async def reservations_by_property(
+    reservations: ReservationRepository,
+    tenant_id: uuid.UUID,
+    properties: Sequence[Property],
+    now: datetime,
+) -> dict[uuid.UUID, list[Reservation]]:
+    """The stays of `properties` inside `candidate_window`, grouped by property.
+
+    Module-level and shared rather than a method, because `ListBlockedTransitionsUseCase` needs
+    the same window as the job: R1.4 fixes the detection horizon at `candidate_window` and D1
+    promises one definition of "mismatch" for the count and for the collection. Two copies of the
+    window would let the two disagree about which stalls exist — the failure `clock_triggers.py`
+    already records for the due-ness comparison.
+    """
+    date_from, date_to = candidate_window(now)
+    rows = await reservations.list_for_properties(
+        tenant_id, [property.id for property in properties], date_from, date_to
+    )
+    grouped: dict[uuid.UUID, list[Reservation]] = {}
+    for reservation in rows:
+        grouped.setdefault(reservation.property_id, []).append(reservation)
+    return grouped
+
+
+@dataclass(frozen=True)
+class BlockedTransitionRow:
+    """One stall, paired with the code an operator recognises the flat by.
+
+    `BlockedTransition` deliberately carries ids only — it is a domain value object and knows
+    nothing about presentation — while a person reading the collection needs "REDES11", not a
+    UUID. Paired here, in `application/`, rather than by widening the value object.
+    """
+
+    mismatch: BlockedTransition
+    property_code: str
+
+
+@dataclass(frozen=True)
+class BlockedTransitionPage:
+    items: tuple[BlockedTransitionRow, ...]
+    total: int
+
+
+class ListBlockedTransitionsUseCase:
+    """The stalls of one tenant, derived on every read and never stored (R2, design D5).
+
+    **Nothing is persisted**, and that is what makes R2.4 free: the collection is recomputed from
+    the flats' states and their stays, so a stall stops being listed the moment it is resolved.
+    There is no row to close, and therefore no row that someone forgets to close — which is the
+    very failure mode this change exists to fix.
+
+    **The pagination is of the result, not of the source.** Every flat of the tenant is examined
+    and the *stalls* are paged. Paging the source would reproduce the original bug: a stalled flat
+    on page 3 would be invisible again. `total` is then the number an operator wants — how many
+    stalls there are.
+
+    The window and the evidence are the job's (R1.4, D1): the same `candidate_window` through
+    `reservations_by_property`, and the same `applied_clock_triggers`. If this use case computed
+    either differently, the report and the screen would disagree about what is stuck.
+    """
+
+    def __init__(
+        self,
+        *,
+        properties: PropertyRepository,
+        reservations: ReservationRepository,
+        transitions: PropertyStateTransitionRepository,
+        configs: TenantConfigRepository,
+    ) -> None:
+        self._properties = properties
+        self._reservations = reservations
+        self._transitions = transitions
+        self._configs = configs
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, now: datetime, page: int, per_page: int
+    ) -> BlockedTransitionPage:
+        # `list_all` is unpaginated by design and declared as debt (design *Risks*): the lever, if
+        # a tenant's portfolio ever makes it hurt, is to filter by the complement of the source
+        # states per trigger the way the job does.
+        properties = await self._properties.list_all(tenant_id)
+        if not properties:
+            return BlockedTransitionPage(items=(), total=0)
+
+        # `checkin_window_hours`, not `get_or_create`: this is a `GET`, and the sibling upsert
+        # stages an `INSERT` for a tenant whose config row does not exist yet — which would make
+        # D5's "nada se guarda" false, on a path a role without `MANAGE_TENANT_SETTINGS` can reach.
+        # Found by the architect and the security reviewer independently in the section-4 panel.
+        checkin_window = timedelta(hours=await self._configs.checkin_window_hours(tenant_id))
+        by_property = await reservations_by_property(
+            self._reservations, tenant_id, properties, now
         )
-        grouped: dict[uuid.UUID, list[Reservation]] = {}
-        for reservation in rows:
-            grouped.setdefault(reservation.property_id, []).append(reservation)
-        return grouped
+        applied = frozenset(
+            await self._transitions.applied_clock_triggers(
+                tenant_id,
+                [
+                    reservation.id
+                    for reservations in by_property.values()
+                    for reservation in reservations
+                ],
+            )
+        )
+
+        rows: list[BlockedTransitionRow] = []
+        for property in properties:
+            for mismatch in detect(
+                property,
+                tuple(by_property.get(property.id, ())),
+                now,
+                checkin_window,
+                applied,
+            ):
+                rows.append(
+                    BlockedTransitionRow(mismatch=mismatch, property_code=property.internal_code)
+                )
+
+        # Oldest stall first, which is the order an operator triages in, with the ids as
+        # tiebreakers so a page boundary cannot repeat or skip a row when two stalls share an
+        # instant — the same reason `PropertyRepository.list` promises a stable sort.
+        rows.sort(
+            key=lambda row: (
+                row.mismatch.due_since,
+                str(row.mismatch.property_id),
+                str(row.mismatch.reservation_id),
+                row.mismatch.trigger.value,
+            )
+        )
+        start = (page - 1) * per_page
+        return BlockedTransitionPage(
+            items=tuple(rows[start : start + per_page]), total=len(rows)
+        )

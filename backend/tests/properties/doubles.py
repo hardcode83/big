@@ -96,6 +96,17 @@ class FakeTenantConfigRepository:
             self.configs[tenant_id] = _default_config(tenant_id, now)
         return self.configs[tenant_id]
 
+    async def checkin_window_hours(self, tenant_id: uuid.UUID) -> int:
+        """Deliberately does **not** create the row, so a test can catch a write on a read path.
+
+        A fake that stored a default here would agree with a use case calling `get_or_create` by
+        mistake, which is the whole distinction this method exists to keep.
+        """
+        config = self.configs.get(tenant_id)
+        if config is None:
+            return TenantConfig.checkin_window_hours_before
+        return config.checkin_window_hours_before
+
 
 def _default_config(tenant_id: uuid.UUID, now: datetime) -> TenantConfig:
     return TenantConfig(

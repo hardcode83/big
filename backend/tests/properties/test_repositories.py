@@ -342,6 +342,28 @@ async def test_save_refuses_a_property_of_another_tenant(db_session) -> None:
         await SqlAlchemyPropertyRepository(db_session).save(tenant_a.id, entity)
 
 
+@pytest.mark.asyncio
+async def test_list_all_does_not_reach_another_tenant(db_session) -> None:
+    """Rule 1 of `steering/security.md`, proved on the query and not on the net.
+
+    `list_all` had no test of its own here, and `cleaning-stall-blocks-next-stay` gave it a
+    portfolio-wide HTTP consumer (`GET /api/v1/blocked-transitions`). Its API-level isolation
+    tests cannot cover this: they share one session that `bind_session_to_tenant` has marked, and
+    `app/core/db.py`'s `with_loader_criteria` net would return the same empty result even with the
+    explicit `WHERE tenant_id` deleted. This session is never bound, so what passes here is the
+    predicate — which is what `app/core/db.py` itself calls "the authoritative mechanism", the net
+    being only a net. Its two other callers are jobs that use it on unmarked sessions.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    await _property(db_session, tenant_b, internal_code="THEIRS")
+    mine = await _property(db_session, tenant_a, internal_code="MINE")
+
+    found = await SqlAlchemyPropertyRepository(db_session).list_all(tenant_a.id)
+
+    assert [prop.id for prop in found] == [mine.id]
+
+
 def _transition(tenant_id, property_id, **overrides) -> PropertyStateTransition:
     defaults = dict(
         id=uuid.uuid4(),

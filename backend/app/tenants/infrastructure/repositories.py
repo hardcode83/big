@@ -67,6 +67,17 @@ class SqlAlchemyTenantConfigRepository:
     def __init__(self, session: AsyncSession) -> None:
         self._session = session
 
+    async def checkin_window_hours(self, tenant_id: uuid.UUID) -> int:
+        """One column, or the entity's own default. No `session.add`, no flush, no entity."""
+        hours = (
+            await self._session.execute(
+                select(TenantConfigModel.checkin_window_hours_before).where(
+                    TenantConfigModel.tenant_id == tenant_id
+                )
+            )
+        ).scalar_one_or_none()
+        return TenantConfig.checkin_window_hours_before if hours is None else hours
+
     async def get_or_create(self, tenant_id: uuid.UUID, now: datetime) -> TenantConfig:
         """Read the row, creating it with its defaults if it is missing (R5.7).
 

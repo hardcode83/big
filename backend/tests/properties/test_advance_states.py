@@ -15,7 +15,10 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
-from app.properties.application.use_cases import AdvancePropertyStatesUseCase
+from app.properties.application.use_cases import (
+    AdvancePropertyStatesUseCase,
+    ListBlockedTransitionsUseCase,
+)
 from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import (
     PropertyOperationalState,
@@ -896,6 +899,107 @@ class TestBlockedTransitions:
         assert record.trigger == "CHECKIN_TIME_REACHED"
         assert record.blocking_state == "CLEANING_IN_PROGRESS"
         assert record.due_since == _local(2026, 8, 19, 15, 0).isoformat()
+
+
+class TestTheJobAndTheCollectionAgree:
+    """D1's promise, made a test rather than a comment.
+
+    "Una sola definición de «desajuste» para el recuento y para la pantalla; si divergieran, el
+    informe y el aviso contarían cosas distintas y nadie lo notaría." The two consumers are
+    separate use cases with separate queries, so nothing structural stops them drifting — the
+    section-3 panel named this as the risk to watch when the collection landed.
+    """
+
+    def _collection(self, harness: Harness) -> ListBlockedTransitionsUseCase:
+        return ListBlockedTransitionsUseCase(
+            properties=harness.properties,
+            reservations=harness.reservations,
+            transitions=harness.transitions,
+            configs=harness.configs,
+        )
+
+    @pytest.mark.asyncio
+    async def test_both_see_the_same_stall(self) -> None:
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        stay = harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+        now = _local(2026, 8, 22, 10, 18)
+
+        report = await harness.run(PropertyStateTrigger.CHECKIN_TIME_REACHED, now)
+        page = await self._collection(harness).execute(
+            tenant_id=TENANT, now=now, page=1, per_page=20
+        )
+
+        assert report.blocked == 1
+        assert page.total == 1
+        [row] = page.items
+        assert row.mismatch.reservation_id == stay.id
+        assert row.mismatch.trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED
+
+    @pytest.mark.asyncio
+    async def test_both_are_cleared_by_the_same_evidence(self) -> None:
+        """The condition most likely to drift, because each reads it through its own call."""
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.OCCUPIED_ESTIMATED)
+        )
+        stay = harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+        now = _local(2026, 8, 22, 10, 18)
+        harness.transitions.transitions.append(
+            PropertyStateTransition(
+                id=uuid.uuid4(),
+                tenant_id=TENANT,
+                property_id=prop.id,
+                from_state=PropertyOperationalState.AWAITING_CHECKIN,
+                to_state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+                triggered_by=StateTransitionTriggeredBy.SYSTEM,
+                created_at=CREATED,
+                metadata={
+                    "trigger": "CHECKIN_TIME_REACHED",
+                    "reservation_id": str(stay.id),
+                },
+            )
+        )
+
+        report = await harness.run(PropertyStateTrigger.CHECKIN_TIME_REACHED, now)
+        page = await self._collection(harness).execute(
+            tenant_id=TENANT, now=now, page=1, per_page=20
+        )
+
+        assert report.blocked == 0
+        assert page.total == 0
+
+    @pytest.mark.asyncio
+    async def test_the_collection_sees_the_triggers_the_job_only_sees_one_at_a_time(self) -> None:
+        """Not a divergence: D1 says the job filters by its trigger and the collection does not.
+
+        Pinned so the difference reads as the design's intent rather than as a bug someone
+        should "fix" by making them identical.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.MAINTENANCE_REQUIRED)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 10), nights=4, check_out_time=time(11, 0))
+        )
+        now = _local(2026, 8, 22, 10, 18)
+
+        checkin = await harness.run(PropertyStateTrigger.CHECKIN_TIME_REACHED, now)
+        checkout = await harness.run(PropertyStateTrigger.CHECKOUT_TIME_REACHED, now)
+        page = await self._collection(harness).execute(
+            tenant_id=TENANT, now=now, page=1, per_page=20
+        )
+
+        assert (checkin.blocked, checkout.blocked) == (0, 1)
+        assert page.total == 1
+        assert page.items[0].mismatch.trigger is PropertyStateTrigger.CHECKOUT_TIME_REACHED
 
 
 class TestTimezones:

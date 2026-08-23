@@ -173,6 +173,36 @@ lista de desajustes, con el sobre de PRD §23. Paginar la fuente reproduciría e
 atascada en la página 3 volvería a ser invisible. `total` es entonces el número que el operador
 quiere: cuántos atascos hay.
 
+**La lectura no escribe, y hubo que añadir un método para que fuera verdad** (panel de la
+sección 4, 2026-08-23: lo encontraron el arquitecto y seguridad por separado). El acceso obvio a
+la ventana de check-in es `TenantConfigRepository.get_or_create`, y ese **inserta** la fila de
+configuración cuando el tenant no la tiene todavía: un `GET` acababa haciendo un `INSERT`, por una
+ruta que alcanza un rol sin `MANAGE_TENANT_SETTINGS`. Hoy no sobrevivía porque nada commitea en
+esa cadena —una seguridad que deja de ser cierta en silencio—. Se añade
+`TenantConfigRepository.checkin_window_hours(tenant_id) -> int`, que lee la columna y cae al
+default de la propia entidad, y `test_reading_the_collection_writes_nothing_at_all` pasa a contar
+también `tenant_configs`, porque sin esa tabla el nombre del test era falso.
+
+**Devuelve el `int` y no un `TenantConfig`**, corregido en la segunda ronda del mismo panel: el
+primer intento devolvía una entidad transitoria de `TenantConfig.with_defaults(...)`, y esa lleva
+un `id` recién generado y sellos de tiempo con pinta de reales, así que nada salvo un docstring la
+distinguía de una fila persistida. Un `int` no se puede confundir con una fila ni pasar a un
+escritor, y no necesita advertencia. De paso deja de ser cierto lo que el docstring anterior
+alegaba —Interface Segregation— cuando en realidad **añadía** un tercer método al mismo `Protocol`:
+el puerto crecía en vez de estrecharse por consumidor. La lectura tiene sus tres tests contra la
+base de datos real en `backend/tests/tenants/test_repositories.py`, aislamiento por tenant
+incluido, sobre sesión **sin marcar** — con sesión marcada la red de `with_loader_criteria` los
+haría pasar aunque el predicado no existiera. (Medido en el panel: la red **sí** cubre un `select`
+de una sola columna, así que en producción esta lectura está protegida por las dos cosas; lo que
+el test sobre sesión sin marcar prueba es el predicado a solas, que es el mecanismo autoritativo.)
+
+**Aviso para el siguiente change que toque este puerto**: `TenantConfigRepository` se queda con
+tres métodos y esto es el sitio donde pararse. `checkin_window_hours` existe porque un peligro
+concreto lo obligó —una escritura en una ruta de lectura—, no porque los accesores escalares sean
+buena idea en general. Si hace falta un **segundo** accesor estrecho para otro campo suelto, eso
+es la señal para partir el puerto en un lector de solo lectura, no para añadir un cuarto método
+escalar.
+
 Rejected: **un bloque en el dashboard** (`PropertyDashboardCard`) — es donde el manager ya mira y
 fue la primera opción, pero (a) obligaría a meter `TenantConfigRepository` en un agregado que hoy
 no tiene ninguna dependencia de configuración, sólo para leer `checkin_window_hours_before`, (b)
@@ -201,6 +231,18 @@ a veces sin manager. No estrena permiso ni toca `ROLE_PERMISSIONS`.
 
 **Consecuencia documental**: `proposal.md` R2.1 queda enmendado en el mismo commit que este
 documento, para que la spec viva no herede un `SHALL` que el diseño ya cambió.
+
+**De qué depende esta justificación, dicho para que se pueda romper en rojo** (panel de la
+sección 4). El cuerpo lleva `reservation_id` y `due_since` sin condición, mientras `app/dashboard`
+sí re-comprueba `READ_RESERVATIONS` antes de incluir su bloque de reserva. Verificado: hoy
+`TENANT_OWNER` tiene `READ_RESERVATIONS` y el dashboard ya le devuelve el id de la reserva y sus
+fechas, así que la frase de arriba es cierta —pero lo es por una coincidencia de
+`ROLE_PERMISSIONS`, no por construcción. Se fija con
+`test_every_reader_of_this_collection_may_already_read_reservations`: si algún día un rol de tipo
+auditoría gana `READ_PROPERTIES` sin `READ_RESERVATIONS`, ese test cae nombrando este decision, que
+es el momento en que alguien tiene que decidir. Se prefirió a condicionar los campos por permiso
+—lo que el panel proponía— porque eso haría que la forma de la respuesta dependiera del rol para un
+rol que todavía no existe, y este decision eligió expresamente no tocar `ROLE_PERMISSIONS`.
 
 Rejected: `MANAGE_PROPERTIES` — literal a R2.1 tal como se escribió, y deja a la propietaria sin
 saber que su vivienda está parada, a cambio de no conceder ninguna lectura nueva. · Rejected: un
@@ -381,6 +423,7 @@ reconstruirlo:
 | Puerto de transiciones | `backend/app/properties/domain/repositories.py`, `infrastructure/repositories.py` | `+ PropertyStateTransitionRepository.applied_clock_triggers()` — la evidencia de `applied` (D1 enmendado). Un **lector** más en un puerto que ya ganó uno en `dashboard-api`: lo que su docstring rechaza es `save`/`update`/`delete`, y esto no es ninguno |
 | Job de reloj | `backend/app/properties/application/use_cases.py` | `AdvanceReport.blocked`; segunda consulta por el complemento de estados origen; log `scheduler.blocked_transition` (D3, D4) |
 | Lectura de R2 (nuevo) | `backend/app/properties/application/use_cases.py` | `ListBlockedTransitionsUseCase` (D5) |
+| Puerto de config | `backend/app/tenants/domain/repositories.py`, `infrastructure/repositories.py` | `+ TenantConfigRepository.checkin_window_hours()` — lectura de una columna con su default, para que «nada se guarda» sea cierto en un `GET` (D5) |
 | API de propiedades | `backend/app/properties/api/router.py`, `schemas.py`, `dependencies.py`, `backend/app/main.py` | `GET /api/v1/blocked-transitions` + su sobre paginado (D5, D6). **Router propio** en el mismo módulo: el `router` que ya está tiene `prefix="/properties"`, y colgar de él un segmento literal es exactamente la colisión que D5 rechaza. Se registra en `main.py` como un segundo `include_router`, igual que `dashboard` sirve sus dos prefijos desde un módulo |
 | Limpieza — entidad | `backend/app/cleaning/domain/entities.py` | `+ CleaningTask.cancel()` (D9) |
 | Limpieza — caso de uso | `backend/app/cleaning/application/use_cases.py` | `+ CancelCleaningTaskUseCase` sobre `_TaskLifecycleBase` (D7, D8) |

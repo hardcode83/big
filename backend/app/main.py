@@ -40,6 +40,7 @@ from app.pricing.api.errors import register_pricing_error_handlers
 from app.pricing.api.recommendations_router import router as price_recommendations_router
 from app.pricing.api.rules_router import router as pricing_rules_router
 from app.properties.api.errors import register_property_error_handlers
+from app.properties.api.router import blocked_transitions_router
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
@@ -109,6 +110,10 @@ def create_app() -> FastAPI:
     # the only domain module without one. Its arrival is what makes `POST /reservations`
     # reachable — it answered 404 on every request because no property could exist.
     app.include_router(properties_router, prefix=API_V1_PREFIX)
+    # `cleaning-stall-blocks-next-stay`: a second prefix from the same module, because a literal
+    # segment under `/properties` collides with `/properties/{id}` and would be resolved by
+    # registration order — `dashboard-api` D7 refused to let a contract guarantee depend on that.
+    app.include_router(blocked_transitions_router, prefix=API_V1_PREFIX)
     # `cleaning`: templates are their own router because they are their own aggregate, and
     # because PRD §23 does not declare them — the deviation is easier to see in a file of
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
