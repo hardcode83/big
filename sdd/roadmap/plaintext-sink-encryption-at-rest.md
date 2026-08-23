@@ -56,8 +56,10 @@ precio escrito.
   contenido en dev desde el 2026-08-10.
 - Descifrado en cada camino de lectura vivo, que hoy son tres para `access_notes` (detalle de
   propiedades, portal del huésped, proyección de contexto del técnico), uno para
-  `cleaning_notes`/`emergency_notes` (el detalle) y el de `cleaner-app` para
-  `access_records.notes`.
+  `cleaning_notes`/`emergency_notes` (el detalle) y, para `access_records.notes`, los del owner y
+  el manager que `access-notifications` ya entregó. **No el de `cleaner-app`**: su `/sdd:new` del
+  2026-08-23 comprobó que esa app no muestra accesos ni puede —`CLEANER` no tiene
+  `READ_ACCESS_RECORDS`—, así que ese cuarto lector no va a existir y no hay que contarlo.
 - El patrón ya existe en el repo: `properties.wifi_password_encrypted` y las credenciales de
   proveedor. Conviene calcarlo antes que inventar otro.
 - Las filas del censo de la regla 11 cambian de **forma** al hacerlo, así que la excepción 6 se
@@ -66,7 +68,15 @@ precio escrito.
 
 ## De quién es qué
 
-`access_records.notes` sigue siendo de `cleaner-app`, que la tiene aparcada con su propio
-razonamiento; esta entrada es donde vive la mitad de cifrado de las cuatro, y la nota de
-`sdd/roadmap/cleaner-app.md` apunta aquí en vez de seguir describiendo la decisión de la regla 11
-como pendiente en su totalidad.
+La mitad de la regla 11 de `access_records.notes` **ya no es de `cleaner-app`**, y desde el
+2026-08-23 no es de nadie: aquel `/sdd:new` comprobó que su disparador —que la app de la limpiadora
+muestre accesos— no ocurre, porque PRD §11 y §6 no le dan accesos al rol y `policy.py` le niega
+`READ_ACCESS_RECORDS` por escrito. Queda aparcada **sin disparador y sin change asignado**, que es
+un estado distinto de «pendiente en el change siguiente»; la despertaría una superficie nueva que
+conceda `READ_ACCESS_RECORDS` a un rol que hoy no lo tiene, y hoy no hay ninguna planificada.
+Razonamiento entero en `sdd/roadmap/cleaner-app.md` §4.
+
+Eso **no** afecta a esta entrada: la mitad de cifrado en reposo de las cuatro columnas sigue viva y
+sigue siendo de aquí. La amenaza que responde —lectura offline de la base, de un backup o de una
+réplica— es idéntica para las cuatro y no la mueve ningún change de audiencia, así que perder el
+disparador de audiencia de una de ellas no le quita ni una columna.

@@ -63,6 +63,13 @@ contacto/acceso», así que `tech-incident-context` es previsiblemente el change
 que tiene la misma decisión aparcada para `access_records.notes` y pide cubrir las cuatro columnas
 a la vez o decir explícitamente por qué no.
 
+> **Al día de 2026-08-23**: `tech-incident-context` hizo exactamente eso el 2026-08-21 —excepción 6
+> del censo de la regla 11, las tres notas de `properties` fuera del listado paginado— y dijo por
+> escrito por qué las otras dos no ganan fila. Y la cuarta, `access_records.notes`, **ya no está
+> aparcada en `cleaner-app`**: su `/sdd:new` del 2026-08-23 comprobó que el disparador no ocurre
+> —PRD §11 y §6 no dan accesos al rol `CLEANER` y `policy.py` le niega `READ_ACCESS_RECORDS` por
+> escrito—, así que esa decisión queda **sin change asignado**. No hay nada que coordinar.
+
 **Las fotos tienen puerto y no tienen consumidor.** `sdd/specs/file-storage.md` nombra a
 `maintenance` (fotos de incidente) como uno de sus dos siguientes consumidores, y es la razón
 declarada de que la capability viva en `app/integrations/` y no colgando de `cleaning`. Es decir:
