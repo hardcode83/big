@@ -231,6 +231,112 @@ async def test_list_by_state_without_states_returns_empty_without_querying(db_se
     assert await SqlAlchemyPropertyRepository(db_session).list_by_state(tenant.id, []) == []
 
 
+# --- `states_for` (`cleaning-assign-preconditions` R3.2, design D6) -------------------
+
+
+@pytest.mark.asyncio
+async def test_states_for_maps_every_requested_id_to_its_state(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    awaiting = await _property(
+        db_session,
+        tenant,
+        internal_code="REDES11",
+        state=PropertyOperationalState.AWAITING_CLEANING,
+    )
+    occupied = await _property(
+        db_session,
+        tenant,
+        internal_code="PAJARITOS8",
+        state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+    unasked = await _property(db_session, tenant, internal_code="UNASKED1")
+
+    states = await SqlAlchemyPropertyRepository(db_session).states_for(
+        tenant.id, [awaiting.id, occupied.id]
+    )
+
+    assert states == {
+        awaiting.id: PropertyOperationalState.AWAITING_CLEANING,
+        occupied.id: PropertyOperationalState.OCCUPIED_ESTIMATED,
+    }
+    assert unasked.id not in states
+
+
+@pytest.mark.asyncio
+async def test_states_for_omits_an_id_that_does_not_exist(db_session) -> None:
+    """A missing key means "unknown", which is what lets `cleaning` fail open (R3.3).
+
+    If this returned a default instead, the screen would be told a flat is in some state
+    nobody ever wrote — and the fail-open of design D4 would never be reachable.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    known = await _property(db_session, tenant, internal_code="REDES11")
+    ghost = uuid.uuid4()
+
+    states = await SqlAlchemyPropertyRepository(db_session).states_for(
+        tenant.id, [known.id, ghost]
+    )
+
+    assert set(states) == {known.id}
+
+
+@pytest.mark.asyncio
+async def test_states_for_without_ids_returns_empty_without_querying(
+    db_session, monkeypatch
+) -> None:
+    """"Without querying" is asserted here, not just claimed in the name.
+
+    The port promises it, mirroring what `list_by_state` promises for an empty `states`, and a
+    page of cleaning tasks with no rows is the ordinary case that reaches it. So the session's
+    `execute` is wrapped to record calls: an implementation that dropped the early return would
+    still return `{}` and would pass a weaker test.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    await _property(db_session, tenant, internal_code="REDES11")
+    calls: list[object] = []
+    original = db_session.execute
+
+    async def recording_execute(*args, **kwargs):
+        calls.append(args)
+        return await original(*args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", recording_execute)
+
+    assert await SqlAlchemyPropertyRepository(db_session).states_for(tenant.id, []) == {}
+    assert calls == []
+
+
+@pytest.mark.asyncio
+async def test_states_for_does_not_reach_another_tenant(db_session) -> None:
+    """Rule 1 of `steering/security.md`, and DoD §28.18, for this query.
+
+    The ids arrive from a page of cleaning tasks, which is already tenant-scoped — so the
+    realistic failure is not an attacker guessing a uuid but a future caller passing ids from
+    somewhere else. Asking for a neighbour's id must be indistinguishable from asking for one
+    that does not exist: absent from the mapping, no error, nothing that confirms it is there.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    mine = await _property(
+        db_session,
+        tenant_a,
+        internal_code="REDES11",
+        state=PropertyOperationalState.AWAITING_CLEANING,
+    )
+    theirs = await _property(
+        db_session,
+        tenant_b,
+        internal_code="THEIRS",
+        state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+    )
+
+    states = await SqlAlchemyPropertyRepository(db_session).states_for(
+        tenant_a.id, [mine.id, theirs.id]
+    )
+
+    assert states == {mine.id: PropertyOperationalState.AWAITING_CLEANING}
+
+
 # --- `list_by_status` (`revenue-pricing` R4.1, design D17) ----------------------------
 
 

@@ -191,6 +191,51 @@ describe("HttpDashboardSource", () => {
     );
   });
 
+  it("maps page/perPage onto the contract's page and per_page query params (R3.1)", async () => {
+    const { source, request } = sourceWith({
+      data: [],
+      total: 40,
+      page: 2,
+      per_page: 20,
+      total_pages: 2,
+    });
+
+    await source.getPropertyTimeline("tenant-1", "property-1", {
+      page: 2,
+      perPage: 20,
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/timeline/{property_id}",
+      {
+        pathParams: { property_id: "property-1" },
+        query: { page: 2, per_page: 20 },
+      },
+    );
+  });
+
+  it("emits neither page nor per_page when they are absent (R3.1)", async () => {
+    const { source, request } = sourceWith({
+      data: [],
+      total: 0,
+      page: 1,
+      per_page: 20,
+      total_pages: 0,
+    });
+
+    await source.getPropertyTimeline("tenant-1", "property-1", {
+      severity: "WARNING",
+    });
+
+    expect(request).toHaveBeenCalledWith(
+      "/api/v1/timeline/{property_id}",
+      {
+        pathParams: { property_id: "property-1" },
+        query: { severity: "WARNING" },
+      },
+    );
+  });
+
   it("omits undefined timeline filters and never calls out-of-scope routes", async () => {
     const { source, request } = sourceWith({
       data: [],

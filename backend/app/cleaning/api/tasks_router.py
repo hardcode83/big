@@ -36,6 +36,7 @@ from app.cleaning.api.dependencies import (
     get_list_cleaning_tasks_use_case,
     get_cancel_cleaning_task_use_case,
     get_reject_cleaning_task_use_case,
+    get_report_task_incident_use_case,
     get_start_cleaning_task_use_case,
     get_upload_cleaning_photo_use_case,
     get_validate_cleaning_task_use_case,
@@ -53,6 +54,8 @@ from app.cleaning.api.schemas import (
     CleaningTaskPageResponse,
     CleaningTaskResponse,
     CreateCleaningTaskRequest,
+    ReportTaskIncidentRequest,
+    TaskIncidentReportedResponse,
     ValidateCleaningTaskRequest,
 )
 from app.cleaning.application.use_cases import (
@@ -70,6 +73,7 @@ from app.cleaning.application.use_cases import (
     ListCleaningTasksUseCase,
     CancelCleaningTaskUseCase,
     RejectCleaningTaskUseCase,
+    ReportTaskIncidentUseCase,
     StartCleaningTaskUseCase,
     UploadCleaningPhotoUseCase,
     ValidateCleaningTaskUseCase,
@@ -107,7 +111,14 @@ def _actor(authenticated: AuthenticatedRequest, ip: str) -> CleaningActor:
     description=(
         "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned "
         "to them; that restriction is derived from the token's role and cannot be widened by "
-        "a query parameter."
+        "a query parameter.\n\n"
+        "Each row carries `assignment_blocked_by`: why that task cannot be assigned right now "
+        "(`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or "
+        "`null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is "
+        "computed when the page is read, so it may be stale by the time a client acts on it; "
+        "the assignment endpoint checks again and its refusal is the authority. `null` also "
+        "covers a property whose state this read could not resolve, so a client must treat it "
+        "as \"go ahead and let the server decide\", never as a guarantee."
     ),
 )
 async def list_cleaning_tasks(
@@ -192,7 +203,14 @@ async def get_cleaning_task(
     description=(
         "Assignment is the only mutation this accepts: the status moves through the lifecycle "
         "endpoints so `PropertyStateMachine` is never bypassed. The person named must hold "
-        "`CLEANER` in the caller's tenant."
+        "`CLEANER` in the caller's tenant.\n\n"
+        "**The first assignment of a task requires its property to be in "
+        "`AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to "
+        "`CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in "
+        "any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from "
+        "the `409` `CONFLICT` returned when it is the task's own status that refuses, so the "
+        "two causes can be told apart without reading the message. Reassigning a task that is "
+        "already `ASSIGNED` does not transition the property and does not depend on its state."
     ),
 )
 async def assign_cleaning_task(
@@ -668,3 +686,99 @@ async def complete_checklist_item(
         now=now_utc(),
     )
     return Response(status_code=status.HTTP_204_NO_CONTENT)
+
+
+# The added statuses, on the same criterion as `_PHOTO_UPLOAD_RESPONSES` above: a row of
+# `_MAPPING` reachable from this handler's own raise sites, not a guess.
+#
+#   404 ← `CleaningTaskNotFoundError`, from all four paths of R2.3 — unknown id, another
+#         tenant's task, another cleaner's task, and a `property_id` that does not resolve
+#         inside the tenant.
+#   409 ← `InvalidCleaningTransitionError`, from `assert_incident_reportable` on a task that is
+#         no longer being worked on.
+#   422 ← the request model, for a body that is not two non-empty storable strings.
+_INCIDENT_REPORT_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task does not exist for this caller — an unknown id, another tenant's task, "
+            "another cleaner's task and a task whose property does not resolve inside the "
+            "tenant are all answered this way, indistinguishably."
+        ),
+    },
+    409: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task is no longer in a state the cleaner can report from: it has been "
+            "completed, rejected or cancelled."
+        ),
+    },
+    422: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The body is not exactly a non-empty `title` and `description` the database can "
+            "store, or it carries a field this operation does not accept."
+        ),
+    },
+}
+
+
+@router.post(
+    "/{task_id}/incidents",
+    response_model=TaskIncidentReportedResponse,
+    status_code=status.HTTP_201_CREATED,
+    summary="Report an incident found during a cleaning",
+    responses=_INCIDENT_REPORT_RESPONSES,
+    description=(
+        "Opens a maintenance incident from the cleaning task the caller is working on — PRD "
+        "§11's «reportar incidencia» and one of the five creation sources of §12.\n\n"
+        "The body is **exactly** a `title` and a `description`. Everything else about the "
+        "incident is decided by the system: it is sealed `source = CLEANER`, attributed to the "
+        "authenticated user, linked to this task, and its property is taken from the task — "
+        "never from the request.\n\n"
+        "It is born `OPEN` and **unclassified**. The classification job gives it a category and "
+        "a severity on a later tick, and from that point it is the manager's; the cleaner gets "
+        "the acknowledgement of the one she just opened and nothing more.\n\n"
+        "A `CLEANER` reaches only the tasks assigned to her. That restriction comes from the "
+        "token's persisted role and **no request field can widen it**. An unknown task, another "
+        "tenant's task and another cleaner's task are one indistinguishable `404`.\n\n"
+        "Reportable while the work is live — `ASSIGNED`, `ACCEPTED` or `IN_PROGRESS`. A "
+        "completed, rejected or cancelled task answers `409`: PRD §12 says «durante checklist», "
+        "and a broken boiler found after the fact is not this surface's business.\n\n"
+        "**Reporting does not block closing the cleaning by itself.** The incident is born "
+        "`MEDIUM`, and `complete()` is refused only by an unresolved `CRITICAL` incident "
+        "**anywhere in the property** — so it starts blocking only if the classifier raises it, "
+        "or if such an incident already existed."
+    ),
+)
+async def report_task_incident(
+    authenticated: ExecuteDep,
+    task_id: uuid.UUID,
+    payload: ReportTaskIncidentRequest,
+    use_case: Annotated[
+        ReportTaskIncidentUseCase, Depends(get_report_task_incident_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> TaskIncidentReportedResponse:
+    """`EXECUTE_CLEANING_TASKS`, plus the row-level rule derived inside the use case.
+
+    `ExecuteDep` and not `ManageDep`: that permission is the cleaner's alone today
+    (`auth/domain/policy.py` — a `PROPERTY_MANAGER` holds `MANAGE_CLEANING_TASKS`, not this
+    one), which is exactly the set of callers PRD §12 names for this source. **No new
+    permission**: reporting is something the cleaner does *to her own task*, and the permission
+    that says she may operate her own tasks already exists.
+
+    The handler names neither `title` nor `description`. `payload.to_report()` does the mapping
+    inside the schema, which is what keeps this module out of the rule-11 census of writers
+    (D9) — a property of the design, not an accident.
+
+    `now` is the server's clock, never a request field.
+    """
+    acknowledgement = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        report=payload.to_report(),
+        now=now_utc(),
+    )
+    return TaskIncidentReportedResponse.from_acknowledgement(acknowledgement)

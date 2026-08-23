@@ -2,9 +2,11 @@
 `cleaning-photos-storage`, design D1/D3/D5/D6).
 
 Lives in `app/integrations/` rather than in `app/cleaning/` because storage is a shared
-capability, not a detail of cleaning: `maintenance` (incident photos) and `revenue`
-(`expenses.receipt_storage_key`) are already named as its next consumers, and hanging it off
-`cleaning/` would force them to import from another business domain. `steering/backend.md`
+capability, not a detail of cleaning. That was written when `cleaning` was its only consumer and
+`maintenance` and `revenue` were merely *named* as the next two; since `incident-photos`,
+`maintenance` (incident photos) is a **real** consumer — it produces keys, signs URLs and calls
+`delete` — and `revenue` (`expenses.receipt_storage_key`) is the one still to come. Hanging this
+off `cleaning/` would force them to import from another business domain. `steering/backend.md`
 says it literally — "adapters externos compartidos en `app/integrations/`" (design D2).
 
 **Two ports, not one, and that is the deliberate shape** (design D1). `FileStoragePort` has
@@ -54,7 +56,10 @@ class StorageWriteError(RuntimeError):
     is refused before touching disk, which is a refusal of the same kind. It is named on the
     write error rather than getting a fourth error type because the design fixes the error
     contract at three, and because a traversal key can only reach an adapter through a bug —
-    the key is derived by `storage_key_for_photo` below and never from client input (D3).
+    every key is derived by `_photo_storage_key` below, through one of its two public callers
+    (`storage_key_for_photo`, `storage_key_for_incident_photo`), and never from client input
+    (D3). Naming the shared body rather than the public functions is deliberate: the next
+    consumer adds a third caller, not a third place this sentence has to be corrected.
     """
 
 
@@ -194,6 +199,34 @@ def content_type_for_extension(extension: str) -> str:
 ACCEPTED_EXTENSIONS: frozenset[str] = frozenset(image.extension for image in ACCEPTED_IMAGE_TYPES)
 
 
+def _photo_storage_key(
+    *,
+    tenant_id: uuid.UUID,
+    collection: str,
+    owner_id: uuid.UUID,
+    photo_id: uuid.UUID,
+    extension: str,
+) -> str:
+    """`tenants/{tenant_id}/{collection}/{owner_id}/{photo_id}.{ext}` — the shared body.
+
+    Private, and the two public functions below are the only callers. It exists so the guard on
+    `extension` has **one** home: that check is what stops a key being built with something the
+    store would later be unable to serve, and a second copy of it is a second thing to forget
+    when a third consumer arrives (change `incident-photos`, design D4).
+
+    `collection` is a literal chosen by the caller, never client input — `cleaning-tasks` and
+    `incidents`, each mirroring its route's prefix. It is not validated here for that reason:
+    validating a constant this module's own callers supply would be theatre, and the callers are
+    enumerable by grep because each is a named function.
+    """
+    if extension not in ACCEPTED_EXTENSIONS:
+        raise ValueError(
+            f"extension {extension!r} is not one of the accepted image extensions "
+            f"{sorted(ACCEPTED_EXTENSIONS)}; it must come from detect_image_type()"
+        )
+    return f"tenants/{tenant_id}/{collection}/{owner_id}/{photo_id}.{extension}"
+
+
 def storage_key_for_photo(
     *, tenant_id: uuid.UUID, task_id: uuid.UUID, photo_id: uuid.UUID, extension: str
 ) -> str:
@@ -211,27 +244,52 @@ def storage_key_for_photo(
 
     `extension` must be one an accepted image type declares: it is derived from the detected
     MIME (D5), so anything else means a caller invented one.
+
+    **Its signature is deliberately unchanged** by the extraction of `_photo_storage_key`: the
+    call site in `cleaning` is untouched, and `tests/integrations/test_storage_keys.py` asserts
+    the parameter set exactly, so there is still no parameter through which a client file name
+    could arrive.
     """
-    if extension not in ACCEPTED_EXTENSIONS:
-        raise ValueError(
-            f"extension {extension!r} is not one of the accepted image extensions "
-            f"{sorted(ACCEPTED_EXTENSIONS)}; it must come from detect_image_type()"
-        )
-    return f"tenants/{tenant_id}/cleaning-tasks/{task_id}/{photo_id}.{extension}"
+    return _photo_storage_key(
+        tenant_id=tenant_id,
+        collection="cleaning-tasks",
+        owner_id=task_id,
+        photo_id=photo_id,
+        extension=extension,
+    )
 
 
-# --- Signed URLs (design D6) ----------------------------------------------------------
+def storage_key_for_incident_photo(
+    *, tenant_id: uuid.UUID, incident_id: uuid.UUID, photo_id: uuid.UUID, extension: str
+) -> str:
+    """`tenants/{tenant_id}/incidents/{incident_id}/{photo_id}.{ext}` (design D4, R1).
 
-#: Rule 5 of `steering/security.md`, and R3.1: photos travel by signed URL with a 3600 s
-#: expiry, never as an internal path.
-#:
-#: A **ceiling**, not just a default. It was only a default argument until the section 1 panel:
-#: `signed_url(expires_in=...)` took whatever it was handed and `verify_signed_key` accepted any
-#: `expiry` the signature covered, so a future consumer — D2 names `maintenance` and `revenue` —
-#: could mint an effectively permanent anonymous URL over a photo and nothing would refuse it.
-#: `clamp_expires_in` applies it at signing time and `verify_signed_key` applies it again at
-#: verification, which is the half that matters: it invalidates an over-long URL even if
-#: something managed to sign one.
+    The second consumer of the storage capability, and the reason this module lives in
+    `app/integrations/` rather than under `cleaning/` — stated as its purpose since it was
+    written, now actually true.
+
+    A separate public function rather than a `collection` parameter on the one above, and that
+    is the point of the shape: each consumer's key scheme stays greppable by name, so "what
+    keys does `maintenance` write?" is answered by finding this function's callers rather than
+    by reading every call site's arguments. The alternative — parameterising the existing
+    public function — would also have changed `cleaning`'s call site for no gain.
+
+    Everything true of the cleaning key is true here and for the same reasons: pure, every
+    component a UUID this system generated, `tenant_id` first so an S3 prefix is scopeable and
+    two tenants cannot collide, no client file name anywhere, and `extension` from
+    `detect_image_type` alone. The segment is `incidents` because that is the prefix of the
+    route the photos hang off (`/api/v1/incidents/{incident_id}/photos`), exactly as
+    `cleaning-tasks` mirrors its own.
+    """
+    return _photo_storage_key(
+        tenant_id=tenant_id,
+        collection="incidents",
+        owner_id=incident_id,
+        photo_id=photo_id,
+        extension=extension,
+    )
+
+
 SIGNED_URL_TTL_SECONDS = 3600
 
 #: Version prefix of the signed payload. It is INSIDE the signature, so bumping it invalidates
@@ -333,9 +391,10 @@ def sign_storage_key(*, signing_key: bytes, key: str, expiry: int) -> str:
     holding up a security argument two fields away. The length prefix makes the field boundary
     explicit, so the payload stays unambiguous whatever those fields later become. Rejecting
     keys containing `|` was the alternative and was not taken: it is a blacklist over caller
-    input, and D2 already names `maintenance` and `revenue` as the next signers with keys built
-    some other way — a primitive that is safe only for keys it approves of is the shape this
-    fix exists to remove.
+    input, and the signer set grows: `maintenance` became the second one in `incident-photos`,
+    and `revenue` (`expenses.receipt_storage_key`) is still to come with keys built some other
+    way — a primitive that is safe only for keys it approves of is the shape this fix exists to
+    remove.
 
     `expiry` is a POSIX timestamp in seconds and is rendered by the caller-independent `str()`
     of an `int`; the type is checked because a `float` would render as `1.7e+09` on some
@@ -490,5 +549,53 @@ class FileStorageFactory(Protocol):
         knows the tenant's backend and can answer before building anything — rather than from
         a port method that exists in order to raise. It is the same mechanism as
         `PMSAdapterFactory.messaging_for`, chosen for the same reason.
+        """
+        ...
+
+
+@dataclass(frozen=True)
+class ObjectLocation:
+    """Where one stored object's bytes live, and which tenant owns them. Nothing else.
+
+    The return of `UnscopedObjectLocationQuery` below, and deliberately **not** the domain
+    entity that owns the object: the anonymous serving route needs exactly two facts to do its
+    job, and handing it the entity would hand it `uploaded_by`, the photo's stage or type and
+    its timestamps — data about a tenant nobody has authenticated against — for a route that
+    returns bytes.
+
+    Generic across consumers on purpose (change `incident-photos`, design D5). It replaces
+    `SignedPhotoLocation`, which said the same two things for `cleaning` alone.
+    """
+
+    storage_key: str
+    tenant_id: uuid.UUID
+
+
+class UnscopedObjectLocationQuery(Protocol):
+    """`object_id → (storage_key, tenant_id)` **with no tenant scoping at all**.
+
+    The named exception to rule 1 of `steering/security.md` that the anonymous signed serving
+    route needs, and the reason it has to exist: that route carries no `Authorization` header
+    — an `<img src>` sends none — so there is no session tenant to scope by, and the tenant is
+    one of the two things the query is *for*.
+
+    Declared here, in `app/integrations/`, rather than once per consuming domain, because the
+    route that consumes it is now shared (`app/integrations/application/signed_serving.py`).
+    Each consumer supplies its own adapter over its own table; `cleaning` supplies
+    `SqlAlchemyUnscopedCleaningPhotoLocationQuery` and `maintenance`
+    `SqlAlchemyUnscopedIncidentPhotoLocationQuery`.
+
+    **Every implementation calls `require_unmarked_session`** (`app/core/db.py`) and appears in
+    the census of `tests/test_unscoped_reads.py`. Given a session marked with a tenant the
+    query would otherwise scope silently to it and refuse every object of any other, which
+    reads as a broken signature rather than as the wiring mistake it is.
+    """
+
+    async def locate_without_tenant_scoping(self, object_id: uuid.UUID) -> ObjectLocation | None:
+        """The key to rebuild the signature over, and the tenant that owns it, or `None`.
+
+        `None` for an id that resolves to nothing. The caller turns that into the **same**
+        refusal a bad signature gets, so this method's answer must not be the difference
+        between them anywhere it can be observed.
         """
         ...

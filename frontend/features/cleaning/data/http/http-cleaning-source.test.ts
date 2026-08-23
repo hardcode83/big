@@ -44,6 +44,14 @@ const mappedTask = {
   createdAt: "2026-08-19T18:00:00Z",
 };
 
+/**
+ * What a **listing** row maps to: `mappedTask` plus the pre-flight verdict (design D7).
+ * Kept separate from `mappedTask`, which is still what `assignTask` returns — the two mappers
+ * exist precisely because the two responses are different shapes, and one fixture for both
+ * would hide that.
+ */
+const mappedListItem = { ...mappedTask, assignmentBlockedBy: null };
+
 function taskPage(data: unknown[]) {
   return { data, total: data.length, page: 1, per_page: 20, total_pages: 1 };
 }
@@ -53,7 +61,7 @@ describe("HttpCleaningSource.listTasks (R1.1, R1.5, R3.1–R3.3)", () => {
     const { source, request } = sourceWith(taskPage([taskResponse]));
 
     await expect(source.listTasks("tenant-1", {}, 3)).resolves.toEqual({
-      data: [mappedTask],
+      data: [mappedListItem],
       total: 1,
       page: 1,
       per_page: 20,
@@ -324,4 +332,56 @@ describe("HttpCleaningSource.assignTask (R4.6)", () => {
       expect(request).toHaveBeenCalledTimes(1);
     },
   );
+});
+
+describe("HttpCleaningSource.listTasks maps the pre-flight (R3.2, R3.3, design D7)", () => {
+  it.each(["PROPERTY_STATE", "TASK_STATUS"] as const)(
+    "maps assignment_blocked_by=%s through to the row",
+    async (blocker) => {
+      const { source } = sourceWith(
+        taskPage([{ ...taskResponse, assignment_blocked_by: blocker }]),
+      );
+
+      const page = await source.listTasks("tenant-1", {}, 1);
+
+      expect(page.data[0].assignmentBlockedBy).toBe(blocker);
+    },
+  );
+
+  it("maps an explicit null to null — the assignable row", async () => {
+    const { source } = sourceWith(
+      taskPage([{ ...taskResponse, assignment_blocked_by: null }]),
+    );
+
+    const page = await source.listTasks("tenant-1", {}, 1);
+
+    expect(page.data[0].assignmentBlockedBy).toBeNull();
+  });
+
+  it("maps an ABSENT key to null, which is the backward deploy-skew window", async () => {
+    // A frontend newer than its backend receives a body without the field. `?? null` turns
+    // that into "nothing known to be blocking", so the row offers the button and the server
+    // decides (R3.3). `undefined` reaching the component would disable a control that works.
+    const { assignment_blocked_by: _omitted, ...withoutTheField } = {
+      ...taskResponse,
+      assignment_blocked_by: null,
+    };
+    const { source } = sourceWith(taskPage([withoutTheField]));
+
+    const page = await source.listTasks("tenant-1", {}, 1);
+
+    expect(page.data[0].assignmentBlockedBy).toBeNull();
+    expect("assignmentBlockedBy" in page.data[0]).toBe(true);
+  });
+
+  it("does not put the pre-flight on what assignTask returns (design D5)", async () => {
+    // The `PATCH` answers `CleaningTaskResponse`, which has no such field: the mutation
+    // invalidates the task-key prefix and the refetch brings fresh verdicts for the page.
+    const { source } = sourceWith(taskResponse);
+
+    const task = await source.assignTask("tenant-1", "task-1", "cleaner-2");
+
+    expect(task).toEqual(mappedTask);
+    expect("assignmentBlockedBy" in task).toBe(false);
+  });
 });

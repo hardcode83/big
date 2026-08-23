@@ -1,0 +1,234 @@
+<!DOCTYPE html><html class="dark" lang="en"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>AutoHostAI - Mobile Landing</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+            darkMode: "class",
+            theme: {
+                extend: {
+                    "colors": {
+                        "on-secondary": "#1000a9",
+                        "tertiary-container": "#ffc4a6",
+                        "inverse-on-surface": "#2c3039",
+                        "surface": "#0f131c",
+                        "surface-dim": "#0f131c",
+                        "text-secondary": "#94A3B8",
+                        "on-secondary-container": "#b0b2ff",
+                        "on-tertiary": "#552100",
+                        "surface-container-high": "#262a33",
+                        "state-error": "#EF4444",
+                        "on-secondary-fixed": "#07006c",
+                        "outline-variant": "#3b494c",
+                        "surface-highlight": "#1E293B",
+                        "state-warning": "#F59E0B",
+                        "on-tertiary-container": "#953f00",
+                        "surface-variant": "#31353e",
+                        "state-success": "#10B981",
+                        "on-tertiary-fixed": "#341100",
+                        "surface-container-low": "#181c24",
+                        "secondary": "#c0c1ff",
+                        "on-background": "#dfe2ee",
+                        "secondary-fixed": "#e1e0ff",
+                        "on-secondary-fixed-variant": "#2f2ebe",
+                        "primary-fixed-dim": "#00daf3",
+                        "primary": "#c3f5ff",
+                        "on-primary-container": "#00626e",
+                        "surface-elevated": "#131D31",
+                        "primary-container": "#00e5ff",
+                        "on-primary": "#00363d",
+                        "state-info": "#38BDF8",
+                        "outline": "#849396",
+                        "on-error": "#690005",
+                        "error": "#ffb4ab",
+                        "secondary-fixed-dim": "#c0c1ff",
+                        "surface-container-lowest": "#0a0e16",
+                        "tertiary-fixed-dim": "#ffb690",
+                        "on-primary-fixed": "#001f24",
+                        "on-surface-variant": "#bac9cc",
+                        "border-subtle": "#1E293B",
+                        "tertiary": "#ffe9df",
+                        "on-error-container": "#ffdad6",
+                        "inverse-primary": "#006875",
+                        "inverse-surface": "#dfe2ee",
+                        "surface-container": "#1c2028",
+                        "surface-container-highest": "#31353e",
+                        "text-primary": "#F8FAFC",
+                        "tertiary-fixed": "#ffdbca",
+                        "text-muted": "#64748B",
+                        "surface-tint": "#00daf3",
+                        "error-container": "#93000a",
+                        "background": "#0f131c",
+                        "surface-bright": "#353942",
+                        "on-primary-fixed-variant": "#004f58",
+                        "secondary-container": "#3131c0",
+                        "on-tertiary-fixed-variant": "#783200",
+                        "on-surface": "#dfe2ee",
+                        "primary-fixed": "#9cf0ff"
+                    },
+                    "borderRadius": {
+                        "DEFAULT": "0.125rem",
+                        "lg": "0.25rem",
+                        "xl": "0.5rem",
+                        "full": "0.75rem"
+                    },
+                    "spacing": {
+                        "margin-mobile": "16px",
+                        "gutter": "16px",
+                        "4xl": "64px",
+                        "sm": "8px",
+                        "unit": "4px",
+                        "lg": "16px",
+                        "md": "12px",
+                        "2xl": "32px",
+                        "3xl": "48px",
+                        "margin-desktop": "32px",
+                        "xl": "24px",
+                        "xs": "4px"
+                    },
+                    "fontFamily": {
+                        "data-mono": ["JetBrains Mono"],
+                        "headline-lg": ["Inter"],
+                        "body-lg": ["Inter"],
+                        "headline-md": ["Inter"],
+                        "body-base": ["Inter"],
+                        "body-medium": ["Inter"],
+                        "display-xl": ["Inter"],
+                        "display-2xl": ["Inter"],
+                        "label-caps": ["Inter"],
+                        "display-lg-mobile": ["Inter"]
+                    },
+                    "fontSize": {
+                        "data-mono": ["13px", { "lineHeight": "18px", "letterSpacing": "-0.01em", "fontWeight": "500" }],
+                        "headline-lg": ["32px", { "lineHeight": "40px", "letterSpacing": "-0.02em", "fontWeight": "700" }],
+                        "body-lg": ["16px", { "lineHeight": "24px", "letterSpacing": "-0.005em", "fontWeight": "400" }],
+                        "headline-md": ["24px", { "lineHeight": "32px", "letterSpacing": "-0.015em", "fontWeight": "600" }],
+                        "body-base": ["14px", { "lineHeight": "20px", "letterSpacing": "0", "fontWeight": "400" }],
+                        "body-medium": ["14px", { "lineHeight": "20px", "letterSpacing": "0", "fontWeight": "500" }],
+                        "display-xl": ["44px", { "lineHeight": "52px", "letterSpacing": "-0.025em", "fontWeight": "800" }],
+                        "display-2xl": ["56px", { "lineHeight": "64px", "letterSpacing": "-0.03em", "fontWeight": "800" }],
+                        "label-caps": ["11px", { "lineHeight": "14px", "letterSpacing": "0.06em", "fontWeight": "700" }],
+                        "display-lg-mobile": ["36px", { "lineHeight": "44px", "letterSpacing": "-0.02em", "fontWeight": "800" }]
+                    }
+                }
+            }
+        }
+    </script>
+<style>
+        body {
+            background-color: #0B0F17;
+            color: #F8FAFC;
+        }
+        .glow-border {
+            box-shadow: 0 0 10px rgba(0, 229, 255, 0.2);
+            transition: all 0.3s ease;
+        }
+        .glow-border:hover {
+            border-color: #0284C7;
+            box-shadow: 0 0 15px rgba(2, 132, 199, 0.4);
+        }
+        .btn-primary {
+            background-color: #00E5FF;
+            color: #051824;
+            transition: all 0.3s ease;
+        }
+        .btn-primary:hover {
+            box-shadow: 0 0 15px rgba(0, 229, 255, 0.6);
+        }
+        .btn-secondary {
+            background-color: transparent;
+            border: 1px solid #1E293B;
+            color: #F8FAFC;
+        }
+    </style>
+</head>
+<body class="antialiased min-h-screen flex flex-col font-body-base text-body-base bg-surface">
+<!-- Top Navigation (Mobile Adapted) -->
+<nav class="fixed top-0 w-full z-50 bg-surface/80 dark:bg-surface/80 backdrop-blur-md border-b border-border-subtle shadow-sm flex justify-between items-center h-16 px-margin-mobile">
+<div class="font-headline-md text-headline-md font-bold text-primary-fixed-dim tracking-tight">
+            AutoHostAI
+        </div>
+<!-- Mobile Menu Icon (Hamburger) -->
+<button class="md:hidden text-text-primary focus:outline-none">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">menu</span>
+</button>
+<!-- Desktop Nav Links (Hidden on Mobile) -->
+<div class="hidden md:flex gap-lg items-center">
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:text-primary-fixed-dim transition-all duration-300" href="#">Features</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:text-primary-fixed-dim transition-all duration-300" href="#">Pricing</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:text-primary-fixed-dim transition-all duration-300" href="#">Portfolio</a>
+<a class="text-text-secondary hover:text-text-primary transition-colors hover:text-primary-fixed-dim transition-all duration-300" href="#">Team</a>
+<a class="btn-secondary px-md py-sm rounded-lg font-body-medium text-body-medium" href="#">Login</a>
+<a class="btn-primary px-md py-sm rounded-lg font-bold font-body-medium text-body-medium" href="#">Sign Up</a>
+</div>
+</nav>
+<!-- Main Content -->
+<main class="flex-grow pt-2xl pb-3xl flex flex-col gap-3xl">
+<!-- Hero Section (Mobile Optimized) -->
+<section class="px-margin-mobile pt-3xl flex flex-col gap-lg text-center items-center">
+<h1 class="font-display-lg-mobile text-display-lg-mobile text-text-primary">
+                Instrumentation-Grade <br> <span class="text-primary-fixed-dim">Property Management</span>
+</h1>
+<p class="font-body-lg text-body-lg text-text-secondary max-w-md mx-auto">
+                Mission control for your short-term rentals. Optimize revenue, automate operations, and gain unprecedented telemetry.
+            </p>
+<div class="flex flex-col gap-md w-full mt-lg">
+<button class="btn-primary w-full py-md rounded-lg font-bold">Start Free Trial</button>
+<button class="btn-secondary w-full py-md rounded-lg font-body-medium">View Demo</button>
+</div>
+<!-- Abstract Dashboard Preview -->
+<div class="mt-2xl w-full h-48 bg-surface-elevated border border-border-subtle rounded-xl relative overflow-hidden flex items-center justify-center glow-border">
+<span class="material-symbols-outlined text-4xl text-primary-fixed-dim opacity-50">monitoring</span>
+<!-- Subtle gradient overlay to suggest glassmorphism -->
+<div class="absolute inset-0 bg-gradient-to-b from-transparent to-surface-elevated/50"></div>
+</div>
+</section>
+<!-- Features Grid (Mobile Optimized - Stacked) -->
+<section class="px-margin-mobile flex flex-col gap-xl">
+<h2 class="font-headline-lg text-headline-lg-mobile text-text-primary text-center mb-md">Core Capabilities</h2>
+<!-- Feature Card 1 -->
+<div class="bg-surface-elevated border border-border-subtle rounded-xl p-lg flex flex-col gap-sm glow-border">
+<div class="w-10 h-10 rounded-full bg-surface-highlight flex items-center justify-center mb-sm">
+<span class="material-symbols-outlined text-primary-fixed-dim">smart_toy</span>
+</div>
+<h3 class="font-headline-md text-body-lg font-bold text-text-primary">Gestión Inteligente</h3>
+<p class="font-body-base text-text-secondary">Automate routine tasks and messaging with AI-driven workflows.</p>
+</div>
+<!-- Feature Card 2 -->
+<div class="bg-surface-elevated border border-border-subtle rounded-xl p-lg flex flex-col gap-sm glow-border">
+<div class="w-10 h-10 rounded-full bg-surface-highlight flex items-center justify-center mb-sm">
+<span class="material-symbols-outlined text-primary-fixed-dim">analytics</span>
+</div>
+<h3 class="font-headline-md text-body-lg font-bold text-text-primary">Analítica Avanzada</h3>
+<p class="font-body-base text-text-secondary">Real-time telemetry and financial insights at a glance.</p>
+</div>
+<!-- Feature Card 3 -->
+<div class="bg-surface-elevated border border-border-subtle rounded-xl p-lg flex flex-col gap-sm glow-border">
+<div class="w-10 h-10 rounded-full bg-surface-highlight flex items-center justify-center mb-sm">
+<span class="material-symbols-outlined text-primary-fixed-dim">security</span>
+</div>
+<h3 class="font-headline-md text-body-lg font-bold text-text-primary">Secure Infrastructure</h3>
+<p class="font-body-base text-text-secondary">Enterprise-grade security protecting your operational data.</p>
+</div>
+</section>
+</main>
+<!-- Footer -->
+<footer class="w-full py-3xl bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-border-subtle px-margin-mobile flex flex-col items-center gap-lg">
+<div class="font-headline-sm text-headline-sm text-primary-fixed-dim font-bold">
+            AutoHostAI
+        </div>
+<div class="flex flex-wrap justify-center gap-md">
+<a class="text-text-muted hover:text-text-primary hover:text-primary transition-colors font-body-base text-body-base" href="#">Privacy Policy</a>
+<a class="text-text-muted hover:text-text-primary hover:text-primary transition-colors font-body-base text-body-base" href="#">Terms of Service</a>
+<a class="text-text-muted hover:text-text-primary hover:text-primary transition-colors font-body-base text-body-base" href="#">API Docs</a>
+<a class="text-text-muted hover:text-text-primary hover:text-primary transition-colors font-body-base text-body-base" href="#">Contact</a>
+</div>
+<div class="text-text-muted font-body-base text-body-base text-center mt-md">
+            © 2024 AutoHostAI. Instrumentation-Grade Management.
+        </div>
+</footer>
+</body></html>

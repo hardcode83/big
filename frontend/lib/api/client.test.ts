@@ -62,6 +62,23 @@ describe("createApiClient (D12)", () => {
     );
   });
 
+  it("serializes a boolean query parameter as true/false", async () => {
+    // `active` on `GET /api/v1/pricing-rules` is the first `boolean` query
+    // parameter in the tree (`pricing-web` design D20). The assertion is on the
+    // wire format FastAPI parses, not just on the type compiling.
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({ items: [] }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await client.request("/api/v1/pricing-rules", {
+      query: { page: 1, active: true },
+    });
+
+    expect(fetchImpl).toHaveBeenCalledWith(
+      "https://api/api/v1/pricing-rules?page=1&active=true",
+      expect.objectContaining({ method: "GET" }),
+    );
+  });
+
   it("serializes a JSON body and sets Content-Type", async () => {
     const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
     const client = createApiClient({ baseUrl: "https://api", fetchImpl });

@@ -111,6 +111,12 @@ SINK_TERMS = (
     # appears all over this codebase's prose — and the other two notes of that table are not
     # census columns, so a bare `properties` would fire on blocks about them.
     "incidents.assignment_note",
+    # `tech-cycle-completion` (2026-08-22) added one column to the census, and it goes in here
+    # for residual 3's reason, the same one `incidents.assignment_note` above entered on: the
+    # sink axis is fed by this tuple, so a column the table governs and this does not is a
+    # blind spot the green would hide. Qualified with its table, like its two siblings and for
+    # the identical reason — `incidents` is an ordinary English word all over this tree's prose.
+    "incidents.materials",
     "properties.access_notes",
     "messages.content",
     "messages.intent",
@@ -249,7 +255,17 @@ def _python_blocks(text: str) -> list[tuple[int, str]]:
         if stripped.startswith("#"):
             if not run:
                 start = number
-            run.append(stripped.lstrip("#").strip())
+            # `#:` is Sphinx, and `lstrip("#")` leaves its colon behind. Every continuation
+            # line of a `#:` run therefore began with `": "`, so a phrase spanning two lines
+            # read as `"…this module is\n: the writer of …"` — and `\s+` does not match a
+            # colon. The guard's own hunted string, present verbatim in
+            # `app/maintenance/domain/entities.py`, was reported as absent for that reason
+            # alone. Found by the security panel of `cleaner-incident-report` section 2; it is
+            # not the paraphrase residual that `test_what_this_guard_does_not_catch` records,
+            # it is the exact vocabulary going unseen. Stripping the colon newly reports
+            # exactly one block across `app/`, `tests/` and `alembic/versions/` — measured
+            # before the change, not hoped for afterwards.
+            run.append(stripped.lstrip("#").lstrip(":").strip())
             continue
         if run:
             blocks.append((start, "\n".join(run)))

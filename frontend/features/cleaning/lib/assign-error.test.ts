@@ -6,8 +6,12 @@ import enCleaning from "@/locales/en/cleaning.json";
 
 import { assignErrorKey, GENERIC_ASSIGN_ERROR_KEY } from "./assign-error";
 
-function apiError(status: number, message = "Backend technical detail") {
-  return new ApiError({ code: "CODE", message, status });
+function apiError(
+  status: number,
+  message = "Backend technical detail",
+  code = "CODE",
+) {
+  return new ApiError({ code, message, status });
 }
 
 function resolve(
@@ -70,5 +74,60 @@ describe("assignErrorKey (R4.4, R4.5, R5.1, design D10)", () => {
   it("resolves the generic key in both locales too", () => {
     expect(typeof resolve(GENERIC_ASSIGN_ERROR_KEY, esCleaning)).toBe("string");
     expect(typeof resolve(GENERIC_ASSIGN_ERROR_KEY, enCleaning)).toBe("string");
+  });
+});
+
+describe("assignErrorKey refines the 409 by code (R2.1, R2.2, R2.3, design D7)", () => {
+  it("gives the property-state conflict its own key, distinct from the task one", () => {
+    const property = assignErrorKey(
+      apiError(409, "blocked", "PROPERTY_STATE_CONFLICT"),
+    );
+    const task = assignErrorKey(apiError(409, "blocked", "CONFLICT"));
+
+    expect(property).toBe("cleaning:assign.error.propertyState");
+    expect(task).toBe("cleaning:assign.error.conflict");
+    expect(property).not.toBe(task);
+  });
+
+  it("keeps the task message for CONFLICT — R2.2, no existing consumer moves", () => {
+    expect(assignErrorKey(apiError(409, "x", "CONFLICT"))).toBe(
+      "cleaning:assign.error.conflict",
+    );
+  });
+
+  it("falls back to the task message for a 409 code it has never heard of", () => {
+    // The deploy-skew window of design D7: a backend newer than this build can answer a
+    // code that is not in the table. Degrading to the wording that shipped before is the
+    // decision; throwing or showing nothing is not.
+    expect(assignErrorKey(apiError(409, "x", "SOMETHING_INVENTED_LATER"))).toBe(
+      "cleaning:assign.error.conflict",
+    );
+  });
+
+  it.each([403, 404, 422])(
+    "does not consult the code for %s — the refinement is scoped to 409",
+    (status) => {
+      const withPropertyCode = assignErrorKey(
+        apiError(status, "x", "PROPERTY_STATE_CONFLICT"),
+      );
+
+      expect(withPropertyCode).toBe(assignErrorKey(apiError(status, "x", "CODE")));
+      expect(withPropertyCode).not.toBe("cleaning:assign.error.propertyState");
+    },
+  );
+
+  it("resolves the new key in both locales (R2.4)", () => {
+    const key = assignErrorKey(apiError(409, "x", "PROPERTY_STATE_CONFLICT"));
+
+    expect(typeof resolve(key, esCleaning)).toBe("string");
+    expect(typeof resolve(key, enCleaning)).toBe("string");
+  });
+
+  it("still never returns the backend's message for the new cause", () => {
+    const secret = "No policy entry for source state and trigger";
+    const key = assignErrorKey(apiError(409, secret, "PROPERTY_STATE_CONFLICT"));
+
+    expect(key).not.toContain(secret);
+    expect(key).toBe("cleaning:assign.error.propertyState");
   });
 });

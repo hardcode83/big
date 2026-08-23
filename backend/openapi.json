@@ -370,6 +370,24 @@
         "title": "Body_upload_cleaning_photo_api_v1_cleaning_tasks__task_id__photos_post",
         "type": "object"
       },
+      "Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post": {
+        "properties": {
+          "file": {
+            "contentMediaType": "application/octet-stream",
+            "title": "File",
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/IncidentPhotoStage"
+          }
+        },
+        "required": [
+          "stage",
+          "file"
+        ],
+        "title": "Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post",
+        "type": "object"
+      },
       "BuildProvenanceResponse": {
         "additionalProperties": false,
         "properties": {
@@ -680,6 +698,15 @@
         "title": "ChecklistTemplateResponse",
         "type": "object"
       },
+      "CleaningAssignmentBlocker": {
+        "description": "Which party refuses to assign a cleaning task: its own status, or its property's state.",
+        "enum": [
+          "TASK_STATUS",
+          "PROPERTY_STATE"
+        ],
+        "title": "CleaningAssignmentBlocker",
+        "type": "string"
+      },
       "CleaningPhotoListResponse": {
         "description": "The photos of one task (R3.1), each already carrying its signed URL.\n\nWrapped in `data` rather than returned as a bare array, the shape `ChecklistResponse`\nalready uses: a top-level JSON array cannot grow a field later without breaking every\ngenerated client, and this list has an obvious future one (`total`, if a task ever\naccumulates enough photos to page).\n\n**The element type is `CleaningPhotoResponse`, whose fields are an allowlist**, which is\nwhere R3.2 is actually enforced — see its docstring. Building this from the entities with\n`model_validate` would publish `storage_key` for every photo at once, so the only way in is\nthrough `from_upload`.",
         "properties": {
@@ -812,11 +839,186 @@
         "title": "CleaningTaskContextResponse",
         "type": "object"
       },
+      "CleaningTaskListItemResponse": {
+        "description": "One row of the cleaning-task listing: a task plus whether it can be assigned now.",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "assigned_cleaner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Cleaner Id"
+          },
+          "assignment_blocked_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CleaningAssignmentBlocker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checklist_template_id": {
+            "format": "uuid",
+            "title": "Checklist Template Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "scheduled_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled End"
+          },
+          "scheduled_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CleaningTaskStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "validated_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated By User Id"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/CleaningValidationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "checklist_template_id",
+          "assigned_cleaner_id",
+          "status",
+          "scheduled_start",
+          "scheduled_end",
+          "accepted_at",
+          "started_at",
+          "completed_at",
+          "validation_status",
+          "validated_by_user_id",
+          "validated_at",
+          "created_at",
+          "updated_at",
+          "assignment_blocked_by"
+        ],
+        "title": "CleaningTaskListItemResponse",
+        "type": "object"
+      },
       "CleaningTaskPageResponse": {
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/CleaningTaskResponse"
+              "$ref": "#/components/schemas/CleaningTaskListItemResponse"
             },
             "title": "Data",
             "type": "array"
@@ -2129,6 +2331,7 @@
           "HTTP_ERROR",
           "VALIDATION_ERROR",
           "CONFLICT",
+          "PROPERTY_STATE_CONFLICT",
           "PAYLOAD_TOO_LARGE",
           "METHOD_NOT_ALLOWED",
           "INVALID_CREDENTIALS",
@@ -2625,6 +2828,26 @@
         "title": "IncidentContextResponse",
         "type": "object"
       },
+      "IncidentEtaRequest": {
+        "additionalProperties": false,
+        "description": "The body of `accept` and of `en-route` — **one schema for both** (R3.2, design D6).\n\nOne and not two because the field set is identical, and duplicating it would put R3.2's\n\"en ninguna otra ruta\" in two places that could drift apart. The router takes it as\n`payload: IncidentEtaRequest | None = None`, so a `POST` with no body at all keeps\nworking exactly as it did before this change.\n\n**No validation of the instant lives here**, deliberately (D6): \"una ETA no puede estar en\nel pasado\" is a business rule, its reference instant is the router's `now_utc()`, and a\nrule written into a DTO would leave every non-HTTP caller — `seed_demo`, the tests —\nwithout it. `Incident._apply_eta` is where it lives, and it also refuses a naïve\ntimestamp, which is what keeps the comparison from surfacing as an undeclared `500`.\n\n`extra=\"forbid\"` is what makes \"no other route accepts an ETA\" a `422` rather than a\nconvention: sending `eta_at` to `wait-parts` or `resume` is rejected because those routes\ntake no body at all, and sending anything else here is rejected by this line.",
+        "properties": {
+          "eta_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta At"
+          }
+        },
+        "title": "IncidentEtaRequest",
+        "type": "object"
+      },
       "IncidentPageResponse": {
         "properties": {
           "items": {
@@ -2656,6 +2879,74 @@
         "title": "IncidentPageResponse",
         "type": "object"
       },
+      "IncidentPhotoListResponse": {
+        "description": "The photos of one incident, oldest first (R3.1).\n\n**Unpaginated, like `cleaning`'s.** A photo list is bounded by how many photos a technician\ntook of one fault, which is single digits; `per_page` exists on the incident *listing*\nbecause that one grows with the tenant's whole history. An envelope with `items` rather than\na bare array so the response can gain a field later without breaking every client.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/IncidentPhotoResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          }
+        },
+        "required": [
+          "items"
+        ],
+        "title": "IncidentPhotoListResponse",
+        "type": "object"
+      },
+      "IncidentPhotoResponse": {
+        "description": "One incident photo, and the signed URL that reads its bytes back (R3.3, design D10).\n\n**Every field is enumerated and the model is built by `from_upload` below — never by\n`model_validate` or `from_attributes` over the entity.** That is not style: `IncidentPhoto`\ncarries `storage_key`, and a dump would publish it. R3.3 forbids the key in any response\nbody or header, and the only reason this schema can be trusted is that there is no code path\nhere that serialises a field nobody listed.\n\n`url` is what replaces it, and what it reveals depends on the tenant's backend:\n\n* `LOCAL` — a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying the photo's\n  id, its expiry and a signature. The internal path is not in it.\n* `S3` — a presigned URL minted by the object store itself, so it necessarily contains the\n  bucket and the full object key. That is inherent to presigned URLs, is the single named\n  exception to rule 5 of `steering/security.md`, and is accepted in writing in\n  `sdd/specs/file-storage.md` and ADR 0008.\n\nIn neither case is `storage_key` a **field** of this body, which is what R3.3 governs.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "incident_id": {
+            "format": "uuid",
+            "title": "Incident Id",
+            "type": "string"
+          },
+          "stage": {
+            "$ref": "#/components/schemas/IncidentPhotoStage"
+          },
+          "uploaded_by": {
+            "format": "uuid",
+            "title": "Uploaded By",
+            "type": "string"
+          },
+          "url": {
+            "title": "Url",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "incident_id",
+          "stage",
+          "uploaded_by",
+          "created_at",
+          "url"
+        ],
+        "title": "IncidentPhotoResponse",
+        "type": "object"
+      },
+      "IncidentPhotoStage": {
+        "description": "When in the job a photo of an incident was taken (`incident-photos` D3, R1.2).\n\n`ASSUMPTION`: **the name is invented and the entity is not in the PRD.** PRD §6 grants the\n`TECHNICIAN` only \"subir fotos (antes y después)\", and PRD §7 declares `CleaningPhoto`\n(§7.12) but no incident-photo entity at all — §7.13 `Incident` has no photo column. So both\nthis enum's name and its two members are this project's, derived from that one phrase.\n\n**Two members, closed, and that is a decision rather than a starting point** (R1.2). A\ncleaning photo's kind is `cleaning_photos.photo_type`, a `String(100)`, because the task's\nchecklist template declares which values are admissible — the template bounds it. An\nincident has no template, so a free-text stage coming from the caller would be a **new\nfree-text sink** under rule 11 of `steering/security.md`, with no screen that ever displays\nit and nothing to close the set. The enum is what makes R6.5 true by construction instead of\nby review: there is no third value to send and no text field to fill.\n\nA third stage is a schema migration and a decision, deliberately. That is the cost of\nclosing the set, and it is the cost worth paying here.",
+        "enum": [
+          "BEFORE",
+          "AFTER"
+        ],
+        "title": "IncidentPhotoStage",
+        "type": "string"
+      },
       "IncidentReportedResponse": {
         "description": "The acknowledgement, and **only** the acknowledgement (R5.3, D15).\n\nThree fields: the id of the incident just created, its status and when. R5.3 forbids the\nbearer of a token from listing, reading, modifying, assigning, classifying or resolving\nincidents — \"la única lectura permitida es el acuse de la que acaba de crear\" — so this\nmodel is the whole of what the portal may ever say about an incident.\n\nIt carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill\nin, and returning their initial values would promise the guest a shape that changes\nunderneath them.",
         "properties": {
@@ -2682,7 +2973,7 @@
         "type": "object"
       },
       "IncidentResponse": {
-        "description": "What an authenticated operator may see about one incident.\n\n`description` **is** here, unlike in the dashboard's `IncidentSummary`: this is the\nsurface a technician works from and the fault is what they have to read. What is not\nhere is everything that identifies who reported it (`reported_by_guest_token`,\n`reported_by_user_id`) and the raw classifier verdict (`ai_classification`) — the first\nis a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink\nwhose audience is the flow, not a client. `ai_summary` stays: it is our own closed\nvocabulary, and it is what tells an operator the incident was looked at.",
+        "description": "What an authenticated operator may see about one incident.\n\n`description` **is** here, unlike in the dashboard's `IncidentSummary`: this is the\nsurface a technician works from and the fault is what they have to read. What is not\nhere is everything that identifies who reported it (`reported_by_guest_token`,\n`reported_by_user_id`) and the raw classifier verdict (`ai_classification`) — the first\nis a stable digest that correlates a guest's stay, and the last is a rule-11 JSON sink\nwhose audience is the flow, not a client. `ai_summary` stays: it is our own closed\nvocabulary, and it is what tells an operator the incident was looked at.\n\n**`eta_at` and `materials` are here, and that includes the paginated listing** — this one\nschema serves both the detail and the `items` of the page (`tech-cycle-completion` D8).\n`properties.access_notes` paid the price of leaving the listing under **excepción 6**,\nwhich is a different concession: that value is a note about how to get into a flat, and\n`GET /api/v1/guest/info/{token}` hands it verbatim to an anonymous bearer. `materials` is\n**excepción 3**, and its audience is exactly the one already reading `title`,\n`description` and `ai_summary` in this same listing — `READ_INCIDENTS`, and if the caller\nis a technician, only their own rows. Splitting the schema would remove no reader and\nwould take from the technician's own list the one column that explains the cost.",
         "properties": {
           "ai_summary": {
             "anyOf": [
@@ -2743,6 +3034,18 @@
             ],
             "title": "Estimated Cost"
           },
+          "eta_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Eta At"
+          },
           "final_cost": {
             "anyOf": [
               {
@@ -2759,6 +3062,17 @@
             "format": "uuid",
             "title": "Id",
             "type": "string"
+          },
+          "materials": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Materials"
           },
           "owner_approval_required": {
             "title": "Owner Approval Required",
@@ -2824,10 +3138,12 @@
           "description",
           "ai_summary",
           "assigned_technician_id",
+          "eta_at",
           "owner_approval_required",
           "estimated_cost",
           "approved_cost",
           "final_cost",
+          "materials",
           "resolved_at",
           "created_at",
           "updated_at"
@@ -4475,6 +4791,30 @@
         "title": "ReportIncidentRequest",
         "type": "object"
       },
+      "ReportTaskIncidentRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /cleaning-tasks/{task_id}/incidents` accepts: a title and a description.\n\n**Exactly two fields, and `extra=\"forbid\"` is what makes that a contract** (R1.3). A body\ncarrying `property_id`, `reservation_id`, `tenant_id`, `source`, `category`, `severity`,\n`status`, `assigned_technician_id` or any cost field is rejected rather than ignored: those\nare derived or sealed by the system, and silently dropping one would leave a caller believing\nit had been accepted. `test_task_incident_api.py` pins the set so that adding a third field is\na deliberate act rather than a drift.\n\n**The bounds are imported, never re-derived** (D7). `MAX_INCIDENT_TITLE` and\n`MAX_INCIDENT_DESCRIPTION` live in `app/maintenance/domain/entities.py`, the module that owns\nthe **bound** — the column's own DDL is next door in that module's\n`infrastructure/models.py`. The guest portal's request schema binds the same two constants; a\nlocal `300` here would be a copy nobody keeps in step with either.\n\n**`storable_text` is not decoration**: without it a `title` carrying `U+0000` or an unpaired\nsurrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the\nsection-7 panel of `guest-portal-api` measured twice on these two columns. `SingleLineText`\nfor the title (no control characters at all — it is rendered into lists and logs) and\n`MultiLineText` for the description (paragraphs and tabs are how a person describes a\nproblem).\n\n`str_strip_whitespace=True` with `min_length=1` is what makes a whitespace-only report a\n`422`, and it means the maxima count characters *after* stripping.",
+        "properties": {
+          "description": {
+            "maxLength": 5000,
+            "minLength": 1,
+            "title": "Description",
+            "type": "string"
+          },
+          "title": {
+            "maxLength": 300,
+            "minLength": 1,
+            "title": "Title",
+            "type": "string"
+          }
+        },
+        "required": [
+          "title",
+          "description"
+        ],
+        "title": "ReportTaskIncidentRequest",
+        "type": "object"
+      },
       "RequiredPhotoPayload": {
         "additionalProperties": false,
         "properties": {
@@ -5103,7 +5443,7 @@
       },
       "ResolveIncidentRequest": {
         "additionalProperties": false,
-        "description": "R4.2 — `final_cost` is required, which is where \"SHALL exigir `final_cost`\" lands for\nan HTTP caller. The entity requires it too, for callers that are not HTTP.",
+        "description": "R4.2 — `final_cost` is required, which is where \"SHALL exigir `final_cost`\" lands for\nan HTTP caller. The entity requires it too, for callers that are not HTTP.\n\n`materials` is optional and, when it comes, is written; when it does not, whatever was\nthere survives (R4.3, D7). That asymmetry with `assign`'s complete-operation semantics is\nload-bearing rather than an inconsistency: the close that trips the owner-approval gate\nwrites `materials` and parks the incident, and when the owner answers the technician\nrepeats the close — so a \"complete operation\" reading would silently erase the description\nof a spend R4.3 has just protected.\n\n**The bound is imported, never re-derived** (D7). `MAX_MATERIALS` lives in\n`app/maintenance/domain/entities.py`, the module that owns the column — its DDL is next\ndoor in that module's `infrastructure/models.py` — so a literal `2000` here would be a\ncopy nobody keeps in step with either.\n\n`MultiLineText` is not decoration: without it a value carrying `U+0000` or an unpaired\nsurrogate reaches asyncpg and surfaces as an undeclared `500`, which is the failure the\nsection-7 panel of `guest-portal-api` measured twice. Multi-line rather than single, since\na list of parts is prose a person types. `str_strip_whitespace=True` with `min_length=1` is\nwhat makes a whitespace-only value a `422`, and it means the maximum counts characters\n*after* stripping — so \"no materials\" is said by **omitting** the field, not by sending\n`\"\"`.",
         "properties": {
           "final_cost": {
             "anyOf": [
@@ -5118,6 +5458,19 @@
               }
             ],
             "title": "Final Cost"
+          },
+          "materials": {
+            "anyOf": [
+              {
+                "maxLength": 2000,
+                "minLength": 1,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Materials"
           }
         },
         "required": [
@@ -5449,6 +5802,31 @@
           "document_expiry_date"
         ],
         "title": "SubmitCheckinRequest",
+        "type": "object"
+      },
+      "TaskIncidentReportedResponse": {
+        "description": "The acknowledgement, and **only** the acknowledgement (R4.4, D8).\n\nThree fields: the id of the incident just created, its status and when. A mirror of the guest\nportal's `IncidentReportedResponse`, and for the same reason — the cleaner does not read,\nlist, classify or resolve incidents (proposal §Out of scope), so this is the whole of what\nthis surface may ever say about one.\n\nIt carries no `category`, no `severity` and no `ai_*`: those are `maintenance`'s to fill in\nand returning their initial values would promise a shape that changes underneath the caller.\nIt does not echo the `description` back either — there is nothing to learn from it and it is\na rule-11 sink, so the round trip would be one more place the value travels to.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "status": {
+            "$ref": "#/components/schemas/IncidentStatus"
+          }
+        },
+        "required": [
+          "id",
+          "status",
+          "created_at"
+        ],
+        "title": "TaskIncidentReportedResponse",
         "type": "object"
       },
       "TenantConfigPatch": {
@@ -5833,6 +6211,7 @@
           "INCIDENT_CLASSIFIED",
           "TECHNICIAN_ASSIGNED",
           "TECHNICIAN_ACCEPTED",
+          "TECHNICIAN_REJECTED",
           "TECHNICIAN_EN_ROUTE",
           "TECHNICIAN_STARTED",
           "INCIDENT_RESOLVED",
@@ -8117,7 +8496,7 @@
     },
     "/api/v1/cleaning-tasks": {
       "get": {
-        "description": "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.",
+        "description": "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.\n\nEach row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as \"go ahead and let the server decide\", never as a guarantee.",
         "operationId": "list_cleaning_tasks_api_v1_cleaning_tasks_get",
         "parameters": [
           {
@@ -8365,7 +8744,7 @@
         ]
       },
       "patch": {
-        "description": "Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.",
+        "description": "Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.\n\n**The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.",
         "operationId": "assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch",
         "parameters": [
           {
@@ -8883,6 +9262,105 @@
           }
         ],
         "summary": "Where the cleaning is and the window it has to happen in",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/incidents": {
+      "post": {
+        "description": "Opens a maintenance incident from the cleaning task the caller is working on — PRD §11's «reportar incidencia» and one of the five creation sources of §12.\n\nThe body is **exactly** a `title` and a `description`. Everything else about the incident is decided by the system: it is sealed `source = CLEANER`, attributed to the authenticated user, linked to this task, and its property is taken from the task — never from the request.\n\nIt is born `OPEN` and **unclassified**. The classification job gives it a category and a severity on a later tick, and from that point it is the manager's; the cleaner gets the acknowledgement of the one she just opened and nothing more.\n\nA `CLEANER` reaches only the tasks assigned to her. That restriction comes from the token's persisted role and **no request field can widen it**. An unknown task, another tenant's task and another cleaner's task are one indistinguishable `404`.\n\nReportable while the work is live — `ASSIGNED`, `ACCEPTED` or `IN_PROGRESS`. A completed, rejected or cancelled task answers `409`: PRD §12 says «durante checklist», and a broken boiler found after the fact is not this surface's business.\n\n**Reporting does not block closing the cleaning by itself.** The incident is born `MEDIUM`, and `complete()` is refused only by an unresolved `CRITICAL` incident **anywhere in the property** — so it starts blocking only if the classifier raises it, or if such an incident already existed.",
+        "operationId": "report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReportTaskIncidentRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/TaskIncidentReportedResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task does not exist for this caller — an unknown id, another tenant's task, another cleaner's task and a task whose property does not resolve inside the tenant are all answered this way, indistinguishably."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task is no longer in a state the cleaner can report from: it has been completed, rejected or cancelled."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The body is not exactly a non-empty `title` and `description` the database can store, or it carries a field this operation does not accept."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Report an incident found during a cleaning",
         "tags": [
           "cleaning"
         ]
@@ -10414,6 +10892,100 @@
         ]
       }
     },
+    "/api/v1/incident-photos/{photo_id}": {
+      "get": {
+        "description": "**Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.\n\nOnly tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.",
+        "operationId": "serve_incident_photo_api_v1_incident_photos__photo_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "photo_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Photo Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "POSIX expiry the signature covers.",
+            "in": "query",
+            "name": "exp",
+            "required": true,
+            "schema": {
+              "description": "POSIX expiry the signature covers.",
+              "title": "Exp",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Hex HMAC of the object's key and `exp`.",
+            "in": "query",
+            "name": "sig",
+            "required": true,
+            "schema": {
+              "description": "Hex HMAC of the object's key and `exp`.",
+              "title": "Sig",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "image/jpeg": {},
+              "image/png": {},
+              "image/webp": {}
+            },
+            "description": "The photo's bytes, with the `Content-Type` derived from the stored object's extension, `X-Content-Type-Options: nosniff`, and a `Cache-Control` of `private, max-age=<what is left of the signature>` so no shared cache keeps the bytes and no browser keeps them past the URL's expiry."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The signature is missing, wrong, expired, tampered with, or names a photo that does not exist. **All five answer with the same body**, deliberately: telling them apart would make this endpoint an existence oracle for an unauthenticated caller."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The photo's tenant stores objects in `S3`, where the browser fetches them directly from the provider, so there is nothing for this endpoint to serve."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The signature was valid but the object could not be read back."
+          }
+        },
+        "summary": "Serve an incident photo by signed URL",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
     "/api/v1/incidents": {
       "get": {
         "description": "Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.",
@@ -10694,7 +11266,7 @@
     },
     "/api/v1/incidents/{incident_id}/accept": {
       "post": {
-        "description": "Cancels the SLA deadline the assignment opened (R3.3).",
+        "description": "Cancels the SLA deadline the assignment opened (R3.3).\n\nThe body is **optional**: `POST` with nothing keeps working exactly as before. When it carries an `eta_at`, that instant is recorded as when the technician says they will arrive — it must carry a timezone and must not be in the past, or the answer is `422`. The ETA belongs to the assignment in force, so a reassignment clears it.",
         "operationId": "accept_incident_api_v1_incidents__incident_id__accept_post",
         "parameters": [
           {
@@ -10708,6 +11280,23 @@
             }
           }
         ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/IncidentEtaRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
         "responses": {
           "200": {
             "content": {
@@ -11057,9 +11646,340 @@
         ]
       }
     },
+    "/api/v1/incidents/{incident_id}/en-route": {
+      "post": {
+        "description": "`ACCEPTED → IN_PROGRESS`, and the milestone PRD §12 draws as \"Técnico en ruta\" (R2.1, R2.2). This route was `POST /{incident_id}/start` until `tech-cycle-completion` renamed it; the old path no longer exists (R2.3).\n\nThe body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.",
+        "operationId": "en_route_incident_api_v1_incidents__incident_id__en_route_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/IncidentEtaRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Payload"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The technician is on the way",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/photos": {
+      "get": {
+        "description": "Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.\n\n`READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.",
+        "operationId": "list_incident_photos_api_v1_incidents__incident_id__photos_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPhotoListResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the photos of an incident",
+        "tags": [
+          "maintenance"
+        ]
+      },
+      "post": {
+        "description": "`multipart/form-data` with a `stage` of `BEFORE` or `AFTER` and a `file`. PRD §6 grants the technician exactly those two — \"subir fotos (antes y después)\" — and the enum is closed, so there is no third value and no free-text alternative.\n\nThe format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `stage` are allowed on purpose: a technician photographs two angles of one fault.\n\nThe response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:\n\n* `LOCAL` — the URL is a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.\n* `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip.\n\nIn neither case does `storage_key` appear as a field of the response body (R3.3).",
+        "operationId": "upload_incident_photo_api_v1_incidents__incident_id__photos_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "multipart/form-data": {
+              "schema": {
+                "$ref": "#/components/schemas/Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentPhotoResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The incident does not accept a photo, with **three distinguishable messages** (design D6): it is already `RESOLVED`/`CANCELLED`; it is waiting for the owner to answer an approval; or it is in a status where the technician's work has not started. Only `IN_PROGRESS` and `WAITING_EXTERNAL_PARTS` accept one."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Either the bytes are not a JPEG, PNG or WebP, or `stage` is not one of `BEFORE`/`AFTER`. The second is answered by FastAPI before the use case runs, and is deliberately **not** a `404`: unlike a cleaning photo's `photo_type`, the admissible stages come from a closed enum rather than from a row, so there is nothing whose existence a `404` could describe (design D11)."
+          },
+          "502": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The file store refused the write; no row was persisted."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Upload a photo of the incident",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
+    "/api/v1/incidents/{incident_id}/reject": {
+      "post": {
+        "description": "The incident goes back to `CLASSIFIED` for the manager to reassign (R1.1, R1.2) — it is **not** closed, which is what `cancel` does and what only a manager may do. The assignee, the ETA and the assignment note are all cleared, because all three belong to the assignment that just ended; who refused survives in the audit trail and on the timeline.\n\nCancels the SLA deadline the assignment opened — a refusal is an answer, so nobody is late (R1.3) — and leaves the tenant's `PROPERTY_MANAGER` a notification with no deadline of its own (R1.4). A tenant with no active manager still gets the refusal applied (R1.5).",
+        "operationId": "reject_incident_api_v1_incidents__incident_id__reject_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "incident_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Incident Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/IncidentResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "The technician refuses the job",
+        "tags": [
+          "maintenance"
+        ]
+      }
+    },
     "/api/v1/incidents/{incident_id}/resolve": {
       "post": {
-        "description": "`final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).",
+        "description": "`final_cost` is required (R4.2). If it goes past the tenant's threshold and no approved budget covers it, the incident is **not** resolved: it moves to `AWAITING_OWNER_APPROVAL` with the cost recorded and no `resolved_at`, and the owner decides (R4.3).\n\n`materials` is optional free text describing what was fitted, bounded to 2000 characters. It **preserves**: sending the field writes it, omitting it leaves whatever was there — so the repeat close after an owner approval does not erase what the first attempt declared. Send no field for \"none\"; an empty string is a `422`. It explains `final_cost` and is never derived from or validated against it.",
         "operationId": "resolve_incident_api_v1_incidents__incident_id__resolve_post",
         "parameters": [
           {
@@ -11199,74 +12119,6 @@
           }
         ],
         "summary": "Work resumes after the part arrived",
-        "tags": [
-          "maintenance"
-        ]
-      }
-    },
-    "/api/v1/incidents/{incident_id}/start": {
-      "post": {
-        "operationId": "start_incident_api_v1_incidents__incident_id__start_post",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "incident_id",
-            "required": true,
-            "schema": {
-              "format": "uuid",
-              "title": "Incident Id",
-              "type": "string"
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/IncidentResponse"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "401": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Missing, malformed or expired credentials."
-          },
-          "403": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Authenticated, but the role lacks the required permission."
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/ErrorEnvelope"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "HTTPBearer": []
-          }
-        ],
-        "summary": "The technician starts work",
         "tags": [
           "maintenance"
         ]

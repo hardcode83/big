@@ -113,6 +113,12 @@ export interface TimelineFilters {
   actorType?: TimelineActorType;
   from?: IsoDateTime;
   to?: IsoDateTime;
+  page?: number;
+  /**
+   * Sent explicitly rather than relying on the server default, so the query key
+   * declares the page size the cached envelope actually describes.
+   */
+  perPage?: number;
 }
 
 /** Guest data on the detail page — masked/PII-free (security.md rules 3-4). */

@@ -325,14 +325,30 @@ se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta 
 genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
 `/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
-**El único límite vivo: las incidencias no se pueden crear todavía.** La precondición de cierre
-consulta la tabla `incidents` de verdad, pero `maintenance` no tiene capa de aplicación, así que
-en la práctica siempre responde «ninguna abierta». El botón «reportar incidencia» de la app de la
-limpiadora es de `maintenance` (PRD §26.11).
+**Ese límite ya no existe, y conviene leer lo que ocupó su sitio.** Esta página decía que las
+incidencias no se podían crear todavía, que `maintenance` no tenía capa de aplicación y que la
+precondición de cierre respondía siempre «ninguna abierta». Las tres cosas eran ciertas y ya no lo
+son: `maintenance` tiene su flujo desde el 2026-08-15, y `cleaner-incident-report` le da a la
+limpiadora una ruta para abrir una incidencia **desde la tarea que está haciendo** —
+`POST /api/v1/cleaning-tasks/{task_id}/incidents`, descrita en
+[`maintenance.md`](maintenance.md#reportar-una-incidencia-desde-una-limpieza).
 
-Los otros dos que esta página llegó a listar ya están cerrados: el escalado por SLA, arriba, y
-**las fotos requeridas al cerrar**, que este change entrega y se cuentan en §«Las fotos de la
-limpieza».
+**Y eso acopla reportar con cerrar, así que aquí va cómo se comporta de verdad**, porque es la
+pregunta que hace una limpiadora en cuanto usa el botón:
+
+- La incidencia que abre nace `MEDIUM`. **No le bloquea el cierre en ese momento**: puede reportar
+  la caldera rota y terminar la limpieza a continuación.
+- Solo empieza a bloquear si el job de clasificación la sube a `CRITICAL` — o si ya había una
+  `CRITICAL` sin resolver en esa vivienda por cualquier otra vía.
+- Cuando bloquea, el `409` dice la causa y nada más: «una incidencia CRITICAL sin resolver». No
+  lleva el identificador, ni el título, ni la descripción, porque el rol `CLEANER` no puede leer
+  incidencias y ese cuerpo sería justo esa lectura.
+- El acotamiento es **la vivienda, no la tarea**. Una `CRITICAL` abierta por un huésped, o durante
+  otra limpieza del mismo piso, bloquea igual. Estrecharlo a la tarea sería relajar la regla, no
+  afinarla, y es un cambio con su propia entrada de roadmap.
+
+Los otros dos límites que esta página llegó a listar ya están cerrados: el escalado por SLA,
+arriba, y **las fotos requeridas al cerrar**, en §«Las fotos de la limpieza».
 
 ## Operar el job
 
@@ -471,12 +487,48 @@ reasignarían tareas a quien solo estaba mirando la lista.
 Si la persona elegida ha dejado de ser una limpiadora activa del tenant entre que se cargó el
 catálogo y se confirma, el backend responde `422` y la pantalla lo dice con esas palabras — «esa
 persona ya no está» — en lugar de un «ha fallado» genérico. Las demás respuestas tienen su propio
-mensaje: `403` sin permiso, `404` si la tarea ya no existe, `409` si la tarea ya no admite un
-cambio de asignación (por ejemplo porque la limpiadora ya la aceptó). El texto lo elige el
-**código de estado**, nunca el mensaje del backend, que es técnico y está en inglés.
+mensaje: `403` sin permiso, `404` si la tarea ya no existe, y **dos `409` distintos** que la
+sección siguiente explica. El texto lo elige el **estado HTTP y, dentro del `409`, el código del
+sobre** — nunca el mensaje del backend, que es técnico y está en inglés.
 
 Cada resultado —éxito o fallo— se anuncia en una **región viva**, de modo que un lector de
 pantalla lo perciba sin depender del color.
+
+### La primera asignación exige la vivienda pendiente de limpieza
+
+**Asignar una tarea `CREATED` mueve la vivienda a `CLEANING_SCHEDULED`, y esa transición solo es
+legal desde `AWAITING_CLEANING`.** Es la única fila que la matriz de `PropertyStateMachine` admite
+para el disparador `CLEANER_ASSIGNED`, así que sobre una vivienda en cualquier otro estado la
+primera asignación se rechaza. Reapuntar una tarea que ya está `ASSIGNED` no mueve la vivienda y
+por tanto no depende de su estado.
+
+Eso convierte el `409` en dos cosas distintas, y el API las distingue por código:
+
+| Quién se niega | Código | Qué se enseña |
+|---|---|---|
+| El ciclo de vida de la tarea (ya está `ACCEPTED`, `IN_PROGRESS`…) | `CONFLICT` | «Esa tarea ya no admite un cambio de asignación» |
+| El estado operacional de la vivienda | `PROPERTY_STATE_CONFLICT` | «La vivienda todavía no está pendiente de limpieza» |
+
+Antes los dos compartían código y la pantalla culpaba a la tarea de una precondición de la
+vivienda — que es el fallo que se midió operando `dev` el 2026-08-22 y el motivo del change
+`cleaning-assign-preconditions`. El código nuevo lo produce **toda** operación de limpieza que la
+máquina de estados bloquee, no solo la asignación: el cierre de una limpieza con el siguiente
+huésped ya dentro responde el mismo `PROPERTY_STATE_CONFLICT`.
+
+**La pantalla lo dice por adelantado, y no es la autoridad.** Cada fila del listado trae
+`assignment_blocked_by`: `TASK_STATUS` si se niega la tarea, `PROPERTY_STATE` si se niega la
+vivienda, o nulo si nada conocido lo bloquea. Cuando no es nulo, el botón de confirmar queda
+deshabilitado y debajo aparece el motivo; el desplegable **sigue operable**, porque deshabilitar
+un elemento con el foco lo manda al `<body>` y dejaría tirado a quien navega con teclado. Elegir
+es inofensivo, solo enviar tiene que esperar.
+
+Que sea una cortesía y no un permiso importa: el indicador se calcula al leer la página, así que
+puede quedarse viejo antes de que nadie pulse. Si la vivienda se mueve entre la carga y el clic,
+el backend rechaza igual y **ese** rechazo es el que manda — con el mensaje correcto, que es la
+mitad del arreglo que de verdad protege al operador. Un nulo obsoleto ofrece un botón que acabará
+en `409`; un no-nulo obsoleto esconde un botón que habría funcionado hasta el siguiente refresco.
+Nulo también es lo que se envía cuando la lectura de la página no resolvió el estado de esa
+vivienda: **falla abierto** a propósito, ofrece la acción y deja decidir al servidor.
 
 ## Entradas de roadmap relacionadas
 

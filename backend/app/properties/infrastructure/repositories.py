@@ -135,6 +135,23 @@ class SqlAlchemyPropertyRepository:
         )
         return [_to_property(model) for model in result.scalars().all()]
 
+    async def states_for(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, PropertyOperationalState]:
+        if not property_ids:
+            return {}
+        result = await self._session.execute(
+            select(PropertyModel.id, PropertyModel.current_operational_state).where(
+                PropertyModel.tenant_id == tenant_id,
+                PropertyModel.id.in_(list(property_ids)),
+            )
+        )
+        # Two columns and no entity, unlike every other read here: the caller needs one enum
+        # per id, so there is nothing to gain from `_to_property` and the whole row it maps.
+        # The rationale is narrowness — see the port docstring, which also says which security
+        # rule this is NOT.
+        return {row.id: row.current_operational_state for row in result}
+
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         if property.tenant_id != tenant_id:
             raise CrossTenantWriteError(

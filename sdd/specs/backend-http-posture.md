@@ -20,10 +20,16 @@ bien en una ruta y se olvidaron en las demás.
   THE SYSTEM SHALL incluirla igualmente.
 - WHEN `MaxBodySizeMiddleware` fabrica y envía su propio `413`, THE SYSTEM SHALL incluirla también
   en esa respuesta, que no pasa por ninguna ruta.
-- WHERE una ruta sella la cabecera por su cuenta —hoy `GET /api/v1/cleaning-tasks/{id}/photos/{id}`—
-  THE SYSTEM SHALL emitir **exactamente un** valor `nosniff`: el sello global sobrescribe, no añade
-  ni respeta un valor previo. Ninguna respuesta de este backend tiene una razón legítima para
-  querer sniffing.
+- WHERE una ruta sella la cabecera por su cuenta —hoy **dos**, `GET /api/v1/cleaning-photos/{photo_id}`
+  y `GET /api/v1/incident-photos/{photo_id}`, las dos rutas anónimas que sirven bytes de un objeto
+  contra una firma HMAC— THE SYSTEM SHALL emitir **exactamente un** valor `nosniff`: el sello global
+  sobrescribe, no añade ni respeta un valor previo. Ninguna respuesta de este backend tiene una
+  razón legítima para querer sniffing.
+- THE SYSTEM SHALL sellarlo en esas dos rutas desde **un solo punto de salida compartido**
+  (`app/integrations/api/signed_media.py`), por el que pasan tanto los bytes como las tres
+  negativas de cada una. Dos copias de ese sello serían dos sitios donde una de las dos rutas
+  pudiera perderlo sin que la otra lo notase; desde que hay dos consumidores del almacén
+  ([`file-storage`](file-storage.md)) el sello vive una sola vez.
 - THE SYSTEM SHALL sellar sin tocar `receive`: sólo se decora `send`. Envolver `receive` se
   interpondría entre el servidor ASGI y el contador acumulativo de `MaxBodySizeMiddleware`, que es
   la mitad que caza un `Content-Length` mentido.
@@ -84,21 +90,28 @@ bien en una ruta y se olvidaron en las demás.
 - THE SYSTEM SHALL resolver el techo **por ruta** en una **sola** instancia de middleware. Apilar
   una instancia por prefijo no funciona: las instancias se anidan, así que la más externa decide
   primero y una más estrecha por dentro nunca llega a ver la petición.
-- THE SYSTEM SHALL resolver los cuatro techos en este orden, y el orden es el mecanismo:
+- THE SYSTEM SHALL resolver los cuatro techos en **cinco ramas**, en este orden, y el orden es el
+  mecanismo:
 
   1. `/api/v1/cleaning-tasks/…/photos` → `PHOTO_UPLOAD_MAX_BYTES` (10 MiB). **Va primero** porque
      la ruta también empieza por `/cleaning-`; un `elif` después de esa rama no se alcanzaría nunca
      y toda foto por encima de 1 MiB sería rechazada. El patrón exige ambos extremos —prefijo
      `/api/v1/cleaning-tasks/` y sufijo `/photos`— para que el techo ancho llegue a esa colección y
      no a un vecino que acabe igual.
-  2. `/api/v1/integrations/` → `CSV_IMPORT_MAX_BYTES` (10 MiB). Regla 6 de `steering/security.md`.
-  3. `/api/v1/cleaning-` → `JSON_BODY_MAX_BYTES` (1 MiB). El endpoint de plantillas de checklist
+  2. `/api/v1/incidents/…/photos` → `PHOTO_UPLOAD_MAX_BYTES` (10 MiB), el **mismo** ajuste y no uno
+     nuevo: es el mismo tipo de fichero por la misma clase de puerta
+     ([`incident-photos`](incident-photos.md)). Su posición relativa **no** es crítica como la de la
+     rama de limpieza —`/incidents/` no comparte prefijo con `/cleaning-` ni con `/integrations/`—,
+     pero tiene que estar antes del `else`, y un test lo fija. Acotada por los dos extremos por el
+     mismo motivo que la primera.
+  3. `/api/v1/integrations/` → `CSV_IMPORT_MAX_BYTES` (10 MiB). Regla 6 de `steering/security.md`.
+  4. `/api/v1/cleaning-` → `JSON_BODY_MAX_BYTES` (1 MiB). El endpoint de plantillas de checklist
      recibe un **array dimensionado por el cliente**, así que su cuerpo no es un objeto pequeño y
      fijo, y sus topes de Pydantic sólo actúan con el cuerpo entero ya en memoria. Medido: un `POST`
      anónimo de ~50 MB se recibió completo y luego se respondió `401`. El número está medido contra
      el máximo del esquema (338 KB con etiquetas acentuadas, porque `json.dumps` escapa el no-ASCII
      y las fixtures del proyecto dicen `Baño`), no estimado.
-  4. Todo lo demás → `REQUEST_MAX_BYTES` (1 MiB). Un `POST /auth/login` de 400 MB llevó el
+  5. Todo lo demás → `REQUEST_MAX_BYTES` (1 MiB). Un `POST /auth/login` de 400 MB llevó el
      contenedor de 195 MiB a 1,016 GiB de RSS en 2,3 s, y FastAPI lee el cuerpo **antes** de
      resolver dependencias, o sea antes de consultar el throttle de 10/min. Ningún compose limita
      la memoria de `backend`, así que el techo era el de la VM.
@@ -106,6 +119,12 @@ bien en una ruta y se olvidaron en las demás.
 - THE SYSTEM SHALL mantener `JSON_BODY_MAX_BYTES` y `REQUEST_MAX_BYTES` como constantes separadas
   aunque hoy valgan lo mismo: uno está clavado a un máximo de esquema y el otro es una palanca
   operativa, así que fundirlos haría que ajustar la palanca moviera en silencio una frontera medida.
+- THE SYSTEM SHALL dejar que las rutas **no** cubiertas por una rama propia caigan en el `else`, y
+  eso incluye las **trece** rutas de `/api/v1/incidents` que no son la foto: caen en
+  `REQUEST_MAX_BYTES` y **no** en `JSON_BODY_MAX_BYTES`, porque esa rama se selecciona por el
+  prefijo `/cleaning-` y `/incidents` nunca la ha tocado. Conviene escribirlo con la constante
+  correcta: es un error que ya se coló en un requisito, resuelto verificándolo contra el código en
+  vez de añadir una rama JSON que no hacía falta.
 - THE SYSTEM SHALL hacer cumplir el tope en dos pasos, porque cada uno solo es sorteable: rechazar
   de entrada un `Content-Length` declarado por encima del techo —sin leer un byte— y contar el
   cuerpo según llega, abortando en cuanto lo excede, que es lo que cubre un `Content-Length` mentido
@@ -121,13 +140,18 @@ bien en una ruta y se olvidaron en las demás.
 ### Riesgo aceptado: cuerpo anónimo antes de autenticar
 
 - THE SYSTEM SHALL aceptar que hasta `PHOTO_UPLOAD_MAX_BYTES` (10 MiB) de cuerpo se reciben sin
-  token en la rama de fotos: el proveedor lo consulta el middleware, que por construcción corre
-  antes de resolver la ruta y antes de `require(...)` —esa es la razón de existir—, así que la
+  token en **las dos** ramas de fotos: el proveedor lo consulta el middleware, que por construcción
+  corre antes de resolver la ruta y antes de `require(...)` —esa es la razón de existir—, así que la
   coincidencia es sobre la cadena de la ruta y la respuesta (un `401`) llega con el cuerpo ya dentro.
-- THE SYSTEM SHALL aceptar que el patrón es **más ancho que la ruta**: `/api/v1/cleaning-tasks/photos`
-  y `/api/v1/cleaning-tasks/a/b/c/photos` también encajan, consumen hasta 10 MiB y responden
-  `404`/`405`. Estrechar el patrón a un segmento UUID acotaría esa mitad pero no la primera, que es
-  la que importa: un id de tarea real es igual de adivinable en forma.
+- THE SYSTEM SHALL aceptar que el patrón es **más ancho que la ruta**, en las dos:
+  `/api/v1/cleaning-tasks/photos` y `/api/v1/cleaning-tasks/a/b/c/photos` encajan en la primera, y
+  `/api/v1/incidents/photos` y `/api/v1/incidents/a/b/c/photos` en la segunda; todas consumen hasta
+  10 MiB y responden `404`/`405`. Estrechar el patrón a un segmento UUID acotaría esa mitad pero no
+  la primera, que es la que importa: un id real es igual de adivinable en forma.
+- THE SYSTEM SHALL escribir ese riesgo **junto a cada rama** en `app/main.py`, con su medida, en vez
+  de heredarlo en silencio al añadir la segunda: una rama nueva que copia el patrón copia también la
+  concesión, y una concesión que solo consta en la rama original deja de constar en cuanto alguien
+  lee la nueva.
 - THE SYSTEM SHALL aceptarlo por ser el coste irreducible de tener un endpoint de subida, y por ser
   el mismo trato que `/api/v1/integrations/` ya cerró con `CSV_IMPORT_MAX_BYTES` (10 MiB, también
   pre-auth). Lo que lo acota es que 10 MiB queda ~40× por debajo del cuerpo de 400 MB que motivó
@@ -158,5 +182,12 @@ bien en una ruta y se olvidaron en las demás.
   `request_max_bytes`.
 - `sdd/steering/security.md` regla 14 — hogar único del contrato de «rechazar antes de leer»;
   `sdd/steering/backend.md` lo enlaza desde su sección *Don'ts*.
+- `backend/app/integrations/api/signed_media.py` — el punto de salida único de las dos rutas
+  anónimas de foto: el sello de `nosniff` y el `Cache-Control` derivado de la firma
+  ([`file-storage`](file-storage.md)).
 - Tests: `backend/tests/test_response_headers.py` (cabecera, enumeración, orden de montaje y
-  residuo), `backend/tests/cleaning/test_photo_body_limit.py` (las tres mitades del techo por ruta).
+  residuo), `backend/tests/cleaning/test_photo_body_limit.py` y
+  `backend/tests/maintenance/test_photo_body_limit.py` (las mitades del techo por ruta de cada
+  colección, incluida la evidencia de que el resto de `/incidents` cae en `REQUEST_MAX_BYTES`),
+  `backend/tests/integrations/test_signed_media_headers.py` (el clamp del `max-age`, `private`, y
+  exactamente un `nosniff`).

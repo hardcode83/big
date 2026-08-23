@@ -35,6 +35,7 @@ def test_the_port_exposes_the_methods_this_change_relies_on() -> None:
         "find_by_internal_code",
         "find_by_pms_external_id",
         "list_by_state",
+        "states_for",
         "list_all",
         "save",
         "set_pms_provider",
@@ -66,6 +67,13 @@ def test_only_the_known_methods_take_an_operational_state_directly() -> None:
 
     `list_by_state` is a READ that filters. Filtering is not writing, so it is allowed — but it
     is listed explicitly rather than exempted by a pattern, so the set cannot grow unnoticed.
+
+    **`states_for` is absent from this set and that is correct, not an oversight.** It carries
+    the enum in its `return` annotation only, which this scan excludes, because a method that
+    *reports* the state takes no route around `PropertyStateMachine` — there is nothing to
+    approve when nothing changes. Said out loud because the set staying at exactly
+    `{"list_by_state"}` after `cleaning-assign-preconditions` added a port method mentioning
+    the enum looks, from the diff alone, like a guard that failed to notice.
 
     Checked on annotations rather than bodies because the port has no bodies: the signature is
     the whole contract, and the signature is what a future change would widen.

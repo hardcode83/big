@@ -180,7 +180,10 @@ Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pas
   generador, y **sólo cuando la fila se crea** —una regeneración que actualiza no pone nada en
   el timeline, así que en régimen estacionario es una fila por vivienda y día en vez de
   sesenta—, y `PRICE_UPDATED_EXTERNAL` lo emite la transición a `APPLIED_EXTERNAL`, que es el
-  registro de que una persona publicó ese precio fuera del sistema.
+  registro de que una persona publicó ese precio fuera del sistema. **`TECHNICIAN_EN_ROUTE` ganó el
+  suyo el 2026-08-22** con [`maintenance.md`](maintenance.md), al renombrarse la transición `start`
+  a `en_route`; el mismo ciclo añadió `TECHNICIAN_REJECTED` al vocabulario **ya con escritor**, de
+  modo que el total subió a 47 miembros mientras los declarados sin escritor bajaron a 18.
 - WHERE el evento apunta a una fila que un `ON CONFLICT DO UPDATE` pudo reescribir, THE SYSTEM
   SHALL tomar su identificador de lo que **devuelve la sentencia** y no de una lectura previa.
   En la rama de conflicto la fila guardada conserva su propio `id`, así que un evento construido

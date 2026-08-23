@@ -95,6 +95,54 @@ no declara las rutas.
 - THE SYSTEM SHALL aceptar la asignación solo desde `CREATED` o `ASSIGNED`, y no SHALL mover la
   propiedad al reasignar una tarea que ya estaba `ASSIGNED`.
 
+**La primera asignación exige la vivienda en `AWAITING_CLEANING`.** Entregar una tarea `CREATED`
+mueve la vivienda a `CLEANING_SCHEDULED`, y `AWAITING_CLEANING` es el único estado desde el que
+`PropertyStateMachine` admite el disparador `CLEANER_ASSIGNED` —es su única fila—.
+
+- IF la tarea está en `CREATED` y su vivienda está en cualquier otro estado operacional, THEN THE
+  SYSTEM SHALL rechazar la asignación con `409` y código `PROPERTY_STATE_CONFLICT`, sin tocar la
+  tarea ni el estado de la vivienda.
+- WHEN el rechazo viene del ciclo de vida de la tarea —no está en `CREATED` ni en `ASSIGNED`—, THE
+  SYSTEM SHALL responder `409` con código `CONFLICT`, el que devolvía antes de que los dos casos se
+  separasen. Los dos códigos SHALL ser distintos, de modo que un cliente discrimine la causa **sin
+  interpretar el mensaje**.
+- THE SYSTEM SHALL NOT publicar en el sobre de error el estado operacional concreto de la vivienda:
+  `details` va vacío y `message` es el texto técnico en inglés de la excepción de origen, que
+  ningún cliente pinta. El mismo código lo recibe la limpiadora al cerrar (§Cierre y validación) y
+  el rol `CLEANER` no tiene `READ_PROPERTIES`, así que el sobre no puede llevar un dato que
+  dependa de quién pregunta.
+- THE SYSTEM SHALL derivar los estados legales de
+  `PropertyStateMachine.source_states_for(CLEANER_ASSIGNED)` y NUNCA de una constante copiada: una
+  lista mantenida a mano derivaría de la matriz —en silencio— la primera vez que se ampliase, y
+  dejaría la pantalla bloqueando para siempre.
+- THE SYSTEM SHALL declarar esa precondición y su respuesta en la descripción OpenAPI del
+  `PATCH /api/v1/cleaning-tasks/{task_id}`, de modo que no haya que leer la matriz para saber
+  cuándo se puede asignar.
+
+### El listado publica si una tarea es asignable ahora
+
+- WHEN se solicita `GET /api/v1/cleaning-tasks`, THE SYSTEM SHALL devolver en cada fila
+  `assignment_blocked_by`: `TASK_STATUS` si es el propio estado de la tarea el que se niega,
+  `PROPERTY_STATE` si es el de su vivienda, y `null` si nada conocido lo bloquea.
+- THE SYSTEM SHALL evaluar las dos causas **en el orden en que las evalúa la operación real** —
+  primero el estado de la tarea, después el de la vivienda—, de modo que una tarea fuera de sus
+  estados asignables se reporte como `TASK_STATUS` aunque la vivienda también fuese a negarse.
+- THE SYSTEM SHALL devolver `null` para una tarea `ASSIGNED` con independencia del estado de la
+  vivienda: reapuntarla no dispara `CLEANER_ASSIGNED`.
+- IF la lectura de la página no resuelve el estado de una vivienda, THEN THE SYSTEM SHALL devolver
+  `null` para esa fila: **falla abierto**, ofrece la acción y deja decidir al backend.
+- THE SYSTEM SHALL llevar ese campo **solo** en el item del listado
+  (`CleaningTaskListItemResponse`, los dieciséis campos de `CleaningTaskResponse` más éste) y no en
+  `CleaningTaskResponse`, que devuelven ocho rutas a ninguna de las cuales se le está haciendo esa
+  pregunta. El campo es aditivo, así que ningún cliente se rompe por su llegada.
+- THE SYSTEM SHALL resolver el estado de las viviendas de la página con **una** consulta acotada a
+  los identificadores de esa página —`PropertyRepository.states_for(tenant_id, property_ids)`,
+  filtrada por `tenant_id` como manda la regla 1 de `steering/security.md`— y NUNCA con una
+  petición por fila. Un `property_ids` vacío no consulta.
+- **Es una cortesía y no un permiso**: THE SYSTEM SHALL seguir comprobando la precondición en la
+  propia asignación, cuyo rechazo es la autoridad. El indicador se calcula al leer la página, así
+  que puede estar obsoleto cuando alguien actúe sobre él, y el contrato lo declara así.
+
 ### Ciclo de vida de la tarea
 
 - WHEN la limpiadora asignada acepta, THE SYSTEM SHALL pasar la tarea a `ACCEPTED` y registrar
@@ -111,7 +159,12 @@ no declara las rutas.
 - IF una operación se solicita desde un estado de tarea que no la admite, THEN THE SYSTEM SHALL
   responder `409` sin tocar la tarea ni el estado de la propiedad.
 - IF el estado de la propiedad no admite la transición —por ejemplo cerrar una limpieza con el
-  siguiente huésped ya dentro—, THEN THE SYSTEM SHALL responder `409` y no un error interno.
+  siguiente huésped ya dentro—, THEN THE SYSTEM SHALL responder `409` con código
+  `PROPERTY_STATE_CONFLICT`, y no un error interno. El discriminador es la clase de excepción
+  (`PropertyStateBlocksCleaningError`), así que **toda** operación de limpieza que la máquina de
+  estados bloquee responde ese código y no solo la asignación: acotarlo a una ruta exigiría partir
+  la excepción en dos según quién la provocó, es decir nombrar la causa por el llamante en vez de
+  por lo que pasó.
 - THE SYSTEM SHALL registrar en `AuditLog` cada operación iniciada por una persona (creación
   manual, asignación, aceptación, rechazo, inicio, cierre y validación), con su actor y su IP. El
   alta automática del checkout lleva actor `SYSTEM` y está exenta por la regla 9 de
@@ -142,6 +195,19 @@ no declara las rutas.
   con la semilla de hash y produciría cuerpos distintos entre dos procesos.
 - WHERE la plantilla no declara ninguna foto `required: true`, THE SYSTEM SHALL permitir el cierre
   sin ninguna foto: la regla es «las requeridas», no «alguna».
+- THE SYSTEM SHALL mantener la tercera cláusula acotada a la **propiedad**
+  (`has_unresolved_critical(tenant_id, property_id)`) y no a la tarea, aun desde que
+  [`cleaner-incident-report`](cleaner-incident-report.md) trajo `incidents.cleaning_task_id` y
+  estrecharla pasó a ser técnicamente posible: es más estricta que PRD §11 («creadas durante la
+  limpieza»), nunca más laxa, y estrecharla **relajaría** el invariante —una `CRITICAL` abierta por
+  el huésped dejaría de bloquear—. Ese cambio tiene entrada de roadmap propia.
+- WHEN una limpiadora reporta una incidencia desde su tarea, THE SYSTEM SHALL crearla `MEDIUM` por
+  defecto, de modo que **reportar no bloquea el cierre en el momento**: solo lo bloquea si el job
+  de clasificación de [`maintenance`](maintenance.md) la sube después a `CRITICAL`, o si ya había
+  una `CRITICAL` sin resolver en la propiedad por cualquier otra vía.
+- IF el cierre se rechaza por esa cláusula, THEN THE SYSTEM NEVER SHALL incluir en el `409` el
+  identificador, el título ni la descripción de la incidencia que bloquea: `CLEANER` no tiene
+  `READ_INCIDENTS`.
 - THE SYSTEM SHALL aplicar las tres cláusulas **dentro de `CleaningTask.complete()`** y en ningún
   otro sitio. Las cuatro lecturas que la alimentan —plantilla, completions, tipos de foto subidos
   e incidencia bloqueante— son responsabilidad de `CompletionEvidenceGatherer`
@@ -250,6 +316,18 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos, por el mismo
   motivo: el `AIAdapter` que entregó `messaging-ai` no declara `validate_cleaning_photo`, y
   `cleaning` no tiene puerto propio para ello. No hay borrado de fotos por ninguna vía de la API.
+- THE SYSTEM SHALL construir esa ruta anónima con la **factoría compartida** de
+  `app/integrations/api/signed_media.py`, y su caso de uso con `ServeSignedObjectUseCase`, en vez de
+  con una implementación propia: desde que el almacén tiene un segundo consumidor
+  ([`incident-photos`](incident-photos.md), 2026-08-23) el cuerpo `403` constante, el `nosniff`, el
+  `Cache-Control` y el orden resolver→verificar→servir viven **una sola vez**
+  ([`file-storage`](file-storage.md) §La capa de servido firmado). La migración fue **sin cambio de
+  comportamiento**, y lo que lo sostiene es que la suite de esta capability compara los cuerpos de
+  refusal literalmente y fija el orden de los middlewares.
+- THE SYSTEM SHALL pasar el prefijo de la URL firmada de esta capability
+  (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
+  NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
+  es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
 
 ### Notificación y SLA
 
@@ -286,13 +364,32 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 - THE SYSTEM SHALL ofrecer el contexto de una tarea —identificación y dirección de la propiedad,
   hora de salida del huésped anterior y plazo del siguiente check-in— por el sub-recurso
   `GET /api/v1/cleaning-tasks/{task_id}/context`, y **no** ampliando `CleaningTaskResponse`, que
-  devuelven nueve rutas incluidas las de escritura y las de ciclo de vida.
+  devuelven **ocho** rutas incluidas las de escritura y las de ciclo de vida. Eran nueve hasta que
+  `cleaning-assign-preconditions` dio al listado su propio modelo de item (§El listado publica si
+  una tarea es asignable ahora), por esa misma razón de forma.
 - THE SYSTEM SHALL servirlo con `READ_CLEANING_TASKS` y el mismo acotamiento por fila que el resto
   de esta capacidad, sin conceder `READ_PROPERTIES` ni `READ_RESERVATIONS` a ningún rol.
 
 Su comportamiento completo —los once campos, lo que nunca lleva, el horizonte de la llegada
 siguiente y el significado de cada `null`— vive en
 [`cleaner-task-context.md`](cleaner-task-context.md).
+
+### Reportar una incidencia desde la tarea
+
+- THE SYSTEM SHALL ofrecer `POST /api/v1/cleaning-tasks/{task_id}/incidents` como sub-recurso de la
+  tarea, con `EXECUTE_CLEANING_TASKS` y el mismo acotamiento por fila que el resto de esta
+  capacidad, aceptando **solo** `title` y `description` y respondiendo `201` con un acuse de tres
+  campos.
+- THE SYSTEM SHALL montarla **aquí y no en `maintenance`**: su sujeto es la tarea de limpieza, de
+  modo que la negativa de [`maintenance`](maintenance.md) a exponer una ruta de creación de
+  incidencias sigue intacta.
+- THE SYSTEM SHALL admitirla sobre una tarea en `ASSIGNED`, `ACCEPTED` o `IN_PROGRESS` y SHALL
+  responder `409` sobre una terminal, comprobando la pertenencia antes que el estado para que un
+  `409` nunca describa una tarea que el llamante no puede ver.
+
+Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el vínculo
+`incidents.cleaning_task_id`, las cotas del texto libre y lo que el acuse nunca lleva— vive en
+[`cleaner-incident-report.md`](cleaner-incident-report.md).
 
 ### Aislamiento y autorización
 
@@ -349,13 +446,20 @@ siguiente y el significado de cada `null`— vive en
 
 - `backend/app/cleaning/domain/` — `entities.py` (las tres cláusulas de PRD §11 en
   `CleaningTask.complete`), `templates.py` (resolución y ambigüedad), `assignment.py`
-  (`resolve_auto_assignee`), `windows.py` (los dos extremos de la ventana de una limpieza, con
+  (`resolve_auto_assignee` y `assignment_blocker`, las dos políticas puras de la asignación),
+  `enums.py` (`CleaningAssignmentBlocker`), `windows.py` (los dos extremos de la ventana de una limpieza, con
   `process_checkouts` y la proyección de contexto como llamantes), `read_models.py`
   (`CleaningTaskContext`), `value_objects.py` (validación del contenido de plantilla y
   `CleaningCompletionEvidence`), `notifications.py`, `ports.py`, `repositories.py`
   (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
   ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local).
+  `ListCleaningTasksUseCase` es además quien lee el estado de las viviendas de la página y devuelve
+  cada tarea con su bloqueador ya resuelto.
+- `backend/app/properties/domain/repositories.py` y `properties/infrastructure/repositories.py` —
+  `states_for(tenant_id, property_ids)`, el único punto por el que esta capacidad lee estado de
+  viviendas. Existe estrecho a propósito: las lecturas de portfolio completo del mismo puerto
+  alimentan barridos, no una pantalla.
 - `backend/app/cleaning/application/evidence.py` — `CompletionEvidenceGatherer`, las cuatro
   lecturas del cierre y el único sitio que ensambla un `CleaningCompletionEvidence`. Es el
   colaborador que dejó `CompleteCleaningTaskUseCase` en ocho colaboradores (siete de
@@ -363,7 +467,16 @@ siguiente y el significado de cada `null`— vive en
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
-  ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
+  ruta anónima firmada, hoy construida con la factoría compartida), `schemas.py`
+  (`CleaningTaskListItemResponse` y su `from_domain`, nunca `from_attributes`, para que `notes` no
+  entre), `dependencies.py`, `errors.py` (la tabla que traduce cada excepción a su código, incluida
+  la fila que separa `PropertyStateBlocksCleaningError` del `CONFLICT` del ciclo de vida).
+- `backend/app/integrations/application/signed_serving.py` y
+  `backend/app/integrations/api/signed_media.py` — el caso de uso y la factoría de router que esta
+  capability estrenó y que hoy comparte con [`incident-photos`](incident-photos.md).
+- `backend/app/integrations/api/dependencies.py` — `get_url_signing_key` y
+  `storage_factory_for(url_prefix)`, que salieron de
+  `backend/app/cleaning/api/dependencies.py` el 2026-08-23.
 - `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
   almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
 - `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con

@@ -77,7 +77,8 @@ Cada ruta renderiza `RoutePlaceholder` (Server Component) → `ModulePlaceholder
 2. Sustituir el `RoutePlaceholder` del `page.tsx` por el componente real del feature.
 3. Definir query options/keys del feature (ver TanStack Query) y sus contratos con backend.
 4. Añadir sus estados (`loading.tsx`/`error.tsx`) componiendo `LoadingState`/`ErrorState`.
-5. Añadir sus claves i18n en `locales/es` y `locales/en`.
+5. Añadir sus claves i18n en `locales/es` y `locales/en`, y registrar el namespace en `lib/i18n/resources.ts` (import, array `NAMESPACES` y las tablas `es`/`en`).
+6. **Registrar la página en `REAL_PAGE_ROUTE_IDS` de `app/route-coverage.test.ts`.** Ese test deduce el `routeId` de cada página leyendo su prop `routeId="…"`, que sólo existe mientras la página es un `RoutePlaceholder`; en cuanto deja de serlo, la página queda «sin cubrir» y el test de páginas huérfanas falla. Es su mecanismo previsto, no un defecto — pero no lo ve ningún test del feature, sólo la suite completa.
 
 ## Server / Client Components y rendimiento
 

@@ -21,14 +21,18 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
 from app.cleaning.application.evidence import CompletionEvidenceGatherer
-from app.cleaning.domain.assignment import resolve_auto_assignee
+from app.cleaning.domain.assignment import assignment_blocker, resolve_auto_assignee
 from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
 )
-from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.enums import (
+    CleaningAssignmentBlocker,
+    CleaningTaskStatus,
+    CleaningValidationStatus,
+)
 from app.cleaning.domain.notifications import (
     RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
@@ -58,7 +62,11 @@ from app.cleaning.domain.repositories import (
     CleaningTaskRepository,
     Page,
     TemplatePage,
-    UnscopedCleaningPhotoLocationQuery,
+)
+from app.cleaning.domain.ports import (
+    IncidentReport,
+    IncidentReportedAcknowledgement,
+    TaskIncidentReportingPort,
 )
 from app.cleaning.domain.read_models import CleaningTaskContext
 from app.cleaning.domain.templates import resolve_template
@@ -74,12 +82,9 @@ from app.integrations.domain.storage import (
     MAGIC_BYTES_LENGTH,
     FileStorageFactory,
     FileStoragePort,
-    InvalidSignatureError,
     StorageWriteError,
-    content_type_for_extension,
     detect_image_type,
     storage_key_for_photo,
-    verify_signed_key,
 )
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
@@ -1391,9 +1396,172 @@ class GetCleaningTaskContextUseCase:
         return checkout_at, checkout_at or now
 
 
-class ListCleaningTasksUseCase:
-    def __init__(self, *, tasks: CleaningTaskRepository) -> None:
+class ReportTaskIncidentUseCase:
+    """The cleaner opens an incident from the task she is working on (`cleaner-incident-report`).
+
+    **Composition, in the shape `GetCleaningTaskContextUseCase` above already uses** (D5): three
+    collaborators, each `get` carrying its own explicit `tenant_id`, rather than a bespoke reader
+    with a `JOIN` — which would be "el segundo sitio donde se escribe el scope de tenant"
+    (`dashboard-api` D2). The composition is also stricter than a join: a task pointing at another
+    tenant's property resolves to `None` and becomes a `404`.
+
+    **This use case is where the tenant precondition of the whole feature is discharged**, and it
+    is worth saying plainly because nothing downstream repeats it. `incidents`' foreign keys are
+    global rather than composite with `tenant_id` (`IncidentRepository.add` states this), so the
+    database would accept an incident of tenant A anchored to tenant B's cleaning task. What stops
+    it is step 1: the task is loaded with an explicit `tenant_id`, and only *that* task's id and
+    `property_id` are ever passed on. The port cannot check it and `maintenance` deliberately does
+    not (D4's rejected alternative was injecting a `CleaningTaskRepository` there).
+
+    **Five steps, in this order** (D5), and the order is not cosmetic:
+
+    1. `tasks.get(tenant_id, task_id)` → `None` ⇒ `CleaningTaskNotFoundError`;
+    2. `restrict_to_cleaner_id` ≠ `task.assigned_cleaner_id` ⇒ the same error;
+    3. `task.assert_incident_reportable(...)` — the `409`, and it comes **after** the two `404`s
+       so that a conflict never describes a task the caller cannot see;
+    4. `properties.get(tenant_id, task.property_id)` → `None` ⇒ the same error again;
+    5. the port, with `property_id` taken from the resolved task and never from the request.
+
+    The four failure paths of R2.3 answer one indistinguishable `404`, so the route cannot be used
+    as a probe for which tasks exist.
+
+    **The second `SELECT` of the property is deliberate and its cost is known.** The alta in
+    `maintenance` resolves the property inside the tenant on its own account — a precondition its
+    port declares as the caller's and which serves its other callers. Letting that one fire
+    instead of doing step 4 would answer `MaintenanceValidationError` ⇒ `422`, a body
+    distinguishable from the other three, which is exactly the probe R2.3 closes. One extra
+    statement on one row buys an indistinguishable refusal.
+
+    A read plus one write: the unit of work belongs to the writer in `maintenance`, so there is no
+    `uow` here and no audit repository — the alta writes its own audit row and timeline entry.
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        properties: PropertyRepository,
+        incidents: TaskIncidentReportingPort,
+    ) -> None:
         self._tasks = tasks
+        self._properties = properties
+        self._incidents = incidents
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        report: IncidentReport,
+        now: datetime,
+    ) -> IncidentReportedAcknowledgement:
+        task = await self._tasks.get(tenant_id, task_id)
+        if task is None:
+            raise CleaningTaskNotFoundError()
+
+        restrict = actor.restrict_to_cleaner_id
+        if restrict is not None and task.assigned_cleaner_id != restrict:
+            # R2.2: derived from the **persisted** role, re-read from the user's row on every
+            # request, and never accepted or widened from the body. For this cleaner the task
+            # does not exist — same error, same body (R2.3).
+            #
+            # **This check is redundant with step 3, and that is worth stating rather than
+            # leaving for someone to rediscover.** For a `CLEANER`, `restrict` *is*
+            # `actor.user_id`, so `_require_assignee` two lines down makes exactly the same
+            # comparison and raises exactly the same error; for every other role `restrict` is
+            # `None` and this branch cannot fire at all. The QA panel of section 5 measured the
+            # consequence: deleting this block leaves the whole suite green, and no test in
+            # `test_task_incident_use_case.py` can distinguish the two — which is a property of
+            # the code, not a hole in the tests.
+            #
+            # It stays for two reasons. D5 lists it as step 2, and the sibling read
+            # (`GetCleaningTaskContextUseCase`) has the identical line, so removing it here
+            # alone would make two use cases that do the same job look like they disagree.
+            # And it is where R2.2 is *legible*: the requirement is about this layer deriving
+            # the restriction from the role, and a reader looking for that finds it here rather
+            # than having to know that an entity method happens to imply it.
+            raise CleaningTaskNotFoundError()
+
+        # R2.5, and the entity owns the rule (D6). `actor.user_id` and not `restrict`: a role
+        # that is not `CLEANER` has `restrict_to_cleaner_id is None` and would otherwise skip
+        # the assignee half of the gate entirely.
+        task.assert_incident_reportable(actor.user_id)
+
+        property = await self._properties.get(tenant_id, task.property_id)
+        if property is None:
+            # A task whose property does not resolve **inside this tenant** is a cross-tenant
+            # pointer or a deleted row; the task's own 404 keeps "you cannot have this"
+            # indistinguishable from "it does not exist" (R2.3).
+            raise CleaningTaskNotFoundError()
+
+        acknowledgement = await self._incidents.report(
+            tenant_id=tenant_id,
+            # R1.4 — off the resolved task, never off the request.
+            property_id=task.property_id,
+            cleaning_task_id=task.id,
+            report=report,
+            actor_user_id=actor.user_id,
+            ip=actor.ip,
+            now=now,
+        )
+
+        # R5.4: the two identifiers and nothing else. What the cleaner typed does not go to a
+        # log any more than it goes to `audit_logs.changes` or to `timeline_events`: rule 11's
+        # "no se propaga" clause means the value does not leave those two columns, and a log
+        # line is somewhere it would leave them to — one no later redaction can reach.
+        #
+        # **Excepción 3 and not 2**, which is the distinction D9 turns on and the reason the
+        # number is worth naming: the 2nd declares its writer to be whoever reports *from the
+        # portal*, an anonymous stranger, and says of itself that it does not authorise a
+        # writer of ours; the 3rd is what a person authenticated with RBAC types about their
+        # own scope, which is a cleaner with `EXECUTE_CLEANING_TASKS`. The census row of
+        # `sdd/steering/security.md` is where that lives; this comment only says which clause
+        # binds the code below it.
+        logger.info(
+            "cleaning.task_incident_reported",
+            extra={
+                "tenant_id": str(tenant_id),
+                "cleaning_task_id": str(task.id),
+                "incident_id": str(acknowledgement.id),
+            },
+        )
+        return acknowledgement
+
+
+@dataclass(frozen=True)
+class CleaningTaskListView:
+    """One row of `GET /cleaning-tasks`: the task plus its assignment pre-flight.
+
+    A view and not a wider entity, because `blocker` is not a property of a cleaning task — it
+    is a verdict about the task *and* its flat at this instant, and it belongs only to the
+    listing (`cleaning-assign-preconditions` D5). The eight endpoints that return a single task
+    keep returning `CleaningTaskResponse` and are not asked a question nobody put to them.
+    """
+
+    task: CleaningTask
+    blocker: CleaningAssignmentBlocker | None
+
+
+@dataclass(frozen=True)
+class CleaningTaskListPage:
+    """`Page`'s shape with views instead of tasks.
+
+    Declared here and not next to `Page`, which lives in `domain/repositories.py` because it
+    types a **port**. This one types a *use case's* return value, so it belongs with the view it
+    carries.
+    """
+
+    items: tuple[CleaningTaskListView, ...]
+    total: int
+
+
+class ListCleaningTasksUseCase:
+    def __init__(
+        self, *, tasks: CleaningTaskRepository, properties: PropertyRepository
+    ) -> None:
+        self._tasks = tasks
+        self._properties = properties
 
     async def execute(
         self,
@@ -1404,14 +1572,28 @@ class ListCleaningTasksUseCase:
         status: CleaningTaskStatus | None,
         page: int,
         per_page: int,
-    ) -> Page:
+    ) -> CleaningTaskListPage:
         """R7.1, R7.2 — the cleaner's restriction is derived here, not accepted from the query.
 
         `CleaningTaskFilters.assigned_cleaner_id` is set from `actor.restrict_to_cleaner_id`
         and there is no request parameter that can reach it, so the row-level rule cannot be
         dropped by omitting a filter.
+
+        **And R3.1/R3.2 of `cleaning-assign-preconditions`**: each row carries whether it can be
+        assigned right now, so the screen does not offer a confirmation that will 409. The
+        decision is made here and not in the router (D6) — the router maps, it does not decide.
+
+        **One extra query per page, never one per row**, which is R3.2 in as many words: the
+        distinct `property_id`s of this page go to `states_for` in a single call. A page of 20
+        tasks over 20 flats costs one `SELECT`; a page over one flat costs the same one. An empty
+        page costs none, because the port returns `{}` without querying.
+
+        `states.get(...)` and not `states[...]`: a property the read did not resolve yields
+        `None`, which `assignment_blocker` turns into "assignable" and lets the backend refuse
+        if it must. That is R3.3 — the UI guard is a courtesy, not a permission — and it is why
+        this cannot raise for a missing key.
         """
-        return await self._tasks.list(
+        result = await self._tasks.list(
             tenant_id,
             CleaningTaskFilters(
                 property_id=property_id,
@@ -1420,6 +1602,23 @@ class ListCleaningTasksUseCase:
             ),
             page=page,
             per_page=per_page,
+        )
+        # `dict.fromkeys` and not a set: distinct, and in the page's own order, so the `IN` list
+        # of the statement is deterministic run to run.
+        property_ids = tuple(dict.fromkeys(task.property_id for task in result.items))
+        states = await self._properties.states_for(tenant_id, property_ids)
+        return CleaningTaskListPage(
+            items=tuple(
+                CleaningTaskListView(
+                    task=task,
+                    blocker=assignment_blocker(
+                        task_status=task.status,
+                        property_state=states.get(task.property_id),
+                    ),
+                )
+                for task in result.items
+            ),
+            total=result.total,
         )
 
 
@@ -1844,134 +2043,6 @@ class ListCleaningPhotosUseCase(_TaskTransitionMixin):
             UploadedCleaningPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
             for photo in photos
         )
-
-
-@dataclass(frozen=True)
-class ServedPhoto:
-    """The bytes to answer with, and the `Content-Type` to answer them with.
-
-    `content_type` comes from `content_type_for_extension` and from nowhere else (design D7,
-    task 4.3c). It is carried here rather than left to the route to work out, so the route has
-    nothing to derive and nothing to guess.
-    """
-
-    content: bytes
-    content_type: str
-
-
-class ServeLocalCleaningPhotoUseCase:
-    """The anonymous signed serving route's use case (design D7, D7b) — R3.3.
-
-    **The order of the three steps is the security property, not an implementation detail**:
-
-    1. **Resolve** `photo_id → (storage_key, tenant_id)` with the unscoped query of D7b. There
-       is no session tenant here — the route is anonymous because an `<img src>` sends no
-       `Authorization` header — so this is the only way to learn either fact.
-    2. **Verify** the signature against the key that came out of step 1, never against
-       anything the client sent. The signature covers the whole key, which begins with
-       `tenants/{tenant_id}/` (D3), so a signature that verifies **proves** the caller was
-       handed a URL minted for this photo of this tenant. That is the entire authorisation of
-       this endpoint.
-    3. **Serve**, and only now: resolve the tenant's backend and read the bytes.
-
-    Inverting 1 and 2 is impossible (there is nothing to verify against yet). Inverting 2 and 3
-    is the failure this ordering exists to prevent, and it has its own test.
-
-    Every refusal in steps 1 and 2 raises the **same** `InvalidSignatureError`, which the route
-    turns into one constant `403` body — task 4.3b. "No such photo", "wrong signature",
-    "expired" and "over the TTL ceiling" must be indistinguishable from outside, or this
-    endpoint becomes an existence oracle over the photo keyspace for a caller with no
-    credentials at all, on a route `api-ingress-routing` left reachable from the internet.
-
-    Step 3 answers differently on purpose, and it is not a leak: `LocalFileReadUnsupportedError`
-    (an `S3` tenant, no local serving) becomes a `404` and a `StorageWriteError` a `502`, but
-    both are only reachable **after** a valid signature, i.e. by someone already holding proof
-    that the photo exists.
-
-    `now` is passed in like every other use case here, and converted to POSIX seconds for
-    `verify_signed_key`, which is pure and takes the clock as an argument (task 1.3). One
-    reading, converted, rather than two parameters that could disagree about *when* this
-    request happened.
-    """
-
-    def __init__(
-        self,
-        *,
-        locations: UnscopedCleaningPhotoLocationQuery,
-        configs: TenantConfigRepository,
-        storage: FileStorageFactory,
-        signing_key: bytes,
-    ) -> None:
-        self._locations = locations
-        self._configs = configs
-        self._storage = storage
-        self._signing_key = signing_key
-
-    async def execute(
-        self,
-        *,
-        photo_id: uuid.UUID,
-        expiry: int,
-        signature: str,
-        now: datetime,
-    ) -> ServedPhoto:
-        location = await self._locations.locate_without_tenant_scoping(photo_id)
-        if location is None:
-            # Step 1 failed. Raised as the SAME error a bad signature raises so the route has
-            # one thing to catch and one body to answer with (4.3b). The message is for the
-            # log; it does not reach the response.
-            #
-            # Known and accepted residue: this path skips the HMAC of step 2, so it is
-            # marginally faster than a signature that fails to verify. Distinguishing a UUID
-            # that exists from one that does not through that difference means measuring
-            # microseconds across the internet over a 122-bit keyspace, per candidate id. The
-            # body is identical, which is what R3.4 asks for.
-            raise InvalidSignatureError(f"no photo resolves for id {photo_id}")
-
-        # Against the key from the DATABASE. Nothing the client sent contributes to it — the
-        # URL carries only the photo id, its expiry and the signature (R3.2 keeps the key out
-        # of every response, so it could not carry the key even if we wanted it to).
-        verify_signed_key(
-            signing_key=self._signing_key,
-            key=location.storage_key,
-            expiry=expiry,
-            signature=signature,
-            now=int(now.timestamp()),
-        )
-
-        # Everything below happens only after a valid signature. `get_or_create` can in
-        # principle insert, which would be a write on an anonymous request — in practice never,
-        # because the upload that created this photo already created the row, and in any case
-        # this route never commits, so the flush dies with the request's transaction.
-        config = await self._configs.get_or_create(location.tenant_id, now)
-        # Raises `LocalFileReadUnsupportedError` for an `S3` tenant, before instantiating
-        # anything — design D1's refusal point. There is no local serving for that backend
-        # because the browser fetches the object straight from the provider.
-        reader = self._storage.read_for(config.storage_type)
-        content = await reader.read(location.storage_key)
-        return ServedPhoto(
-            content=content,
-            # Task 4.3c: the ONLY admitted source. The MIME detected at upload is not
-            # persisted; with `LOCAL` it survives solely inside the key's extension (D3).
-            # Deriving it from anything else — or omitting it and letting Starlette sniff —
-            # turns a polyglot that starts with `FF D8 FF` and carries HTML into stored XSS on
-            # the API's own origin. `_extension_of` refuses a key it cannot read rather than
-            # falling back to a default, for the same reason.
-            content_type=content_type_for_extension(_extension_of(location.storage_key)),
-        )
-
-
-def _extension_of(storage_key: str) -> str:
-    """The extension inside a storage key, with no default and no guess.
-
-    Returns `""` for a key with no extension, which `content_type_for_extension` then refuses
-    with a `ValueError` — a 500, correctly, because such a key can only come from a bug of
-    ours: every key is built by `storage_key_for_photo`, which validates the extension against
-    the image allowlist before assembling it. Substituting `application/octet-stream` here
-    would be exactly the fallback task 4.3c exists to forbid.
-    """
-    _, separator, extension = storage_key.rpartition(".")
-    return extension if separator else ""
 
 
 def _effective_checkout(

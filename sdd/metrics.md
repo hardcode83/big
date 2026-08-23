@@ -57,4 +57,11 @@
 | incidents-web | new, design, tasks, run, review, ship, archive | 2581925 | 277525 | 109796724 | 74.7461 | 2026-08-20 | 2026-08-20 |
 | cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
+| cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
+| properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
+| timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
+| tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
+| incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
+| pricing-web | new, design, tasks, run, review, ship, archive | 325336 | 973216 | 172901470 | 119.2598 | 2026-08-23 | 2026-08-23 |
+| cleaning-assign-preconditions | new, design, tasks, run, review, ship, archive | 363030 | 1219226 | 313886120 | 183.5497 | 2026-08-22 | 2026-08-23 |
 | cleaning-stall-blocks-next-stay | design, tasks, run, review | 706929 | 1569896 | 373587047 | 208.3898 | 2026-08-23 | — |

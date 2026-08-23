@@ -6,7 +6,7 @@ FORGOT its filter still cannot see another tenant's rows.
 """
 
 import uuid
-from datetime import date
+from datetime import date, datetime, timezone
 from decimal import Decimal
 
 import pytest
@@ -22,8 +22,18 @@ from app.core.db import (
 )
 from app.guests.infrastructure.models import GuestAccessTokenModel
 from app.integrations.infrastructure.models import WebhookEventModel
-from app.maintenance.domain.enums import OwnerApprovalRelatedType
-from app.maintenance.infrastructure.models import OwnerApprovalModel
+from app.maintenance.domain.enums import (
+    IncidentPhotoStage,
+    IncidentSeverity,
+    IncidentSource,
+    IncidentStatus,
+    OwnerApprovalRelatedType,
+)
+from app.maintenance.infrastructure.models import (
+    IncidentModel,
+    IncidentPhotoModel,
+    OwnerApprovalModel,
+)
 from app.notifications.domain.enums import NotificationChannel
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.pricing.infrastructure.models import PriceRecommendationModel, PricingRuleModel
@@ -58,6 +68,12 @@ async def test_the_registry_scan_finds_the_tenant_scoped_entities() -> None:
         "owner_statements",
         "expenses",
         "owner_approvals",
+        # `incident-photos` R1.3/D2. Named here for the reason this block gives: the only thing
+        # tying it to the net is `TenantScopedMixin`, so dropping the mixin would take the table
+        # out of the filter with the rest of the suite still green. It is the table that exists
+        # *because* `cleaning_photos` never got here — that one carries no `tenant_id` and is
+        # scoped through its parent task instead.
+        "incident_photos",
     } <= names
 
 
@@ -74,6 +90,64 @@ async def test_an_unfiltered_select_cannot_see_another_tenant(db_session: AsyncS
     found = (await db_session.execute(select(UserModel))).scalars().all()
 
     assert [user.id for user in found] == [user_a.id]
+
+
+@pytest.mark.asyncio
+async def test_an_unfiltered_select_of_incident_photos_cannot_see_another_tenant(
+    db_session: AsyncSession,
+) -> None:
+    """`incident-photos` R1.3/D2 — the net's EFFECT on this table, exercised not assumed.
+
+    Raised by the section-4 security panel. `incident_photos`' membership of
+    `tenant_scoped_classes()` was asserted in `tests/maintenance/test_models.py`, but no query
+    proved the listener actually filters it, and membership and effect are different claims —
+    only the second is what rule 1 of `steering/security.md` promises. A future bypass specific
+    to this model (a Core statement path, a relationship load) would leave a membership
+    assertion green.
+
+    Deliberately no `WHERE tenant_id`: that omission is the mistake being caught.
+    `SqlAlchemyIncidentPhotoRepository` always writes the filter itself — that is the
+    mechanism — and this is the net behind it.
+    """
+
+    async def _photo_for(tenant, *, code: str):
+        prop = PropertyModel(tenant_id=tenant.id, name=code, internal_code=code)
+        db_session.add(prop)
+        await db_session.flush()
+        incident = IncidentModel(
+            tenant_id=tenant.id,
+            property_id=prop.id,
+            source=IncidentSource.CLEANER,
+            title="Broken AC",
+            description="Not cooling.",
+            severity=IncidentSeverity.MEDIUM,
+            status=IncidentStatus.IN_PROGRESS,
+        )
+        db_session.add(incident)
+        await db_session.flush()
+        uploader = await insert_user(db_session, tenant=tenant)
+        photo = IncidentPhotoModel(
+            tenant_id=tenant.id,
+            incident_id=incident.id,
+            uploaded_by=uploader.id,
+            stage=IncidentPhotoStage.BEFORE,
+            storage_key=f"tenants/{tenant.id}/incidents/{incident.id}/{uuid.uuid4()}.jpg",
+            created_at=datetime.now(timezone.utc),
+        )
+        db_session.add(photo)
+        await db_session.flush()
+        return photo
+
+    tenant_a = await insert_tenant(db_session, name="photo-filter-a")
+    tenant_b = await insert_tenant(db_session, name="photo-filter-b")
+    photo_a = await _photo_for(tenant_a, code="PHOTOA")
+    await _photo_for(tenant_b, code="PHOTOB")
+
+    bind_session_to_tenant(db_session, tenant_a.id)
+
+    found = (await db_session.execute(select(IncidentPhotoModel))).scalars().all()
+
+    assert [photo.id for photo in found] == [photo_a.id]
 
 
 @pytest.mark.asyncio

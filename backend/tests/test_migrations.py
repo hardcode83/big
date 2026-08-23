@@ -274,6 +274,20 @@ async def test_the_declared_column_widths_reach_the_real_ddl(migrations_database
     # A second column, so the helper is not pinned to one case: `incidents.title` is
     # `String(300)` in the model and the baseline revision declares the same.
     assert await _column_shape(url, "incidents", "title") == ("character varying", 300)
+    # `tech-cycle-completion` R4.1: `materials` is bounded in the DDL as well as in the request
+    # schema, so an over-long list of parts is a `422` and not a driver error that aborts the
+    # transaction. `MAX_MATERIALS` in `app/maintenance/domain/entities.py` is the same number.
+    assert await _column_shape(url, "incidents", "materials") == (
+        "character varying",
+        2000,
+    )
+    # And `eta_at` carries its offset. Asserted here rather than only in the model because
+    # `timestamp without time zone` reports the same absent width, and a column that dropped
+    # the offset would silently undo what `_apply_eta` refuses a naïve value for.
+    assert await _column_shape(url, "incidents", "eta_at") == (
+        "timestamp with time zone",
+        None,
+    )
 
 
 @pytest.mark.asyncio
@@ -350,6 +364,122 @@ async def test_an_added_column_unwinds_and_reapplies_over_existing_rows(
         assert await conn.fetchval(
             "SELECT assignment_note IS NULL FROM incidents WHERE id = $1", incident_id
         ) is True
+    finally:
+        await conn.close()
+
+
+@pytest.mark.asyncio
+async def test_the_tech_cycle_revision_unwinds_over_populated_rows_and_keeps_its_enum_label(
+    migrations_database,
+) -> None:
+    """`c8e1f4a92b70` down and up again, with rows in **both** tables it touches.
+
+    The sibling test above walks the older `assignment_note` revision; this one walks *this*
+    change's, and it exists because the QA panel of `tech-cycle-completion` pointed out that
+    nothing automated covered it — the behaviour had been confirmed only by a manual pass, which
+    guards nothing against a regression.
+
+    Three things an empty-table run cannot prove, and one that only this revision has:
+
+    * the two `ADD COLUMN`s do not fail on existing rows, and `downgrade` really drops them;
+    * neither `incidents` nor `timeline_events` loses a row in either direction;
+    * **the `TECHNICIAN_REJECTED` enum label survives the `downgrade`** — deliberately not
+      removed, because PostgreSQL cannot drop a value from an enum type. That is the assertion
+      that matters most here: a row already carrying the label has to stay readable after a
+      rollback, and a `downgrade` that tried to be tidy would either fail or orphan it.
+    """
+    url = migrations_database
+    assert _alembic("upgrade", "head", database_url=url).returncode == 0
+
+    parsed = make_url(url)
+
+    async def connect():
+        return await asyncpg.connect(
+            user=parsed.username,
+            password=parsed.password,
+            host=parsed.host,
+            port=parsed.port,
+            database=parsed.database,
+        )
+
+    conn = await connect()
+    try:
+        tenant_id = await conn.fetchval(
+            "INSERT INTO tenants (id, name, billing_email) "
+            "VALUES (gen_random_uuid(), 'TechCycleTenant', 'tc@example.com') RETURNING id"
+        )
+        property_id = await conn.fetchval(
+            "INSERT INTO properties (id, tenant_id, name, internal_code) "
+            "VALUES (gen_random_uuid(), $1, 'Redes 11', 'REDESTC') RETURNING id",
+            tenant_id,
+        )
+        incident_id = await conn.fetchval(
+            "INSERT INTO incidents "
+            "(id, tenant_id, property_id, source, title, description, eta_at, materials) "
+            "VALUES (gen_random_uuid(), $1, $2, 'GUEST', 'Broken boiler', 'No hot water.', "
+            "now() + interval '2 hours', 'Dos codos de 22 mm') RETURNING id",
+            tenant_id,
+            property_id,
+        )
+        # A row that actually carries the new label, which is what makes the survival
+        # assertion below mean something.
+        event_id = await conn.fetchval(
+            "INSERT INTO timeline_events "
+            "(id, tenant_id, property_id, actor_type, event_type, title, created_at, severity, "
+            "metadata) VALUES (gen_random_uuid(), $1, $2, 'USER', 'TECHNICIAN_REJECTED', "
+            "'Technician rejected the incident', now(), 'INFO', '{}'::jsonb) RETURNING id",
+            tenant_id,
+            property_id,
+        )
+    finally:
+        await conn.close()
+
+    # Targeted at the revision, not counted in steps — the convention this file already
+    # states above, and `incident-photos` is why: it landed on top of `tech-cycle-completion`,
+    # so `-1` stopped unwinding the revision this test is about.
+    unwound = _alembic("downgrade", "b3f5d1c8a047", database_url=url)
+    assert unwound.returncode == 0, unwound.stderr
+    assert await _column_shape(url, "incidents", "eta_at") is None
+    assert await _column_shape(url, "incidents", "materials") is None
+
+    conn = await connect()
+    try:
+        assert await conn.fetchval(
+            "SELECT count(*) FROM incidents WHERE id = $1", incident_id
+        ) == 1
+        # The label is still declared, and the row that uses it is still readable. Either
+        # failing would mean the `downgrade` had tried to remove a value from the enum.
+        assert await conn.fetchval(
+            "SELECT count(*) FROM pg_enum WHERE enumtypid = "
+            "(SELECT oid FROM pg_type WHERE typname = 'timeline_event_type') "
+            "AND enumlabel = 'TECHNICIAN_REJECTED'"
+        ) == 1
+        assert await conn.fetchval(
+            "SELECT event_type::text FROM timeline_events WHERE id = $1", event_id
+        ) == "TECHNICIAN_REJECTED"
+    finally:
+        await conn.close()
+
+    reapplied = _alembic("upgrade", "head", database_url=url)
+    assert reapplied.returncode == 0, reapplied.stderr
+    assert await _column_shape(url, "incidents", "materials") == (
+        "character varying",
+        2000,
+    )
+    assert await _column_shape(url, "incidents", "eta_at") == (
+        "timestamp with time zone",
+        None,
+    )
+
+    conn = await connect()
+    try:
+        # The row survived the round trip and its two new values did not: a `DROP COLUMN`
+        # loses the data, which is exactly what the revision's docstring says it means.
+        row = await conn.fetchrow(
+            "SELECT eta_at, materials FROM incidents WHERE id = $1", incident_id
+        )
+        assert row["eta_at"] is None
+        assert row["materials"] is None
     finally:
         await conn.close()
 

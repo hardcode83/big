@@ -97,6 +97,22 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 - THE SYSTEM SHALL exigir una selección explícita: el desplegable no viene preseleccionado con la
   limpiadora actual, y SHALL impedir confirmar cuando no hay selección o cuando la seleccionada ya es
   la asignada, de modo que no se emita un PATCH que no cambia nada.
+- WHERE el listado marca una tarea como no asignable ahora, THE SYSTEM SHALL deshabilitar además el
+  botón de confirmación de esa fila y SHALL mostrar bajo él el motivo localizado —la vivienda o el
+  estado de la tarea—, referenciado desde el botón con `aria-describedby` y renderizado **solo**
+  cuando existe, para que un lector de pantalla no anuncie una descripción vacía.
+- THE SYSTEM SHALL derivar esa condición del campo `assignment_blocked_by` que **ya viene en la
+  respuesta del listado**, sin petición adicional por fila y **sin calcular nada en el componente**:
+  la vista no conoce la matriz de estados de la vivienda y no debe aprenderla.
+- THE SYSTEM SHALL mantener el `<select>` habilitado aunque el botón esté deshabilitado por ese
+  motivo —solo lo deshabilita la mutación en vuelo de su propia fila—, porque deshabilitar un
+  elemento que tiene el foco lo manda al `<body>`.
+- THE SYSTEM SHALL mostrar el motivo como **texto estático** y no como `title` ni tooltip: la vista
+  es mobile-first y donde se opera no hay hover.
+- **La guarda es cortesía, no permiso**: IF la condición cambia entre la carga de la lista y la
+  confirmación, THEN THE SYSTEM SHALL tratar el rechazo del backend como la autoridad. Un indicador
+  ausente o `null` deja el botón vivo a propósito —falla abierto— y el `409` que llegue se anuncia
+  ya con el mensaje correcto.
 - WHILE una asignación está en vuelo, THE SYSTEM SHALL impedir confirmar otra en cualquier fila, y
   SHALL deshabilitar el desplegable **solo** de la fila que la lanzó, para no robar el foco a quien
   navega por teclado.
@@ -106,10 +122,19 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 - THE SYSTEM SHALL no aplicar ninguna actualización optimista: la celda de la limpiadora se pinta
   siempre desde los datos del servidor. **Una respuesta 403 NUNCA se interpreta como éxito** y la
   fila conserva la asignación que el backend sigue teniendo por buena.
-- THE SYSTEM SHALL traducir el fallo **por código HTTP y nunca por el texto del mensaje del backend**:
-  `403` sin permiso, `404` tarea inexistente, `409` tarea que ya no admite cambio de asignación,
-  `422` persona que ya no es limpiadora activa del tenant, y un mensaje genérico para cualquier otro
-  estado o para un fallo que no sea de la API.
+- THE SYSTEM SHALL traducir el fallo **por el estado HTTP y, dentro del `409`, por el código del
+  sobre — nunca por el texto del mensaje del backend**, que es técnico y está en inglés: `403` sin
+  permiso, `404` tarea inexistente, `422` persona que ya no es limpiadora activa del tenant, y un
+  mensaje genérico para cualquier otro estado o para un fallo que no sea de la API.
+- THE SYSTEM SHALL distinguir los **dos** `409` que la asignación puede recibir:
+  `PROPERTY_STATE_CONFLICT` atribuye el bloqueo **a la vivienda** («la vivienda todavía no está
+  pendiente de limpieza») y SHALL NOT afirmar que la tarea no admite un cambio de asignación;
+  cualquier otro código con `409` —`CONFLICT` incluido— conserva el mensaje del ciclo de vida de la
+  tarea.
+- IF el `409` llega con un código que esta compilación no conoce, THEN THE SYSTEM SHALL caer en el
+  mensaje del ciclo de vida de la tarea, el que se servía antes de la distinción. Es la ventana de
+  asimetría de despliegue: un frontend más viejo que su backend degrada al texto de ayer en vez de
+  no decir nada, por el mismo razonamiento con que un estado de tarea desconocido degrada a gris.
 - THE SYSTEM SHALL no reintentar la mutación.
 
 ### Permisos: el frontend oculta, el backend decide
@@ -161,14 +186,32 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
 ### Frontera con el backend
 
 - THE SYSTEM SHALL consumir únicamente endpoints que ya existían —`GET /cleaning-tasks`,
-  `PATCH /cleaning-tasks/{task_id}`, `GET /users?role=CLEANER` y `GET /properties`— **sin cambiar el
-  contrato**, de modo que `backend/openapi.json` y `frontend/lib/api/generated/openapi.d.ts` no se
-  regeneren por esta capacidad.
+  `PATCH /cleaning-tasks/{task_id}`, `GET /users?role=CLEANER` y `GET /properties`—, sin estrenar
+  ninguna ruta.
+- **El contrato sí ha cambiado una vez, y por una necesidad de esta pantalla.** Esta capacidad se
+  entregó sin tocarlo, pero `cleaning-assign-preconditions` amplió el item del listado con
+  `assignment_blocked_by` precisamente para que la vista pudiera saber si una tarea es asignable
+  ahora sin derivar reglas de negocio en el cliente. THE SYSTEM SHALL regenerar `backend/openapi.json`
+  y `frontend/lib/api/generated/openapi.d.ts` en el mismo Pull Request que cambie esa forma —son las
+  dos mitades del mismo puente, cada una con su workflow— y no SHALL declarar que esta capacidad
+  vive sobre un contrato congelado.
 - THE SYSTEM SHALL mantener las claves de consulta acotadas por tenant, aunque la fuente de datos no
   use el `tenantId` en la petición: la acotación real la hace el backend con el JWT verificado, y el
   parámetro existe para que la caché no cruce tenants.
 - IF no hay tenant autenticado en el contexto, THEN THE SYSTEM SHALL fallar de forma explícita en vez
   de emitir una petición sin tenant.
+
+## Estado
+
+- **Deuda con disparador: la pasada visual de `/cleaning` no se ha hecho contra un entorno
+  desplegado.** El bloqueo de fila que `cleaning-assign-preconditions` añadió está fijado por tests
+  de componente con aserciones de DOM reales, y ningún criterio de aceptación depende de mirarlo —
+  es acabado, no cobertura. Lo que falta es verlo: la fila bloqueada con el botón deshabilitado y el
+  `<select>` vivo, el `409` de la carrera anunciándose con el mensaje de la vivienda, los dos
+  idiomas, 320 px sin scroll horizontal y la consola limpia. No se hizo en el worktree porque
+  `next dev` con `PORT_OFFSET` sirve la página sin hidratarla, y porque `AWAITING_CLEANING` no es
+  alcanzable por el camino real en un mismo día. **Disparador**: el primer despliegue de este
+  change en `dev`, que es además donde se midió el fallo original el 2026-08-22.
 
 ## Key files
 
@@ -179,15 +222,21 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
   paginación, región viva), `cleaning-task-row.tsx` (tarjeta de tarea, `IdentityValue`, badge de
   estado), `cleaning-filters.tsx`, `cleaning-pagination.tsx`, `assign-cleaner-control.tsx`.
 - `frontend/features/cleaning/data/` — `cleaning-source.ts` (interfaz `CleaningDataSource`), `dto.ts`
-  (tipos, con `CleaningTaskStatus` aliasado al contrato generado), `http/http-cleaning-source.ts`
-  (endpoints, parámetros y mapeo snake_case→camelCase, `TASKS_PER_PAGE`/`CATALOG_PER_PAGE`),
-  `index.ts` (composición de la fuente única).
+  (tipos, con `CleaningTaskStatus` aliasado al contrato generado, y `CleaningTaskListItem` sobre
+  `CleaningTask` con `assignmentBlockedBy`), `http/http-cleaning-source.ts`
+  (endpoints, parámetros y mapeo snake_case→camelCase con `mapTask`/`mapListItem`,
+  `TASKS_PER_PAGE`/`CATALOG_PER_PAGE`), `index.ts` (composición de la fuente única).
+  **Cuidado al propagar un campo nuevo del listado**: `CleaningTaskListItem` es un supertipo por
+  ampliación y TypeScript es estructural, así que el typecheck se rompe en el mapeador y **solo
+  ahí**; un consumidor que siga anotado con el tipo base compila igual aunque nunca lea el campo.
+  Lo que cubre ese tramo son los tests que fijan que la fila bloqueada deshabilita el botón, no el
+  compilador.
 - `frontend/features/cleaning/hooks/` — `query-keys.ts` (claves acotadas por tenant),
   `use-cleaning-data.ts` (tareas + los dos catálogos cacheados), `use-assign-cleaning-task.ts`
   (mutación, `retry: false`, invalidación en `onSettled`).
 - `frontend/features/cleaning/lib/` — `task-status.ts` (mapa exhaustivo estado→color y clases de
   badge), `directory.ts` (índice de catálogo y las cuatro formas de identidad), `assign-error.ts`
-  (estado HTTP→clave de traducción).
+  (estado HTTP→clave de traducción, más la tabla por código consultada solo dentro del `409`).
 - `frontend/features/cleaning/state/use-cleaning-filters-store.ts` — store Zustand de filtros, página
   y tenant adoptado.
 - `frontend/lib/auth/permissions.ts` — `Permission`, `ROLE_UI_PERMISSIONS`, `useHasPermission`;
