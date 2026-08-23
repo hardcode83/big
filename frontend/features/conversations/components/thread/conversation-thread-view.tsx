@@ -44,8 +44,8 @@ export function ConversationThreadView({
 }) {
   const { t } = useTranslation(["conversations", "states"]);
   const conversationQuery = useConversation(conversationId);
-  const messagesQuery = useConversationMessages(conversationId, 1);
   const [messagesPage, setMessagesPage] = useState(1);
+  const messagesQuery = useConversationMessages(conversationId, messagesPage);
   const messagesState = mapConversationsError(messagesQuery);
   const conversationState = mapConversationsError(conversationQuery);
 

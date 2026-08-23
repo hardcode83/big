@@ -144,4 +144,20 @@ describe("ConversationThreadView (R3)", () => {
     expect(prev.hasAttribute("disabled")).toBe(true);
     expect(next.hasAttribute("disabled")).toBe(false);
   });
+
+  it("clicking 'next' fetches the next page (R3.3)", async () => {
+    listMessagesMock.mockResolvedValue(MESSAGES_WITH_PAGES);
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("Hola")).toBeTruthy());
+    const callsBefore = listMessagesMock.mock.calls.length;
+    const next = view.getByRole("button", { name: "fields.nextPage" });
+    next.click();
+    await waitFor(() =>
+      expect(listMessagesMock.mock.calls.length).toBeGreaterThan(callsBefore),
+    );
+    const lastCallArgs = listMessagesMock.mock.calls.at(-1)!;
+    expect(lastCallArgs[0]).toBe("tenant-from-session");
+    expect(lastCallArgs[1]).toBe("c1");
+    expect(lastCallArgs[2]).toBe(2);
+  });
 });

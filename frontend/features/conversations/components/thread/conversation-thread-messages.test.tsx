@@ -154,4 +154,20 @@ describe("ConversationThreadMessages (D7, D8)", () => {
     );
     expect(view.getByText("fields.senderUserIdSection", { exact: false })).toBeTruthy();
   });
+
+  it("renders the sender-meta section when sender_type is OWNER and aiGenerated is false (R3.5 — the other 'our own' role)", () => {
+    const view = render(
+      <ConversationThreadMessages
+        messages={[
+          message({
+            id: "m1",
+            senderType: "OWNER",
+            aiGenerated: false,
+            senderUserId: "u1",
+          }),
+        ]}
+      />,
+    );
+    expect(view.getByText("fields.senderUserIdSection", { exact: false })).toBeTruthy();
+  });
 });
