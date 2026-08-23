@@ -95,6 +95,11 @@ significan cosas distintas para quien opera:
 | `already_there` | Ya estaba en el destino | No. Hoy **siempre vale 0**: los tres triggers tienen destino distinto del origen, así que una propiedad que ya transicionó deja de ser candidata |
 | `unresolvable_time` | La hora local de la reserva no existe o es ambigua | **Sí.** Nunca avanzará sola |
 | `ambiguous` | Dos reservas vencen a la vez para la misma propiedad | **Sí.** Nadie elige por ti |
+| `blocked` | El calendario pedía mover la vivienda y su estado no lo admite | **Sí.** No se destasca sola |
+
+`blocked` es el único contador que **no** sale de la consulta de candidatas, y por eso está fuera
+de la frase de arriba: cuenta viviendas que la consulta de candidatas no puede ver. Detalle en
+§«Viviendas atascadas» más abajo.
 
 **Job de SLA** (`EscalationReport`):
 
@@ -126,6 +131,62 @@ en lugar de sin límite.
 | `revoked` | Acceso de una reserva cancelada | No |
 | `expired` | `valid_to` pasado | No. Hoy **siempre vale 0**: nada rellena `valid_to` hasta que haya un proveedor de accesos real |
 | `legal_status_initialised` | Reserva que pasa a `PENDING_GUEST_DATA` (PRD §17 paso 1) | No |
+
+## Viviendas atascadas (`blocked`)
+
+Una vivienda está **atascada** cuando el calendario exige una transición de reloj, su estado
+operacional no admite ese trigger, y **no consta que esa transición se haya aplicado ya para esa
+reserva**. Las tres condiciones hacen falta: sin la tercera, el contador acaba siendo el tamaño
+de la cartera activa (ver abajo).
+
+El caso que lo motivó, medido en `dev` el 2026-08-22: REDES11 llevaba en `CLEANING_IN_PROGRESS`
+desde el 16 con una limpieza que nadie cerró, y la reserva del 19 al 23 nunca pasó a
+`OCCUPIED_ESTIMATED`. El tick de las 08:18 devolvió `candidates: 0 … not_eligible: 0` en los dos
+jobs de check-in. El informe era correcto: la vivienda **nunca entró en él**, porque la consulta
+de candidatas filtra por estado origen del trigger y una vivienda atascada por definición no está
+en uno.
+
+**`blocked` no es `not_eligible`, y la diferencia importa al operar.** `not_eligible` significa
+«la hora no ha llegado» —el caso normal, no hay nada que hacer—. `blocked` significa «la hora
+llegó y esta vivienda no puede obedecer». La segunda no se arregla esperando.
+
+**Por qué la tercera condición.** `is_due` contesta «¿llegó ese instante?», no «¿está esta
+vivienda esperándolo?»: para `CHECKIN_TIME_REACHED` es verdad durante **toda** la estancia y para
+`CHECKOUT_TIME_REACHED` **para siempre** después del checkout. Y «su estado no es origen del
+trigger» incluye todos los estados que una vivienda ocupa *después* de hacer bien esa misma
+transición. Con sólo esas dos, una vivienda `OCCUPIED_ESTIMATED` a mitad de estancia y una
+`AWAITING_CLEANING` recién salida de un checkout se reportaban las dos como atascadas, en cada
+tick. La evidencia que las distingue ya estaba guardada: `property_state_transitions.metadata`
+lleva `reservation_id` y `trigger`, así que «¿se aplicó ya el check-in de *esta* reserva?» es una
+lectura, no una inferencia.
+
+**La ventana, y lo que queda fuera.** La detección usa la misma `candidate_window` que las
+candidatas: **30 días atrás y 2 adelante**. No hay un horizonte propio a propósito —dos ventanas
+paralelas son otra cosa que mantener en sync—, y tiene una consecuencia que conviene decir en voz
+alta: **un atasco de más de 30 días deja de aparecer**. Es el precio del límite, el mismo que
+`CANDIDATE_LOOKBEHIND` ya paga para los checkouts pendientes, y no un descuido. Una vivienda que
+lleve más de un mes parada necesita una transición manual.
+
+**Qué se escribe.** Nada. El sweep cuenta y registra; no mueve la vivienda. Desatascarla es una
+decisión de una persona —cancelar la limpieza que no va a cerrarse, resolver la incidencia— y un
+job que lo hiciera solo estaría adivinando el motivo.
+
+Cada desajuste deja una línea `scheduler.blocked_transition` con `tenant_id`, `property_id`,
+`reservation_id`, `trigger`, `blocking_state` y `due_since`. **Una por desajuste, no por
+vivienda**: dos reservas solapadas sobre la misma vivienda cuentan **una** en `blocked` y dejan
+**dos** líneas, porque quien persigue una de las dos necesita saber de qué reserva habla.
+
+**Se repite en cada tick mientras el atasco dure**, y eso es deliberado: nada lo resuelve
+automáticamente, así que la línea desaparece cuando el atasco se arregla y no antes. Con la
+tercera condición el volumen es proporcional a los atascos reales y no a la cartera; sin ella
+—que fue el primer intento— eran todas las viviendas ocupadas, en cada tick, y habría ahogado
+las líneas hermanas `scheduler.unresolvable_reservation_time` y
+`scheduler.ambiguous_due_reservation`.
+
+**Un caso que sí se reporta y puede sorprender**: una vivienda en `OUT_OF_SERVICE` o
+`BLOCKED_BY_OWNER` con una reserva confirmada cuya hora llegó aparece como atascada. Es
+intencionado —hay una reserva que nadie va a poder cumplir— pero significa que retirar una
+vivienda de circulación **sin cancelar sus reservas** genera avisos hasta que se cancelen.
 
 ## Limitaciones conocidas
 

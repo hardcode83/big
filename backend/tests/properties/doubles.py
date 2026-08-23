@@ -7,6 +7,7 @@ that can disagree. Only the two ports nothing else uses yet are defined here.
 """
 
 import uuid
+from collections.abc import Collection
 from dataclasses import dataclass, field
 from datetime import datetime
 from decimal import Decimal
@@ -26,6 +27,43 @@ from tests.reservations.doubles import (  # noqa: F401  (re-exported for the tes
 class FakePropertyStateTransitionRepository:
     transitions: list[PropertyStateTransition] = field(default_factory=list)
     fail_with: Exception | None = None
+
+    async def applied_clock_triggers(
+        self, tenant_id: uuid.UUID, reservation_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, str]]:
+        """Derived from the rows actually appended, not from a separate list to keep in sync.
+
+        The real adapter reads `metadata->>'reservation_id'` and `metadata->>'trigger'` out of
+        the stored JSON, so this reads the same two keys off the same metadata dict — a fake that
+        answered from a hand-set field could agree with a test and disagree with Postgres, which
+        is the failure `fixtures-and-real-writers-disagree` records.
+        """
+        wanted = {str(reservation_id) for reservation_id in reservation_ids}
+        if not wanted:
+            return set()
+        found: set[tuple[uuid.UUID, str]] = set()
+        for transition in self.transitions:
+            if transition.tenant_id != tenant_id:
+                continue
+            reservation_id = (transition.metadata or {}).get("reservation_id")
+            trigger = (transition.metadata or {}).get("trigger")
+            if reservation_id is None or trigger is None:
+                continue
+            # Loud, because the alternative is quiet in the wrong direction. `metadata` is
+            # JSON, so `PropertyStateMachine.evaluate` writes `str(reservation_id)`; a raw UUID
+            # would never match this fake's string keys and the row would simply be dropped —
+            # reporting "not applied" for a stay that had in fact transitioned. The real adapter
+            # cannot drift that way (Postgres would reject the value), so the fake must not be
+            # the more forgiving of the two.
+            if not isinstance(reservation_id, str) or not isinstance(trigger, str):
+                raise TypeError(
+                    "property_state_transitions.metadata must hold reservation_id and trigger "
+                    f"as strings, got {type(reservation_id).__name__}/{type(trigger).__name__}"
+                )
+            if reservation_id not in wanted:
+                continue
+            found.add((uuid.UUID(reservation_id), trigger))
+        return found
 
     async def add(self, tenant_id: uuid.UUID, transition: PropertyStateTransition) -> None:
         if self.fail_with is not None:

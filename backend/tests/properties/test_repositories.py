@@ -394,6 +394,147 @@ async def test_transition_add_refuses_another_tenants_transition(db_session) -> 
         )
 
 
+# --- `applied_clock_triggers` (`cleaning-stall-blocks-next-stay` R1.1, design D1) -------
+#
+# Against the real database on purpose. The in-memory fake reads the two keys off a Python dict
+# while this reads them out of JSONB with `->>`, and a fake that agreed with the test while
+# disagreeing with Postgres is the exact failure the `fixtures-and-real-writers-disagree` note
+# records: a green suite over a production bug.
+
+
+@pytest.mark.asyncio
+async def test_applied_clock_triggers_reads_the_pair_out_of_jsonb(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    reservation_id = uuid.uuid4()
+    await SqlAlchemyPropertyStateTransitionRepository(db_session).add(
+        tenant.id,
+        _transition(
+            tenant.id,
+            model.id,
+            metadata={
+                "trigger": "CHECKIN_TIME_REACHED",
+                "reservation_id": str(reservation_id),
+            },
+        ),
+    )
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).applied_clock_triggers(
+        tenant.id, [reservation_id]
+    )
+
+    assert found == {(reservation_id, "CHECKIN_TIME_REACHED")}
+
+
+@pytest.mark.asyncio
+async def test_applied_clock_triggers_is_empty_without_ids_and_does_not_query(
+    db_session, monkeypatch
+) -> None:
+    """The early return is asserted, not just its result.
+
+    Without the `execute` spy this test passed on the empty return value alone, so removing the
+    guard and emitting an `IN ()` would have kept it green — the name would have been the only
+    thing claiming a query was avoided.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    executed: list[object] = []
+    original = db_session.execute
+
+    async def spy(statement, *args, **kwargs):
+        executed.append(statement)
+        return await original(statement, *args, **kwargs)
+
+    monkeypatch.setattr(db_session, "execute", spy)
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).applied_clock_triggers(
+        tenant.id, []
+    )
+
+    assert found == set()
+    assert executed == []
+
+
+@pytest.mark.asyncio
+async def test_applied_clock_triggers_skips_rows_without_a_reservation(db_session) -> None:
+    """A manual transition carries no `reservation_id`, and must not become a `(None, …)` pair."""
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    reservation_id = uuid.uuid4()
+    repo = SqlAlchemyPropertyStateTransitionRepository(db_session)
+    await repo.add(
+        tenant.id, _transition(tenant.id, model.id, metadata={"trigger": "OWNER_BLOCKED"})
+    )
+    await repo.add(
+        tenant.id,
+        _transition(
+            tenant.id,
+            model.id,
+            metadata={
+                "trigger": "CHECKOUT_TIME_REACHED",
+                "reservation_id": str(reservation_id),
+            },
+        ),
+    )
+
+    found = await repo.applied_clock_triggers(tenant.id, [reservation_id])
+
+    assert found == {(reservation_id, "CHECKOUT_TIME_REACHED")}
+
+
+@pytest.mark.asyncio
+async def test_applied_clock_triggers_never_reads_another_tenants_history(db_session) -> None:
+    """Rule 1 of `steering/security.md`, on a query whose filter is a JSON expression.
+
+    The `reservation_id` is a UUID the caller supplies, so without the tenant predicate one
+    tenant could confirm another's transition and suppress a stall it should have been shown.
+    """
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs = await _property(db_session, tenant_b, internal_code="THEIRS")
+    reservation_id = uuid.uuid4()
+    await SqlAlchemyPropertyStateTransitionRepository(db_session).add(
+        tenant_b.id,
+        _transition(
+            tenant_b.id,
+            theirs.id,
+            metadata={
+                "trigger": "CHECKIN_TIME_REACHED",
+                "reservation_id": str(reservation_id),
+            },
+        ),
+    )
+
+    found = await SqlAlchemyPropertyStateTransitionRepository(db_session).applied_clock_triggers(
+        tenant_a.id, [reservation_id]
+    )
+
+    assert found == set()
+
+
+@pytest.mark.asyncio
+async def test_applied_clock_triggers_does_not_return_an_unasked_reservation(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    model = await _property(db_session, tenant, internal_code="REDES11")
+    asked, other = uuid.uuid4(), uuid.uuid4()
+    repo = SqlAlchemyPropertyStateTransitionRepository(db_session)
+    for reservation_id in (asked, other):
+        await repo.add(
+            tenant.id,
+            _transition(
+                tenant.id,
+                model.id,
+                metadata={
+                    "trigger": "CHECKIN_TIME_REACHED",
+                    "reservation_id": str(reservation_id),
+                },
+            ),
+        )
+
+    found = await repo.applied_clock_triggers(tenant.id, [asked])
+
+    assert found == {(asked, "CHECKIN_TIME_REACHED")}
+
+
 # --- `last_for_property` (`dashboard-api` R3.1, task 3.1) -------------------------------
 
 

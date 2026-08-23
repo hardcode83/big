@@ -8,6 +8,7 @@ Zone throughout is `Europe/Madrid`, the tenant's own (PRD §1), so every "local"
 means something.
 """
 
+import logging
 import uuid
 from datetime import UTC, date, datetime, time, timedelta
 from zoneinfo import ZoneInfo
@@ -15,7 +16,7 @@ from zoneinfo import ZoneInfo
 import pytest
 
 from app.properties.application.use_cases import AdvancePropertyStatesUseCase
-from app.properties.domain.entities import Property
+from app.properties.domain.entities import Property, PropertyStateTransition
 from app.properties.domain.enums import (
     PropertyOperationalState,
     StateTransitionTriggeredBy,
@@ -628,6 +629,273 @@ class TestRejectionsAndFailures:
         for (source, trigger), destinations in PropertyStateMachine._POLICY.items():
             if trigger in clock_triggers:
                 assert source not in destinations, (source, trigger)
+
+
+class TestBlockedTransitions:
+    """R1: the flat the calendar wants to move and the state will not admit.
+
+    The bug these pin, measured in `dev` on 2026-08-22: REDES11 stalled in
+    `CLEANING_IN_PROGRESS` from the 16th while a `CONFIRMED` stay ran from the 19th, and the
+    08:18 tick reported `candidates: 0 … not_eligible: 0` for both check-in jobs. The report
+    was correct and empty of it — a flat whose state is not a source of the trigger never
+    reaches `list_by_state`, so it incremented no bucket at all.
+    """
+
+    @pytest.mark.asyncio
+    async def test_the_stalled_flat_is_counted_and_is_not_not_eligible(self) -> None:
+        """R1.2: `not_eligible` means "the hour has not come", and this hour came days ago."""
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+
+        report = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+
+        assert report.blocked == 1
+        assert report.not_eligible == 0
+        assert report.candidates == 0
+        assert report.transitioned == 0
+
+    @pytest.mark.asyncio
+    async def test_nothing_is_written_by_the_detection_sweep(self) -> None:
+        """It counts and logs; it does not transition. The exit is a human's (R3)."""
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+
+        report = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+
+        assert report.blocked == 1
+        assert harness.transitions.transitions == []
+        assert harness.timeline.events == []
+        assert harness.uow.commits == 0
+        assert prop.current_operational_state is PropertyOperationalState.CLEANING_IN_PROGRESS
+
+    @pytest.mark.asyncio
+    async def test_an_ordinary_candidate_does_not_increment_blocked(self) -> None:
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.AWAITING_CHECKIN)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 22), check_in_time=time(15, 0))
+        )
+
+        report = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 16, 0)
+        )
+
+        assert report.transitioned == 1
+        assert report.blocked == 0
+
+    @pytest.mark.asyncio
+    async def test_the_tick_after_a_successful_transition_reports_nothing(self) -> None:
+        """The false positive that made `blocked` count the whole active portfolio.
+
+        Tick one moves the flat `AWAITING_CHECKIN` → `OCCUPIED_ESTIMATED`. On tick two that flat
+        is no longer in a source state and `is_due` for `CHECKIN_TIME_REACHED` is still true —
+        it stays true for the entire stay — so the two-condition definition reported it, and
+        every other correctly occupied flat with it, on every tick until checkout. What clears
+        it is the transition row tick one wrote (design D1, amended after the section-3 panel).
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.AWAITING_CHECKIN)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 22), check_in_time=time(15, 0))
+        )
+
+        first = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 16, 0)
+        )
+        assert first.transitioned == 1
+        assert prop.current_operational_state is PropertyOperationalState.OCCUPIED_ESTIMATED
+
+        second = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 18, 0)
+        )
+
+        assert second.blocked == 0
+        assert second.candidates == 0
+
+    @pytest.mark.asyncio
+    async def test_a_flat_correctly_awaiting_cleaning_is_not_blocked(self) -> None:
+        """The same class of false positive on `CHECKOUT_TIME_REACHED`, which never expires.
+
+        `is_due` for it holds forever once the checkout instant passes, so a flat sitting
+        correctly in `AWAITING_CLEANING` was reported for as long as the 30-day window kept its
+        stay in view.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.OCCUPIED_ESTIMATED)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 10), nights=4, check_out_time=time(11, 0))
+        )
+
+        first = await harness.run(
+            PropertyStateTrigger.CHECKOUT_TIME_REACHED, _local(2026, 8, 14, 12, 0)
+        )
+        assert first.transitioned == 1
+        assert prop.current_operational_state is PropertyOperationalState.AWAITING_CLEANING
+
+        second = await harness.run(
+            PropertyStateTrigger.CHECKOUT_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+
+        assert second.blocked == 0
+
+    @pytest.mark.asyncio
+    async def test_two_overlapping_stays_count_one_flat(self, caplog) -> None:
+        """The double-count risk the design names: the bucket counts flats, not mismatches.
+
+        `detect` returns one entry per `(property_id, reservation_id, trigger)` on purpose, so
+        collapsing to a flat is this use case's job — the same "one bucket per property"
+        precedence `AdvanceReport` already documents.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 20), nights=4, check_in_time=time(15, 0))
+        )
+
+        with caplog.at_level(logging.WARNING, logger="app.properties.application.use_cases"):
+            report = await harness.run(
+                PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+            )
+
+        assert report.blocked == 1
+        # One flat, but two facts: D4 asks for a line per mismatch, and a person chasing one of
+        # the two stays needs its reservation named. Asserted because `blocked == 1` alone would
+        # stay green if the log loop were collapsed to one line per flat.
+        lines = [r for r in caplog.records if r.message == "scheduler.blocked_transition"]
+        assert len(lines) == 2
+        assert len({r.reservation_id for r in lines}) == 2
+
+    @pytest.mark.asyncio
+    async def test_only_the_running_trigger_is_counted(self) -> None:
+        """One `execute` is one trigger, so an overdue checkout is not this job's `blocked`.
+
+        Without the filter, `mark_occupied_estimated` would report the stall that
+        `process_checkouts` is responsible for, and three jobs would each count the same
+        three facts.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.MAINTENANCE_REQUIRED)
+        )
+        harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 10), nights=4, check_out_time=time(11, 0))
+        )
+
+        checkin = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+        checkout = await harness.run(
+            PropertyStateTrigger.CHECKOUT_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+
+        assert checkin.blocked == 0
+        assert checkout.blocked == 1
+
+    @pytest.mark.asyncio
+    async def test_the_fake_refuses_metadata_the_real_writer_could_not_produce(self) -> None:
+        """The fake must not be more forgiving than Postgres (raised by the section-3 panel).
+
+        `metadata` is JSON and `PropertyStateMachine.evaluate` writes `str(reservation_id)`. A raw
+        UUID in there would never match the fake's string keys, so the row would be dropped and
+        the stay reported as never-transitioned — a quiet answer in the wrong direction, on the
+        exact fake/adapter boundary `fixtures-and-real-writers-disagree` warns about.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        stay = harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+        harness.transitions.transitions.append(
+            PropertyStateTransition(
+                id=uuid.uuid4(),
+                tenant_id=TENANT,
+                property_id=prop.id,
+                from_state=PropertyOperationalState.AWAITING_CHECKIN,
+                to_state=PropertyOperationalState.OCCUPIED_ESTIMATED,
+                triggered_by=StateTransitionTriggeredBy.SYSTEM,
+                created_at=CREATED,
+                metadata={"trigger": "CHECKIN_TIME_REACHED", "reservation_id": stay.id},
+            )
+        )
+
+        with pytest.raises(TypeError, match="as strings"):
+            await harness.run(
+                PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+            )
+
+    @pytest.mark.asyncio
+    async def test_a_flat_of_another_tenant_is_never_blocked_here(self) -> None:
+        """Rule 1 of `steering/security.md`: the sweep is a second query and it is scoped."""
+        harness = Harness()
+        theirs = harness.with_property(
+            _property(
+                state=PropertyOperationalState.CLEANING_IN_PROGRESS, tenant_id=uuid.uuid4()
+            )
+        )
+        harness.with_reservation(
+            _reservation(theirs, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+
+        report = await harness.run(
+            PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+        )
+
+        assert report.blocked == 0
+
+    @pytest.mark.asyncio
+    async def test_each_mismatch_logs_its_six_identifying_fields(self, caplog) -> None:
+        """R1.1: "identificando la vivienda, la reserva, el trigger y el estado que lo impide".
+
+        Same shape as `scheduler.unresolvable_reservation_time`, and one line per mismatch
+        rather than per flat — two overlapping stays are two facts a person may need to chase.
+        """
+        harness = Harness()
+        prop = harness.with_property(
+            _property(state=PropertyOperationalState.CLEANING_IN_PROGRESS)
+        )
+        stay = harness.with_reservation(
+            _reservation(prop, check_in=date(2026, 8, 19), nights=4, check_in_time=time(15, 0))
+        )
+
+        with caplog.at_level(logging.WARNING, logger="app.properties.application.use_cases"):
+            await harness.run(
+                PropertyStateTrigger.CHECKIN_TIME_REACHED, _local(2026, 8, 22, 10, 18)
+            )
+
+        [record] = [r for r in caplog.records if r.message == "scheduler.blocked_transition"]
+        assert record.tenant_id == str(TENANT)
+        assert record.property_id == str(prop.id)
+        assert record.reservation_id == str(stay.id)
+        assert record.trigger == "CHECKIN_TIME_REACHED"
+        assert record.blocking_state == "CLEANING_IN_PROGRESS"
+        assert record.due_since == _local(2026, 8, 19, 15, 0).isoformat()
 
 
 class TestTimezones:

@@ -123,9 +123,25 @@ admite deje rastro, **so that** una vivienda parada no dependa de que alguien la
 Acceptance criteria:
 
 1. WHEN una reserva `CONFIRMED` o `CHECKED_IN_ESTIMATED` alcanza el instante de una transición de
-   reloj y el estado operacional de su vivienda no es origen de ese trigger, THE SYSTEM SHALL
-   registrar ese desajuste identificando la vivienda, la reserva, el trigger y el estado que lo
-   impide.
+   reloj, el estado operacional de su vivienda no es origen de ese trigger **y no consta que esa
+   transición se haya aplicado ya para esa reserva**, THE SYSTEM SHALL registrar ese desajuste
+   identificando la vivienda, la reserva, el trigger y el estado que lo impide.
+
+   *Enmendado en el panel de la sección 3 de `/sdd:run`, 2026-08-23 (design D1/D3), decidido por
+   Jose.* La redacción anterior —«alcanza el instante … y el estado no es origen de ese
+   trigger»— parecía describir el atasco y describía **todo lo que está aguas abajo del
+   trigger**, porque las dos condiciones se cumplen igual de bien cuando la transición ya
+   ocurrió: `is_due` de `CHECKIN_TIME_REACHED` es verdad durante **toda** la estancia, y el de
+   `CHECKOUT_TIME_REACHED` lo es **para siempre** después del checkout, mientras «no es origen»
+   incluye cualquier estado posterior. Medido sobre la implementación literal: una vivienda
+   `OCCUPIED_ESTIMATED` a mitad de estancia —que hizo su check-in correctamente— se reportaba
+   como atascada en cada tick, y una `AWAITING_CLEANING` recién salida de un checkout también,
+   durante 30 días. `report.blocked` acababa siendo el tamaño de la cartera activa y REDES11
+   era indistinguible de una vivienda sana.
+
+   La tercera condición es la que faltaba, y la evidencia ya existe: `property_state_transitions`
+   guarda `reservation_id` y `trigger` en su `metadata`, así que «¿se aplicó ya el check-in de
+   *esta* reserva?» es una pregunta contestable sin inventar estado nuevo.
 2. THE SYSTEM SHALL NOT contabilizarlo como `not_eligible`: ese cubo significa «la hora no ha
    llegado», y confundir las dos cosas es exactamente lo que hoy oculta el caso
    (`AdvanceReport` ya documenta esa distinción para `ambiguous` y `unresolvable_time`).
@@ -143,8 +159,15 @@ enteré por un huésped.
 Acceptance criteria:
 
 1. WHEN existe un desajuste de R1 vigente, THE SYSTEM SHALL hacerlo visible a un rol con
-   `MANAGE_CLEANING_TASKS` o `MANAGE_PROPERTIES` **sin** que ese rol tenga que leer logs del
-   servidor.
+   `READ_PROPERTIES` **sin** que ese rol tenga que leer logs del servidor.
+
+   *Enmendado en el gate de `/sdd:design` del 2026-08-23 (design D6).* Decía
+   «`MANAGE_CLEANING_TASKS` o `MANAGE_PROPERTIES`», y los dos los tiene exactamente el mismo rol
+   —`PROPERTY_MANAGER`— y ninguno más, así que la disyunción no discriminaba a nadie y dejaba
+   fuera a la propietaria, que es quien PRD §1 describe operando dos viviendas desde el móvil.
+   Se ensancha a `READ_PROPERTIES` porque el aviso **no expone nada** que ella no vea ya en su
+   card del dashboard —el estado operacional de su vivienda y las fechas de su reserva—, así que
+   el criterio 3 de abajo sigue cumplido al pie de la letra.
 2. THE SYSTEM SHALL incluir el motivo: el trigger que no pudo aplicarse y el estado que lo impide.
 3. THE SYSTEM SHALL respetar el aislamiento por tenant y el reparto de permisos vigente: la
    visibilidad no estrena acceso a datos que el rol no tuviera.

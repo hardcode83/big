@@ -25,6 +25,17 @@ class ContextualStateResolver:
         }
     )
 
+    # What `after_cleaning_cancellation` can answer, and therefore the only destinations
+    # `CLEANING_CANCELLED` may declare in the matrix: it delegates to
+    # `_contextual_reservation_cleaning`, which never reads incidents.
+    CANCELLATION_STATES = frozenset(
+        CONTEXTUAL_STATES
+        - {
+            PropertyOperationalState.CRITICAL_INCIDENT,
+            PropertyOperationalState.MAINTENANCE_REQUIRED,
+        }
+    )
+
     @staticmethod
     def _zone(property: Property) -> ZoneInfo:
         try:
@@ -137,6 +148,11 @@ class ContextualStateResolver:
                 return PropertyOperationalState.AWAITING_CHECKIN
             return PropertyOperationalState.READY_FOR_NEXT_GUEST
         return PropertyOperationalState.VACANT_READY
+
+    @classmethod
+    def after_cleaning_cancellation(cls, property: Property, context: PropertyTransitionContext, instant: datetime) -> PropertyOperationalState:
+        cls._validate_scope(property, context)
+        return cls._contextual_reservation_cleaning(property, context, instant, include_incidents=False)
 
     @classmethod
     def _contextual_reservation_cleaning(cls, property: Property, context: PropertyTransitionContext, instant: datetime, *, include_incidents: bool, completed_only: bool = False) -> PropertyOperationalState:
