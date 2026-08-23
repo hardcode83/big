@@ -22,7 +22,9 @@ are deliberately paranoid about the two things a status code alone does not show
   hold the bytes and replay them to anyone re-presenting an expired URL.
 
 The ordering that makes the whole thing safe (resolve → verify → serve) is pinned one layer
-down, in `test_serve_photo_use_case.py`, where the sequence is observable.
+down, in `tests/integrations/test_signed_serving_use_case.py`, where the sequence is
+observable. It moved there with the use case itself when `incident-photos` (design D5) made
+`maintenance` its second consumer; what stays here is `cleaning`'s route end to end.
 """
 
 import time

@@ -37,7 +37,19 @@ MEDIA_ROOT = Path("/app/media")
 #: rather than a hardcoded string inside `signed_url`, because the port is shared: `maintenance`
 #: and `revenue` will serve their own objects from their own routes (design D2), and only the
 #: wiring knows which. The route itself is design D7's.
-DEFAULT_SIGNED_URL_PREFIX = "/api/v1/cleaning-photos"
+#:
+#: **That anticipation came true in `incident-photos`, so the two live prefixes are now named.**
+#: The default stays cleaning's for compatibility — every existing construction relies on it —
+#: but no consumer should depend on the default any more: each declares its own dependency
+#: through `storage_factory_for` in `app/integrations/api/dependencies.py`. A consumer that took
+#: the default would mint URLs pointing at cleaning's route, which cannot resolve its object ids
+#: and answers the constant `403`, i.e. a broken feature that reads as a broken signature.
+CLEANING_PHOTO_URL_PREFIX = "/api/v1/cleaning-photos"
+
+#: `maintenance`'s own serving route (`incident-photos` R4.1, design D12).
+INCIDENT_PHOTO_URL_PREFIX = "/api/v1/incident-photos"
+
+DEFAULT_SIGNED_URL_PREFIX = CLEANING_PHOTO_URL_PREFIX
 
 
 class LocalFileStorage:
@@ -126,9 +138,11 @@ class LocalFileStorage:
         right-hand side), and through a symlink that `resolve()` follows out of the tree.
         Comparing the resolved path against the resolved root catches all three with one rule.
 
-        Nothing that reaches here should ever fail this: keys come from
-        `storage_key_for_photo`, which builds them from four UUIDs and never from client input
-        (D3). It is defence in depth against a future caller that forgets that.
+        Nothing that reaches here should ever fail this: every key comes from
+        `_photo_storage_key` (`app/integrations/domain/storage.py`), through one of its public
+        callers — `storage_key_for_photo` or `storage_key_for_incident_photo` — which build
+        them from UUIDs and a literal collection segment, never from client input (D3). It is
+        defence in depth against a future caller that forgets that.
         """
         if not key or "\x00" in key:
             raise StorageWriteError("storage key must be a non-empty string without NUL bytes")

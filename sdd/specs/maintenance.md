@@ -7,9 +7,9 @@ desde el `OPEN` que deja cualquier fuente hasta `RESOLVED` o `CANCELLED`: clasif
 por un puerto propio, aprobación de la propietaria cuando el gasto supera el umbral del tenant,
 asignación a un técnico con su plazo de SLA, el ciclo de transiciones que conduce el técnico, y la
 recomposición del estado operacional de la propiedad. Es el único escritor de mutaciones sobre
-`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por tres vías: la anónima
-del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)), desde el 2026-08-16 una
-conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
+`incidents` y `owner_approvals`; la **creación** llega desde fuera, hoy por cuatro vías: la
+anónima del portal del huésped ([`guest-portal-api.md`](guest-portal-api.md)), desde el 2026-08-16
+una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ([`messaging-ai.md`](messaging-ai.md)), y desde el 2026-08-17 el alta **genérica** que abre
 `ReportIncidentUseCase` ([`seed-data-demo.md`](seed-data-demo.md)).
 
@@ -34,7 +34,8 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   | `resume_after_approval:MAINTENANCE_COST` | `AWAITING_OWNER_APPROVAL` | `IN_PROGRESS` |
   | `assign` | `CLASSIFIED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`, `WAITING_EXTERNAL_PARTS` | `ASSIGNED` |
   | `accept` | `ASSIGNED` | `ACCEPTED` |
-  | `start` | `ACCEPTED` | `IN_PROGRESS` |
+  | `reject` | `ASSIGNED`, `ACCEPTED` | `CLASSIFIED` |
+  | `en_route` | `ACCEPTED` | `IN_PROGRESS` |
   | `wait_for_parts` | `IN_PROGRESS` | `WAITING_EXTERNAL_PARTS` |
   | `resume_work` | `WAITING_EXTERNAL_PARTS` | `IN_PROGRESS` |
   | `resolve` | `IN_PROGRESS` | `RESOLVED` |
@@ -52,6 +53,16 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   operación rechazada deje la incidencia exactamente como estaba.
 - THE SYSTEM SHALL admitir la reasignación (`assign` desde `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS` o
   `WAITING_EXTERNAL_PARTS`) devolviendo la incidencia a `ASSIGNED`.
+- WHEN el técnico rechaza la incidencia (`reject`), THE SYSTEM SHALL limpiar los **tres** campos de
+  la asignación vigente —`assigned_technician_id`, `eta_at` y `assignment_note`— y devolverla a
+  `CLASSIFIED`, que es el origen desde el que `assign` reparte. Una incidencia `CLASSIFIED` con
+  asignatario, con ETA o con la nota escrita para quien dijo que no sería una fila que miente; quién
+  rechazó no se pierde, porque el `AuditLog` audita `assigned_technician_id` con su valor anterior y
+  el evento de timeline lleva el identificador.
+
+  > `ASSUMPTION`: el destino `CLASSIFIED` no lo dice el PRD. Se elige porque es el origen desde el
+  > que `assign` reparte y porque no es terminal —lo terminal es `cancel`, que es del manager— y la
+  > avería sigue ahí para que la arregle otra persona.
 
 ### R2 — Clasificación automática
 
@@ -92,10 +103,14 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ### R3 — El job de clasificación
 
 - THE SYSTEM SHALL ejecutar la clasificación en un job periódico, `classify_incidents`, **cada 5
-  minutos**, y NEVER SHALL clasificar dentro de la **petición** que crea la incidencia: las dos
-  vías que crean incidencias por HTTP son una ruta **anónima desde internet** y un pipeline
-  disparado por un webhook, y colgar de ellas la llamada al clasificador es lo que prohíbe la
-  regla 12(d) de `steering/security.md`.
+  minutos**, y NEVER SHALL clasificar dentro de la **petición** que crea la incidencia. Las vías
+  que crean incidencias por HTTP son tres: una ruta **anónima desde internet**, un pipeline
+  disparado por un webhook, y —desde `cleaner-incident-report`— el alta **autenticada** de la
+  limpiadora sobre su propia tarea ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
+  Colgar de cualquiera de ellas la llamada al clasificador es lo que prohíbe la regla 12(d) de
+  `steering/security.md`, y la tercera no debilita ese argumento: lo que la regla acota es el
+  trabajo que un desconocido provoca desde fuera, y las dos primeras siguen siendo la razón por la
+  que la clasificación no puede vivir en la petición.
 - WHERE la creación no viene de una petición sino de un comando que una persona ejecuta —hoy sólo
   `make seed-demo`—, THE SYSTEM SHALL permitir clasificar en la misma transacción que crea la
   incidencia. Lo que la regla 12(d) acota es el trabajo que un desconocido puede provocar desde
@@ -169,8 +184,23 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `sla_deadline_at` **sobre la maquinaria de SLA que ya existe** en `notifications`
   (`list_sla_breach_candidates`, `mark_breached`, `cancel_sla_deadline`), sin construir una segunda.
 - WHEN el técnico acepta, THE SYSTEM SHALL cancelar el plazo pendiente.
+- WHEN el técnico rechaza, THE SYSTEM SHALL cancelar igualmente el plazo pendiente de la
+  notificación `TECHNICIAN_ASSIGNED` de esa incidencia: un rechazo **es** una respuesta, así que
+  nadie llega tarde.
 - WHEN se reasigna una incidencia que ya tenía asignatario, THE SYSTEM SHALL cancelar el plazo del
   anterior antes de abrir el del nuevo.
+- WHEN un manager (re)asigna la incidencia, THE SYSTEM SHALL poner `eta_at` a `NULL` sin
+  condiciones, por el mismo motivo que reescribe `assignment_note`: la ETA pertenece a la
+  **asignación vigente**, no a la incidencia, y el técnico B no hereda la hora que prometió el A.
+- WHEN el técnico rechaza, THE SYSTEM SHALL notificar al `PROPERTY_MANAGER` del tenant dejando su
+  `NotificationLog` con `notification_type = "INCIDENT_REJECTED"`, y esa notificación NEVER SHALL
+  llevar `sla_deadline_at`: no hay plazo que reclamar contra una respuesta ya dada, y el tipo no
+  tiene política de escalado, así que un plazo aquí produciría un incumplimiento que no escala a
+  nadie. Su asunto y su cuerpo SHALL ser constante más identificadores, sin leer `title`,
+  `description`, `ai_summary` ni la nota de asignación.
+- IF el tenant no tiene ningún `PROPERTY_MANAGER` activo, THEN THE SYSTEM SHALL registrar el hecho
+  y continuar sin fallar, dejando el rechazo aplicado — el mismo criterio que R4 aplica a la
+  aprobación sin destinatario.
 - THE SYSTEM SHALL apuntar `related_id` de estas notificaciones a la **incidencia**, no a la
   aprobación, con `related_type = "incident"`.
 - THE SYSTEM SHALL dejar la notificación de aprobación **sin** `sla_deadline_at`: no hay plazo que
@@ -180,10 +210,38 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 ### R6 — El ciclo del técnico
 
 - THE SYSTEM SHALL permitir al técnico asignado las transiciones `ASSIGNED → ACCEPTED`,
-  `ACCEPTED → IN_PROGRESS`, `IN_PROGRESS → WAITING_EXTERNAL_PARTS`,
-  `WAITING_EXTERNAL_PARTS → IN_PROGRESS` e `IN_PROGRESS → RESOLVED`.
+  `ASSIGNED`/`ACCEPTED → CLASSIFIED` (el rechazo de R1), `ACCEPTED → IN_PROGRESS` (`en_route`),
+  `IN_PROGRESS → WAITING_EXTERNAL_PARTS`, `WAITING_EXTERNAL_PARTS → IN_PROGRESS` e
+  `IN_PROGRESS → RESOLVED`.
+- WHEN el técnico se pone en ruta, THE SYSTEM SHALL escribir el evento de timeline
+  `TECHNICIAN_EN_ROUTE`. La operación se llama `en_route`: conserva exactamente los orígenes
+  (`ACCEPTED`) y el destino (`IN_PROGRESS`) que tenía cuando se llamaba `start`, y es el movimiento
+  que PRD §12 dibuja literalmente como «Técnico en ruta → status IN_PROGRESS».
+- THE SYSTEM SHALL conservar `resume_work` (`WAITING_EXTERNAL_PARTS → IN_PROGRESS`) escribiendo
+  `TECHNICIAN_STARTED`, de modo que ese miembro del vocabulario sigue teniendo escritor y no hay
+  nada que retirar del enum ni del tipo `timeline_event_type` de PostgreSQL.
+- THE SYSTEM SHALL aceptar un `eta_at` **opcional** en el cuerpo de `accept` y en el de `en_route`,
+  y NEVER SHALL aceptarlo en ninguna otra operación del módulo. WHEN el cuerpo trae un `eta_at`,
+  THE SYSTEM SHALL escribirlo sustituyendo al anterior; IF el cuerpo no lo trae, THEN SHALL dejar
+  el valor anterior intacto — no hay distinción «ausente contra nulo explícito» que hacer.
+- IF el `eta_at` recibido es **estrictamente anterior** al instante de la petición, o llega sin
+  `tzinfo` utilizable, THEN THE SYSTEM SHALL rechazarlo con `MaintenanceValidationError` y NEVER
+  SHALL escribir nada. El instante límite exacto pasa. La comprobación de zona no es adorno:
+  comparar un `now` con offset contra un valor ingenuo levanta `TypeError`, que saldría por la API
+  como un `500` sin declarar.
+- THE SYSTEM SHALL validar la transición **antes** de la ETA y la ETA **antes** de mover el estado,
+  de modo que una operación fuera de orden y una ETA inválida dejen la incidencia intacta por igual.
 - WHEN el técnico resuelve, THE SYSTEM SHALL exigir `final_cost`, y —salvo que se abra la segunda
   puerta de aprobación— fijar `resolved_at` y pasar a `RESOLVED`.
+- THE SYSTEM SHALL aceptar en el cuerpo de `resolve` un `materials` **opcional** —el texto con que
+  el técnico declara qué piezas puso— acotado a 2000 caracteres en el DDL **y** en el esquema de
+  petición, con recorte de espacios y sin admitir la cadena vacía. WHEN el cuerpo lo trae, THE
+  SYSTEM SHALL escribirlo; IF no lo trae, THEN SHALL preservar el valor anterior.
+- THE SYSTEM SHALL escribir `materials` **también** cuando el cierre abra la segunda puerta de
+  aprobación de R4: leerlo como «operación completa» borraría en silencio la descripción de un gasto
+  precisamente cuando el importe supera el umbral, y obligaría al técnico a teclearla dos veces.
+- THE SYSTEM NEVER SHALL derivar `final_cost` de `materials` ni validar el uno contra el otro:
+  `final_cost` sigue siendo el único número y las dos puertas de aprobación no cambian por ello.
 - THE SYSTEM SHALL rechazar todo coste negativo con `MaintenanceValidationError`.
 - THE SYSTEM SHALL permitir también a `PROPERTY_MANAGER` conducir estas transiciones, para
   desatascar; es la única diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
@@ -211,20 +269,52 @@ conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
 
 ### R8 — API del módulo, permisos y aislamiento
 
-- THE SYSTEM SHALL exponer trece rutas, todas autenticadas y todas con permiso declarado: doce bajo
-  `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `GET` de contexto operativo, `PATCH` de
-  triaje y los `POST` de `classify`, `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve` y
-  `cancel`) y `POST /api/v1/owner-approvals/{approval_id}/respond`.
+- THE SYSTEM SHALL exponer dieciséis rutas autenticadas, todas con permiso declarado: quince
+  bajo `/api/v1/incidents` (`GET` de listado, `GET` de detalle, `GET` de contexto operativo, `GET` y
+  `POST` de fotos, `PATCH`
+  de triaje y los `POST` de `classify`, `assign`, `accept`, `reject`, `en-route`, `wait-parts`,
+  `resume`, `resolve` y `cancel`) y `POST /api/v1/owner-approvals/{approval_id}/respond`.
+- THE SYSTEM SHALL exponer además **una** ruta **anónima** del módulo,
+  `GET /api/v1/incident-photos/{photo_id}`, que sirve los bytes de una foto contra su firma HMAC
+  porque un `<img src>` no puede mandar `Authorization`. Es la única del módulo sin permiso, cuelga
+  de un router propio y no de `incidents_router`, y su capability tiene spec propia
+  ([`incident-photos`](incident-photos.md)). Lo que le toca a este módulo es que la ruta existe por
+  diff visible en el censo de `ANONYMOUS_ENDPOINTS` y no por descuido.
+- THE SYSTEM SHALL exponer el rechazo en `POST /api/v1/incidents/{incident_id}/reject`, bajo
+  `EXECUTE_INCIDENTS`, y SHALL permitirlo al técnico asignado y al `PROPERTY_MANAGER`, igual que el
+  resto del ciclo. THE SYSTEM NEVER SHALL permitir rechazar a un técnico que no sea el asignado, y
+  esa negativa SHALL ser indistinguible de «no existe»: el mismo `404` con el mismo cuerpo que para
+  una incidencia inexistente o de otro tenant.
+- THE SYSTEM SHALL exponer «en ruta» en `POST /api/v1/incidents/{incident_id}/en-route`, y
+  `POST /api/v1/incidents/{incident_id}/start` NEVER SHALL existir en el contrato publicado: la
+  operación se renombró, no se duplicó.
+- THE SYSTEM SHALL compartir **un solo** esquema de petición entre `accept` y `en-route` —el cuerpo
+  es opcional y su único campo es `eta_at`—, de modo que el «en ninguna otra ruta» de la ETA no viva
+  en dos sitios que puedan divergir; y SHALL mantener el `extra="forbid"` del módulo en los tres
+  cuerpos que este ciclo toca.
 - THE SYSTEM SHALL servir el contexto operativo de una incidencia —a qué propiedad va el técnico y
   cómo entra— en `GET /api/v1/incidents/{incident_id}/context`, bajo `READ_INCIDENTS` y con el mismo
   acotamiento por fila que el resto del módulo. Es una capacidad con su propia spec
   ([`tech-incident-context`](tech-incident-context.md)) y no se reenuncia aquí: lo que le toca a este
   módulo es que **no creó permiso nuevo**, que no ensanchó ninguna fila alcanzable, y que
   `IncidentResponse` **no** cambió por su causa.
+- THE SYSTEM SHALL servir la **evidencia fotográfica** del trabajo del técnico en
+  `POST` y `GET /api/v1/incidents/{incident_id}/photos` —subir bajo `EXECUTE_INCIDENTS`, listar bajo
+  `READ_INCIDENTS`—, con el mismo acotamiento por fila que el resto del módulo. Es una capacidad con
+  su propia spec ([`incident-photos`](incident-photos.md)) y no se reenuncia aquí: lo que le toca a
+  este módulo es que **no creó permiso nuevo** —`ROLE_PERMISSIONS` no se tocó—, que no ensanchó
+  ninguna fila alcanzable, que `IncidentResponse` **no** cambió por su causa, y que la subida sólo
+  se admite con la incidencia en `IN_PROGRESS` o `WAITING_EXTERNAL_PARTS`, con las **tres** negativas
+  de R1 reutilizadas tal cual (`409`, tres mensajes distinguibles) y sin fila nueva en
+  `_TRANSITIONS`, porque subir una foto no mueve el estado.
+- THE SYSTEM SHALL entender que la negativa de creación de arriba **no la toca** la aparición de esas
+  rutas: crean **fotos**, no incidencias. Las superficies que crean incidencias siguen siendo cuatro.
 - THE SYSTEM NEVER SHALL exponer una ruta de **creación** de incidencias en este módulo, y esa
   negativa SHALL sobrevivir a la aparición de un alta genérica: `ReportIncidentUseCase` es un caso
-  de uso, no una ruta. Las superficies que crean incidencias son la anónima del portal del huésped,
-  el pipeline de mensajería y el comando `make seed-demo`.
+  de uso, no una ruta. Las superficies que crean incidencias son cuatro: la anónima del portal del
+  huésped, el pipeline de mensajería, el comando `make seed-demo` y el alta de la limpiadora desde
+  su propia tarea, que vive **bajo `cleaning`** y no aquí
+  ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
 
 **El alta genérica, y la precondición que tiene que descargar ella misma.** Desde el 2026-08-17
 `maintenance` ofrece `ReportIncidentUseCase` —`tenant_id`, `property_id`, `source`, `title`,
@@ -241,10 +331,17 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   abierto a cualquier llamante no tiene nada equivalente.
 - THE SYSTEM SHALL exigir actor: el alta no está en el conjunto de acciones que `_AuditWriter`
   exime, así que una creación sin actor se rechaza y no commitea nada.
-- THE SYSTEM SHALL NOT aceptar `reservation_id` ni `reported_by_user_id`. Se diseñaron y se
-  quitaron: arrastraban la misma precondición sin descargar y hoy no tienen llamante. Quien traiga
-  el primero —la alerta de cerradura que este módulo anuncia— añade el parámetro **junto con** la
-  búsqueda que lo hace seguro.
+- THE SYSTEM SHALL NOT aceptar `reservation_id`. Se diseñó y se quitó junto a
+  `reported_by_user_id`: arrastraban la misma precondición sin descargar y ninguno tenía llamante.
+  La regla que quedó es que quien traiga uno añade el parámetro **junto con** la búsqueda que lo
+  hace seguro.
+- THE SYSTEM SHALL aceptar `reported_by_user_id` y `cleaning_task_id`, ambos **opcionales** y por
+  palabra clave, de modo que ningún llamante existente cambie. Los trajo
+  [`cleaner-incident-report`](cleaner-incident-report.md) honrando esa regla y no derogándola: el
+  primero viene del token ya verificado, y el segundo de una tarea de limpieza que el llamante
+  cargó con `tenant_id` explícito. THE SYSTEM NEVER SHALL derivar uno del otro — «quién reportó» y
+  «quién actúa» son dos conceptos, y colapsarlos cambiaría en silencio lo que escribe
+  `app/cli/seed_demo.py`.
 - THE SYSTEM SHALL admitir cualquier miembro de `IncidentSource`, sin filtro, y SHALL dejar la
   incidencia en `OPEN` sin fijar `category`, `severity` ni `ai_classification` — que es lo que
   mantiene a `classify` como única puerta de salida de `OPEN` (R1).
@@ -271,15 +368,18 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 
   | Rol | Puede |
   |---|---|
-  | `TENANT_OWNER` | leer incidencias; responder aprobaciones |
-  | `PROPERTY_MANAGER` | leer, clasificar, triar, asignar, cancelar **y** todo el ciclo del técnico |
-  | `TECHNICIAN` | leer y ejecutar el ciclo (aceptar, empezar, esperar piezas, reanudar, resolver) |
-  | `CLEANER`, `SUPER_ADMIN` | nada de este módulo |
+  | `TENANT_OWNER` | leer incidencias **y las fotos de sus incidencias**; responder aprobaciones |
+  | `PROPERTY_MANAGER` | leer, clasificar, triar, asignar, cancelar **y** todo el ciclo del técnico, **fotos incluidas** |
+  | `TECHNICIAN` | leer y ejecutar el ciclo (aceptar, empezar, esperar piezas, reanudar, resolver) y **subir y ver las fotos** de las suyas |
+  | `CLEANER` | abrir una incidencia desde una tarea de limpieza suya, y nada más — y esa alta vive **bajo `cleaning`** ([`cleaner-incident-report.md`](cleaner-incident-report.md)), no en este módulo |
+  | `SUPER_ADMIN` | nada de este módulo |
 
 - THE SYSTEM SHALL conceder a `TECHNICIAN` exactamente lo que R5 y R6 necesitan y nada más: su
   conjunto completo es autoservicio (`READ_OWN_PROFILE`, `MANAGE_OWN_SESSION`,
   `READ_OWN_NOTIFICATIONS`) más `READ_INCIDENTS` y `EXECUTE_INCIDENTS`. NEVER SHALL poder clasificar,
-  triar, asignar, cancelar ni responder aprobaciones.
+  triar, asignar, cancelar ni responder aprobaciones. Las fotos de la incidencia viajan **sobre esos
+  dos mismos permisos** y no ampliaron el conjunto: subir es `EXECUTE_INCIDENTS`, listar es
+  `READ_INCIDENTS`.
 - WHERE el solicitante es `TECHNICIAN`, THE SYSTEM SHALL devolver **sólo** las incidencias que tiene
   asignadas, derivando la restricción del **rol del token** y NEVER SHALL aceptarla ni ensancharla
   desde la petición: no existe parámetro `assigned_technician_id` en la ruta, y el filtro se
@@ -289,7 +389,11 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   existencia.
 - THE SYSTEM SHALL tomar el `tenant_id` únicamente del token verificado, SHALL pasarlo explícito a
   cada método de repositorio, y NEVER SHALL aceptarlo en ningún esquema de petición.
-- THE SYSTEM NEVER SHALL exponer estas rutas al rol `CLEANER` ni al portador de un token de huésped.
+- THE SYSTEM NEVER SHALL exponer **las quince rutas de `/api/v1/incidents`** al rol `CLEANER` ni al
+  portador de un token de huésped: leer, listar, clasificar, triar, asignar, cancelar, el ciclo
+  del técnico y sus fotos siguen cerrados a los dos. Lo único que una `CLEANER` puede hacer con una incidencia
+  es abrirla desde su propia tarea de limpieza, y esa ruta pertenece a otro módulo
+  ([`cleaner-incident-report.md`](cleaner-incident-report.md)).
 - THE SYSTEM SHALL paginar el listado con `?page&per_page` (por defecto 1 y 20, máximos 100.000 y
   100) y devolver `items`, `total`, `page` y `per_page`, y SHALL admitir los filtros `property_id`,
   `status` y `severity`, combinados con `AND`.
@@ -310,21 +414,35 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 
 - WHEN cambia el estado de una incidencia o se responde una aprobación, THE SYSTEM SHALL escribir su
   `AuditLog` y su `TimelineEvent` **en la misma transacción** que el cambio.
-- THE SYSTEM SHALL auditar sobre `INCIDENT` exactamente once campos: `source`, `status`,
-  `reservation_id`, `category`, `severity`, `assigned_technician_id`, `owner_approval_required`,
-  `estimated_cost`, `approved_cost` y `final_cost`, más `resolved_at`.
-- THE SYSTEM NEVER SHALL auditar `title`, `description`, `ai_summary`, `ai_classification` ni
-  `assignment_note`, y esa exclusión SHALL ser **estructural**: nombrar cualquiera de los cinco en un
-  `ChangeSet` levanta `AuditContractError`, en las dos formas —`diff()` y `redacted()`—, por no ser
-  campo declarado de la entidad. Los dos primeros son texto libre de origen externo sobre una tabla
+- THE SYSTEM SHALL auditar sobre `INCIDENT` exactamente trece campos: `source`, `status`,
+  `reservation_id`, `cleaning_task_id`, `category`, `severity`, `assigned_technician_id`,
+  `owner_approval_required`, `estimated_cost`, `approved_cost` y `final_cost`, más `resolved_at` y
+  `eta_at`. `eta_at` entra por el mismo criterio que `resolved_at`: es una marca de tiempo, no texto
+  libre, así que la excepción 2 de la regla 11 no se toca.
+  `cleaning_task_id` entró con [`cleaner-incident-report`](cleaner-incident-report.md): la fila de
+  auditoría registra contra qué está anclada la incidencia —para eso está `reservation_id`— y
+  «durante qué limpieza» es el ancla equivalente. Es un identificador y no texto, así que la
+  excepción 2 de la regla 11 no se toca.
+- THE SYSTEM NEVER SHALL auditar `title`, `description`, `ai_summary`, `ai_classification`,
+  `assignment_note` ni `materials`, y esa exclusión SHALL ser **estructural**: nombrar cualquiera de
+  los seis en un `ChangeSet` levanta `AuditContractError`, en las dos formas —`diff()` y
+  `redacted()`—, por no ser campo declarado de la entidad. Los dos primeros son texto libre de origen externo sobre una tabla
   append-only; los dos siguientes son los sumideros que R2 acota; el último es la nota de la
   asignación, que además SHALL quedar **fuera de `REDACTED_FIELDS`** de forma deliberada —denylistar
   obligaría a añadirla al allowlist, que es estrictamente más superficie— y cuyo texto NEVER SHALL
   viajar al `metadata` del `TimelineEvent` de la asignación, que lleva solo `incident_id` y
-  `technician_id`.
+  `technician_id`. `materials` lleva ese mismo contrato calcado: fuera de los campos auditables,
+  fuera de `REDACTED_FIELDS`, y su texto NEVER SHALL viajar al `metadata` del `TimelineEvent` de la
+  resolución.
 - THE SYSTEM SHALL auditar sobre `OWNER_APPROVAL` exactamente cinco campos: `status`, `amount`,
   `related_type`, `responded_by` y `responded_at`, y NEVER SHALL auditar `reason` ni
   `response_notes`.
+- THE SYSTEM SHALL auditar sobre `INCIDENT_PHOTO` exactamente tres campos —`stage`, `incident_id` y
+  `uploaded_by`—, contra la **propia foto** como entidad y no contra la incidencia, y NEVER SHALL
+  auditar `storage_key`. Es la **tercera** entidad auditable de este módulo, y su detalle vive en
+  [`incident-photos`](incident-photos.md); lo que le toca a R9 es que la subida **no** escribe
+  `TimelineEvent`, por el mismo motivo por el que no lo escribe esperar piezas: el vocabulario de
+  PRD §10 no tiene un tipo para ella.
 - THE SYSTEM SHALL nombrar como actor al usuario que ejecuta la transición, y NEVER SHALL escribir
   una fila que reclame a la vez un usuario y un portador de token.
 - WHERE la clasificación la dispara el job **o el comando de seed**, THE SYSTEM SHALL escribir la
@@ -340,8 +458,14 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   `INCIDENT_CREATED` con actor `USER`, título constante y metadatos sólo con identificadores.
 - THE SYSTEM SHALL escribir en el timeline `INCIDENT_CLASSIFIED`, `OWNER_APPROVAL_REQUIRED`,
   `OWNER_APPROVED_EXPENSE`, `OWNER_REJECTED_EXPENSE`, `TECHNICIAN_ASSIGNED`, `TECHNICIAN_ACCEPTED`,
-  `TECHNICIAN_STARTED`, `INCIDENT_RESOLVED` e `INCIDENT_CANCELLED`, con **título constante** y
-  `metadata` sólo con identificadores.
+  `TECHNICIAN_REJECTED`, `TECHNICIAN_EN_ROUTE`, `TECHNICIAN_STARTED`, `INCIDENT_RESOLVED` e
+  `INCIDENT_CANCELLED`, con **título constante** y `metadata` sólo con identificadores.
+  `TECHNICIAN_REJECTED` lo añadió este ciclo al vocabulario de `TimelineEventType`, con el precedente
+  de `GUEST_CHECKIN_COMPLETED`, que [`guest-portal-api`](guest-portal-api.md) ya había añadido fuera
+  de la lista de PRD §7.8.
+- WHEN se rechaza una incidencia o se escribe un `eta_at`, THE SYSTEM SHALL escribir su `AuditLog` y
+  su `TimelineEvent` en la misma transacción que el cambio, nombrando como actor al usuario que
+  ejecuta la operación.
 - THE SYSTEM NEVER SHALL escribir evento de timeline al esperar piezas: el vocabulario de PRD §10 no
   tiene un tipo para ello y el hito ya lo cuenta el `status` de la incidencia. Es una decisión, no
   un olvido; el coste asumido es que el timeline no explica por sí solo por qué una incidencia lleva
@@ -357,7 +481,7 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   hueco. Cerrarlo sólo aquí dejaría un rastro incoherente. Candidato con nombre propuesto:
   `property-transition-audit`.
 - **El aislamiento por tenant está implementado y verificado ruta por ruta, pero demostrado en dos
-  de sus tres puertas.** El detalle, el contexto operativo y las ocho transiciones comparten hoy una
+  de sus tres puertas.** El detalle, el contexto operativo y las nueve transiciones comparten hoy una
   única función —`_load_incident_in_scope`, una corrutina de módulo que
   [`tech-incident-context`](tech-incident-context.md) extrajo cuando la regla estaba escrita dos
   veces y añadir una tercera copia era la alternativa—; la tercera puerta
@@ -375,8 +499,13 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   traiga la expiración.
 - **`OwnerApprovalRelatedType.OTHER` no reanuda ninguna incidencia**: responder una aprobación de ese
   tipo levanta `MaintenanceValidationError`. No hay hoy quien cree aprobaciones `OTHER`.
-- **`TimelineEventType.TECHNICIAN_EN_ROUTE` existe y nadie lo escribe**: no hay transición «en ruta»
-  en el ciclo entregado.
+- **`incidents.assignment_note` no pasa por `storable_text`.** Es el único sumidero de texto libre
+  vivo del módulo declarado como `str` con `max_length` a secas: `materials` entró con
+  `MultiLineText` desde el primer día, así que un `U+0000` en la nota de asignación llega a asyncpg
+  y sale hoy como un `500` sin declarar, mientras el mismo carácter en los materiales se rechaza
+  como `422`. No se cerró en este ciclo porque el cuerpo de `assign` no es suyo —lo sirve
+  [`tech-incident-context`](tech-incident-context.md)— y cambiar la validación de una ruta ajena de
+  paso habría ensanchado el change. Candidato: `assignment-note-storable-text`.
 - **No hay ruta de lectura de aprobaciones** ni permiso `READ_OWNER_APPROVALS`: la propietaria las
   descubre por su notificación y las responde por id. Ensancharlo es de quien traiga su bandeja.
 - **El clasificador es de desarrollo.** El puerto se entrega con adaptador determinista, como manda
@@ -388,8 +517,8 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 
 ## Key files
 
-- `backend/app/maintenance/domain/entities.py` — `Incident`, `OwnerApproval` y la tabla de
-  transiciones.
+- `backend/app/maintenance/domain/entities.py` — `Incident`, `OwnerApproval`, `IncidentPhoto` y la
+  tabla de transiciones (más `ensure_accepts_photo()`, que no está en ella a propósito).
 - `backend/app/maintenance/domain/read_models.py` — `IncidentContext`, la proyección de
   [`tech-incident-context`](tech-incident-context.md).
 - `backend/app/maintenance/domain/ports.py` — `IncidentClassifier` y `LiveCleaningTaskQuery`.
@@ -400,6 +529,9 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
 - `backend/app/maintenance/application/use_cases.py` — los casos de uso y los mixins compartidos.
 - `backend/app/maintenance/api/` — routers, dependencias, esquemas y el mapa de errores.
 - `backend/app/auth/domain/policy.py` — los cuatro permisos y el grant de `TECHNICIAN`.
-- `backend/app/audit/domain/value_objects.py` — `AUDITABLE_FIELDS` de `INCIDENT` y `OWNER_APPROVAL`.
+- `backend/app/audit/domain/value_objects.py` — `AUDITABLE_FIELDS` de `INCIDENT`,
+  `OWNER_APPROVAL` e `INCIDENT_PHOTO`.
+- `backend/app/maintenance/api/photos_router.py` — la ruta anónima de servido firmado, la única del
+  módulo sin permiso ([`incident-photos`](incident-photos.md)).
 - `backend/app/scheduler/tasks.py`, `backend/app/scheduler/schedule.py` — el job `classify_incidents`.
 - `docs/maintenance.md` — cómo se opera.

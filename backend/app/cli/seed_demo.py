@@ -70,6 +70,7 @@ from app.integrations.application.ingest import IngestRow, ReservationIngestor
 from app.integrations.domain.dtos import ReservationDTO
 from app.integrations.domain.storage import derive_signing_key
 from app.integrations.infrastructure.storage import (
+    CLEANING_PHOTO_URL_PREFIX,
     ConfiguredFileStorageFactory,
     build_s3_client,
     credentials_are_resolvable,
@@ -1225,6 +1226,13 @@ def _file_storage_factory() -> ConfiguredFileStorageFactory:
     """
     return ConfiguredFileStorageFactory(
         signing_key=derive_signing_key(settings.jwt_secret_key),
+        # **Explicit, never the default** (`incident-photos` D10a). The default is cleaning's
+        # route, and this seed's only consumer today is `UploadCleaningPhotoUseCase` — so
+        # omitting it happens to be correct and would stay correct right up until someone adds
+        # incident-photo seeding here and reuses this helper, at which point the seeded URLs
+        # would point at `/api/v1/cleaning-photos/{id}` and answer a constant `403`. Naming it
+        # costs one line and removes the trap; raised by the section 7-9 security panel.
+        url_prefix=CLEANING_PHOTO_URL_PREFIX,
         s3_bucket=settings.s3_bucket,
         s3_client_factory=partial(
             build_s3_client,

@@ -232,6 +232,22 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # `photo_type` and the two ids are what an incident review actually asks for: who uploaded
     # what kind of evidence, against which cleaning.
     "CLEANING_PHOTO": frozenset({"photo_type", "cleaning_task_id", "uploaded_by"}),
+    # `incident-photos` R6.2, design D8. The same three facts as `CLEANING_PHOTO` above and for
+    # the same reasons, with `stage` where that one has `photo_type`: an incident review asks who
+    # uploaded which stage of evidence, against which incident.
+    #
+    # **`storage_key` is absent, and that is the point of the entry.** `audit_logs.changes` is a
+    # rule-11 sink whose whole contract is that a value cannot arrive through it without the
+    # column announcing it, and the internal key is precisely the one string this change works to
+    # keep out of every response — putting it in the column designed to be dumped would undo
+    # that. (The key *is* written to the log by the compensating delete of design D7, and that is
+    # not a contradiction: R3.3 governs API responses, and that log line is the entire recovery
+    # procedure for an orphaned object.)
+    #
+    # `stage` is safe to audit where a free-text photo type would not be: it is a closed native
+    # enum (`IncidentPhotoStage`), so it cannot carry a caller's text into the sink. That is what
+    # R6.5 means when it says this change adds no new sink.
+    "INCIDENT_PHOTO": frozenset({"stage", "incident_id", "uploaded_by"}),
     # `access-notifications`. Rule 9 of `steering/security.md` names `AccessRecord` in its
     # enumeration, so every operator action on one writes a row.
     #
@@ -315,6 +331,11 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # was opened, by whom and against which stay — `source`, `status` and `reservation_id`
     # say that without carrying a word the guest typed into an append-only column.
     #
+    # `tech-cycle-completion` adds `eta_at` and, by not adding `materials`, makes that
+    # column's rule-11 contract structural: naming it in a `ChangeSet` raises
+    # `AuditContractError` in both `diff()` and `redacted()` rather than relying on nobody
+    # thinking of it (R4.6).
+    #
     # `maintenance` adds the fields its flow mutates, and **`ai_summary` and
     # `ai_classification` are absent for the same reason `title` and `description` are**:
     # excepción 2 of rule 11 says of itself that it does not propagate and does not
@@ -326,9 +347,20 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
             "source",
             "status",
             "reservation_id",
+            # `cleaner-incident-report` D10. The audit row of an incident records what it was
+            # anchored against — `reservation_id` is here for that reason — and "during which
+            # cleaning" is the equivalent anchor. It is an identifier and not text, so
+            # excepción 2 of rule 11 is untouched by it.
+            "cleaning_task_id",
             "category",
             "severity",
             "assigned_technician_id",
+            # `tech-cycle-completion` R5.1. A timestamp, not free text, so it enters by the
+            # same criterion as `resolved_at` — and it has to, because the technician steps
+            # now derive their audited diff over it (that change's D5). Its sibling column
+            # `materials` is deliberately **absent**: it is 2000 characters a person types,
+            # so it stays outside by the rule that keeps `assignment_note` outside.
+            "eta_at",
             "owner_approval_required",
             "estimated_cost",
             "approved_cost",

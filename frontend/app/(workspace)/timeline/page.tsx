@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { TimelineView } from "@/features/dashboard";
 import { routeMetadata } from "@/features/shell";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("timeline");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="timeline" />;
+  return <TimelineView />;
 }

@@ -28,6 +28,9 @@ INCIDENT_ACTIONS = {
     "INCIDENT_TRIAGED",
     "INCIDENT_ASSIGNED",
     "INCIDENT_ACCEPTED",
+    # `tech-cycle-completion` R5.2: the technician's refusal is its own action, because an
+    # auditor has to tell "handed to somebody" from "the person it went to said no".
+    "INCIDENT_REJECTED",
     "INCIDENT_STARTED",
     "INCIDENT_WAITING_PARTS",
     "INCIDENT_RESOLVED",
@@ -36,8 +39,12 @@ INCIDENT_ACTIONS = {
 APPROVAL_ACTIONS = {"OWNER_APPROVAL_REQUESTED", "OWNER_APPROVAL_ANSWERED"}
 
 
-def test_the_ten_actions_of_the_flow_are_declared() -> None:
-    """D6, and the door `actions.py` described: each of these has a use case performing it."""
+def test_the_eleven_actions_of_the_flow_are_declared() -> None:
+    """D6, and the door `actions.py` described: each of these has a use case performing it.
+
+    Ten until `tech-cycle-completion` added `INCIDENT_REJECTED` (R5.2) with
+    `RejectIncidentUseCase` behind it.
+    """
     assert INCIDENT_ACTIONS | APPROVAL_ACTIONS <= actions.ACTIONS
 
 
@@ -52,16 +59,25 @@ def test_the_incident_allowlist_is_exactly_what_it_should_be() -> None:
     The allowlist is the whole defence of rule 11 in this module — "by construction, not by
     care" — so a later change adding a free-text incident column to it (a resolution note,
     an operator comment) has to fail here rather than pass silently. The three names it
-    starts with are `guest-portal-api`'s; the eight after are this flow's.
+    starts with are `guest-portal-api`'s; the eight after are this flow's, and the twelfth is
+    `cleaner-incident-report`'s (D10) — an identifier, like the two it sits between.
+
+    The thirteenth is `tech-cycle-completion`'s `eta_at` (R5.1), a timestamp on the same
+    footing as `resolved_at`. That change's `materials` is asserted **absent** below rather
+    than merely omitted here: this test is what its R4.6 leans on to make the rule-11 contract
+    of that column structural, and an exact-set assertion says "not present" only until
+    somebody widens the set without reading the docstring.
     """
     assert AUDITABLE_FIELDS["INCIDENT"] == frozenset(
         {
             "source",
             "status",
             "reservation_id",
+            "cleaning_task_id",
             "category",
             "severity",
             "assigned_technician_id",
+            "eta_at",
             "owner_approval_required",
             "estimated_cost",
             "approved_cost",
@@ -69,6 +85,8 @@ def test_the_incident_allowlist_is_exactly_what_it_should_be() -> None:
             "resolved_at",
         }
     )
+    # Named explicitly, because it is the one absence a reader has to be able to find.
+    assert "materials" not in AUDITABLE_FIELDS["INCIDENT"]
 
 
 def test_the_owner_approval_allowlist_is_exactly_what_d6_declares() -> None:

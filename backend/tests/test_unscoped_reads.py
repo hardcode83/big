@@ -12,8 +12,15 @@ anywhere a human maintains it.
 That count is the audit control for rule 1 of `steering/security.md`, so it stops being prose
 here. The set of callers of `require_unmarked_session` is the census of one class of read: the
 ones where an anonymous caller presents a credential and the row itself resolves the tenant.
-Asserted below against the five declared — adding a caller without declaring it is red,
+Asserted below against `DECLARED_UNSCOPED_READS` — adding a caller without declaring it is red,
 removing a call is red.
+
+**No numeral here, deliberately.** This sentence used to say "the five declared", and
+`incident-photos` made it six — which is the fifth time a count of these reads went stale in
+prose, in the one file whose whole argument is that it should not be written where a human
+maintains it. The paragraph above keeps its numerals because they are history in the past tense
+(what the count *was* when each change audited it); a present-tense count belongs only in the
+frozenset, which is the thing the tests actually read.
 
 **What this census is NOT is a list of every query in the system that runs without a tenant**,
 and that limit is stated here because the version of this docstring that shipped first claimed
@@ -49,6 +56,15 @@ DECLARED_UNSCOPED_READS = frozenset(
         # claimed the census WAS the class. An incoming webhook carries no JWT, so the row
         # resolves the tenant — structurally identical to the portal's token lookup above.
         ("integrations/infrastructure/repositories.py", "find_by_token_hash"),
+        # The sixth (`incident-photos` R6.4, design D13): the twin of the `cleaning` entry
+        # above, for the second consumer of the shared signed-serving route. Same structural
+        # reason — the anonymous route must resolve `photo_id -> (storage_key, tenant_id)`
+        # before it can verify anything, because the request carries no credential naming a
+        # tenant and the tenant is half of what the signature is rebuilt against.
+        #
+        # Unlike its twin it needs no `JOIN`: `incident_photos` carries its own `tenant_id`
+        # (design D2), so one table answers both halves.
+        ("maintenance/infrastructure/repositories.py", "locate_without_tenant_scoping"),
     }
 )
 

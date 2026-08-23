@@ -45,6 +45,12 @@ class TimelineEventType(str, enum.Enum):
     INCIDENT_CLASSIFIED = "INCIDENT_CLASSIFIED"
     TECHNICIAN_ASSIGNED = "TECHNICIAN_ASSIGNED"
     TECHNICIAN_ACCEPTED = "TECHNICIAN_ACCEPTED"
+    # The technician refused the job and it went back to the manager
+    # (`tech-cycle-completion` R1.9). None of the values above says it: `TECHNICIAN_ACCEPTED`
+    # is its opposite, `INCIDENT_CANCELLED` is the manager closing the incident for good, and
+    # `CLEANER_REJECTED` is the other trade. Added outside PRD §7.8's list with the precedent
+    # of `GUEST_CHECKIN_COMPLETED`, which `guest-portal-api` added for the same reason.
+    TECHNICIAN_REJECTED = "TECHNICIAN_REJECTED"
     TECHNICIAN_EN_ROUTE = "TECHNICIAN_EN_ROUTE"
     TECHNICIAN_STARTED = "TECHNICIAN_STARTED"
     INCIDENT_RESOLVED = "INCIDENT_RESOLVED"

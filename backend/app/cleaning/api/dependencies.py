@@ -8,7 +8,6 @@ That net does **not** reach `cleaning_checklist_completions`, which has no `tena
 column (design D6); there the explicit `JOIN` inside the adapter is the only mechanism.
 """
 
-from functools import partial
 from typing import Annotated
 
 from fastapi import Depends
@@ -31,7 +30,7 @@ from app.cleaning.application.use_cases import (
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
     RejectCleaningTaskUseCase,
-    ServeLocalCleaningPhotoUseCase,
+    ReportTaskIncidentUseCase,
     StartCleaningTaskUseCase,
     UploadCleaningPhotoUseCase,
     ValidateCleaningTaskUseCase,
@@ -45,13 +44,21 @@ from app.cleaning.infrastructure.repositories import (
     SqlAlchemyUnscopedCleaningPhotoLocationQuery,
 )
 from app.core.config import settings
+from app.maintenance.application.use_cases import (
+    CleanerIncidentReporter,
+    ReportIncidentUseCase,
+)
+from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
-from app.integrations.domain.storage import FileStorageFactory, derive_signing_key
-from app.integrations.infrastructure.storage import (
-    ConfiguredFileStorageFactory,
-    build_s3_client,
+from app.integrations.api.dependencies import (
+    SigningKeyDep,
+    get_url_signing_key,
+    storage_factory_for,
 )
+from app.integrations.application.signed_serving import ServeSignedObjectUseCase
+from app.integrations.domain.storage import FileStorageFactory
+from app.integrations.infrastructure.storage import CLEANING_PHOTO_URL_PREFIX
 from app.notifications.infrastructure.repositories import (
     SqlAlchemyNotificationLogRepository,
 )
@@ -194,59 +201,13 @@ def get_complete_checklist_item_use_case(
     )
 
 
-def get_url_signing_key() -> bytes:
-    """The HKDF-derived URL signing key of design D6.
-
-    Its own dependency because **two** things need the same bytes and must not drift: the
-    factory below, which signs, and `ServeLocalCleaningPhotoUseCase`, which verifies. Deriving
-    it twice from `settings` would work, but it would also let a test override one half and
-    silently leave the other on the real secret — every signature would then be refused, and
-    the failure would look like a broken signing scheme rather than like a broken fixture.
-
-    The key is derived per call rather than cached. It is two HMACs of a 32-byte input, and a
-    module-level cache of a value computed from `JWT_SECRET_KEY` is the kind of thing that
-    survives a settings change in a test and then explains nothing when a signature stops
-    verifying. `derive_signing_key` is pure, so calling it is the cheap option and the honest
-    one.
-    """
-    return derive_signing_key(settings.jwt_secret_key)
-
-
-SigningKeyDep = Annotated[bytes, Depends(get_url_signing_key)]
-
-
-def get_file_storage_factory(signing_key: SigningKeyDep) -> FileStorageFactory:
-    """The tenant-agnostic factory of design D1, wired with the derived URL signing key.
-
-    Its own dependency, and overridable as one, so a test can point the `LOCAL` root at a
-    temporary directory without reaching into the use case builders below.
-
-    **This is the only place the object-store settings are read** (`object-storage-provisioning`
-    design D5, R3.2): the use cases receive the factory and never learn a bucket, a region or an
-    endpoint exists. `partial` keeps `s3_client_factory` a zero-argument callable, so the tests
-    that inject a spy through this same dependency go on working unchanged.
-
-    `.strip() or None` is what satisfies R3.4: an unset variable arrives as `""`, and boto3 reads
-    an empty `endpoint_url` as an endpoint rather than as its absence. Turning it into `None` is
-    what makes "point at AWS" mean *configure nothing*.
-
-    The `.strip()` is not decoration, and a bare `or None` was wrong here. A whitespace-only value
-    — one stray space surviving a hand-edited `.env` — is truthy, so it would reach
-    `boto3.client(...)` and raise `InvalidRegionError` or `ValueError: Invalid endpoint:` straight
-    out of `storage_for(S3)`, bypassing the `StorageWriteError` contract that
-    `ConfiguredFileStorageFactory` otherwise guarantees for a misconfigured store. The bucket beside
-    it has always been read as `s3_bucket.strip()` for exactly this reason; these two now match it.
-    """
-    return ConfiguredFileStorageFactory(
-        signing_key=signing_key,
-        s3_bucket=settings.s3_bucket,
-        s3_client_factory=partial(
-            build_s3_client,
-            region_name=settings.s3_region.strip() or None,
-            endpoint_url=settings.s3_endpoint_url.strip() or None,
-        ),
-    )
-
+#: `cleaning`'s own signed-URL prefix, and therefore its own factory dependency.
+#:
+#: The name is unchanged so that every existing override — `tests/cleaning/conftest.py` pins the
+#: `LOCAL` root and the signing key through it — keeps resolving. What changed is that the
+#: prefix is now stated here instead of defaulted inside the factory, because `maintenance`
+#: serves its photos from a different route (`incident-photos` section 8).
+get_file_storage_factory = storage_factory_for(CLEANING_PHOTO_URL_PREFIX)
 
 StorageFactoryDep = Annotated[FileStorageFactory, Depends(get_file_storage_factory)]
 
@@ -270,6 +231,34 @@ def get_upload_cleaning_photo_use_case(
         audit=SqlAlchemyAuditLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
         max_bytes=settings.photo_upload_max_bytes,
+    )
+
+
+def get_report_task_incident_use_case(session: SessionDep) -> ReportTaskIncidentUseCase:
+    """R3.7, D2 — the one place entitled to know both modules.
+
+    `cleaning` declares `TaskIncidentReportingPort` and `maintenance` supplies the implementer,
+    so somebody has to hold both ends. That somebody is `api/`: a use case importing another
+    module's use cases is what the dependency rule forbids, and it is the same division
+    `messaging/api/dependencies.py` makes for the port it declares.
+
+    `CleanerIncidentReporter` wraps the generic alta rather than reimplementing it (D3), so the
+    incident, its audit row and its timeline entry are written and committed by
+    `ReportIncidentUseCase` — which is why the unit of work is built here, for it, and not for
+    the cleaning use case that calls through the port.
+    """
+    return ReportTaskIncidentUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        incidents=CleanerIncidentReporter(
+            ReportIncidentUseCase(
+                incidents=SqlAlchemyIncidentRepository(session),
+                properties=SqlAlchemyPropertyRepository(session),
+                audit=SqlAlchemyAuditLogRepository(session),
+                timeline=SqlAlchemyTimelineEventRepository(session),
+                uow=SqlAlchemyUnitOfWork(session),
+            )
+        ),
     )
 
 
@@ -303,15 +292,19 @@ def get_list_cleaning_photos_use_case(
     )
 
 
-def get_serve_local_cleaning_photo_use_case(
+def get_serve_cleaning_photo_use_case(
     session: SessionDep, storage: StorageFactoryDep, signing_key: SigningKeyDep
-) -> ServeLocalCleaningPhotoUseCase:
-    """The anonymous serving route's wiring (design D7, D7b).
+) -> ServeSignedObjectUseCase:
+    """The anonymous serving route's wiring.
 
     **`SqlAlchemyUnscopedCleaningPhotoLocationQuery` is wired HERE and nowhere else**, which is
     what keeps the one tenant-less read in `cleaning` to the one route that cannot have a
     tenant. Every other builder in this module hands out `SqlAlchemyCleaningPhotoRepository`,
     whose every method demands one.
+
+    The use case itself is `app/integrations/`'s since `incident-photos` (design D5) — this
+    builder is the seam that keeps it `cleaning`'s photos it resolves, and it is the only thing
+    that changed here: the adapter, the session and the signing key are the same three.
 
     The session it gets is the request's, and for this route nothing binds a tenant to it, so
     the query runs unfiltered — the precondition it documents. That is this chain as it stood
@@ -325,7 +318,7 @@ def get_serve_local_cleaning_photo_use_case(
     `signing_key` is the same dependency the factory signs with, so signing and verifying
     cannot drift apart.
     """
-    return ServeLocalCleaningPhotoUseCase(
+    return ServeSignedObjectUseCase(
         locations=SqlAlchemyUnscopedCleaningPhotoLocationQuery(session),
         configs=SqlAlchemyTenantConfigRepository(session),
         storage=storage,

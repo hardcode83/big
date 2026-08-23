@@ -173,10 +173,12 @@ cierra, §6 documenta.
   hay que ejecutar la lista de `docker compose cp` de `sdd/project.md`, o dos ficheros ajenos al
   change (`features/provenance/workflow-contract.test.ts`,
   `lib/config/build-identity-contract.test.ts`) fallan con `ENOENT` y la cifra no vale. Referencia:
-  **90 ficheros, 747 tests** (medido el 2026-08-23 en este worktree, con la lista de copias
-  aplicada; unos 20 de esos tests los añade este change). La cifra que citaba esta tarea —«63
-  ficheros, 415 tests»— venía de `tech-incident-context` y estaba obsoleta; se corrige aquí y en
-  `sdd/project.md`.
+  **90 ficheros, 747 tests** — medido el 2026-08-23 **en este worktree**, que salió de `main`
+  antes de que entraran `cleaner-incident-report`, `incident-photos` y `pricing-web`. No es una
+  cifra de referencia y no sirve para comparar tras el merge: sobre el árbol de `main`,
+  `pricing-web` midió 123 ficheros y 1101 tests el mismo día. Vale como registro de que la suite
+  de este worktree pasó entera (unos 20 de esos tests los añade este change), y nada más; la
+  regla que manda es la de `sdd/project.md`, «la cifra de referencia se mide, no se recuerda».
 - [x] 7.3 Tipos y lint del frontend limpios: `docker compose exec -T frontend npm run typecheck` y
   `docker compose exec -T frontend npm run lint`.
 - [x] 7.4 Deriva de contrato cero: `docker compose exec -T frontend npm run api:check` (con la

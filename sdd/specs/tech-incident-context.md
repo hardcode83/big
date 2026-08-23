@@ -163,8 +163,9 @@ aparcada sobre `properties.access_notes`. El *cómo se opera* está en
 
 ### Las dos exclusiones de la nota son estructurales por ausencia del allowlist
 
-- THE SYSTEM SHALL mantener `assignment_note` **fuera** de `AUDITABLE_FIELDS["INCIDENT"]`, que sigue
-  con sus once campos, y esa exclusión SHALL ser **estructural**: nombrarla en un `ChangeSet` levanta
+- THE SYSTEM SHALL mantener `assignment_note` **fuera** de `AUDITABLE_FIELDS["INCIDENT"]` —que
+  pasó a **doce** campos en [`cleaner-incident-report`](cleaner-incident-report.md), al entrar
+  `cleaning_task_id`—, y esa exclusión SHALL ser **estructural**: nombrarla en un `ChangeSet` levanta
   `AuditContractError` por no ser un campo declarado de la entidad, en **las dos formas** —`diff()` y
   `redacted()`—. Es el mismo mecanismo exacto que ya excluye `title`, `description`, `ai_summary` y
   `ai_classification`.
@@ -268,9 +269,10 @@ lectura de una incidencia, no en un listado; hay tests que lo fijan por número 
   entrada en su `needs`. El andamio (`frontend/app/(field)/tech/`, `TechnicianShell`, `AuthGuard`) ya
   existía y no se tocó.
 - **Fotos de la incidencia**, y el par antes/después: son de `incident-photos`.
-- **`reject`, ETA, materiales y «en ruta».** Son de `tech-cycle-completion`, que es quien toca la
-  tabla de transiciones de [`maintenance`](maintenance.md) R1 y decide si `TECHNICIAN_EN_ROUTE` es
-  estado nuevo o si `start` pasa a significarlo.
+- **`reject`, ETA, materiales y «en ruta».** Fueron de `tech-cycle-completion`, que las entregó el
+  2026-08-22 tocando la tabla de transiciones de [`maintenance`](maintenance.md) R1: `start` pasó a
+  llamarse `en_route` y a escribir `TECHNICIAN_EN_ROUTE`, sin cambiar orígenes ni destino, y
+  `resume_work` conservó `TECHNICIAN_STARTED`, así que no se retiró ningún miembro del vocabulario.
 - **Cifrado en reposo de las cuatro columnas de texto libre.** Rechazado con su motivo escrito y
   aplazado con nombre a `plaintext-sink-encryption-at-rest`.
 - **Conceder `READ_PROPERTIES` o `READ_RESERVATIONS` a `TECHNICIAN`.** El conjunto de permisos del

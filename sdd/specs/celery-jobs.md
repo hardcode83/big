@@ -181,6 +181,10 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   **`generate_price_recommendations` sí está** desde
   [`revenue-pricing`](revenue-pricing.md) (2026-08-18), y es quien estrenó `DAILY_JOBS`: hasta
   entonces el calendario sólo sabía expresar intervalos.
+  Desde `pricing-web` (2026-08-23) su **puerta manual** —`POST /api/v1/price-recommendations/generate`,
+  que comparte el generador con el job— tiene consumidor de frontend: el botón «Regenerar ahora»
+  de `/pricing`. No cambia nada del calendario, y se anota porque el reloj deja de ser la única
+  vía por la que se ejercita ese generador en la práctica.
 - **No hay sync periódico del PMS.** La cadencia sería función del presupuesto de créditos, ya
   medido contra Beds24, pero su adapter no existe: programarlo hoy sincronizaría el mock. Llega
   con `pms-beds24-adapter`, dueño de la `PMSAdapterFactory`. `pms_sync` sigue siendo la única

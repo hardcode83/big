@@ -213,26 +213,33 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 82 de las 93 operaciones lo
-  referencian. Las once restantes son `GET /health`, `POST /api/v1/auth/login`,
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 86 de las 98 operaciones lo
+  referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
+  `GET /api/v1/incident-photos/{photo_id}`,
   `POST /api/v1/webhooks/{provider}/{webhook_token}` y las cuatro del portal del huésped
   (`GET /api/v1/guest/info/{token}`, `GET` y `POST /api/v1/guest/checkin/{token}`,
-  `POST /api/v1/guest/incident/{token}`). Las seis últimas son las anónimas que **tocan datos de
+  `POST /api/v1/guest/incident/{token}`). Las siete últimas son las anónimas que **tocan datos de
   un tenant**, y cada una lo resuelve por su lado porque el llamante no puede mandar cabecera
-  `Authorization`: la de fotos, con la firma HMAC de su query string, porque un navegador que
-  resuelve un `<img src>` no la manda; la de webhooks, con el token opaco de la ruta más el
+  `Authorization`: las **dos** de fotos —la de limpieza y la de incidencia—, con la firma HMAC de
+  su query string, porque un navegador que resuelve un `<img src>` no la manda; la de webhooks, con
+  el token opaco de la ruta más el
   secreto de cabecera del tenant (`specs/reservations-webhooks.md`), porque el llamante es el PMS
   y no tiene sesión; las cuatro del portal, con `GuestPortalAuthenticator` sobre el token de la
-  ruta (`specs/guest-portal-api.md`). Las once están nombradas **con su verbo** en el allowlist de
+  ruta (`specs/guest-portal-api.md`). Las doce están nombradas **con su verbo** en el allowlist de
   `tests/test_route_authorization.py`, que es el diff visible que ese allowlist existe para forzar.
-- **Las trece rutas de `maintenance` entraron todas autenticadas y con permiso declarado**: doce
-  bajo `/api/v1/incidents` —la última, `GET /api/v1/incidents/{incident_id}/context`, entró el
-  2026-08-21 con [`tech-incident-context`](tech-incident-context.md)— y
-  `POST /api/v1/owner-approvals/{approval_id}/respond`. Ninguna tocó el allowlist anónimo, que
-  sigue teniendo las once entradas de arriba: la proyección de contexto del técnico exige
-  `READ_INCIDENTS` como el resto del módulo.
+- **Las dieciséis rutas de `maintenance` entraron todas autenticadas y con permiso declarado**:
+  quince bajo `/api/v1/incidents` —las dos últimas,
+  `POST` y `GET /api/v1/incidents/{incident_id}/photos`, entraron el 2026-08-23 con
+  [`incident-photos`](incident-photos.md), y antes de ellas
+  `POST /api/v1/incidents/{incident_id}/reject`, el 2026-08-22 con
+  [`tech-cycle-completion`](maintenance.md)— y
+  `POST /api/v1/owner-approvals/{approval_id}/respond`. Sólo una capacidad del módulo tocó el
+  allowlist anónimo: `incident-photos`, que le añadió la **duodécima** entrada
+  (`GET /api/v1/incident-photos/{photo_id}`) porque un `<img src>` no puede mandar
+  `Authorization`. Las otras no: la proyección de contexto del técnico exige `READ_INCIDENTS` como
+  el resto del módulo, y las dos rutas autenticadas de foto también.
 - **Las siete rutas de `messaging` entraron igual** (2026-08-16), todas bajo
   `/api/v1/conversations` y repartidas entre `READ_CONVERSATIONS` y `MANAGE_CONVERSATIONS`
   ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación

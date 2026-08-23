@@ -142,6 +142,19 @@ no declara las rutas.
   con la semilla de hash y produciría cuerpos distintos entre dos procesos.
 - WHERE la plantilla no declara ninguna foto `required: true`, THE SYSTEM SHALL permitir el cierre
   sin ninguna foto: la regla es «las requeridas», no «alguna».
+- THE SYSTEM SHALL mantener la tercera cláusula acotada a la **propiedad**
+  (`has_unresolved_critical(tenant_id, property_id)`) y no a la tarea, aun desde que
+  [`cleaner-incident-report`](cleaner-incident-report.md) trajo `incidents.cleaning_task_id` y
+  estrecharla pasó a ser técnicamente posible: es más estricta que PRD §11 («creadas durante la
+  limpieza»), nunca más laxa, y estrecharla **relajaría** el invariante —una `CRITICAL` abierta por
+  el huésped dejaría de bloquear—. Ese cambio tiene entrada de roadmap propia.
+- WHEN una limpiadora reporta una incidencia desde su tarea, THE SYSTEM SHALL crearla `MEDIUM` por
+  defecto, de modo que **reportar no bloquea el cierre en el momento**: solo lo bloquea si el job
+  de clasificación de [`maintenance`](maintenance.md) la sube después a `CRITICAL`, o si ya había
+  una `CRITICAL` sin resolver en la propiedad por cualquier otra vía.
+- IF el cierre se rechaza por esa cláusula, THEN THE SYSTEM NEVER SHALL incluir en el `409` el
+  identificador, el título ni la descripción de la incidencia que bloquea: `CLEANER` no tiene
+  `READ_INCIDENTS`.
 - THE SYSTEM SHALL aplicar las tres cláusulas **dentro de `CleaningTask.complete()`** y en ningún
   otro sitio. Las cuatro lecturas que la alimentan —plantilla, completions, tipos de foto subidos
   e incidencia bloqueante— son responsabilidad de `CompletionEvidenceGatherer`
@@ -250,6 +263,18 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
 - THE SYSTEM SHALL dejar `ai_validation_result` sin escribir también en las fotos, por el mismo
   motivo: el `AIAdapter` que entregó `messaging-ai` no declara `validate_cleaning_photo`, y
   `cleaning` no tiene puerto propio para ello. No hay borrado de fotos por ninguna vía de la API.
+- THE SYSTEM SHALL construir esa ruta anónima con la **factoría compartida** de
+  `app/integrations/api/signed_media.py`, y su caso de uso con `ServeSignedObjectUseCase`, en vez de
+  con una implementación propia: desde que el almacén tiene un segundo consumidor
+  ([`incident-photos`](incident-photos.md), 2026-08-23) el cuerpo `403` constante, el `nosniff`, el
+  `Cache-Control` y el orden resolver→verificar→servir viven **una sola vez**
+  ([`file-storage`](file-storage.md) §La capa de servido firmado). La migración fue **sin cambio de
+  comportamiento**, y lo que lo sostiene es que la suite de esta capability compara los cuerpos de
+  refusal literalmente y fija el orden de los middlewares.
+- THE SYSTEM SHALL pasar el prefijo de la URL firmada de esta capability
+  (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
+  NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
+  es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
 
 ### Notificación y SLA
 
@@ -293,6 +318,23 @@ funciona entera: se encola aquí, se entrega allí, y responder cierra el plazo.
 Su comportamiento completo —los once campos, lo que nunca lleva, el horizonte de la llegada
 siguiente y el significado de cada `null`— vive en
 [`cleaner-task-context.md`](cleaner-task-context.md).
+
+### Reportar una incidencia desde la tarea
+
+- THE SYSTEM SHALL ofrecer `POST /api/v1/cleaning-tasks/{task_id}/incidents` como sub-recurso de la
+  tarea, con `EXECUTE_CLEANING_TASKS` y el mismo acotamiento por fila que el resto de esta
+  capacidad, aceptando **solo** `title` y `description` y respondiendo `201` con un acuse de tres
+  campos.
+- THE SYSTEM SHALL montarla **aquí y no en `maintenance`**: su sujeto es la tarea de limpieza, de
+  modo que la negativa de [`maintenance`](maintenance.md) a exponer una ruta de creación de
+  incidencias sigue intacta.
+- THE SYSTEM SHALL admitirla sobre una tarea en `ASSIGNED`, `ACCEPTED` o `IN_PROGRESS` y SHALL
+  responder `409` sobre una terminal, comprobando la pertenencia antes que el estado para que un
+  `409` nunca describa una tarea que el llamante no puede ver.
+
+Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el vínculo
+`incidents.cleaning_task_id`, las cotas del texto libre y lo que el acuse nunca lleva— vive en
+[`cleaner-incident-report.md`](cleaner-incident-report.md).
 
 ### Aislamiento y autorización
 
@@ -363,7 +405,14 @@ siguiente y el significado de cada `null`— vive en
 - `backend/app/cleaning/infrastructure/repositories.py` — adaptadores; los de completions y fotos
   son el único aislamiento de sus tablas.
 - `backend/app/cleaning/api/` — `tasks_router.py`, `templates_router.py`, `photos_router.py` (la
-  ruta anónima firmada), `schemas.py`, `dependencies.py`, `errors.py`.
+  ruta anónima firmada, hoy construida con la factoría compartida), `schemas.py`, `dependencies.py`,
+  `errors.py`.
+- `backend/app/integrations/application/signed_serving.py` y
+  `backend/app/integrations/api/signed_media.py` — el caso de uso y la factoría de router que esta
+  capability estrenó y que hoy comparte con [`incident-photos`](incident-photos.md).
+- `backend/app/integrations/api/dependencies.py` — `get_url_signing_key` y
+  `storage_factory_for(url_prefix)`, que salieron de
+  `backend/app/cleaning/api/dependencies.py` el 2026-08-23.
 - `backend/app/integrations/domain/storage.py` y `.../infrastructure/storage/` — el puerto de
   almacenamiento y sus adaptadores, documentados en [`specs/file-storage.md`](file-storage.md).
 - `backend/app/cli/seed_demo.py` — llamante de `CreateChecklistTemplateUseCase` fuera del API, con
