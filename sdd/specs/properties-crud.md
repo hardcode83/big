@@ -381,7 +381,10 @@ y un `PROPERTY_MANAGER` la ven; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben 
   wifi, el diccionario `written` que decide a la vez qué se persiste y qué se audita, y la
   redacción de los campos de texto libre.
 - `backend/app/properties/domain/repositories.py` — el puerto, `PATCHABLE_PROPERTY_FIELDS` como
-  único hogar de la regla, `PropertyFilters` y `Page`.
+  único hogar de la regla, `PropertyFilters` y `Page`. Incluye `states_for(tenant_id, property_ids)`,
+  la lectura estrecha de estado operacional por lote que consume `cleaning` para decir en su listado
+  si una tarea es asignable ahora (`cleaning.md`); es deliberadamente distinta de las lecturas de
+  portfolio completo del mismo puerto, que alimentan barridos y no pantallas.
 - `backend/app/properties/infrastructure/repositories.py` — los escritores, la guarda de tenant, la
   comprobación de estado en el alta y la traducción de las constraints.
 - `backend/app/properties/domain/exceptions.py` — `PropertyNotFoundError`,
