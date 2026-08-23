@@ -21,7 +21,7 @@ function findPageFiles(dir: string): string[] {
 // `routeId` prop. As modules graduate from placeholder to implemented, they are
 // listed here by path suffix → route id (dashboard-web-frontend: dashboard,
 // property-detail; cleaning-manager-view: cleaning; properties-web: properties;
-// timeline-web: timeline).
+// timeline-web: timeline; pricing-web: pricing).
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/cleaning/page.tsx": "cleaning",
   "(workspace)/dashboard/page.tsx": "dashboard",
@@ -32,6 +32,7 @@ const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/reservations/[id]/page.tsx": "reservation-detail",
   "(workspace)/incidents/page.tsx": "incidents",
   "(workspace)/incidents/[id]/page.tsx": "incident-detail",
+  "(workspace)/pricing/page.tsx": "pricing",
   "(public)/login/page.tsx": "login",
   "(guest)/guest/[token]/page.tsx": "guest",
 };

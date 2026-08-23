@@ -1,5 +1,6 @@
 import { Badge } from "@/components/ui/badge";
 import type { components } from "@/lib/api/generated/openapi";
+import { TONE_BADGE_CLASS, type Tone } from "@/lib/ui/status-tone";
 import { cn } from "@/lib/utils";
 
 /**
@@ -16,16 +17,20 @@ import { cn } from "@/lib/utils";
  * this module deliberately knows nothing about i18n.
  *
  * Scope of the "single table" claim (design D2): this unifies the
- * `PropertyOperationalState` table only. `features/cleaning/lib/task-status.ts`
- * holds a separate table with the same Tailwind values for `CleaningTaskStatus`
- * — a different enum, kept on purpose by that change, and not touched here.
+ * `PropertyOperationalState` → color-group table only. The group → Tailwind
+ * table it used to hold privately no longer lives here either: `pricing-web`
+ * (design D22) moved it to `lib/ui/status-tone.ts` when a third consumer
+ * appeared, so `features/cleaning/lib/task-status.ts` and `features/pricing`
+ * now read the same strings instead of copying them. Each enum still keeps its
+ * own map to a tone, because what "amber" means belongs to that lifecycle.
  */
 
 /** Re-exported from the generated OpenAPI, never from a feature's hand-written union (design D3). */
 export type PropertyOperationalState =
   components["schemas"]["PropertyOperationalState"];
 
-export type StateColorGroup = "green" | "blue" | "amber" | "red" | "gray";
+/** Alias of the shared `Tone` (design D22): `features/properties` and this module's test import it by this name. */
+export type StateColorGroup = Tone;
 
 /**
  * Operational-state color groups from PRD §9.1. The mapping is exhaustive over
@@ -83,16 +88,6 @@ export function stateColorGroup(
   return STATE_COLOR_GROUP[state] ?? "gray";
 }
 
-const STATE_BADGE_CLASS: Record<StateColorGroup, string> = {
-  green:
-    "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-800",
-  blue: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800",
-  amber:
-    "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800",
-  red: "bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-200 dark:border-red-800",
-  gray: "bg-muted text-muted-foreground border-border",
-};
-
 export function PropertyStateBadge({
   state,
   label,
@@ -103,7 +98,7 @@ export function PropertyStateBadge({
   return (
     <Badge
       variant="outline"
-      className={cn(STATE_BADGE_CLASS[stateColorGroup(state)])}
+      className={cn(TONE_BADGE_CLASS[stateColorGroup(state)])}
     >
       {label}
     </Badge>
