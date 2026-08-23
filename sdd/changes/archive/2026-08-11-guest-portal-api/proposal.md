@@ -18,9 +18,10 @@ ningún endpoint público. Lo que sí existe es el suelo sobre el que se apoya �
 `reported_by_guest_token` ya prevista — de modo que este change es la costura que
 los une, no un dominio nuevo.
 
-Semilla: `sdd/changes/guest-portal/proposal.md` (capability original, CANCELLED).
+Semilla: la capability original `guest-portal`, CANCELLED al partirse en dos.
 Sus R1-R4 son de servidor y se reformulan aquí; su R5 es de interfaz y pertenece a
-`guest-portal-web`.
+`guest-portal-web`. Su directorio de change se eliminó el 2026-08-23, una vez
+entregadas las dos subtareas; el texto original sigue en el historial de git.
 
 > **Corrección de una premisa heredada.** La proposal de `guest-portal` afirmaba
 > que *«La API ya reserva los endpoints `/api/v1/guest/{checkin,incident,info}/{token}`»*.
