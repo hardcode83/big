@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/pricing-web
 implementation_sha: 564ab158f94b26f636665a9a0c96e34a73f106dd
 pr_number: 
 pr_url: 
