@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/cleaning-assign-preconditions
 implementation_sha: 0391bd5f1b287ce7b157a3c93701c68dc9d48091
 pr_number: 
 pr_url: 
