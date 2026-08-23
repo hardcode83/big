@@ -168,7 +168,12 @@ def get_cleaning_task_use_case(session: SessionDep) -> GetCleaningTaskUseCase:
 
 
 def get_list_cleaning_tasks_use_case(session: SessionDep) -> ListCleaningTasksUseCase:
-    return ListCleaningTasksUseCase(tasks=SqlAlchemyCleaningTaskRepository(session))
+    return ListCleaningTasksUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        # The listing reads each row's flat to answer whether it is assignable
+        # (`cleaning-assign-preconditions` D6). One `states_for` per page, not per row.
+        properties=SqlAlchemyPropertyRepository(session),
+    )
 
 
 def get_checklist_use_case(session: SessionDep) -> GetChecklistUseCase:

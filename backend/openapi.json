@@ -584,6 +584,15 @@
         "title": "ChecklistTemplateResponse",
         "type": "object"
       },
+      "CleaningAssignmentBlocker": {
+        "description": "Which party refuses to assign a cleaning task: its own status, or its property's state.",
+        "enum": [
+          "TASK_STATUS",
+          "PROPERTY_STATE"
+        ],
+        "title": "CleaningAssignmentBlocker",
+        "type": "string"
+      },
       "CleaningPhotoListResponse": {
         "description": "The photos of one task (R3.1), each already carrying its signed URL.\n\nWrapped in `data` rather than returned as a bare array, the shape `ChecklistResponse`\nalready uses: a top-level JSON array cannot grow a field later without breaking every\ngenerated client, and this list has an obvious future one (`total`, if a task ever\naccumulates enough photos to page).\n\n**The element type is `CleaningPhotoResponse`, whose fields are an allowlist**, which is\nwhere R3.2 is actually enforced — see its docstring. Building this from the entities with\n`model_validate` would publish `storage_key` for every photo at once, so the only way in is\nthrough `from_upload`.",
         "properties": {
@@ -716,11 +725,186 @@
         "title": "CleaningTaskContextResponse",
         "type": "object"
       },
+      "CleaningTaskListItemResponse": {
+        "description": "One row of the cleaning-task listing: a task plus whether it can be assigned now.",
+        "properties": {
+          "accepted_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Accepted At"
+          },
+          "assigned_cleaner_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Assigned Cleaner Id"
+          },
+          "assignment_blocked_by": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CleaningAssignmentBlocker"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "checklist_template_id": {
+            "format": "uuid",
+            "title": "Checklist Template Id",
+            "type": "string"
+          },
+          "completed_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Completed At"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "scheduled_end": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled End"
+          },
+          "scheduled_start": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Scheduled Start"
+          },
+          "started_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Started At"
+          },
+          "status": {
+            "$ref": "#/components/schemas/CleaningTaskStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          },
+          "validated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated At"
+          },
+          "validated_by_user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validated By User Id"
+          },
+          "validation_status": {
+            "$ref": "#/components/schemas/CleaningValidationStatus"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "reservation_id",
+          "checklist_template_id",
+          "assigned_cleaner_id",
+          "status",
+          "scheduled_start",
+          "scheduled_end",
+          "accepted_at",
+          "started_at",
+          "completed_at",
+          "validation_status",
+          "validated_by_user_id",
+          "validated_at",
+          "created_at",
+          "updated_at",
+          "assignment_blocked_by"
+        ],
+        "title": "CleaningTaskListItemResponse",
+        "type": "object"
+      },
       "CleaningTaskPageResponse": {
         "properties": {
           "data": {
             "items": {
-              "$ref": "#/components/schemas/CleaningTaskResponse"
+              "$ref": "#/components/schemas/CleaningTaskListItemResponse"
             },
             "title": "Data",
             "type": "array"
@@ -2033,6 +2217,7 @@
           "HTTP_ERROR",
           "VALIDATION_ERROR",
           "CONFLICT",
+          "PROPERTY_STATE_CONFLICT",
           "PAYLOAD_TOO_LARGE",
           "METHOD_NOT_ALLOWED",
           "INVALID_CREDENTIALS",
@@ -7938,7 +8123,7 @@
     },
     "/api/v1/cleaning-tasks": {
       "get": {
-        "description": "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.",
+        "description": "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.\n\nEach row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as \"go ahead and let the server decide\", never as a guarantee.",
         "operationId": "list_cleaning_tasks_api_v1_cleaning_tasks_get",
         "parameters": [
           {
@@ -8186,7 +8371,7 @@
         ]
       },
       "patch": {
-        "description": "Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.",
+        "description": "Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.\n\n**The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.",
         "operationId": "assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch",
         "parameters": [
           {

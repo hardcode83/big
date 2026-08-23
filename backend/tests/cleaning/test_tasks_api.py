@@ -17,14 +17,19 @@ from app.audit.domain import actions as audit_actions
 from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
-from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.enums import (
+    CleaningAssignmentBlocker,
+    CleaningTaskStatus,
+    CleaningValidationStatus,
+)
 from app.cleaning.infrastructure.models import CleaningTaskModel
+from app.core.error_codes import ErrorCode
 from app.maintenance.domain.enums import IncidentSeverity, IncidentSource, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
 from app.properties.domain.enums import PropertyOperationalState
 from app.reservations.domain.enums import ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
-from tests.cleaning.conftest import auth_header, insert_task, insert_template
+from tests.cleaning.conftest import auth_header, insert_property, insert_task, insert_template
 
 TASKS = "/api/v1/cleaning-tasks"
 NOW = datetime.now(UTC)
@@ -79,6 +84,23 @@ async def task_a(db_session, tenant_a, property_a, template_a):
     property_a.current_operational_state = PropertyOperationalState.AWAITING_CLEANING
     db_session.add(property_a)
     task = await insert_task(db_session, tenant_a, property_a, template_a)
+    await db_session.flush()
+    return task
+
+
+@pytest_asyncio.fixture
+async def task_on_a_property_not_awaiting_cleaning(db_session, tenant_a, template_a):
+    """A `CREATED`, unassigned task on a property nothing moved to `AWAITING_CLEANING`.
+
+    `insert_property` leaves `current_operational_state` at the model default, `VACANT_READY`,
+    which is not in `source_states_for(CLEANER_ASSIGNED)`. So the first assignment on this task
+    is refused by the **property**, while every other assignment test in this file starts from
+    `task_a` — which forces `AWAITING_CLEANING` and can therefore only ever be refused by the
+    task. That missing starting point is why the 409 an operator hit in dev on 2026-08-22 was
+    never covered (`cleaning-assign-preconditions` R1.4).
+    """
+    prop = await insert_property(db_session, tenant_a, code="MADRID42")
+    task = await insert_task(db_session, tenant_a, prop, template_a)
     await db_session.flush()
     return task
 
@@ -309,7 +331,12 @@ async def test_closing_a_cleaning_while_a_guest_is_in_is_a_conflict(
     blocked = await api.post(f"{TASKS}/{task_a.id}/complete", headers=cleaner)
 
     assert blocked.status_code == 409
-    assert blocked.json()["error"]["code"] == "CONFLICT"
+    # `PROPERTY_STATE_CONFLICT` and no longer `CONFLICT`: this close is refused by the
+    # property's state, so it is the same cause as a blocked assignment and carries the same
+    # code (`cleaning-assign-preconditions` D2 / OQ2). It reaches this endpoint because the
+    # discriminator is `PropertyStateBlocksCleaningError` and not the route — the alternative
+    # was naming the cause after whoever asked.
+    assert blocked.json()["error"]["code"] == "PROPERTY_STATE_CONFLICT"
 
 
 @pytest.mark.asyncio
@@ -701,6 +728,80 @@ async def test_accepting_a_task_assigned_to_someone_else_is_a_404(
 
 
 @pytest.mark.asyncio
+async def test_assigning_on_a_property_outside_awaiting_cleaning_is_a_property_conflict(
+    api, users_by_role_a, cleaner_a, task_on_a_property_not_awaiting_cleaning
+):
+    """R1.1 — the 409 the property caused carries `PROPERTY_STATE_CONFLICT`.
+
+    The first assignment fires `CLEANER_ASSIGNED`, whose only source state is
+    `AWAITING_CLEANING`, so a property in any other state refuses it. Read together with the
+    test below — same status, same endpoint, same role, different code — this pair is the whole
+    point of the change: before it, both answers were `CONFLICT` and the frontend blamed the
+    task for something the property did.
+    """
+    response = await api.patch(
+        f"{TASKS}/{task_on_a_property_not_awaiting_cleaning.id}",
+        json={"assigned_cleaner_id": str(cleaner_a.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.PROPERTY_STATE_CONFLICT.value
+
+
+@pytest.mark.asyncio
+async def test_assigning_a_task_past_its_assignable_states_is_a_task_conflict(
+    api, users_by_role_a, cleaner_a, task_a
+):
+    """R1.2 — the 409 the task's own lifecycle caused keeps `CONFLICT`, unchanged.
+
+    `CleaningTask.assign` admits `CREATED` and `ASSIGNED` only, so an `ACCEPTED` task refuses
+    a re-point. The code must stay what it has always been: an existing consumer switching on
+    `CONFLICT` for this case cannot be broken by the split.
+    """
+    manager = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    assigned = await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner_a.id)},
+        headers=manager,
+    )
+    assert assigned.status_code == 200
+    accepted = await api.post(f"{TASKS}/{task_a.id}/accept", headers=auth_header(api, cleaner_a))
+    assert accepted.status_code == 200
+
+    response = await api.patch(
+        f"{TASKS}/{task_a.id}",
+        json={"assigned_cleaner_id": str(cleaner_a.id)},
+        headers=manager,
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == ErrorCode.CONFLICT.value
+
+
+@pytest.mark.asyncio
+async def test_the_property_conflict_does_not_leak_the_operational_state(
+    api, users_by_role_a, cleaner_a, task_on_a_property_not_awaiting_cleaning
+):
+    """R1.3, D3 — the envelope names no state, and that is a guarantee and not an accident.
+
+    `_transition` builds `PropertyStateBlocksCleaningError(str(exc))`, which drops the
+    `from_state` the properties-domain error carries as an attribute. It has to stay that way
+    because the discriminator is the exception class, so the very same code and body reach a
+    `CLEANER` closing a cleaning (D2) — and `CLEANER` does not hold `READ_PROPERTIES`.
+    """
+    response = await api.patch(
+        f"{TASKS}/{task_on_a_property_not_awaiting_cleaning.id}",
+        json={"assigned_cleaner_id": str(cleaner_a.id)},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+    error = response.json()["error"]
+
+    assert not error["details"]
+    assert not any(state.value in error["message"] for state in PropertyOperationalState)
+
+
+@pytest.mark.asyncio
 async def test_starting_before_accepting_is_a_conflict(
     api, users_by_role_a, cleaner_a, task_a
 ):
@@ -952,6 +1053,272 @@ async def test_the_listing_is_scoped_to_the_tenant(
 
     assert response.json()["total"] == 1
     assert [row["id"] for row in response.json()["data"]] == [str(task_a.id)]
+
+
+@pytest.mark.asyncio
+async def test_the_listing_publishes_the_three_shapes_of_the_pre_flight(
+    api, db_session, tenant_a, property_a, template_a, users_by_role_a, task_a,
+    task_on_a_property_not_awaiting_cleaning,
+):
+    """R3.1, R3.2 — the whole point, and it has to be **one page**.
+
+    Three rows, three verdicts, one request: `null` for the task that can be assigned,
+    `PROPERTY_STATE` for the one whose flat is not awaiting cleaning, `TASK_STATUS` for the one
+    past its assignable statuses. Asserting them together is what proves the field discriminates
+    rather than echoing something constant — three separate single-row tests would each pass
+    against a hardcoded answer.
+    """
+    in_progress = await insert_task(
+        db_session,
+        tenant_a,
+        property_a,
+        template_a,
+        status=CleaningTaskStatus.IN_PROGRESS,
+    )
+
+    response = await api.get(
+        TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200
+    blockers = {row["id"]: row["assignment_blocked_by"] for row in response.json()["data"]}
+    assert blockers == {
+        str(task_a.id): None,
+        str(task_on_a_property_not_awaiting_cleaning.id): (
+            CleaningAssignmentBlocker.PROPERTY_STATE.value
+        ),
+        str(in_progress.id): CleaningAssignmentBlocker.TASK_STATUS.value,
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_listing_rows_never_carry_notes(api, users_by_role_a, task_a):
+    """Design D13 of `cleaning`, for the second model.
+
+    `CleaningTaskListItemResponse` enumerates its fields by hand precisely so `notes` cannot
+    ride along; the sibling test above covers the detail endpoint, and this one covers the row,
+    because the two are now different models and only one of them was ever checked.
+    """
+    response = await api.get(
+        TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200
+    assert response.json()["data"]
+    for row in response.json()["data"]:
+        assert "notes" not in row
+
+
+@pytest.mark.asyncio
+async def test_a_row_whose_property_state_is_unresolved_is_still_offered(
+    api, db_session, users_by_role_a, task_on_a_property_not_awaiting_cleaning
+):
+    """R3.3 — fails open: unresolved is not "blocked", it is "nothing known to be blocking".
+
+    The task is the same one the test above reports as `PROPERTY_STATE`, so the only variable is
+    that the page read resolved no state for its flat. The field must come back `null` and the
+    row must be offered; the backend refuses on the mutation if it must, and that refusal is the
+    authority. Posed by substituting the properties port with one that resolves nothing — the
+    real adapter cannot produce this, because `property_id` is a foreign key.
+    """
+    from app.cleaning.api.dependencies import get_list_cleaning_tasks_use_case
+    from app.cleaning.application.use_cases import ListCleaningTasksUseCase
+    from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepository
+
+    class _ResolvesNothing:
+        async def states_for(self, tenant_id, property_ids):
+            return {}
+
+    api.asgi_app.dependency_overrides[get_list_cleaning_tasks_use_case] = (
+        lambda: ListCleaningTasksUseCase(
+            tasks=SqlAlchemyCleaningTaskRepository(db_session),
+            properties=_ResolvesNothing(),
+        )
+    )
+    try:
+        response = await api.get(
+            TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+        )
+    finally:
+        api.asgi_app.dependency_overrides.pop(get_list_cleaning_tasks_use_case)
+
+    assert response.status_code == 200
+    rows = {row["id"]: row["assignment_blocked_by"] for row in response.json()["data"]}
+    assert rows[str(task_on_a_property_not_awaiting_cleaning.id)] is None
+
+
+def test_the_listing_item_mirrors_the_task_response_field_for_field():
+    """The 16 shared fields of the two response models must not drift (D5).
+
+    `CleaningTaskListItemResponse` enumerates its fields by hand instead of inheriting from
+    `CleaningTaskResponse`, and that is deliberate: inheritance would make every future field of
+    the detail model appear in the listing silently. The cost of the choice is that the two can
+    drift, and the architecture reviewer of this section pointed out that nothing was paying it.
+    This is the payment — add a field to either model and this fails until the other is
+    considered.
+    """
+    from app.cleaning.api.schemas import CleaningTaskListItemResponse, CleaningTaskResponse
+
+    listed = set(CleaningTaskListItemResponse.model_fields)
+    detail = set(CleaningTaskResponse.model_fields)
+
+    assert listed - detail == {"assignment_blocked_by"}
+    assert detail - listed == set()
+
+
+@pytest.mark.asyncio
+async def test_the_listing_reads_the_property_states_once_per_page(
+    api, db_session, tenant_a, property_a, template_a, users_by_role_a, task_a,
+    task_on_a_property_not_awaiting_cleaning,
+):
+    """R3.2 — "sin una petición adicional por fila", asserted instead of assumed.
+
+    The QA reviewer of this section measured the real SQL and found one statement, then said the
+    guarantee was unguarded: the blocker is computed inside a comprehension, and turning that
+    into a loop with an `await` per row would satisfy every other test in this file. So this
+    counts the calls.
+
+    Four tasks over three flats, one page: exactly one call, carrying exactly three ids. The
+    second assertion is the one that catches a caller that stopped de-duplicating — four ids
+    would still be one call, and still be wrong.
+    """
+    from app.cleaning.api.dependencies import get_list_cleaning_tasks_use_case
+    from app.cleaning.application.use_cases import ListCleaningTasksUseCase
+    from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepository
+    from app.properties.infrastructure.repositories import SqlAlchemyPropertyRepository
+
+    third = await insert_property(db_session, tenant_a, code="TERCERA3")
+    await insert_task(db_session, tenant_a, third, template_a)
+    # A second task on `property_a`, so the page holds four rows over three flats and the
+    # de-duplication has something to do.
+    await insert_task(db_session, tenant_a, property_a, template_a)
+    calls: list[tuple] = []
+
+    class _CountingProperties:
+        """Wraps the real adapter — it counts, it does not fake the answer."""
+
+        def __init__(self, inner):
+            self._inner = inner
+
+        async def states_for(self, tenant_id, property_ids):
+            calls.append(tuple(property_ids))
+            return await self._inner.states_for(tenant_id, property_ids)
+
+    api.asgi_app.dependency_overrides[get_list_cleaning_tasks_use_case] = (
+        lambda: ListCleaningTasksUseCase(
+            tasks=SqlAlchemyCleaningTaskRepository(db_session),
+            properties=_CountingProperties(SqlAlchemyPropertyRepository(db_session)),
+        )
+    )
+    try:
+        response = await api.get(
+            TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+        )
+    finally:
+        api.asgi_app.dependency_overrides.pop(get_list_cleaning_tasks_use_case)
+
+    assert response.status_code == 200
+    assert len(response.json()["data"]) == 4
+    assert len(calls) == 1
+    assert len(calls[0]) == 3
+
+
+@pytest.mark.asyncio
+async def test_a_cleaner_never_sees_the_property_state_blocker(
+    api, db_session, tenant_a, template_a, users_by_role_a, cleaner_a
+):
+    """R1.3's principle at the listing: a `CLEANER` has no `READ_PROPERTIES`.
+
+    The security reviewers of sections 2 and 4 and the tenancy reviewer all leaned on the same
+    unwritten invariant — a `CREATED` task has no `assigned_cleaner_id`, so it cannot appear in a
+    cleaner's page, so the `PROPERTY_STATE` branch is unreachable for them. Three reviews resting
+    on an invariant nothing pins is exactly what this test is for.
+
+    The flat here is **not** `AWAITING_CLEANING`, so a blocker computed without regard to the
+    task's status would say `PROPERTY_STATE` and hand the cleaner a fact about a property she
+    may not read.
+    """
+    prop = await insert_property(db_session, tenant_a, code="CLEANERV1")
+    task = await insert_task(
+        db_session,
+        tenant_a,
+        prop,
+        template_a,
+        status=CleaningTaskStatus.ASSIGNED,
+        cleaner=cleaner_a,
+    )
+    # A second row, on another flat that is also not `AWAITING_CLEANING`. Without it the page
+    # holds one entry and the page-wide assertion below is logically the same as the row
+    # assertion above — inert. The security reviewer of this section said so, and two rows is
+    # what makes it a distinct guard.
+    other_prop = await insert_property(db_session, tenant_a, code="CLEANERV2")
+    accepted = await insert_task(
+        db_session,
+        tenant_a,
+        other_prop,
+        template_a,
+        status=CleaningTaskStatus.ACCEPTED,
+        cleaner=cleaner_a,
+    )
+
+    response = await api.get(TASKS, headers=auth_header(api, cleaner_a))
+
+    assert response.status_code == 200
+    rows = {row["id"]: row["assignment_blocked_by"] for row in response.json()["data"]}
+    assert rows == {
+        str(task.id): None,
+        # `ACCEPTED` is outside the assignable statuses, so the task's own status refuses first
+        # and the flat is never consulted — that is `assignment_blocker`'s branch order.
+        str(accepted.id): CleaningAssignmentBlocker.TASK_STATUS.value,
+    }
+    assert CleaningAssignmentBlocker.PROPERTY_STATE.value not in rows.values()
+
+
+@pytest.mark.asyncio
+async def test_a_neighbours_property_does_not_colour_the_pre_flight(
+    api, db_session, tenant_b, template_b, users_by_role_a,
+    task_on_a_property_not_awaiting_cleaning,
+):
+    """Rule 1 of `steering/security.md` at the endpoint, as defence in depth.
+
+    **Honest about its own strength**: this cannot fail today, and the reason is worth writing
+    down rather than dressing up. `states_for` matches by primary key, so a neighbour's row can
+    never collide with ours even with the `tenant_id` predicate deleted — that predicate is
+    falsified at the repository level instead, by
+    `tests/properties/test_repositories.py::test_states_for_does_not_reach_another_tenant`, which
+    the section-3 panel verified genuinely fails.
+
+    What this guards is the *next* implementation: anything that resolved the flat's state by a
+    route other than the task's own tenant-scoped id — a lookup by internal code, a cache keyed
+    on something coarser, a join that forgot the tenant — would let the neighbour's
+    `AWAITING_CLEANING` unblock our row. The tenancy reviewer of this section asked for it on
+    those grounds.
+    """
+    from tests.cleaning.conftest import insert_property as insert_property_b
+
+    # **The same `internal_code` as tenant A's property, deliberately.** `internal_code` is
+    # unique per tenant (`uq_properties_tenant_id_internal_code`), never globally, so this
+    # collision is legal — and it is what makes the guard aim at the regression the docstring
+    # names. With two different codes, a future code-based lookup that forgot the tenant would
+    # simply miss, and this test would pass for the wrong reason. The tenancy reviewer of this
+    # section caught exactly that.
+    neighbour = await insert_property_b(db_session, tenant_b, code="MADRID42")
+    neighbour.current_operational_state = PropertyOperationalState.AWAITING_CLEANING
+    db_session.add(neighbour)
+    await insert_task(db_session, tenant_b, neighbour, template_b)
+    await db_session.flush()
+
+    response = await api.get(
+        TASKS, headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200
+    rows = {row["id"]: row["assignment_blocked_by"] for row in response.json()["data"]}
+    assert rows == {
+        str(task_on_a_property_not_awaiting_cleaning.id): (
+            CleaningAssignmentBlocker.PROPERTY_STATE.value
+        )
+    }
 
 
 @pytest.mark.asyncio

@@ -21,14 +21,18 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
 from app.cleaning.application.evidence import CompletionEvidenceGatherer
-from app.cleaning.domain.assignment import resolve_auto_assignee
+from app.cleaning.domain.assignment import assignment_blocker, resolve_auto_assignee
 from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
 )
-from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.enums import (
+    CleaningAssignmentBlocker,
+    CleaningTaskStatus,
+    CleaningValidationStatus,
+)
 from app.cleaning.domain.notifications import (
     RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
@@ -1217,9 +1221,39 @@ class GetCleaningTaskContextUseCase:
         return checkout_at, checkout_at or now
 
 
+@dataclass(frozen=True)
+class CleaningTaskListView:
+    """One row of `GET /cleaning-tasks`: the task plus its assignment pre-flight.
+
+    A view and not a wider entity, because `blocker` is not a property of a cleaning task — it
+    is a verdict about the task *and* its flat at this instant, and it belongs only to the
+    listing (`cleaning-assign-preconditions` D5). The eight endpoints that return a single task
+    keep returning `CleaningTaskResponse` and are not asked a question nobody put to them.
+    """
+
+    task: CleaningTask
+    blocker: CleaningAssignmentBlocker | None
+
+
+@dataclass(frozen=True)
+class CleaningTaskListPage:
+    """`Page`'s shape with views instead of tasks.
+
+    Declared here and not next to `Page`, which lives in `domain/repositories.py` because it
+    types a **port**. This one types a *use case's* return value, so it belongs with the view it
+    carries.
+    """
+
+    items: tuple[CleaningTaskListView, ...]
+    total: int
+
+
 class ListCleaningTasksUseCase:
-    def __init__(self, *, tasks: CleaningTaskRepository) -> None:
+    def __init__(
+        self, *, tasks: CleaningTaskRepository, properties: PropertyRepository
+    ) -> None:
         self._tasks = tasks
+        self._properties = properties
 
     async def execute(
         self,
@@ -1230,14 +1264,28 @@ class ListCleaningTasksUseCase:
         status: CleaningTaskStatus | None,
         page: int,
         per_page: int,
-    ) -> Page:
+    ) -> CleaningTaskListPage:
         """R7.1, R7.2 — the cleaner's restriction is derived here, not accepted from the query.
 
         `CleaningTaskFilters.assigned_cleaner_id` is set from `actor.restrict_to_cleaner_id`
         and there is no request parameter that can reach it, so the row-level rule cannot be
         dropped by omitting a filter.
+
+        **And R3.1/R3.2 of `cleaning-assign-preconditions`**: each row carries whether it can be
+        assigned right now, so the screen does not offer a confirmation that will 409. The
+        decision is made here and not in the router (D6) — the router maps, it does not decide.
+
+        **One extra query per page, never one per row**, which is R3.2 in as many words: the
+        distinct `property_id`s of this page go to `states_for` in a single call. A page of 20
+        tasks over 20 flats costs one `SELECT`; a page over one flat costs the same one. An empty
+        page costs none, because the port returns `{}` without querying.
+
+        `states.get(...)` and not `states[...]`: a property the read did not resolve yields
+        `None`, which `assignment_blocker` turns into "assignable" and lets the backend refuse
+        if it must. That is R3.3 — the UI guard is a courtesy, not a permission — and it is why
+        this cannot raise for a missing key.
         """
-        return await self._tasks.list(
+        result = await self._tasks.list(
             tenant_id,
             CleaningTaskFilters(
                 property_id=property_id,
@@ -1246,6 +1294,23 @@ class ListCleaningTasksUseCase:
             ),
             page=page,
             per_page=per_page,
+        )
+        # `dict.fromkeys` and not a set: distinct, and in the page's own order, so the `IN` list
+        # of the statement is deterministic run to run.
+        property_ids = tuple(dict.fromkeys(task.property_id for task in result.items))
+        states = await self._properties.states_for(tenant_id, property_ids)
+        return CleaningTaskListPage(
+            items=tuple(
+                CleaningTaskListView(
+                    task=task,
+                    blocker=assignment_blocker(
+                        task_status=task.status,
+                        property_state=states.get(task.property_id),
+                    ),
+                )
+                for task in result.items
+            ),
+            total=result.total,
         )
 
 

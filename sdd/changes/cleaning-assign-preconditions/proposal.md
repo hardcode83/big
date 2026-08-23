@@ -81,6 +81,15 @@ Acceptance criteria:
    distinto del fixture actual**: un test cuya vivienda no esté en `AWAITING_CLEANING` es el que
    faltaba y el que prueba que la distinción existe.
 
+**Alcance ampliado en la puerta de design (2026-08-23, OQ2).** El código nuevo lo elige la clase de
+excepción, `PropertyStateBlocksCleaningError`, y esa la lanza también `POST /cleaning-tasks/{id}/complete`
+cuando el siguiente huésped ya está dentro. Así que ese `409` **también** pasa al código nuevo, aunque
+ningún criterio de arriba lo nombre: es la misma causa, y acotarlo a la asignación exigía partir la
+excepción en dos clases según quién la provocó. Ningún consumidor mapea hoy los errores del cierre
+—la UI de `/cleaner` no existe y `assign-error.ts` es el único mapeador de errores de limpieza del
+frontend—, así que la ampliación no rompe nada. Se escribe aquí para que `sdd/specs/cleaning.md`
+recoja al archivar el comportamiento entregado y no uno más estrecho.
+
 ### R2 — El mensaje nombra a quien bloquea
 
 **As a** `PROPERTY_MANAGER`, **I want** que el error me diga qué impide asignar, **so that** sepa
