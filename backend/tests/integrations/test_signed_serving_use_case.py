@@ -1,19 +1,25 @@
-"""R3.3, R3.4, R6 — `ServeLocalCleaningPhotoUseCase`: **the order is the guarantee**.
+"""`ServeSignedObjectUseCase`: **the order is the guarantee**.
 
-Design D7b decides that the anonymous serving route resolves the photo's row *without a
-tenant*, rebuilds the storage key from it, and only **then** verifies the signature. That
-ordering is the entire security argument of the endpoint — the signature covers the whole key,
-which begins with `tenants/{tenant_id}/`, so a signature that verifies proves the caller was
-handed a URL minted for that photo of that tenant — and an implementation that got it backwards
-would still pass every status-code assertion in `test_serve_photo_api.py`.
+The anonymous serving route resolves the object's row *without a tenant*, rebuilds the storage
+key from it, and only **then** verifies the signature. That ordering is the entire security
+argument of the endpoint — the signature covers the whole key, which begins with
+`tenants/{tenant_id}/`, so a signature that verifies proves the caller was handed a URL minted
+for that object of that tenant — and an implementation that got it backwards would still pass
+every status-code assertion in the routes' API tests.
 
 So every fake here writes into one shared `journal`, and the tests assert on the sequence, not
-only on the outcome. Task 4.3 asks for exactly this test.
+only on the outcome.
 
 The other thing only a fake can pin: that the key fed to the verifier is the one from the
-database and not one the caller could influence. `test_a_signature_over_the_key_the_caller_
-wishes_for_is_refused` builds a signature that is cryptographically perfect over a *different*
-key and watches it fail.
+database and not one the caller could influence.
+`test_a_signature_over_the_key_the_caller_wishes_for_is_refused` builds a signature that is
+cryptographically perfect over a *different* key and watches it fail.
+
+**This file moved here from `tests/cleaning/test_serve_photo_use_case.py`** when the change
+`incident-photos` extracted the use case out of `cleaning` (design D5). The assertions are the
+ones that guarded `cleaning`'s route, unchanged: they now guard the one implementation both
+`cleaning` and `maintenance` mount, which is the whole point of extracting it. Each consumer's
+own API test still pins its route end to end.
 """
 
 import uuid
@@ -21,12 +27,12 @@ from datetime import UTC, datetime, timedelta
 
 import pytest
 
-from app.cleaning.application.use_cases import ServeLocalCleaningPhotoUseCase
-from app.cleaning.domain.repositories import SignedPhotoLocation
+from app.integrations.application.signed_serving import ServeSignedObjectUseCase
 from app.integrations.domain.storage import (
     SIGNED_URL_TTL_SECONDS,
     InvalidSignatureError,
     LocalFileReadUnsupportedError,
+    ObjectLocation,
     StorageWriteError,
     derive_signing_key,
     sign_storage_key,
@@ -39,7 +45,7 @@ TENANT = uuid.uuid4()
 TASK = uuid.uuid4()
 PHOTO = uuid.uuid4()
 KEY = f"tenants/{TENANT}/cleaning-tasks/{TASK}/{PHOTO}.jpg"
-BYTES = b"\xff\xd8\xff-these-are-the-photo-bytes"
+BYTES = b"\xff\xd8\xff-these-are-the-object-bytes"
 
 SIGNING_KEY = derive_signing_key("a-secret-that-is-long-enough-to-be-plausible")
 
@@ -48,14 +54,14 @@ SIGNING_KEY = derive_signing_key("a-secret-that-is-long-enough-to-be-plausible")
 
 
 class FakeLocationQuery:
-    def __init__(self, journal: list[str], location: SignedPhotoLocation | None) -> None:
+    def __init__(self, journal: list[str], location: ObjectLocation | None) -> None:
         self._journal = journal
         self._location = location
         self.asked: list[uuid.UUID] = []
 
-    async def locate_without_tenant_scoping(self, photo_id):
+    async def locate_without_tenant_scoping(self, object_id):
         self._journal.append("locate")
-        self.asked.append(photo_id)
+        self.asked.append(object_id)
         return self._location
 
 
@@ -108,7 +114,7 @@ class FakeStorageFactory:
 
 def _build(
     *,
-    location: SignedPhotoLocation | None = SignedPhotoLocation(
+    location: ObjectLocation | None = ObjectLocation(
         storage_key=KEY, tenant_id=TENANT
     ),
     storage_type: StorageType = StorageType.LOCAL,
@@ -120,7 +126,7 @@ def _build(
     configs = FakeConfigRepository(journal, storage_type)
     reader = FakeReader(journal, fail=read_fails)
     factory = FakeStorageFactory(journal, reader, local=local)
-    use_case = ServeLocalCleaningPhotoUseCase(
+    use_case = ServeSignedObjectUseCase(
         locations=locations,
         configs=configs,
         storage=factory,
@@ -134,9 +140,9 @@ def _valid(key: str = KEY, *, expiry: int | None = None) -> tuple[int, str]:
     return expiry, sign_storage_key(signing_key=SIGNING_KEY, key=key, expiry=expiry)
 
 
-async def _serve(use_case, expiry, signature, *, photo_id=PHOTO, now=NOW):
+async def _serve(use_case, expiry, signature, *, object_id=PHOTO, now=NOW):
     return await use_case.execute(
-        photo_id=photo_id, expiry=expiry, signature=signature, now=now
+        object_id=object_id, expiry=expiry, signature=signature, now=now
     )
 
 
@@ -145,7 +151,7 @@ async def _serve(use_case, expiry, signature, *, photo_id=PHOTO, now=NOW):
 
 @pytest.mark.asyncio
 async def test_the_order_is_resolve_then_verify_then_serve():
-    """Task 4.3 — asserted as a sequence, not inferred from a status code."""
+    """Asserted as a sequence, not inferred from a status code."""
     use_case, journal, locations, configs, reader = _build()
     expiry, signature = _valid()
 
@@ -165,7 +171,7 @@ async def test_a_bad_signature_stops_before_anything_is_served():
     """The inverted implementation this file exists to catch would read first and check after.
 
     `journal` ends at `locate`: no tenant configuration was read and no adapter was built, so
-    nothing about the photo left the process.
+    nothing about the object left the process.
     """
     use_case, journal, _, _, reader = _build()
 
@@ -178,7 +184,7 @@ async def test_a_bad_signature_stops_before_anything_is_served():
 
 @pytest.mark.asyncio
 async def test_a_signature_over_the_key_the_caller_wishes_for_is_refused():
-    """The key is the row's, never the request's — design D7b's whole reason for step 1.
+    """The key is the row's, never the request's — the whole reason step 1 comes first.
 
     This signature is cryptographically perfect: the right secret, the right scheme, an expiry
     in the future. It just covers a key belonging to **another tenant**, which is the pivot the
@@ -197,8 +203,8 @@ async def test_a_signature_over_the_key_the_caller_wishes_for_is_refused():
 
 
 @pytest.mark.asyncio
-async def test_a_photo_that_does_not_exist_raises_the_same_error_as_a_bad_signature():
-    """R3.4 — one error type, so the route has one body to answer with (task 4.3b)."""
+async def test_an_object_that_does_not_exist_raises_the_same_error_as_a_bad_signature():
+    """One error type, so the route has one body to answer with."""
     use_case, journal, _, _, _ = _build(location=None)
     expiry, signature = _valid()
 
@@ -221,8 +227,7 @@ async def test_an_expired_signature_is_refused():
 
 @pytest.mark.asyncio
 async def test_a_signature_reaching_past_the_ttl_ceiling_is_refused():
-    """The half of design D6 the section 1 panel added: the ceiling binds the URL, not only
-    the signer. A well-formed signature over `now + 1 day` still does not work."""
+    """The ceiling binds the URL, not only the signer. A well-formed signature over `now + 1 day` still does not work."""
     use_case, _, _, _, _ = _build()
     expiry, signature = _valid(expiry=NOW_POSIX + SIGNED_URL_TTL_SECONDS + 60)
 
@@ -252,7 +257,7 @@ async def test_the_clock_comes_from_the_caller():
 
 @pytest.mark.asyncio
 async def test_an_s3_tenant_has_no_local_serving():
-    """Design D1 — the factory refuses, and only ever after the signature has been accepted."""
+    """The factory refuses, and only ever after the signature has been accepted."""
     use_case, journal, _, _, _ = _build(storage_type=StorageType.S3, local=False)
     expiry, signature = _valid()
 
@@ -264,7 +269,7 @@ async def test_an_s3_tenant_has_no_local_serving():
 
 @pytest.mark.asyncio
 async def test_an_unreadable_object_surfaces_as_a_storage_error():
-    """Design D4's forbidden direction: a row pointing at an object that is not there."""
+    """The forbidden direction: a row pointing at an object that is not there."""
     use_case, _, _, _, _ = _build(read_fails=True)
     expiry, signature = _valid()
 
@@ -278,10 +283,10 @@ async def test_an_unreadable_object_surfaces_as_a_storage_error():
 )
 @pytest.mark.asyncio
 async def test_the_content_type_comes_from_the_keys_extension(extension, expected):
-    """Task 4.3c — `content_type_for_extension` and nothing else, for every accepted format."""
+    """`content_type_for_extension` and nothing else, for every accepted format."""
     key = f"tenants/{TENANT}/cleaning-tasks/{TASK}/{PHOTO}.{extension}"
     use_case, _, _, _, _ = _build(
-        location=SignedPhotoLocation(storage_key=key, tenant_id=TENANT)
+        location=ObjectLocation(storage_key=key, tenant_id=TENANT)
     )
     expiry, signature = _valid(key)
 
@@ -292,7 +297,7 @@ async def test_the_content_type_comes_from_the_keys_extension(extension, expecte
 
 @pytest.mark.asyncio
 async def test_a_key_without_a_usable_extension_is_refused_rather_than_guessed():
-    """No `application/octet-stream` fallback and no sniffing — that is the whole of 4.3c.
+    """No `application/octet-stream` fallback and no sniffing.
 
     Only reachable through a corrupted row, so a `ValueError` (a 500) is the right answer: it
     is our bug, not the caller's, and the alternative is serving bytes with a type nobody
@@ -300,7 +305,7 @@ async def test_a_key_without_a_usable_extension_is_refused_rather_than_guessed()
     """
     key = f"tenants/{TENANT}/cleaning-tasks/{TASK}/{PHOTO}"
     use_case, _, _, _, _ = _build(
-        location=SignedPhotoLocation(storage_key=key, tenant_id=TENANT)
+        location=ObjectLocation(storage_key=key, tenant_id=TENANT)
     )
     expiry, signature = _valid(key)
 

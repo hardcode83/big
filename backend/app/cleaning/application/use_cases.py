@@ -58,7 +58,6 @@ from app.cleaning.domain.repositories import (
     CleaningTaskRepository,
     Page,
     TemplatePage,
-    UnscopedCleaningPhotoLocationQuery,
 )
 from app.cleaning.domain.ports import (
     IncidentReport,
@@ -79,12 +78,9 @@ from app.integrations.domain.storage import (
     MAGIC_BYTES_LENGTH,
     FileStorageFactory,
     FileStoragePort,
-    InvalidSignatureError,
     StorageWriteError,
-    content_type_for_extension,
     detect_image_type,
     storage_key_for_photo,
-    verify_signed_key,
 )
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
@@ -1808,134 +1804,6 @@ class ListCleaningPhotosUseCase(_TaskTransitionMixin):
             UploadedCleaningPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
             for photo in photos
         )
-
-
-@dataclass(frozen=True)
-class ServedPhoto:
-    """The bytes to answer with, and the `Content-Type` to answer them with.
-
-    `content_type` comes from `content_type_for_extension` and from nowhere else (design D7,
-    task 4.3c). It is carried here rather than left to the route to work out, so the route has
-    nothing to derive and nothing to guess.
-    """
-
-    content: bytes
-    content_type: str
-
-
-class ServeLocalCleaningPhotoUseCase:
-    """The anonymous signed serving route's use case (design D7, D7b) — R3.3.
-
-    **The order of the three steps is the security property, not an implementation detail**:
-
-    1. **Resolve** `photo_id → (storage_key, tenant_id)` with the unscoped query of D7b. There
-       is no session tenant here — the route is anonymous because an `<img src>` sends no
-       `Authorization` header — so this is the only way to learn either fact.
-    2. **Verify** the signature against the key that came out of step 1, never against
-       anything the client sent. The signature covers the whole key, which begins with
-       `tenants/{tenant_id}/` (D3), so a signature that verifies **proves** the caller was
-       handed a URL minted for this photo of this tenant. That is the entire authorisation of
-       this endpoint.
-    3. **Serve**, and only now: resolve the tenant's backend and read the bytes.
-
-    Inverting 1 and 2 is impossible (there is nothing to verify against yet). Inverting 2 and 3
-    is the failure this ordering exists to prevent, and it has its own test.
-
-    Every refusal in steps 1 and 2 raises the **same** `InvalidSignatureError`, which the route
-    turns into one constant `403` body — task 4.3b. "No such photo", "wrong signature",
-    "expired" and "over the TTL ceiling" must be indistinguishable from outside, or this
-    endpoint becomes an existence oracle over the photo keyspace for a caller with no
-    credentials at all, on a route `api-ingress-routing` left reachable from the internet.
-
-    Step 3 answers differently on purpose, and it is not a leak: `LocalFileReadUnsupportedError`
-    (an `S3` tenant, no local serving) becomes a `404` and a `StorageWriteError` a `502`, but
-    both are only reachable **after** a valid signature, i.e. by someone already holding proof
-    that the photo exists.
-
-    `now` is passed in like every other use case here, and converted to POSIX seconds for
-    `verify_signed_key`, which is pure and takes the clock as an argument (task 1.3). One
-    reading, converted, rather than two parameters that could disagree about *when* this
-    request happened.
-    """
-
-    def __init__(
-        self,
-        *,
-        locations: UnscopedCleaningPhotoLocationQuery,
-        configs: TenantConfigRepository,
-        storage: FileStorageFactory,
-        signing_key: bytes,
-    ) -> None:
-        self._locations = locations
-        self._configs = configs
-        self._storage = storage
-        self._signing_key = signing_key
-
-    async def execute(
-        self,
-        *,
-        photo_id: uuid.UUID,
-        expiry: int,
-        signature: str,
-        now: datetime,
-    ) -> ServedPhoto:
-        location = await self._locations.locate_without_tenant_scoping(photo_id)
-        if location is None:
-            # Step 1 failed. Raised as the SAME error a bad signature raises so the route has
-            # one thing to catch and one body to answer with (4.3b). The message is for the
-            # log; it does not reach the response.
-            #
-            # Known and accepted residue: this path skips the HMAC of step 2, so it is
-            # marginally faster than a signature that fails to verify. Distinguishing a UUID
-            # that exists from one that does not through that difference means measuring
-            # microseconds across the internet over a 122-bit keyspace, per candidate id. The
-            # body is identical, which is what R3.4 asks for.
-            raise InvalidSignatureError(f"no photo resolves for id {photo_id}")
-
-        # Against the key from the DATABASE. Nothing the client sent contributes to it — the
-        # URL carries only the photo id, its expiry and the signature (R3.2 keeps the key out
-        # of every response, so it could not carry the key even if we wanted it to).
-        verify_signed_key(
-            signing_key=self._signing_key,
-            key=location.storage_key,
-            expiry=expiry,
-            signature=signature,
-            now=int(now.timestamp()),
-        )
-
-        # Everything below happens only after a valid signature. `get_or_create` can in
-        # principle insert, which would be a write on an anonymous request — in practice never,
-        # because the upload that created this photo already created the row, and in any case
-        # this route never commits, so the flush dies with the request's transaction.
-        config = await self._configs.get_or_create(location.tenant_id, now)
-        # Raises `LocalFileReadUnsupportedError` for an `S3` tenant, before instantiating
-        # anything — design D1's refusal point. There is no local serving for that backend
-        # because the browser fetches the object straight from the provider.
-        reader = self._storage.read_for(config.storage_type)
-        content = await reader.read(location.storage_key)
-        return ServedPhoto(
-            content=content,
-            # Task 4.3c: the ONLY admitted source. The MIME detected at upload is not
-            # persisted; with `LOCAL` it survives solely inside the key's extension (D3).
-            # Deriving it from anything else — or omitting it and letting Starlette sniff —
-            # turns a polyglot that starts with `FF D8 FF` and carries HTML into stored XSS on
-            # the API's own origin. `_extension_of` refuses a key it cannot read rather than
-            # falling back to a default, for the same reason.
-            content_type=content_type_for_extension(_extension_of(location.storage_key)),
-        )
-
-
-def _extension_of(storage_key: str) -> str:
-    """The extension inside a storage key, with no default and no guess.
-
-    Returns `""` for a key with no extension, which `content_type_for_extension` then refuses
-    with a `ValueError` — a 500, correctly, because such a key can only come from a bug of
-    ours: every key is built by `storage_key_for_photo`, which validates the extension against
-    the image allowlist before assembling it. Substituting `application/octet-stream` here
-    would be exactly the fallback task 4.3c exists to forbid.
-    """
-    _, separator, extension = storage_key.rpartition(".")
-    return extension if separator else ""
 
 
 def _effective_checkout(

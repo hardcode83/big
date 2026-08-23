@@ -4,14 +4,17 @@
 
 Guarda fuera de la base de datos los ficheros que sube la aplicación y los devuelve por URL
 firmada de caducidad acotada, sin que ningún caso de uso sepa dónde acaban. Es una capability
-**compartida**: hoy su único llamante son las fotos de limpieza
-([`specs/cleaning.md`](cleaning.md)) —por dos puertas, la API y el comando `make seed-demo`
-([`seed-data-demo.md`](seed-data-demo.md))—, y `maintenance` (fotos de incidente) y `revenue`
-(`expenses.receipt_storage_key`) están nombrados como sus siguientes consumidores, que es la
-razón de que viva en `app/integrations/` y no colgando del dominio que la estrenó.
+**compartida, y desde el 2026-08-23 lo es de hecho y no de intención**: tiene **dos** llamantes,
+las fotos de limpieza ([`specs/cleaning.md`](cleaning.md)) —por dos puertas, la API y el comando
+`make seed-demo` ([`seed-data-demo.md`](seed-data-demo.md))— y las fotos de incidencia
+([`specs/incident-photos.md`](incident-photos.md)), que es el consumidor que esta spec llevaba
+nombrando desde que se escribió y la razón declarada de que viva en `app/integrations/` y no
+colgando del dominio que la estrenó. `revenue` (`expenses.receipt_storage_key`) sigue nombrado
+como el siguiente.
 
 Cubre el puerto, sus dos implementaciones (`LOCAL` y `S3`), el esquema de claves, la detección
-del tipo real del contenido y el esquema de firma. **Lo que no cubre**: qué rutas HTTP existen
+del tipo real del contenido, el esquema de firma y —desde que hay dos consumidores— la **capa de
+servido firmado compartida** que los dos montan. **Lo que no cubre**: qué rutas HTTP existen
 sobre él ni quién puede llamarlas — eso pertenece a la capability que lo consume.
 
 ## Requirements
@@ -67,6 +70,15 @@ sobre él ni quién puede llamarlas — eso pertenece a la capability que lo con
   de modo que dos tenants no puedan colisionar en el mismo objeto —ni por colisión de UUID de
   tarea ni por `photo_type` repetido— y un prefijo del almacén sea directamente acotable por
   tenant.
+- THE SYSTEM SHALL derivar la clave de una foto de incidencia como
+  `tenants/{tenant_id}/incidents/{incident_id}/{photo_id}.{ext}`
+  ([`incident-photos`](incident-photos.md)), con el mismo `tenant_id` delante y con el segmento de
+  colección reflejando el prefijo de su ruta, igual que `cleaning-tasks` refleja el suyo.
+- THE SYSTEM SHALL derivar las dos de un **cuerpo privado compartido** que conserva en un solo sitio
+  la comprobación de que la extensión sale de la allowlist, y SHALL exponer **una función pública
+  por consumidor** en vez de parametrizar una sola: la forma greppable por consumidor es lo que hace
+  que añadir un tercero sea un diff visible, y duplicar el cuerpo duplicaría la guarda que impide
+  construir una clave con algo que el almacén luego no sabe servir.
 - THE SYSTEM SHALL construir la clave únicamente a partir de identificadores que el propio sistema
   generó. **El nombre de fichero que envía el cliente no toca la clave en ningún punto**: es
   entrada no confiable, sanearlo sería una lista negra de fragmentos de ruta, y el nombre original
@@ -140,6 +152,44 @@ de producto, y ampliar la allowlist es una línea el día que se tome.
 - THE SYSTEM SHALL devolver de la verificación `None` en caso de éxito y no un booleano: un
   booleano invita a escribir la llamada sin el `if`, y una verificación cuyo resultado se puede
   ignorar no lo es.
+- THE SYSTEM SHALL acuñar la URL como `{url_prefix}/{id del objeto}?exp=…&sig=…`, y SHALL fijar
+  `url_prefix` **por consumidor** al construir la factoría (`storage_factory_for(url_prefix)`), no
+  dentro del adaptador de almacenamiento: cada dominio sirve sus objetos desde su propia ruta y
+  **sólo el wiring sabe cuál**. Derivarlo del segmento de colección de la clave acoplaría el
+  adaptador a los nombres de los routers y añadiría un mapa que mantener sincronizado con ellos.
+- THE SYSTEM SHALL considerar que **ningún consumidor debe depender del `url_prefix` por defecto**.
+  El default sigue siendo la ruta de limpieza, así que quien lo herede acuñará URLs que resuelven el
+  id contra `cleaning_photos`, no encontrarán la fila y contestarán el `403` constante — **una
+  feature rota que se lee como una firma rota**. Se descubrió implementando
+  [`incident-photos`](incident-photos.md), y por eso el comando de siembra pasa el suyo explícito.
+- THE SYSTEM SHALL mantener **compartida** la clave de firma entre consumidores —es el mismo secreto
+  para firmar y para verificar— y NEVER SHALL derivar una por dominio: lo único que varía entre
+  consumidores es la ruta desde la que se sirve.
+
+### La capa de servido firmado, compartida por los consumidores
+
+Existe porque hay **dos** consumidores. Es la superficie más expuesta de la aplicación —anónima,
+alcanzable desde internet por el túnel de `api-ingress-routing`, devolviendo bytes que subió un
+tercero—, y dos copias de su prosa de seguridad son dos sitios donde la garantía puede divergir.
+
+- THE SYSTEM SHALL declarar en `app/integrations/` un puerto de **localización** sin scoping de
+  tenant, `UnscopedObjectLocationQuery` (`locate_without_tenant_scoping(object_id) ->
+  ObjectLocation | None`, con `ObjectLocation(storage_key, tenant_id)` congelado), separado de los
+  tres puertos de almacenamiento.
+- THE SYSTEM SHALL declarar un único `ServeSignedObjectUseCase` con el orden
+  **resolver → verificar → servir** y sus refusals colapsados en un solo tipo de excepción, y una
+  única factoría de router (`build_signed_media_router(...)`) que produzca el cuerpo `403`
+  constante, el sello de `nosniff`, el `Cache-Control` derivado de lo que le queda a la firma y el
+  bloque `responses` con los media types de la allowlist.
+- THE SYSTEM SHALL hacer que cada consumidor monte su ruta con esa factoría, aportando **solo** el
+  prefijo, el tag y el nombre del evento de log, y NEVER SHALL mantener dos implementaciones de esa
+  frontera.
+- THE SYSTEM SHALL NOT modificar `FileStoragePort`, `LocalFileReadPort` ni `FileStorageFactory` por
+  esta causa: lo que se añadió es un puerto de localización y una capa de aplicación/API por encima,
+  no un cambio del almacén.
+- THE SYSTEM SHALL dejar cada adaptador de localización **fuera** del repositorio de su dominio, y
+  SHALL exigirle `require_unmarked_session(...)` antes de consultar y una entrada en el censo de
+  lecturas sin scoping. La capa compartida no relaja esa disciplina: la hereda de los dos.
 
 ### El adaptador `LOCAL`
 
@@ -318,6 +368,11 @@ cada ajuste:
 - **Rotación acoplada**: al derivarse la clave de firma de `JWT_SECRET_KEY`, no se puede rotar la
   firma de los ficheros sin invalidar todas las sesiones, ni al revés. El prefijo de versión del
   mensaje firmado deja abierta la migración a un `MEDIA_SIGNING_KEY` propio sin romper URLs vivas.
+- **El segundo consumidor existe desde el 2026-08-23** ([`incident-photos`](incident-photos.md)), y
+  con él la razón de que esta capability viva en `app/integrations/` pasó de intención a hecho. Lo
+  que el segundo consumidor descubrió y el primero no podía: que el `url_prefix` por defecto es una
+  trampa, y que el cuerpo `403` constante —bien diseñado para no ser un oráculo— **también esconde
+  los errores propios**, así que un fallo de wiring se lee exactamente igual que una firma inválida.
 - **Sin borrado desde la API**: el puerto tiene `delete` y su único llamante es el borrado
   compensatorio interno. No hay superficie de borrado para un usuario, y no la habrá sin una
   decisión de retención.
@@ -334,8 +389,19 @@ cada ajuste:
 - `backend/app/integrations/infrastructure/storage/s3.py` — `S3FileStorage` y `build_s3_client`,
   con el `endpoint_url` que mantiene abierto el proveedor y las dos concesiones que un endpoint
   no-AWS exige (path-style y checksums `when_required`).
-- `backend/app/cleaning/api/dependencies.py` — `get_file_storage_factory`, el **único** punto donde
-  se leen los tres ajustes del almacén.
+- `backend/app/integrations/api/dependencies.py` — `get_url_signing_key` y
+  `storage_factory_for(url_prefix)`: el punto donde se leen los ajustes del almacén y donde cada
+  consumidor declara su prefijo de URL firmada. **Estuvo en
+  `backend/app/cleaning/api/dependencies.py` hasta el 2026-08-23**, y esta spec decía que aquél era
+  el «único punto»; dejó de ser cierto al llegar el segundo consumidor
+  ([`incident-photos`](incident-photos.md)).
+- `backend/app/integrations/application/signed_serving.py` — `ServeSignedObjectUseCase`,
+  `ServedObject` y `extension_of`: el orden resolver→verificar→servir, una sola vez.
+- `backend/app/integrations/api/signed_media.py` — `build_signed_media_router(...)`, los cuerpos de
+  refusal constantes, el sello de `nosniff` y el `Cache-Control` derivado de la firma.
+- `backend/app/integrations/infrastructure/storage/local.py` — además de `LocalFileStorage`,
+  `CLEANING_PHOTO_URL_PREFIX`, `INCIDENT_PHOTO_URL_PREFIX` y `DEFAULT_SIGNED_URL_PREFIX`, del que
+  ningún consumidor debe depender.
 - `backend/tests/integrations/test_storage_provider_agnostic.py` — las guardas de agnosticidad:
   imports de SDK por AST, hostnames de proveedor y símbolos de configuración.
 - `infra/environments/dev/main.tf` — el bucket, su usuario IAM, la policy acotada, la Customer

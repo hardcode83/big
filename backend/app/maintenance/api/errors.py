@@ -22,12 +22,15 @@ from app.maintenance.domain.exceptions import (
     IncidentAlreadyClosedError,
     IncidentBlockedByPendingApprovalError,
     IncidentNotFoundError,
+    IncidentPhotoStorageUnavailableError,
+    IncidentPhotoTooLargeError,
     InvalidIncidentTransitionError,
     InvalidTechnicianError,
     MaintenanceDomainError,
     MaintenanceValidationError,
     OwnerApprovalAlreadyAnsweredError,
     OwnerApprovalNotFoundError,
+    UnsupportedIncidentPhotoFormatError,
 )
 
 # Order matters: the first matching entry wins. The hierarchy is flat by design (see the
@@ -41,6 +44,12 @@ _MAPPING: tuple[tuple[type[MaintenanceDomainError], int, ErrorCode], ...] = (
     (IncidentBlockedByPendingApprovalError, 409, ErrorCode.CONFLICT),
     (OwnerApprovalAlreadyAnsweredError, 409, ErrorCode.CONFLICT),
     (InvalidTechnicianError, 422, ErrorCode.VALIDATION_ERROR),
+    # The photo upload's three (`incident-photos` R2.8, R2.9, R5.1). Siblings of
+    # `MaintenanceValidationError`, so their position relative to it does not matter — which is
+    # the whole point of the flat hierarchy this module's header describes.
+    (IncidentPhotoTooLargeError, 413, ErrorCode.PAYLOAD_TOO_LARGE),
+    (UnsupportedIncidentPhotoFormatError, 422, ErrorCode.VALIDATION_ERROR),
+    (IncidentPhotoStorageUnavailableError, 502, ErrorCode.BAD_GATEWAY),
     (MaintenanceValidationError, 422, ErrorCode.VALIDATION_ERROR),
 )
 

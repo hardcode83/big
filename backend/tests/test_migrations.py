@@ -434,7 +434,10 @@ async def test_the_tech_cycle_revision_unwinds_over_populated_rows_and_keeps_its
     finally:
         await conn.close()
 
-    unwound = _alembic("downgrade", "-1", database_url=url)
+    # Targeted at the revision, not counted in steps — the convention this file already
+    # states above, and `incident-photos` is why: it landed on top of `tech-cycle-completion`,
+    # so `-1` stopped unwinding the revision this test is about.
+    unwound = _alembic("downgrade", "b3f5d1c8a047", database_url=url)
     assert unwound.returncode == 0, unwound.stderr
     assert await _column_shape(url, "incidents", "eta_at") is None
     assert await _column_shape(url, "incidents", "materials") is None

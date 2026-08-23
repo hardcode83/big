@@ -46,7 +46,6 @@ from app.cleaning.domain.exceptions import (
 from app.cleaning.domain.repositories import (
     CleaningTaskFilters,
     Page,
-    SignedPhotoLocation,
     TemplatePage,
 )
 from app.cleaning.domain.value_objects import CleaningTaskSummary
@@ -58,6 +57,7 @@ from app.cleaning.infrastructure.models import (
 )
 from app.core.db import require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
+from app.integrations.domain.storage import ObjectLocation
 from app.maintenance.domain.enums import IncidentSeverity, IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
 
@@ -520,16 +520,33 @@ class SqlAlchemyCleaningPhotoRepository:
 
 
 class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
-    """Implements `UnscopedCleaningPhotoLocationQuery` — design D7b, and the one read here
-    that does **not** take a tenant.
+    """Implements `UnscopedObjectLocationQuery` for `cleaning_photos` — the one read here that
+    does **not** take a tenant.
 
     It is a class of its own rather than a method on the adapter above, and that separation is
     the mechanism: the repository the authenticated use cases hold cannot express this query,
     so no use case can accidentally reach for it instead of the scoped `get`. Its only wiring
-    is `get_serve_local_cleaning_photo_use_case`, for the anonymous route of design D7.
+    is `get_serve_cleaning_photo_use_case`, for the anonymous serving route.
+
+    **Why it is not a fifth method on `CleaningPhotoRepository`.** Two reasons, and the second
+    is the one that matters. It would break that port's stated acceptance criterion (four
+    methods, each with a caller, every one taking the tenant first). And it would put an
+    unscoped read within reach of every authenticated use case that already holds that
+    repository — a place it must never be, because there the tenant is available and omitting
+    it would be a leak rather than a necessity.
+
+    **What keeps it safe is the ORDER of its caller, not the query.** This read grants nothing
+    by itself: `ServeSignedObjectUseCase` resolves the location, rebuilds the key, and only
+    **then** verifies the signature. The signature covers the whole key, which starts with
+    `tenants/{tenant_id}/`, so a valid one proves the caller was given a URL minted for that
+    photo of that tenant. And it cannot be used as an existence oracle either, because the
+    refusal is a single constant `403` for "no such photo", "wrong signature", "expired" and
+    "tampered" alike.
 
     It still joins `cleaning_tasks`, but for a different reason than everything above: not to
     filter, but because `tenant_id` lives there and is one of the two facts the caller needs.
+    `maintenance`'s equivalent needs no join, because `incident_photos` carries its own
+    `tenant_id` (`incident-photos` design D2).
 
     **Contract of the session it is given: never marked with a tenant.** Nothing in this route's
     dependency chain binds one — read off the chain on 2026-08-17, by a person, and **not**
@@ -548,12 +565,12 @@ class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
         self._session = session
 
     async def locate_without_tenant_scoping(
-        self, photo_id: uuid.UUID
-    ) -> SignedPhotoLocation | None:
+        self, object_id: uuid.UUID
+    ) -> ObjectLocation | None:
         """Two columns, no entity: the key to rebuild and the tenant that owns it.
 
-        Returning `SignedPhotoLocation` rather than `CleaningPhoto` keeps everything else about
-        the row — who uploaded it, when, of what — out of a request nobody authenticated.
+        Returning `ObjectLocation` rather than `CleaningPhoto` keeps everything else about the
+        row — who uploaded it, when, of what — out of a request nobody authenticated.
         """
         require_unmarked_session(self._session, read="locate_without_tenant_scoping")
         row = (
@@ -563,12 +580,12 @@ class SqlAlchemyUnscopedCleaningPhotoLocationQuery:
                     CleaningTaskModel,
                     CleaningTaskModel.id == CleaningPhotoModel.cleaning_task_id,
                 )
-                .where(CleaningPhotoModel.id == photo_id)
+                .where(CleaningPhotoModel.id == object_id)
             )
         ).one_or_none()
         if row is None:
             return None
-        return SignedPhotoLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)
+        return ObjectLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)
 
 
 class SqlAlchemyLiveCleaningTaskReader:

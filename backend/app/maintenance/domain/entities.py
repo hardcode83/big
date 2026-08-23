@@ -6,6 +6,7 @@ from typing import Any, ClassVar, Mapping
 
 from app.maintenance.domain.enums import (
     IncidentCategory,
+    IncidentPhotoStage,
     IncidentSeverity,
     IncidentSource,
     IncidentStatus,
@@ -39,6 +40,22 @@ CLOSED_INCIDENT_STATUSES = frozenset(
     {IncidentStatus.RESOLVED, IncidentStatus.CANCELLED}
 )
 OPEN_INCIDENT_STATUSES = frozenset(IncidentStatus) - CLOSED_INCIDENT_STATUSES
+
+#: The statuses in which an incident accepts a photo (`incident-photos` R2.4, design D6).
+#:
+#: The two in which the technician's work is actually under way. It is **not**
+#: `OPEN_INCIDENT_STATUSES`: an incident that is merely `CLASSIFIED` or `ASSIGNED` has nobody
+#: on site yet, and evidence filed before the work starts is evidence of nothing.
+#:
+#: `WAITING_EXTERNAL_PARTS` is in, for the same reason `CLOSED_INCIDENT_STATUSES` leaves it
+#: out: the flat still has a broken thing in it, and a technician waiting on a part may well
+#: photograph what is missing.
+#:
+#: Lives here beside the other two so the rule has one home rather than a literal tuple inside
+#: `ensure_accepts_photo`.
+PHOTO_ACCEPTING_INCIDENT_STATUSES = frozenset(
+    {IncidentStatus.IN_PROGRESS, IncidentStatus.WAITING_EXTERNAL_PARTS}
+)
 
 #: What `ai_classification["adapter"]` says when the name it was given is not a closed
 #: token. `incidents.ai_classification` is a rule-11 sink of `steering/security.md` under
@@ -249,6 +266,28 @@ class Incident:
         if self.status in origins:
             return target
 
+        self._refuse_if_closed_or_awaiting_owner()
+        raise InvalidIncidentTransitionError(
+            f"Incident cannot move from {self.status.value} to {target.value}"
+        )
+
+    def _refuse_if_closed_or_awaiting_owner(self) -> None:
+        """The two refusals that mean something more specific than "out of order", in order.
+
+        Extracted from `_check_transition` by `incident-photos` (design D6) so that the order
+        has **one home**: `ensure_accepts_photo` below has to produce the same three
+        distinguishable refusals, and a second copy of this sequence is the thing that would
+        eventually disagree with the first.
+
+        The order is the content. A closed incident is checked first because it will never
+        admit anything, so reporting "out of order" would invite waiting for a state that is
+        never coming; one awaiting the owner is second because it is blocked on a specific
+        answer from a specific person, which is actionable. Whatever survives both is a step
+        taken out of sequence, and that refusal belongs to the caller — it is the only one of
+        the three whose message depends on where the caller was trying to go.
+
+        Returns `None` and mutates nothing: both callers validate before touching a field.
+        """
         if self.status in CLOSED_INCIDENT_STATUSES:
             raise IncidentAlreadyClosedError(
                 f"Incident is already {self.status.value} and admits no further transition"
@@ -257,9 +296,36 @@ class Incident:
             raise IncidentBlockedByPendingApprovalError(
                 "Incident is waiting for the owner to answer an approval request"
             )
-        raise InvalidIncidentTransitionError(
-            f"Incident cannot move from {self.status.value} to {target.value}"
-        )
+
+    def ensure_accepts_photo(self) -> None:
+        """Refuse unless this incident is in a state where the technician's work is under way.
+
+        R2.4/R2.5/R2.6 and design D6. **Does not mutate**: uploading a photo is evidence, not
+        a lifecycle step, so there is no row for it in `_TRANSITIONS` and nothing here moves
+        the status. D6 rejected adding such a row outright — a table of transitions with a
+        non-transition inside it lies about what it is.
+
+        Three distinguishable refusals, sharing their order with `_check_transition` through
+        `_refuse_if_closed_or_awaiting_owner`:
+
+        1. `RESOLVED`/`CANCELLED` → `IncidentAlreadyClosedError` (R2.6);
+        2. `AWAITING_OWNER_APPROVAL` → `IncidentBlockedByPendingApprovalError` (R2.5);
+        3. anything that is neither `IN_PROGRESS` nor `WAITING_EXTERNAL_PARTS` →
+           `InvalidIncidentTransitionError` (R2.4).
+
+        All three are already `409 CONFLICT` with distinct messages in
+        `app/maintenance/api/errors.py`, so this needs no new error class and does not touch
+        the module's published error contract.
+
+        `WAITING_EXTERNAL_PARTS` accepts photos deliberately: the flat still has a broken thing
+        in it, and a technician waiting on a part may well photograph what is missing. That is
+        the same reason `CLOSED_INCIDENT_STATUSES` leaves it out.
+        """
+        self._refuse_if_closed_or_awaiting_owner()
+        if self.status not in PHOTO_ACCEPTING_INCIDENT_STATUSES:
+            raise InvalidIncidentTransitionError(
+                f"Cannot attach a photo to an incident in status {self.status.value}"
+            )
 
     def _transition(self, operation: str, now: datetime) -> None:
         self.status = self._check_transition(operation)
@@ -654,3 +720,62 @@ class OwnerApproval:
         self.responded_by = responded_by
         self.response_notes = response_notes
         return self.amount if status is OwnerApprovalStatus.APPROVED else None
+
+
+@dataclass
+class IncidentPhoto:
+    """One photo of one incident, at one stage of the job (`incident-photos` R1).
+
+    `ASSUMPTION`: **this entity is not in the PRD.** PRD §7.13 `Incident` declares no photo
+    column and PRD §7 defines only `CleaningPhoto` (§7.12); what exists is PRD §6 granting the
+    `TECHNICIAN` "subir fotos (antes y después)" and PRD §12 asking for them twice. So the
+    entity, its table and `IncidentPhotoStage` extend the PRD's model rather than implement it
+    — recorded the same way `cleaning` recorded the deviation for its checklist templates.
+
+    **`tenant_id` is on the row, and that is a deliberate departure from `cleaning_photos`**
+    (R1.3, design D2), which has none and is scoped through its parent task. Three separate
+    things follow from the column, and only the first is about convenience: the *model* that
+    maps this entity lands in `tenant_scoped_classes()` and therefore under the global filter
+    of `app/core/db.py`; it lets the isolation test R6.3 demands exist without going through
+    the incident; and paired with the composite foreign key of D2 it makes "the photo's tenant
+    and its incident's tenant agree" an invariant of the schema instead of discipline in the
+    repository.
+
+    The first of those is worth stating precisely, because it is easy to credit to the wrong
+    layer: `tenant_scoped_classes()` resolves from the SQLAlchemy **mapper registry**
+    (`app/core/db.py`), so it is `IncidentPhotoModel` that enters the filter, not this
+    dataclass. This entity is plain Python and no query ever sees it.
+
+    **No `updated_at`, and that is the deviation from `steering/backend.md`'s "toda entidad con
+    `tenant_id`, `created_at`, `updated_at`" — recorded here rather than left to be noticed**,
+    the way `OwnerApproval` below records its own. A photo row is **immutable after insert**:
+    `IncidentPhotoRepository` declares `add` and `list_for_incident` and no `save`, so there is
+    no write path through which an `updated_at` could ever move, and a column that can only
+    ever equal `created_at` invites a reader to trust it as evidence of an edit that cannot
+    happen. The precedent is not new either — `cleaning_photos` carries `created_at` alone for
+    the same reason. If a later change gives a photo an editable field, that change adds the
+    column and this paragraph goes.
+
+    **What is deliberately absent**: no `content_type` and no client file name (R1.5). The
+    served `Content-Type` is derived from the extension inside `storage_key` and from nothing
+    else, and the client's file name never touches the key — so persisting either would create
+    a second, weaker source for a decision that already has one. There is also no
+    `ai_validation_result`: `cleaning` left its equivalent unwritten for want of a port, and
+    this change opens no write path to one.
+
+    `storage_key` is internal and never leaves the application in a response body or header;
+    `IncidentPhotoResponse` enumerates its fields explicitly for that reason (R3.3).
+    """
+
+    id: uuid.UUID
+    tenant_id: uuid.UUID
+    incident_id: uuid.UUID
+    #: The user from the verified token, never a value that travelled with the request.
+    uploaded_by: uuid.UUID
+    stage: IncidentPhotoStage
+    storage_key: str
+    #: Written by the use case rather than defaulted in the database: Postgres `now()` is the
+    #: *transaction* timestamp, so several photos inserted together would share one instant and
+    #: the listing's ordering would fall through to a random `uuid4`. The upload order is what
+    #: R3.1 asks the listing to preserve.
+    created_at: datetime

@@ -87,11 +87,21 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # completing the twelve.
         "cleaning-checklist-templates",
         "cleaning-tasks",
-        # The same change's third route, and the only anonymous one that serves tenant data:
+        # The same change's third route, and the first of the two anonymous ones that serve
+        # tenant data — `incident-photos` below is the second:
         # `GET /cleaning-photos/{photo_id}` (design D7). A prefix of its own because the path
         # is not under `/cleaning-tasks/` — the URL carries the photo id alone, never the
         # storage key (R3.2) and never the task.
         "cleaning-photos",
+        # `incident-photos`: the same shape one module over, and for the same reason — the
+        # anonymous route that serves an incident photo's bytes against an HMAC signature
+        # (R4.1/R4.6). A prefix of its own because the path is not under `/incidents/`: the URL
+        # carries the photo id alone, never the storage key (R3.3) and never the incident.
+        #
+        # The two are built by one factory (`app/integrations/api/signed_media.py`, design D5),
+        # so they are the same surface twice rather than two surfaces — which is why the prose
+        # above governs both and is not repeated.
+        "incident-photos",
         # `maintenance`: the ten incident routes of design D14 plus the owner's answer. Two
         # prefixes because they are two aggregates — one incident can raise two approvals,
         # so the approval has an identity the incident cannot stand in for. There is

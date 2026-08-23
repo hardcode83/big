@@ -61,4 +61,5 @@
 | properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
 | timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
 | tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
-| pricing-web | new, design, tasks, run, review | 291090 | 881652 | 158095921 | 107.0994 | 2026-08-23 | — |
+| incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
+| pricing-web | new, design, tasks, run, review, ship | 291136 | 893758 | 161534132 | 109.3444 | 2026-08-23 | — |

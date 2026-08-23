@@ -324,6 +324,15 @@ export interface paths {
      */
     patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
   };
+  "/api/v1/incident-photos/{photo_id}": {
+    /**
+     * Serve an incident photo by signed URL
+     * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+     *
+     * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+     */
+    get: operations["serve_incident_photo_api_v1_incident_photos__photo_id__get"];
+  };
   "/api/v1/incidents": {
     /**
      * List the tenant's incidents
@@ -398,6 +407,29 @@ export interface paths {
      * The body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.
      */
     post: operations["en_route_incident_api_v1_incidents__incident_id__en_route_post"];
+  };
+  "/api/v1/incidents/{incident_id}/photos": {
+    /**
+     * List the photos of an incident
+     * @description Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.
+     *
+     * `READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.
+     */
+    get: operations["list_incident_photos_api_v1_incidents__incident_id__photos_get"];
+    /**
+     * Upload a photo of the incident
+     * @description `multipart/form-data` with a `stage` of `BEFORE` or `AFTER` and a `file`. PRD §6 grants the technician exactly those two — "subir fotos (antes y después)" — and the enum is closed, so there is no third value and no free-text alternative.
+     *
+     * The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `stage` are allowed on purpose: a technician photographs two angles of one fault.
+     *
+     * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+     *
+     * * `LOCAL` — the URL is a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+     * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip.
+     *
+     * In neither case does `storage_key` appear as a field of the response body (R3.3).
+     */
+    post: operations["upload_incident_photo_api_v1_incidents__incident_id__photos_post"];
   };
   "/api/v1/incidents/{incident_id}/reject": {
     /**
@@ -882,6 +914,12 @@ export interface components {
       file: string;
       /** Photo Type */
       photo_type: string;
+    };
+    /** Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post */
+    Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post: {
+      /** File */
+      file: string;
+      stage: components["schemas"]["IncidentPhotoStage"];
     };
     /** BuildProvenanceResponse */
     BuildProvenanceResponse: {
@@ -1847,6 +1885,87 @@ export interface components {
       /** Total */
       total: number;
     };
+    /**
+     * IncidentPhotoListResponse
+     * @description The photos of one incident, oldest first (R3.1).
+     *
+     * **Unpaginated, like `cleaning`'s.** A photo list is bounded by how many photos a technician
+     * took of one fault, which is single digits; `per_page` exists on the incident *listing*
+     * because that one grows with the tenant's whole history. An envelope with `items` rather than
+     * a bare array so the response can gain a field later without breaking every client.
+     */
+    IncidentPhotoListResponse: {
+      /** Items */
+      items: components["schemas"]["IncidentPhotoResponse"][];
+    };
+    /**
+     * IncidentPhotoResponse
+     * @description One incident photo, and the signed URL that reads its bytes back (R3.3, design D10).
+     *
+     * **Every field is enumerated and the model is built by `from_upload` below — never by
+     * `model_validate` or `from_attributes` over the entity.** That is not style: `IncidentPhoto`
+     * carries `storage_key`, and a dump would publish it. R3.3 forbids the key in any response
+     * body or header, and the only reason this schema can be trusted is that there is no code path
+     * here that serialises a field nobody listed.
+     *
+     * `url` is what replaces it, and what it reveals depends on the tenant's backend:
+     *
+     * * `LOCAL` — a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying the photo's
+     *   id, its expiry and a signature. The internal path is not in it.
+     * * `S3` — a presigned URL minted by the object store itself, so it necessarily contains the
+     *   bucket and the full object key. That is inherent to presigned URLs, is the single named
+     *   exception to rule 5 of `steering/security.md`, and is accepted in writing in
+     *   `sdd/specs/file-storage.md` and ADR 0008.
+     *
+     * In neither case is `storage_key` a **field** of this body, which is what R3.3 governs.
+     */
+    IncidentPhotoResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Incident Id
+       * Format: uuid
+       */
+      incident_id: string;
+      stage: components["schemas"]["IncidentPhotoStage"];
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
+    };
+    /**
+     * IncidentPhotoStage
+     * @description When in the job a photo of an incident was taken (`incident-photos` D3, R1.2).
+     *
+     * `ASSUMPTION`: **the name is invented and the entity is not in the PRD.** PRD §6 grants the
+     * `TECHNICIAN` only "subir fotos (antes y después)", and PRD §7 declares `CleaningPhoto`
+     * (§7.12) but no incident-photo entity at all — §7.13 `Incident` has no photo column. So both
+     * this enum's name and its two members are this project's, derived from that one phrase.
+     *
+     * **Two members, closed, and that is a decision rather than a starting point** (R1.2). A
+     * cleaning photo's kind is `cleaning_photos.photo_type`, a `String(100)`, because the task's
+     * checklist template declares which values are admissible — the template bounds it. An
+     * incident has no template, so a free-text stage coming from the caller would be a **new
+     * free-text sink** under rule 11 of `steering/security.md`, with no screen that ever displays
+     * it and nothing to close the set. The enum is what makes R6.5 true by construction instead of
+     * by review: there is no third value to send and no text field to fill.
+     *
+     * A third stage is a schema migration and a decision, deliberately. That is the cost of
+     * closing the set, and it is the cost worth paying here.
+     * @enum {string}
+     */
+    IncidentPhotoStage: "BEFORE" | "AFTER";
     /**
      * IncidentReportedResponse
      * @description The acknowledgement, and **only** the acknowledgement (R5.3, D15).
@@ -5310,6 +5429,59 @@ export interface operations {
     };
   };
   /**
+   * Serve an incident photo by signed URL
+   * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+   *
+   * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+   */
+  serve_incident_photo_api_v1_incident_photos__photo_id__get: {
+    parameters: {
+      query: {
+        /** @description POSIX expiry the signature covers. */
+        exp: number;
+        /** @description Hex HMAC of the object's key and `exp`. */
+        sig: string;
+      };
+      path: {
+        photo_id: string;
+      };
+    };
+    responses: {
+      /** @description The photo's bytes, with the `Content-Type` derived from the stored object's extension, `X-Content-Type-Options: nosniff`, and a `Cache-Control` of `private, max-age=<what is left of the signature>` so no shared cache keeps the bytes and no browser keeps them past the URL's expiry. */
+      200: {
+        content: {
+          "image/jpeg": unknown;
+          "image/png": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description The signature is missing, wrong, expired, tampered with, or names a photo that does not exist. **All five answer with the same body**, deliberately: telling them apart would make this endpoint an existence oracle for an unauthenticated caller. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The photo's tenant stores objects in `S3`, where the browser fetches them directly from the provider, so there is nothing for this endpoint to serve. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The signature was valid but the object could not be read back. */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's incidents
    * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
    */
@@ -5680,6 +5852,114 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the photos of an incident
+   * @description Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.
+   *
+   * `READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.
+   */
+  list_incident_photos_api_v1_incidents__incident_id__photos_get: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentPhotoListResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a photo of the incident
+   * @description `multipart/form-data` with a `stage` of `BEFORE` or `AFTER` and a `file`. PRD §6 grants the technician exactly those two — "subir fotos (antes y después)" — and the enum is closed, so there is no third value and no free-text alternative.
+   *
+   * The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `stage` are allowed on purpose: a technician photographs two angles of one fault.
+   *
+   * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+   *
+   * * `LOCAL` — the URL is a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+   * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip.
+   *
+   * In neither case does `storage_key` appear as a field of the response body (R3.3).
+   */
+  upload_incident_photo_api_v1_incidents__incident_id__photos_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["IncidentPhotoResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The incident does not accept a photo, with **three distinguishable messages** (design D6): it is already `RESOLVED`/`CANCELLED`; it is waiting for the owner to answer an approval; or it is in a status where the technician's work has not started. Only `IN_PROGRESS` and `WAITING_EXTERNAL_PARTS` accept one. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Either the bytes are not a JPEG, PNG or WebP, or `stage` is not one of `BEFORE`/`AFTER`. The second is answered by FastAPI before the use case runs, and is deliberately **not** a `404`: unlike a cleaning photo's `photo_type`, the admissible stages come from a closed enum rather than from a row, so there is nothing whose existence a `404` could describe (design D11). */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The file store refused the write; no row was persisted. */
+      502: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
