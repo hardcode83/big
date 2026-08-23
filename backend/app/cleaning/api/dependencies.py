@@ -27,6 +27,7 @@ from app.cleaning.application.use_cases import (
     GetChecklistUseCase,
     GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
+    GetPhotoRequirementsUseCase,
     ListChecklistTemplatesUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
@@ -182,6 +183,25 @@ def get_checklist_use_case(session: SessionDep) -> GetChecklistUseCase:
         tasks=SqlAlchemyCleaningTaskRepository(session),
         templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
         completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
+    )
+
+
+def get_photo_requirements_use_case(session: SessionDep) -> GetPhotoRequirementsUseCase:
+    """The sibling of `get_checklist_use_case` above, and its third repository is the
+    difference: the checklist reads completions, this reads which photo types are already
+    uploaded.
+
+    **No new infrastructure.** All three adapters already exist and are already wired
+    elsewhere in this module — in particular `SqlAlchemyCleaningPhotoRepository`, whose
+    `uploaded_photo_types` is the same method the completion path uses
+    (`get_complete_cleaning_task_use_case` above). Sharing the port method rather than adding a
+    fifth one is design D2, and it is what keeps `CleaningPhotoRepository`'s "four methods, and
+    each one has a caller" docstring true.
+    """
+    return GetPhotoRequirementsUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+        photos=SqlAlchemyCleaningPhotoRepository(session),
     )
 
 

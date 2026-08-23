@@ -145,7 +145,42 @@ está en `sdd/specs/cleaning.md`, y la forma exacta de cada petición y respuest
 
 Qué fotos pide una tarea lo decide su plantilla, en el mismo `required_photos` del ejemplo de
 más arriba. Una plantilla sin ninguna foto `required` es legítima: entonces el cierre no exige
-ninguna.
+ninguna. **Y la limpiadora ya no tiene que saberlo de antemano**: hay una ruta que se lo dice,
+y es lo primero que hace la app.
+
+### Preguntar qué fotos pide
+
+```bash
+curl .../api/v1/cleaning-tasks/<task_id>/photo-requirements \
+  -H 'Authorization: Bearer <token de la limpiadora asignada>'
+```
+
+```json
+{"data": [{"photo_type": "kitchen", "label": "Cocina",            "required": true,  "uploaded": true},
+          {"photo_type": "before",  "label": "Antes de empezar",  "required": false, "uploaded": false}]}
+```
+
+Es la lista de botones que pinta la app, uno por categoría. Lo que conviene saber al operarla:
+
+- **Pertenecer a la lista y `required` son dos cosas distintas.** Estar en la lista significa
+  *esta foto se puede subir*; `required: true` significa además *sin ella no se cierra*. La
+  columna se llama `required_photos` y contiene entradas opcionales — el nombre engaña y no se
+  renombra, pero la respuesta no hereda la ambigüedad.
+- **Un `photo_type` que no está en esta lista es exactamente el que la subida responde `404`.**
+  Las dos rutas leen la misma plantilla, así que la relación es una garantía y no una
+  casualidad: no hace falta adivinar identificadores contra un `404`, ni descubrir lo que falta
+  fallando el cierre.
+- El orden es el que escribió quien creó la plantilla, que es el orden en que se hace el
+  trabajo. Es estable entre peticiones.
+- `uploaded` dice si ya hay **al menos una** foto de ese tipo en esta tarea. Es un hecho, no un
+  veredicto: si la tarea se puede cerrar o no lo contesta `/complete` y nadie más.
+- Responde **en cualquier estado** de la tarea, no solo en `IN_PROGRESS`: sirve justamente para
+  saber qué te van a pedir *antes* de empezar. La que sí exige `IN_PROGRESS` es la subida.
+- Una plantilla sin fotos declaradas responde `200` con `{"data": []}` — «esta tarea no pide
+  fotos» es una respuesta, no un error.
+- La lee la limpiadora asignada, y también el manager y el owner del tenant. **No hace falta
+  ningún permiso de plantillas**: la limpiadora sigue sin poder ver el catálogo de plantillas
+  del tenant, que es justo lo que esta ruta evita tener que abrirle.
 
 ### Subir
 
@@ -168,9 +203,10 @@ curl -X POST .../api/v1/cleaning-tasks/<task_id>/photos \
   Firefox no lo pintan.
 - La tarea tiene que estar **`IN_PROGRESS`**: contra cualquier otro estado es `409`. No se
   archiva evidencia de una limpieza que no ha empezado o que ya se cerró.
-- Un `photo_type` que la plantilla no declara es `404`. Una tarea de otro tenant o de otra
-  limpiadora, también `404`, y con el mismo cuerpo que un id inexistente — misma razón que en la
-  tabla de arriba.
+- Un `photo_type` que la plantilla no declara es `404` — y los que declara se leen en
+  [§Preguntar qué fotos pide](#preguntar-qué-fotos-pide), que existe para que este `404` no haya
+  que descubrirlo probando. Una tarea de otro tenant o de otra limpiadora, también `404`, y con
+  el mismo cuerpo que un id inexistente — misma razón que en la tabla de arriba.
 - Tope de tamaño **propio**, `PHOTO_UPLOAD_MAX_BYTES` (10 MB por defecto): por encima es `413`,
   cortado antes de leer el cuerpo entero. Si una foto no cabe, **sube esa variable y no
   `REQUEST_MAX_BYTES`**: el techo general lo comparten todas las rutas JSON, y subirlo por una

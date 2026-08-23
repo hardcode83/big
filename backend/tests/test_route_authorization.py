@@ -376,6 +376,15 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # and it lives here rather than under `/api/v1/incidents` precisely so that module's
         # "no creation route" invariant survives (R1.2).
         "/api/v1/cleaning-tasks/{task_id}/incidents",
+        # `cleaner-photo-requirements` R4.1: `READ_CLEANING_TASKS`, **no new permission**, on the
+        # same reasoning as the context path above. It is the read half of the photo path right
+        # below it — the cleaner is told which categories exist instead of discovering them by
+        # trying identifiers against that route's 404 — and reading three fields of the task's
+        # own template server-side is deliberately not `READ_CLEANING_TEMPLATES` (R4.2), which
+        # would open the tenant's whole template catalogue to resolve one row. The row-level
+        # half is again derived from the persisted role and invisible to this snapshot.
+        # Asserted per role in `tests/cleaning/test_photo_requirements_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/photo-requirements",
         "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
