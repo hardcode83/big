@@ -11,6 +11,15 @@ catches.
 
 `404` for a cross-tenant reference — and for another cleaner's task — is R7.3 and R7.2, not
 a convention: see design D7.
+
+The `409`s of this table do not share one code. `PropertyStateBlocksCleaningError` returns
+`PROPERTY_STATE_CONFLICT` and every other `409` returns `CONFLICT`
+(`cleaning-assign-preconditions` D1): the discriminator is what refused, and the property's
+operational state refusing is not the task's lifecycle refusing. Because the discriminator is
+the exception class and not the route, the new code reaches **every** cleaning operation that
+`PropertyStateMachine` blocks — including `POST /cleaning-tasks/{id}/complete` when the next
+guest is already inside, which no acceptance criterion of that change names (D2, OQ2). Whoever
+builds the `/cleaner` UI maps it there too.
 """
 
 from fastapi import FastAPI, Request
@@ -48,7 +57,10 @@ _MAPPING: tuple[tuple[type[CleaningDomainError], int, ErrorCode], ...] = (
     (PropertyNotFoundError, 404, ErrorCode.NOT_FOUND),
     (ReservationNotFoundError, 404, ErrorCode.NOT_FOUND),
     (InvalidCleaningTransitionError, 409, ErrorCode.CONFLICT),
-    (PropertyStateBlocksCleaningError, 409, ErrorCode.CONFLICT),
+    # 409 like the row above but with a code of its own: what refused is the property's
+    # operational state, not the task's lifecycle, and the two are different things to tell
+    # the caller (`cleaning-assign-preconditions` D1).
+    (PropertyStateBlocksCleaningError, 409, ErrorCode.PROPERTY_STATE_CONFLICT),
     (ChecklistIncompleteError, 409, ErrorCode.CONFLICT),
     # PRD §11's third clause (R4.2). Same status and same shape as the items row above: the
     # missing `photo_type`s ride in the message, which is where `ChecklistIncompleteError` puts

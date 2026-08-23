@@ -63,3 +63,4 @@
 | tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
 | incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
 | pricing-web | new, design, tasks, run, review, ship, archive | 325336 | 973216 | 172901470 | 119.2598 | 2026-08-23 | 2026-08-23 |
+| cleaning-assign-preconditions | new, design, tasks, run, review, ship | 329744 | 1090228 | 288729196 | 164.9394 | 2026-08-22 | — |

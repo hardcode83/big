@@ -108,7 +108,14 @@ def _actor(authenticated: AuthenticatedRequest, ip: str) -> CleaningActor:
     description=(
         "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned "
         "to them; that restriction is derived from the token's role and cannot be widened by "
-        "a query parameter."
+        "a query parameter.\n\n"
+        "Each row carries `assignment_blocked_by`: why that task cannot be assigned right now "
+        "(`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or "
+        "`null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is "
+        "computed when the page is read, so it may be stale by the time a client acts on it; "
+        "the assignment endpoint checks again and its refusal is the authority. `null` also "
+        "covers a property whose state this read could not resolve, so a client must treat it "
+        "as \"go ahead and let the server decide\", never as a guarantee."
     ),
 )
 async def list_cleaning_tasks(
@@ -193,7 +200,14 @@ async def get_cleaning_task(
     description=(
         "Assignment is the only mutation this accepts: the status moves through the lifecycle "
         "endpoints so `PropertyStateMachine` is never bypassed. The person named must hold "
-        "`CLEANER` in the caller's tenant."
+        "`CLEANER` in the caller's tenant.\n\n"
+        "**The first assignment of a task requires its property to be in "
+        "`AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to "
+        "`CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in "
+        "any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from "
+        "the `409` `CONFLICT` returned when it is the task's own status that refuses, so the "
+        "two causes can be told apart without reading the message. Reassigning a task that is "
+        "already `ASSIGNED` does not transition the property and does not depend on its state."
     ),
 )
 async def assign_cleaning_task(

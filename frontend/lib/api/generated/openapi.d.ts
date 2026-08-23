@@ -114,6 +114,8 @@ export interface paths {
     /**
      * List the tenant's cleaning tasks
      * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+     *
+     * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
      */
     get: operations["list_cleaning_tasks_api_v1_cleaning_tasks_get"];
     /**
@@ -131,6 +133,8 @@ export interface paths {
     /**
      * Assign or reassign a cleaning task
      * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+     *
+     * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
      */
     patch: operations["assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch"];
   };
@@ -1048,6 +1052,12 @@ export interface components {
       updated_at: string;
     };
     /**
+     * CleaningAssignmentBlocker
+     * @description Which party refuses to assign a cleaning task: its own status, or its property's state.
+     * @enum {string}
+     */
+    CleaningAssignmentBlocker: "TASK_STATUS" | "PROPERTY_STATE";
+    /**
      * CleaningPhotoListResponse
      * @description The photos of one task (R3.1), each already carrying its signed URL.
      *
@@ -1108,10 +1118,62 @@ export interface components {
       /** Timezone */
       timezone: string;
     };
+    /**
+     * CleaningTaskListItemResponse
+     * @description One row of the cleaning-task listing: a task plus whether it can be assigned now.
+     */
+    CleaningTaskListItemResponse: {
+      /** Accepted At */
+      accepted_at: string | null;
+      /** Assigned Cleaner Id */
+      assigned_cleaner_id: string | null;
+      assignment_blocked_by: components["schemas"]["CleaningAssignmentBlocker"] | null;
+      /**
+       * Checklist Template Id
+       * Format: uuid
+       */
+      checklist_template_id: string;
+      /** Completed At */
+      completed_at: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Scheduled End */
+      scheduled_end: string | null;
+      /** Scheduled Start */
+      scheduled_start: string | null;
+      /** Started At */
+      started_at: string | null;
+      status: components["schemas"]["CleaningTaskStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Validated At */
+      validated_at: string | null;
+      /** Validated By User Id */
+      validated_by_user_id: string | null;
+      validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
       /** Data */
-      data: components["schemas"]["CleaningTaskResponse"][];
+      data: components["schemas"]["CleaningTaskListItemResponse"][];
       /** Page */
       page: number;
       /** Per Page */
@@ -1631,7 +1693,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PROPERTY_STATE_CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -4210,6 +4272,8 @@ export interface operations {
   /**
    * List the tenant's cleaning tasks
    * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+   *
+   * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
    */
   list_cleaning_tasks_api_v1_cleaning_tasks_get: {
     parameters: {
@@ -4324,6 +4388,8 @@ export interface operations {
   /**
    * Assign or reassign a cleaning task
    * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+   *
+   * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
    */
   assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch: {
     parameters: {
