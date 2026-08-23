@@ -39,11 +39,17 @@ el manager asigna        POST /incidents/{id}/assign   → ASSIGNED
                                                         + plazo de SLA según la severidad
         ▼
 el técnico acepta        POST /incidents/{id}/accept   → ACCEPTED  (cancela el plazo)
-empieza                  POST /incidents/{id}/start    → IN_PROGRESS
+                                                       { "eta_at": … } opcional
+el técnico rechaza       POST /incidents/{id}/reject   → CLASSIFIED (cancela el plazo)
+                                                       + notificación al manager
+                                                       borra asignatario, ETA y nota
+va de camino             POST /incidents/{id}/en-route → IN_PROGRESS
+                                                       { "eta_at": … } opcional
 espera piezas            POST /incidents/{id}/wait-parts → WAITING_EXTERNAL_PARTS
 reanuda                  POST /incidents/{id}/resume   → IN_PROGRESS
         ▼
-cierra                   POST /incidents/{id}/resolve  { "final_cost": … }
+cierra                   POST /incidents/{id}/resolve  { "final_cost": …,
+                                                         "materials": … opcional }
         │
         ├── coste cubierto o bajo umbral ──────► RESOLVED, con `resolved_at`
         │                                        propiedad recompuesta
@@ -253,7 +259,7 @@ La pantalla de **lista y detalle** de incidencias del workspace (`/incidents`,
 `/incidents/[id]`) está disponible en modo solo lectura desde `incidents-web` (archivado
 en `changes/archive/`). Cubre la consulta: la manager abre `/incidents`, filtra por `status`
 y `severity`, paginacliente (`lastPage = max(1, ceil(total / perPage))`, porque el endpoint
-no expone `total_pages`), y abre cada fila en `/incidents/[id]`. El detalle pinta los 18
+no expone `total_pages`), y abre cada fila en `/incidents/[id]`. El detalle pinta los 20
 campos de `IncidentResponse` — incluido `description` como **texto plano** (regla 11 de
 `sdd/steering/security.md`: texto libre del huésped o de la limpiadora, nunca HTML) y
 `assigned_technician_id` bajo una sección secundaria etiquetada con su nota de limitación
@@ -261,8 +267,8 @@ campos de `IncidentResponse` — incluido `description` como **texto plano** (re
 
 Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
 
-- Las **once operaciones de mutación** de la incidencia (`classify`, `triage` vía `PATCH`,
-  `assign`, `accept`, `start`, `wait-parts`, `resume`, `resolve`, `cancel`): cada una lleva
+- Las **diez operaciones de mutación** de la incidencia (`classify`, `triage` vía `PATCH`,
+  `assign`, `accept`, `reject`, `en-route`, `wait-parts`, `resume`, `resolve`, `cancel`): cada una lleva
   su permiso (`MANAGE_INCIDENTS` o `EXECUTE_INCIDENTS`), su validación de transición
   (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
   `IncidentBlockedByPendingApprovalError`), su UX de confirmación y su auditoría.

@@ -100,9 +100,9 @@ La cronología de una propiedad se muestra en orden inmutable y en el idioma
 activo. Se puede filtrar por **tipo de evento**, **actor**, **severidad** y
 **rango de fechas**, y se recorre por páginas de 20.
 
-- El desplegable de tipos ofrece siempre **los 46 tipos** del contrato, traducidos
+- El desplegable de tipos ofrece siempre **los 47 tipos** del contrato, traducidos
   — no solo los que trajo la página que estás viendo. Que un tipo no devuelva nada
-  es una respuesta correcta: 19 de los 46 todavía no tienen quien los escriba.
+  es una respuesta correcta: 18 de los 47 todavía no tienen quien los escriba.
 - El **rango de fechas** es inclusivo en los dos extremos y se manda con zona
   horaria (el día local que elegiste, de su principio a su final). Si pones un
   «hasta» anterior al «desde», sale un error junto al campo y **no se pide nada**.
