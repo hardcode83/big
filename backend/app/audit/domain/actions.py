@@ -164,6 +164,12 @@ CLEANING_TASK_STARTED = "CLEANING_TASK_STARTED"
 CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
 CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
 CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
+# `cleaning-stall-blocks-next-stay` R3.3. Its own action for the reason above: rule 9 is only
+# auditable if the operation is findable by `action`, and "who retired this cleaning, and why"
+# is the question this one exists to answer. Always a person — `MANAGE_CLEANING_TASKS` — so
+# rule 9's `SYSTEM` exemption does not reach it, and the `reason` the entity demands travels
+# with the row.
+CLEANING_TASK_CANCELLED = "CLEANING_TASK_CANCELLED"
 
 # Cleaning photos (`cleaning-photos-storage`, R2.7). A person uploads it, so rule 9's actor
 # exemption — which covers only `SYSTEM` — does not reach it. There is no
@@ -352,6 +358,7 @@ ACTIONS = frozenset(
         CLEANING_TASK_STARTED,
         CLEANING_TASK_COMPLETED,
         CLEANING_TASK_VALIDATED,
+        CLEANING_TASK_CANCELLED,
         CLEANING_PHOTO_UPLOADED,
         ACCESS_RECORD_CREATED,
         ACCESS_CODE_REGISTERED,

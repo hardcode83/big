@@ -367,6 +367,9 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks",
         "/api/v1/cleaning-tasks/{task_id}",
         "/api/v1/cleaning-tasks/{task_id}/accept",
+        # `cleaning-stall-blocks-next-stay` R3.1: the exit the cycle lacked, restricted to
+        # `MANAGE_CLEANING_TASKS`. Asserted per role in `tests/cleaning/test_tasks_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/cancel",
         "/api/v1/cleaning-tasks/{task_id}/checklist",
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",

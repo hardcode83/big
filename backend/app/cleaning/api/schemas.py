@@ -31,6 +31,10 @@ from app.cleaning.domain.value_objects import (
     MAX_REQUIRED_PHOTOS,
 )
 
+#: A cancellation reason is a sentence, not a document. Bounded like every other free-text field
+#: here so a request body cannot be used as storage (`cleaning-stall-blocks-next-stay` R3.1).
+MAX_CANCEL_REASON = 500
+
 MAX_PER_PAGE = 100
 # `page` needs a ceiling too, not just `per_page`: the value becomes a SQL OFFSET and a
 # 20-digit page number overflows int8, producing an unhandled driver error instead of a 422
@@ -147,6 +151,21 @@ class ValidateCleaningTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     validation_status: CleaningValidationStatus
+
+
+class CancelCleaningTaskRequest(BaseModel):
+    """`cleaning-stall-blocks-next-stay` R3.1.
+
+    `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+    `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+    exactly what has to be explainable six months later. It is recorded on
+    `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+    admits only real, non-sensitive columns of the entity.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Annotated[str, Field(min_length=1, max_length=MAX_CANCEL_REASON)]
 
 
 class CleaningTaskResponse(BaseModel):

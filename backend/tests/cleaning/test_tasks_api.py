@@ -1166,3 +1166,151 @@ async def test_the_patch_refuses_anything_but_the_assignee(api, users_by_role_a,
     )
 
     assert response.status_code == 422
+
+
+# --- cancellation (`cleaning-stall-blocks-next-stay` R3.1, R3.4) ------------------
+
+
+@pytest.mark.asyncio
+async def test_a_manager_cancels_a_live_task(
+    api, db_session, tenant_a, property_a, users_by_role_a, task_a
+):
+    """R3.1 over HTTP: `MANAGE_CLEANING_TASKS`, a required reason, the task comes back cancelled."""
+    manager = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+
+    response = await api.post(
+        f"{TASKS}/{task_a.id}/cancel",
+        json={"reason": "the cleaner never came back"},
+        headers=manager,
+    )
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["id"] == str(task_a.id)
+    assert body["status"] == CleaningTaskStatus.CANCELLED.value
+    assert audit_actions.CLEANING_TASK_CANCELLED in await _audit_actions_of(
+        db_session, tenant_a.id
+    )
+
+
+@pytest.mark.asyncio
+async def test_cancelling_twice_is_a_conflict_that_writes_nothing(
+    api, db_session, tenant_a, users_by_role_a, task_a
+):
+    """R3.4. The second attempt must not add an audit row either — it did not happen."""
+    manager = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    first = await api.post(
+        f"{TASKS}/{task_a.id}/cancel", json={"reason": "abandoned"}, headers=manager
+    )
+    assert first.status_code == 200, first.text
+    actions_after_first = await _audit_actions_of(db_session, tenant_a.id)
+
+    second = await api.post(
+        f"{TASKS}/{task_a.id}/cancel", json={"reason": "again"}, headers=manager
+    )
+
+    assert second.status_code == 409
+    assert CleaningTaskStatus.CANCELLED.value in second.json()["error"]["message"]
+    assert await _audit_actions_of(db_session, tenant_a.id) == actions_after_first
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "body,expected",
+    [
+        ({}, 422),
+        ({"reason": ""}, 422),
+        ({"reason": None}, 422),
+        # The interesting one, and the reason each case is pinned exactly rather than to
+        # `in (409, 422)`: whitespace passes the schema's `min_length` and is refused one layer
+        # deeper, by the entity. A disjunction would have stayed green if someone deleted the
+        # entity's strip check and let `min_length` carry it alone — which is the drift this case
+        # exists to catch (section-5 QA panel).
+        ({"reason": "   "}, 409),
+    ],
+    ids=["missing", "empty", "null", "whitespace"],
+)
+async def test_a_blank_reason_is_rejected(api, users_by_role_a, task_a, body, expected):
+    """Required and non-blank: an `AuditLog` that says nothing explains nothing."""
+    manager = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+
+    response = await api.post(f"{TASKS}/{task_a.id}/cancel", json=body, headers=manager)
+
+    assert response.status_code == expected, response.text
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_field_in_the_body_is_refused(api, users_by_role_a, task_a):
+    """`extra="forbid"`, like every other request schema in this module."""
+    manager = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+
+    response = await api.post(
+        f"{TASKS}/{task_a.id}/cancel",
+        json={"reason": "abandoned", "status": "COMPLETED"},
+        headers=manager,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.asyncio
+async def test_a_cleaner_cannot_cancel(api, users_by_role_a, cleaner_a, task_a):
+    """R3.1 restricts this to `MANAGE_CLEANING_TASKS`, which a `CLEANER` does not hold.
+
+    A `403` and not a `404`: the permission gate runs before the task is ever resolved, so this
+    says nothing about whether the task exists — which is the same shape every other
+    manage-only route in this module has.
+    """
+    response = await api.post(
+        f"{TASKS}/{task_a.id}/cancel",
+        json={"reason": "not mine to cancel"},
+        headers=auth_header(api, cleaner_a),
+    )
+
+    assert response.status_code == 403
+
+
+@pytest.mark.asyncio
+async def test_cancelling_is_not_anonymous(api, task_a):
+    response = await api.post(
+        f"{TASKS}/{task_a.id}/cancel", json={"reason": "abandoned"}
+    )
+
+    assert response.status_code == 401
+
+
+@pytest.mark.asyncio
+async def test_a_neighbours_task_is_a_404(
+    api, db_session, tenant_b, property_b, template_b, users_by_role_a
+):
+    """The route's 404 shape — and deliberately not the claim that it proves tenant scoping.
+
+    The `api` fixture shares one session that each request marks with its tenant, so
+    `app/core/db.py`'s `with_loader_criteria` net would filter the neighbour's row out even if the
+    repository's own `WHERE tenant_id` were deleted. What this pins is the *response*: a
+    neighbour's task is indistinguishable from one that never existed. The predicate itself is
+    pinned by `tests/cleaning/test_cancel_task.py::test_a_neighbours_task_cannot_be_cancelled`,
+    which runs on the unmarked session — the distinction the section-5 tenancy panel drew.
+    """
+    theirs = await insert_task(db_session, tenant_b, property_b, template_b)
+
+    response = await api.post(
+        f"{TASKS}/{theirs.id}/cancel",
+        json={"reason": "not mine"},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+
+    assert response.status_code == 404
+    await db_session.refresh(theirs)
+    assert theirs.status is CleaningTaskStatus.CREATED
+
+
+@pytest.mark.asyncio
+async def test_an_unknown_task_is_a_404(api, users_by_role_a):
+    response = await api.post(
+        f"{TASKS}/{uuid.uuid4()}/cancel",
+        json={"reason": "abandoned"},
+        headers=auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
+    )
+
+    assert response.status_code == 404

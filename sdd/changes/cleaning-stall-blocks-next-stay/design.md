@@ -34,7 +34,7 @@ leer como enum. Por eso este change **no lleva migración**, ni para estrenar el
 R3 ni para retirar el trigger de R4.
 
 Diagrama del nudo y de la salida:
-[`docs/diagrams/2026-08-23_autohost-limpieza-atascada.svg`](../../../docs/diagrams/2026-08-23_autohost-limpieza-atascada.svg).
+[`docs/diagrams/2026-08-23_autohost-limpieza-atascada.png`](../../../docs/diagrams/2026-08-23_autohost-limpieza-atascada.png).
 
 ## Decisions
 
@@ -304,7 +304,8 @@ inventarle una rama. Es literalmente el argumento de `RejectCleaningTaskUseCase`
 «la propiedad nunca se queda en `AWAITING_CLEANING` sin nada pendiente»), aplicado al revés: la
 tarea pendiente es lo que impide que el sistema declare limpia una vivienda que no lo está.
 
-Dos excepciones, cada una citando un invariante que ya existe y **ninguna** por conveniencia:
+Dos excepciones al reemplazo, cada una citando un invariante que ya existe y **ninguna** por
+conveniencia (más una tercera salida, la del solape, documentada abajo):
 
 1. **Hay una estancia activa en `now`** → no se crea reemplazo. Una limpieza con el huésped dentro
    es imposible por decisión del sistema (`after_cleaning_completion` se niega a cerrarla), así que
@@ -315,6 +316,55 @@ Dos excepciones, cada una citando un invariante que ya existe y **ninguna** por 
    `uq_cleaning_tasks_live_reservation` lo rechazaría con un `IntegrityError`
    (`DuplicateLiveCleaningTaskError`). Y no hace falta: esa tarea viva es la que el resolvedor va a
    contar.
+
+   **Y es inalcanzable mientras ese índice exista, descubierto al implementarlo (sección 5).** El
+   índice es parcial sobre `reservation_id IS NOT NULL AND status IN (vivos)`, así que **no puede
+   haber** una segunda tarea viva con esa reserva mientras la nuestra siga viva —y cancelar exige
+   que lo esté—; después de cancelar hay exactamente cero. La guarda se queda en el caso de uso
+   porque cuesta una consulta y sería lo que salve el día que el índice cambie, pero no es una rama
+   viva y conviene no leerla como si lo fuera. Lo que sí es comprobable es el invariante en el que
+   se apoya, y eso es lo que fija `test_two_live_tasks_cannot_share_a_reservation`. La mitad
+   alcanzable —una tarea **sin** reserva, que no compite por ningún hueco— tiene su propio test.
+
+**Y hay una tercera salida de `_replacement_for`, que no es una excepción de las de arriba**
+(panel de la sección 5, hallazgo de seguridad). `has_active_stay` levanta
+`IncompatibleTransitionContextError` cuando hay **dos estancias activas solapadas** —un estado real
+tras una anomalía de sync del PMS, no una hipótesis—, y esa excepción es un `PropertyDomainError`
+que ningún handler mapea: sin capturarla, una cancelación legítima y autorizada salía como **500**
+justo en la ruta que esta feature existe para desatascar. Se captura y se devuelve `None`, con lo
+que la ejecución llega a `_transition`, cuyo resolvedor se topa con el mismo solape y se niega
+igual — y ahí sí está traducido a `PropertyStateBlocksCleaningError`, el `409` de este módulo.
+
+La indirección se apoya en un invariante que conviene decir: `_transition` reconstruye **las mismas
+reservas** (mismo `candidate_window(now)`, misma vivienda, sin escrituras en medio) y la tarea del
+contexto ya está `CANCELLED`, así que ninguna rama temprana de `_contextual_reservation_cleaning`
+la desvía y la segunda llamada a `_active_reservations` es la misma llamada. O levantan las dos, o
+no levanta ninguna: no hay entrada que produzca una cancelación *exitosa* con destino equivocado.
+Lo fija `test_two_overlapping_stays_answer_a_conflict_not_a_crash`, que además comprueba que no se
+escribe ni una fila.
+
+**Y hereda de `_AnswersAnAssignmentBase`, no de `_TaskLifecycleBase` como decía este decision**
+(corregido al implementar, sección 5). Cancelar no es responder a una asignación, pero **puede
+pasar desde `ASSIGNED`**, donde el plazo de SLA de esa asignación sigue vivo. Sin cerrarlo,
+`check_sla_breaches` escalaría al manager por una tarea que ya no existe — una falsa alarma que
+introduciría este change, porque cancelar desde `ASSIGNED` es nuevo. Se reutiliza
+`_close_assignment_sla`, que ya es idempotente y silencioso cuando no hay nada que cerrar
+(`access-notifications`, proposal R5 criterio 3 —su *spec* ordena la misma regla por títulos y no
+por R-números, así que la referencia es al proposal archivado—), así que el caso corriente
+—cancelar una tarea `IN_PROGRESS`— cuesta un no-op. Lo prueba
+`test_cancelling_an_assigned_task_closes_its_assignment_sla`: sin él la rama que **sí** limpia un
+plazo vivo sólo se ejercitaba como no-op, y un `notification_type` equivocado habría pasado
+inadvertido.
+
+**Dónde acaba el `reason`, que no es donde este design suponía.** *Data & interfaces* dice que
+retirar el trabajo de otra persona es lo que un `AuditLog` tiene que poder explicar, y el primer
+intento lo metió en el diff auditado. `AUDITABLE_FIELDS` lo rechaza, y con razón: sólo admite
+columnas reales y no sensibles de la entidad, y `cleaning_tasks.notes` está fuera a propósito
+porque `audit_logs.changes` es un sumidero de la regla 11. El `reason` va entonces a
+`property_state_transitions.reason`, que es la columna hecha para esto, y la fila de `AuditLog`
+contesta «quién retiró esta tarea y cuándo». **Queda un hueco declarado**: cuando la cancelación no
+mueve la vivienda no hay fila de transición, así que en ese caso el motivo sólo vive en la línea de
+log `cleaning.cancel_without_state_change`. Es el precio de no meter texto libre en `changes`.
 
 Rejected: un `requires_recleaning: bool` en el cuerpo — traslada al cliente una decisión que el
 contexto ya contesta sin ambigüedad, y abre la combinación «recleaning con huésped dentro», que
@@ -433,7 +483,7 @@ reconstruirlo:
 | Tests | `backend/tests/properties/test_state_machine.py` | catálogo cerrado de triggers, matriz esperada y guardas: quitar el retirado, añadir el nuevo |
 | Tests (nuevos) | `backend/tests/properties/test_stalls.py`, `tests/cleaning/test_cancel_task.py`, `tests/properties/test_blocked_transitions_api.py` | ver *Risks* |
 | Docs | `docs/celery-jobs.md`, `docs/cleaning.md`, `docs/properties.md` | cubo `blocked` y su ventana; la cancelación y su evidencia; la colección nueva |
-| Diagramas | `docs/diagrams/2026-08-23_autohost-limpieza-atascada.svg` | nuevo (el nudo y la salida) |
+| Diagramas | `docs/diagrams/2026-08-23_autohost-limpieza-atascada.png` | nuevo (el nudo y la salida). Regenerado a **PNG** con `mmdc` en el panel de la sección 5: el primer intento era `.svg` y `steering/documentation.md` nombra `{YYYY-MM-DD}_{slug}.png`, que es además el formato de los otros siete. Ojo si alguien lo reconvierte: sus etiquetas viven en `foreignObject`, así que `rsvg-convert` produce un diagrama **sin una sola etiqueta** —comprobado— y hay que rerenderizar desde el fuente Mermaid, no convertir |
 | Specs (al archivar) | `sdd/specs/celery-jobs.md`, `timeline-state-machine.md`, `cleaning.md`, `api-contract.md` | R1/R4, D7/D10, D8/D9, ruta nueva |
 
 **`sdd/specs/dashboard-api.md` no queda afectada**: D5 resolvió R2 fuera del dashboard.

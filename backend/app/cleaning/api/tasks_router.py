@@ -34,6 +34,7 @@ from app.cleaning.api.dependencies import (
     get_create_cleaning_task_use_case,
     get_list_cleaning_photos_use_case,
     get_list_cleaning_tasks_use_case,
+    get_cancel_cleaning_task_use_case,
     get_reject_cleaning_task_use_case,
     get_start_cleaning_task_use_case,
     get_upload_cleaning_photo_use_case,
@@ -44,6 +45,7 @@ from app.cleaning.api.schemas import (
     MAX_PER_PAGE,
     MAX_PHOTO_TYPE_LENGTH,
     AssignCleaningTaskRequest,
+    CancelCleaningTaskRequest,
     ChecklistResponse,
     CleaningPhotoListResponse,
     CleaningPhotoResponse,
@@ -66,6 +68,7 @@ from app.cleaning.application.use_cases import (
     GetCleaningTaskUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
+    CancelCleaningTaskUseCase,
     RejectCleaningTaskUseCase,
     StartCleaningTaskUseCase,
     UploadCleaningPhotoUseCase,
@@ -258,6 +261,47 @@ async def reject_cleaning_task(
         now=now_utc(),
     )
     return CleaningTaskResponse.from_domain(replacement)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=CleaningTaskResponse,
+    summary="Retire a cleaning that is not going to be completed",
+    description=(
+        "The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` "
+        "and the property's state is resolved **through `PropertyStateMachine`**, never written "
+        "directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the "
+        "state a blocked check-in never got to write. A replacement task is created unassigned "
+        "unless a guest is in the flat right now — a cleaning nobody could perform would freeze "
+        "the property again. `reason` is required and is recorded on the state transition. The "
+        "partial evidence already gathered, checklist items and photos alike, is kept whole. "
+        "A task that is already terminal answers `409` without writing anything."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorEnvelope,
+            "description": (
+                "The task is not in a live status, or the property's state does not admit the "
+                "cancellation."
+            ),
+        }
+    },
+)
+async def cancel_cleaning_task(
+    authenticated: ManageDep,
+    task_id: uuid.UUID,
+    payload: CancelCleaningTaskRequest,
+    use_case: Annotated[CancelCleaningTaskUseCase, Depends(get_cancel_cleaning_task_use_case)],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningTaskResponse:
+    task = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        reason=payload.reason,
+        now=now_utc(),
+    )
+    return CleaningTaskResponse.from_domain(task)
 
 
 @router.post(

@@ -395,6 +395,23 @@
         "title": "BuildProvenanceResponse",
         "type": "object"
       },
+      "CancelCleaningTaskRequest": {
+        "additionalProperties": false,
+        "description": "`cleaning-stall-blocks-next-stay` R3.1.\n\n`reason` is required and non-blank even though `PropertyStateMachine` does not demand one for\n`CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is\nexactly what has to be explainable six months later. It is recorded on\n`property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which\nadmits only real, non-sensitive columns of the entity.",
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CancelCleaningTaskRequest",
+        "type": "object"
+      },
       "ChangePasswordRequest": {
         "additionalProperties": false,
         "description": "The current password and the replacement.\n\nThe account is the one the access token belongs to; this body cannot name a user.\nA new password that breaks the password policy is answered with `422` saying which\nrule it broke.",
@@ -8489,6 +8506,95 @@
           }
         ],
         "summary": "Accept an assigned cleaning task",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
+    "/api/v1/cleaning-tasks/{task_id}/cancel": {
+      "post": {
+        "description": "The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.",
+        "operationId": "cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelCleaningTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task is not in a live status, or the property's state does not admit the cancellation."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire a cleaning that is not going to be completed",
         "tags": [
           "cleaning"
         ]

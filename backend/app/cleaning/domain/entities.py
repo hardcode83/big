@@ -175,6 +175,41 @@ class CleaningTask:
         self.validation_status = CleaningValidationStatus.PASSED
         self.updated_at = now
 
+    def cancel(self, now: datetime, reason: str) -> None:
+        """Retire a cleaning that is not going to be completed (R3.1, R3.4, design D9).
+
+        The exit the cycle did not have. REDES11 sat in `CLEANING_IN_PROGRESS` from 16 August
+        because the three ways out of that state were `complete()` — which
+        `after_cleaning_completion` refuses while a guest is in the flat — or inventing a HIGH
+        incident to unfreeze it with false data. Neither `reject` nor any other method applied:
+        `reject` is the cleaner's own act and demands `ASSIGNED`/`ACCEPTED`, and this task was
+        `IN_PROGRESS`.
+
+        **Allowed from exactly `LIVE_STATUSES`.** `PENDING_REVIEW` is refused although it is not
+        terminal, and that is a declared divergence from R3.4's word "terminal" rather than an
+        omission: nothing writes it (`complete()` goes straight to `COMPLETED`) and a task that
+        reached it has already resolved the property's state, so there is nothing to unstick.
+
+        **No assignee guard, unlike `accept`/`reject`/`start`/`complete`.** Those are things the
+        cleaner does; this is a manager retiring someone else's task, so there is no `cleaner_id`
+        to match. The authorisation is `MANAGE_CLEANING_TASKS` at the route.
+
+        **`reason` is required even though the machine does not ask for one** —
+        `CLEANING_CANCELLED` is not in `PropertyStateMachine`'s `manual` set. Taking away work
+        another person was doing is exactly what an `AuditLog` has to be able to explain six
+        months later.
+
+        The evidence already gathered is **not** touched: no checklist item and no photo is
+        deleted. Three reasons in D9, and the load-bearing one is that photos are objects in a
+        store no transaction rolls back, so a partial delete leaves orphans on one side or the
+        other depending on where it failed.
+        """
+        self._require_status(set(LIVE_STATUSES), "cancel")
+        if not reason or not reason.strip():
+            raise InvalidCleaningTransitionError("Cancelling a cleaning task requires a reason")
+        self.status = CleaningTaskStatus.CANCELLED
+        self.updated_at = now
+
     def record_manual_validation(
         self, *, validator_user_id: uuid.UUID, status: CleaningValidationStatus, now: datetime
     ) -> None:

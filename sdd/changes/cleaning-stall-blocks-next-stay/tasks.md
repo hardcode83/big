@@ -120,18 +120,18 @@ diagrama nuevo.
   `trigger`, `blocking_state` y `due_since`; el sobre paginado tiene el `total` de desajustes.
   [R2.1, R2.2, R2.3]
 
-## 5. Una limpieza que no puede cerrarse tiene salida
+## 5. Una limpieza que no puede cerrarse tiene salida <!-- panel: PASS 2026-08-23 -->
 
-- [ ] 5.1 `CleaningTask.cancel(now, reason)` en `backend/app/cleaning/domain/entities.py` con
+- [x] 5.1 `CleaningTask.cancel(now, reason)` en `backend/app/cleaning/domain/entities.py` con
   `_require_status(LIVE_STATUSES, "cancel")` → `CleaningTaskStatus.CANCELLED`. Test primero en
   `backend/tests/cleaning/test_entities.py`: cada estado de `LIVE_STATUSES` se cancela; un
   estado terminal y `PENDING_REVIEW` lanzan `InvalidCleaningTransitionError` **con el estado en
   el mensaje** (la divergencia declarada en D9 respecto a la palabra «terminal» de R3.4).
   [R3.1, R3.4]
-- [ ] 5.2 `audit_actions.CLEANING_TASK_CANCELLED` en
+- [x] 5.2 `audit_actions.CLEANING_TASK_CANCELLED` en
   `backend/app/audit/domain/actions.py`: la constante y su alta en el `frozenset` `ACTIONS`,
   que es exhaustivo. [R3.3]
-- [ ] 5.3 `CancelCleaningTaskUseCase` sobre `_TaskLifecycleBase` en
+- [x] 5.3 `CancelCleaningTaskUseCase` sobre `_TaskLifecycleBase` en
   `backend/app/cleaning/application/use_cases.py`, con la plantilla exacta de
   `RejectCleaningTaskUseCase` y este orden en una sola transacción: `task.cancel()` → tarea de
   reemplazo si procede → `self._transition(..., trigger=CLEANING_CANCELLED,
@@ -139,7 +139,7 @@ diagrama nuevo.
   (D8): **no** se crea con una estancia activa en `now`, ni si ya hay otra tarea viva de la
   misma reserva. `NoOperationalStateChangeError` no es error: se cancela la tarea, la vivienda
   no se mueve y queda en el log. [R3.1, R3.2, R3.3]
-- [ ] 5.4 Nuevo `backend/tests/cleaning/test_cancel_task.py` con la cobertura que el design
+- [x] 5.4 Nuevo `backend/tests/cleaning/test_cancel_task.py` con la cobertura que el design
   declara mínima: (a) el caso REDES11 de extremo a extremo — `CLEANING_IN_PROGRESS`, estancia
   del 19→23 corriendo, `cancel` → la vivienda queda en `OCCUPIED_ESTIMATED` y **no** hay tarea
   de reemplazo; (b) sin estancia activa → `AWAITING_CLEANING` **con** reemplazo sin asignar;
@@ -147,7 +147,7 @@ diagrama nuevo.
   (d) `property_state_transitions`, `timeline_events` y `audit_logs` tienen su fila y
   `current_operational_state` no se escribió por fuera de la máquina; (e) la evidencia parcial
   —ítems de checklist y fotos— sigue entera después de cancelar. [R3.2, R3.3, R3.5]
-- [ ] 5.5 `POST /api/v1/cleaning-tasks/{task_id}/cancel` en
+- [x] 5.5 `POST /api/v1/cleaning-tasks/{task_id}/cancel` en
   `backend/app/cleaning/api/tasks_router.py` con `ManageDep` (`MANAGE_CLEANING_TASKS`), cuerpo
   `{"reason": str}` obligatorio y no vacío en `backend/app/cleaning/api/schemas.py`, proveedor
   en `backend/app/cleaning/api/dependencies.py`, respuesta `CleaningTaskResponse`. El `409` de

@@ -19,6 +19,7 @@ propiedad → AWAITING_CLEANING  +  CleaningTask creada   ← una sola transacci
         ▼
 limpiadora acepta        POST /accept
         │  (o rechaza → POST /reject: la tarea queda REJECTED y nace su reemplazo sin asignar)
+        │  (desde cualquier estado vivo el manager puede POST /cancel — §La salida de excepción)
         ▼
 limpiadora inicia        POST /start     → propiedad → CLEANING_IN_PROGRESS
         ▼
@@ -38,6 +39,58 @@ el manager valida        POST /validate   (PASSED | FAILED | WAIVED)
 Ninguna de esas flechas de estado de propiedad la escribe este módulo por su cuenta: todas
 pasan por `PropertyStateMachine`, que es el único sitio donde ocurre una transición
 (`sdd/steering/architecture.md`).
+
+## La salida de excepción: cancelar una limpieza que no va a cerrarse
+
+El ciclo de arriba supone que la limpieza termina. Cuando no va a terminar —la limpiadora no
+volvió, la tarea se creó sobre la vivienda equivocada— hay una salida explícita, añadida por
+`cleaning-stall-blocks-next-stay`:
+
+```bash
+curl -X POST .../api/v1/cleaning-tasks/<id>/cancel \\
+  -H 'Authorization: Bearer <token de manager>' \\
+  -d '{"reason":"la limpiadora no volvio"}'
+```
+
+**Por qué existe.** Sin ella, una limpieza abandonada congelaba la vivienda. El caso medido en
+`dev` el 2026-08-22: REDES11 llevaba en `CLEANING_IN_PROGRESS` desde el 16 con una estancia
+corriendo del 19 al 23, y las tres salidas de ese estado eran cerrar la limpieza —que
+`after_cleaning_completion` **se niega** a hacer con un huesped dentro— o inventarse una
+incidencia `HIGH`, que descongela la vivienda con un dato falso. `POST /reject` no servía: es el
+acto de la limpiadora y exige `ASSIGNED` o `ACCEPTED`.
+
+Lo que hay que saber para operarla:
+
+- **Quién**: `MANAGE_CLEANING_TASKS`, o sea el manager. No la limpiadora, que recibe `403`.
+- **Desde dónde**: cualquier estado vivo (`CREATED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`). Una
+  tarea ya terminal —o en `PENDING_REVIEW`— responde `409` **con el estado en el mensaje**, y no
+  escribe nada.
+- **`reason` es obligatorio** y no puede ir en blanco. Se guarda en
+  `property_state_transitions.reason`, no en el diff auditado: `audit_logs.changes` sólo admite
+  columnas reales y no sensibles de la entidad. La fila de `AuditLog`
+  (`CLEANING_TASK_CANCELLED`) contesta quién y cuándo; la de la transición, por qué.
+- **Dónde acaba la vivienda**: lo decide la máquina de estados con el contexto real, nunca este
+  módulo. Con un huésped dentro queda en `OCCUPIED_ESTIMATED` —el estado que el check-in
+  bloqueado nunca llegó a escribir—; sin estancia activa, en `AWAITING_CLEANING`.
+- **Tarea de reemplazo**: se crea sin asignar (`CREATED`) **salvo** que haya una estancia activa
+  ahora mismo. Con el huésped dentro no se crea, porque nadie podría hacerla y volvería a
+  congelar la vivienda; el calendario ya provee, porque `process_checkouts` crea la limpieza al
+  checkout.
+- **La evidencia parcial se conserva entera**: ni los ítems de checklist marcados ni las fotos
+  subidas se borran. Las fotos son objetos en un almacén que ninguna transacción deshace, así que
+  un borrado a medias dejaría huérfanos de un lado o del otro; y el trabajo que sí se hizo es
+  justo lo que hace falta para decidir si la limpieza se repite. La tarea cancelada sigue
+  consultable con sus ítems y sus fotos por las rutas de siempre.
+- **Si la vivienda no se mueve** —cancelar la única tarea `CREATED` de una que ya estaba en
+  `AWAITING_CLEANING`— no es un error: la tarea se cancela igual y queda su fila de `AuditLog`.
+  En ese caso no hay fila de transición, así que el motivo vive sólo en la línea de log
+  `cleaning.cancel_without_state_change`.
+- **Si la vivienda tiene dos estancias solapadas** activas a la vez, la máquina se niega a
+  resolver y la cancelación responde `409`. Es un dato que hay que arreglar antes, no algo que
+  esta operación pueda decidir por su cuenta.
+
+Y lo que la cancelación **no** hace: no relaja el `409` de `POST /complete` con un huésped
+dentro, que es una garantía y no un defecto.
 
 ## Antes de que nada funcione: la plantilla de checklist
 
