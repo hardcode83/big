@@ -95,6 +95,24 @@ class PropertyStateMachine:
         return frozenset(state for state, candidate in cls._POLICY if candidate is trigger)
 
     @classmethod
+    def destination_states_for(cls, trigger: PropertyStateTrigger) -> frozenset[PropertyOperationalState]:
+        """Where `trigger` can leave a property, derived from the policy above.
+
+        The mirror of `source_states_for`, and derived for the same reason: a hand-kept list
+        would drift from `_POLICY` the first time a row changed, and it would drift silently.
+
+        Added by `cleaning-stall-blocks-next-stay` so stall detection can tell "this flat never
+        made the transition" from "this flat is already where the transition was taking it" —
+        R2.4 needs the second to stop being reported, however the flat got there.
+        """
+        return frozenset(
+            destination
+            for (_, candidate), destinations in cls._POLICY.items()
+            if candidate is trigger
+            for destination in destinations
+        )
+
+    @classmethod
     def is_due(cls, request: PropertyStateChangeRequest) -> bool:
         """Whether the clock says this transition should happen, ignoring whether it may.
 

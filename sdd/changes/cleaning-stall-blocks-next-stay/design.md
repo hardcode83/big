@@ -55,8 +55,44 @@ commit). Es el conjunto de pares `(reservation_id, trigger)` que **ya constan ap
 ```
 is_due(reserva, trigger)
   and estado not in source_states_for(trigger)
+  and estado not in destination_states_for(trigger)
   and (reserva.id, trigger) not in applied
 ```
+
+**La tercera condición se añadió en la verificación 7.5, corriendo el flujo real contra el stack**
+—y es la única de las cuatro que ninguna prueba unitaria habría encontrado—. Cancelar la limpieza
+deja la vivienda en `OCCUPIED_ESTIMATED`, que es exactamente donde `CHECKIN_TIME_REACHED` la
+llevaba, pero escribe una transición `CLEANING_CANCELLED` cuyo `source_entity_id` es **la tarea** y
+sin `reservation_id`. Así que `applied` no la ve, y con sólo las otras tres condiciones la
+colección seguía listando la vivienda que se acababa de arreglar: R2.4 —«deja de mostrarlo sin
+intervención manual»— incumplido en producción con la suite en verde.
+
+Por qué la suite no lo vio: los tests simulaban la resolución escribiendo a mano una fila de
+transición **con** `reservation_id`, que es algo que el escritor real no escribe nunca. El fixture
+y el escritor real guardaban cosas distintas, que es el modo de fallo que ya tiene nombre en este
+proyecto. Los tests están corregidos para escribir lo que escribe la cancelación y nada más.
+
+Estar **en el destino** significa que la exigencia del calendario está satisfecha, llegara la
+vivienda como llegara, y eso es lo que R2.4 pide. `destination_states_for` se deriva de `_POLICY`
+igual que `source_states_for`, y los tres triggers de reloj tienen **un** destino cada uno, fijado
+por `test_every_clock_trigger_has_exactly_one_destination` para que el día que alguno gane un
+segundo destino alguien tenga que decidir qué significa el atajo en vez de que se degrade solo.
+
+**Y va acotada a la reserva, no al trigger** (decidido por Jose tras el panel de la sección 7, que
+lo encontró y lo reprodujo). La primera versión ponía la condición **antes** del bucle de reservas,
+y eso enmascaraba un atasco real: con dos estancias solapadas, si a A se le aplicó el check-in la
+vivienda queda en `OCCUPIED_ESTIMATED`, y el atajo saltaba el trigger entero, así que B —cuyo
+check-in nunca ocurrió— desaparecía del cubo `blocked` y de la colección. El bug que este change
+existe para cerrar, reintroducido para el caso solapado, que D8 llama «un estado real, no una
+hipótesis».
+
+La razón de fondo: `current_operational_state` es **una** columna, así que «está en el destino» es
+un hecho de la **vivienda**, mientras que un atasco es un hecho del par `(reserva, trigger)`. Con
+una sola estancia vencida para ese trigger no hay ambigüedad —y ése es el caso de la cancelación
+que motivó la condición—; con dos o más la columna no puede decir a cuál se refiere, así que el
+atajo se abstiene y cada estancia se juzga por su propia evidencia. Lo fija
+`test_the_destination_shortcut_does_not_mask_a_second_stalled_stay`, y se comprobó por medición
+que la versión izada devolvía `[]` donde la acotada devuelve B.
 
 Las dos primeras condiciones no describen un atasco: describen **todo lo que está aguas abajo
 del trigger**. `is_due` de `CHECKIN_TIME_REACHED` es verdad durante toda la estancia y el de

@@ -52,7 +52,10 @@ diagrama nuevo.
 - [x] 2.2 `backend/app/properties/domain/stalls.py` nuevo: value object
   `BlockedTransition(property_id, reservation_id, trigger, blocking_state, due_since)` y
   `detect(property, reservations, now, checkin_window)`, que combina `is_due(...)` con
-  `state not in PropertyStateMachine.source_states_for(trigger)` —más la pinza de
+  `state not in PropertyStateMachine.source_states_for(trigger)`, más
+  `state not in destination_states_for(trigger)` (añadida en la verificación 7.5: sin ella el
+  desajuste seguía listado después de cancelar, porque la cancelación no registra el trigger de
+  reloj para esa reserva) —más la pinza de
   `opens_checkin_window` para `CHECKIN_WINDOW_OPENED`, enmendada en D2 tras el panel de la
   sección 2, y **más la evidencia `applied`**, enmendada en D1 tras el panel de la sección 3
   porque sin ella la definición reportaba toda la cartera activa—. Sin I/O y sin comparar horas
@@ -159,7 +162,7 @@ diagrama nuevo.
 
 ## 6. Contrato y documentación
 
-- [ ] 6.1 Regenerar las **dos mitades** del contrato. **La rama está en rojo hasta que esto corra**:
+- [x] 6.1 Regenerar las **dos mitades** del contrato. **La rama está en rojo hasta que esto corra**:
   `frontend-api-contract` no está filtrado por rutas, así que corre en cada PR y falla desde que la
   sección 4 estrenó ruta y regeneró sólo la mitad del backend (medido en el panel de la sección 4).
   Se aplaza aquí a propósito —la sección 5 estrena una segunda ruta y habría que rehacerlo— y no se
@@ -169,41 +172,41 @@ diagrama nuevo.
   `sdd/project.md` §Worktree bootstrap (el `cd frontend && npm run api:generate` literal no
   corre aquí). Comprobar que las dos operaciones nuevas aparecen con su esquema de respuesta
   campo a campo y con sus códigos de error declarados. [R2.1, R3.1]
-- [ ] 6.2 `docs/celery-jobs.md`: el cubo `blocked`, que no es `not_eligible` y por qué, y la
+- [x] 6.2 `docs/celery-jobs.md`: el cubo `blocked`, que no es `not_eligible` y por qué, y la
   ventana de detección —la misma `candidate_window` de 30 días atrás y 2 adelante— **con su
   consecuencia dicha en voz alta**: un atasco de más de 30 días deja de aparecer. En el mismo
   fichero, la retirada de `CLEANING_ASSIGNMENT_EXPIRED` y las razones de D10, para que el
   siguiente lector no la reintroduzca como olvido; la constancia en
   `sdd/specs/timeline-state-machine.md` la escribe `/sdd:archive` (ver *Affected specs*).
   [R1.2, R1.4, R4.1, R4.3]
-- [ ] 6.3 `docs/cleaning.md`: la operación de cancelación —quién puede, qué le pasa a la
+- [x] 6.3 `docs/cleaning.md`: la operación de cancelación —quién puede, qué le pasa a la
   vivienda, cuándo se crea tarea de reemplazo y cuándo no— y que la **evidencia parcial se
   conserva entera**, ítems y fotos, con las tres razones de D9. Enlazar la spec, no duplicarla.
   [R3.5]
-- [ ] 6.4 `docs/properties.md`: la colección `GET /api/v1/blocked-transitions` — qué significa
+- [x] 6.4 `docs/properties.md`: la colección `GET /api/v1/blocked-transitions` — qué significa
   cada campo, qué rol la ve, que desaparece sola cuando el atasco se resuelve, y la deuda
   declarada de `list_all` sin paginar en origen **con su palanca escrita** (filtrar por el
   complemento de estados origen por trigger, como hace el job). [R2.1, R2.2, R2.4]
 
-## 7. Verification
+## 7. Verification <!-- panel: PASS 2026-08-23 -->
 
-- [ ] 7.1 Suite completa verde: `docker compose exec backend uv run pytest` desde el worktree,
+- [x] 7.1 Suite completa verde: `docker compose exec backend uv run pytest` desde el worktree,
   con su propio stack levantado (`make up`). Cifras reales, no la salida colapsada de rtk.
-- [ ] 7.2 `backend/tests/test_layering.py`, `test_route_authorization.py`,
+- [x] 7.2 `backend/tests/test_layering.py`, `test_route_authorization.py`,
   `test_openapi_contract.py` y `test_unscoped_reads.py` verdes **sin añadir ninguna entrada a
   sus listas de excepciones**: las dos rutas nuevas declaran su permiso y no son anónimas, así
   que ninguna necesita allowlist.
-- [ ] 7.3 Lint/typecheck con el comando del proyecto. **El proyecto no tiene ese comando** (ni
+- [x] 7.3 Lint/typecheck con el comando del proyecto. **El proyecto no tiene ese comando** (ni
   `ruff` ni `mypy` en el contenedor, ni paso de lint en `.github/workflows/backend-tests.yml`);
   lo verificable y lo que se verifica es **cero `type: ignore` nuevos** en el código del change.
-- [ ] 7.4 Contrato sin deriva: `make openapi` no deja diff y el `openapi.d.ts` regenerado
+- [x] 7.4 Contrato sin deriva: `make openapi` no deja diff y el `openapi.d.ts` regenerado
   tampoco (equivalente de `npm run api:check` según §Worktree bootstrap).
-- [ ] 7.5 Comprobación manual del flujo con el stack del worktree, desde dentro del contenedor
+- [x] 7.5 Comprobación manual del flujo con el stack del worktree, desde dentro del contenedor
   (`docker compose exec backend ...`, porque un worktree no publica puertos): sembrar una
   vivienda en `CLEANING_IN_PROGRESS` con una estancia activa → `GET /api/v1/blocked-transitions`
   la muestra con su trigger y su estado bloqueante → `POST /cleaning-tasks/{id}/cancel` →
   la vivienda queda en `OCCUPIED_ESTIMATED` y la colección vuelve vacía sin tocar nada más.
-- [ ] 7.6 Un tick real del job sobre esa misma vivienda antes de cancelar
+- [x] 7.6 Un tick real del job sobre esa misma vivienda antes de cancelar
   (`check_checkin_windows` / `mark_occupied_estimated`) devuelve `blocked: 1` con
   `candidates: 0` y `not_eligible: 0` — que es literalmente el informe vacío del 2026-08-22
   dejando de estar vacío.

@@ -77,18 +77,98 @@ def test_the_redes11_case_is_one_blocked_transition():
     )
 
 
-def test_a_flat_that_already_checked_in_is_not_a_stall():
-    """The false positive that made `blocked` count the active portfolio (design D1, amended).
+def test_the_destination_shortcut_does_not_mask_a_second_stalled_stay():
+    """The masking the section-7 panel found and reproduced, refused.
 
-    A flat mid-stay is `OCCUPIED_ESTIMATED`, which is *not* a source state of
-    `CHECKIN_TIME_REACHED`, and `is_due` for that trigger stays true for the whole stay. So the
-    first two conditions hold for every correctly occupied flat in the portfolio, every tick.
-    What makes it not a stall is that the transition is already on record for this stay.
+    Two stays are running at once. A's check-in was applied, so the flat sits in
+    `OCCUPIED_ESTIMATED` — the destination of `CHECKIN_TIME_REACHED`. B's check-in never happened
+    and is genuinely stuck. A first version of the destination short-circuit skipped the whole
+    trigger the moment the flat matched the destination, so B vanished from both the job's count
+    and the collection: the very bug this change exists to close, reintroduced for overlapping
+    stays — which D8 calls "un estado real, no una hipotesis".
+
+    The short-circuit is now scoped to the unambiguous case: with two stays due, the property's
+    single state cannot say which one it refers to, so each is judged on its own evidence.
+    """
+    prop = make_property(PropertyOperationalState.OCCUPIED_ESTIMATED)
+    stay_a = make_reservation(prop, date(2026, 8, 19), date(2026, 8, 25))
+    stay_b = make_reservation(prop, date(2026, 8, 20), date(2026, 8, 26))
+
+    found = detect(
+        prop,
+        (stay_a, stay_b),
+        NOW,
+        CHECKIN_WINDOW,
+        already_applied((stay_a, PropertyStateTrigger.CHECKIN_TIME_REACHED)),
+    )
+
+    assert [entry.reservation_id for entry in found] == [stay_b.id]
+    assert found[0].trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED
+
+
+def test_a_flat_already_in_the_triggers_destination_is_not_a_stall():
+    """R2.4, and the bug only the live run of task 7.5 exposed.
+
+    Cancelling a cleaning moves the flat to `OCCUPIED_ESTIMATED` — exactly where
+    `CHECKIN_TIME_REACHED` was taking it — but records a `CLEANING_CANCELLED` transition whose
+    source entity is the *task*, with no `reservation_id`. So the `applied` evidence cannot see
+    it and, with only the first three conditions, the collection kept reporting a flat that had
+    just been fixed. Every unit test missed it because each one simulated the resolution by
+    hand-writing a transition row carrying a `reservation_id`, which the real writer never
+    writes — the fixture and the real writer disagreed.
+
+    Being in the destination means the calendar's demand is satisfied, however the flat got
+    there. That is what R2.4 asks for.
     """
     prop = make_property(PropertyOperationalState.OCCUPIED_ESTIMATED)
     stay = make_reservation(prop, date(2026, 8, 20), date(2026, 8, 25))
 
-    assert PropertyOperationalState.OCCUPIED_ESTIMATED not in PropertyStateMachine.source_states_for(
+    assert PropertyOperationalState.OCCUPIED_ESTIMATED in PropertyStateMachine.destination_states_for(
+        PropertyStateTrigger.CHECKIN_TIME_REACHED
+    )
+    # No evidence at all: the third condition cannot help here, only the fourth.
+    assert detect(prop, (stay,), NOW, CHECKIN_WINDOW, NO_EVIDENCE) == ()
+
+
+def test_a_flat_awaiting_cleaning_after_an_overdue_checkout_is_not_a_stall():
+    """The same short-circuit on the trigger whose due-ness never expires."""
+    prop = make_property(PropertyOperationalState.AWAITING_CLEANING)
+    past = make_reservation(prop, date(2026, 8, 10), date(2026, 8, 14))
+
+    assert PropertyOperationalState.AWAITING_CLEANING in PropertyStateMachine.destination_states_for(
+        PropertyStateTrigger.CHECKOUT_TIME_REACHED
+    )
+    assert detect(prop, (past,), NOW, CHECKIN_WINDOW, NO_EVIDENCE) == ()
+
+
+def test_every_clock_trigger_has_exactly_one_destination():
+    """What makes the destination short-circuit meaningful rather than approximate.
+
+    Each clock trigger leaves a property in exactly one state across all its matrix rows, so
+    "already in the destination" is a single, unambiguous check. If a row ever gives one of them a
+    second destination, this fails and whoever added it has to decide what the short-circuit
+    should mean — rather than it silently becoming a partial test.
+    """
+    for trigger in CLOCK_TRIGGERS:
+        assert len(PropertyStateMachine.destination_states_for(trigger)) == 1, trigger
+
+
+def test_a_recorded_checkin_stops_a_later_blocking_state_being_a_stall():
+    """The evidence condition, on a state that is neither source nor destination.
+
+    `is_due` for `CHECKIN_TIME_REACHED` stays true for the whole stay, and `CLEANING_IN_PROGRESS`
+    is neither a source nor the destination — so the first three conditions all hold and only the
+    evidence separates two very different situations: a flat whose check-in never happened
+    (REDES11, a stall) from one that checked in and later had a cleaning opened mid-stay (not a
+    stall — the calendar got what it asked for).
+    """
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    stay = make_reservation(prop, date(2026, 8, 20), date(2026, 8, 25))
+
+    assert PropertyOperationalState.CLEANING_IN_PROGRESS not in PropertyStateMachine.source_states_for(
+        PropertyStateTrigger.CHECKIN_TIME_REACHED
+    )
+    assert PropertyOperationalState.CLEANING_IN_PROGRESS not in PropertyStateMachine.destination_states_for(
         PropertyStateTrigger.CHECKIN_TIME_REACHED
     )
     assert PropertyStateMachine.is_due(
@@ -105,14 +185,15 @@ def test_a_flat_that_already_checked_in_is_not_a_stall():
     ) == ()
 
 
-def test_a_flat_that_already_checked_out_is_not_a_stall():
-    """The same false positive on the trigger with no upper bound at all.
+def test_a_recorded_checkout_stops_a_later_blocking_state_being_a_stall():
+    """The same, on the trigger whose due-ness never expires.
 
-    `is_due` for `CHECKOUT_TIME_REACHED` is true *forever* after the checkout instant, so a flat
-    sitting correctly in `AWAITING_CLEANING` would be reported on every tick for as long as the
-    30-day window kept its stay in view.
+    `is_due` for `CHECKOUT_TIME_REACHED` is true *forever* after the checkout instant, and
+    `MAINTENANCE_REQUIRED` is neither its source nor its destination — so without the evidence
+    every flat that ever had a checkout and later took a fault would be reported for as long as
+    the 30-day window kept the stay in view.
     """
-    prop = make_property(PropertyOperationalState.AWAITING_CLEANING)
+    prop = make_property(PropertyOperationalState.MAINTENANCE_REQUIRED)
     past = make_reservation(prop, date(2026, 8, 10), date(2026, 8, 14))
 
     assert detect(prop, (past,), NOW, CHECKIN_WINDOW, NO_EVIDENCE) != ()
@@ -305,19 +386,29 @@ def test_every_clock_trigger_materialises_the_bounds_inside_is_due(trigger):
     assert PropertyStateMachine.is_due(_probe(prop, gap, trigger, NOW)) is False
 
 
-def test_no_state_is_a_source_of_every_clock_trigger():
+def test_no_state_skips_the_reservation_loop_of_every_clock_trigger():
     """Why the scope check in `detect` is always reachable.
 
-    `detect` skips a trigger whose source states already contain the flat's state. If some
-    state were a source of **all three**, every loop would `continue` before any reservation
-    was examined, and a foreign reservation would leave as an empty result instead of a
-    `TransitionScopeMismatchError` — rule 1 of `steering/security.md` turned back into the
-    silent under-report this module exists to prevent. Today the three source sets are
-    disjoint; this fails the day a `_POLICY` entry makes one state answer all three, which is
-    when someone needs to look.
+    `detect` skips a trigger's reservation loop when the flat's state is one of that trigger's
+    **source** states. If some state did that for **all three**, no reservation would ever be
+    examined, and a foreign one would leave as an empty result instead of a
+    `TransitionScopeMismatchError` — rule 1 of `steering/security.md` turned back into the silent
+    under-report this module exists to prevent.
+
+    **Asserted over source union destination**, widened after the section-7 panel: the destination
+    short-circuit added a second way to skip a stay. It now lives *inside* the loop, so it can no
+    longer skip the scope check at all — but pinning the union keeps this guard true of the whole
+    skip surface rather than of the half it originally covered. Both reviewers raised it, and the
+    union is what a future `_POLICY` edit could close.
     """
     for state in PropertyOperationalState:
-        answering = [t for t in CLOCK_TRIGGERS if state in PropertyStateMachine.source_states_for(t)]
+        answering = [
+            t
+            for t in CLOCK_TRIGGERS
+            if state
+            in PropertyStateMachine.source_states_for(t)
+            | PropertyStateMachine.destination_states_for(t)
+        ]
         assert len(answering) < len(CLOCK_TRIGGERS), state
 
 

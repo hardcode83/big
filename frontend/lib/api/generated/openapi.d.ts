@@ -89,6 +89,13 @@ export interface paths {
      */
     post: operations["reset_password_api_v1_auth_reset_password_post"];
   };
+  "/api/v1/blocked-transitions": {
+    /**
+     * List the tenant's blocked transitions
+     * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+     */
+    get: operations["list_blocked_transitions_api_v1_blocked_transitions_get"];
+  };
   "/api/v1/cleaning-checklist-templates": {
     /**
      * List the tenant's checklist templates
@@ -140,6 +147,13 @@ export interface paths {
      * @description Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.
      */
     post: operations["accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/cancel": {
+    /**
+     * Retire a cleaning that is not going to be completed
+     * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+     */
+    post: operations["cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post"];
   };
   "/api/v1/cleaning-tasks/{task_id}/checklist": {
     /**
@@ -833,6 +847,61 @@ export interface components {
        */
       technician_id: string;
     };
+    /**
+     * BlockedTransitionPageResponse
+     * @description The pagination envelope of PRD §23, over the stalls rather than over the flats.
+     *
+     * `total` is how many stalls the tenant has, not how many properties were examined — see
+     * `ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot
+     * hide on page 3 of the source.
+     */
+    BlockedTransitionPageResponse: {
+      /** Data */
+      data: components["schemas"]["BlockedTransitionResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * BlockedTransitionResponse
+     * @description One transition the calendar required and the flat's state refused (R2.2).
+     *
+     * `trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same
+     * treatment `dashboard-api` gives `operational_state` ("carries no colour: the colour mapping
+     * belongs to the client"). Translating them here would open a catalogue of strings for a
+     * consumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.
+     *
+     * `due_since` answers "since when", which is the number an operator actually wants: for REDES11,
+     * the 19th of August and not the day somebody happened to look.
+     */
+    BlockedTransitionResponse: {
+      /** Blocking State */
+      blocking_state: string;
+      /**
+       * Due Since
+       * Format: date-time
+       */
+      due_since: string;
+      /** Property Code */
+      property_code: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /**
+       * Reservation Id
+       * Format: uuid
+       */
+      reservation_id: string;
+      /** Trigger */
+      trigger: string;
+    };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
       /**
@@ -853,6 +922,20 @@ export interface components {
       /** App Version */
       app_version: string;
       provenance: components["schemas"]["PrivateProvenanceResponse"] | null;
+    };
+    /**
+     * CancelCleaningTaskRequest
+     * @description `cleaning-stall-blocks-next-stay` R3.1.
+     *
+     * `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+     * `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+     * exactly what has to be explainable six months later. It is recorded on
+     * `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+     * admits only real, non-sensitive columns of the entity.
+     */
+    CancelCleaningTaskRequest: {
+      /** Reason */
+      reason: string;
     };
     /**
      * ChangePasswordRequest
@@ -3807,6 +3890,44 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's blocked transitions
+   * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+   */
+  list_blocked_transitions_api_v1_blocked_transitions_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BlockedTransitionPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's checklist templates
    * @description Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.
    */
@@ -4115,6 +4236,54 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Retire a cleaning that is not going to be completed
+   * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+   */
+  cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is not in a live status, or the property's state does not admit the cancellation. */
+      409: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

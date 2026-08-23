@@ -139,6 +139,14 @@ Acceptance criteria:
    durante 30 días. `report.blocked` acababa siendo el tamaño de la cartera activa y REDES11
    era indistinguible de una vivienda sana.
 
+   *Ampliado en la verificación 7.5.* Hay una cuarta condición, y sólo apareció al correr el flujo
+   real: **el estado tampoco puede ser el destino del trigger, cuando esa es la única estancia
+   vencida para él**. Cancelar la limpieza deja la vivienda donde el check-in la habría dejado, pero
+   sin registrar ese trigger para esa reserva, así que sin esta condición el desajuste seguía
+   listándose después de resolverse —R2.4 incumplido—. La acotación a «única estancia vencida» la
+   añadió el panel de la sección 7: sin ella, dos estancias solapadas hacían que resolver una
+   ocultara el atasco real de la otra.
+
    La tercera condición es la que faltaba, y la evidencia ya existe: `property_state_transitions`
    guarda `reservation_id` y `trigger` en su `metadata`, así que «¿se aplicó ya el check-in de
    *esta* reserva?» es una pregunta contestable sin inventar estado nuevo.

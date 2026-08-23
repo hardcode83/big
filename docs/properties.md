@@ -72,6 +72,52 @@ también aparece en el agregado `GET /api/v1/properties/{id}/dashboard` y en la 
 `GET /api/v1/dashboard/properties`; los tres están documentados en
 [`docs/dashboard.md`](dashboard.md).
 
+## Cuando el calendario quiere mover una vivienda y su estado no lo admite
+
+`GET /api/v1/blocked-transitions` lista los **desajustes**: viviendas a las que el reloj exigió una
+transición que su estado operacional no admite. Lo lee cualquier rol con `READ_PROPERTIES`, o sea
+el manager **y la propietaria** — no expone nada que ella no vea ya en su card del dashboard.
+
+```bash
+curl .../api/v1/blocked-transitions \
+  -H 'Authorization: Bearer <token de manager o propietaria>'
+```
+
+Cada entrada dice qué pasa y desde cuándo:
+
+| Campo | Qué es |
+|---|---|
+| `property_id` / `property_code` | La vivienda, por id y por el código con el que se la reconoce |
+| `reservation_id` | La reserva cuyo instante llegó y no se pudo aplicar |
+| `trigger` | El trigger que no pudo aplicarse (`CHECKIN_WINDOW_OPENED`, `CHECKIN_TIME_REACHED`, `CHECKOUT_TIME_REACHED`), en su literal canónico |
+| `blocking_state` | El estado que lo impide (`CLEANING_IN_PROGRESS`, `MAINTENANCE_REQUIRED`…), también canónico |
+| `due_since` | **Desde cuándo** está vencido, que es el dato que se quiere: para REDES11, el 19 de agosto y no el día en que alguien miró |
+
+`trigger` y `blocking_state` viajan sin prosa a propósito: traducirlos aquí estrenaría un catálogo
+de cadenas para un consumidor que todavía no existe — este change entrega API, no pantalla.
+
+Cuatro cosas que hay que saber al operarla:
+
+- **Se calcula en cada petición y no guarda nada.** Un desajuste desaparece de la lista en cuanto
+  se resuelve —cancelando la limpieza, resolviendo la incidencia— sin que nadie tenga que cerrar
+  nada. No hay fila que quede abierta, y por tanto no hay fila que alguien olvide cerrar.
+- **`total` cuenta desajustes, no viviendas revisadas.** La paginación es del **resultado**: se
+  examina la cartera entera y se paginan los atascos. Paginar la fuente reproduciría el bug
+  original —una vivienda atascada en la página 3 volvería a ser invisible—.
+- **La ventana es la misma de los jobs de reloj**: 30 días atrás y 2 adelante. Un atasco de más de
+  30 días **deja de aparecer** y necesita una transición manual; el detalle está en
+  [`celery-jobs.md`](celery-jobs.md) §Viviendas atascadas.
+- **Una vivienda `OUT_OF_SERVICE` o `BLOCKED_BY_OWNER` con una reserva confirmada cuya hora llegó
+  sí aparece.** Es intencionado —hay una reserva que nadie va a poder cumplir— pero significa que
+  retirar una vivienda sin cancelar sus reservas genera avisos hasta que se cancelen.
+
+**Deuda declarada, con su palanca escrita.** La lectura recorre **todas** las viviendas del tenant
+(`PropertyRepository.list_all`, sin paginar en origen) y detecta sobre cada una. Con dos viviendas
+es irrelevante; con doscientas son dos consultas grandes por petición. La palanca, cuando pese:
+filtrar en la consulta por el **complemento** de los estados origen de cada trigger, que es
+exactamente lo que ya hace el job (`AdvancePropertyStatesUseCase._count_blocked`). Se escribe aquí
+para que se encuentre cuando haga falta, en vez de descubrirse midiendo.
+
 ## La contraseña del wifi entra y no vuelve a salir
 
 Se puede enviar en el alta y en la edición, y se guarda cifrada. **No se puede leer de vuelta por

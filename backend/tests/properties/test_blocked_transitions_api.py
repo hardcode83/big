@@ -276,13 +276,19 @@ async def test_resolving_the_stall_removes_the_entry_without_any_write(
 ) -> None:
     """R2.4, and design D5's reason for persisting nothing: there is no row to forget to close.
 
-    The resolution is simulated the way the machine performs one — the state **and** its
-    `property_state_transitions` row, in the same flush. That is not incidental to the test: rule
-    9 of `steering/security.md` requires that "todo escritor de `current_operational_state`
-    persiste su fila … en la misma transacción", and an earlier version of this test moved only
-    the column. The entry correctly stayed listed, because a state moved without a transition row
-    is precisely the bypass this change's proposal complains about — the collection is right to
-    keep reporting it.
+    **The resolution here writes the transition row the real cancellation writes, and no more.**
+    That matters more than it looks. An earlier version of this test hand-wrote a row carrying a
+    `reservation_id`, which made the `applied` evidence see the check-in as done and the entry
+    disappear — but `CancelCleaningTaskUseCase` writes `source_entity_id=task.id` and **no**
+    `reservation_id`, so production still listed the flat after cancelling it and this test was
+    green over a broken R2.4. The live run of task 7.5 caught it; the fixture and the real writer
+    had stored different things. What actually clears the entry is the flat reaching the trigger's
+    destination, which is the fourth condition in `stalls.detect`.
+
+    Rule 9 of `steering/security.md` is why the row is written at all — "todo escritor de
+    `current_operational_state` persiste su fila … en la misma transacción" — and an even earlier
+    version that moved only the column was correctly still reported, because a state moved without
+    a transition row is the bypass this change's proposal complains about.
     """
     prop = await _stalled_property(db_session, tenant_a)
     stay = await _stay(db_session, prop)
@@ -299,11 +305,14 @@ async def test_resolving_the_stall_removes_the_entry_without_any_write(
             property_id=prop.id,
             from_state=PropertyOperationalState.CLEANING_IN_PROGRESS,
             to_state=PropertyOperationalState.OCCUPIED_ESTIMATED,
-            triggered_by="SYSTEM",
-            metadata_={
-                "trigger": "CHECKIN_TIME_REACHED",
-                "reservation_id": str(stay.id),
-            },
+            # `USER` with its actor, like the real cancellation: rule 9 of `security.md` exempts
+            # only `SYSTEM` from `AuditLog`, so getting the actor wrong here would misrepresent
+            # which rule the row falls under.
+            triggered_by="USER",
+            triggered_by_user_id=users_by_role_a[UserRole.PROPERTY_MANAGER].id,
+            # Exactly what `CancelCleaningTaskUseCase` records: the task as source entity, no
+            # `reservation_id`. Do not add one — that is the divergence that hid the bug.
+            metadata_={"trigger": "CLEANING_CANCELLED", "source_entity_id": str(uuid.uuid4())},
         )
     )
     await db_session.flush()

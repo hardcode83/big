@@ -9,9 +9,11 @@ included. The tick's report was correct and empty of it. **It does not discard t
 never looks at it** — which is why R1 cannot be satisfied by adding a bucket, and why this
 module detects the mismatch *outside* the candidate query.
 
-**Three conditions, and the third is what makes this a stall detector.** A mismatch is
-`PropertyStateMachine.is_due(request)`, `state not in source_states_for(trigger)`, **and** no
-transition already recorded for that `(reservation, trigger)` pair. The first two alone describe
+**Four conditions, and the last two are what make this a stall detector rather than a list of
+everything downstream.** A mismatch is
+`PropertyStateMachine.is_due(request)`, `state not in source_states_for(trigger)`, no transition
+already recorded for that `(reservation, trigger)` pair, **and** not already sitting in
+`destination_states_for(trigger)` with this as the only stay due for it. The first two alone describe
 everything *downstream* of the trigger, not what is stuck: `is_due` for `CHECKIN_TIME_REACHED`
 holds for the whole stay and for `CHECKOUT_TIME_REACHED` forever after the checkout — they answer
 "did that moment arrive", not "is this flat still waiting for it" — while the complement of the
@@ -110,7 +112,26 @@ def detect(
             if (reservation.id, trigger.value) in applied:
                 # This flat already made this transition for this stay, so it is downstream of
                 # the trigger rather than stuck before it. Checked first because it is the
-                # cheapest of the three and the one that rules out the whole healthy portfolio.
+                # cheapest of the four and the one that rules out the whole healthy portfolio.
+                continue
+            if blocking_state in PropertyStateMachine.destination_states_for(
+                trigger
+            ) and _only_stay_due_for(property, reservations, trigger, now):
+                # Already where the trigger was taking it, and only this stay could have put it
+                # there. R2.4 needs this: cancelling a cleaning resolves a stall by moving the
+                # flat to exactly this state **without** recording the clock trigger for the
+                # stay, so `applied` above cannot see it and the collection kept listing a flat
+                # it had just fixed (found by task 7.5, against the live stack).
+                #
+                # **Scoped to the unambiguous case on purpose.** `current_operational_state` is
+                # one column, so "the flat is in the destination" is a fact about the *property*,
+                # while a stall is a fact about a `(stay, trigger)` pair. With two stays due for
+                # the same trigger it cannot say which one it refers to — and a first version
+                # that skipped the whole trigger there masked a genuinely stuck second stay,
+                # reintroducing the bug this change exists to close. The section-7 panel found it
+                # and reproduced it. With one stay due there is no ambiguity, which is the
+                # cancellation case; with more, this falls through and each stay is judged on its
+                # own evidence.
                 continue
             # `is_due` FIRST, and the order is a tenant-isolation guarantee rather than a
             # preference. It runs `_validate_request`, which is what raises
@@ -152,6 +173,26 @@ def detect(
                 )
             )
     return tuple(found)
+
+
+def _only_stay_due_for(
+    property: Property,
+    reservations: tuple[Reservation, ...],
+    trigger: PropertyStateTrigger,
+    now: datetime,
+) -> bool:
+    """Whether exactly one of `reservations` is due for `trigger` at `now`.
+
+    What makes "the flat is already in the destination" attributable to a particular stay. Asks
+    the machine, like everything else here — no second opinion about due-ness.
+    """
+    due = 0
+    for reservation in reservations:
+        if PropertyStateMachine.is_due(_probe(property, reservation, trigger, now)):
+            due += 1
+            if due > 1:
+                return False
+    return due == 1
 
 
 def _due_since(

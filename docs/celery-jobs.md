@@ -188,6 +188,31 @@ las líneas hermanas `scheduler.unresolvable_reservation_time` y
 intencionado —hay una reserva que nadie va a poder cumplir— pero significa que retirar una
 vivienda de circulación **sin cancelar sus reservas** genera avisos hasta que se cancelen.
 
+## Un trigger que se retiró: `CLEANING_ASSIGNMENT_EXPIRED`
+
+Existía en el enum, tenía su fila en la matriz (`CLEANING_SCHEDULED → AWAITING_CLEANING`) y su
+guarda de estados esperados… y **nadie lo emitía**: no estaba en `CADENCES`, no estaba en
+`DAILY_JOBS` y ningún caso de uso lo construía. La única caducidad que el ciclo de limpieza tenía
+escrita nunca corrió. `cleaning-stall-blocks-next-stay` lo retiró, y conviene que quede escrito
+**por qué**, para que el siguiente lector no lo reintroduzca como si fuera un olvido:
+
+1. **La necesidad operativa ya está cubierta.** Una asignación sin respuesta escala al manager por
+   el SLA de `check_sla_breaches`, con el plazo de `TenantConfig.sla_medium_minutes`. El trigger no
+   añadía un aviso: añadía una **desasignación automática**.
+2. **Y esa desasignación es política operativa nueva**, que el change `cleaning` dejó fuera de
+   alcance a propósito. Quitarle la tarea a una limpiadora que está a punto de aceptar es una
+   decisión de producto, no la reparación de un trigger huérfano.
+3. **Su guarda ya era incoherente con su nombre**: aceptaba `{ASSIGNED, ACCEPTED}`, y una tarea
+   `ACCEPTED` es precisamente una asignación **respondida**.
+4. **Hay una salida humana y auditada** que hace el trabajo que el trigger intentaba automatizar:
+   un manager con `MANAGE_CLEANING_TASKS` cancela la tarea, con motivo, `AuditLog` y
+   `TimelineEvent` (ver [`cleaning.md`](cleaning.md) §La salida de excepción).
+
+Retirarlo no costó migración: `PropertyStateTrigger` no es columna de ninguna tabla —viaja como
+texto dentro del JSON de `metadata`— y nada lo vuelve a leer como enum, lo cual está fijado por un
+test que recorre `app/` entero. Si alguna vez gana su política, se reintroduce **con su emisor en
+el mismo commit**, que es la única forma en que debió existir.
+
 ## Limitaciones conocidas
 
 **Horas locales imposibles.** Una reserva cuya hora de entrada o salida no existe en la zona
