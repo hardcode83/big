@@ -23,6 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field, model_validator
 
 from app.integrations.domain.enums import PMSProvider
 from app.properties.application.property_admin import PropertyState
+from app.properties.application.use_cases import BlockedTransitionRow
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import PropertyOperationalState, PropertyStatus
 from app.properties.domain.repositories import PATCHABLE_PROPERTY_FIELDS
@@ -397,6 +398,64 @@ class PropertyPageResponse(BaseModel):
     ) -> "PropertyPageResponse":
         return cls(
             data=[PropertyListItemResponse.from_domain(item) for item in properties],
+            total=total,
+            page=page,
+            per_page=per_page,
+            total_pages=(total + per_page - 1) // per_page if per_page else 0,
+        )
+
+
+class BlockedTransitionResponse(BaseModel):
+    """One transition the calendar required and the flat's state refused (R2.2).
+
+    `trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same
+    treatment `dashboard-api` gives `operational_state` ("carries no colour: the colour mapping
+    belongs to the client"). Translating them here would open a catalogue of strings for a
+    consumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.
+
+    `due_since` answers "since when", which is the number an operator actually wants: for REDES11,
+    the 19th of August and not the day somebody happened to look.
+    """
+
+    property_id: uuid.UUID
+    property_code: str
+    reservation_id: uuid.UUID
+    trigger: str
+    blocking_state: str
+    due_since: datetime
+
+    @classmethod
+    def from_row(cls, row: BlockedTransitionRow) -> "BlockedTransitionResponse":
+        return cls(
+            property_id=row.mismatch.property_id,
+            property_code=row.property_code,
+            reservation_id=row.mismatch.reservation_id,
+            trigger=row.mismatch.trigger.value,
+            blocking_state=row.mismatch.blocking_state.value,
+            due_since=row.mismatch.due_since,
+        )
+
+
+class BlockedTransitionPageResponse(BaseModel):
+    """The pagination envelope of PRD §23, over the stalls rather than over the flats.
+
+    `total` is how many stalls the tenant has, not how many properties were examined — see
+    `ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot
+    hide on page 3 of the source.
+    """
+
+    data: list[BlockedTransitionResponse]
+    total: int
+    page: int
+    per_page: int
+    total_pages: int
+
+    @classmethod
+    def build(
+        cls, rows: tuple[BlockedTransitionRow, ...], *, total: int, page: int, per_page: int
+    ) -> "BlockedTransitionPageResponse":
+        return cls(
+            data=[BlockedTransitionResponse.from_row(row) for row in rows],
             total=total,
             page=page,
             per_page=per_page,

@@ -19,6 +19,7 @@ from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.application.use_cases import (
     AcceptCleaningTaskUseCase,
     AssignCleaningTaskUseCase,
+    CancelCleaningTaskUseCase,
     CompleteChecklistItemUseCase,
     CompleteCleaningTaskUseCase,
     CreateChecklistTemplateUseCase,
@@ -137,6 +138,16 @@ def get_accept_cleaning_task_use_case(session: SessionDep) -> AcceptCleaningTask
 
 def get_reject_cleaning_task_use_case(session: SessionDep) -> RejectCleaningTaskUseCase:
     return RejectCleaningTaskUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        **_lifecycle_kwargs(session),
+    )
+
+
+def get_cancel_cleaning_task_use_case(session: SessionDep) -> CancelCleaningTaskUseCase:
+    """Takes the notification port for the same reason `reject` does: cancelling a task that was
+    only `ASSIGNED` has to close its assignment SLA, or the manager is escalated about a task that
+    no longer exists (design D8, corrected in section 5)."""
+    return CancelCleaningTaskUseCase(
         notifications=SqlAlchemyNotificationLogRepository(session),
         **_lifecycle_kwargs(session),
     )

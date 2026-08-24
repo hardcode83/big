@@ -88,7 +88,7 @@ from app.integrations.domain.storage import (
 )
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
-from app.properties.domain.clock_triggers import candidate_window
+from app.properties.domain.clock_triggers import candidate_window, has_active_stay
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import StateTransitionTriggeredBy
 from app.properties.domain.exceptions import (
@@ -569,7 +569,16 @@ class _TaskTransitionMixin:
         actor: CleaningActor,
         now: datetime,
         with_reservations: bool = False,
+        extra_tasks: tuple[CleaningTask, ...] = (),
+        reason: str | None = None,
     ) -> None:
+        """`extra_tasks` joins `task` in the machine's context.
+
+        Added by `cleaning-stall-blocks-next-stay` (design D8) for the cancellation, whose
+        replacement task has to be visible to `after_cleaning_cancellation` — the resolver counts
+        live tasks first, so a replacement outside the context would let the flat be resolved as
+        if nothing were pending.
+        """
         property = await self._properties.get(tenant_id, task.property_id)
         if property is None:
             raise PropertyNotFoundError()
@@ -589,7 +598,7 @@ class _TaskTransitionMixin:
             property=property,
             trigger=trigger,
             context=PropertyTransitionContext(
-                cleaning_tasks=(task,), reservations=reservations
+                cleaning_tasks=(task, *extra_tasks), reservations=reservations
             ),
             actor=TransitionActor(
                 triggered_by=StateTransitionTriggeredBy.USER, user_id=actor.user_id
@@ -599,6 +608,7 @@ class _TaskTransitionMixin:
                 transition_id=uuid.uuid4(), timeline_event_id=uuid.uuid4()
             ),
             source_entity_id=task.id,
+            reason=reason,
             correlation_id=str(uuid.uuid4()),
         )
         try:
@@ -644,7 +654,7 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
 
 
 class _AnswersAnAssignmentBase(_TaskLifecycleBase):
-    """The two operations that answer an assignment, and therefore close its SLA.
+    """The operations that must close an assignment's SLA when they run.
 
     Added by `access-notifications` (its R5, design D7) to pay a debt this module recorded
     when it shipped: `cleaning`'s own R6.4 asked for the deadline to be closed on an answer
@@ -656,9 +666,14 @@ class _AnswersAnAssignmentBase(_TaskLifecycleBase):
     a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
     four hours and escalate to the manager for a task that was answered immediately.
 
-    Only two use cases inherit this, not the six of `_TaskLifecycleBase`: starting,
-    completing and validating happen *after* an answer, so the deadline is already closed by
-    then, and giving them the port would be handing out a write nobody needs.
+    Three use cases inherit this, not the six of `_TaskLifecycleBase`: starting, completing
+    and validating happen *after* an answer, so the deadline is already closed by then, and
+    giving them the port would be handing out a write nobody needs.
+
+    Accepting and rejecting *are* answers. Cancelling is not — it is a manager withdrawing the
+    task (`cleaning-stall-blocks-next-stay`, design D8) — and it inherits anyway because it can
+    fire from `ASSIGNED`, where that assignment's deadline is still live: without closing it,
+    `check_sla_breaches` would escalate a task that no longer exists.
     """
 
     def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
@@ -770,6 +785,165 @@ class RejectCleaningTaskUseCase(_AnswersAnAssignmentBase):
         await self._uow.commit()
         return replacement
 
+
+
+
+class CancelCleaningTaskUseCase(_AnswersAnAssignmentBase):
+    """Retire a cleaning that is not going to be completed (R3.1-R3.3, design D7, D8).
+
+    The operation the cycle was missing. REDES11 sat in `CLEANING_IN_PROGRESS` from 16 August
+    with a stay running from the 19th: `complete()` is refused while a guest is in the flat,
+    `reject` is the cleaner's own act and needs `ASSIGNED`/`ACCEPTED`, and the only door left
+    open was perverse — a HIGH incident moves the flat to `MAINTENANCE_REQUIRED` and unfreezes
+    it with a lie. This is the honest door, and it goes through the machine like every other
+    (R3.2): the column is never written directly.
+
+    Built on `_AnswersAnAssignmentBase` rather than `_TaskLifecycleBase`, which is a **departure
+    from D8's letter**: cancellation is not an answer to an assignment, but it can happen *from*
+    `ASSIGNED`, where the assignment's SLA deadline is still live. Left open, `check_sla_breaches`
+    would escalate to a manager about a task that no longer exists — a false alarm this change
+    would have introduced, since cancelling from `ASSIGNED` is new. Closing it reuses
+    `_close_assignment_sla`, which is already idempotent and silent when there is nothing to
+    clear (`access-notifications` proposal R5, criterion 3 — its *spec* organises the same rule
+    under section titles rather than R-numbers, so follow the archived proposal), so the ordinary
+    case of cancelling an `IN_PROGRESS` task costs one no-op.
+    """
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        reason: str,
+        now: datetime,
+    ) -> CleaningTask:
+        task = await self._load_task(tenant_id, task_id, actor)
+        previous = task.status
+        task.cancel(now, reason=reason)
+        await self._tasks.save(tenant_id, task)
+        await self._close_assignment_sla(tenant_id, task)
+
+        replacement = await self._replacement_for(tenant_id, task, now)
+        if replacement is not None:
+            await self._tasks.add(tenant_id, replacement)
+
+        try:
+            await self._transition(
+                tenant_id=tenant_id,
+                task=task,
+                trigger=PropertyStateTrigger.CLEANING_CANCELLED,
+                actor=actor,
+                now=now,
+                with_reservations=True,
+                extra_tasks=(replacement,) if replacement is not None else (),
+                # `property_state_transitions.reason` is the column made for this. It cannot go
+                # into `audit_logs.changes`: `AUDITABLE_FIELDS` admits only real, non-sensitive
+                # columns of the entity, and `cleaning_tasks.notes` is excluded there on purpose
+                # because that JSONB is a rule-11 sink. So the audit row answers "who retired
+                # this task, and when", and the transition row answers "why".
+                reason=reason,
+            )
+        except NoOperationalStateChangeError:
+            # Not an error (design D8): cancelling the only `CREATED` task of a flat that is
+            # already `AWAITING_CLEANING` leaves it exactly where it is. The task is still
+            # cancelled and the `AuditLog` row below still explains why — the same call
+            # `_fire_cleaner_assigned` already makes for the same reason.
+            logger.info(
+                "cleaning.cancel_without_state_change",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "property_id": str(task.property_id),
+                    # `reason` is here because this line **is** the declared fallback for it: with
+                    # no state change there is no `property_state_transitions` row to carry it, and
+                    # `audit_logs.changes` cannot (rule 11). The section-5 panel caught that D8
+                    # cited this log as the mitigation while the payload omitted the one field
+                    # that made it one.
+                    "reason": reason,
+                },
+            )
+
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=audit_actions.CLEANING_TASK_CANCELLED,
+            task_id=task.id,
+            actor=actor,
+            changes=ChangeSet(audit_actions.ENTITY_CLEANING_TASK).diff(
+                "status", previous.value, task.status.value
+            ),
+            now=now,
+        )
+        await self._uow.commit()
+        return task
+
+    async def _replacement_for(
+        self, tenant_id: uuid.UUID, task: CleaningTask, now: datetime
+    ) -> CleaningTask | None:
+        """The unassigned task that keeps the flat's state honest, or `None` (design D8).
+
+        Without one, cancelling the last live cleaning of a dirty flat resolves it to
+        `VACANT_READY` — a lie about a flat nobody has cleaned, against principle 1 of
+        `product.md`. It is `RejectCleaningTaskUseCase`'s argument applied in reverse: there the
+        replacement frees the slot, here it is what stops the system declaring the work done.
+
+        Two exceptions, each citing an invariant that already exists:
+
+        1. **A guest is in the flat at `now`.** A cleaning with the guest inside is impossible by
+           the system's own decision (`after_cleaning_completion` refuses to close one), so the
+           replacement would be an obligation nobody can discharge — and worse, it would freeze
+           the flat in `AWAITING_CLEANING` again, undoing this change. The calendar already
+           provides: `process_checkouts` creates the cleaning at checkout.
+        2. **Another live task already covers this reservation.** `uq_cleaning_tasks_live_reservation`
+           would reject a second one with an `IntegrityError`, and it is not needed anyway — that
+           task is the one the resolver will count.
+        """
+        property = await self._properties.get(tenant_id, task.property_id)
+        if property is None:
+            raise PropertyNotFoundError()
+
+        date_from, date_to = candidate_window(now)
+        reservations = tuple(
+            await self._reservations.list_for_properties(
+                tenant_id, [property.id], date_from, date_to
+            )
+        )
+        try:
+            guest_inside = has_active_stay(property, reservations, now)
+        except IncompatibleTransitionContextError:
+            # Overlapping active stays — a real data state, not a hypothetical, and the resolver's
+            # own verdict rather than ours to second-guess. Left uncaught it escaped as a `500`,
+            # because `IncompatibleTransitionContextError` is a `PropertyDomainError` and no
+            # handler maps it (found by the section-5 security panel). Skipping the replacement
+            # lets `_transition` reach the same resolver, which refuses for the same reason and is
+            # translated there into this module's `409` — the shape every other resolver caller
+            # here already produces. Nothing is committed, so nothing is cancelled either.
+            return None
+        if guest_inside:
+            return None
+
+        if task.reservation_id is not None:
+            live = await self._tasks.list_live_for_reservation(tenant_id, task.reservation_id)
+            # `live` is always empty here, and that is worth stating: by now the cancelled task
+            # is persisted as `CANCELLED` and excluded by `LIVE_STATUSES`, and
+            # `uq_cleaning_tasks_live_reservation` forbids a second live task on that reservation.
+            # So neither this comparison nor the `return None` below is reachable while the index
+            # holds (D8) — the lookup runs and is covered, the branch cannot be, and the QA panel
+            # of section 5 confirmed by mutation that inverting the comparison changes nothing.
+            if any(other.id != task.id for other in live):
+                return None
+
+        return CleaningTask(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            property_id=task.property_id,
+            checklist_template_id=task.checklist_template_id,
+            created_at=now,
+            updated_at=now,
+            reservation_id=task.reservation_id,
+            scheduled_start=task.scheduled_start,
+            scheduled_end=task.scheduled_end,
+        )
 
 class StartCleaningTaskUseCase(_TaskLifecycleBase):
     """R3.6 — the cleaner begins, and the property enters `CLEANING_IN_PROGRESS`."""

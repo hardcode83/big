@@ -370,6 +370,34 @@ class PropertyStateTransitionRepository(Protocol):
         """
         ...
 
+    async def applied_clock_triggers(
+        self, tenant_id: uuid.UUID, reservation_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, str]]:
+        """Which `(reservation_id, trigger)` pairs already have a transition recorded
+        (`cleaning-stall-blocks-next-stay` R1.1, design D1 as amended).
+
+        The evidence that separates "this flat never advanced" from "this flat advanced and is
+        now further along". Without it, stall detection reported every flat downstream of a
+        trigger: `is_due` for `CHECKIN_TIME_REACHED` holds for the whole stay and for
+        `CHECKOUT_TIME_REACHED` forever after checkout, so "the hour came and this flat is not
+        at the gate" is true of every flat that passed through the gate correctly.
+
+        **The trigger comes back as the stored text, not as `PropertyStateTrigger`.** Deliberate:
+        `metadata` is JSON written by `PropertyStateMachine.evaluate`, and rebuilding the enum
+        from it is the one read path that retiring a member could break — the thing
+        `test_no_read_path_rebuilds_a_trigger_from_stored_data` exists to forbid. Callers compare
+        against `trigger.value`.
+
+        Keyed on the reservation rather than the property because that is the question: a flat
+        with two stays has applied the check-in of one and not the other. `reservation_ids`
+        bounds the read to the stays the caller already loaded, so there is no unbounded scan —
+        an empty collection returns an empty set without querying.
+
+        A **reader**, and the port's docstring already settled that readers are allowed here:
+        what it refuses is `save`, `update` and `delete`.
+        """
+        ...
+
     async def last_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID
     ) -> PropertyStateTransition | None:

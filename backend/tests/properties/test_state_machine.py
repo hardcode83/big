@@ -1,7 +1,9 @@
+import ast
 import copy
 import uuid
 from dataclasses import replace
 from datetime import date, datetime, time, timezone
+from pathlib import Path
 
 import pytest
 
@@ -76,12 +78,96 @@ def test_property_state_trigger_catalog_is_closed() -> None:
     assert [member.value for member in PropertyStateTrigger] == [
         "CHECKIN_WINDOW_OPENED", "CHECKIN_TIME_REACHED", "CHECKOUT_TIME_REACHED",
         "RESERVATION_CANCELLED_BEFORE_CHECKIN", "CLEANER_ASSIGNED", "CLEANER_REJECTED",
-        "CLEANING_ASSIGNMENT_EXPIRED", "CLEANING_STARTED", "CLEANING_COMPLETED",
+        "CLEANING_STARTED", "CLEANING_COMPLETED", "CLEANING_CANCELLED",
         "INCIDENT_HIGH", "INCIDENT_CRITICAL", "INCIDENT_RESOLVED", "OWNER_BLOCKED",
         "PROPERTY_MARKED_OUT_OF_SERVICE", "PROPERTY_REACTIVATED", "OWNER_MANAGER_UNBLOCKED",
     ]
     with pytest.raises(ValueError):
         PropertyStateTrigger("DOOR_OPENED")
+
+
+APP_ROOT = Path(__file__).resolve().parents[2] / "app"
+
+
+def _is_the_enum(node: ast.expr) -> bool:
+    """Whether `node` names the enum class itself, bare or qualified.
+
+    Deliberately not a walk of the subtree: `getattr(PropertyStateTrigger.CLEANING_CANCELLED,
+    "value")` reads an attribute off a member that is *already* concrete, so it reconstructs
+    nothing and must not be flagged. Only the class itself — `PropertyStateTrigger` or
+    `some_module.PropertyStateTrigger` — is a lookup root.
+    """
+    if isinstance(node, ast.Name):
+        return node.id == "PropertyStateTrigger"
+    return isinstance(node, ast.Attribute) and node.attr == "PropertyStateTrigger"
+
+
+def _trigger_constructions_from_data() -> list[str]:
+    """Every place production code could turn a value back into a `PropertyStateTrigger`.
+
+    AST and not a grep: the name appears in dozens of comparisons and annotations, and only
+    a lookup reconstructs a member from data.
+
+    Four shapes, not one. The first two are the obvious ones — `PropertyStateTrigger(value)`
+    and `PropertyStateTrigger[value]`. The other two were added after the section 1 panel
+    pointed out that the narrow version had a blind spot: `getattr(PropertyStateTrigger, x)`
+    hides behind a `Call` whose func is `getattr`, and `PropertyStateTrigger.__members__[x]`
+    behind a `Subscript` whose value is an `Attribute` named `__members__`. Neither exists
+    in the codebase; the point is that if one appeared, this test would have to see it —
+    otherwise the mitigation D10 relies on would pass while the risk was live.
+    """
+    lookup_attributes = {"__members__", "_value2member_map_", "_member_map_"}
+    found = []
+    for module in sorted(APP_ROOT.glob("**/*.py")):
+        tree = ast.parse(module.read_text())
+        for node in ast.walk(tree):
+            target = None
+            if isinstance(node, ast.Call):
+                target = node.func
+            elif isinstance(node, ast.Subscript):
+                target = node.value
+            if target is None:
+                continue
+            name = target.attr if isinstance(target, ast.Attribute) else getattr(target, "id", None)
+            hit = name == "PropertyStateTrigger"
+            if not hit and name == "getattr" and isinstance(node, ast.Call) and node.args:
+                hit = _is_the_enum(node.args[0])
+            if not hit and name in lookup_attributes and isinstance(target, ast.Attribute):
+                hit = _is_the_enum(target.value)
+            if hit:
+                found.append(f"{module.relative_to(APP_ROOT)}:{node.lineno}")
+    return found
+
+
+def test_no_read_path_rebuilds_a_trigger_from_stored_data() -> None:
+    """What makes retiring a member of this enum safe (design D10, `Risks`).
+
+    `CLEANING_ASSIGNMENT_EXPIRED` left the catalog above, and rows written before that
+    still carry the string in `property_state_transitions.metadata` and
+    `timeline_events.metadata`. They break nothing only while no read path feeds that text
+    back into the enum — `PropertyStateTrigger("CLEANING_ASSIGNMENT_EXPIRED")` would raise
+    `ValueError`. Without this test that is an assertion in a document, not a property of
+    the code.
+    """
+    assert _trigger_constructions_from_data() == []
+
+
+def test_the_trigger_is_persisted_as_plain_text() -> None:
+    prop = make_property(PropertyOperationalState.AWAITING_CHECKIN)
+    reservation = make_reservation(prop)
+    result = PropertyStateMachine.evaluate(
+        make_request(
+            prop,
+            PropertyStateTrigger.CHECKIN_TIME_REACHED,
+            context=PropertyTransitionContext(reservations=(reservation,)),
+            source=reservation.id,
+            reservation_id=reservation.id,
+            instant=datetime(2026, 1, 1, 16, tzinfo=timezone.utc),
+        )
+    )
+
+    assert type(result.transition.metadata["trigger"]) is str
+    assert type(result.timeline_event.metadata["trigger"]) is str
 
 
 def context_for_destination(prop, destination):
@@ -127,13 +213,13 @@ def valid_case(state, trigger, destination=None):
             instant = datetime(2026, 1, 3, 12, tzinfo=timezone.utc)
         if trigger is PropertyStateTrigger.CHECKIN_TIME_REACHED and state is PropertyOperationalState.AWAITING_CHECKIN:
             instant = datetime(2026, 1, 1, 16, tzinfo=timezone.utc)
-    elif trigger in {PropertyStateTrigger.CLEANER_ASSIGNED, PropertyStateTrigger.CLEANER_REJECTED, PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED, PropertyStateTrigger.CLEANING_STARTED, PropertyStateTrigger.CLEANING_COMPLETED}:
+    elif trigger in {PropertyStateTrigger.CLEANER_ASSIGNED, PropertyStateTrigger.CLEANER_REJECTED, PropertyStateTrigger.CLEANING_STARTED, PropertyStateTrigger.CLEANING_COMPLETED, PropertyStateTrigger.CLEANING_CANCELLED}:
         status = {
             PropertyStateTrigger.CLEANER_ASSIGNED: CleaningTaskStatus.ASSIGNED,
             PropertyStateTrigger.CLEANER_REJECTED: CleaningTaskStatus.REJECTED,
-            PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED: CleaningTaskStatus.ASSIGNED,
             PropertyStateTrigger.CLEANING_STARTED: CleaningTaskStatus.IN_PROGRESS,
             PropertyStateTrigger.CLEANING_COMPLETED: CleaningTaskStatus.COMPLETED,
+            PropertyStateTrigger.CLEANING_CANCELLED: CleaningTaskStatus.CANCELLED,
         }[trigger]
         task = make_cleaning(prop, status)
         source = task.id
@@ -143,6 +229,15 @@ def valid_case(state, trigger, destination=None):
             context = PropertyTransitionContext(
                 reservations=destination_context.reservations,
                 cleaning_tasks=(task,),
+            )
+        if trigger is PropertyStateTrigger.CLEANING_CANCELLED and destination is not None:
+            # The cancelled task stays in the context alongside whatever the destination
+            # needs: unlike `after_cleaning_completion`, the resolver behind this trigger
+            # counts live tasks, so dropping them would change the answer.
+            destination_context, instant = context_for_destination(prop, destination)
+            context = PropertyTransitionContext(
+                reservations=destination_context.reservations,
+                cleaning_tasks=(task, *destination_context.cleaning_tasks),
             )
     elif trigger in {PropertyStateTrigger.INCIDENT_HIGH, PropertyStateTrigger.INCIDENT_CRITICAL, PropertyStateTrigger.INCIDENT_RESOLVED}:
         severity = IncidentSeverity.CRITICAL if trigger is PropertyStateTrigger.INCIDENT_CRITICAL else IncidentSeverity.HIGH
@@ -172,6 +267,22 @@ def valid_case(state, trigger, destination=None):
 
 S = PropertyOperationalState
 T = PropertyStateTrigger
+
+# What `after_cleaning_cancellation` can actually answer: `CONTEXTUAL_STATES` minus the two
+# incident states, which only `after_incident_resolution` reaches. Spelled out rather than
+# derived from `CONTEXTUAL_STATES` so that widening that frozenset cannot silently widen
+# this matrix row too.
+CANCELLATION_DESTINATIONS = frozenset(
+    {
+        S.CLEANING_IN_PROGRESS,
+        S.AWAITING_CLEANING,
+        S.OCCUPIED_ESTIMATED,
+        S.AWAITING_CHECKIN,
+        S.READY_FOR_NEXT_GUEST,
+        S.VACANT_READY,
+    }
+)
+
 EXPECTED_POLICY = {
     (S.VACANT_READY, T.CHECKIN_WINDOW_OPENED): {S.AWAITING_CHECKIN},
     (S.VACANT_READY, T.OWNER_BLOCKED): {S.BLOCKED_BY_OWNER},
@@ -194,7 +305,6 @@ EXPECTED_POLICY = {
     (S.AWAITING_CLEANING, T.OWNER_BLOCKED): {S.BLOCKED_BY_OWNER},
     (S.CLEANING_SCHEDULED, T.CLEANING_STARTED): {S.CLEANING_IN_PROGRESS},
     (S.CLEANING_SCHEDULED, T.CLEANER_REJECTED): {S.AWAITING_CLEANING},
-    (S.CLEANING_SCHEDULED, T.CLEANING_ASSIGNMENT_EXPIRED): {S.AWAITING_CLEANING},
     (S.CLEANING_SCHEDULED, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
     # Added by `maintenance` (design D8): `CLEANING_SCHEDULED` admitted `INCIDENT_CRITICAL`
     # and not `INCIDENT_HIGH`, while every other cleaning state admitted both.
@@ -206,6 +316,14 @@ EXPECTED_POLICY = {
     },
     (S.CLEANING_IN_PROGRESS, T.INCIDENT_HIGH): {S.MAINTENANCE_REQUIRED},
     (S.CLEANING_IN_PROGRESS, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
+    # Added by `cleaning-stall-blocks-next-stay` (design D7): the three cleaning states had
+    # no exit that led anywhere near a check-in, so an abandoned task froze the flat until
+    # the calendar released it. The destination is contextual and the two incident states are
+    # out of every row on purpose — the resolver behind this trigger never reads incidents,
+    # and a flat in a `CLEANING_*` state cannot have a live HIGH or CRITICAL one anyway.
+    (S.AWAITING_CLEANING, T.CLEANING_CANCELLED): CANCELLATION_DESTINATIONS - {S.AWAITING_CLEANING},
+    (S.CLEANING_SCHEDULED, T.CLEANING_CANCELLED): CANCELLATION_DESTINATIONS,
+    (S.CLEANING_IN_PROGRESS, T.CLEANING_CANCELLED): CANCELLATION_DESTINATIONS - {S.CLEANING_IN_PROGRESS},
     (S.READY_FOR_NEXT_GUEST, T.CHECKIN_WINDOW_OPENED): {S.AWAITING_CHECKIN},
     (S.READY_FOR_NEXT_GUEST, T.INCIDENT_HIGH): {S.MAINTENANCE_REQUIRED},
     (S.READY_FOR_NEXT_GUEST, T.INCIDENT_CRITICAL): {S.CRITICAL_INCIDENT},
@@ -275,17 +393,20 @@ REMOVED_CONTEXTUAL_SUPERSET_RELATIONS = [
 
 
 def test_original_66_policy_candidates_are_explicitly_classified():
-    """The original 66 candidates, plus what later changes added on purpose.
+    """The original 66 candidates, plus what later changes added or removed on purpose.
 
     `maintenance` (design D8) closed two omissions of the matrix — `VACANT_READY` +
     `INCIDENT_CRITICAL` and `CLEANING_SCHEDULED` + `INCIDENT_HIGH` — so the declared
-    relations went from 58 to 60. The 66 stays as the reference point it always was: it is
-    the size of the space this test enumerated, not a budget.
+    relations went from 58 to 60. `cleaning-stall-blocks-next-stay` (design D10) then
+    retired `CLEANING_ASSIGNMENT_EXPIRED`, which nobody ever emitted, taking its one row
+    with it (60 → 59), and its D7 added the three contextual `CLEANING_CANCELLED` rows,
+    worth 5 + 6 + 5 destinations (59 → 75). The 66 stays as the reference point it always
+    was: it is the size of the space this test enumerated, not a budget.
     """
     assert PropertyStateMachine._POLICY == EXPECTED_POLICY
-    assert len(DECLARED_POLICY_RELATIONS) == 60
+    assert len(DECLARED_POLICY_RELATIONS) == 75
     assert len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 8
-    assert len(DECLARED_POLICY_RELATIONS) + len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 68
+    assert len(DECLARED_POLICY_RELATIONS) + len(REMOVED_CONTEXTUAL_SUPERSET_RELATIONS) == 83
 
 
 @pytest.mark.parametrize("state,trigger,destination", REMOVED_CONTEXTUAL_SUPERSET_RELATIONS)
@@ -484,17 +605,17 @@ def test_reservation_trigger_preconditions_reject_incompatible_statuses(trigger,
 @pytest.mark.parametrize("trigger,status", [
     (PropertyStateTrigger.CLEANER_ASSIGNED, CleaningTaskStatus.CREATED),
     (PropertyStateTrigger.CLEANER_REJECTED, CleaningTaskStatus.ASSIGNED),
-    (PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED, CleaningTaskStatus.REJECTED),
     (PropertyStateTrigger.CLEANING_STARTED, CleaningTaskStatus.ASSIGNED),
     (PropertyStateTrigger.CLEANING_COMPLETED, CleaningTaskStatus.IN_PROGRESS),
+    (PropertyStateTrigger.CLEANING_CANCELLED, CleaningTaskStatus.IN_PROGRESS),
 ])
 def test_cleaning_trigger_preconditions_reject_incompatible_statuses(trigger, status):
     state = {
         PropertyStateTrigger.CLEANER_ASSIGNED: PropertyOperationalState.AWAITING_CLEANING,
         PropertyStateTrigger.CLEANER_REJECTED: PropertyOperationalState.CLEANING_SCHEDULED,
-        PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED: PropertyOperationalState.CLEANING_SCHEDULED,
         PropertyStateTrigger.CLEANING_STARTED: PropertyOperationalState.CLEANING_SCHEDULED,
         PropertyStateTrigger.CLEANING_COMPLETED: PropertyOperationalState.CLEANING_IN_PROGRESS,
+        PropertyStateTrigger.CLEANING_CANCELLED: PropertyOperationalState.CLEANING_IN_PROGRESS,
     }[trigger]
     p = make_property(state)
     task = make_cleaning(p, status)
@@ -527,6 +648,120 @@ def test_incident_trigger_preconditions_reject_incompatible_evidence(trigger, se
     item = make_incident(p, severity, status)
     with pytest.raises(IncompatibleTransitionContextError):
         PropertyStateMachine.evaluate(make_request(p, trigger, context=PropertyTransitionContext(incidents=(item,)), source=item.id))
+
+
+def test_is_due_answers_the_question_evaluate_cannot_reach():
+    """The whole point of `is_due` (design D2), in the shape of REDES11.
+
+    `evaluate()` consults `_POLICY` **before** the preconditions, so for a state that is not
+    a source of the trigger it answers `InvalidStateTransitionError` and never gets as far as
+    saying whether the hour had come. That is why the stuck flat was invisible: the only
+    question the machine could answer was "is this legal", and nobody could ask "was this
+    due". `is_due` asks the second question without the first.
+    """
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    stay = make_reservation(prop, check_in=date(2026, 1, 1), check_out=date(2026, 1, 5))
+    request = make_request(
+        prop,
+        PropertyStateTrigger.CHECKIN_TIME_REACHED,
+        context=PropertyTransitionContext(reservations=(stay,)),
+        source=stay.id,
+        reservation_id=stay.id,
+        instant=datetime(2026, 1, 2, 16, tzinfo=timezone.utc),
+    )
+
+    assert PropertyOperationalState.CLEANING_IN_PROGRESS not in PropertyStateMachine.source_states_for(
+        PropertyStateTrigger.CHECKIN_TIME_REACHED
+    )
+    assert PropertyStateMachine.is_due(request) is True
+    with pytest.raises(InvalidStateTransitionError):
+        PropertyStateMachine.evaluate(request)
+
+
+def test_is_due_is_false_before_the_hour_arrives():
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    stay = make_reservation(prop, check_in=date(2026, 1, 4), check_out=date(2026, 1, 6))
+    request = make_request(
+        prop,
+        PropertyStateTrigger.CHECKIN_TIME_REACHED,
+        context=PropertyTransitionContext(reservations=(stay,)),
+        source=stay.id,
+        reservation_id=stay.id,
+        instant=datetime(2026, 1, 2, 16, tzinfo=timezone.utc),
+    )
+
+    assert PropertyStateMachine.is_due(request) is False
+
+
+def test_is_due_does_not_swallow_caller_bugs():
+    """`IncompatibleTransitionContextError` means "not due"; the others mean "you built it wrong".
+
+    Swallowing a scope mismatch here would turn a cross-tenant context into a quiet `False`,
+    which is how a detection sweep starts under-reporting instead of failing.
+    """
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    foreign = make_reservation(prop, tenant_id=uuid.uuid4())
+    with pytest.raises(TransitionScopeMismatchError):
+        PropertyStateMachine.is_due(
+            make_request(
+                prop,
+                PropertyStateTrigger.CHECKIN_TIME_REACHED,
+                context=PropertyTransitionContext(reservations=(foreign,)),
+                source=foreign.id,
+            )
+        )
+
+
+def test_cleaning_cancelled_unblocks_a_flat_whose_stay_already_started():
+    """REDES11, the case this change exists for (design D7).
+
+    `CLEANING_IN_PROGRESS` since 16 August with a stay running from the 19th: every other
+    exit from that state either needed the cleaning closed — which the stay forbids — or
+    invented a HIGH incident. Cancelling the task answers the state the check-in never wrote.
+    """
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    abandoned = make_cleaning(prop, CleaningTaskStatus.CANCELLED)
+    stay = make_reservation(prop, check_in=date(2026, 1, 1), check_out=date(2026, 1, 5))
+
+    result = PropertyStateMachine.evaluate(
+        make_request(
+            prop,
+            PropertyStateTrigger.CLEANING_CANCELLED,
+            context=PropertyTransitionContext(reservations=(stay,), cleaning_tasks=(abandoned,)),
+            source=abandoned.id,
+            instant=datetime(2026, 1, 2, 16, tzinfo=timezone.utc),
+        )
+    )
+
+    assert result.transition.from_state is PropertyOperationalState.CLEANING_IN_PROGRESS
+    assert result.transition.to_state is PropertyOperationalState.OCCUPIED_ESTIMATED
+    assert result.transition.metadata["trigger"] == "CLEANING_CANCELLED"
+
+
+@pytest.mark.parametrize("foreign", ["tenant", "property"])
+def test_cleaning_cancelled_rejects_out_of_scope_context(foreign):
+    """Rule 1 of `steering/security.md`, driven through the new trigger specifically.
+
+    `_validate_request`'s scope loop is not trigger-conditional today, and this is what
+    keeps it that way: `_destination` already dispatches on `CLEANING_CANCELLED`, so an
+    early return added there for the contextual branch is a plausible future edit. Without
+    a case that drives the scope check *through this trigger*, that edit would be silent.
+    """
+    prop = make_property(PropertyOperationalState.CLEANING_IN_PROGRESS)
+    task = (
+        make_cleaning(make_property(tenant_id=uuid.uuid4()), CleaningTaskStatus.CANCELLED)
+        if foreign == "tenant"
+        else CleaningTask(uuid.uuid4(), prop.tenant_id, uuid.uuid4(), uuid.uuid4(), NOW, NOW, status=CleaningTaskStatus.CANCELLED)
+    )
+    with pytest.raises(TransitionScopeMismatchError):
+        PropertyStateMachine.evaluate(
+            make_request(
+                prop,
+                PropertyStateTrigger.CLEANING_CANCELLED,
+                context=PropertyTransitionContext(cleaning_tasks=(task,)),
+                source=task.id,
+            )
+        )
 
 
 @pytest.mark.parametrize("state", [

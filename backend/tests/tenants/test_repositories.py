@@ -185,3 +185,47 @@ async def test_two_tenants_keep_their_own_configuration(db_session) -> None:
 
     assert (await repo.get_or_create(first.id, utc_now())).sla_high_minutes == 45
     assert (await repo.get_or_create(second.id, utc_now())).sla_high_minutes == 15
+@pytest.mark.asyncio
+async def test_checkin_window_hours_reads_the_tenants_own_value(db_session) -> None:
+    tenant = await insert_tenant(db_session, name="MAGNO")
+    repo = SqlAlchemyTenantConfigRepository(db_session)
+    await repo.get_or_create(tenant.id, utc_now())
+    await repo.apply_changes(tenant.id, {"checkin_window_hours_before": 7})
+
+    assert await repo.checkin_window_hours(tenant.id) == 7
+
+@pytest.mark.asyncio
+async def test_checkin_window_hours_defaults_without_a_row_and_writes_nothing(db_session) -> None:
+    """The reason this method exists: a `GET` must not create the configuration row.
+
+    `get_or_create` would insert one here, which on `GET /api/v1/blocked-transitions` is a write
+    performed by a role that does not hold `MANAGE_TENANT_SETTINGS` (design D5).
+    """
+    tenant = await insert_tenant(db_session, name="MAGNO")
+    repo = SqlAlchemyTenantConfigRepository(db_session)
+
+    hours = await repo.checkin_window_hours(tenant.id)
+
+    assert hours == 2
+    rows = (
+        await db_session.execute(
+            select(TenantConfigModel).where(TenantConfigModel.tenant_id == tenant.id)
+        )
+    ).scalars().all()
+    assert rows == []
+
+@pytest.mark.asyncio
+async def test_checkin_window_hours_never_reads_another_tenants_configuration(db_session) -> None:
+    """Rule 1 of `steering/security.md`, on the fourth read of the blocked-transitions endpoint.
+
+    Only the neighbour has a row, and theirs is not the default. Without the tenant predicate this
+    tenant would compute its check-in window from someone else's settings — a cross-tenant value
+    silently steering its own operational output, which is worse than a visible leak.
+    """
+    mine = await insert_tenant(db_session, name="MAGNO")
+    theirs = await insert_tenant(db_session, name="NEIGHBOUR")
+    repo = SqlAlchemyTenantConfigRepository(db_session)
+    await repo.get_or_create(theirs.id, utc_now())
+    await repo.apply_changes(theirs.id, {"checkin_window_hours_before": 9})
+
+    assert await repo.checkin_window_hours(mine.id) == 2

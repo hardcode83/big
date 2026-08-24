@@ -64,3 +64,4 @@
 | incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
 | pricing-web | new, design, tasks, run, review, ship, archive | 325336 | 973216 | 172901470 | 119.2598 | 2026-08-23 | 2026-08-23 |
 | cleaning-assign-preconditions | new, design, tasks, run, review, ship, archive | 363030 | 1219226 | 313886120 | 183.5497 | 2026-08-22 | 2026-08-23 |
+| cleaning-stall-blocks-next-stay | design, tasks, run, review, ship | 707957 | 1603129 | 385918907 | 216.3277 | 2026-08-23 | — |

@@ -33,6 +33,7 @@ from app.properties.domain.state_resolution import ContextualStateResolver
 from app.reservations.domain.entities import Reservation
 
 from .exceptions import InvalidTransitionInputError
+from .value_objects import PropertyTransitionContext
 
 #: How far **ahead** of `now` to fetch. Two days is not arbitrary: every forward-looking
 #: trigger is clamped to the property's local *day* (`opens_checkin_window` below), and no
@@ -66,6 +67,28 @@ def effective_bounds(
     after the check-in. The caller counts those apart from "not due yet" (R3.4).
     """
     return ContextualStateResolver._effective_bounds(property, reservation)
+
+
+def has_active_stay(
+    property: Property, reservations: tuple[Reservation, ...], now: datetime
+) -> bool:
+    """Whether a guest is in the flat at `now`.
+
+    A public wrapper over `ContextualStateResolver._active_reservations`, reached the same way
+    this module reaches `_effective_bounds` — as a module-internal helper of its own domain
+    package. Exists because `cleaning`'s cancellation has to answer this question to decide
+    whether a replacement cleaning makes sense (design D8), and a second implementation of
+    "is there a stay running" is exactly the drift this module's docstring warns about: the
+    interval is half-open, the bounds are DST-sensitive, and the resolver is where both live.
+
+    Raises `IncompatibleTransitionContextError` on overlapping active stays, which is the
+    resolver's own verdict and not a decision to make twice.
+    """
+    return bool(
+        ContextualStateResolver._active_reservations(
+            property, PropertyTransitionContext(reservations=reservations), now
+        )
+    )
 
 
 def opens_checkin_window(
