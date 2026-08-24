@@ -751,7 +751,7 @@ traducido, así que WCAG 1.4.1 también queda cubierto).
 | Severidad | `frontend/features/incidents/lib/severity-tone.ts` (nuevo), `components/detail/incident-detail-sections.tsx`, `components/list/incidents-view.tsx` | Los dos `SEVERITY_COLOR` mueren; queda un mapa enum→`Tone` |
 | Tests | `frontend/components/property-state-badge.test.tsx` | Las cadenas fijadas se actualizan a las nuevas (13 `dark:` + 24 escalas fuera) |
 | Guards | `frontend/app/globals.tokens.test.ts`, `globals.contrast.test.ts`, `test/color-tokens.test.ts` (nuevos) | Paridad de los tres bloques (D1), auditoría de contraste (D11), cero escalas crudas y cero `dark:` (D12) |
-| Docs | `frontend/README.md` | La sección de estilos deja de describir una paleta placeholder |
+| Docs | `frontend/README.md` | **Se añade** una sección de estilos: no había ninguna que corregir (verificado a mano; panel de la sección 2). Además, `constants.ts` en §Configuración y la cobertura de §Testing quedaban incompletas |
 
 ## Data & interfaces
 

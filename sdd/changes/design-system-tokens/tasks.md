@@ -636,7 +636,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
 ## 9. Documentación
 
-- [ ] 9.1 `frontend/README.md`: **premisa corregida el 2026-08-24** (panel de la sección 2,
+- [x] 9.1 `frontend/README.md`: **premisa corregida el 2026-08-24** (panel de la sección 2,
       revisor documentation, verificado a mano) — el README **no tiene ninguna sección de
       estilos**, así que no hay «descripción de estilos» que reescribir: hay que **añadirla**.
       La segunda mitad de esta tarea ya pedía exactamente eso, así que sigue siendo
@@ -646,7 +646,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       hablar de paleta placeholder — sección que describa la capa de tokens, los dos temas, el mecanismo de
       cookie + atributo y las fuentes autohospedadas. Verificar además que el `README.md` de
       la raíz no afirma nada que este change deje falso. [R1.1, R3.1, R4.1]
-- [ ] 9.2 Grep de la redacción vieja por todo el árbol (`placeholder palette`, «Neutral
+- [x] 9.2 Grep de la redacción vieja por todo el árbol (`placeholder palette`, «Neutral
       placeholder», «Dark mode follows the OS preference») para que no sobreviva una copia en
       otro documento. Ninguna doc referencia comportamiento eliminado.
       **Lista medida el 2026-08-24** (panel de la sección 2, revisor documentation): las tres
@@ -659,6 +659,13 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       **se quedan**. Lo que 9.2 tiene que garantizar es que ninguna doc *afirme* como vigente
       un comportamiento eliminado, no borrar las citas que explican por qué se eliminó. La
       entrada de roadmap sí es doc viva y la corrige `/sdd:archive`.
+      **Re-medido el 2026-08-24 al ejecutar**: 15 coincidencias, **todas** en `sdd/`
+      (`proposal.md` 4, `tasks.md` 4 —que son el texto de esta propia tarea—, `roadmap.md` 1,
+      `roadmap/design-system-tokens.md` 3, `design.md` 1). Cero en `frontend/`, `docs/` y el
+      `README.md` de la raíz. Las de proposal y roadmap son citas del código viejo y se
+      quedan; la de `design.md` **no era una cita sino una afirmación falsa** —«la sección de
+      estilos deja de describir una paleta placeholder», cuando no había sección— y se ha
+      corregido en la tabla de Changes by area.
 
 ## 10. Verificación
 
