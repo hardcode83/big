@@ -500,6 +500,37 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
 ## 7. Tonos de estado y severidad de incidencias
 
+<!-- ESTADO DEL ENTORNO al empezar la sección 7 (2026-08-24), porque no vive en
+     ningún otro sitio y una sesión nueva lo tendría que redescubrir:
+
+     · El stack de este worktree está levantado con `PORT_OFFSET=41`
+       (frontend 3041, backend 8041, postgres 5473, redis 6420). `make ports` lo
+       confirma. Si se recrea un servicio suelto hay que repetir el desplazamiento
+       o ese servicio se queda sin puertos.
+     · Hay un contenedor APARTE sirviendo el build de producción en el host 3042
+       (`docker compose run --rm --no-deps -p 3042:3000 frontend sh -c 'npx next
+       start -p 3000 -H 0.0.0.0'`). Es lo que permite la pasada visual: con
+       `next dev` la app NO hidrata en un worktree, con `next start` sí. Razón
+       completa en design.md D11.
+     · La BD está sembrada: `make bootstrap` + `make seed-demo`, con credenciales
+       de desarrollo en `.env` (gitignored). `owner@local.test`,
+       `manager@local.test`, `cleaner@local.test`, `tech@local.test`, todas con
+       `LocalDev12345!`. El proyecto se niega a arrancar sin ellas a propósito.
+     · Los `docker compose cp` de `sdd/project.md` §Worktree bootstrap SE PERDIERON
+       al recrear el contenedor con `make up PORT_OFFSET=41`. Hay que reaplicarlos
+       antes de la medición final de 10.1, o reaparecerán los dos ENOENT de entorno.
+
+     DEFECTO CONFIRMADO EN NAVEGADOR que esta sección arregla: en `/dashboard` los
+     badges «Vacant, ready» y «Maintenance required» se pintan con su variante
+     CLARA (`bg-emerald-100`, luminancia 94.9) sobre fondo oscuro. Medido: el
+     atributo es `data-theme="dark"` pero `prefers-color-scheme: dark` es false, y
+     el variante `dark:` de Tailwind sigue al SISTEMA, no a nuestro atributo — así
+     que `dark:bg-emerald-950` no dispara. Es exactamente el defecto de R6.5, y
+     valida el rechazo de D12 a redefinir `dark:` para que siguiera al atributo:
+     habría dejado de disparar en «sin cookie, sistema oscuro», el caso más común.
+     El arreglo correcto es el de esta sección — que cambie el TOKEN, no que exista
+     un variante. -->
+
 - [ ] 7.1 `frontend/lib/ui/status-tone.ts`: las cinco entradas de `TONE_BADGE_CLASS` pasan a
       **una** cadena sin `dark:`, sobre los tokens `state-*` y `state-*-text` con los
       modificadores de opacidad de Tailwind v4 (`bg-state-success/15
@@ -545,13 +576,29 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
 ## 9. Documentación
 
-- [ ] 9.1 `frontend/README.md`: la descripción de estilos deja de hablar de paleta
-      placeholder — sección que describa la capa de tokens, los dos temas, el mecanismo de
+- [ ] 9.1 `frontend/README.md`: **premisa corregida el 2026-08-24** (panel de la sección 2,
+      revisor documentation, verificado a mano) — el README **no tiene ninguna sección de
+      estilos**, así que no hay «descripción de estilos» que reescribir: hay que **añadirla**.
+      La segunda mitad de esta tarea ya pedía exactamente eso, así que sigue siendo
+      ejecutable. Comprobado además que su línea 103 («No se añaden providers de
+      theme/analytics/flags») **sigue siendo cierta**: `next/font` no añade provider y el
+      conmutador es una isla de cliente, no un provider. La descripción de estilos deja de
+      hablar de paleta placeholder — sección que describa la capa de tokens, los dos temas, el mecanismo de
       cookie + atributo y las fuentes autohospedadas. Verificar además que el `README.md` de
       la raíz no afirma nada que este change deje falso. [R1.1, R3.1, R4.1]
 - [ ] 9.2 Grep de la redacción vieja por todo el árbol (`placeholder palette`, «Neutral
       placeholder», «Dark mode follows the OS preference») para que no sobreviva una copia en
       otro documento. Ninguna doc referencia comportamiento eliminado.
+      **Lista medida el 2026-08-24** (panel de la sección 2, revisor documentation): las tres
+      frases aparecen SÓLO en `sdd/` — `sdd/roadmap/design-system-tokens.md:12-14`,
+      `sdd/roadmap.md:165`, `sdd/changes/design-system-tokens/proposal.md:9-11` y una
+      referencia en este propio fichero. **Cero** coincidencias en `sdd/specs/`, en `docs/`,
+      en `frontend/README.md` y en el `README.md` de la raíz.
+      **Y ojo con qué se toca**: en el proposal y en el roadmap esas frases son **citas del
+      código viejo usadas como motivación** de este change — son registro histórico correcto y
+      **se quedan**. Lo que 9.2 tiene que garantizar es que ninguna doc *afirme* como vigente
+      un comportamiento eliminado, no borrar las citas que explican por qué se eliminó. La
+      entrada de roadmap sí es doc viva y la corrige `/sdd:archive`.
 
 ## 10. Verificación
 
