@@ -57,6 +57,27 @@ class FakePropertyRepository:
         rows = [prop for prop in self.properties.values() if prop.tenant_id == tenant_id]
         return sorted(rows, key=lambda prop: str(prop.id))
 
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> Sequence[Property]:
+        """Mirror of `SqlAlchemyPropertyRepository.list_for_ids` (`reservation-property-identity` D2).
+
+        Same three rules the real adapter enforces: empty input returns `[]`, ids not of
+        this tenant are absent rather than mapped to `None`, and `None`/duplicate ids in
+        the input are filtered before the comparison. The fake keeps the same shape so a
+        use-case test that exercises the listing composition cannot accidentally rely on
+        a real-only behaviour.
+        """
+        cleaned = {property_id for property_id in property_ids if property_id is not None}
+        if not cleaned:
+            return []
+        rows = [
+            prop
+            for prop in self.properties.values()
+            if prop.tenant_id == tenant_id and prop.id in cleaned
+        ]
+        return sorted(rows, key=lambda prop: str(prop.id))
+
     async def list_by_state(
         self, tenant_id: uuid.UUID, states: Collection[PropertyOperationalState]
     ) -> list[Property]:
@@ -121,6 +142,25 @@ class FakeGuestRepository:
                 acting_tenant_id=tenant_id,
             )
         self.guests[guest.id] = guest
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, guest_ids: Collection[uuid.UUID]
+    ) -> Sequence[GuestSummary]:
+        """Mirror of `SqlAlchemyGuestRepository.list_for_ids` (`dashboard-api` R1.7).
+
+        Same three rules as the real adapter — empty input short-circuits without work,
+        ids not of this tenant are absent (not `None`), and `None`/duplicate ids are
+        filtered before the membership check.
+        """
+        cleaned = {guest_id for guest_id in guest_ids if guest_id is not None}
+        if not cleaned:
+            return []
+        rows = [
+            _summary(guest)
+            for guest in self.guests.values()
+            if guest.tenant_id == tenant_id and guest.id in cleaned
+        ]
+        return sorted(rows, key=lambda summary: str(summary.id))
 
 
 @dataclass

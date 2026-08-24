@@ -10,7 +10,7 @@ single commit, so a failure recording the event leaves the reservation unchanged
 """
 
 import uuid
-from dataclasses import dataclass, field
+from dataclasses import dataclass, field, replace
 from datetime import date, datetime, time
 from decimal import Decimal
 from typing import Any
@@ -94,10 +94,18 @@ class CreateReservationCommand:
 
 @dataclass(frozen=True)
 class ReservationDetail:
-    """A reservation plus the guest data the caller is allowed to see (R1.8, design D17)."""
+    """A reservation plus the guest data the caller is allowed to see (R1.8, design D17).
+
+    The two derived `property_*` fields follow `reservation-property-identity` (R2, D1,
+    D4, D5): the linked `Property` is resolved server-side, and the answer degrades to
+    `None` (with its key) when the FK does not resolve inside the token's tenant — which
+    is why the field exists on the read model and not as a separate endpoint.
+    """
 
     reservation: Reservation
     guest: GuestSummary | None = None
+    property_name: str | None = None
+    property_internal_code: str | None = None
 
 
 @dataclass
@@ -355,15 +363,29 @@ class CancelReservationUseCase:
 
 class GetReservationUseCase:
     def __init__(
-        self, *, reservations: ReservationRepository, guests: GuestRepository
+        self,
+        *,
+        reservations: ReservationRepository,
+        guests: GuestRepository,
+        properties: PropertyRepository,
     ) -> None:
         self._reservations = reservations
         self._guests = guests
+        self._properties = properties
 
     async def execute(
         self, *, tenant_id: uuid.UUID, reservation_id: uuid.UUID
     ) -> ReservationDetail:
-        """The reservation and its linked guest, without document data (R1.8, D17)."""
+        """The reservation, its linked guest (no document data, R1.8, D17), and the
+        readable identity of its linked property (R2, D1, D4, D5).
+
+        A `property_id` pointing to another tenant — or to a row that does not exist at
+        all within the token's tenant — answers the two new fields as `None` with their
+        key, **not** a `404`. The entity is the reservation; the FK that happened not to
+        resolve does not promote itself to the primary key (D5 rejects `404` here on
+        purpose: the use-case design of `tech-incident-context` chose `404`, but there
+        the property is the body of the response, while here it is three of thirty).
+        """
         reservation = await self._reservations.get(tenant_id, reservation_id)
         if reservation is None:
             raise ReservationNotFoundError("Reservation does not exist")
@@ -372,12 +394,38 @@ class GetReservationUseCase:
             if reservation.guest_id is not None
             else None
         )
-        return ReservationDetail(reservation=reservation, guest=guest)
+        property = await self._properties.get(tenant_id, reservation.property_id)
+        # `guest_full_name` rides on the entity so `ReservationResponse.from_domain` and
+        # `ReservationDetailResponse.from_detail` can carry it without learning yet
+        # another composition pattern — the alternative was to thread it through the DTO
+        # factory, which the contract reviewer (D1) already rejected for the listing.
+        enriched = replace(
+            reservation,
+            property_name=property.name if property is not None else None,
+            property_internal_code=property.internal_code if property is not None else None,
+            guest_full_name=guest.full_name if guest is not None else None,
+        )
+        return ReservationDetail(
+            reservation=enriched,
+            guest=guest,
+            # `None` on a missing/foreign-tenant FK is the deliberate "degrade, do not
+            # 404" choice of D5 — the field's key is always present in the response.
+            property_name=property.name if property is not None else None,
+            property_internal_code=property.internal_code if property is not None else None,
+        )
 
 
 class ListReservationsUseCase:
-    def __init__(self, *, reservations: ReservationRepository) -> None:
+    def __init__(
+        self,
+        *,
+        reservations: ReservationRepository,
+        properties: PropertyRepository,
+        guests: GuestRepository,
+    ) -> None:
         self._reservations = reservations
+        self._properties = properties
+        self._guests = guests
 
     async def execute(
         self,
@@ -387,11 +435,41 @@ class ListReservationsUseCase:
         page: int,
         per_page: int,
     ) -> Page:
-        """Filtered and paginated (R1.1).
+        """Filtered and paginated (R1.1), enriched with the readable identity of every
+        reservation's property and guest (R1, R3, R5, D1, D3, D4).
 
         The tenant comes from the caller's context and is never a filter the client can
         set (R5.2) — `ReservationFilters` has no `tenant_id` field for that reason.
+
+        Composition lives here, not in the response model (D1). The two batch readers
+        run AFTER the page query — once, not per row (D3), each with an explicit
+        `tenant_id` per call (D2 of `dashboard-api`). The result is the union of three
+        independent queries (one for the page, two batches), which `test_list_identity_queries`
+        asserts as a constant statement count.
         """
-        return await self._reservations.list(
+        page_result = await self._reservations.list(
             tenant_id, filters, page=page, per_page=per_page
         )
+        property_ids: set[uuid.UUID] = {
+            item.property_id for item in page_result.items if item.property_id is not None
+        }
+        guest_ids: set[uuid.UUID] = {
+            item.guest_id for item in page_result.items if item.guest_id is not None
+        }
+        # Batches short-circuit on empty input (their own contracts); no need to gate here.
+        properties_by_id = {
+            prop.id: prop
+            for prop in await self._properties.list_for_ids(tenant_id, property_ids)
+        }
+        guests_by_id = {
+            guest.id: guest
+            for guest in await self._guests.list_for_ids(tenant_id, guest_ids)
+        }
+        enriched: list[Reservation] = []
+        for item in page_result.items:
+            prop = properties_by_id.get(item.property_id)
+            guest = guests_by_id.get(item.guest_id) if item.guest_id is not None else None
+            enriched.append(replace(item, property_name=prop.name if prop else None,
+                                    property_internal_code=prop.internal_code if prop else None,
+                                    guest_full_name=guest.full_name if guest else None))
+        return Page(items=tuple(enriched), total=page_result.total)
