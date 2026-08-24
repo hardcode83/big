@@ -68,11 +68,41 @@ Entrega continua de la aplicación al entorno `dev` de Oracle Cloud: GitHub Acti
 - THE SYSTEM SHALL generar los secrets de runtime (`POSTGRES_PASSWORD`, `JWT_SECRET_KEY`, `ENCRYPTION_KEY` — clave Fernet válida) con Terraform (`random_*`) y guardarlos, junto con la clave de la App, como `oci_vault_secret`; `POSTGRES_DB`/`POSTGRES_USER` son variables no sensibles.
 - THE SYSTEM SHALL escribir al `.env` del despliegue las cinco variables del almacén de objetos —`S3_BUCKET`, `S3_REGION`, `S3_ENDPOINT_URL`, `AWS_ACCESS_KEY_ID`, `AWS_SECRET_ACCESS_KEY`— leyendo del Vault **por nombre** los cuatro secretos de medios (nombres deterministas a partir de `ENV`, como el token del túnel) y derivando el nombre del bucket del propio `ENV`. Cero pasos manuales por entorno.
 - IF alguno de esos secretos no se puede leer del Vault, THEN THE SYSTEM SHALL fallar el paso «Render .env» **nombrando la clave ausente**. Es fail-fast deliberado y seguro: ocurre antes del `pull` y del `up`, así que la VM sigue sirviendo la versión anterior. La causa más probable es un OCID olvidado en la enumeración de la policy del runner.
-- THE SYSTEM SHALL NOT incluir las variables `BOOTSTRAP_*` ni `SEED_*` en ese `.env`: el paso lo **trunca y lo regenera** en cada ejecución con solo lo que la aplicación necesita en runtime. Los comandos que las requieren se ejecutan pasándolas en línea (procedimiento en `RUNBOOK-seed-demo.md`).
+- THE SYSTEM SHALL NOT incluir las variables `BOOTSTRAP_*`, `SEED_*` ni `DEMO_ACCOUNT_PASSWORD` en ese `.env`: el paso lo **trunca y lo regenera** en cada ejecución con solo lo que la aplicación necesita en runtime. Los comandos que las requieren se ejecutan pasándolas en línea (procedimiento en `RUNBOOK-seed-demo.md`); `DEMO_ACCOUNT_PASSWORD` la inyecta su propio workflow leyéndola del Vault, y por eso el reset programado sigue funcionando aunque esa variable no esté en ningún fichero de la VM.
+
+### Segundo workflow sobre el mismo runner (`.github/workflows/demo-reset.yml`)
+
+Desde `demo-user` el runner de la VM no sirve sólo al deploy. Lo que aquí importa es la convivencia;
+el comportamiento del reset se especifica en [`demo-tenant`](demo-tenant.md).
+
+- THE SYSTEM SHALL ejecutar el reset del tenant de demostración en el **mismo grupo de runner**
+  (`runs-on: [self-hosted, dev]`) y bajo la **misma `concurrency`** que el job de deploy
+  (`group: deploy-dev`, sin cancelación), de modo que un reset y un redespliegue no puedan cruzarse:
+  el deploy trunca y regenera el `.env` y recrea contenedores, y el reset depende de ambos.
+- THE SYSTEM SHALL alcanzar la aplicación con un contenedor **de un solo uso** sobre el stack vivo
+  (`run --rm --no-deps -T backend` del compose de deploy), y THE SYSTEM SHALL NOT abrir puerto,
+  publicar la base de datos, requerir SSH ni tocar el security list. Es la razón por la que el runner
+  local es el único mecanismo posible: el `metadata` de la instancia es ForceNew con
+  `ignore_changes`, así que un cron por cloud-init no llegaría nunca a la VM viva.
+- THE SYSTEM SHALL hacer `checkout` con `clean: false`. El `.env` del despliegue **no está
+  versionado** y vive en el workspace compartido del runner: un checkout limpio lo borraría y dejaría
+  al deploy siguiente sin `.env` hasta re-renderizarlo. La deuda que esto nombra —extraer el paso
+  «Render .env» a un script versionado compartido por los dos workflows— queda declarada y no pagada.
+- THE SYSTEM SHALL comprobar como precondición, antes de tocar nada, que ese `.env` existe y que
+  `postgres` está corriendo, fallando en rojo si no.
+- THE SYSTEM SHALL leer del Vault **por nombre** y con instance principal el único secreto que
+  necesita (`autohostai-<env>-demo-account-password`), enmascararlo en cuanto lo tiene y pasarlo al
+  contenedor **sin valor en la línea de órdenes**. Lo único que lee de GitHub es la *variable*
+  `OCI_VAULT_ID`: no hay secret de Actions nuevo.
+- WHERE el workspace quede en un `main` más nuevo que la imagen desplegada, THE SYSTEM SHALL fallar en
+  rojo nombrando la fase — un `docker-compose.deploy.yml` nuevo con un `.env` viejo es un fallo
+  legítimo, y el deploy siguiente lo arregla solo.
 
 ## Key files
 
 - `.github/workflows/deploy-dev.yml` — build (GHCR) + deploy (runner self-hosted).
+- `.github/workflows/demo-reset.yml` — reset programado del tenant de demostración, mismo runner y
+  misma `concurrency` (ver `demo-tenant`).
 - `docker-compose.deploy.yml`, `.env.deploy.example` — orquestación de deploy (imágenes de registry).
 - `infra/environments/dev/{cloud-init.yaml.tftpl,runner-bootstrap.sh,gh-app-install-token.py}` — provisión del runner (IaC) y minteo de token de App.
 - `infra/environments/dev/{main.tf,variables.tf}` — instance principal (dynamic group + policy), secrets generados → Vault.
