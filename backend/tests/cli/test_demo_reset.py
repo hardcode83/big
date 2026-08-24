@@ -25,7 +25,7 @@ from app.auth.infrastructure.models import (
     UserSessionModel,
 )
 from app.auth.domain.password_policy import PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH
-from app.cli import demo_reset
+from app.cli import demo_reset, seed_demo
 from app.core.config import FERNET_KEY_BYTES, Settings, settings
 from app.access.infrastructure.models import AccessRecordModel
 from app.audit.domain import actions
@@ -98,6 +98,51 @@ _LEAKY_DETAIL = (
 
 class _DatabaseErrorCarryingItsParameters(Exception):
     """Stands in for `sqlalchemy.exc.DBAPIError` without needing a broken database."""
+
+
+@pytest.fixture(autouse=True)
+def demo_storage_root(tmp_path, monkeypatch: pytest.MonkeyPatch):
+    """Root every `LOCAL` store this module can reach at `tmp_path`, not at `MEDIA_ROOT`.
+
+    The seed phase uploads the closed cleaning's photos, and it does so through
+    `seed_demo._file_storage_factory()`, whose `local_root` defaults to `MEDIA_ROOT` —
+    `/app/media`. Two independent reasons that has to be redirected, and the second is why this
+    is `autouse`:
+
+    1. **`/app` is not writable where the suite really runs.** In the container the repository
+       is a bind mount and the directory happens to be writable, so leaving the default green
+       locally; in CI it is not, and the seed phase fails with
+       `PermissionError: [Errno 13] Permission denied: '/app'` surfacing as
+       `PhaseError: seed: failed with PhotoStorageUnavailableError`. That is exactly what
+       happened on PR #123: 14 tests of this file red in CI and all of them green here.
+    2. **Shared mutable state between tests.** Every test that runs the command writes the same
+       six objects to the same place, so counts and sweeps would depend on which tests ran
+       before.
+
+    `test_seed_demo.py::seed_storage` solves the identical problem the identical way and its
+    docstring says so; this is that fixture, for the command that composes that seed. The sweep
+    tests that patch `ConfiguredFileStorageFactory.storage_for` outright are unaffected — they
+    replace the store rather than its root.
+    """
+    root = tmp_path / "media"
+    real = demo_reset.ConfiguredFileStorageFactory
+
+    class _RootedFactory(real):
+        """The real factory, with `local_root` forced to the test's own directory.
+
+        A subclass and not a lambda on purpose: the sweep tests patch
+        `demo_reset.ConfiguredFileStorageFactory.storage_for`, which only works if the module
+        attribute is still a class. They patch this subclass, and inherit everything else.
+        """
+
+        def __init__(self, **kwargs):
+            super().__init__(**{**kwargs, "local_root": root})
+
+    monkeypatch.setattr(demo_reset, "ConfiguredFileStorageFactory", _RootedFactory)
+    monkeypatch.setattr(
+        seed_demo, "_file_storage_factory", lambda: _RootedFactory(signing_key=b"k" * 32)
+    )
+    return root
 
 
 @pytest.fixture
