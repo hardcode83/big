@@ -21,14 +21,18 @@ from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
 from app.cleaning.application.evidence import CompletionEvidenceGatherer
-from app.cleaning.domain.assignment import resolve_auto_assignee
+from app.cleaning.domain.assignment import assignment_blocker, resolve_auto_assignee
 from app.cleaning.domain.entities import (
     CleaningChecklistCompletion,
     CleaningChecklistTemplate,
     CleaningPhoto,
     CleaningTask,
 )
-from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.enums import (
+    CleaningAssignmentBlocker,
+    CleaningTaskStatus,
+    CleaningValidationStatus,
+)
 from app.cleaning.domain.notifications import (
     RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
@@ -84,7 +88,7 @@ from app.integrations.domain.storage import (
 )
 from app.notifications.domain.enums import NotificationType
 from app.notifications.domain.repositories import NotificationLogRepository
-from app.properties.domain.clock_triggers import candidate_window
+from app.properties.domain.clock_triggers import candidate_window, has_active_stay
 from app.properties.domain.entities import Property
 from app.properties.domain.enums import StateTransitionTriggeredBy
 from app.properties.domain.exceptions import (
@@ -565,7 +569,16 @@ class _TaskTransitionMixin:
         actor: CleaningActor,
         now: datetime,
         with_reservations: bool = False,
+        extra_tasks: tuple[CleaningTask, ...] = (),
+        reason: str | None = None,
     ) -> None:
+        """`extra_tasks` joins `task` in the machine's context.
+
+        Added by `cleaning-stall-blocks-next-stay` (design D8) for the cancellation, whose
+        replacement task has to be visible to `after_cleaning_cancellation` — the resolver counts
+        live tasks first, so a replacement outside the context would let the flat be resolved as
+        if nothing were pending.
+        """
         property = await self._properties.get(tenant_id, task.property_id)
         if property is None:
             raise PropertyNotFoundError()
@@ -585,7 +598,7 @@ class _TaskTransitionMixin:
             property=property,
             trigger=trigger,
             context=PropertyTransitionContext(
-                cleaning_tasks=(task,), reservations=reservations
+                cleaning_tasks=(task, *extra_tasks), reservations=reservations
             ),
             actor=TransitionActor(
                 triggered_by=StateTransitionTriggeredBy.USER, user_id=actor.user_id
@@ -595,6 +608,7 @@ class _TaskTransitionMixin:
                 transition_id=uuid.uuid4(), timeline_event_id=uuid.uuid4()
             ),
             source_entity_id=task.id,
+            reason=reason,
             correlation_id=str(uuid.uuid4()),
         )
         try:
@@ -640,7 +654,7 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
 
 
 class _AnswersAnAssignmentBase(_TaskLifecycleBase):
-    """The two operations that answer an assignment, and therefore close its SLA.
+    """The operations that must close an assignment's SLA when they run.
 
     Added by `access-notifications` (its R5, design D7) to pay a debt this module recorded
     when it shipped: `cleaning`'s own R6.4 asked for the deadline to be closed on an answer
@@ -652,9 +666,14 @@ class _AnswersAnAssignmentBase(_TaskLifecycleBase):
     a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
     four hours and escalate to the manager for a task that was answered immediately.
 
-    Only two use cases inherit this, not the six of `_TaskLifecycleBase`: starting,
-    completing and validating happen *after* an answer, so the deadline is already closed by
-    then, and giving them the port would be handing out a write nobody needs.
+    Three use cases inherit this, not the six of `_TaskLifecycleBase`: starting, completing
+    and validating happen *after* an answer, so the deadline is already closed by then, and
+    giving them the port would be handing out a write nobody needs.
+
+    Accepting and rejecting *are* answers. Cancelling is not — it is a manager withdrawing the
+    task (`cleaning-stall-blocks-next-stay`, design D8) — and it inherits anyway because it can
+    fire from `ASSIGNED`, where that assignment's deadline is still live: without closing it,
+    `check_sla_breaches` would escalate a task that no longer exists.
     """
 
     def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
@@ -766,6 +785,165 @@ class RejectCleaningTaskUseCase(_AnswersAnAssignmentBase):
         await self._uow.commit()
         return replacement
 
+
+
+
+class CancelCleaningTaskUseCase(_AnswersAnAssignmentBase):
+    """Retire a cleaning that is not going to be completed (R3.1-R3.3, design D7, D8).
+
+    The operation the cycle was missing. REDES11 sat in `CLEANING_IN_PROGRESS` from 16 August
+    with a stay running from the 19th: `complete()` is refused while a guest is in the flat,
+    `reject` is the cleaner's own act and needs `ASSIGNED`/`ACCEPTED`, and the only door left
+    open was perverse — a HIGH incident moves the flat to `MAINTENANCE_REQUIRED` and unfreezes
+    it with a lie. This is the honest door, and it goes through the machine like every other
+    (R3.2): the column is never written directly.
+
+    Built on `_AnswersAnAssignmentBase` rather than `_TaskLifecycleBase`, which is a **departure
+    from D8's letter**: cancellation is not an answer to an assignment, but it can happen *from*
+    `ASSIGNED`, where the assignment's SLA deadline is still live. Left open, `check_sla_breaches`
+    would escalate to a manager about a task that no longer exists — a false alarm this change
+    would have introduced, since cancelling from `ASSIGNED` is new. Closing it reuses
+    `_close_assignment_sla`, which is already idempotent and silent when there is nothing to
+    clear (`access-notifications` proposal R5, criterion 3 — its *spec* organises the same rule
+    under section titles rather than R-numbers, so follow the archived proposal), so the ordinary
+    case of cancelling an `IN_PROGRESS` task costs one no-op.
+    """
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        task_id: uuid.UUID,
+        actor: CleaningActor,
+        reason: str,
+        now: datetime,
+    ) -> CleaningTask:
+        task = await self._load_task(tenant_id, task_id, actor)
+        previous = task.status
+        task.cancel(now, reason=reason)
+        await self._tasks.save(tenant_id, task)
+        await self._close_assignment_sla(tenant_id, task)
+
+        replacement = await self._replacement_for(tenant_id, task, now)
+        if replacement is not None:
+            await self._tasks.add(tenant_id, replacement)
+
+        try:
+            await self._transition(
+                tenant_id=tenant_id,
+                task=task,
+                trigger=PropertyStateTrigger.CLEANING_CANCELLED,
+                actor=actor,
+                now=now,
+                with_reservations=True,
+                extra_tasks=(replacement,) if replacement is not None else (),
+                # `property_state_transitions.reason` is the column made for this. It cannot go
+                # into `audit_logs.changes`: `AUDITABLE_FIELDS` admits only real, non-sensitive
+                # columns of the entity, and `cleaning_tasks.notes` is excluded there on purpose
+                # because that JSONB is a rule-11 sink. So the audit row answers "who retired
+                # this task, and when", and the transition row answers "why".
+                reason=reason,
+            )
+        except NoOperationalStateChangeError:
+            # Not an error (design D8): cancelling the only `CREATED` task of a flat that is
+            # already `AWAITING_CLEANING` leaves it exactly where it is. The task is still
+            # cancelled and the `AuditLog` row below still explains why — the same call
+            # `_fire_cleaner_assigned` already makes for the same reason.
+            logger.info(
+                "cleaning.cancel_without_state_change",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "property_id": str(task.property_id),
+                    # `reason` is here because this line **is** the declared fallback for it: with
+                    # no state change there is no `property_state_transitions` row to carry it, and
+                    # `audit_logs.changes` cannot (rule 11). The section-5 panel caught that D8
+                    # cited this log as the mitigation while the payload omitted the one field
+                    # that made it one.
+                    "reason": reason,
+                },
+            )
+
+        await self._audit.record(
+            tenant_id=tenant_id,
+            action=audit_actions.CLEANING_TASK_CANCELLED,
+            task_id=task.id,
+            actor=actor,
+            changes=ChangeSet(audit_actions.ENTITY_CLEANING_TASK).diff(
+                "status", previous.value, task.status.value
+            ),
+            now=now,
+        )
+        await self._uow.commit()
+        return task
+
+    async def _replacement_for(
+        self, tenant_id: uuid.UUID, task: CleaningTask, now: datetime
+    ) -> CleaningTask | None:
+        """The unassigned task that keeps the flat's state honest, or `None` (design D8).
+
+        Without one, cancelling the last live cleaning of a dirty flat resolves it to
+        `VACANT_READY` — a lie about a flat nobody has cleaned, against principle 1 of
+        `product.md`. It is `RejectCleaningTaskUseCase`'s argument applied in reverse: there the
+        replacement frees the slot, here it is what stops the system declaring the work done.
+
+        Two exceptions, each citing an invariant that already exists:
+
+        1. **A guest is in the flat at `now`.** A cleaning with the guest inside is impossible by
+           the system's own decision (`after_cleaning_completion` refuses to close one), so the
+           replacement would be an obligation nobody can discharge — and worse, it would freeze
+           the flat in `AWAITING_CLEANING` again, undoing this change. The calendar already
+           provides: `process_checkouts` creates the cleaning at checkout.
+        2. **Another live task already covers this reservation.** `uq_cleaning_tasks_live_reservation`
+           would reject a second one with an `IntegrityError`, and it is not needed anyway — that
+           task is the one the resolver will count.
+        """
+        property = await self._properties.get(tenant_id, task.property_id)
+        if property is None:
+            raise PropertyNotFoundError()
+
+        date_from, date_to = candidate_window(now)
+        reservations = tuple(
+            await self._reservations.list_for_properties(
+                tenant_id, [property.id], date_from, date_to
+            )
+        )
+        try:
+            guest_inside = has_active_stay(property, reservations, now)
+        except IncompatibleTransitionContextError:
+            # Overlapping active stays — a real data state, not a hypothetical, and the resolver's
+            # own verdict rather than ours to second-guess. Left uncaught it escaped as a `500`,
+            # because `IncompatibleTransitionContextError` is a `PropertyDomainError` and no
+            # handler maps it (found by the section-5 security panel). Skipping the replacement
+            # lets `_transition` reach the same resolver, which refuses for the same reason and is
+            # translated there into this module's `409` — the shape every other resolver caller
+            # here already produces. Nothing is committed, so nothing is cancelled either.
+            return None
+        if guest_inside:
+            return None
+
+        if task.reservation_id is not None:
+            live = await self._tasks.list_live_for_reservation(tenant_id, task.reservation_id)
+            # `live` is always empty here, and that is worth stating: by now the cancelled task
+            # is persisted as `CANCELLED` and excluded by `LIVE_STATUSES`, and
+            # `uq_cleaning_tasks_live_reservation` forbids a second live task on that reservation.
+            # So neither this comparison nor the `return None` below is reachable while the index
+            # holds (D8) — the lookup runs and is covered, the branch cannot be, and the QA panel
+            # of section 5 confirmed by mutation that inverting the comparison changes nothing.
+            if any(other.id != task.id for other in live):
+                return None
+
+        return CleaningTask(
+            id=uuid.uuid4(),
+            tenant_id=tenant_id,
+            property_id=task.property_id,
+            checklist_template_id=task.checklist_template_id,
+            created_at=now,
+            updated_at=now,
+            reservation_id=task.reservation_id,
+            scheduled_start=task.scheduled_start,
+            scheduled_end=task.scheduled_end,
+        )
 
 class StartCleaningTaskUseCase(_TaskLifecycleBase):
     """R3.6 — the cleaner begins, and the property enters `CLEANING_IN_PROGRESS`."""
@@ -1351,9 +1529,39 @@ class ReportTaskIncidentUseCase:
         return acknowledgement
 
 
+@dataclass(frozen=True)
+class CleaningTaskListView:
+    """One row of `GET /cleaning-tasks`: the task plus its assignment pre-flight.
+
+    A view and not a wider entity, because `blocker` is not a property of a cleaning task — it
+    is a verdict about the task *and* its flat at this instant, and it belongs only to the
+    listing (`cleaning-assign-preconditions` D5). The eight endpoints that return a single task
+    keep returning `CleaningTaskResponse` and are not asked a question nobody put to them.
+    """
+
+    task: CleaningTask
+    blocker: CleaningAssignmentBlocker | None
+
+
+@dataclass(frozen=True)
+class CleaningTaskListPage:
+    """`Page`'s shape with views instead of tasks.
+
+    Declared here and not next to `Page`, which lives in `domain/repositories.py` because it
+    types a **port**. This one types a *use case's* return value, so it belongs with the view it
+    carries.
+    """
+
+    items: tuple[CleaningTaskListView, ...]
+    total: int
+
+
 class ListCleaningTasksUseCase:
-    def __init__(self, *, tasks: CleaningTaskRepository) -> None:
+    def __init__(
+        self, *, tasks: CleaningTaskRepository, properties: PropertyRepository
+    ) -> None:
         self._tasks = tasks
+        self._properties = properties
 
     async def execute(
         self,
@@ -1364,14 +1572,28 @@ class ListCleaningTasksUseCase:
         status: CleaningTaskStatus | None,
         page: int,
         per_page: int,
-    ) -> Page:
+    ) -> CleaningTaskListPage:
         """R7.1, R7.2 — the cleaner's restriction is derived here, not accepted from the query.
 
         `CleaningTaskFilters.assigned_cleaner_id` is set from `actor.restrict_to_cleaner_id`
         and there is no request parameter that can reach it, so the row-level rule cannot be
         dropped by omitting a filter.
+
+        **And R3.1/R3.2 of `cleaning-assign-preconditions`**: each row carries whether it can be
+        assigned right now, so the screen does not offer a confirmation that will 409. The
+        decision is made here and not in the router (D6) — the router maps, it does not decide.
+
+        **One extra query per page, never one per row**, which is R3.2 in as many words: the
+        distinct `property_id`s of this page go to `states_for` in a single call. A page of 20
+        tasks over 20 flats costs one `SELECT`; a page over one flat costs the same one. An empty
+        page costs none, because the port returns `{}` without querying.
+
+        `states.get(...)` and not `states[...]`: a property the read did not resolve yields
+        `None`, which `assignment_blocker` turns into "assignable" and lets the backend refuse
+        if it must. That is R3.3 — the UI guard is a courtesy, not a permission — and it is why
+        this cannot raise for a missing key.
         """
-        return await self._tasks.list(
+        result = await self._tasks.list(
             tenant_id,
             CleaningTaskFilters(
                 property_id=property_id,
@@ -1380,6 +1602,23 @@ class ListCleaningTasksUseCase:
             ),
             page=page,
             per_page=per_page,
+        )
+        # `dict.fromkeys` and not a set: distinct, and in the page's own order, so the `IN` list
+        # of the statement is deterministic run to run.
+        property_ids = tuple(dict.fromkeys(task.property_id for task in result.items))
+        states = await self._properties.states_for(tenant_id, property_ids)
+        return CleaningTaskListPage(
+            items=tuple(
+                CleaningTaskListView(
+                    task=task,
+                    blocker=assignment_blocker(
+                        task_status=task.status,
+                        property_state=states.get(task.property_id),
+                    ),
+                )
+                for task in result.items
+            ),
+            total=result.total,
         )
 
 
@@ -1444,6 +1683,97 @@ class GetChecklistUseCase:
             # touched still has to appear, and a stale completion for an item the template no
             # longer declares must not.
             for item in spec.items
+        ]
+
+
+@dataclass(frozen=True)
+class PhotoRequirementView:
+    """One row of `GET /cleaning-tasks/{id}/photo-requirements` (`cleaner-photo-requirements` R1).
+
+    The mirror of `ChecklistItemView` above, field for field, because the domain already says
+    the two halves of PRD §11's evidence are one rule expressed twice
+    (`CleaningCompletionEvidence`'s docstring): `{item_id, label, required, completed}` there,
+    `{photo_type, label, required, uploaded}` here.
+
+    `uploaded` is a boolean and not a count: the column it comes from answers set membership
+    (`CleaningPhotoRepository.uploaded_photo_types`), and a caller that wants the exact count
+    already has `GET /cleaning-tasks/{id}/photos`, which publishes `photo_type` per photo.
+    """
+
+    photo_type: str
+    label: str
+    required: bool
+    uploaded: bool
+
+
+class GetPhotoRequirementsUseCase(_TaskTransitionMixin):
+    """R1 — the photo types the task's template declares, each with its upload state.
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, exactly as
+    `ListCleaningPhotosUseCase` does and for exactly the same two rules: the task is resolved
+    **inside the tenant**, and a `CLEANER` only reaches the tasks assigned to them. That is what
+    makes R1.5's "404 indistinguible entre las tres causas" inherited rather than reimplemented —
+    the four other attributes the mixin annotates are not set here and `_transition` is never
+    called.
+
+    **The order of the two reads is load-bearing, and `_load_task` is always first.**
+    `uploaded_photo_types` answers an empty set for a task that is not this tenant's — its
+    declared safe direction, which blocks a close rather than granting one — and publishing that
+    emptiness would be answering `200` to a caller who owns nothing. Resolving the task first is
+    what makes the case unreachable instead of merely harmless.
+
+    Driven by `spec.required_photos`, the **tuple**, and never by `photo_types()` or
+    `required_photo_types()`: the tuple is the only source that carries the `label`, its order is
+    the one the template's author wrote (R1.3), and iterating it is what keeps a `required: false`
+    type in the collection (R2.2) — the upload admits it, so the enumeration has to name it.
+
+    It reports what is uploaded and decides nothing: no clause of PRD §11 is applied here, and
+    the comparison that governs the close stays inside `CleaningTask.complete()` by way of
+    `CompletionEvidenceGatherer` (R3.2-R3.4).
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        templates: CleaningChecklistTemplateRepository,
+        photos: CleaningPhotoRepository,
+    ) -> None:
+        self._tasks = tasks
+        self._templates = templates
+        self._photos = photos
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, task_id: uuid.UUID, actor: CleaningActor
+    ) -> list[PhotoRequirementView]:
+        task = await self._load_task(tenant_id, task_id, actor)
+        # No look at `task.status` anywhere below (R1.4): the cleaner needs to know what will be
+        # asked of her *before* starting, not only while in progress, exactly like `/checklist`.
+        template = await self._templates.get(tenant_id, task.checklist_template_id)
+        if template is None:
+            raise ChecklistTemplateNotFoundError(
+                "The task's checklist template no longer exists"
+            )
+        # No `template_id=`, unlike the create path: R4.4 forbids **this response** publishing
+        # the template's `id`, and `parse_template_content` interpolates it into the
+        # `CleaningValidationError` message, which the error envelope then carries verbatim — so
+        # a stored row that stops parsing would answer a `CLEANER` with the identifier of a
+        # template she holds no `READ_CLEANING_TEMPLATES` to fetch.
+        #
+        # Scoped to this route on purpose, and that is not a system-wide guarantee: `/checklist`
+        # and the other `READ_CLEANING_TASKS` readers still pass `template_id=` and still name it
+        # on the same corrupted row. R4.4 is this route's requirement and this change's scope;
+        # the asymmetry is recorded in `design.md` §Residuos as a follow-up, not hidden here.
+        spec = parse_template_content(template.items, template.required_photos)
+        uploaded = await self._photos.uploaded_photo_types(tenant_id, task.id)
+        return [
+            PhotoRequirementView(
+                photo_type=photo.photo_type,
+                label=photo.label,
+                required=photo.required,
+                uploaded=photo.photo_type in uploaded,
+            )
+            for photo in spec.required_photos
         ]
 
 

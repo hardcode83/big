@@ -68,12 +68,33 @@ typecheck del frontend contra los tipos derivados, que pertenece a otra capacida
   comprobado por su compilador. El catálogo publicado y el registro deben coincidir
   exactamente.
 
-Los doce códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFLICT`,
-`PAYLOAD_TOO_LARGE`, `METHOD_NOT_ALLOWED`, `INVALID_CREDENTIALS`, `INVALID_TOKEN`,
-`FORBIDDEN`, `RATE_LIMITED`, `NOT_FOUND` y `BAD_GATEWAY`. Este último lo añadió
-`cleaning-photos-storage` para el fallo del almacén de ficheros, distinto de `INTERNAL_ERROR` a
-propósito: el frontend distingue «reintentar puede funcionar» de «esto es un bug nuestro», y son
-dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
+Los **catorce** códigos son `INTERNAL_ERROR`, `HTTP_ERROR`, `VALIDATION_ERROR`, `CONFLICT`,
+`PROPERTY_STATE_CONFLICT`, `PAYLOAD_TOO_LARGE`, `METHOD_NOT_ALLOWED`, `INVALID_CREDENTIALS`,
+`INVALID_TOKEN`, `FORBIDDEN`, `RATE_LIMITED`, `PASSWORD_CHANGE_REQUIRED`, `NOT_FOUND` y
+`BAD_GATEWAY`.
+
+Tres de ellos existen para partir en dos un status que ya estaba ocupado, y por el mismo motivo
+las tres veces —que son dos mensajes distintos que enseñar a una persona distinta—:
+
+- `BAD_GATEWAY` lo añadió `cleaning-photos-storage` para el fallo del almacén de ficheros,
+  distinto de `INTERNAL_ERROR` a propósito: el frontend distingue «reintentar puede funcionar» de
+  «esto es un bug nuestro», y son dos mensajes distintos que enseñar a una limpiadora con una foto
+  que no sube.
+- `PASSWORD_CHANGE_REQUIRED` lo añadió `auth-account-recovery`.
+- `PROPERTY_STATE_CONFLICT` lo añadió `cleaning-assign-preconditions` para separar del `CONFLICT`
+  del `409` la negativa que viene de la **máquina de estados de la vivienda** y no del ciclo de
+  vida del recurso pedido. Conserva el sufijo del código del que se separa, que es lo que hace
+  legible que sigan compartiendo el `409`. Su emisor es la clase de excepción
+  (`PropertyStateBlocksCleaningError`), así que lo produce **toda** operación de limpieza que la
+  matriz bloquee y no solo la asignación; el detalle vive en [`cleaning.md`](cleaning.md).
+
+**Esta cifra en prosa no la guarda ningún test, y ha estado desviada.** La igualdad que la suite
+sí afirma es la del párrafo anterior —catálogo publicado ↔ registro—, y esa se cumplió siempre;
+lo que derivó es la enumeración de aquí. `PASSWORD_CHANGE_REQUIRED` entró el 2026-08-11 con
+`auth-account-recovery` y no se escribió, así que cuando `incident-photos` corrigió «once → doce»
+el 2026-08-23 la lista ya estaba corta en uno y la corrección la dejó igual de corta.
+`cleaning-assign-preconditions` la reconstruyó contra `ErrorCode` en vez de incrementarla, que es
+la única forma de que un recuento en prosa vuelva a ser cierto.
 
 ### Lo que el documento declara sobre los errores
 
@@ -213,7 +234,7 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 86 de las 98 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 88 de las 100 operaciones lo
   referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
@@ -240,6 +261,15 @@ dos mensajes distintos que enseñar a una limpiadora con una foto que no sube.
   (`GET /api/v1/incident-photos/{photo_id}`) porque un `<img src>` no puede mandar
   `Authorization`. Las otras no: la proyección de contexto del técnico exige `READ_INCIDENTS` como
   el resto del módulo, y las dos rutas autenticadas de foto también.
+- **Las dos rutas de `cleaning-stall-blocks-next-stay` entraron autenticadas y con permiso
+  declarado** (2026-08-23): `POST /api/v1/cleaning-tasks/{task_id}/cancel`
+  (`MANAGE_CLEANING_TASKS`) y `GET /api/v1/blocked-transitions` (`READ_PROPERTIES`), la segunda
+  servida por un **segundo router del módulo `properties`** con su propio prefijo, porque colgar un
+  segmento literal del router de `/properties` colisiona con `/properties/{id}`. Es el mismo patrón
+  con que `dashboard` sirve sus dos prefijos. La cancelación declara `200/401/403/409/422` y no
+  declara el `404` cross-tenant que sí emite, igual que sus cinco rutas hermanas del ciclo de la
+  tarea: es convención del módulo y no una regresión de esta capacidad, y lo que la enumeración de
+  arriba prohíbe es justamente ese catálogo plausible por endpoint.
 - **Las siete rutas de `messaging` entraron igual** (2026-08-16), todas bajo
   `/api/v1/conversations` y repartidas entre `READ_CONVERSATIONS` y `MANAGE_CONVERSATIONS`
   ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación

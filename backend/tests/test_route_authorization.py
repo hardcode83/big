@@ -377,6 +377,9 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks",
         "/api/v1/cleaning-tasks/{task_id}",
         "/api/v1/cleaning-tasks/{task_id}/accept",
+        # `cleaning-stall-blocks-next-stay` R3.1: the exit the cycle lacked, restricted to
+        # `MANAGE_CLEANING_TASKS`. Asserted per role in `tests/cleaning/test_tasks_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/cancel",
         "/api/v1/cleaning-tasks/{task_id}/checklist",
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",
@@ -386,6 +389,15 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         # and it lives here rather than under `/api/v1/incidents` precisely so that module's
         # "no creation route" invariant survives (R1.2).
         "/api/v1/cleaning-tasks/{task_id}/incidents",
+        # `cleaner-photo-requirements` R4.1: `READ_CLEANING_TASKS`, **no new permission**, on the
+        # same reasoning as the context path above. It is the read half of the photo path right
+        # below it — the cleaner is told which categories exist instead of discovering them by
+        # trying identifiers against that route's 404 — and reading three fields of the task's
+        # own template server-side is deliberately not `READ_CLEANING_TEMPLATES` (R4.2), which
+        # would open the tenant's whole template catalogue to resolve one row. The row-level
+        # half is again derived from the persisted role and invisible to this snapshot.
+        # Asserted per role in `tests/cleaning/test_photo_requirements_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/photo-requirements",
         "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
@@ -445,6 +457,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/properties",
         "/api/v1/properties/{property_id}",
         "/api/v1/properties/{property_id}/state",
+        # `cleaning-stall-blocks-next-stay` D5: a path of its own rather than a literal segment
+        # under `/properties`, which would collide with `/properties/{property_id}`. Read with
+        # `READ_PROPERTIES` (D6), so the owner sees her own stalled flat; asserted per role in
+        # `tests/properties/test_blocked_transitions_api.py`.
+        "/api/v1/blocked-transitions",
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",

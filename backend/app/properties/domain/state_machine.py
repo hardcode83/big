@@ -46,7 +46,6 @@ class PropertyStateMachine:
         (PropertyOperationalState.AWAITING_CLEANING, PropertyStateTrigger.OWNER_BLOCKED): {PropertyOperationalState.BLOCKED_BY_OWNER},
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANING_STARTED): {PropertyOperationalState.CLEANING_IN_PROGRESS},
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANER_REJECTED): {PropertyOperationalState.AWAITING_CLEANING},
-        (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED): {PropertyOperationalState.AWAITING_CLEANING},
         (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
         # Added by `maintenance` (design D8), the second of the same pair of omissions:
         # `CLEANING_SCHEDULED` admitted `INCIDENT_CRITICAL` and not `INCIDENT_HIGH`, while
@@ -55,6 +54,15 @@ class PropertyStateMachine:
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.CLEANING_COMPLETED): {PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyOperationalState.AWAITING_CHECKIN, PropertyOperationalState.VACANT_READY},
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
+        (PropertyOperationalState.AWAITING_CLEANING, PropertyStateTrigger.CLEANING_CANCELLED): (
+            set(ContextualStateResolver.CANCELLATION_STATES) - {PropertyOperationalState.AWAITING_CLEANING}
+        ),
+        (PropertyOperationalState.CLEANING_SCHEDULED, PropertyStateTrigger.CLEANING_CANCELLED): (
+            set(ContextualStateResolver.CANCELLATION_STATES)
+        ),
+        (PropertyOperationalState.CLEANING_IN_PROGRESS, PropertyStateTrigger.CLEANING_CANCELLED): (
+            set(ContextualStateResolver.CANCELLATION_STATES) - {PropertyOperationalState.CLEANING_IN_PROGRESS}
+        ),
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.CHECKIN_WINDOW_OPENED): {PropertyOperationalState.AWAITING_CHECKIN},
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.INCIDENT_HIGH): {PropertyOperationalState.MAINTENANCE_REQUIRED},
         (PropertyOperationalState.READY_FOR_NEXT_GUEST, PropertyStateTrigger.INCIDENT_CRITICAL): {PropertyOperationalState.CRITICAL_INCIDENT},
@@ -85,6 +93,52 @@ class PropertyStateMachine:
         the job would simply stop considering a state that had become legal.
         """
         return frozenset(state for state, candidate in cls._POLICY if candidate is trigger)
+
+    @classmethod
+    def destination_states_for(cls, trigger: PropertyStateTrigger) -> frozenset[PropertyOperationalState]:
+        """Where `trigger` can leave a property, derived from the policy above.
+
+        The mirror of `source_states_for`, and derived for the same reason: a hand-kept list
+        would drift from `_POLICY` the first time a row changed, and it would drift silently.
+
+        Added by `cleaning-stall-blocks-next-stay` so stall detection can tell "this flat never
+        made the transition" from "this flat is already where the transition was taking it" —
+        R2.4 needs the second to stop being reported, however the flat got there.
+        """
+        return frozenset(
+            destination
+            for (_, candidate), destinations in cls._POLICY.items()
+            if candidate is trigger
+            for destination in destinations
+        )
+
+    @classmethod
+    def is_due(cls, request: PropertyStateChangeRequest) -> bool:
+        """Whether the clock says this transition should happen, ignoring whether it may.
+
+        Added by `cleaning-stall-blocks-next-stay` (design D2) because `evaluate` cannot
+        answer it: `evaluate` consults `_POLICY` **before** `_validate_trigger_preconditions`,
+        so for a state that is not a source of the trigger it raises
+        `InvalidStateTransitionError` and never reaches the question. That ordering is right
+        for a caller performing a transition and useless for one detecting a mismatch — which
+        is exactly why a flat stuck in `CLEANING_IN_PROGRESS` with a stay already running went
+        unreported: nobody could ask the second question separately.
+
+        **`_POLICY` is deliberately not consulted here.** The legality half is the caller's to
+        ask, with `source_states_for`; folding both into one answer would collapse "not due"
+        and "not legal" back into the single verdict whose ambiguity this exists to break.
+
+        Only `IncompatibleTransitionContextError` means "not due". `InvalidTransitionInputError`
+        and `TransitionScopeMismatchError` mean the caller built the request wrong, and they
+        escape for the same reason `AdvancePropertyStatesUseCase` refuses to catch them: a bug
+        in us must not read as a fact about the world.
+        """
+        cls._validate_request(request)
+        try:
+            cls._validate_trigger_preconditions(request)
+        except IncompatibleTransitionContextError:
+            return False
+        return True
 
     @classmethod
     def evaluate(cls, request: PropertyStateChangeRequest) -> PropertyStateChangeResult:
@@ -185,10 +239,13 @@ class PropertyStateMachine:
         trigger = request.trigger
         contextual_triggers = {
             PropertyStateTrigger.CLEANING_COMPLETED,
+            PropertyStateTrigger.CLEANING_CANCELLED,
             PropertyStateTrigger.INCIDENT_RESOLVED,
         }
         if trigger is PropertyStateTrigger.CLEANING_COMPLETED:
             return ContextualStateResolver.after_cleaning_completion(request.property, request.context, request.reference_instant)
+        if trigger is PropertyStateTrigger.CLEANING_CANCELLED:
+            return ContextualStateResolver.after_cleaning_cancellation(request.property, request.context, request.reference_instant)
         if trigger is PropertyStateTrigger.INCIDENT_RESOLVED:
             return ContextualStateResolver.after_incident_resolution(request.property, request.context, request.reference_instant)
         if (
@@ -234,14 +291,14 @@ class PropertyStateMachine:
                 raise IncompatibleTransitionContextError("Checkout time requires an eligible reservation at or after effective checkout")
             if trigger is PropertyStateTrigger.RESERVATION_CANCELLED_BEFORE_CHECKIN and (reservation.status is not ReservationStatus.CANCELLED or utc_instant >= utc_start):
                 raise IncompatibleTransitionContextError("Cancellation must precede effective check-in")
-        if trigger in (PropertyStateTrigger.CLEANER_ASSIGNED, PropertyStateTrigger.CLEANER_REJECTED, PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED, PropertyStateTrigger.CLEANING_STARTED, PropertyStateTrigger.CLEANING_COMPLETED):
+        if trigger in (PropertyStateTrigger.CLEANER_ASSIGNED, PropertyStateTrigger.CLEANER_REJECTED, PropertyStateTrigger.CLEANING_STARTED, PropertyStateTrigger.CLEANING_COMPLETED, PropertyStateTrigger.CLEANING_CANCELLED):
             task = cls._source_cleaning(request)
             expected = {
                 PropertyStateTrigger.CLEANER_ASSIGNED: {CleaningTaskStatus.ASSIGNED},
                 PropertyStateTrigger.CLEANER_REJECTED: {CleaningTaskStatus.REJECTED},
-                PropertyStateTrigger.CLEANING_ASSIGNMENT_EXPIRED: {CleaningTaskStatus.ASSIGNED, CleaningTaskStatus.ACCEPTED},
                 PropertyStateTrigger.CLEANING_STARTED: {CleaningTaskStatus.IN_PROGRESS},
                 PropertyStateTrigger.CLEANING_COMPLETED: {CleaningTaskStatus.COMPLETED},
+                PropertyStateTrigger.CLEANING_CANCELLED: {CleaningTaskStatus.CANCELLED},
             }[trigger]
             if task.status not in expected:
                 raise IncompatibleTransitionContextError("Cleaning trigger status is incompatible")

@@ -1,0 +1,143 @@
+{
+  "tabs": {
+    "label": "Secciones de precios",
+    "recommendations": "Recomendaciones",
+    "rules": "Reglas"
+  },
+  "separator": "·",
+  "recommendations": {
+    "list": {
+      "label": "Recomendaciones de precio",
+      "empty": {
+        "title": "Sin recomendaciones",
+        "description": "No hay recomendaciones que coincidan con los filtros seleccionados."
+      },
+      "error": {
+        "title": "No se pudieron cargar las recomendaciones",
+        "description": "Vuelve a intentarlo en unos segundos."
+      }
+    },
+    "columns": {
+      "property": "Vivienda",
+      "date": "Noche",
+      "recommendedPrice": "Precio recomendado",
+      "status": "Estado",
+      "explanation": "Ver el cálculo"
+    }
+  },
+  "status": {
+    "DRAFT": "Borrador",
+    "RECOMMENDED": "Recomendada",
+    "APPROVED": "Aprobada",
+    "APPLIED_EXTERNAL": "Publicada",
+    "REJECTED": "Rechazada"
+  },
+  "identity": {
+    "unavailable": "Identidad no disponible",
+    "loading": "Cargando identidad…",
+    "portfolio": "Toda la cartera"
+  },
+  "filters": {
+    "property": {
+      "label": "Vivienda",
+      "all": "Todas las viviendas"
+    },
+    "dateFrom": { "label": "Desde" },
+    "dateTo": { "label": "Hasta" },
+    "status": {
+      "label": "Estado",
+      "all": "Todos los estados"
+    },
+    "active": {
+      "label": "Vigencia",
+      "all": "Todas las reglas",
+      "true": "Solo activas",
+      "false": "Solo inactivas"
+    }
+  },
+  "pagination": {
+    "label": "Paginación de recomendaciones",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalItems": "{{total}} en total"
+  },
+  "decide": {
+    "approve": "Aprobar",
+    "reject": "Rechazar",
+    "markPublished": "Marcar como publicada",
+    "confirm": "Confirmar",
+    "cancel": "Cancelar",
+    "sending": "Enviando…",
+    "success": "Recomendación actualizada.",
+    "confirmQuestion": {
+      "APPROVED": "¿Aprobar este precio?",
+      "REJECTED": "¿Rechazar este precio?",
+      "APPLIED_EXTERNAL": "¿Marcar este precio como publicado?"
+    },
+    "error": {
+      "forbidden": "No tienes permiso para decidir recomendaciones de precio.",
+      "notFound": "Esa recomendación ya no existe.",
+      "conflict": "Esa recomendación ya no está en el estado que creías. Vuelve a cargar la lista.",
+      "invalid": "Ese movimiento no es válido para esta recomendación.",
+      "generic": "No se pudo guardar la decisión. Vuelve a intentarlo."
+    }
+  },
+  "generate": {
+    "button": "Regenerar ahora",
+    "sending": "Generando…",
+    "report": "Generación ejecutada: {{created}} creadas, {{updated}} actualizadas, {{preserved}} conservadas, {{skipped}} omitidas.",
+    "error": {
+      "forbidden": "No tienes permiso para generar recomendaciones.",
+      "invalid": "No se puede generar para la vivienda seleccionada.",
+      "generic": "No se pudo generar. Vuelve a intentarlo."
+    }
+  },
+  "rules": {
+    "list": {
+      "label": "Reglas de precio",
+      "empty": {
+        "title": "Sin reglas de precio",
+        "description": "No hay reglas que coincidan con los filtros seleccionados."
+      },
+      "error": {
+        "title": "No se pudieron cargar las reglas",
+        "description": "Vuelve a intentarlo en unos segundos."
+      }
+    },
+    "columns": {
+      "name": "Nombre",
+      "scope": "Ámbito",
+      "active": "Vigencia",
+      "band": "Banda de precio",
+      "minPrice": "Mínimo",
+      "basePrice": "Base",
+      "maxPrice": "Máximo",
+      "maxDailyChangePct": "Variación diaria máxima (%)",
+      "modifiers": "Modificadores"
+    },
+    "scope": {
+      "portfolio": "Toda la cartera"
+    },
+    "active": {
+      "true": "Activa",
+      "false": "Inactiva"
+    },
+    "modifiers": {
+      "weekday": "Día de la semana: {{count}}",
+      "leadTime": "Antelación: {{count}}",
+      "occupancy": "Ocupación: {{count}}",
+      "seasonality": "Temporada: {{count}}",
+      "event": "Eventos: {{count}}"
+    },
+    "pagination": {
+      "label": "Paginación de reglas de precio"
+    }
+  },
+  "read": {
+    "error": {
+      "forbidden": "No tienes permiso para ver los precios de este tenant.",
+      "generic": "Vuelve a intentarlo en unos segundos."
+    }
+  }
+}

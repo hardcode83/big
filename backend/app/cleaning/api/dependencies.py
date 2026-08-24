@@ -19,6 +19,7 @@ from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.application.use_cases import (
     AcceptCleaningTaskUseCase,
     AssignCleaningTaskUseCase,
+    CancelCleaningTaskUseCase,
     CompleteChecklistItemUseCase,
     CompleteCleaningTaskUseCase,
     CreateChecklistTemplateUseCase,
@@ -26,6 +27,7 @@ from app.cleaning.application.use_cases import (
     GetChecklistUseCase,
     GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
+    GetPhotoRequirementsUseCase,
     ListChecklistTemplatesUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
@@ -142,6 +144,16 @@ def get_reject_cleaning_task_use_case(session: SessionDep) -> RejectCleaningTask
     )
 
 
+def get_cancel_cleaning_task_use_case(session: SessionDep) -> CancelCleaningTaskUseCase:
+    """Takes the notification port for the same reason `reject` does: cancelling a task that was
+    only `ASSIGNED` has to close its assignment SLA, or the manager is escalated about a task that
+    no longer exists (design D8, corrected in section 5)."""
+    return CancelCleaningTaskUseCase(
+        notifications=SqlAlchemyNotificationLogRepository(session),
+        **_lifecycle_kwargs(session),
+    )
+
+
 def get_start_cleaning_task_use_case(session: SessionDep) -> StartCleaningTaskUseCase:
     return StartCleaningTaskUseCase(**_lifecycle_kwargs(session))
 
@@ -175,7 +187,12 @@ def get_cleaning_task_use_case(session: SessionDep) -> GetCleaningTaskUseCase:
 
 
 def get_list_cleaning_tasks_use_case(session: SessionDep) -> ListCleaningTasksUseCase:
-    return ListCleaningTasksUseCase(tasks=SqlAlchemyCleaningTaskRepository(session))
+    return ListCleaningTasksUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        # The listing reads each row's flat to answer whether it is assignable
+        # (`cleaning-assign-preconditions` D6). One `states_for` per page, not per row.
+        properties=SqlAlchemyPropertyRepository(session),
+    )
 
 
 def get_checklist_use_case(session: SessionDep) -> GetChecklistUseCase:
@@ -183,6 +200,25 @@ def get_checklist_use_case(session: SessionDep) -> GetChecklistUseCase:
         tasks=SqlAlchemyCleaningTaskRepository(session),
         templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
         completions=SqlAlchemyCleaningChecklistCompletionRepository(session),
+    )
+
+
+def get_photo_requirements_use_case(session: SessionDep) -> GetPhotoRequirementsUseCase:
+    """The sibling of `get_checklist_use_case` above, and its third repository is the
+    difference: the checklist reads completions, this reads which photo types are already
+    uploaded.
+
+    **No new infrastructure.** All three adapters already exist and are already wired
+    elsewhere in this module — in particular `SqlAlchemyCleaningPhotoRepository`, whose
+    `uploaded_photo_types` is the same method the completion path uses
+    (`get_complete_cleaning_task_use_case` above). Sharing the port method rather than adding a
+    fifth one is design D2, and it is what keeps `CleaningPhotoRepository`'s "four methods, and
+    each one has a caller" docstring true.
+    """
+    return GetPhotoRequirementsUseCase(
+        tasks=SqlAlchemyCleaningTaskRepository(session),
+        templates=SqlAlchemyCleaningChecklistTemplateRepository(session),
+        photos=SqlAlchemyCleaningPhotoRepository(session),
     )
 
 

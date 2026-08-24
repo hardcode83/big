@@ -8,7 +8,7 @@ import { useAuth } from "@/lib/auth";
 import {
   getCleaningDataSource,
   type CleanerSummary,
-  type CleaningTask,
+  type CleaningTaskListItem,
   type CleaningTaskFilters,
   type PaginatedResponse,
   type PropertySummary,
@@ -35,7 +35,7 @@ function useTenantId(): string {
 export function useCleaningTasks(
   filters: CleaningTaskFilters,
   page: number,
-): UseQueryResult<PaginatedResponse<CleaningTask>> {
+): UseQueryResult<PaginatedResponse<CleaningTaskListItem>> {
   const tenantId = useTenantId();
   return useQuery({
     queryKey: cleaningKeys.tasks(tenantId, filters, page),

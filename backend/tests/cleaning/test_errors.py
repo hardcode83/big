@@ -36,6 +36,7 @@ from app.cleaning.domain.exceptions import (
     ReservationNotFoundError,
     UnsupportedPhotoFormatError,
 )
+from app.core.error_codes import ErrorCode
 
 
 def _concrete_domain_errors() -> set[type]:
@@ -70,39 +71,48 @@ def test_no_row_names_an_exception_from_another_module():
 
 
 @pytest.mark.parametrize(
-    ("error", "expected_status"),
+    ("error", "expected_status", "expected_code"),
     [
-        (CleaningTaskNotFoundError(), 404),
-        (ChecklistTemplateNotFoundError("x"), 404),
-        (ChecklistItemNotFoundError("x"), 404),
-        (PropertyNotFoundError(), 404),
-        (ReservationNotFoundError(), 404),
-        (InvalidCleaningTransitionError("x"), 409),
-        (PropertyStateBlocksCleaningError("x"), 409),
-        (ChecklistIncompleteError(("a",)), 409),
+        (CleaningTaskNotFoundError(), 404, ErrorCode.NOT_FOUND),
+        (ChecklistTemplateNotFoundError("x"), 404, ErrorCode.NOT_FOUND),
+        (ChecklistItemNotFoundError("x"), 404, ErrorCode.NOT_FOUND),
+        (PropertyNotFoundError(), 404, ErrorCode.NOT_FOUND),
+        (ReservationNotFoundError(), 404, ErrorCode.NOT_FOUND),
+        # The two 409s that `cleaning-assign-preconditions` R1.1 and R1.2 separate. They are
+        # two cases and not one because the status alone no longer distinguishes them: the
+        # task's lifecycle refusing keeps `CONFLICT`, the property's operational state refusing
+        # gets its own code. Collapse them back into a single assertion on 409 and the
+        # distinction the whole change exists for stops being covered.
+        (InvalidCleaningTransitionError("x"), 409, ErrorCode.CONFLICT),
+        (
+            PropertyStateBlocksCleaningError("x"),
+            409,
+            ErrorCode.PROPERTY_STATE_CONFLICT,
+        ),
+        (ChecklistIncompleteError(("a",)), 409, ErrorCode.CONFLICT),
         # Its sibling, and checked next to it for the reason its own docstring gives: the two
         # are "deliberately built the same way" but are not related by `isinstance`, so nothing
         # makes the photo row inherit the checklist row's status. Without this case, changing
         # `_MAPPING`'s `PhotosIncompleteError` entry to any other code leaves this file green —
         # `test_every_domain_error_has_a_row` only checks presence, never the status.
-        (PhotosIncompleteError(("a",)), 409),
-        (BlockingIncidentError("x"), 409),
-        (AmbiguousChecklistTemplateError("x"), 409),
-        (DuplicateLiveCleaningTaskError("x"), 409),
-        (CleaningValidationError("x"), 422),
+        (PhotosIncompleteError(("a",)), 409, ErrorCode.CONFLICT),
+        (BlockingIncidentError("x"), 409, ErrorCode.CONFLICT),
+        (AmbiguousChecklistTemplateError("x"), 409, ErrorCode.CONFLICT),
+        (DuplicateLiveCleaningTaskError("x"), 409, ErrorCode.CONFLICT),
+        (CleaningValidationError("x"), 422, ErrorCode.VALIDATION_ERROR),
         # `cleaning-photos-storage`. The four outcomes of the upload that the checklist had no
         # equivalent of: a type the template does not declare, a body over the ceiling, bytes
         # that are not an accepted image, and a file store that refused the write.
-        (PhotoTypeNotFoundError("x"), 404),
-        (PhotoTooLargeError("x"), 413),
-        (UnsupportedPhotoFormatError("x"), 422),
-        (PhotoStorageUnavailableError("x"), 502),
+        (PhotoTypeNotFoundError("x"), 404, ErrorCode.NOT_FOUND),
+        (PhotoTooLargeError("x"), 413, ErrorCode.PAYLOAD_TOO_LARGE),
+        (UnsupportedPhotoFormatError("x"), 422, ErrorCode.VALIDATION_ERROR),
+        (PhotoStorageUnavailableError("x"), 502, ErrorCode.BAD_GATEWAY),
     ],
 )
-def test_each_error_maps_to_its_status(error, expected_status):
-    status, _ = http_error_for(error)
+def test_each_error_maps_to_its_status_and_code(error, expected_status, expected_code):
+    status, code = http_error_for(error)
 
-    assert status == expected_status
+    assert (status, code) == (expected_status, expected_code)
 
 
 def test_the_storage_failure_is_a_502_and_not_a_500():

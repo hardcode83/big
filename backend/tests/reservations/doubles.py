@@ -53,6 +53,10 @@ class FakePropertyRepository:
                 return prop
         return None
 
+    async def list_all(self, tenant_id: uuid.UUID) -> list[Property]:
+        rows = [prop for prop in self.properties.values() if prop.tenant_id == tenant_id]
+        return sorted(rows, key=lambda prop: str(prop.id))
+
     async def list_by_state(
         self, tenant_id: uuid.UUID, states: Collection[PropertyOperationalState]
     ) -> list[Property]:

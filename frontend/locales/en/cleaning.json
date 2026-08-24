@@ -61,10 +61,15 @@
     "confirm": "Assign",
     "sending": "Assigning…",
     "success": "Task assigned to {{name}}.",
+    "blocked": {
+      "propertyState": "Cannot be assigned yet: the property is not awaiting cleaning.",
+      "taskStatus": "Cannot be assigned: this task no longer accepts an assignment change."
+    },
     "error": {
       "forbidden": "You do not have permission to assign cleanings.",
       "notFound": "That cleaning task no longer exists.",
       "conflict": "That task no longer accepts an assignment change.",
+      "propertyState": "The property is not awaiting cleaning yet.",
       "invalid": "That person is no longer an active cleaner in this tenant.",
       "generic": "The cleaning could not be assigned. Please try again."
     }

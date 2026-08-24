@@ -34,6 +34,8 @@ from app.cleaning.api.dependencies import (
     get_create_cleaning_task_use_case,
     get_list_cleaning_photos_use_case,
     get_list_cleaning_tasks_use_case,
+    get_cancel_cleaning_task_use_case,
+    get_photo_requirements_use_case,
     get_reject_cleaning_task_use_case,
     get_report_task_incident_use_case,
     get_start_cleaning_task_use_case,
@@ -45,6 +47,7 @@ from app.cleaning.api.schemas import (
     MAX_PER_PAGE,
     MAX_PHOTO_TYPE_LENGTH,
     AssignCleaningTaskRequest,
+    CancelCleaningTaskRequest,
     ChecklistResponse,
     CleaningPhotoListResponse,
     CleaningPhotoResponse,
@@ -52,6 +55,7 @@ from app.cleaning.api.schemas import (
     CleaningTaskPageResponse,
     CleaningTaskResponse,
     CreateCleaningTaskRequest,
+    PhotoRequirementsResponse,
     ReportTaskIncidentRequest,
     TaskIncidentReportedResponse,
     ValidateCleaningTaskRequest,
@@ -67,8 +71,10 @@ from app.cleaning.application.use_cases import (
     GetChecklistUseCase,
     GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
+    GetPhotoRequirementsUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
+    CancelCleaningTaskUseCase,
     RejectCleaningTaskUseCase,
     ReportTaskIncidentUseCase,
     StartCleaningTaskUseCase,
@@ -108,7 +114,14 @@ def _actor(authenticated: AuthenticatedRequest, ip: str) -> CleaningActor:
     description=(
         "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned "
         "to them; that restriction is derived from the token's role and cannot be widened by "
-        "a query parameter."
+        "a query parameter.\n\n"
+        "Each row carries `assignment_blocked_by`: why that task cannot be assigned right now "
+        "(`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or "
+        "`null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is "
+        "computed when the page is read, so it may be stale by the time a client acts on it; "
+        "the assignment endpoint checks again and its refusal is the authority. `null` also "
+        "covers a property whose state this read could not resolve, so a client must treat it "
+        "as \"go ahead and let the server decide\", never as a guarantee."
     ),
 )
 async def list_cleaning_tasks(
@@ -193,7 +206,14 @@ async def get_cleaning_task(
     description=(
         "Assignment is the only mutation this accepts: the status moves through the lifecycle "
         "endpoints so `PropertyStateMachine` is never bypassed. The person named must hold "
-        "`CLEANER` in the caller's tenant."
+        "`CLEANER` in the caller's tenant.\n\n"
+        "**The first assignment of a task requires its property to be in "
+        "`AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to "
+        "`CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in "
+        "any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from "
+        "the `409` `CONFLICT` returned when it is the task's own status that refuses, so the "
+        "two causes can be told apart without reading the message. Reassigning a task that is "
+        "already `ASSIGNED` does not transition the property and does not depend on its state."
     ),
 )
 async def assign_cleaning_task(
@@ -262,6 +282,47 @@ async def reject_cleaning_task(
         now=now_utc(),
     )
     return CleaningTaskResponse.from_domain(replacement)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=CleaningTaskResponse,
+    summary="Retire a cleaning that is not going to be completed",
+    description=(
+        "The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` "
+        "and the property's state is resolved **through `PropertyStateMachine`**, never written "
+        "directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the "
+        "state a blocked check-in never got to write. A replacement task is created unassigned "
+        "unless a guest is in the flat right now — a cleaning nobody could perform would freeze "
+        "the property again. `reason` is required and is recorded on the state transition. The "
+        "partial evidence already gathered, checklist items and photos alike, is kept whole. "
+        "A task that is already terminal answers `409` without writing anything."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorEnvelope,
+            "description": (
+                "The task is not in a live status, or the property's state does not admit the "
+                "cancellation."
+            ),
+        }
+    },
+)
+async def cancel_cleaning_task(
+    authenticated: ManageDep,
+    task_id: uuid.UUID,
+    payload: CancelCleaningTaskRequest,
+    use_case: Annotated[CancelCleaningTaskUseCase, Depends(get_cancel_cleaning_task_use_case)],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningTaskResponse:
+    task = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        reason=payload.reason,
+        now=now_utc(),
+    )
+    return CleaningTaskResponse.from_domain(task)
 
 
 @router.post(
@@ -396,7 +457,9 @@ _PHOTO_UPLOAD_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": (
             "The `photo_type` is not declared by the task's template, or the task does not "
             "exist for this caller — another tenant's task and another cleaner's task are "
-            "both answered this way, indistinguishably."
+            "both answered this way, indistinguishably. **Which types the template does "
+            "declare is readable at `GET /cleaning-tasks/{task_id}/photo-requirements`**, so "
+            "this refusal never has to be discovered by trying."
         ),
     },
     409: {
@@ -600,6 +663,88 @@ async def list_cleaning_photos(
         now=now_utc(),
     )
     return CleaningPhotoListResponse.build(photos)
+
+
+# The only status this projection adds, on the same criterion as the two catalogues above: each
+# entry is a row of `app/cleaning/api/errors.py::_MAPPING` reached from this handler's own raise
+# sites, not a guess.
+#
+#   404 ← `CleaningTaskNotFoundError` from `_load_task`, for an unknown task, another tenant's
+#         task and another cleaner's task alike.
+#   404 ← `ChecklistTemplateNotFoundError` when the task's template no longer exists, which is
+#         the same failure the close already answers for the same cause.
+#
+# There is deliberately **no `409`**: this route answers whatever the task's status, exactly as
+# `/checklist` does, so no `InvalidCleaningTransitionError` can reach it. And the `422` is not
+# declared, for the reason `_PHOTO_UPLOAD_RESPONSES` gives: FastAPI injects it for the validated
+# `task_id` and `_point_errors_at_envelope` rewrites it to the envelope.
+_PHOTO_REQUIREMENTS_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task does not exist for this caller — an unknown id, another tenant's task "
+            "and another cleaner's task are all answered this way, indistinguishably — or the "
+            "task's checklist template no longer exists."
+        ),
+    },
+}
+
+
+@router.get(
+    "/{task_id}/photo-requirements",
+    response_model=PhotoRequirementsResponse,
+    summary="Which photo categories this cleaning task asks for",
+    responses=_PHOTO_REQUIREMENTS_RESPONSES,
+    description=(
+        "The photo categories the task's checklist template declares, each with the label the "
+        "template's author wrote, whether the close demands it, and whether one has already "
+        "been uploaded. It exists so a `CLEANER` can be shown **a button per category** "
+        "without holding `READ_CLEANING_TEMPLATES`.\n\n"
+        "**Belonging to this collection and `required` are two different facts.** A "
+        "`photo_type` listed here may be uploaded; `required: true` additionally means the "
+        "close will refuse without it. An optional category is listed, because the upload "
+        "admits it.\n\n"
+        "**A `photo_type` that is not in this collection is exactly what "
+        "`POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the "
+        "same template, so the relation is a guarantee and not a coincidence to be discovered "
+        "by trying identifiers.\n\n"
+        "Order is the template's own — the order its author declared, which is the order the "
+        "work is done in — and it is stable across requests.\n\n"
+        "`uploaded` reports what is already filed and decides nothing: whether the task may be "
+        "closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. "
+        "A template that declares no photo answers `200` with an empty collection, never a "
+        "`404`.\n\n"
+        "Answered whatever the task's status: the cleaner needs to know what will be asked of "
+        "her **before** starting, not only while in progress. A `CLEANER` reaches only the "
+        "tasks assigned to them; a manager or owner reaches every task of their tenant, and "
+        "that restriction comes from the token's persisted role — no request field can widen "
+        "it."
+    ),
+)
+async def get_photo_requirements(
+    authenticated: ReadDep,
+    task_id: uuid.UUID,
+    use_case: Annotated[
+        GetPhotoRequirementsUseCase, Depends(get_photo_requirements_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> PhotoRequirementsResponse:
+    """`READ_CLEANING_TASKS`, plus the row-level rule derived inside the use case.
+
+    `ReadDep` and not `ExecuteDep`: a manager and an owner read this too, exactly as they read
+    `/checklist` and `/photos`. No new permission is declared, and none is needed — reading
+    three fields of the task's own template server-side is not `READ_CLEANING_TEMPLATES`, which
+    would open the tenant's whole template catalogue.
+
+    The half that keeps a cleaner to her own tasks is not declared here and cannot be: it comes
+    from `CleaningActor.restrict_to_cleaner_id`, off the role persisted on the user's row.
+    """
+    views = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+    )
+    return PhotoRequirementsResponse.build(views)
 
 
 @router.post(

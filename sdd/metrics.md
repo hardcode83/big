@@ -62,4 +62,8 @@
 | timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
 | tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
 | incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
+| pricing-web | new, design, tasks, run, review, ship, archive | 325336 | 973216 | 172901470 | 119.2598 | 2026-08-23 | 2026-08-23 |
+| cleaning-assign-preconditions | new, design, tasks, run, review, ship, archive | 363030 | 1219226 | 313886120 | 183.5497 | 2026-08-22 | 2026-08-23 |
+| cleaning-stall-blocks-next-stay | design, tasks, run, review, ship, archive | 766276 | 1683373 | 401801053 | 230.5488 | 2026-08-23 | 2026-08-24 |
+| cleaner-photo-requirements | new, tasks, design, run, review | 293878 | 823543 | 130798113 | 87.7495 | 2026-08-23 | — |
 | demo-user | new, design, tasks, run, review | 864679 | 1930666 | 398222422 | 252.7534 | 2026-08-23 | — |

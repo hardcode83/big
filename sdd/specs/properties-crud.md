@@ -176,6 +176,15 @@ propiedad está dentro de su tenant.
   `property_state_transitions` ni ningún `TimelineEvent`: crear no es transitar, y no existe tipo
   de evento de creación de propiedad.
 
+- **El módulo sirve además una colección que no es de propiedades**:
+  `GET /api/v1/blocked-transitions` (`READ_PROPERTIES`), las viviendas a las que el reloj exigió una
+  transición que su estado no admite. Vive en un **segundo router** con su propio prefijo —colgar un
+  segmento literal del router de `/properties` colisionaría con `/properties/{id}`— y su
+  comportamiento se especifica donde se define el hecho que sirve, en
+  [`celery-jobs.md`](celery-jobs.md) §Desajustes entre el calendario y el estado, para no
+  duplicarlo. Se nombra aquí porque quien busque la superficie de lectura de `properties` la
+  encontraría incompleta sin ella.
+
 **Cómo se sostiene la garantía, que no es uniforme y conviene no describir como si lo fuera**:
 `update_details` y `set_wifi_password` nombran exactamente lo que escriben, de modo que sus
 **firmas** hacen irrepresentable un cambio de estado. `add` recibe una `Property` entera y por eso
@@ -381,7 +390,10 @@ y un `PROPERTY_MANAGER` la ven; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben 
   wifi, el diccionario `written` que decide a la vez qué se persiste y qué se audita, y la
   redacción de los campos de texto libre.
 - `backend/app/properties/domain/repositories.py` — el puerto, `PATCHABLE_PROPERTY_FIELDS` como
-  único hogar de la regla, `PropertyFilters` y `Page`.
+  único hogar de la regla, `PropertyFilters` y `Page`. Incluye `states_for(tenant_id, property_ids)`,
+  la lectura estrecha de estado operacional por lote que consume `cleaning` para decir en su listado
+  si una tarea es asignable ahora (`cleaning.md`); es deliberadamente distinta de las lecturas de
+  portfolio completo del mismo puerto, que alimentan barridos y no pantallas.
 - `backend/app/properties/infrastructure/repositories.py` — los escritores, la guarda de tenant, la
   comprobación de estado en el alta y la traducción de las constraints.
 - `backend/app/properties/domain/exceptions.py` — `PropertyNotFoundError`,

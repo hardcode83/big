@@ -1,0 +1,605 @@
+<!DOCTYPE html><html class="dark" lang="es"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Dashboard - PropManage AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-fixed-dim": "#00daf3",
+                      "surface-container-lowest": "#0a0e17",
+                      "on-background": "#dfe2ef",
+                      "text-secondary": "#94A3B8",
+                      "on-surface": "#dfe2ef",
+                      "on-error-container": "#ffdad6",
+                      "background": "#0f131c",
+                      "outline": "#879390",
+                      "surface-variant": "#31353f",
+                      "surface-bright": "#353943",
+                      "inverse-surface": "#dfe2ef",
+                      "error": "#ffb4ab",
+                      "secondary-fixed-dim": "#bcc7de",
+                      "surface-container": "#1c2029",
+                      "on-tertiary": "#00363d",
+                      "state-success": "#10B981",
+                      "inverse-primary": "#006b5f",
+                      "surface-elevated": "#131D31",
+                      "inverse-on-surface": "#2c303a",
+                      "on-primary-container": "#00302a",
+                      "on-error": "#690005",
+                      "tertiary": "#00daf3",
+                      "tertiary-container": "#009fb2",
+                      "surface-container-low": "#181b25",
+                      "secondary-container": "#3e495d",
+                      "tertiary-fixed": "#9cf0ff",
+                      "error-container": "#93000a",
+                      "surface-dim": "#0f131c",
+                      "on-tertiary-container": "#002f35",
+                      "surface-container-high": "#262a34",
+                      "text-primary": "#F8FAFC",
+                      "primary-fixed-dim": "#70d8c8",
+                      "on-surface-variant": "#bcc9c5",
+                      "primary-container": "#32a192",
+                      "on-primary-fixed-variant": "#005048",
+                      "on-secondary-container": "#aeb9d0",
+                      "on-secondary-fixed": "#111c2d",
+                      "surface-tint": "#70d8c8",
+                      "surface": "#0f131c",
+                      "secondary": "#bcc7de",
+                      "on-tertiary-fixed-variant": "#004f58",
+                      "surface-container-highest": "#31353f",
+                      "surface-highlight": "#1E293B",
+                      "text-muted": "#64748B",
+                      "on-tertiary-fixed": "#001f24",
+                      "on-primary": "#003731",
+                      "secondary-fixed": "#d8e3fb",
+                      "state-warning": "#F59E0B",
+                      "state-info": "#38BDF8",
+                      "primary": "#70d8c8",
+                      "state-error": "#EF4444",
+                      "on-secondary-fixed-variant": "#3c475a",
+                      "outline-variant": "#3d4946",
+                      "on-primary-fixed": "#00201c",
+                      "on-secondary": "#263143",
+                      "primary-fixed": "#8df5e4"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "lg": "16px",
+                      "md": "12px",
+                      "unit": "4px",
+                      "margin-mobile": "16px",
+                      "xl": "24px",
+                      "margin-desktop": "32px",
+                      "4xl": "64px",
+                      "sm": "8px",
+                      "gutter": "16px",
+                      "3xl": "48px",
+                      "2xl": "32px",
+                      "xs": "4px"
+              },
+              "fontFamily": {
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "display-xl": [
+                              "Inter"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "data-mono": [
+                              "JetBrains Mono"
+                      ],
+                      "display-lg-mobile": [
+                              "Inter"
+                      ],
+                      "body-base": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "display-2xl": [
+                              "Inter"
+                      ],
+                      "body-medium": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "display-xl": [
+                              "44px",
+                              {
+                                      "lineHeight": "52px",
+                                      "letterSpacing": "-0.025em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.015em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "data-mono": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "display-lg-mobile": [
+                              "36px",
+                              {
+                                      "lineHeight": "44px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-base": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "-0.005em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-2xl": [
+                              "56px",
+                              {
+                                      "lineHeight": "64px",
+                                      "letterSpacing": "-0.03em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-medium": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "14px",
+                                      "letterSpacing": "0.06em",
+                                      "fontWeight": "700"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        .glass-panel {
+            background: rgba(24, 27, 37, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 1px solid #262a34;
+        }
+        
+        .nav-active-glow {
+            box-shadow: 0 4px 20px -2px rgba(112, 216, 200, 0.15);
+        }
+
+        .btn-primary-glow {
+            box-shadow: 0 4px 14px 0 rgba(0, 137, 123, 0.39);
+        }
+        
+        .btn-primary-glow:hover {
+            box-shadow: 0 6px 20px rgba(0, 137, 123, 0.23);
+            transform: translateY(-1px);
+        }
+
+        .card-hover-gradient {
+            position: relative;
+        }
+        
+        .card-hover-gradient::before {
+            content: '';
+            position: absolute;
+            top: 0;
+            left: 0;
+            right: 0;
+            height: 1px;
+            background: linear-gradient(90deg, transparent, #70d8c8, transparent);
+            opacity: 0;
+            transition: opacity 0.3s ease;
+        }
+        
+        .card-hover-gradient:hover::before {
+            opacity: 1;
+        }
+
+        /* Ambient background glow */
+        body::before {
+            content: '';
+            position: fixed;
+            top: -50%;
+            left: -50%;
+            width: 200%;
+            height: 200%;
+            background: radial-gradient(circle at 50% 50%, rgba(112, 216, 200, 0.03) 0%, transparent 50%);
+            z-index: -1;
+            pointer-events: none;
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-base min-h-screen flex selection:bg-primary selection:text-on-primary">
+<!-- SideNavBar -->
+<nav class="hidden md:flex flex-col h-screen w-64 fixed left-0 top-0 bg-surface-container-low border-r border-outline-variant shadow-sm py-xl z-50">
+<!-- Brand -->
+<div class="px-xl mb-2xl">
+<div class="flex items-center gap-md">
+<div class="w-10 h-10 rounded-lg bg-primary-container flex items-center justify-center text-on-primary-container">
+<span class="material-symbols-outlined font-bold">home_work</span>
+</div>
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary">AutoHostAI</h1>
+<p class="font-label-caps text-label-caps text-text-muted mt-1">Panel de Control</p>
+</div>
+</div>
+</div>
+<!-- CTA -->
+<div class="px-xl mb-xl">
+<button class="w-full bg-[#00897b] hover:bg-primary-container text-white py-2 px-4 rounded-xl flex items-center justify-center gap-sm transition-all btn-primary-glow font-body-medium">
+<span class="material-symbols-outlined text-sm" style="font-variation-settings: 'FILL' 1;">add</span>
+                Añadir Propiedad
+            </button>
+</div>
+<!-- Main Navigation -->
+<div class="flex-1 px-lg space-y-sm overflow-y-auto custom-scrollbar">
+<a class="flex items-center gap-md px-lg py-md bg-secondary-container text-on-secondary-container rounded-xl font-body-medium nav-active-glow active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">dashboard</span>
+<span>Dashboard</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl font-body-medium active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined">domain</span>
+<span>Propiedades</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl font-body-medium active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined">calendar_month</span>
+<span>Reservas</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl font-body-medium active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined">analytics</span>
+<span>Analítica</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl font-body-medium active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined">settings</span>
+<span>Configuración</span>
+</a>
+</div>
+<!-- Footer Nav -->
+<div class="px-lg mt-auto pt-lg border-t border-outline-variant/50">
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl font-body-medium active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined">help</span>
+<span>Ayuda</span>
+</a>
+</div>
+</nav>
+<!-- Main Content Wrapper -->
+<div class="flex-1 flex flex-col md:ml-64 min-h-screen">
+<!-- TopAppBar -->
+<header class="sticky top-0 w-full bg-surface/80 backdrop-blur-xl border-b border-outline-variant shadow-sm z-40">
+<div class="flex justify-between items-center h-16 px-margin-mobile md:px-margin-desktop">
+<!-- Left: Title / Mobile Menu -->
+<div class="flex items-center gap-md">
+<button class="md:hidden text-on-surface-variant hover:text-primary transition-colors">
+<span class="material-symbols-outlined">menu</span>
+</button>
+<h2 class="font-headline-md text-headline-md font-bold text-primary md:hidden">AutoHostAI</h2>
+<!-- Search Bar (Desktop) -->
+<div class="hidden md:flex items-center relative">
+<span class="material-symbols-outlined absolute left-3 text-text-muted text-sm">search</span>
+<input class="bg-surface-container-low border-outline-variant rounded-full pl-10 pr-4 py-1.5 text-sm focus:border-primary focus:ring-1 focus:ring-primary w-64 transition-all" placeholder="Buscar reservas, propiedades..." type="text">
+</div>
+</div>
+<!-- Right: Actions & Profile -->
+<div class="flex items-center gap-lg">
+<div class="flex items-center gap-sm">
+<button class="text-on-surface-variant hover:text-primary transition-all p-2 rounded-full hover:bg-surface-variant active:scale-95 transition-transform relative">
+<span class="material-symbols-outlined">language</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-all p-2 rounded-full hover:bg-surface-variant active:scale-95 transition-transform relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-1.5 right-1.5 w-2 h-2 bg-state-error rounded-full"></span>
+</button>
+</div>
+<div class="h-8 w-px bg-outline-variant mx-1"></div>
+<button class="flex items-center gap-sm hover:opacity-80 transition-opacity">
+<div class="w-8 h-8 rounded-full bg-primary-container overflow-hidden border border-outline-variant">
+<img alt="Avatar de usuario" class="w-full h-full object-cover" data-alt="A professional headshot of a property manager in a well-lit, modern corporate office environment. The lighting is crisp and the aesthetic matches a high-end, precise UI style with dark tech tones." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBPqABz-w8TiJind12KrIjtEqFyP0xhO-FRjjatSyYBz3RAgFoZyi_UG2Wh_hGOz5YwZ1vRwZCaRvqDcaWI6kQ_SSxgZD-bKv961L5TuX2xN9gX7HYrkJFnY3SNurETe-vD-5CpaMb5-VjmpssOKRYDaIGZAXpVWy4011XzWlwz32bVmXmW4OAQnX25xoBa_vc5eniuwACZaJ9wIjPu0gq9TpOW89wPRIAyKkFKr20CRdbOCOYK_DrT">
+</div>
+</button>
+</div>
+</div>
+</header>
+<!-- Main Canvas -->
+<main class="flex-1 p-margin-mobile md:p-margin-desktop max-w-7xl mx-auto w-full">
+<!-- Page Header -->
+<div class="mb-xl flex flex-col sm:flex-row justify-between items-start sm:items-center gap-4">
+<div>
+<h2 class="font-headline-lg text-headline-lg font-bold text-on-surface">Dashboard</h2>
+<p class="text-text-muted mt-1 font-body-base">Resumen de operaciones para hoy</p>
+</div>
+<div class="flex items-center gap-sm">
+<button class="px-4 py-2 border border-[#1E293B] rounded-lg text-on-surface hover:bg-[rgba(0,137,123,0.1)] hover:border-primary transition-all text-sm font-medium flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">filter_list</span>
+                        Filtros
+                    </button>
+<button class="px-4 py-2 bg-[#00897b] hover:bg-primary-container text-white rounded-lg transition-all btn-primary-glow text-sm font-medium flex items-center gap-2">
+<span class="material-symbols-outlined text-sm">refresh</span>
+                        Actualizar
+                    </button>
+</div>
+</div>
+<!-- Bento Grid: Stats Overview -->
+<div class="grid grid-cols-1 md:grid-cols-3 mb-2xl gap-xl">
+<!-- Stat Card 1 -->
+<div class="glass-panel rounded-xl p-lg flex flex-col justify-between relative overflow-hidden group">
+<div class="absolute -right-6 -top-6 w-24 h-24 bg-primary/10 rounded-full blur-2xl group-hover:bg-primary/20 transition-all duration-500"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-surface-container-high rounded-lg text-primary">
+<span class="material-symbols-outlined">cleaning_services</span>
+</div>
+<span class="flex items-center gap-1 text-xs text-state-success bg-state-success/10 px-2 py-1 rounded-full">
+<span class="material-symbols-outlined text-[12px]">trending_up</span>
+                            12%
+                        </span>
+</div>
+<div>
+<h3 class="text-text-muted font-body-base mb-1">Limpiezas Hoy</h3>
+<p class="font-data-mono text-3xl font-bold text-on-surface">24</p>
+</div>
+</div>
+<!-- Stat Card 2 -->
+<div class="glass-panel rounded-xl p-lg flex flex-col justify-between relative overflow-hidden group">
+<div class="absolute -right-6 -top-6 w-24 h-24 bg-state-info/10 rounded-full blur-2xl group-hover:bg-state-info/20 transition-all duration-500"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-surface-container-high rounded-lg text-state-info">
+<span class="material-symbols-outlined">luggage</span>
+</div>
+<span class="flex items-center gap-1 text-xs text-text-muted bg-surface-container px-2 py-1 rounded-full">
+                            Hoy
+                        </span>
+</div>
+<div>
+<h3 class="text-text-muted font-body-base mb-1">Check-ins Próximos</h3>
+<p class="font-data-mono text-3xl font-bold text-on-surface">18</p>
+</div>
+</div>
+<!-- Stat Card 3 -->
+<div class="glass-panel rounded-xl p-lg flex flex-col justify-between relative overflow-hidden group">
+<div class="absolute -right-6 -top-6 w-24 h-24 bg-state-warning/10 rounded-full blur-2xl group-hover:bg-state-warning/20 transition-all duration-500"></div>
+<div class="flex justify-between items-start mb-4">
+<div class="p-2 bg-surface-container-high rounded-lg text-state-warning">
+<span class="material-symbols-outlined">report_problem</span>
+</div>
+<span class="flex items-center gap-1 text-xs text-state-error bg-state-error/10 px-2 py-1 rounded-full">
+<span class="material-symbols-outlined text-[12px]">trending_up</span>
+                            2 Urgentes
+                        </span>
+</div>
+<div>
+<h3 class="text-text-muted font-body-base mb-1">Incidencias Abiertas</h3>
+<p class="font-data-mono text-3xl font-bold text-on-surface">5</p>
+</div>
+</div>
+</div>
+<!-- Main Content Area: Operations & Chart -->
+<div class="grid grid-cols-1 lg:grid-cols-3 gap-xl mb-4xl">
+<!-- Left Column: Operations Feed (Takes up 2 cols on LG) -->
+<div class="lg:col-span-2 space-y-xl gap-2xl">
+<div class="flex justify-between items-center mb-md">
+<h3 class="font-headline-md text-lg font-semibold text-on-surface">Operaciones Críticas</h3>
+<a class="text-primary hover:text-primary-fixed text-sm flex items-center gap-1 transition-colors" href="#">
+                            Ver todas
+                            <span class="material-symbols-outlined text-sm">arrow_forward</span>
+</a>
+</div>
+<!-- Operation Card 1 -->
+<div class="bg-[#181b25] border border-[#262a34] rounded-xl p-lg card-hover-gradient transition-all">
+<div class="flex justify-between items-start border-b border-outline-variant/50 pb-md mb-md">
+<div>
+<h4 class="font-bold text-on-surface text-lg">PAJARITOS8</h4>
+<p class="text-xs text-text-muted mt-1 font-data-mono">ID: OP-8492-A</p>
+</div>
+<span class="px-3 py-1 bg-state-warning/20 text-state-warning border border-state-warning/30 rounded-full text-xs font-semibold">
+                                Cleaning scheduled
+                            </span>
+</div>
+<div class="grid grid-cols-2 gap-4 mb-4">
+<div class="bg-surface/50 p-3 rounded-lg border border-outline-variant/30">
+<p class="text-xs text-text-muted mb-1">Incidencias Abiertas</p>
+<p class="font-data-mono text-xl font-bold">0</p>
+</div>
+<div class="bg-surface/50 p-3 rounded-lg border border-outline-variant/30 border-l-2 border-l-primary">
+<p class="text-xs text-text-muted mb-1">Próxima acción</p>
+<p class="font-medium text-sm text-on-surface">Pendiente de aceptar</p>
+<p class="text-xs text-text-muted mt-0.5">Resp: Limpiadora asignada</p>
+</div>
+</div>
+<div class="space-y-2 text-sm">
+<div class="flex justify-between">
+<span class="text-text-muted">Reserva</span>
+<span class="font-medium text-on-surface">DIRECT</span>
+</div>
+<div class="flex justify-between">
+<span class="text-text-muted">Huésped</span>
+<span class="font-medium text-on-surface">No guest</span>
+</div>
+<div class="flex justify-between">
+<span class="text-text-muted">Fechas</span>
+<span class="font-medium text-on-surface text-right">
+<span class="text-text-muted text-xs">In:</span> Aug 21, 2026 <br>
+<span class="text-text-muted text-xs">Out:</span> Aug 22, 2026
+                                </span>
+</div>
+</div>
+</div>
+<!-- Operation Card 2 -->
+<div class="bg-[#181b25] border border-[#262a34] rounded-xl p-lg card-hover-gradient transition-all">
+<div class="flex justify-between items-start border-b border-outline-variant/50 pb-md mb-md">
+<div>
+<h4 class="font-bold text-on-surface text-lg">REDES11</h4>
+<p class="text-xs text-text-muted mt-1 font-data-mono">ID: OP-9102-B</p>
+</div>
+<span class="px-3 py-1 bg-state-info/20 text-state-info border border-state-info/30 rounded-full text-xs font-semibold">
+                                Cleaning in progress
+                            </span>
+</div>
+<div class="grid grid-cols-2 gap-4 mb-4">
+<div class="bg-surface/50 p-3 rounded-lg border border-outline-variant/30">
+<p class="text-xs text-text-muted mb-1">Incidencias Abiertas</p>
+<p class="font-data-mono text-xl font-bold">0</p>
+</div>
+<div class="bg-surface/50 p-3 rounded-lg border border-outline-variant/30 border-l-2 border-l-state-info">
+<p class="text-xs text-text-muted mb-1">Próxima acción</p>
+<p class="font-medium text-sm text-on-surface">Limpieza en curso</p>
+<p class="text-xs text-text-muted mt-0.5">Resp: Limpiadora asignada</p>
+</div>
+</div>
+<div class="space-y-2 text-sm">
+<div class="flex justify-between">
+<span class="text-text-muted">Reserva</span>
+<span class="font-medium text-on-surface truncate ml-4" title="BOOKING #SEED-BOOKING-1">BOOKING #SEED-B...</span>
+</div>
+<div class="flex justify-between">
+<span class="text-text-muted">Huésped</span>
+<span class="font-medium text-on-surface">María García</span>
+</div>
+<div class="flex justify-between">
+<span class="text-text-muted">Fechas</span>
+<span class="font-medium text-on-surface text-right">
+<span class="text-text-muted text-xs">In:</span> Aug 19, 2026 <br>
+<span class="text-text-muted text-xs">Out:</span> Aug 23, 2026
+                                </span>
+</div>
+</div>
+</div>
+</div>
+<!-- Right Column: Analytics & Recent Activity -->
+<div class="space-y-xl gap-2xl">
+<!-- Occupancy Chart Placeholder -->
+<div class="glass-panel rounded-xl p-xl">
+<div class="flex justify-between items-center mb-md">
+<h3 class="font-headline-md text-base font-semibold text-on-surface">Ocupación Semanal</h3>
+<button class="text-text-muted hover:text-primary transition-colors">
+<span class="material-symbols-outlined text-sm">more_vert</span>
+</button>
+</div>
+<div class="h-48 relative flex items-end justify-between gap-2 pt-8 pb-4">
+<!-- Faux Chart Bars -->
+<div class="w-full bg-surface-container rounded-t-sm h-[40%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">L</span></div>
+<div class="w-full bg-surface-container rounded-t-sm h-[65%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">M</span></div>
+<div class="w-full bg-primary rounded-t-sm h-[85%] relative group cursor-pointer shadow-[0_0_15px_rgba(112,216,200,0.3)]"><div class="absolute inset-0 bg-white/10 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-on-surface font-medium">X</span></div>
+<div class="w-full bg-surface-container rounded-t-sm h-[50%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">J</span></div>
+<div class="w-full bg-surface-container rounded-t-sm h-[90%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">V</span></div>
+<div class="w-full bg-surface-container rounded-t-sm h-[95%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">S</span></div>
+<div class="w-full bg-surface-container rounded-t-sm h-[70%] relative group cursor-pointer"><div class="absolute inset-0 bg-primary/20 opacity-0 group-hover:opacity-100 transition-opacity"></div><span class="absolute -bottom-5 left-1/2 -translate-x-1/2 text-xs text-text-muted">D</span></div>
+<!-- Grid lines -->
+<div class="absolute top-0 left-0 w-full border-t border-outline-variant/30 border-dashed"></div>
+<div class="absolute top-1/2 left-0 w-full border-t border-outline-variant/30 border-dashed"></div>
+</div>
+</div>
+<!-- Activity Feed -->
+<div class="glass-panel rounded-xl p-lg">
+<div class="flex justify-between items-center mb-md">
+<h3 class="font-headline-md text-base font-semibold text-on-surface">Actividad Reciente</h3>
+</div>
+<div class="space-y-4 relative before:absolute before:inset-0 before:ml-[11px] before:-translate-x-px md:before:mx-auto md:before:translate-x-0 before:h-full before:w-0.5 before:bg-outline-variant/30">
+<!-- Activity Item 1 -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group is-active">
+<div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-primary text-background shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+<span class="material-symbols-outlined text-[12px] font-bold">check</span>
+</div>
+<div class="w-[calc(100%-2rem)] md:w-[calc(50%-1.5rem)] p-3 rounded-lg border border-outline-variant/50 bg-surface/50">
+<div class="flex items-center justify-between mb-1">
+<h4 class="font-medium text-sm text-on-surface">Limpieza completada</h4>
+</div>
+<p class="text-xs text-text-muted">REDES11 - Estado actualizado</p>
+<span class="text-[10px] text-text-muted mt-2 block font-data-mono">Hace 10 min</span>
+</div>
+</div>
+<!-- Activity Item 2 -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+<div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-surface-container-high text-text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+<span class="material-symbols-outlined text-[12px]">schedule</span>
+</div>
+<div class="w-[calc(100%-2rem)] md:w-[calc(50%-1.5rem)] p-3 rounded-lg border border-outline-variant/50 bg-surface/30">
+<div class="flex items-center justify-between mb-1">
+<h4 class="font-medium text-sm text-on-surface">Reserva confirmada</h4>
+</div>
+<p class="text-xs text-text-muted">PAJARITOS8 - Nuevo huésped</p>
+<span class="text-[10px] text-text-muted mt-2 block font-data-mono">Hace 1 hora</span>
+</div>
+</div>
+<!-- Activity Item 3 -->
+<div class="relative flex items-center justify-between md:justify-normal md:odd:flex-row-reverse group">
+<div class="flex items-center justify-center w-6 h-6 rounded-full border-2 border-background bg-surface-container-high text-text-muted shadow shrink-0 md:order-1 md:group-odd:-translate-x-1/2 md:group-even:translate-x-1/2 z-10">
+<span class="material-symbols-outlined text-[12px]">build</span>
+</div>
+<div class="w-[calc(100%-2rem)] md:w-[calc(50%-1.5rem)] p-3 rounded-lg border border-outline-variant/50 bg-surface/30">
+<div class="flex items-center justify-between mb-1">
+<h4 class="font-medium text-sm text-on-surface">Incidencia reportada</h4>
+</div>
+<p class="text-xs text-text-muted">Wifi no funciona en ALFA2</p>
+<span class="text-[10px] text-text-muted mt-2 block font-data-mono">Hace 3 horas</span>
+</div>
+</div>
+</div>
+</div>
+</div>
+</div>
+</main>
+<!-- Footer -->
+<footer class="w-full py-2xl bg-surface-container-lowest border-t border-outline-variant text-label-caps mt-auto">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-mobile md:px-margin-desktop gap-4">
+<div class="text-text-muted">© 2024 AutoHostAI. Todos los derechos reservados.</div>
+<div class="flex gap-lg">
+<a class="text-text-muted hover:text-primary transition-colors" href="#">© 2024 AutoHostAI. Todos los derechos reservados.</a>
+<a class="text-text-muted hover:text-primary transition-colors" href="#">© 2024 AutoHostAI. Todos los derechos reservados.</a>
+<a class="text-text-muted hover:text-primary transition-colors" href="#">© 2024 AutoHostAI. Todos los derechos reservados.</a>
+</div>
+</div>
+</footer>
+</div>
+</body></html>

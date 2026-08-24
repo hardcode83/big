@@ -89,6 +89,13 @@ export interface paths {
      */
     post: operations["reset_password_api_v1_auth_reset_password_post"];
   };
+  "/api/v1/blocked-transitions": {
+    /**
+     * List the tenant's blocked transitions
+     * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+     */
+    get: operations["list_blocked_transitions_api_v1_blocked_transitions_get"];
+  };
   "/api/v1/cleaning-checklist-templates": {
     /**
      * List the tenant's checklist templates
@@ -114,6 +121,8 @@ export interface paths {
     /**
      * List the tenant's cleaning tasks
      * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+     *
+     * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
      */
     get: operations["list_cleaning_tasks_api_v1_cleaning_tasks_get"];
     /**
@@ -131,6 +140,8 @@ export interface paths {
     /**
      * Assign or reassign a cleaning task
      * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+     *
+     * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
      */
     patch: operations["assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch"];
   };
@@ -140,6 +151,13 @@ export interface paths {
      * @description Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.
      */
     post: operations["accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/cancel": {
+    /**
+     * Retire a cleaning that is not going to be completed
+     * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+     */
+    post: operations["cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post"];
   };
   "/api/v1/cleaning-tasks/{task_id}/checklist": {
     /**
@@ -191,6 +209,23 @@ export interface paths {
      * **Reporting does not block closing the cleaning by itself.** The incident is born `MEDIUM`, and `complete()` is refused only by an unresolved `CRITICAL` incident **anywhere in the property** — so it starts blocking only if the classifier raises it, or if such an incident already existed.
      */
     post: operations["report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
+    /**
+     * Which photo categories this cleaning task asks for
+     * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
+     *
+     * **Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.
+     *
+     * **A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.
+     *
+     * Order is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.
+     *
+     * `uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.
+     *
+     * Answered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.
+     */
+    get: operations["get_photo_requirements_api_v1_cleaning_tasks__task_id__photo_requirements_get"];
   };
   "/api/v1/cleaning-tasks/{task_id}/photos": {
     /**
@@ -900,6 +935,61 @@ export interface components {
        */
       technician_id: string;
     };
+    /**
+     * BlockedTransitionPageResponse
+     * @description The pagination envelope of PRD §23, over the stalls rather than over the flats.
+     *
+     * `total` is how many stalls the tenant has, not how many properties were examined — see
+     * `ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot
+     * hide on page 3 of the source.
+     */
+    BlockedTransitionPageResponse: {
+      /** Data */
+      data: components["schemas"]["BlockedTransitionResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * BlockedTransitionResponse
+     * @description One transition the calendar required and the flat's state refused (R2.2).
+     *
+     * `trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same
+     * treatment `dashboard-api` gives `operational_state` ("carries no colour: the colour mapping
+     * belongs to the client"). Translating them here would open a catalogue of strings for a
+     * consumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.
+     *
+     * `due_since` answers "since when", which is the number an operator actually wants: for REDES11,
+     * the 19th of August and not the day somebody happened to look.
+     */
+    BlockedTransitionResponse: {
+      /** Blocking State */
+      blocking_state: string;
+      /**
+       * Due Since
+       * Format: date-time
+       */
+      due_since: string;
+      /** Property Code */
+      property_code: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /**
+       * Reservation Id
+       * Format: uuid
+       */
+      reservation_id: string;
+      /** Trigger */
+      trigger: string;
+    };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
       /**
@@ -926,6 +1016,20 @@ export interface components {
       /** App Version */
       app_version: string;
       provenance: components["schemas"]["PrivateProvenanceResponse"] | null;
+    };
+    /**
+     * CancelCleaningTaskRequest
+     * @description `cleaning-stall-blocks-next-stay` R3.1.
+     *
+     * `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+     * `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+     * exactly what has to be explainable six months later. It is recorded on
+     * `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+     * admits only real, non-sensitive columns of the entity.
+     */
+    CancelCleaningTaskRequest: {
+      /** Reason */
+      reason: string;
     };
     /**
      * ChangePasswordRequest
@@ -1048,6 +1152,12 @@ export interface components {
       updated_at: string;
     };
     /**
+     * CleaningAssignmentBlocker
+     * @description Which party refuses to assign a cleaning task: its own status, or its property's state.
+     * @enum {string}
+     */
+    CleaningAssignmentBlocker: "TASK_STATUS" | "PROPERTY_STATE";
+    /**
      * CleaningPhotoListResponse
      * @description The photos of one task (R3.1), each already carrying its signed URL.
      *
@@ -1108,10 +1218,62 @@ export interface components {
       /** Timezone */
       timezone: string;
     };
+    /**
+     * CleaningTaskListItemResponse
+     * @description One row of the cleaning-task listing: a task plus whether it can be assigned now.
+     */
+    CleaningTaskListItemResponse: {
+      /** Accepted At */
+      accepted_at: string | null;
+      /** Assigned Cleaner Id */
+      assigned_cleaner_id: string | null;
+      assignment_blocked_by: components["schemas"]["CleaningAssignmentBlocker"] | null;
+      /**
+       * Checklist Template Id
+       * Format: uuid
+       */
+      checklist_template_id: string;
+      /** Completed At */
+      completed_at: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Scheduled End */
+      scheduled_end: string | null;
+      /** Scheduled Start */
+      scheduled_start: string | null;
+      /** Started At */
+      started_at: string | null;
+      status: components["schemas"]["CleaningTaskStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Validated At */
+      validated_at: string | null;
+      /** Validated By User Id */
+      validated_by_user_id: string | null;
+      validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
       /** Data */
-      data: components["schemas"]["CleaningTaskResponse"][];
+      data: components["schemas"]["CleaningTaskListItemResponse"][];
       /** Page */
       page: number;
       /** Per Page */
@@ -1631,7 +1793,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PROPERTY_STATE_CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -2277,6 +2439,54 @@ export interface components {
       id: string;
       /** Label */
       label: string;
+    };
+    /**
+     * PhotoRequirementsResponse
+     * @description The photo categories of one task, in the order the template declares them.
+     *
+     * A single `data` key, the shape `ChecklistResponse` above and `CleaningPhotoListResponse`
+     * below already use: a top-level JSON array cannot grow a field later without breaking every
+     * generated client.
+     *
+     * **The class names deliberately do not start with `CleaningPhoto`.** That prefix already
+     * collides in the published contract — `backend/openapi.json` carries
+     * `app__cleaning__api__schemas__CleaningPhotoResponse` and
+     * `app__dashboard__api__schemas__CleaningPhotoResponse`, mangled by module — and those mangled
+     * names are what a frontend consumer writes by hand. A third collision would mangle the two
+     * that survive today as well (design D3).
+     */
+    PhotoRequirementsResponse: {
+      /** Data */
+      data: components["schemas"]["PhotoRequirementStateResponse"][];
+    };
+    /**
+     * PhotoRequirementStateResponse
+     * @description One photo category the task's template declares (`cleaner-photo-requirements` R2.1).
+     *
+     * **Four fields enumerated by hand, and no `from_attributes`** — the rule this module opens
+     * with. The view it is built from carries only these four, but enumerating them is what makes
+     * R4.4 ("ni el `id` de la plantilla, ni su `name`, ni su `property_id`, ni su `active`, ni sus
+     * `items` en crudo") a property of this class rather than of whoever next edits the view.
+     *
+     * **`required` is not what the collection means.** Belonging to the collection says *the
+     * upload admits this type*; `required: true` says *the close demands it*. The column these
+     * come from is named `required_photos` and holds entries that may perfectly well be optional
+     * — the domain says so of itself in `RequiredPhotoSpec`'s docstring — so the two facts are
+     * published under two names and the ambiguity of the column name stops at the schema.
+     *
+     * `uploaded` reports what is already there and adjudicates nothing: whether the task may be
+     * closed stays inside `CleaningTask.complete()`, which is the only place any clause of
+     * PRD §11 is applied.
+     */
+    PhotoRequirementStateResponse: {
+      /** Label */
+      label: string;
+      /** Photo Type */
+      photo_type: string;
+      /** Required */
+      required: boolean;
+      /** Uploaded */
+      uploaded: boolean;
     };
     /**
      * PMSProvider
@@ -4080,6 +4290,44 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's blocked transitions
+   * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+   */
+  list_blocked_transitions_api_v1_blocked_transitions_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BlockedTransitionPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's checklist templates
    * @description Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.
    */
@@ -4210,6 +4458,8 @@ export interface operations {
   /**
    * List the tenant's cleaning tasks
    * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+   *
+   * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
    */
   list_cleaning_tasks_api_v1_cleaning_tasks_get: {
     parameters: {
@@ -4324,6 +4574,8 @@ export interface operations {
   /**
    * Assign or reassign a cleaning task
    * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+   *
+   * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
    */
   assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch: {
     parameters: {
@@ -4388,6 +4640,54 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Retire a cleaning that is not going to be completed
+   * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+   */
+  cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is not in a live status, or the property's state does not admit the cancellation. */
+      409: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
@@ -4624,6 +4924,59 @@ export interface operations {
     };
   };
   /**
+   * Which photo categories this cleaning task asks for
+   * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
+   *
+   * **Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.
+   *
+   * **A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.
+   *
+   * Order is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.
+   *
+   * `uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.
+   *
+   * Answered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.
+   */
+  get_photo_requirements_api_v1_cleaning_tasks__task_id__photo_requirements_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PhotoRequirementsResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably — or the task's checklist template no longer exists. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List a cleaning task's photos
    * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
    *
@@ -4709,7 +5062,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
-      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. */
+      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. **Which types the template does declare is readable at `GET /cleaning-tasks/{task_id}/photo-requirements`**, so this refusal never has to be discovered by trying. */
       404: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];

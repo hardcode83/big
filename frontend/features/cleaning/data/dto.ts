@@ -31,7 +31,15 @@ export interface PaginatedResponse<T> {
  */
 export type CleaningTaskStatus = components["schemas"]["CleaningTaskStatus"];
 
-/** One cleaning task row (PRD §11, §24). */
+/**
+ * Why an assignment cannot happen right now. Aliased from the generated union for the
+ * same reason as `CleaningTaskStatus` above and never hand-copied: a third member on the
+ * backend has to break this build once the contract is regenerated.
+ */
+export type CleaningAssignmentBlocker =
+  components["schemas"]["CleaningAssignmentBlocker"];
+
+/** One cleaning task (PRD §11, §24) — what every single-task endpoint returns. */
 export interface CleaningTask {
   id: string;
   propertyId: string;
@@ -40,6 +48,23 @@ export interface CleaningTask {
   scheduledStart: IsoDateTime | null;
   scheduledEnd: IsoDateTime | null;
   createdAt: IsoDateTime;
+}
+
+/**
+ * One **row of the listing**: a task plus the backend's pre-flight verdict.
+ *
+ * Split from `CleaningTask` exactly as the backend splits `CleaningTaskListItemResponse`
+ * from `CleaningTaskResponse` (design D5/D7). `assignTask` returns the base shape, because
+ * the `PATCH` does not answer this question — and it does not need to: the mutation
+ * invalidates the whole task-key prefix, so the refetch brings fresh verdicts for the
+ * entire page.
+ *
+ * `null` means "nothing known to be blocking", which also covers a flat whose state the
+ * page read could not resolve. It is a courtesy, never a permission: the backend refuses
+ * again on the mutation and that refusal is the authority (R3.3).
+ */
+export interface CleaningTaskListItem extends CleaningTask {
+  assignmentBlockedBy: CleaningAssignmentBlocker | null;
 }
 
 /**
