@@ -1,0 +1,483 @@
+# Design: design-system-tokens
+
+## Context
+
+`frontend/app/globals.css` es hoy 13 tokens de color `oklch(L 0 0)` —croma cero— en `:root`,
+redeclarados dentro de un `@media (prefers-color-scheme: dark)` que **no se puede vencer**, más
+un `@theme inline` que los expone a Tailwind v4, un `@layer base`, el bloque
+`prefers-reduced-motion` y las utilidades `tap-target` / `pb-safe`. No hay fichero
+`tailwind.config` (decisión de `frontend-foundation`: `components.json` lleva
+`"tailwind": {"config": ""}`), no se carga ninguna fuente (`app/layout.tsx` no usa `next/font`)
+y no existe token de tipografía, ritmo ni radio más allá de un único `--radius: 0.5rem`.
+
+El idioma ya resuelve por cookie en servidor: `lib/config/constants.ts:15` declara
+`LOCALE_COOKIE`, `lib/i18n/server.ts` lo lee con `cookies()` y `app/layout.tsx` pinta
+`<html lang={locale}>`. `features/shell/components/locale-switcher.tsx` es el conmutador —
+cliente, muta en `useEffect`, escribe la cookie y `document.documentElement.lang`, sin Zustand.
+`Topbar` (Server Component) lo monta por defecto en su slot `end`, y **los cinco shells**
+(`public`, `workspace`, `cleaner`, `technician`, `guest`) renderizan `Topbar`, así que lo que
+entre ahí aparece en toda la app sin tocar ninguna pantalla.
+
+El color crudo está medido: **68 usos de escalas numéricas de Tailwind en exactamente 4
+ficheros** —`lib/ui/status-tone.ts` (24), `components/property-state-badge.test.tsx` (24) y los
+dos `SEVERITY_COLOR` de `features/incidents/` (10 cada uno)— y **25 apariciones de `dark:`**,
+todas en los dos primeros. Los dos `SEVERITY_COLOR` son byte a byte idénticos, incumplen
+`sdd/specs/frontend-foundation.md:38` y no llevan variante `dark:`, así que hoy pintan
+`bg-gray-100 text-gray-700` sobre página oscura. `components/property-state-badge.test.tsx` es
+el **único** test que fija cadenas de clase exactas; `features/pricing/lib/recommendation-status.test.ts`
+solo comprueba que la clave existe en `TONE_BADGE_CLASS`, y `features/cleaning` la reexporta.
+
+Fuente canónica de valores: `docs/design/2026-08-23-stitch-export/DESIGN.md` (56 tokens de
+color, 10 roles tipográficos, 6 radios, 11 pasos de ritmo). Es **solo oscuro**.
+
+## Decisiones
+
+### D1 — Los tres bloques: claro en `:root`, oscuro dos veces, y un test de paridad que lo vigila
+
+**Elegido:** el patrón de tres bloques con selector de atributo, en este orden exacto:
+
+```css
+:root                       { color-scheme: light dark; /* … tokens claros … */ }
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) { /* … tokens oscuros … */ }
+}
+:root[data-theme="dark"]    { /* … tokens oscuros, otra vez … */ }
+:root[data-theme="light"]   { color-scheme: light; }
+:root[data-theme="dark"]    { color-scheme: dark; }
+```
+
+Las dos primeras reglas y la tercera tienen **la misma especificidad** —`:root` es una
+pseudoclase (0,1,0) y `[data-theme]` un atributo (0,1,0), así que `:root[data-theme="dark"]` y
+`:root:not([data-theme="light"])` empatan en (0,2,0)—, de modo que **el orden del fichero es lo
+que decide** y el bloque del atributo tiene que ir después de la media query. Con esto R1.4 sale
+en las dos direcciones sin `!important`: `data-theme="light"` sobre sistema oscuro excluye la
+media query por el `:not(...)` y deja ganar a `:root`; `data-theme="dark"` sobre sistema claro
+gana por orden. El `color-scheme` acompaña para que los controles nativos, la barra de scroll y
+el fondo del propio navegador sigan al tema resuelto.
+
+El precio es que los valores oscuros se escriben **dos veces**, y ese es exactamente el riesgo
+que el roadmap nombra («quedarse a medias»). Se paga con un test —`app/globals.tokens.test.ts`—
+que parsea `globals.css`, extrae los tres bloques y afirma que (a) declaran **el mismo conjunto
+de nombres** de token y (b) los dos bloques oscuros declaran **valores idénticos**. Eso convierte
+R1.2 en una comprobación de CI en vez de una promesa, y hace la duplicación segura en lugar de
+frágil.
+
+Rechazado: **`light-dark(claro, oscuro)`** — una sola declaración por token y sin duplicación,
+pero su suelo de navegador (Chrome 123 / Safari 17.5 / Firefox 120) está **por encima del target
+por defecto de Next 16**, así que un Safari 17.0-17.4 recibiría el token *inválido* y por tanto
+sin valor; y su anidamiento dentro del `color-mix(in oklab, …)` que Tailwind v4 genera para los
+modificadores de opacidad (`bg-surface/60`) —que es justo lo que `visual-restyle-workspace`
+necesita para el glassmorphism— no está verificado aquí.
+Rechazado: **`@media` + clase `.dark` estilo shadcn** — obliga a una clase en `<html>` y a un
+script inline anti-parpadeo; la cookie leída en servidor (D4) hace ambos innecesarios.
+Rechazado: **el «space toggle» de custom properties** (`--dark: initial`) — elimina la
+duplicación, pero es ilegible y ningún test lo salvaría de eso.
+
+### D2 — El subconjunto de tokens: 25 nombres, no los 56 del export
+
+**Elegido:** se declaran **25 tokens de color** —15 de núcleo y 10 de estado— y de los **56**
+que trae el frontmatter de `DESIGN.md` (contados) el resto se usa como **semilla** de valores, no
+como token propio. El export es un volcado del sistema de Material 3
+(`surface-tint`, `*-fixed`, `*-fixed-dim`, `inverse-*`, `tertiary-*`) y declarar los 56 nombres × 2
+temas fabricaría más de treinta tokens sin consumidor, cada uno con una fila en la auditoría de contraste de
+R1.6 y una posibilidad de deriva en el test de paridad de D1. Menos nombres, todos con dueño.
+
+Y los 13 nombres semánticos que ya existen (`background`, `foreground`, `muted`,
+`muted-foreground`, `primary`, `primary-foreground`, `secondary`, `secondary-foreground`,
+`accent`, `accent-foreground`, `border`, `input`, `ring`) **se conservan y solo cambian de
+valor**: renombrarlos obligaría a editar las seis primitivas de `components/ui/` y todas las
+pantallas, que es precisamente lo que este change declara fuera de alcance.
+
+Rechazado: portar los 56 tokens tal cual — trazabilidad total, pero R1.2 y R1.6 tendrían que
+cubrir tokens que nada pinta.
+Rechazado: renombrar a la nomenclatura M3 del export (`on-surface`, `surface-container-low`) —
+alineaba los nombres con la fuente y rompía todo el árbol.
+
+### D3 — La paleta clara: `#006b5f` como primario, porque el `#00897b` del export no llega a AA
+
+**Elegido:** la tabla completa de §«Paleta» de abajo, con esta resolución de R2.4: **el token
+primario canónico es `#70d8c8` en oscuro y `#006b5f` en claro.**
+
+`DESIGN.md` se contradice —frontmatter `primary: '#70d8c8'`, prosa «a signature Teal
+(#00897b)»— y la contradicción se resuelve al ver que son **dos papeles distintos**, no dos
+opiniones: `#70d8c8` viene emparejado con `on-primary: #003731`, es decir es el tono claro que
+se lee *sobre* fondo oscuro (papel de «primary» en M3 oscuro); `#00897b` es, según la propia
+prosa, el relleno sólido con **texto blanco**, que es el papel de «primary» en un tema claro. Las
+maquetas usan los dos y cada una en su sitio (`#70d8c8` en las de espacio de trabajo, `#00897b`
+20 veces en la landing de escritorio — contado).
+
+Pero **`#00897b` con texto blanco mide 4.32:1**, y el rótulo de un botón es texto normal
+(`text-sm font-medium` = 14 px/500), así que **falla el 4.5:1 de WCAG 2.2 AA**. No es una
+objeción teórica: es el botón primario de la prosa de `DESIGN.md`. Y el propio export trae el
+hermano que sí cumple: `inverse-primary` `#006b5f`, blanco sobre él **6.43:1**, que es
+literalmente el token que M3 reserva para «el primario cuando la superficie es clara». Así que la
+corrección que exige R1.6 no inventa nada: usa el valor que el export ya tenía para este caso.
+
+`#00897b` sobrevive como el ancla del *glow* teal (`rgba(0,137,123,0.2)`) y como color de texto
+grande (4.09:1 ≥ 3:1 para ≥24 px bold), los dos de `visual-restyle-workspace` y `landing-public`;
+aquí **no se declara token** porque no tendría consumidor — resuelto así en el gate (OQ3).
+
+Rechazado: `#00897b` como primario claro — es el valor que la prosa nombra, y falla AA por 0.18.
+Rechazado: `#00897b` con texto `#003731` en vez de blanco — pasa el contraste y contradice la
+prosa del export («with white text») además de leerse apagado.
+Rechazado: invertir luminancias del oscuro token a token — lo que R2 y el roadmap D1 prohíben
+explícitamente: da contraste válido y carácter muerto.
+
+### D4 — El tema se resuelve en servidor por cookie, calcado del idioma
+
+**Elegido:** `THEME_COOKIE = "autohostai.theme"` declarada junto a `LOCALE_COOKIE` en
+`lib/config/constants.ts`; `resolveTheme()` isomorfo en `lib/theme/theme.ts` (espejo de
+`resolveLocale`, devuelve `Theme | null`); `getServerTheme()` en `lib/theme/server.ts` (espejo de
+`getServerLocale`); `app/layout.tsx` pinta `<html lang={locale} data-theme={theme ?? undefined}>`.
+`undefined` deja el atributo **ausente**, que es el tercer estado y el que devuelve el mando a la
+media query. Tres estados, sin valor `"system"` persistido: la ausencia *es* el estado.
+
+| cookie `autohostai.theme` | `prefers-color-scheme` | atributo en `<html>` | tema pintado |
+|---|---|---|---|
+| ausente | light | (ninguno) | claro (`:root`) |
+| ausente | dark | (ninguno) | oscuro (media query) |
+| `light` | light | `data-theme="light"` | claro |
+| `light` | dark | `data-theme="light"` | claro (el `:not()` excluye la media query) |
+| `dark` | light | `data-theme="dark"` | oscuro (gana por orden) |
+| `dark` | dark | `data-theme="dark"` | oscuro |
+| basura | cualquiera | (ninguno) | como «ausente» (`resolveTheme` valida) |
+
+Esa tabla es el contenido entero del mecanismo, así que **no se genera diagrama**: una figura
+diría lo mismo con menos precisión y costaría contexto leerla.
+
+Rechazado: Zustand — cliente, se hidrata después del primer pintado, parpadeo garantizado (R3.3).
+Rechazado: solo `prefers-color-scheme` — es lo que hay hoy y no es un conmutador.
+Rechazado: `next-themes` — resuelve en cliente con un script inline anti-FOUC; añade
+dependencia y un `<script>` para un problema que el servidor ya no tiene.
+
+### D5 — El conmutador: tres botones junto al de idioma, y `Topbar` pasa a `async`
+
+**Elegido:** `features/shell/components/theme-switcher.tsx`, cliente, tres botones (Claro /
+Oscuro / Sistema) en un `role="group"` con `aria-label` traducido y `aria-pressed` sobre la
+**preferencia elegida** (no sobre el tema resuelto), mutando en `useEffect` con el mismo patrón
+`requested === null` del `LocaleSwitcher`: escribe/borra la cookie y pone/quita
+`document.documentElement.dataset.theme`. Elegir «Sistema» borra la cookie (`max-age=0`) y
+`delete dataset.theme` (R3.6).
+
+Para que el botón activo sea correcto **en el primer pintado**, `Topbar` pasa a `async` y llama
+a `getServerTheme()`, pasando el valor como prop; su slot `end` por defecto se vuelve
+`<><ThemeSwitcher …/><LocaleSwitcher /></>`. Los cinco shells lo heredan sin cambiar una línea.
+
+Área táctil: `Button size="sm"` es `h-9` (36 px), por debajo de los 44 exigidos, así que los
+botones llevan la utilidad `tap-target` que ya existe en `globals.css` (R3.5, y R5.3 la conserva).
+Rótulos nuevos bajo `navigation.themeSwitcher.{label,light,dark,system}` en `locales/es` y
+`locales/en`; el test de paridad de catálogos ya vigente los cubre.
+
+Rechazado: un único botón que cicla los tres estados — menos superficie y no hay forma honesta de
+comunicar tres estados con un `aria-pressed`.
+Rechazado: leer el tema en cliente al montar en vez de pasarlo desde servidor — el tema no
+parpadearía (lo pone el HTML) pero el *botón activo* sí, un tick después de hidratar.
+
+### D6 — Los badges: 10 tokens y modificadores de opacidad, no 15 tokens literales
+
+**Elegido:** cinco anclas de estado y cinco colores de texto —`state-{success,warning,error,info,neutral}`
+y `state-*-text`— y cada entrada de `TONE_BADGE_CLASS` pasa a ser **una** cadena sin `dark:`:
+
+```ts
+green: "bg-state-success/15 text-state-success-text border-state-success/40",
+```
+
+El fondo y el borde se derivan del ancla con los modificadores de opacidad de Tailwind v4
+(`color-mix(in oklab, var(--color-state-success) 15%, transparent)`), así que se componen sobre
+el fondo del tema que toque y **los dos temas salen del mismo string**. El texto necesita token
+propio porque el ancla no basta: medido, `#10B981` sobre su propio tinte al 15% en claro da
+2.3:1. Con `state-*-text` las **30** combinaciones (5 tonos × 3 superficies × 2 temas) pasan AA,
+entre 5.40 y 10.02 (tabla abajo).
+
+Esto cierra R6.1 (el gris que `DESIGN.md` no define) tomándolo de la familia slate del propio
+export —`state-neutral` = `#94A3B8` (`text-secondary`) en oscuro y `#64748B` (`text-muted`) en
+claro— en vez de inventar un tono, y cierra R6.5: el defecto actual era la ausencia de `dark:`,
+y aquí no hay `dark:` que falte porque el token es el que cambia.
+
+Nota de alcance sobre el borde: en `features/incidents/` los badges son `<span>` **sin
+`border`**, así que la clase de color de borde es inerte ahí hasta que `visual-restyle-workspace`
+les ponga la primitiva `Badge`. No se les añade ancho de borde aquí — sería cambiar una pantalla.
+
+Rechazado: 15 tokens literales (surface/text/border × 5 tonos) — auditables por inspección
+directa, y 30 valores más que mantener en dos temas por una ganancia que el cálculo de
+composición ya da.
+Rechazado: usar el ancla también como color de texto (`text-state-success`) — habría sido cero
+tokens nuevos; falla en claro en los cinco tonos y en rojo también en oscuro (4.29:1). Medido.
+
+### D7 — `SEVERITY_COLOR` se unifica como mapa enum→tono, no como segunda tabla de clases
+
+**Elegido:** `features/incidents/lib/severity-tone.ts` con
+`SEVERITY_COLOR_GROUP: Record<IncidentSeverity, Tone>` = `{LOW: "gray", MEDIUM: "blue",
+HIGH: "amber", CRITICAL: "red"}` y `severityColorGroup()` con su `?? "gray"`; los dos componentes
+pasan a `TONE_BADGE_CLASS[severityColorGroup(s)]`. Los tonos son exactamente los de hoy, así que
+no cambia qué severidad es de qué color.
+
+Es la lectura de R6.4 que respeta el patrón vivo y su propia frase («reutilizar un tono no
+fusiona vocabularios»): las **cadenas de clase** viven una sola vez en `lib/ui/status-tone.ts`
+—que es lo que `frontend-foundation.md:38` exige— y el mapa enum→tono vive con su enum, igual
+que `STATE_COLOR_GROUP` en `components/property-state-badge.tsx` y `STATUS_COLOR_GROUP` en
+`features/cleaning/lib/task-status.ts`. `IncidentSeverity` viene del OpenAPI generado, así que
+el `Record` da exhaustividad en compilación — algo que el `Record<string, string>` de hoy no da.
+
+Rechazado: mover la tabla de severidad entera a `lib/ui/` — cumpliría la letra de R6.4 y metería
+en `lib/ui/` el vocabulario de una feature, que es lo que D22 de `pricing-web` evitó.
+Rechazado: dejar los dos mapas y solo añadirles `dark:` — arregla el síntoma y deja el
+incumplimiento del `SHALL`.
+
+### D8 — Fuentes por `next/font/google`, autohospedadas
+
+**Elegido:** `Inter` y `JetBrains_Mono` desde `next/font/google` en `app/layout.tsx`, con
+`subsets: ["latin"]`, `display: "swap"` y `variable: "--font-inter"` / `"--font-jetbrains-mono"`;
+las clases van en `<html>` y `@theme inline` mapea `--font-sans` y `--font-mono` a esas variables
+con pila de reserva del sistema. `next/font` **descarga los ficheros en tiempo de build y los
+sirve desde `/_next/static`**: en runtime no hay ni una petición a `fonts.googleapis.com`, que es
+lo que R4.1 pide.
+
+Lo que sí introduce es una **dependencia de red en `npm run build`**, y el build corre en la
+etapa `builder` del `frontend/devops/Dockerfile` y en el job «Production build» de
+`.github/workflows/frontend-tests.yml`. Los dos tienen red, y el fallo sería ruidoso (build
+roto), no silencioso. Verificado además que ningún test importa `app/layout.tsx`: los dos que lo
+nombran (`features/provenance/disclosure.test.ts:14` y `workflow-contract.test.ts:242`) lo leen
+como **texto** con `readFileSync`, así que `next/font` no entra nunca en vitest y no hace falta
+mock.
+
+Rechazado: `next/font/local` con los `.woff2` versionados — build reproducible sin red, y mete
+~430 KB de binarios más sus licencias OFL en el repo y obliga a curar ejes y subconjuntos a mano.
+Es la salida documentada si el fetch de build llegara a molestar.
+Rechazado: `<link>` a Google Fonts — un tercero en el camino crítico de una app con datos de
+tenant; R4.1 lo prohíbe.
+
+### D9 — `--border` decorativo y `--input` con contraste, dejan de ser el mismo valor
+
+**Elegido:** hoy `--border` y `--input` tienen el mismo valor. Se separan, porque WCAG 2.2
+**1.4.11** exige 3:1 al límite visual de un *componente de interfaz* y no a una línea decorativa:
+
+- `--border` toma el valor que `DESIGN.md` manda explícitamente («Outlines are strictly defined
+  at 1px using `#262a34`») → oscuro `#262a34`, claro `#d5dbe8`. Mide **1.29:1** contra el fondo, y
+  se declara conforme: es la filaña tonal del export, el contorno de una tarjeta no identifica
+  ningún control, y ninguna información depende de verla.
+- `--input`, que es el borde de los controles (`border-input` en la variante `outline` de
+  `Button`), pasa a oscuro `#879390` —el `outline` del export— y claro `#6b7688`: **5.85:1** y
+  **4.06:1** contra su fondo.
+
+Rechazado: subir `--border` a 3:1 — cumpliría un requisito que WCAG no impone y borraría la
+estética de hairline que es la mitad del «Midnight Technical».
+
+### D10 — Tipografía, ritmo y radios: px del export → rem, y los radios ya cuadran
+
+**Elegido:** los 10 roles como `--text-<rol>` con sus tres modificadores
+(`--text-<rol>--line-height`, `--text-<rol>--letter-spacing`, `--text-<rol>--font-weight`), que es
+la API de `@theme` en Tailwind v4 y da una sola utilidad (`text-display-2xl`) que pone tamaño,
+interlineado, tracking y peso. **Se convierten los px del export a rem** (56 px → 3.5rem, …) para
+que el texto siga el tamaño base del navegador; el tracking en `em` se deja tal cual porque ya es
+relativo. La escala numérica por defecto de Tailwind (`text-sm`, `text-xs`, `text-lg`) **se
+conserva**: la usan `Badge`, `Button` y media docena de componentes, y los roles del export son
+aditivos.
+
+El ritmo entra como `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,margin-mobile,margin-desktop}`
+en rem sobre la unidad de 4 px, junto al `--spacing` base que Tailwind ya usa para `p-4`.
+
+Y los radios cuadran casi solos, comprobado contra los `calc()` de hoy: `rounded-md` vale hoy
+`0.375rem` y el export dice `md: 0.375rem`; `rounded-lg` vale `0.5rem` y el export dice
+`lg: 0.5rem`. **Solo `sm` cambia**, de `0.25rem` a `0.125rem` (lo usa el botón de cierre de
+`Sheet`). Se declaran `--radius-{sm,md,lg,xl,full}` con valores literales y desaparece
+`--radius` con sus tres `calc()` derivados (R5.1). El `DEFAULT: 0.25rem` del export coincide con
+el `rounded` desnudo de Tailwind v4, así que no se declara — con una tarea que lo verifique en
+vez de darlo por hecho.
+
+### D11 — La auditoría de contraste es un test, no una tabla de una sola vez
+
+**Elegido:** `app/globals.contrast.test.ts` parsea los valores hexadecimales de los tres bloques
+de `globals.css`, calcula el ratio WCAG de cada par declarado (incluida la composición
+`color-mix` de los badges al 15 % sobre las tres superficies) y falla por debajo del umbral
+—4.5:1 texto, 3:1 controles— con las excepciones de D9 declaradas como lista explícita.
+
+Es la única forma de que R1.6 («la comprobación SHALL quedar registrada con su ratio medido por
+par») siga siendo verdad después de este change: el helper `getA11yViolations` de `test/render.tsx`
+**desactiva `color-contrast`** a propósito, porque jsdom no compone color, así que axe no puede
+cubrirlo. Y una tabla en markdown envejece en cuanto alguien retoca un hex.
+
+Rechazado: la tabla manual en `design.md` como única prueba — es lo que hay abajo, y sirve para
+aprobar la paleta, no para defenderla dentro de tres changes.
+Rechazado: Playwright con axe sobre la app real — cubriría el color compuesto de verdad, y
+`npx playwright test` aún no existe en el proyecto (llega con `hardening-release`).
+
+### D12 — Prohibir `dark:` y las escalas crudas con un guard, en vez de redefinir el variante
+
+**Elegido:** un test `test/color-tokens.test.ts` que recorre `app/`, `components/`, `features/` y
+`lib/` y falla si encuentra (a) una escala numérica de color de Tailwind
+(`(bg|text|border|ring|…)-(slate|…|rose)-\d{2,3}`) o (b) un `dark:`, en código **no de test**,
+con una lista de excepciones declaradas. Ese guard es a la vez la implementación de R6.6 y la de
+R1.5, y su salida es el registro que R6.6 pide. Sigue el precedente de
+`test/eslint-boundaries.test.ts`, que ya usa un test para hacer cumplir una regla de repo.
+
+Excepciones declaradas, las tres únicas del árbol: `bg-black/50` del scrim de
+`components/ui/sheet.tsx` (un velo, idéntico en los dos temas, y no es una escala numérica);
+`#555` y `#ccc` en estilos inline de `app/global-error.tsx` (sustituye al `layout.tsx` que importa
+`globals.css`, así que literalmente no tiene tokens disponibles — la misma razón por la que lleva
+su catálogo i18n inline); y los ficheros `*.test.*`, que sí pueden nombrar clases.
+
+Rechazado: redefinir el variante `dark:` con `@custom-variant` para que siga al atributo — el
+variante quedaría atado al atributo y **dejaría de disparar** en el caso «sin cookie, sistema
+oscuro», que es el más común.
+Rechazado: una regla de ESLint — `no-restricted-syntax` sobre literales de clase es frágil con
+`cva` y `cn()`; un test que lee ficheros dice exactamente lo que R6.6 quiere contar.
+
+## Paleta
+
+Semilla: `E` = valor literal del export (`DESIGN.md`), con el nombre del token de origen.
+`N` = valor nuevo de esta propuesta. Todos los ratios están **medidos**, no estimados.
+
+### Núcleo (15 tokens)
+
+| token | oscuro | de dónde | claro | de dónde |
+|---|---|---|---|---|
+| `background` | `#0f131c` | E `background`/`surface` | `#eef1f7` | N — hermano claro de E `inverse-surface` |
+| `foreground` | `#F8FAFC` | E `text-primary` | `#2c303a` | E `inverse-on-surface` |
+| `surface` | `#181b25` | E `surface-container-low` (DESIGN.md: «Cards use #181b25») | `#f8fafd` | N |
+| `surface-high` | `#1c2029` | E `surface-container` | `#ffffff` | N |
+| `muted` | `#262a34` | E `surface-container-high` | `#e2e7f1` | N |
+| `muted-foreground` | `#94A3B8` | E `text-secondary` | `#525b6b` | N — E `text-muted` oscurecido a AA |
+| `accent` | `#262a34` | = `muted` (como hoy) | `#e2e7f1` | = `muted` (como hoy) |
+| `accent-foreground` | `#F8FAFC` | = `foreground` (como hoy) | `#2c303a` | = `foreground` (como hoy) |
+| `primary` | `#70d8c8` | E `primary` | `#006b5f` | E `inverse-primary` (D3) |
+| `primary-foreground` | `#003731` | E `on-primary` | `#ffffff` | N |
+| `secondary` | `#3e495d` | E `secondary-container` | `#dfe2ef` | E `inverse-surface` |
+| `secondary-foreground` | `#aeb9d0` | E `on-secondary-container` | `#2c303a` | E `inverse-on-surface` |
+| `border` | `#262a34` | E `surface-container-high` (DESIGN.md: «Outlines … 1px using #262a34») | `#d5dbe8` | N |
+| `input` | `#879390` | E `outline` | `#6b7688` | N (D9) |
+| `ring` | `#70d8c8` | = `primary` | `#006b5f` | = `primary` |
+
+Las tres superficies son **monótonas en los dos temas**: cada paso se acerca al observador
+aclarándose (oscuro `0f131c → 181b25 → 1c2029`; claro `eef1f7 → f8fafd → ffffff`). Esa es la
+razón de reducir la rampa M3 de seis pasos del export a tres: seis pasos invertidos dejan de ser
+monótonos y el nombre deja de significar lo mismo en cada tema.
+
+### Estado (10 tokens) — la quinta familia de PRD §9.1 incluida
+
+| token | oscuro | claro | de dónde |
+|---|---|---|---|
+| `state-success` | `#10B981` | `#0f7a58` | E `state-success` / N (misma tinta, a AA) |
+| `state-warning` | `#F59E0B` | `#a4600a` | E `state-warning` / N |
+| `state-error` | `#EF4444` | `#c92a2a` | E `state-error` / N |
+| `state-info` | `#38BDF8` | `#0a72ad` | E `state-info` / N |
+| `state-neutral` | `#94A3B8` | `#64748B` | E `text-secondary` / E `text-muted` — **R6.1** |
+| `state-success-text` | `#6EE7B7` | `#065f46` | N |
+| `state-warning-text` | `#FCD34D` | `#7c4a04` | N |
+| `state-error-text` | `#FCA5A5` | `#991b1b` | N |
+| `state-info-text` | `#7DD3FC` | `#0b5177` | N |
+| `state-neutral-text` | `#CBD5E1` | `#3f4a5a` | N |
+
+Los `state-*` son tokens **gráficos**: rellenos, puntos, bordes, umbral 3:1 (medido 4.21-8.67 en
+los dos temas). Los `state-*-text` son los de texto, umbral 4.5:1.
+
+### Contraste medido (R1.6)
+
+Oscuro, texto (umbral 4.5:1): `foreground` sobre las tres superficies **17.76 / 16.42 / 15.58**;
+`muted-foreground` **7.25 / 6.70 / 6.36**; `primary-foreground` sobre `primary` **7.76**;
+`secondary-foreground` sobre `secondary` **4.60**; `accent-foreground` sobre `accent` **13.72**.
+Controles (3:1): `input` **5.85 / 5.40**, `ring` **10.92 / 10.10**.
+
+Claro, texto: `foreground` **11.67 / 12.62 / 13.20**; `muted-foreground` **6.05 / 6.55 / 6.85**;
+`primary-foreground` sobre `primary` **6.43**; `secondary-foreground` sobre `secondary` **10.22**;
+`accent-foreground` sobre `accent` **10.64**. Controles: `input` **4.06 / 4.39**, `ring`
+**5.68 / 6.15**.
+
+Badges, las 30 combinaciones (5 tonos × 3 superficies × 2 temas), texto sobre el ancla compuesta
+al 15 %: **oscuro 7.32-10.02**, **claro 5.40-7.46**. Mínimo global **5.40** (ámbar claro sobre
+`background`). Cero fallos.
+
+Excepciones declaradas y su razón, ya en D9: `border` mide 1.29:1 (oscuro) / 1.32:1 (claro) y el
+borde de badge al 40 % mide 1.37-1.83:1 contra su propia superficie — líneas decorativas, no
+límites de control, y en ningún caso portadoras únicas de información (el badge lleva su rótulo
+traducido, así que WCAG 1.4.1 también queda cubierto).
+
+## Changes by area
+
+| Área | Ficheros | Cambio |
+|---|---|---|
+| Tokens | `frontend/app/globals.css` | Reescrito: tres bloques de D1, 25 tokens de color × 2 temas, `color-scheme`, 10 roles `--text-*`, 11 pasos `--spacing-*`, 5 `--radius-*`, `--font-sans`/`--font-mono`. Se conservan intactos `@layer base`, `:focus-visible`, `prefers-reduced-motion`, `tap-target`, `pb-safe` (R5.3) |
+| Fuentes | `frontend/app/layout.tsx` | `next/font/google` (Inter, JetBrains Mono) + clases en `<html>` + `data-theme` desde `getServerTheme()` |
+| Config | `frontend/lib/config/constants.ts` | `THEME_COOKIE`, `Theme`, `isTheme` junto a los del idioma |
+| Tema | `frontend/lib/theme/theme.ts`, `frontend/lib/theme/server.ts` (nuevos) | `resolveTheme()` isomorfo; `getServerTheme()` server-only |
+| Conmutador | `frontend/features/shell/components/theme-switcher.tsx` (nuevo), `theme-switcher.test.tsx` (nuevo), `topbar.tsx` | Grupo accesible de tres estados; `Topbar` pasa a `async` y lo monta por defecto |
+| i18n | `frontend/locales/{es,en}/navigation.json` | `themeSwitcher.{label,light,dark,system}` |
+| Tonos | `frontend/lib/ui/status-tone.ts` | Las 5 entradas de `TONE_BADGE_CLASS` pasan a tokens; desaparecen sus 24 escalas crudas y 12 `dark:` |
+| Severidad | `frontend/features/incidents/lib/severity-tone.ts` (nuevo), `components/detail/incident-detail-sections.tsx`, `components/list/incidents-view.tsx` | Los dos `SEVERITY_COLOR` mueren; queda un mapa enum→`Tone` |
+| Tests | `frontend/components/property-state-badge.test.tsx` | Las cadenas fijadas se actualizan a las nuevas (13 `dark:` + 24 escalas fuera) |
+| Guards | `frontend/app/globals.tokens.test.ts`, `globals.contrast.test.ts`, `test/color-tokens.test.ts` (nuevos) | Paridad de los tres bloques (D1), auditoría de contraste (D11), cero escalas crudas y cero `dark:` (D12) |
+| Docs | `frontend/README.md` | La sección de estilos deja de describir una paleta placeholder |
+
+## Data & interfaces
+
+Sin cambios de esquema, de contrato de API ni de variables de entorno: no hay que regenerar
+`backend/openapi.json` ni `frontend/lib/api/generated/openapi.d.ts` (y por tanto no aplica el
+apaño de `api:generate` en worktree que documenta `sdd/project.md`).
+
+Superficie nueva, toda de frontend:
+
+```ts
+// lib/config/constants.ts
+export const THEME_COOKIE = "autohostai.theme";        // path=/, samesite=lax, sin PII
+export const SUPPORTED_THEMES = ["light", "dark"] as const;
+export type Theme = (typeof SUPPORTED_THEMES)[number];
+
+// lib/theme/theme.ts        — isomorfo, sin Next ni navegador
+export function resolveTheme(value: string | undefined | null): Theme | null;
+export const THEME_ATTRIBUTE = "data-theme";
+
+// lib/theme/server.ts       — "server-only"
+export async function getServerTheme(): Promise<Theme | null>;
+
+// features/incidents/lib/severity-tone.ts
+export function severityColorGroup(severity: IncidentSeverity): Tone;
+```
+
+Cookie: `autohostai.theme` = `light` | `dark`, `path=/`, `samesite=lax`, `max-age=31536000`, sin
+dato personal — la misma postura que `autohostai.locale`. La **ausencia** es el tercer estado.
+
+## Risks & mitigations
+
+- **Quedarse a medias**, el riesgo que nombra el roadmap. Mitigación: el guard de D12 es el
+  criterio de terminado y es un número, no una impresión — 68 usos en 4 ficheros hoy, 0 en código
+  no de test al acabar.
+- **Deriva entre los dos bloques oscuros** que impone D1. Mitigación: el test de paridad de D1
+  compara nombres y valores; sin él la duplicación sería inaceptable.
+- **`Topbar` pasa a `async`** y lo renderizan los cinco shells. Es un Server Component en los
+  cinco casos, así que es legal; `features/shell/*.test.tsx` (`shell-frame`, `workspace-shell`,
+  `field-public-guest-shell`) son la red que lo detecta si algún camino lo renderiza desde
+  cliente. Verificar esos tres ficheros antes de cerrar la sección.
+- **`rounded-sm` cambia** de 0.25rem a 0.125rem, único cambio geométrico visible del change
+  (botón de cierre de `Sheet`). Aceptado: es el valor del export.
+- **Cambio visual amplio sin pantalla nueva**: toda la app cambia de aspecto porque consumía los
+  tokens. Es el efecto pretendido, no una regresión; lo que se vea raro es de
+  `visual-restyle-workspace` (fuera de alcance, dicho en el proposal).
+- **Red en tiempo de build** por D8. Mitigación: falla ruidosamente y `next/font/local` es la
+  salida documentada.
+- **Sin pasada visual desde este worktree**: `sdd/project.md` documenta que con `PORT_OFFSET` la
+  página se sirve pero **no hidrata** (medido el 2026-08-23), así que el conmutador no se puede
+  probar a mano aquí. La verificación es vitest (`theme-switcher.test.tsx` sobre jsdom, que sí
+  cubre cookie + atributo + `aria-pressed`) y, si hace falta ojo humano, el worktree principal o
+  `dev`. No se toca `next.config` para poder mirar la app.
+- **La suite de partida se mide, no se recuerda**: `sdd/project.md` avisa de que la cifra escrita
+  ahí ha estado desfasada, y de los 2 ficheros que dan `ENOENT` en worktree hasta hacer los
+  `docker compose cp`. Medir el punto de partida antes de tocar nada.
+
+## Open questions
+
+**Las cinco quedaron resueltas por Jose el 2026-08-23, en el gate de esta fase.** Ninguna
+enmienda un requisito del proposal: R2.1 pedía aprobación (dada), R2.4 pedía resolver el
+primario canónico (resuelto en D3 como el proposal mandaba) y R4.1 admitía cualquier vía
+autohospedada.
+
+1. **Paleta clara: aprobada tal cual.** R2.1 cerrado, R2.3 no se activa: el change entrega los
+   dos temas con los valores de §Paleta, sin retoques.
+2. **Primario claro: `#006b5f`** (E `inverse-primary`), no el `#00897b` de la prosa del export.
+   D3 queda en firme y R2.4 cerrado: `#70d8c8` en oscuro, `#006b5f` en claro.
+3. **`#00897b` no se declara como token.** Queda escrito en la spec al archivar y fuera de
+   `@theme`, porque hoy no tendría consumidor; lo declarará quien lo use — el glow y los
+   titulares grandes son de `visual-restyle-workspace` y `landing-public`.
+4. **Fuentes: `next/font/google`.** D8 en firme, con `next/font/local` como salida documentada si
+   el fetch en tiempo de build llegara a molestar.
+5. **El conmutador va también en `/guest/[token]`**, sin excepción: los cinco shells lo heredan
+   del slot `end` de `Topbar`, que el `GuestShell` ya monta para el de idioma.
