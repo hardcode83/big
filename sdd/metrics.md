@@ -62,3 +62,4 @@
 | timeline-web | new, design, tasks, run, review, ship, archive | 237269 | 816568 | 120188488 | 80.3897 | 2026-08-22 | 2026-08-22 |
 | tech-cycle-completion | new, design, tasks, run, review, ship, archive | 301310 | 783985 | 190140142 | 112.2926 | 2026-08-22 | 2026-08-23 |
 | incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
+| demo-user | new, design, tasks, run, review | 864679 | 1930666 | 398222422 | 252.7534 | 2026-08-23 | — |
