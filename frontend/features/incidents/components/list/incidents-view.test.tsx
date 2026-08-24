@@ -5,6 +5,8 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import esIncidents from "@/locales/es/incidents.json";
 import esStates from "@/locales/es/states.json";
 import { ApiError } from "@/lib/api";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
+import { severityColorGroup } from "../../lib/severity-tone";
 
 const useIncidentsMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-incidents", () => ({
@@ -261,5 +263,47 @@ describe("IncidentsView", () => {
       { target: { value: "OPEN" } },
     );
     expect(capturedFilters).toEqual({ status: "OPEN", page: 1 });
+  });
+
+  /**
+   * The wiring, not the map — raised by the QA panel on section 7.
+   *
+   * `severity-tone.test.ts` proves the enum→tone map is right, and this file
+   * proved the label renders, but nothing asserted that the badge a user sees
+   * gets its classes from the severity. So `severityColorGroup(row.status)`
+   * instead of `row.severity` — a plausible typo at the call site — used to keep
+   * every test in this file green.
+   *
+   * `SAMPLE` carries LOW and HIGH, which resolve to different tones (`gray` and
+   * `amber`), so a badge taking its tone from the wrong field or a constant
+   * cannot satisfy both rows.
+   */
+  it("colours each severity badge from its own severity (R6.4, D7)", () => {
+    useIncidentsMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      data: SAMPLE,
+      refetch: vi.fn(),
+    });
+    renderView();
+    const rows = within(screen.getByRole("table")).getAllByRole("row");
+
+    for (const [index, item] of SAMPLE.items.entries()) {
+      const badge = within(rows[index + 1]).getByText(
+        esIncidents.severity[item.severity],
+      );
+      const expected = TONE_BADGE_CLASS[severityColorGroup(item.severity)];
+      expect(
+        badge.className,
+        `${item.severity} badge in row ${index + 1}`,
+      ).toBe(expected);
+    }
+
+    // And the two rows really do differ, so the loop above cannot pass by
+    // painting every badge the same colour.
+    expect(TONE_BADGE_CLASS[severityColorGroup("LOW")]).not.toBe(
+      TONE_BADGE_CLASS[severityColorGroup("HIGH")],
+    );
   });
 });

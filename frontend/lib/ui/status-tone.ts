@@ -30,10 +30,21 @@ export type Tone = "green" | "blue" | "amber" | "red" | "gray";
  * the alphas or the suffix moves the audit with it instead of leaving it green
  * about a badge the app no longer paints.
  */
-export const TONE_BADGE_CLASS: Record<Tone, string> = {
+const BADGE_CLASS: Record<Tone, string> = {
   green: "bg-state-success/15 text-state-success-text border-state-success/40",
   blue: "bg-state-info/15 text-state-info-text border-state-info/40",
   amber: "bg-state-warning/15 text-state-warning-text border-state-warning/40",
   red: "bg-state-error/15 text-state-error-text border-state-error/40",
   gray: "bg-state-neutral/15 text-state-neutral-text border-state-neutral/40",
 };
+
+/**
+ * Frozen, for the reason `features/pricing/lib/recommendation-status.ts` gives
+ * about its own table and the section-7 panel pointed out applies here with more
+ * force: this is a module-level singleton that **every** badge in the app indexes,
+ * so one stray write would change what every later badge renders. Its consumer
+ * `features/incidents/lib/severity-tone.ts` was already frozen while the palette
+ * it reads was not.
+ */
+export const TONE_BADGE_CLASS: Readonly<Record<Tone, string>> =
+  Object.freeze(BADGE_CLASS);
