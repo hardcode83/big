@@ -14,22 +14,14 @@ import { AppProviders } from "./providers";
  * `next/font/google` downloads the files at BUILD time and serves them from
  * `/_next/static`, so at runtime there is not one request to
  * `fonts.googleapis.com` — which is the point: a third party in the critical path
- * of an app that serves tenant data is what R4.1 forbids. The cost is a network
- * dependency in `npm run build`, which runs in the `builder` stage of
- * `frontend/devops/Dockerfile` and in the «Production build» job of
- * `.github/workflows/frontend-tests.yml`. Both have network, and the failure mode
- * is a broken build — loud, not silent (`next build`, unlike `next dev`, treats a
- * `next/font/google` fetch failure as fatal).
+ * of an app that serves tenant data is what R4.1 forbids.
  *
- * Three places run that build, not the two D8 named: the `builder` stage is
- * invoked by `frontend/devops/Dockerfile` directly, by the step «Production
- * build and public artifact disclosure gate» of the `provenance-contract` job in
- * `.github/workflows/frontend-tests.yml` (there is no job called «Production
- * build» — it is a step), and by the `build-frontend` job of
- * `.github/workflows/deploy-dev.yml`. All three are GitHub-hosted runners with
- * network. The self-hosted runner on the dev VM never builds this image: its
- * `deploy` job only does `docker compose pull` from GHCR, so a font fetch never
- * happens there.
+ * The cost is a network dependency in `npm run build`, and the failure mode is a
+ * broken build — loud, not silent (`next build`, unlike `next dev`, treats a
+ * `next/font/google` fetch failure as fatal). WHICH builds run it is enumerated
+ * once, in design D8 §«Dónde corre ese build», and deliberately not repeated
+ * here: this comment carried two different counts at the same time because each
+ * correction was appended instead of applied.
  *
  * `variable` (not `className` alone) because `@theme inline` maps `--font-sans`
  * and `--font-mono` onto these, so every Tailwind font utility resolves through

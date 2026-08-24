@@ -284,25 +284,69 @@ Lo que sí introduce es una **dependencia de red en `npm run build`**, y el fall
 (build roto), no silencioso — `next build`, al contrario que `next dev`, trata el fallo de
 descarga de `next/font/google` como fatal.
 
-> **Corrección de 2026-08-24 (`/sdd:run`, panel de la sección 3, revisor cicd).** Esta decisión
-> decía «la etapa `builder` del `frontend/devops/Dockerfile` y el job «Production build» de
-> `.github/workflows/frontend-tests.yml`. Los dos tienen red». Dos inexactitudes, ambas
-> comprobadas contra los ficheros:
-> 1. **No existe ningún job llamado «Production build».** Es un *paso* —«Production build and
->    public artifact disclosure gate»— dentro del job `provenance-contract`
->    (`frontend-tests.yml:53`, con `npm run build` en la 61). El job `frontend-tests` no
->    construye nunca. Quien buscara ese job miraría el equivocado.
-> 2. **Son tres sitios, no dos.** Falta el job `build-frontend` de
->    `.github/workflows/deploy-dev.yml:101`, que construye la imagen vía
->    `docker/build-push-action` con `target: prod` y por tanto atraviesa `builder`.
->
-> Lo sustantivo se sostiene y queda además cerrado el peor caso que se temía: los tres corren en
-> `ubuntu-latest` (GitHub-hosted) con red y sin `--network=none` ni bandera offline, y **el
-> runner self-hosted de la VM de dev no construye el frontend** — su job `deploy`
-> (`deploy-dev.yml:149`, `runs-on: [self-hosted, dev]`) sólo hace `docker compose pull` desde
-> GHCR, así que la descarga de fuentes no ocurre ahí y no hace falta salida HTTPS a
-> `fonts.gstatic.com` en la VM. Tampoco hay `cache-from`/`cache-to` ni `actions/cache` en
-> ninguno de los workflows, así que no hay riesgo de que la descarga quede cacheada y rancia.
+<a id="d8-sitios-de-build"></a>
+
+**Dónde corre ese build: cuatro sitios.** Esta lista es el **único hogar** del hecho; el
+comentario de `app/layout.tsx` apunta aquí en vez de repetirla, porque repetirla es lo que dejó
+dos versiones distintas conviviendo en el mismo comentario. Todos atraviesan la etapa `builder`
+de `frontend/devops/Dockerfile`, todos corren en `ubuntu-latest` (GitHub-hosted) con red y sin
+`--network=none` ni bandera offline:
+
+1. La etapa `builder` de `frontend/devops/Dockerfile`, cuando se construye la imagen de
+   producción a mano (`docker build --target=prod -f frontend/devops/Dockerfile frontend`).
+   **No la invoca ningún target del `Makefile`**, comprobado: `make up` hace
+   `docker compose up -d --build` (`Makefile:253`) y `docker-compose.yml:238-242` fija
+   `target: dev` para el servicio `frontend`, así que el arranque local corre `npm run dev` y no
+   descarga fuentes. El otro camino local es
+   `npm run build` a mano dentro de `frontend/`, fuera de Docker.
+2. El **paso** «Production build and public artifact disclosure gate» del job
+   `provenance-contract` de `.github/workflows/frontend-tests.yml:53` (`npm run build` en la 61).
+   **No existe ningún job llamado «Production build»**: es un paso, y el job `frontend-tests` no
+   construye nunca — quien buscara ese job miraría el equivocado.
+3. El job `build-frontend` de `.github/workflows/deploy-dev.yml:101`, vía
+   `docker/build-push-action` con `target: prod` y `platforms: linux/arm64` bajo QEMU — sólo
+   arm64, y sólo en `main` (`if: github.ref == 'refs/heads/main'`), que es la VM Ampere A1 de
+   dev (ADR 0001).
+4. El job `build-frontend` de `.github/workflows/multiarch-build-check.yml:35-48`, también
+   `target: prod`, con `platforms: linux/amd64,linux/arm64` — así que **baja las fuentes dos
+   veces por ejecución**, una por plataforma, y la de arm64 bajo emulación QEMU. Corre poco
+   porque está filtrado por `paths` a los Dockerfile y manifiestos de dependencias, que es
+   justamente por qué este change no lo dispara.
+
+**El riesgo que eso deja abierto, aceptado aquí con su motivo en vez de prometido a una tarea.**
+Lo que se ejercita antes de mezclar y lo que no, medido contra los ficheros y no supuesto:
+
+- **La descarga sobre amd64 sí se cubre en cada PR**, y sólo por el sitio 2:
+  `frontend-tests.yml` declara `pull_request: {}` **sin filtro de `paths`** —a propósito, y su
+  cabecera explica por qué (un check requerido con filtro se queda colgado en los PR que no
+  tocan esas rutas)—, así que su `npm run build` baja las fuentes en cada Pull Request.
+- **La descarga bajo QEMU/arm64 no se cubre antes de mezclar.** El sitio 4 está filtrado por
+  `paths` y este diff no toca ninguno de esos ficheros; y el sitio 3 —que es
+  `platforms: linux/arm64`, es decir **arm64 emulado y sólo arm64**— está condicionado a
+  `if: github.ref == 'refs/heads/main'` (`deploy-dev.yml:103`), o sea que corre **después** del
+  merge.
+
+Así que la primera descarga de fuentes bajo emulación ocurre en el job `build-frontend` del workflow `deploy-dev.yml` (líneas 101-143, `platforms: linux/arm64` bajo QEMU). Se
+acepta, y el motivo es dónde cae el fallo: sería un job en rojo que **no publica imagen**, con lo
+que la VM de dev sigue sirviendo la anterior —`deploy` sólo hace `docker compose pull`—; no hay
+despliegue a medias ni impacto en producción, que no existe aún. Ampliar el filtro `paths` del
+sitio 4 para que este change lo dispare se consideró y se descarta: haría correr dos builds
+multiplataforma con QEMU en cada PR que toque `app/`, caro para adelantar un fallo que, de
+ocurrir, se ve entero en el primer push a `main`. La condición de salida, por si cambia: el día
+que exista un entorno de producción arm64, o que el deploy de dev deje de tolerar una imagen
+anterior, esto pasa a ser cobertura obligatoria y no aceptación.
+
+**El runner self-hosted de la VM de dev no construye el frontend**: su job `deploy`
+(`deploy-dev.yml:149`, `runs-on: [self-hosted, dev]`) sólo hace `docker compose pull` desde
+GHCR, así que la descarga de fuentes no ocurre ahí y no hace falta salida HTTPS a
+`fonts.gstatic.com` en la VM. Tampoco hay `cache-from`/`cache-to` ni `actions/cache` en ninguno
+de los workflows, así que no hay riesgo de que la descarga quede cacheada y rancia.
+
+> **Historial de la corrección.** La decisión original nombraba **dos** sitios y llamaba «job» a
+> lo que es un paso; el panel de la sección 3 (revisor cicd, 2026-08-24) subió la cuenta a tres,
+> y la review del 2026-08-24 encontró el cuarto. Las tres versiones llegaron a convivir porque
+> cada corrección se **añadió** en vez de aplicarse — de ahí que ahora el hecho tenga un solo
+> sitio y los demás apunten.
 
 **`subsets: ["latin"]` no restringe lo que se emite**, medido el 2026-08-24 sobre el build real:
 la salida trae 13 ficheros `.woff2` con bloques `unicode-range` de cirílico, griego y vietnamita
@@ -546,8 +590,9 @@ Diez agujeros en dos versiones sucesivas, todos invisibles a un test que sólo a
 está limpio». Como lo puso el revisor de arquitectura: el guard «se pondría verde con una regex
 rota siempre que el árbol no ejercite la rotura». Así que los patrones se extraen a
 `test/color-tokens.ts` y `test/color-tokens.patterns.test.ts` los recorre **desde una tabla**:
-66 casos, uno por agujero encontrado, con sus negativos. La corrección del guard deja de
-depender de lo que el árbol contenga hoy, y cerrar el siguiente agujero es añadir una fila.
+una fila por agujero encontrado, con sus negativos (66 al cerrar esta decisión; el recuento vivo
+es el del propio fichero, que es quien se pone rojo). La corrección del guard deja de depender de
+lo que el árbol contenga hoy, y cerrar el siguiente agujero es añadir una fila.
 
 **Límite que el guard no cubre, y se declara en vez de insinuarse**: una clase construida
 dinámicamente (`` `bg-${tono}-100` ``, concatenación) no la ve ninguna de las cinco
@@ -563,6 +608,37 @@ mensaje de error deja las cinco comprobaciones en verde, porque ambos tokens est
 Eso es semántica de sitio de llamada y sólo lo cazan aserciones de render; las hay para los
 badges de severidad (sección 7), y no para los tres mensajes de error de D13 —`guest-fields.tsx`
 no tiene fichero de test siquiera, hueco anterior a este change. Se declara y no se cierra.
+
+> **Enmendado el 2026-08-24 (sección 11, remediación de la review).** El guard ya no recorre
+> sólo `.tsx?`. Dos ampliaciones y un límite nuevo, aquí y no sólo en el código, porque una
+> decisión de diseño que vive en un comentario es la deriva que la sección 11 existe para cerrar:
+>
+> 1. **Alcance de ficheros**: se aceptan `.tsx?`, `.jsx?`, `.mjs`, `.cjs` y `.css`. Antes un
+>    componente `.mjs` o una hoja de estilos nueva no se abrían siquiera — los patrones cazaban
+>    la cadena, el recorrido nunca se la daba.
+> 2. **Qué se lee de una hoja de estilos: sólo las clases que nombra un `@apply`**, vía
+>    `applyDirectives` en `test/color-tokens.ts`. Una hoja no es un componente: pasarle los
+>    patrones de clase entera reporta disparates —`border-color: var(--color-border)` se lee como
+>    el prefijo `border` nombrando un token `color` no declarado, y
+>    `@media (prefers-color-scheme: dark)` como una variante de tema—, así que `@apply` es el
+>    único sitio de una hoja donde esos patrones significan algo.
+> 3. **Tercer límite declarado, consecuencia directa de lo anterior**: una hoja de estilos nueva
+>    que declare color a pelo —`.card { color: #fff }`, o un bloque
+>    `@media (prefers-color-scheme: dark)` propio— es **invisible** a las cinco comprobaciones.
+>    Es una ruta distinta al mismo defecto de R1.5/R6.5 que la sección 11 cerró para las clases,
+>    y hoy no muerde porque `app/globals.css` es la única hoja del árbol y la capa de tokens vive
+>    ahí por diseño (D1). Se declara y no se cierra: cerrarlo de verdad pide un parser de CSS que
+>    distinga la declaración de tokens legítima de la de un consumidor, que es otro change.
+>
+> También en esta pasada, y por el mismo motivo de «que la mutación exacta no agote el espacio»:
+> `DARK_VARIANT` dejó de perseguir el VALOR de la media query y pasa a detectar el **nombre de
+> la característica**: cualquier variante arbitraria que mencione `prefers-color-scheme`. Tres
+> vueltas de review costó llegar ahí —el literal `dark:`, luego `:_dark` (Tailwind v4 expande `_`
+> a espacio), luego `not (…: light)`, que es modo oscuro sin que la palabra `dark` aparezca—, y
+> las tres compilaban a una regla `@media` real. Perseguir el valor era una carrera perdida;
+> detectar la característica la termina, y no cuesta nada, porque R1.5 prohíbe que un consumidor
+> siga la preferencia del sistema **en absoluto**. El recuento de filas de la tabla, como el de
+> arriba, es el del propio fichero.
 
 ### D13 — `bg-card` no pinta nada, y el guard que lo habría visto
 
@@ -739,19 +815,49 @@ traducido, así que WCAG 1.4.1 también queda cubierto).
 
 ## Changes by area
 
-| Área | Ficheros | Cambio |
+Esta tabla describe **áreas y qué cambia en ellas**, no un inventario de ficheros. La lista de
+ficheros tiene un único hogar —el propio diff— y enumerarla aquí es lo que la dejó afirmando
+19 cuando el change entrega 49 fuera de `sdd/`: cada ampliación de huella (los diez arreglos de
+D13, los cinco shells, `locale-switcher.tsx`, los módulos de test) se decidió en voz alta en su
+sección de `tasks.md` y no llegó nunca a la tabla. Para el recuento vivo,
+`git diff --name-status $(git merge-base HEAD main)`.
+
+Igual con los recuentos de tokens: los fija `app/globals.tokens.test.ts`, que es lo que falla si
+alguien cambia uno, y no una cifra escrita aquí que nada comprueba.
+
+| Área | Dónde | Cambio |
 |---|---|---|
-| Tokens | `frontend/app/globals.css` | Reescrito: tres bloques de D1, 25 tokens de color × 2 temas, `color-scheme`, 10 roles `--text-*`, 11 pasos `--spacing-*`, 5 `--radius-*`, `--font-sans`/`--font-mono`. Se conservan intactos `@layer base`, `:focus-visible`, `prefers-reduced-motion`, `tap-target`, `pb-safe` (R5.3) |
-| Fuentes | `frontend/app/layout.tsx` | `next/font/google` (Inter, JetBrains Mono) + clases en `<html>` + `data-theme` desde `getServerTheme()` |
+| Tokens | `frontend/app/globals.css` | Reescrito: los tres bloques de D1 (claro en `:root`, oscuro por media query y por atributo), la paleta de color × 2 temas y `color-scheme` en `@theme inline`; los roles tipográficos `--text-*`, el ritmo `--spacing-*` y los radios `--radius-*` en un `@theme` llano, por ser literales que no dependen del tema. **Los recuentos exactos los asertan `globals.tokens.test.ts` y la comprobación 3 de `color-tokens.test.ts`** (R5.1 quedó enmendado dos veces sobre ritmo y radios; ver el propio requisito). Se conservan intactos `@layer base`, `:focus-visible`, `prefers-reduced-motion`, `tap-target`, `pb-safe` (R5.3) |
+| Fuentes | `frontend/app/layout.tsx` | `next/font/google` (Inter, JetBrains Mono) + clases en `<html>` + `data-theme` desde `getServerTheme()`. Los sitios de build que descargan las caras se enumeran una sola vez, en D8 |
 | Config | `frontend/lib/config/constants.ts` | `THEME_COOKIE`, `Theme`, `isTheme` junto a los del idioma |
-| Tema | `frontend/lib/theme/theme.ts`, `frontend/lib/theme/server.ts` (nuevos) | `resolveTheme()` isomorfo; `getServerTheme()` server-only |
-| Conmutador | `frontend/features/shell/components/theme-switcher.tsx` (nuevo), `theme-switcher.test.tsx` (nuevo), `topbar.tsx` | Grupo accesible de tres estados; `Topbar` pasa a `async` y lo monta por defecto |
-| i18n | `frontend/locales/{es,en}/navigation.json` | `themeSwitcher.{label,light,dark,system}` |
-| Tonos | `frontend/lib/ui/status-tone.ts` | Las 5 entradas de `TONE_BADGE_CLASS` pasan a tokens; desaparecen sus 24 escalas crudas y 12 `dark:` |
-| Severidad | `frontend/features/incidents/lib/severity-tone.ts` (nuevo), `components/detail/incident-detail-sections.tsx`, `components/list/incidents-view.tsx` | Los dos `SEVERITY_COLOR` mueren; queda un mapa enum→`Tone` |
-| Tests | `frontend/components/property-state-badge.test.tsx` | Las cadenas fijadas se actualizan a las nuevas (13 `dark:` + 24 escalas fuera) |
-| Guards | `frontend/app/globals.tokens.test.ts`, `globals.contrast.test.ts`, `test/color-tokens.test.ts` (nuevos) | Paridad de los tres bloques (D1), auditoría de contraste (D11), cero escalas crudas y cero `dark:` (D12) |
-| Docs | `frontend/README.md` | **Se añade** una sección de estilos: no había ninguna que corregir (verificado a mano; panel de la sección 2). Además, `constants.ts` en §Configuración y la cobertura de §Testing quedaban incompletas |
+| Tema | `frontend/lib/theme/` (nuevo) | `resolveTheme()` isomorfo; `getServerTheme()` server-only |
+| Conmutador y shells | `features/shell/` | `ThemeSwitcher` nuevo (grupo accesible de tres estados); `Topbar` pasa a `async` y lo monta por defecto, y con ella los **cinco** shells que la invocan. Incluye el rediseño del `LocaleSwitcher` preexistente, que es creep de alcance asumido y está registrado como tal en el proposal |
+| i18n | `frontend/locales/{es,en}/navigation.json` | `themeSwitcher.{label,light,dark,system}`; se borra la clave huérfana `localeSwitcher.label` |
+| Tonos y severidad | `lib/ui/status-tone.ts`, `features/incidents/lib/severity-tone.ts` (nuevo) | Las 5 entradas de `TONE_BADGE_CLASS` pasan a tokens y desaparecen sus escalas crudas y sus `dark:`; los dos `SEVERITY_COLOR` duplicados mueren y queda un mapa enum→`Tone` en su dominio (R6.4, enmendado) |
+| Consumidores | Componentes de `features/` y `components/` | Los arreglos de D13: utilidades que nombraban tokens inexistentes y superficies que no pintaban nada |
+| Guards | `app/globals.tokens.test.ts`, `app/globals.contrast.test.ts`, `app/layout.test.tsx`, `test/color-tokens*.{ts,test.ts}`, `test/css-tokens.ts`, `test/wcag-contrast.ts`, `test/theme-client-state.test.ts` | Paridad de los tres bloques (D1), auditoría de contraste (D11), y el guard de color de D12 con sus patrones extraídos a tabla. **Cuántas comprobaciones tiene ese guard y qué mira cada una lo dice su propia cabecera**, no esta fila |
+| Docs | `frontend/README.md`, y `docs/design-system-tokens.md` al archivar | **Se añade** una sección de estilos: no había ninguna que corregir (verificado a mano; panel de la sección 2). Además, `constants.ts` en §Configuración y la cobertura de §Testing quedaban incompletas. La página de capability la exige `steering/documentation.md:18` y está anclada en el proposal |
+
+## Dónde vive cada hecho (y por qué se decidió)
+
+La review del 2026-08-24 encontró diez copias que sobrevivieron a sus propias enmiendas, y todas
+tenían la misma causa: cuatro hechos vivían a la vez en `proposal.md`, en la prosa de un D# y en
+esta tabla, en el cuerpo de una tarea y en su comentario de panel, en `frontend/README.md` y en
+un comentario de código. Propagar una enmienda a cinco sitios y llegar a tres es lo que pasó
+tres veces seguidas. Así que cada hecho tiene un hogar, **el sitio que se pone rojo o se lee
+primero cuando cambia**, y los demás apuntan en vez de repetir:
+
+| Hecho | Hogar | Quién apunta |
+|---|---|---|
+| Qué tokens se declaran y cuántos son | `app/globals.css`, asertado por `app/globals.tokens.test.ts` y por la comprobación de tokens declarados de `test/color-tokens.test.ts` | La tabla de Changes by area y `frontend/README.md` §Diseño citan el test, no una cifra |
+| Cuántas comprobaciones tiene el guard de color y qué mira cada una | La cabecera de `frontend/test/color-tokens.test.ts` | `frontend/README.md` §Diseño describe el criterio y remite ahí |
+| Qué ficheros toca el change | El propio diff (`git diff --name-status $(git merge-base HEAD main)`) | La tabla de Changes by area describe áreas y lo dice explícitamente |
+| Qué builds descargan las fuentes | D8 §«Dónde corre ese build» | El comentario de `app/layout.tsx` |
+
+Y la regla para lo que no se pueda evitar duplicar: **que lo vigile un test de paridad**, que es
+exactamente lo que D1 ya hace con los dos bloques oscuros, y lo que hace el test de paridad de
+claves i18n. Una duplicación vigilada es una decisión; una sin vigilar es la deriva de arriba
+esperando su turno.
 
 ## Data & interfaces
 
