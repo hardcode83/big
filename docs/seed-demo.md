@@ -114,8 +114,15 @@ Las cuatro cuentas quedan operativas al instante, sin cambio de contraseña forz
 exige rotar cuatro contraseñas antes del primer clic no es una demo.
 
 > **Dónde puedes rellenarlas.** No hay rechazo por entorno: el comando siembra allí donde lo
-> ejecutes. No cuelga de ningún workflow de CD, y ponerlo en uno sería publicar credenciales
-> conocidas en un entorno alcanzable.
+> ejecutes. **`make seed-demo` no cuelga de ningún workflow de CD**, y ponerlo en uno sería publicar
+> credenciales conocidas en un entorno alcanzable: sus seis variables sin valor por defecto son
+> justamente lo que lo impide.
+>
+> Lo que **sí** corre programado, desde el 2026-08-24, es el reset del **tenant de demostración**, que
+> reutiliza la misma función de siembra (`apply_plan`) desde otro comando. No es una excepción a lo
+> anterior sino otra cosa: ese comando no toma del entorno ni el tenant ni las cuentas —los lleva en
+> constantes—, su contraseña viene del OCI Vault y no de un `.env`, y refusa si le apuntan al tenant de
+> trabajo. Los detalles y sus límites aceptados: [`demo-tenant.md`](demo-tenant.md).
 
 ## Se puede correr dos veces (pero envejece)
 
@@ -128,6 +135,11 @@ la propiedad, el correo normalizado de la cuenta, y los identificadores `SEED-AI
 arregla.** Las fechas se calculan el día de la siembra. Un entorno sembrado hace dos semanas
 enseña una reserva «activa» que ya terminó, y volver a correr el comando **no** la re-ancla — eso
 sería modificar filas existentes, justo lo que la idempotencia prohíbe.
+
+Para el **tenant de demostración** eso ya está resuelto por otra vía: su reset borra y vuelve a
+sembrar, así que re-ancla las fechas al día de la ejecución sin romper ninguna idempotencia — porque
+no modifica filas, las sustituye. Ver [`demo-tenant.md`](demo-tenant.md). Para el tenant de trabajo
+sigue valiendo lo de abajo.
 
 Para refrescarlo se tira la base y se empieza de cero:
 
