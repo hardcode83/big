@@ -89,6 +89,13 @@ export interface paths {
      */
     post: operations["reset_password_api_v1_auth_reset_password_post"];
   };
+  "/api/v1/blocked-transitions": {
+    /**
+     * List the tenant's blocked transitions
+     * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+     */
+    get: operations["list_blocked_transitions_api_v1_blocked_transitions_get"];
+  };
   "/api/v1/cleaning-checklist-templates": {
     /**
      * List the tenant's checklist templates
@@ -114,6 +121,8 @@ export interface paths {
     /**
      * List the tenant's cleaning tasks
      * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+     *
+     * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
      */
     get: operations["list_cleaning_tasks_api_v1_cleaning_tasks_get"];
     /**
@@ -131,6 +140,8 @@ export interface paths {
     /**
      * Assign or reassign a cleaning task
      * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+     *
+     * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
      */
     patch: operations["assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch"];
   };
@@ -140,6 +151,13 @@ export interface paths {
      * @description Only the assigned cleaner can accept, and only while the task is `ASSIGNED`; anyone else gets the same `404` an unknown task gives. Accepting stops the SLA clock in the operational sense — no second notification is written — and does **not** move the property, which is already `CLEANING_SCHEDULED`.
      */
     post: operations["accept_cleaning_task_api_v1_cleaning_tasks__task_id__accept_post"];
+  };
+  "/api/v1/cleaning-tasks/{task_id}/cancel": {
+    /**
+     * Retire a cleaning that is not going to be completed
+     * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+     */
+    post: operations["cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post"];
   };
   "/api/v1/cleaning-tasks/{task_id}/checklist": {
     /**
@@ -341,6 +359,15 @@ export interface paths {
      */
     patch: operations["set_guest_document_api_v1_guests__guest_id__document_patch"];
   };
+  "/api/v1/incident-photos/{photo_id}": {
+    /**
+     * Serve an incident photo by signed URL
+     * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+     *
+     * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+     */
+    get: operations["serve_incident_photo_api_v1_incident_photos__photo_id__get"];
+  };
   "/api/v1/incidents": {
     /**
      * List the tenant's incidents
@@ -415,6 +442,29 @@ export interface paths {
      * The body is **optional** and takes the same `eta_at` as `accept`, under the same rules: a timezone is required and the past is refused with `422`.
      */
     post: operations["en_route_incident_api_v1_incidents__incident_id__en_route_post"];
+  };
+  "/api/v1/incidents/{incident_id}/photos": {
+    /**
+     * List the photos of an incident
+     * @description Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.
+     *
+     * `READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.
+     */
+    get: operations["list_incident_photos_api_v1_incidents__incident_id__photos_get"];
+    /**
+     * Upload a photo of the incident
+     * @description `multipart/form-data` with a `stage` of `BEFORE` or `AFTER` and a `file`. PRD §6 grants the technician exactly those two — "subir fotos (antes y después)" — and the enum is closed, so there is no third value and no free-text alternative.
+     *
+     * The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `stage` are allowed on purpose: a technician photographs two angles of one fault.
+     *
+     * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+     *
+     * * `LOCAL` — the URL is a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+     * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip.
+     *
+     * In neither case does `storage_key` appear as a field of the response body (R3.3).
+     */
+    post: operations["upload_incident_photo_api_v1_incidents__incident_id__photos_post"];
   };
   "/api/v1/incidents/{incident_id}/reject": {
     /**
@@ -885,6 +935,61 @@ export interface components {
        */
       technician_id: string;
     };
+    /**
+     * BlockedTransitionPageResponse
+     * @description The pagination envelope of PRD §23, over the stalls rather than over the flats.
+     *
+     * `total` is how many stalls the tenant has, not how many properties were examined — see
+     * `ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot
+     * hide on page 3 of the source.
+     */
+    BlockedTransitionPageResponse: {
+      /** Data */
+      data: components["schemas"]["BlockedTransitionResponse"][];
+      /** Page */
+      page: number;
+      /** Per Page */
+      per_page: number;
+      /** Total */
+      total: number;
+      /** Total Pages */
+      total_pages: number;
+    };
+    /**
+     * BlockedTransitionResponse
+     * @description One transition the calendar required and the flat's state refused (R2.2).
+     *
+     * `trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same
+     * treatment `dashboard-api` gives `operational_state` ("carries no colour: the colour mapping
+     * belongs to the client"). Translating them here would open a catalogue of strings for a
+     * consumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.
+     *
+     * `due_since` answers "since when", which is the number an operator actually wants: for REDES11,
+     * the 19th of August and not the day somebody happened to look.
+     */
+    BlockedTransitionResponse: {
+      /** Blocking State */
+      blocking_state: string;
+      /**
+       * Due Since
+       * Format: date-time
+       */
+      due_since: string;
+      /** Property Code */
+      property_code: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /**
+       * Reservation Id
+       * Format: uuid
+       */
+      reservation_id: string;
+      /** Trigger */
+      trigger: string;
+    };
     /** Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post */
     Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post: {
       /**
@@ -900,11 +1005,31 @@ export interface components {
       /** Photo Type */
       photo_type: string;
     };
+    /** Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post */
+    Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post: {
+      /** File */
+      file: string;
+      stage: components["schemas"]["IncidentPhotoStage"];
+    };
     /** BuildProvenanceResponse */
     BuildProvenanceResponse: {
       /** App Version */
       app_version: string;
       provenance: components["schemas"]["PrivateProvenanceResponse"] | null;
+    };
+    /**
+     * CancelCleaningTaskRequest
+     * @description `cleaning-stall-blocks-next-stay` R3.1.
+     *
+     * `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+     * `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+     * exactly what has to be explainable six months later. It is recorded on
+     * `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+     * admits only real, non-sensitive columns of the entity.
+     */
+    CancelCleaningTaskRequest: {
+      /** Reason */
+      reason: string;
     };
     /**
      * ChangePasswordRequest
@@ -1027,6 +1152,12 @@ export interface components {
       updated_at: string;
     };
     /**
+     * CleaningAssignmentBlocker
+     * @description Which party refuses to assign a cleaning task: its own status, or its property's state.
+     * @enum {string}
+     */
+    CleaningAssignmentBlocker: "TASK_STATUS" | "PROPERTY_STATE";
+    /**
      * CleaningPhotoListResponse
      * @description The photos of one task (R3.1), each already carrying its signed URL.
      *
@@ -1087,10 +1218,62 @@ export interface components {
       /** Timezone */
       timezone: string;
     };
+    /**
+     * CleaningTaskListItemResponse
+     * @description One row of the cleaning-task listing: a task plus whether it can be assigned now.
+     */
+    CleaningTaskListItemResponse: {
+      /** Accepted At */
+      accepted_at: string | null;
+      /** Assigned Cleaner Id */
+      assigned_cleaner_id: string | null;
+      assignment_blocked_by: components["schemas"]["CleaningAssignmentBlocker"] | null;
+      /**
+       * Checklist Template Id
+       * Format: uuid
+       */
+      checklist_template_id: string;
+      /** Completed At */
+      completed_at: string | null;
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Property Id
+       * Format: uuid
+       */
+      property_id: string;
+      /** Reservation Id */
+      reservation_id: string | null;
+      /** Scheduled End */
+      scheduled_end: string | null;
+      /** Scheduled Start */
+      scheduled_start: string | null;
+      /** Started At */
+      started_at: string | null;
+      status: components["schemas"]["CleaningTaskStatus"];
+      /**
+       * Updated At
+       * Format: date-time
+       */
+      updated_at: string;
+      /** Validated At */
+      validated_at: string | null;
+      /** Validated By User Id */
+      validated_by_user_id: string | null;
+      validation_status: components["schemas"]["CleaningValidationStatus"];
+    };
     /** CleaningTaskPageResponse */
     CleaningTaskPageResponse: {
       /** Data */
-      data: components["schemas"]["CleaningTaskResponse"][];
+      data: components["schemas"]["CleaningTaskListItemResponse"][];
       /** Page */
       page: number;
       /** Per Page */
@@ -1610,7 +1793,7 @@ export interface components {
      * ErrorCode
      * @enum {string}
      */
-    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
+    ErrorCode: "INTERNAL_ERROR" | "HTTP_ERROR" | "VALIDATION_ERROR" | "CONFLICT" | "PROPERTY_STATE_CONFLICT" | "PAYLOAD_TOO_LARGE" | "METHOD_NOT_ALLOWED" | "INVALID_CREDENTIALS" | "INVALID_TOKEN" | "FORBIDDEN" | "RATE_LIMITED" | "PASSWORD_CHANGE_REQUIRED" | "NOT_FOUND" | "BAD_GATEWAY";
     /**
      * ErrorEnvelope
      * @description Mirror of `app.core.errors.error_envelope()` — the only error shape this API emits.
@@ -1864,6 +2047,87 @@ export interface components {
       /** Total */
       total: number;
     };
+    /**
+     * IncidentPhotoListResponse
+     * @description The photos of one incident, oldest first (R3.1).
+     *
+     * **Unpaginated, like `cleaning`'s.** A photo list is bounded by how many photos a technician
+     * took of one fault, which is single digits; `per_page` exists on the incident *listing*
+     * because that one grows with the tenant's whole history. An envelope with `items` rather than
+     * a bare array so the response can gain a field later without breaking every client.
+     */
+    IncidentPhotoListResponse: {
+      /** Items */
+      items: components["schemas"]["IncidentPhotoResponse"][];
+    };
+    /**
+     * IncidentPhotoResponse
+     * @description One incident photo, and the signed URL that reads its bytes back (R3.3, design D10).
+     *
+     * **Every field is enumerated and the model is built by `from_upload` below — never by
+     * `model_validate` or `from_attributes` over the entity.** That is not style: `IncidentPhoto`
+     * carries `storage_key`, and a dump would publish it. R3.3 forbids the key in any response
+     * body or header, and the only reason this schema can be trusted is that there is no code path
+     * here that serialises a field nobody listed.
+     *
+     * `url` is what replaces it, and what it reveals depends on the tenant's backend:
+     *
+     * * `LOCAL` — a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying the photo's
+     *   id, its expiry and a signature. The internal path is not in it.
+     * * `S3` — a presigned URL minted by the object store itself, so it necessarily contains the
+     *   bucket and the full object key. That is inherent to presigned URLs, is the single named
+     *   exception to rule 5 of `steering/security.md`, and is accepted in writing in
+     *   `sdd/specs/file-storage.md` and ADR 0008.
+     *
+     * In neither case is `storage_key` a **field** of this body, which is what R3.3 governs.
+     */
+    IncidentPhotoResponse: {
+      /**
+       * Created At
+       * Format: date-time
+       */
+      created_at: string;
+      /**
+       * Id
+       * Format: uuid
+       */
+      id: string;
+      /**
+       * Incident Id
+       * Format: uuid
+       */
+      incident_id: string;
+      stage: components["schemas"]["IncidentPhotoStage"];
+      /**
+       * Uploaded By
+       * Format: uuid
+       */
+      uploaded_by: string;
+      /** Url */
+      url: string;
+    };
+    /**
+     * IncidentPhotoStage
+     * @description When in the job a photo of an incident was taken (`incident-photos` D3, R1.2).
+     *
+     * `ASSUMPTION`: **the name is invented and the entity is not in the PRD.** PRD §6 grants the
+     * `TECHNICIAN` only "subir fotos (antes y después)", and PRD §7 declares `CleaningPhoto`
+     * (§7.12) but no incident-photo entity at all — §7.13 `Incident` has no photo column. So both
+     * this enum's name and its two members are this project's, derived from that one phrase.
+     *
+     * **Two members, closed, and that is a decision rather than a starting point** (R1.2). A
+     * cleaning photo's kind is `cleaning_photos.photo_type`, a `String(100)`, because the task's
+     * checklist template declares which values are admissible — the template bounds it. An
+     * incident has no template, so a free-text stage coming from the caller would be a **new
+     * free-text sink** under rule 11 of `steering/security.md`, with no screen that ever displays
+     * it and nothing to close the set. The enum is what makes R6.5 true by construction instead of
+     * by review: there is no third value to send and no text field to fill.
+     *
+     * A third stage is a schema migration and a decision, deliberately. That is the cost of
+     * closing the set, and it is the cost worth paying here.
+     * @enum {string}
+     */
+    IncidentPhotoStage: "BEFORE" | "AFTER";
     /**
      * IncidentReportedResponse
      * @description The acknowledgement, and **only** the acknowledgement (R5.3, D15).
@@ -4026,6 +4290,44 @@ export interface operations {
     };
   };
   /**
+   * List the tenant's blocked transitions
+   * @description Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).
+   */
+  list_blocked_transitions_api_v1_blocked_transitions_get: {
+    parameters: {
+      query?: {
+        page?: number;
+        per_page?: number;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["BlockedTransitionPageResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's checklist templates
    * @description Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.
    */
@@ -4156,6 +4458,8 @@ export interface operations {
   /**
    * List the tenant's cleaning tasks
    * @description Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned to them; that restriction is derived from the token's role and cannot be widened by a query parameter.
+   *
+   * Each row carries `assignment_blocked_by`: why that task cannot be assigned right now (`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or `null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is computed when the page is read, so it may be stale by the time a client acts on it; the assignment endpoint checks again and its refusal is the authority. `null` also covers a property whose state this read could not resolve, so a client must treat it as "go ahead and let the server decide", never as a guarantee.
    */
   list_cleaning_tasks_api_v1_cleaning_tasks_get: {
     parameters: {
@@ -4270,6 +4574,8 @@ export interface operations {
   /**
    * Assign or reassign a cleaning task
    * @description Assignment is the only mutation this accepts: the status moves through the lifecycle endpoints so `PropertyStateMachine` is never bypassed. The person named must hold `CLEANER` in the caller's tenant.
+   *
+   * **The first assignment of a task requires its property to be in `AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to `CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from the `409` `CONFLICT` returned when it is the task's own status that refuses, so the two causes can be told apart without reading the message. Reassigning a task that is already `ASSIGNED` does not transition the property and does not depend on its state.
    */
   assign_cleaning_task_api_v1_cleaning_tasks__task_id__patch: {
     parameters: {
@@ -4334,6 +4640,54 @@ export interface operations {
       };
       /** @description Authenticated, but the role lacks the required permission. */
       403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Retire a cleaning that is not going to be completed
+   * @description The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.
+   */
+  cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "application/json": components["schemas"]["CancelCleaningTaskRequest"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["CleaningTaskResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task is not in a live status, or the property's state does not admit the cancellation. */
+      409: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
@@ -5428,6 +5782,59 @@ export interface operations {
     };
   };
   /**
+   * Serve an incident photo by signed URL
+   * @description **Anonymous by design** (`steering/security.md` rule 5): photos travel as signed URLs, and a browser fetching an `<img src>` sends no `Authorization` header. The `exp` and `sig` query parameters are the credential — `sig` is an HMAC over the object's internal key and `exp`, so it cannot be moved to another photo, another tenant or a later deadline.
+   *
+   * Only tenants whose `storage_type` is `LOCAL` are served here; an `S3` tenant's URLs point straight at the object store and this route answers `404` for them.
+   */
+  serve_incident_photo_api_v1_incident_photos__photo_id__get: {
+    parameters: {
+      query: {
+        /** @description POSIX expiry the signature covers. */
+        exp: number;
+        /** @description Hex HMAC of the object's key and `exp`. */
+        sig: string;
+      };
+      path: {
+        photo_id: string;
+      };
+    };
+    responses: {
+      /** @description The photo's bytes, with the `Content-Type` derived from the stored object's extension, `X-Content-Type-Options: nosniff`, and a `Cache-Control` of `private, max-age=<what is left of the signature>` so no shared cache keeps the bytes and no browser keeps them past the URL's expiry. */
+      200: {
+        content: {
+          "image/jpeg": unknown;
+          "image/png": unknown;
+          "image/webp": unknown;
+        };
+      };
+      /** @description The signature is missing, wrong, expired, tampered with, or names a photo that does not exist. **All five answer with the same body**, deliberately: telling them apart would make this endpoint an existence oracle for an unauthenticated caller. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The photo's tenant stores objects in `S3`, where the browser fetches them directly from the provider, so there is nothing for this endpoint to serve. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The signature was valid but the object could not be read back. */
+      502: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List the tenant's incidents
    * @description Paginated with `page`/`per_page` (PRD §23). A `TECHNICIAN` sees only the incidents assigned to them; that restriction is derived from the token's role and there is no parameter that can widen it.
    */
@@ -5798,6 +6205,114 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * List the photos of an incident
+   * @description Oldest first, so `BEFORE` and `AFTER` read in the order the work happened. Each entry carries a signed URL **minted for this response**; a URL from an earlier response may already have expired.
+   *
+   * `READ_INCIDENTS`, so a `TENANT_OWNER` can read the evidence as well as the manager — reading it is what they do, uploading it is the technician's. A `TECHNICIAN` sees only the incidents assigned to them, and that restriction is derived from the token's role with no parameter that can widen it.
+   */
+  list_incident_photos_api_v1_incidents__incident_id__photos_get: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["IncidentPhotoListResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Upload a photo of the incident
+   * @description `multipart/form-data` with a `stage` of `BEFORE` or `AFTER` and a `file`. PRD §6 grants the technician exactly those two — "subir fotos (antes y después)" — and the enum is closed, so there is no third value and no free-text alternative.
+   *
+   * The format is decided from the file's **bytes** — JPEG, PNG or WebP — and the `Content-Type` the client sends is never consulted; anything else is a `422`. Several photos of the same `stage` are allowed on purpose: a technician photographs two angles of one fault.
+   *
+   * The response carries a **signed URL valid for 3600 s**, and what that URL reveals depends on the tenant's `storage_type`:
+   *
+   * * `LOCAL` — the URL is a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying only the photo's id, its expiry and a signature. The internal storage path is not in it.
+   * * `S3` — the URL is a **presigned URL minted by the object store itself**, so it necessarily contains the bucket and the full object key. That is inherent to how presigned URLs work and is not something this API can strip.
+   *
+   * In neither case does `storage_key` appear as a field of the response body (R3.3).
+   */
+  upload_incident_photo_api_v1_incidents__incident_id__photos_post: {
+    parameters: {
+      path: {
+        incident_id: string;
+      };
+    };
+    requestBody: {
+      content: {
+        "multipart/form-data": components["schemas"]["Body_upload_incident_photo_api_v1_incidents__incident_id__photos_post"];
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      201: {
+        content: {
+          "application/json": components["schemas"]["IncidentPhotoResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The incident does not accept a photo, with **three distinguishable messages** (design D6): it is already `RESOLVED`/`CANCELLED`; it is waiting for the owner to answer an approval; or it is in a status where the technician's work has not started. Only `IN_PROGRESS` and `WAITING_EXTERNAL_PARTS` accept one. */
+      409: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The body exceeds `PHOTO_UPLOAD_MAX_BYTES` (10 MB by default). Answered by `MaxBodySizeMiddleware`, which is the layer that refuses before the body is read. The use case counts again as it consumes the stream, but that bounds the in-memory copy rather than repeating the refusal — rule 14 of `sdd/steering/security.md`. */
+      413: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Either the bytes are not a JPEG, PNG or WebP, or `stage` is not one of `BEFORE`/`AFTER`. The second is answered by FastAPI before the use case runs, and is deliberately **not** a `404`: unlike a cleaning photo's `photo_type`, the admissible stages come from a closed enum rather than from a row, so there is nothing whose existence a `404` could describe (design D11). */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The file store refused the write; no row was persisted. */
+      502: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

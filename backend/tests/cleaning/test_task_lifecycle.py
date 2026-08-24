@@ -460,6 +460,99 @@ def test_is_live_reflects_the_status():
     assert not _task(CleaningTaskStatus.REJECTED).is_live
 
 
+# --- `cancel` (`cleaning-stall-blocks-next-stay` R3.1, R3.4, design D9) --------------------
+
+
+@pytest.mark.parametrize("status", sorted(LIVE_STATUSES, key=lambda s: s.value))
+def test_a_live_task_can_be_cancelled(status) -> None:
+    """R3.1: exactly `LIVE_STATUSES`, which is the set that means "this stay is being handled".
+
+    Parametrized over the set itself rather than a literal list, so a status added to
+    `LIVE_STATUSES` is covered the day it is added — and one removed stops being asserted.
+    """
+    task = _task(status, assigned=CLEANER)
+
+    task.cancel(LATER, reason="the cleaner never came back")
+
+    assert task.status is CleaningTaskStatus.CANCELLED
+    assert task.updated_at == LATER
+
+
+@pytest.mark.parametrize(
+    "status",
+    sorted(set(CleaningTaskStatus) - set(LIVE_STATUSES), key=lambda s: s.value),
+)
+def test_a_task_that_is_not_live_cannot_be_cancelled(status) -> None:
+    """R3.4, and the divergence D9 declares from its wording.
+
+    R3.4 says "IF la tarea ya está en un estado terminal", and `PENDING_REVIEW` is refused too
+    although it is not terminal: nothing writes it (`complete()` goes straight to `COMPLETED`)
+    and a task that reached it has already resolved the property's state, so there is nothing to
+    unstick. The complement of `LIVE_STATUSES` is the honest way to say that, and it is derived
+    here rather than listed so the two sets cannot drift.
+    """
+    task = _task(status, assigned=CLEANER)
+
+    with pytest.raises(InvalidCleaningTransitionError) as raised:
+        task.cancel(LATER, reason="too late")
+
+    # D9: "el `409` lleva el estado en el mensaje" — a manager who raced someone else needs to
+    # know what the task is now, not merely that they lost.
+    assert status.value in str(raised.value)
+    assert task.status is status
+
+
+def test_cancelling_keeps_the_record_of_who_had_it() -> None:
+    """Same reasoning `reject` records: the assignee column is the evidence of who held it."""
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.cancel(LATER, reason="abandoned")
+
+    assert task.assigned_cleaner_id == CLEANER
+
+
+def test_cancelling_does_not_pretend_the_cleaning_finished() -> None:
+    """`completed_at` and the validation verdict stay untouched: nothing was completed."""
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    task.cancel(LATER, reason="abandoned")
+
+    assert task.completed_at is None
+    assert task.validation_status is CleaningValidationStatus.PENDING
+    assert task.validated_by_user_id is None
+
+
+def test_cancel_is_not_an_assignee_operation() -> None:
+    """A manager retires someone else's task, so there is no `cleaner_id` to match (R3.1).
+
+    Deliberately unlike `accept`/`reject`/`start`/`complete`, which all call
+    `_require_assignee`: those are the cleaner's own acts. The permission for this one is
+    `MANAGE_CLEANING_TASKS` at the route, and the entity takes no actor — pinned so that
+    "no assignee guard" reads as a decision rather than an omission.
+    """
+    task = _task(CleaningTaskStatus.ACCEPTED, assigned=OTHER_CLEANER)
+
+    task.cancel(LATER, reason="the guest is still in the flat")
+
+    assert task.status is CleaningTaskStatus.CANCELLED
+
+
+def test_cancel_requires_a_reason() -> None:
+    """`reason` is not optional, and the machine is not what makes it so.
+
+    `CLEANING_CANCELLED` is not in `PropertyStateMachine`'s `manual` set, so nothing downstream
+    demands one. Retiring another person's work is exactly what an `AuditLog` has to be able to
+    explain six months later (*Data & interfaces*), so the entity refuses a blank.
+    """
+    task = _task(CleaningTaskStatus.IN_PROGRESS, assigned=CLEANER)
+
+    for blank in ("", "   "):
+        with pytest.raises(InvalidCleaningTransitionError):
+            task.cancel(LATER, reason=blank)
+
+    assert task.status is CleaningTaskStatus.IN_PROGRESS
+
+
 # --- R6: what reporting an incident does, and does not do, to closing the task -------------
 #
 # `cleaner-incident-report` changes **not one line** of `complete()`. What it adds is a

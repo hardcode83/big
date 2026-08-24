@@ -1,9 +1,9 @@
 # Precios recomendados — cómo se opera
 
-Capability del change `revenue-pricing` (PRD §19, §7.17, §26.22). Esta página cuenta **cómo se
-usa y se opera**. El *qué hace*, con sus criterios EARS, vive hoy en
-`sdd/changes/revenue-pricing/proposal.md` y pasará a `sdd/specs/revenue-pricing.md` cuando
-`/sdd:archive` cierre el change. El contrato HTTP está en `backend/openapi.json`.
+Capability de los changes `revenue-pricing` (backend) y `pricing-web` (la pantalla) — PRD §19,
+§7.17, §24, §26.22. Esta página cuenta **cómo se usa y se opera**. El *qué hace*, con sus
+criterios EARS, vive en `sdd/specs/revenue-pricing.md`. El contrato HTTP está en
+`backend/openapi.json`.
 
 ## Lo primero, porque cambia cómo se lee todo lo demás: Modo 1
 
@@ -106,7 +106,8 @@ locales se derivan de la zona de cada propiedad—, una vez por tenant activo, s
 siguientes de cada vivienda activa con regla aplicable. Una vivienda sin regla se omite sin
 error y sin dejar el job en fallo.
 
-Para forzarlo sin esperar al reloj:
+Para forzarlo sin esperar al reloj, lo normal es el botón **Regenerar ahora** de `/pricing` (ver
+abajo). Por API:
 
 ```bash
 # todo el portfolio del tenant, tal como lo haría el reloj
@@ -139,6 +140,58 @@ exactamente a eso.
 docker compose logs -f beat
 docker compose logs -f worker
 ```
+
+## Operar los precios desde `/pricing`
+
+Desde el change `pricing-web` la pantalla existe y es donde se trabaja: **dos pestañas bajo la
+misma ruta**, sin subrutas y sin `?tab=` — la pestaña activa no viaja en la URL, así que no hay
+enlace que compartir a la de reglas.
+
+**Pestaña «Recomendaciones»** (la que se abre por defecto), la cola de decisión:
+
+- Filtros: vivienda, rango de fechas (`date_from`/`date_to`) y estado. Cambiar cualquiera vuelve
+  a la página 1 — si no, te quedarías en una página que el conjunto filtrado ya no tiene.
+- Por fila: vivienda, día, precio recomendado, estado y la `explanation` **plegada** en un
+  desplegable cerrado. No verás `current_price` (siempre vacío en Modo 1), ni `confidence`
+  (siempre `1.00`, el cálculo es determinista), ni fecha de la decisión — el contrato no la
+  publica, así que la pantalla no puede inventarla.
+- **Los tres movimientos**, con confirmación en dos pasos dentro de la propia fila:
+  **Aprobar** y **Rechazar** sobre una fila `RECOMMENDED`, y **Marcar como publicada** sobre una
+  ya `APPROVED`. Ese tercer botón es el que cierra el Modo 1: significa «ya subí este precio a la
+  OTA a mano», y sin él una fila aprobada no tiene salida. Los demás estados no ofrecen ninguno.
+- Mientras una decisión vuela se deshabilitan los botones de **todas** las filas y el de
+  regenerar; los filtros siguen usables.
+- **Regenerar ahora** dispara la generación sobre la vivienda del filtro activo, o sobre todo el
+  portfolio si no hay filtro, y anuncia los cuatro contadores («0 creadas, 60 actualizadas, 0
+  conservadas, 1 omitidas»). Corre **en la petición**: no hay progreso que sondear. Ojo con lo que
+  ese aviso *no* dice — el contrato no publica un contador `failed`, así que **un barrido con
+  agujeros se ve verde**; si sospechas, el log del worker sí nombra la vivienda que falló.
+
+**Pestaña «Reglas»**, en **sólo lectura**: por regla su nombre, el ámbito («Toda la cartera»
+cuando no cuelga de una vivienda), si está activa, la banda mínimo/base/máximo, el tope diario y
+**cuántas** entradas hay en cada una de las cinco columnas JSONB. Se cuenta el interior, nunca se
+pinta: pintarlo sería reimplementar el esquema de PRD §7.17 en el navegador. Para **escribir** una
+regla sigue haciendo falta la API (`POST`/`PATCH /api/v1/pricing-rules`) — el formulario tiene
+entrada de roadmap propia, y no está aquí porque la norma del proyecto prohíbe pintar el cuerpo
+del `422`, así que la pantalla no podría decirte cuál de las cinco columnas rechazó el backend.
+
+Detalles que ahorran un susto:
+
+- **Los importes van sin moneda**, porque ninguna respuesta de pricing lleva `currency`. El
+  separador es el del idioma: `120,00` en español y `120.00` en inglés — es el mismo número.
+- **El día no se convierte de zona.** Un navegador al oeste de UTC ve la misma noche que el
+  backend calculó, no la anterior.
+- **`DRAFT` tiene etiqueta pero no lo produce nadie.** Está en el enum por PRD §7.18 y no lo
+  escribe ningún camino.
+- **A partir de la vivienda 100 los nombres degradan.** El catálogo se pide en una sola página de
+  100, así que en una cartera mayor las que se queden fuera aparecen como no encontradas en vez de
+  por su nombre.
+- **El sidebar no filtra por rol**: un `CLEANER` ve la entrada «Precios» y, al entrar, la pantalla
+  le dice que no tiene permiso — no una pantalla en blanco. La propietaria **sí** decide aquí (ver
+  «Permisos»), y ésa es la divergencia consciente del patrón habitual.
+- **Un `409` al decidir** tiene su propio mensaje, distinto del error genérico: significa que la
+  fila ya no está en el estado que la pantalla creía, normalmente porque alguien más la decidió.
+  Vuelve a cargar y mira el estado nuevo.
 
 ## Leer una `explanation`
 
@@ -183,7 +236,7 @@ PRD §1— sin poder poner su propio suelo ni aprobar el precio de su propio pis
 
 ## Referencias
 
-- Criterios EARS: `sdd/changes/revenue-pricing/proposal.md` hasta el archivado, `sdd/specs/revenue-pricing.md` después
+- Criterios EARS: `sdd/specs/revenue-pricing.md` (backend y pantalla)
 - Contrato HTTP: `backend/openapi.json`
 - Calendario de jobs y su lock: [`docs/celery-jobs.md`](celery-jobs.md)
 - Regla 9 (excepción 5) y censo de la regla 11: `sdd/steering/security.md`

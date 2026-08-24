@@ -19,6 +19,7 @@ propiedad → AWAITING_CLEANING  +  CleaningTask creada   ← una sola transacci
         ▼
 limpiadora acepta        POST /accept
         │  (o rechaza → POST /reject: la tarea queda REJECTED y nace su reemplazo sin asignar)
+        │  (desde cualquier estado vivo el manager puede POST /cancel — §La salida de excepción)
         ▼
 limpiadora inicia        POST /start     → propiedad → CLEANING_IN_PROGRESS
         ▼
@@ -38,6 +39,59 @@ el manager valida        POST /validate   (PASSED | FAILED | WAIVED)
 Ninguna de esas flechas de estado de propiedad la escribe este módulo por su cuenta: todas
 pasan por `PropertyStateMachine`, que es el único sitio donde ocurre una transición
 (`sdd/steering/architecture.md`).
+
+## La salida de excepción: cancelar una limpieza que no va a cerrarse
+
+El ciclo de arriba supone que la limpieza termina. Cuando no va a terminar —la limpiadora no
+volvió, la tarea se creó sobre la vivienda equivocada— hay una salida explícita, añadida por
+`cleaning-stall-blocks-next-stay`:
+
+```bash
+curl -X POST .../api/v1/cleaning-tasks/<id>/cancel \\
+  -H 'Authorization: Bearer <token de manager>' \\
+  -d '{"reason":"la limpiadora no volvio"}'
+```
+
+**Por qué existe.** Sin ella, una limpieza abandonada congelaba la vivienda. El caso medido en
+`dev` el 2026-08-22: REDES11 llevaba en `CLEANING_IN_PROGRESS` desde el 16 con una estancia
+corriendo del 19 al 23, y las tres salidas de ese estado eran cerrar la limpieza —que
+`after_cleaning_completion` **se niega** a hacer con un huesped dentro— o inventarse una
+incidencia `HIGH`, que descongela la vivienda con un dato falso. `POST /reject` no servía: es el
+acto de la limpiadora y exige `ASSIGNED` o `ACCEPTED`.
+
+Lo que hay que saber para operarla:
+
+- **Quién**: `MANAGE_CLEANING_TASKS`, o sea el manager. No la limpiadora, que recibe `403`.
+- **Desde dónde**: cualquier estado vivo (`CREATED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`). Una
+  tarea ya terminal —o en `PENDING_REVIEW`— responde `409` **con el estado en el mensaje**, y no
+  escribe nada.
+- **`reason` es obligatorio** y no puede ir en blanco. Se guarda en
+  `property_state_transitions.reason`, no en el diff auditado: `audit_logs.changes` sólo admite
+  columnas reales y no sensibles de la entidad. La fila de `AuditLog`
+  (`CLEANING_TASK_CANCELLED`) contesta quién y cuándo; la de la transición, por qué.
+- **Dónde acaba la vivienda**: lo decide la máquina de estados con el contexto real, nunca este
+  módulo. Con un huésped dentro queda en `OCCUPIED_ESTIMATED` —el estado que el check-in
+  bloqueado nunca llegó a escribir—; sin estancia activa, en `AWAITING_CLEANING`.
+- **Tarea de reemplazo**: se crea sin asignar (`CREATED`) **salvo** que haya una estancia activa
+  ahora mismo. Con el huésped dentro no se crea, porque nadie podría hacerla y volvería a
+  congelar la vivienda; el calendario ya provee, porque `process_checkouts` crea la limpieza al
+  checkout.
+- **La evidencia parcial se conserva entera**: ni los ítems de checklist marcados ni las fotos
+  subidas se borran. Las fotos son objetos en un almacén que ninguna transacción deshace, así que
+  un borrado a medias dejaría huérfanos de un lado o del otro; el trabajo que sí se hizo es
+  justo lo que hace falta para decidir si la limpieza se repite; y borrar evidencia por cancelar
+  contradiría el timeline inmutable del principio 1 de `product.md`. La tarea cancelada sigue
+  consultable con sus ítems y sus fotos por las rutas de siempre.
+- **Si la vivienda no se mueve** —cancelar la única tarea `CREATED` de una que ya estaba en
+  `AWAITING_CLEANING`— no es un error: la tarea se cancela igual y queda su fila de `AuditLog`.
+  En ese caso no hay fila de transición, así que el motivo vive sólo en la línea de log
+  `cleaning.cancel_without_state_change`.
+- **Si la vivienda tiene dos estancias solapadas** activas a la vez, la máquina se niega a
+  resolver y la cancelación responde `409`. Es un dato que hay que arreglar antes, no algo que
+  esta operación pueda decidir por su cuenta.
+
+Y lo que la cancelación **no** hace: no relaja el `409` de `POST /complete` con un huésped
+dentro, que es una garantía y no un defecto.
 
 ## Antes de que nada funcione: la plantilla de checklist
 
@@ -469,12 +523,48 @@ reasignarían tareas a quien solo estaba mirando la lista.
 Si la persona elegida ha dejado de ser una limpiadora activa del tenant entre que se cargó el
 catálogo y se confirma, el backend responde `422` y la pantalla lo dice con esas palabras — «esa
 persona ya no está» — en lugar de un «ha fallado» genérico. Las demás respuestas tienen su propio
-mensaje: `403` sin permiso, `404` si la tarea ya no existe, `409` si la tarea ya no admite un
-cambio de asignación (por ejemplo porque la limpiadora ya la aceptó). El texto lo elige el
-**código de estado**, nunca el mensaje del backend, que es técnico y está en inglés.
+mensaje: `403` sin permiso, `404` si la tarea ya no existe, y **dos `409` distintos** que la
+sección siguiente explica. El texto lo elige el **estado HTTP y, dentro del `409`, el código del
+sobre** — nunca el mensaje del backend, que es técnico y está en inglés.
 
 Cada resultado —éxito o fallo— se anuncia en una **región viva**, de modo que un lector de
 pantalla lo perciba sin depender del color.
+
+### La primera asignación exige la vivienda pendiente de limpieza
+
+**Asignar una tarea `CREATED` mueve la vivienda a `CLEANING_SCHEDULED`, y esa transición solo es
+legal desde `AWAITING_CLEANING`.** Es la única fila que la matriz de `PropertyStateMachine` admite
+para el disparador `CLEANER_ASSIGNED`, así que sobre una vivienda en cualquier otro estado la
+primera asignación se rechaza. Reapuntar una tarea que ya está `ASSIGNED` no mueve la vivienda y
+por tanto no depende de su estado.
+
+Eso convierte el `409` en dos cosas distintas, y el API las distingue por código:
+
+| Quién se niega | Código | Qué se enseña |
+|---|---|---|
+| El ciclo de vida de la tarea (ya está `ACCEPTED`, `IN_PROGRESS`…) | `CONFLICT` | «Esa tarea ya no admite un cambio de asignación» |
+| El estado operacional de la vivienda | `PROPERTY_STATE_CONFLICT` | «La vivienda todavía no está pendiente de limpieza» |
+
+Antes los dos compartían código y la pantalla culpaba a la tarea de una precondición de la
+vivienda — que es el fallo que se midió operando `dev` el 2026-08-22 y el motivo del change
+`cleaning-assign-preconditions`. El código nuevo lo produce **toda** operación de limpieza que la
+máquina de estados bloquee, no solo la asignación: el cierre de una limpieza con el siguiente
+huésped ya dentro responde el mismo `PROPERTY_STATE_CONFLICT`.
+
+**La pantalla lo dice por adelantado, y no es la autoridad.** Cada fila del listado trae
+`assignment_blocked_by`: `TASK_STATUS` si se niega la tarea, `PROPERTY_STATE` si se niega la
+vivienda, o nulo si nada conocido lo bloquea. Cuando no es nulo, el botón de confirmar queda
+deshabilitado y debajo aparece el motivo; el desplegable **sigue operable**, porque deshabilitar
+un elemento con el foco lo manda al `<body>` y dejaría tirado a quien navega con teclado. Elegir
+es inofensivo, solo enviar tiene que esperar.
+
+Que sea una cortesía y no un permiso importa: el indicador se calcula al leer la página, así que
+puede quedarse viejo antes de que nadie pulse. Si la vivienda se mueve entre la carga y el clic,
+el backend rechaza igual y **ese** rechazo es el que manda — con el mensaje correcto, que es la
+mitad del arreglo que de verdad protege al operador. Un nulo obsoleto ofrece un botón que acabará
+en `409`; un no-nulo obsoleto esconde un botón que habría funcionado hasta el siguiente refresco.
+Nulo también es lo que se envía cuando la lectura de la página no resolvió el estado de esa
+vivienda: **falla abierto** a propósito, ofrece la acción y deja decidir al servidor.
 
 ## Entradas de roadmap relacionadas
 

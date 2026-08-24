@@ -34,6 +34,7 @@ from app.cleaning.api.dependencies import (
     get_create_cleaning_task_use_case,
     get_list_cleaning_photos_use_case,
     get_list_cleaning_tasks_use_case,
+    get_cancel_cleaning_task_use_case,
     get_photo_requirements_use_case,
     get_reject_cleaning_task_use_case,
     get_report_task_incident_use_case,
@@ -46,6 +47,7 @@ from app.cleaning.api.schemas import (
     MAX_PER_PAGE,
     MAX_PHOTO_TYPE_LENGTH,
     AssignCleaningTaskRequest,
+    CancelCleaningTaskRequest,
     ChecklistResponse,
     CleaningPhotoListResponse,
     CleaningPhotoResponse,
@@ -72,6 +74,7 @@ from app.cleaning.application.use_cases import (
     GetPhotoRequirementsUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
+    CancelCleaningTaskUseCase,
     RejectCleaningTaskUseCase,
     ReportTaskIncidentUseCase,
     StartCleaningTaskUseCase,
@@ -111,7 +114,14 @@ def _actor(authenticated: AuthenticatedRequest, ip: str) -> CleaningActor:
     description=(
         "Paginated with `page`/`per_page` (PRD §23). A `CLEANER` sees only the tasks assigned "
         "to them; that restriction is derived from the token's role and cannot be widened by "
-        "a query parameter."
+        "a query parameter.\n\n"
+        "Each row carries `assignment_blocked_by`: why that task cannot be assigned right now "
+        "(`TASK_STATUS` if its own status refuses, `PROPERTY_STATE` if its property does), or "
+        "`null` if nothing known is blocking it. **It is a courtesy, not a permission.** It is "
+        "computed when the page is read, so it may be stale by the time a client acts on it; "
+        "the assignment endpoint checks again and its refusal is the authority. `null` also "
+        "covers a property whose state this read could not resolve, so a client must treat it "
+        "as \"go ahead and let the server decide\", never as a guarantee."
     ),
 )
 async def list_cleaning_tasks(
@@ -196,7 +206,14 @@ async def get_cleaning_task(
     description=(
         "Assignment is the only mutation this accepts: the status moves through the lifecycle "
         "endpoints so `PropertyStateMachine` is never bypassed. The person named must hold "
-        "`CLEANER` in the caller's tenant."
+        "`CLEANER` in the caller's tenant.\n\n"
+        "**The first assignment of a task requires its property to be in "
+        "`AWAITING_CLEANING`.** Handing a `CREATED` task to a cleaner moves the property to "
+        "`CLEANING_SCHEDULED`, and that transition is legal from no other state. A property in "
+        "any other state is answered `409` with code `PROPERTY_STATE_CONFLICT` — distinct from "
+        "the `409` `CONFLICT` returned when it is the task's own status that refuses, so the "
+        "two causes can be told apart without reading the message. Reassigning a task that is "
+        "already `ASSIGNED` does not transition the property and does not depend on its state."
     ),
 )
 async def assign_cleaning_task(
@@ -265,6 +282,47 @@ async def reject_cleaning_task(
         now=now_utc(),
     )
     return CleaningTaskResponse.from_domain(replacement)
+
+
+@router.post(
+    "/{task_id}/cancel",
+    response_model=CleaningTaskResponse,
+    summary="Retire a cleaning that is not going to be completed",
+    description=(
+        "The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` "
+        "and the property's state is resolved **through `PropertyStateMachine`**, never written "
+        "directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the "
+        "state a blocked check-in never got to write. A replacement task is created unassigned "
+        "unless a guest is in the flat right now — a cleaning nobody could perform would freeze "
+        "the property again. `reason` is required and is recorded on the state transition. The "
+        "partial evidence already gathered, checklist items and photos alike, is kept whole. "
+        "A task that is already terminal answers `409` without writing anything."
+    ),
+    responses={
+        status.HTTP_409_CONFLICT: {
+            "model": ErrorEnvelope,
+            "description": (
+                "The task is not in a live status, or the property's state does not admit the "
+                "cancellation."
+            ),
+        }
+    },
+)
+async def cancel_cleaning_task(
+    authenticated: ManageDep,
+    task_id: uuid.UUID,
+    payload: CancelCleaningTaskRequest,
+    use_case: Annotated[CancelCleaningTaskUseCase, Depends(get_cancel_cleaning_task_use_case)],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> CleaningTaskResponse:
+    task = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+        reason=payload.reason,
+        now=now_utc(),
+    )
+    return CleaningTaskResponse.from_domain(task)
 
 
 @router.post(

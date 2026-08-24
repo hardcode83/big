@@ -232,6 +232,22 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # `photo_type` and the two ids are what an incident review actually asks for: who uploaded
     # what kind of evidence, against which cleaning.
     "CLEANING_PHOTO": frozenset({"photo_type", "cleaning_task_id", "uploaded_by"}),
+    # `incident-photos` R6.2, design D8. The same three facts as `CLEANING_PHOTO` above and for
+    # the same reasons, with `stage` where that one has `photo_type`: an incident review asks who
+    # uploaded which stage of evidence, against which incident.
+    #
+    # **`storage_key` is absent, and that is the point of the entry.** `audit_logs.changes` is a
+    # rule-11 sink whose whole contract is that a value cannot arrive through it without the
+    # column announcing it, and the internal key is precisely the one string this change works to
+    # keep out of every response — putting it in the column designed to be dumped would undo
+    # that. (The key *is* written to the log by the compensating delete of design D7, and that is
+    # not a contradiction: R3.3 governs API responses, and that log line is the entire recovery
+    # procedure for an orphaned object.)
+    #
+    # `stage` is safe to audit where a free-text photo type would not be: it is a closed native
+    # enum (`IncidentPhotoStage`), so it cannot carry a caller's text into the sink. That is what
+    # R6.5 means when it says this change adds no new sink.
+    "INCIDENT_PHOTO": frozenset({"stage", "incident_id", "uploaded_by"}),
     # `access-notifications`. Rule 9 of `steering/security.md` names `AccessRecord` in its
     # enumeration, so every operator action on one writes a row.
     #

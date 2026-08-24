@@ -27,10 +27,12 @@ from typing import Annotated
 from pydantic import BaseModel, ConfigDict, Field
 
 from app.core.storable_text import MultiLineText
+from app.maintenance.application.use_cases import UploadedIncidentPhoto
 from app.maintenance.domain.entities import MAX_MATERIALS, Incident
 from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.enums import (
     IncidentCategory,
+    IncidentPhotoStage,
     IncidentSeverity,
     IncidentSource,
     IncidentStatus,
@@ -277,3 +279,76 @@ class RespondOwnerApprovalRequest(BaseModel):
 
     status: OwnerApprovalStatus
     response_notes: Annotated[str | None, Field(max_length=MAX_RESPONSE_NOTES)] = None
+
+
+class IncidentPhotoResponse(BaseModel):
+    """One incident photo, and the signed URL that reads its bytes back (R3.3, design D10).
+
+    **Every field is enumerated and the model is built by `from_upload` below — never by
+    `model_validate` or `from_attributes` over the entity.** That is not style: `IncidentPhoto`
+    carries `storage_key`, and a dump would publish it. R3.3 forbids the key in any response
+    body or header, and the only reason this schema can be trusted is that there is no code path
+    here that serialises a field nobody listed.
+
+    `url` is what replaces it, and what it reveals depends on the tenant's backend:
+
+    * `LOCAL` — a route of this API (`/api/v1/incident-photos/{photo_id}`) carrying the photo's
+      id, its expiry and a signature. The internal path is not in it.
+    * `S3` — a presigned URL minted by the object store itself, so it necessarily contains the
+      bucket and the full object key. That is inherent to presigned URLs, is the single named
+      exception to rule 5 of `steering/security.md`, and is accepted in writing in
+      `sdd/specs/file-storage.md` and ADR 0008.
+
+    In neither case is `storage_key` a **field** of this body, which is what R3.3 governs.
+    """
+
+    id: uuid.UUID
+    incident_id: uuid.UUID
+    stage: IncidentPhotoStage
+    uploaded_by: uuid.UUID
+    created_at: datetime
+    url: str
+
+    @classmethod
+    def from_upload(cls, uploaded: "UploadedIncidentPhoto") -> "IncidentPhotoResponse":
+        """Build from the use case's result, naming every field explicitly.
+
+        Takes `UploadedIncidentPhoto` rather than an `IncidentPhoto` plus a string because the
+        URL is minted per response and belongs with the photo it was minted for — passing them
+        separately is how a listing ends up pairing one photo with another's URL.
+        """
+        photo = uploaded.photo
+        return cls(
+            id=photo.id,
+            incident_id=photo.incident_id,
+            stage=photo.stage,
+            uploaded_by=photo.uploaded_by,
+            created_at=photo.created_at,
+            url=uploaded.url,
+        )
+
+
+class IncidentPhotoListResponse(BaseModel):
+    """The photos of one incident, oldest first (R3.1).
+
+    **Unpaginated, like `cleaning`'s.** A photo list is bounded by how many photos a technician
+    took of one fault, which is single digits; `per_page` exists on the incident *listing*
+    because that one grows with the tenant's whole history. An envelope with `items` rather than
+    a bare array so the response can gain a field later without breaking every client.
+    """
+
+    items: Sequence[IncidentPhotoResponse]
+
+    @classmethod
+    def from_uploads(
+        cls, uploaded: "Sequence[UploadedIncidentPhoto]"
+    ) -> "IncidentPhotoListResponse":
+        """Build the envelope, so the router does not map the elements itself.
+
+        Mirrors `CleaningPhotoListResponse.build` — D10 points at that envelope as the shape to
+        follow, and `steering/backend.md` wants routers thin ("La lógica nunca vive en el
+        router"). Encapsulating the mapping here also means `from_upload` stays the **only** way
+        an element is constructed, which is what keeps R3.3 true for the listing as well as for
+        the `201`.
+        """
+        return cls(items=[IncidentPhotoResponse.from_upload(item) for item in uploaded])

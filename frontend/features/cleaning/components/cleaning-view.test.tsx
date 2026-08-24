@@ -9,7 +9,7 @@ import { fireEvent, render, screen, waitFor, within } from "@/test/render";
 import type {
   CleanerSummary,
   CleaningDataSource,
-  CleaningTask,
+  CleaningTaskListItem,
   PaginatedResponse,
   PropertySummary,
 } from "../data";
@@ -49,7 +49,7 @@ vi.mock("../data", async (importOriginal) => ({
 const PROPERTY_UUID = "8f14e45f-ceea-467a-9b7c-9d7c1a2b3c4d";
 const CLEANER_UUID = "c9f0f895-fb98-4b41-a54b-2e1a7c0d9e8f";
 
-const task: CleaningTask = {
+const task: CleaningTaskListItem = {
   id: "task-1",
   propertyId: PROPERTY_UUID,
   assignedCleanerId: CLEANER_UUID,
@@ -57,6 +57,8 @@ const task: CleaningTask = {
   scheduledStart: "2026-08-20T09:00:00Z",
   scheduledEnd: "2026-08-20T11:00:00Z",
   createdAt: "2026-08-19T18:00:00Z",
+  // Assignable by default, so every pre-existing test keeps describing the ordinary row.
+  assignmentBlockedBy: null,
 };
 
 const cleaners: CleanerSummary[] = [
@@ -67,9 +69,9 @@ const properties: PropertySummary[] = [
 ];
 
 function page(
-  data: CleaningTask[],
-  envelope: Partial<PaginatedResponse<CleaningTask>> = {},
-): PaginatedResponse<CleaningTask> {
+  data: CleaningTaskListItem[],
+  envelope: Partial<PaginatedResponse<CleaningTaskListItem>> = {},
+): PaginatedResponse<CleaningTaskListItem> {
   return {
     data,
     total: data.length,
@@ -594,6 +596,121 @@ describe("CleaningView — one assignment at a time (R4.4, R4.5)", () => {
       expect(
         screen.getAllByRole("button", { name: "Asignando…" }),
       ).toHaveLength(1),
+    );
+  });
+});
+
+describe("CleaningView — the pre-flight, and the race it does not pretend to win (R3.1, R3.3)", () => {
+  const OTHER_PROPERTY = "2b7e1516-28ae-4d2a-a6ab-f7158809cf4f";
+
+  it("shows a blocked row and an assignable one in the same list", async () => {
+    listTasks.mockResolvedValue(
+      page([
+        { ...task, assignmentBlockedBy: null },
+        {
+          ...task,
+          id: "task-2",
+          propertyId: OTHER_PROPERTY,
+          assignmentBlockedBy: "PROPERTY_STATE",
+        },
+      ]),
+    );
+    listProperties.mockResolvedValue([
+      ...properties,
+      { id: OTHER_PROPERTY, name: "Pajaritos 8", internalCode: "PAJARITOS8" },
+    ]);
+    renderView();
+
+    await waitFor(() =>
+      expect(screen.getAllByRole("listitem")).toHaveLength(2),
+    );
+    const [assignable, blocked] = screen.getAllByRole("listitem");
+    expect(
+      within(blocked).getByText(
+        "No se puede asignar todavía: la vivienda no está pendiente de limpieza.",
+      ),
+    ).toBeInTheDocument();
+    expect(within(blocked).getByRole("button", { name: "Asignar" })).toBeDisabled();
+    expect(
+      within(assignable).queryByText(/No se puede asignar/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("announces the property message for a real 409 the row had offered (R3.3)", async () => {
+    // The heart of R3.3. The row said `null` — assignable — because that is what the page
+    // read saw; between the read and the click the flat moved, and the backend refused. The
+    // guard was a courtesy, the refusal is the authority, and the message the manager sees
+    // must now name the **property**, which before this change it never did: both 409s
+    // shared one code and the screen blamed the task.
+    listTasks.mockResolvedValue(page([{ ...task, assignmentBlockedBy: null }]));
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      ).toBeInTheDocument(),
+    );
+    assignTask.mockRejectedValue(
+      new ApiError({
+        code: "PROPERTY_STATE_CONFLICT",
+        message: "No policy entry for source state and trigger",
+        status: 409,
+      }),
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Asignar limpiadora" }), {
+      target: { value: "cleaner-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("La vivienda todavía no está pendiente de limpieza."),
+      ).toBeInTheDocument(),
+    );
+    // Still the single live region of design D11, and still an alert for a failure.
+    expect(screen.getByRole("alert").textContent).toBe(
+      "La vivienda todavía no está pendiente de limpieza.",
+    );
+    // And emphatically NOT the task sentence, which is the bug this change exists to fix.
+    expect(document.body.textContent).not.toContain(
+      "Esa tarea ya no admite un cambio de asignación.",
+    );
+    // Never the backend's technical English (R2.3, R5.1).
+    expect(document.body.textContent).not.toContain("No policy entry");
+  });
+
+  it("still blames the task when the task is what refused", async () => {
+    listTasks.mockResolvedValue(page([{ ...task, assignmentBlockedBy: null }]));
+    listCleaners.mockResolvedValue([
+      ...cleaners,
+      { id: "cleaner-2", name: "Lucía Gil", isActive: true },
+    ]);
+    renderView();
+    await waitFor(() =>
+      expect(
+        screen.getByRole("combobox", { name: "Asignar limpiadora" }),
+      ).toBeInTheDocument(),
+    );
+    assignTask.mockRejectedValue(
+      new ApiError({ code: "CONFLICT", message: "detail", status: 409 }),
+    );
+
+    fireEvent.change(screen.getByRole("combobox", { name: "Asignar limpiadora" }), {
+      target: { value: "cleaner-2" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Asignar" }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByText("Esa tarea ya no admite un cambio de asignación."),
+      ).toBeInTheDocument(),
+    );
+    expect(document.body.textContent).not.toContain(
+      "La vivienda todavía no está pendiente de limpieza.",
     );
   });
 });

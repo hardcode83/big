@@ -19,6 +19,7 @@ from app.maintenance.api.incidents_router import router as incidents_router
 from app.messaging.api.errors import register_messaging_error_handlers
 from app.messaging.api.router import router as conversations_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
+from app.maintenance.api.photos_router import router as incident_photos_router
 from app.cleaning.api.tasks_router import router as cleaning_tasks_router
 from app.cleaning.api.templates_router import router as cleaning_templates_router
 from app.core.config import settings
@@ -40,6 +41,7 @@ from app.pricing.api.errors import register_pricing_error_handlers
 from app.pricing.api.recommendations_router import router as price_recommendations_router
 from app.pricing.api.rules_router import router as pricing_rules_router
 from app.properties.api.errors import register_property_error_handlers
+from app.properties.api.router import blocked_transitions_router
 from app.properties.api.router import router as properties_router
 from app.reservations.api.errors import register_reservation_error_handlers
 from app.reservations.api.router import router as reservations_router
@@ -109,25 +111,36 @@ def create_app() -> FastAPI:
     # the only domain module without one. Its arrival is what makes `POST /reservations`
     # reachable — it answered 404 on every request because no property could exist.
     app.include_router(properties_router, prefix=API_V1_PREFIX)
+    # `cleaning-stall-blocks-next-stay`: a second prefix from the same module, because a literal
+    # segment under `/properties` collides with `/properties/{id}` and would be resolved by
+    # registration order — `dashboard-api` D7 refused to let a contract guarantee depend on that.
+    app.include_router(blocked_transitions_router, prefix=API_V1_PREFIX)
     # `cleaning`: templates are their own router because they are their own aggregate, and
     # because PRD §23 does not declare them — the deviation is easier to see in a file of
     # its own than buried among the task routes (proposal R1, `ASSUMPTION`).
     app.include_router(cleaning_templates_router, prefix=API_V1_PREFIX)
     app.include_router(cleaning_tasks_router, prefix=API_V1_PREFIX)
-    # `cleaning-photos-storage`: the **only anonymous route this application mounts** besides
-    # login, refresh and `/health` (design D7). Its own router because it is the only one, and
-    # because sharing `cleaning_tasks_router` — which declares `AUTHENTICATED_RESPONSES` and
+    # `cleaning-photos-storage`: the **first of the two anonymous routes that serve tenant
+    # data** (design D7); `incident-photos` mounted the second below, and its D5 moved the
+    # machinery both share into `app/integrations/`. Its own router because sharing
+    # `cleaning_tasks_router` — which declares `AUTHENTICATED_RESPONSES` and
     # hangs every route off a `require(...)` — would put an unauthenticated endpoint one copied
     # decorator away from twelve authorised ones. The signature in its query string is its
     # authorisation, and `tests/test_route_authorization.py` names it in `ANONYMOUS_ENDPOINTS`,
     # which is a visible diff by construction.
     app.include_router(cleaning_photos_router, prefix=API_V1_PREFIX)
-    # `maintenance`: the `api/` layer that module never had. Two routers because they are two
-    # aggregates — one incident can raise two owner approvals, so the approval has an
-    # identity the incident cannot stand in for (design D14). Both are fully authenticated:
-    # there is no anonymous door into this module, and the one surface that creates an
-    # incident anonymously is the guest portal's, mounted below.
+    # `maintenance`: the `api/` layer that module never had. Two authenticated routers because
+    # they are two aggregates — one incident can raise two owner approvals, so the approval has
+    # an identity the incident cannot stand in for (design D14). The module's one anonymous
+    # door is the photo-serving router mounted just below, which `incident-photos` added under
+    # its R4.6; nothing here opens one, and the one surface that creates an incident
+    # anonymously is the guest portal's, mounted further down.
     app.include_router(incidents_router, prefix=API_V1_PREFIX)
+    # Its own router and NOT part of `incidents_router` (R4.6): that one's every path carries
+    # a `require(...)`, and this is the module's only anonymous door. The second route in the
+    # application that serves object bytes against an HMAC signature, after
+    # `GET /api/v1/cleaning-photos/{photo_id}` — both built by the same factory (design D5).
+    app.include_router(incident_photos_router, prefix=API_V1_PREFIX)
     app.include_router(owner_approvals_router, prefix=API_V1_PREFIX)
     # `messaging-ai`: the inbox of PRD §16. One router and seven routes, all authenticated —
     # messages enter through the panel or the API, not from an OTA, because
@@ -244,6 +257,28 @@ def create_app() -> FastAPI:
         max_bytes_provider=lambda path: (
             settings.photo_upload_max_bytes
             if path.startswith(f"{API_V1_PREFIX}/cleaning-tasks/")
+            and path.endswith("/photos")
+            # `incident-photos` R5.1/design D9: the same ceiling for the same kind of file
+            # through the same kind of door, reusing `PHOTO_UPLOAD_MAX_BYTES` rather than
+            # introducing a second setting.
+            #
+            # Bounded at **both** ends (R5.3) — prefix `/incidents/` and suffix `/photos` — so
+            # it cannot widen the ceiling for any of the module's other authenticated routes,
+            # which share the prefix. Its position relative to the branches below is not
+            # critical the way the cleaning one's is (`/incidents/` collides with neither
+            # `/cleaning-` nor `/integrations/`), but it must precede the final `else`, and
+            # `tests/maintenance/test_photo_body_limit.py` fixes that.
+            #
+            # **The accepted risk, written here rather than inherited in silence**: this is
+            # 10 MiB of body admitted before any authentication runs, and the pattern is
+            # **wider than the route** — `/api/v1/incidents/photos` and
+            # `/api/v1/incidents/a/b/c/photos` also match, consume up to the ceiling, and only
+            # then get their 404/405. It is the same bargain the cleaning branch above struck,
+            # bounded by the same two facts: 10 MiB is ~40x below the 400 MB body that made
+            # `api-ingress-routing` mount this middleware, and it is a per-request ceiling, not
+            # a per-connection one.
+            else settings.photo_upload_max_bytes
+            if path.startswith(f"{API_V1_PREFIX}/incidents/")
             and path.endswith("/photos")
             else settings.csv_import_max_bytes
             if path.startswith(f"{API_V1_PREFIX}/integrations/")

@@ -154,7 +154,7 @@ igual que [`cleaner-task-context`](cleaner-task-context.md). El *cómo se opera*
 ### Lo que esta capacidad no hace
 
 - THE SYSTEM NEVER SHALL permitir a `CLEANER` leer, listar, seguir, clasificar, asignar o resolver
-  incidencias: el acuse de tres campos es toda la lectura que tiene. Las once rutas de
+  incidencias: el acuse de tres campos es toda la lectura que tiene. Las quince rutas de
   `/api/v1/incidents` siguen cerradas a ese rol.
 - THE SYSTEM NEVER SHALL permitirle fijar `category` ni `severity`: `classify` sigue siendo la
   única puerta de salida de `OPEN`.

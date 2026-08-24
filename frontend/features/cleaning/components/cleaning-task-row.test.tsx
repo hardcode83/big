@@ -18,14 +18,18 @@ vi.mock("@/lib/auth/auth-provider", async (importOriginal) => ({
   useAuth: () => ({ user: { tenant_id: tenantId.current, role: role.current } }),
 }));
 
-import type { CleanerSummary, CleaningTask, PropertySummary } from "../data";
+import type {
+  CleanerSummary,
+  CleaningTaskListItem,
+  PropertySummary,
+} from "../data";
 import { buildDirectory } from "../lib/directory";
 import { CleaningTaskRow } from "./cleaning-task-row";
 
 const PROPERTY_UUID = "8f14e45f-ceea-467a-9b7c-9d7c1a2b3c4d";
 const CLEANER_UUID = "c9f0f895-fb98-4b41-a54b-2e1a7c0d9e8f";
 
-const task: CleaningTask = {
+const task: CleaningTaskListItem = {
   id: "task-1",
   propertyId: PROPERTY_UUID,
   assignedCleanerId: CLEANER_UUID,
@@ -33,6 +37,9 @@ const task: CleaningTask = {
   scheduledStart: "2026-08-20T09:00:00Z",
   scheduledEnd: "2026-08-20T11:00:00Z",
   createdAt: "2026-08-19T18:00:00Z",
+  // The default row is assignable, so the pre-existing tests keep describing the ordinary
+  // case. The blocked shapes are posed explicitly by the tests that are about them.
+  assignmentBlockedBy: null,
 };
 
 const properties: PropertySummary[] = [
@@ -261,5 +268,64 @@ describe("CleaningTaskRow — who gets the assignment control (R4.3)", () => {
       screen.queryByRole("option", { name: "Ana Pérez" }),
     ).not.toBeInTheDocument();
     expect(screen.getByRole("option", { name: "Marta Ruiz" })).toBeInTheDocument();
+  });
+});
+
+describe("CleaningTaskRow passes the pre-flight through (R3.1, design D9)", () => {
+  it("hands the blocker to the control instead of deriving anything", () => {
+    renderRow({
+      task: { ...task, assignmentBlockedBy: "PROPERTY_STATE" },
+      assignment: { isPending: false, isBlocked: false, onConfirm: vi.fn() },
+    });
+
+    expect(
+      screen.getByText(
+        "No se puede asignar todavía: la vivienda no está pendiente de limpieza.",
+      ),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Asignar" })).toBeDisabled();
+  });
+
+  it("leaves the control alone when nothing is blocking", () => {
+    renderRow({
+      task: { ...task, assignmentBlockedBy: null },
+      assignment: { isPending: false, isBlocked: false, onConfirm: vi.fn() },
+    });
+
+    expect(screen.queryByText(/No se puede asignar/)).not.toBeInTheDocument();
+    // Still disabled, but for the ordinary reason: nobody has been picked yet.
+    expect(screen.getByRole("button", { name: "Asignar" })).toBeDisabled();
+  });
+
+  it("shows the task-status cause with its own sentence", () => {
+    renderRow({
+      task: { ...task, status: "IN_PROGRESS", assignmentBlockedBy: "TASK_STATUS" },
+      assignment: { isPending: false, isBlocked: false, onConfirm: vi.fn() },
+    });
+
+    expect(
+      screen.getByText(
+        "No se puede asignar: esta tarea ya no admite un cambio de asignación.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it("says nothing about it to a role without the control (R4.3)", () => {
+    // The row still states who is assigned, but a blocked-assignment hint on a screen with
+    // no assignment control would be explaining an action this role cannot take.
+    role.current = "CLEANER";
+    renderRow({ task: { ...task, assignmentBlockedBy: "PROPERTY_STATE" } });
+
+    expect(screen.queryByText(/No se puede asignar/)).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Asignar" })).not.toBeInTheDocument();
+  });
+
+  it("has no accessibility violations with a blocked row", async () => {
+    const { container } = renderRow({
+      task: { ...task, assignmentBlockedBy: "PROPERTY_STATE" },
+      assignment: { isPending: false, isBlocked: false, onConfirm: vi.fn() },
+    });
+
+    expect(await getA11yViolations(container)).toEqual([]);
   });
 });

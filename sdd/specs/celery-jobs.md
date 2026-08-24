@@ -123,6 +123,70 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   IANA se aleja más de 24 h—; el retraso es un límite operativo, porque un check-out vencido
   sigue venciendo y una caída del worker más larga deja la propiedad atascada.
 
+### Desajustes entre el calendario y el estado
+
+- WHEN el calendario exige un trigger de reloj sobre una reserva y el estado operacional de su
+  vivienda no admite ese trigger, THE SYSTEM SHALL registrar el desajuste identificando la
+  vivienda, la reserva, el trigger y el estado que lo impide, y SHALL contarlo en el cubo
+  `blocked` de `AdvanceReport`.
+- THE SYSTEM SHALL derivarlo **fuera de la consulta de candidatas**, sobre el complemento de los
+  estados origen del trigger (`PropertyOperationalState` menos `source_states_for(trigger)`): una
+  vivienda atascada no es candidata **por definición**, así que ningún cubo de esa consulta puede
+  contarla. Es el único contador del informe que no se deriva de ella.
+- THE SYSTEM SHALL NOT contabilizarlo como `not_eligible`, que significa «la hora aún no ha
+  llegado». Confundir las dos cosas es exactamente lo que mantuvo invisible una vivienda parada
+  desde el 2026-08-16 hasta que se operó `dev` el 2026-08-22: el informe decía `candidates: 0` y
+  `not_eligible: 0`, y era cierto — la vivienda no entraba en él.
+- THE SYSTEM SHALL considerar atascada una reserva sólo si se cumplen **todas** estas
+  condiciones, y las dos últimas no son refinamientos: sin ellas el cubo mide el tamaño de la
+  cartera activa y no el atasco, porque `is_due` de `CHECKIN_TIME_REACHED` es verdad durante toda
+  la estancia y el de `CHECKOUT_TIME_REACHED` lo es para siempre después del checkout.
+  1. La hora ha llegado, resuelto por `PropertyStateMachine.is_due`, que valida las precondiciones
+     temporales del trigger **sin consultar la matriz** —la pregunta «¿vence?» es independiente de
+     «¿es legal?»—. WHERE el trigger es `CHECKIN_WINDOW_OPENED`, THE SYSTEM SHALL exigir además la
+     ventana del operador (`opens_checkin_window` sobre `TenantConfig.checkin_window_hours_before`),
+     que es política del job y no de la máquina, igual que en la transición.
+  2. El estado de la vivienda **no es origen** del trigger.
+  3. **No consta que esa transición se haya aplicado ya para esa reserva.**
+  4. El estado **no es destino** del trigger cuando ésa es la **única** estancia vencida para él.
+- THE SYSTEM SHALL contestar «¿se aplicó ya?» con la evidencia que ya existía:
+  `PropertyStateTransitionRepository.applied_clock_triggers` lee `reservation_id` y `trigger` del
+  `metadata` de `property_state_transitions` **como texto**, acotada al tenant y a las reservas de
+  la ventana, y no SHALL reconstruir el enum desde datos almacenados.
+- WHERE dos estancias solapadas están vencidas para el mismo trigger, THE SYSTEM SHALL abstenerse
+  del atajo del destino: resolver una no SHALL ocultar el atasco de la otra.
+- THE SYSTEM SHALL contar **viviendas** en `blocked` —la misma precedencia «un cubo por vivienda»
+  que el resto del informe— y emitir **una línea por desajuste** en
+  `scheduler.blocked_transition`, con vivienda, reserva, trigger, estado que bloquea e instante
+  vencido. Dos estancias solapadas dan `blocked = 1` y dos líneas.
+- THE SYSTEM SHALL no escribir nada al detectar, y SHALL derivar el desajuste en cada ejecución:
+  no hay fila que marcar ni cerrar, así que un atasco deja de contarse y de listarse en cuanto se
+  resuelve, sin intervención manual.
+- THE SYSTEM SHALL acotar la detección a la **misma** `candidate_window` que las candidatas —30
+  días atrás, 2 adelante— sin horizonte propio, y SHALL declarar en `docs/celery-jobs.md` que un
+  atasco de más de 30 días deja de aparecer y necesita una transición manual. Es el precio del
+  límite, el mismo que `CANDIDATE_LOOKBEHIND` ya paga para los checkouts pendientes.
+- WHERE la vivienda está `OUT_OF_SERVICE` o `BLOCKED_BY_OWNER` y tiene una estancia vencida, THE
+  SYSTEM SHALL reportarla igualmente: el calendario y el estado se contradicen, y cuál de los dos
+  está mal no lo decide un barrido.
+- THE SYSTEM SHALL servir esos mismos desajustes por `GET /api/v1/blocked-transitions` a todo rol
+  con `READ_PROPERTIES` —incluida la propietaria—, con el envelope paginado de PRD §23 y cada
+  entrada llevando `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state` y
+  `due_since`. `trigger` y `blocking_state` viajan como los literales canónicos, sin prosa: la
+  traducción es del cliente, el mismo trato que `dashboard-api` da a `operational_state`.
+- THE SYSTEM SHALL derivar esa colección de la misma función que el job (`stalls.detect`) y de la
+  misma ventana, de modo que el cubo y la colección no puedan discrepar; la diferencia es que el
+  job pregunta por un trigger por ejecución y la colección por los tres.
+- THE SYSTEM SHALL respetar el aislamiento por tenant en esa lectura y no SHALL estrenar acceso a
+  datos que el rol no tuviera: el aviso expone el estado operacional de su vivienda y las fechas
+  de su reserva, que ya están en su card del dashboard.
+- THE SYSTEM SHALL paginar los **desajustes** —no las viviendas—, con `total` contando desajustes,
+  y SHALL ordenarlos por `due_since` ascendente, con desempate estable por vivienda, reserva y
+  trigger: lo primero que el operador necesita es lo que lleva más tiempo parado.
+- THE SYSTEM SHALL no escribir en esa petición, ni siquiera la fila de configuración del tenant:
+  `TenantConfigRepository.checkin_window_hours` lee una columna con su default en vez de pasar por
+  `get_or_create`, que es lo que haría un `GET` escribir.
+
 ### Idempotencia y no solapamiento
 
 - WHEN una tarea vuelve a ejecutarse sobre un estado ya alcanzado, THE SYSTEM SHALL no escribir
@@ -181,6 +245,10 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   **`generate_price_recommendations` sí está** desde
   [`revenue-pricing`](revenue-pricing.md) (2026-08-18), y es quien estrenó `DAILY_JOBS`: hasta
   entonces el calendario sólo sabía expresar intervalos.
+  Desde `pricing-web` (2026-08-23) su **puerta manual** —`POST /api/v1/price-recommendations/generate`,
+  que comparte el generador con el job— tiene consumidor de frontend: el botón «Regenerar ahora»
+  de `/pricing`. No cambia nada del calendario, y se anota porque el reloj deja de ser la única
+  vía por la que se ejercita ese generador en la práctica.
 - **No hay sync periódico del PMS.** La cadencia sería función del presupuesto de créditos, ya
   medido contra Beds24, pero su adapter no existe: programarlo hoy sincronizaría el mock. Llega
   con `pms-beds24-adapter`, dueño de la `PMSAdapterFactory`. `pms_sync` sigue siendo la única
@@ -196,6 +264,33 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   llamante no necesitó abrir ninguna costura nueva. Lo que ese llamante sí hace y beat no es
   pasar un `now` **histórico** —reproduce hechos de hace días— y encadenar los disparadores en
   orden cronológico explícito, porque la política de transiciones es sensible al orden.
+- **El cubo `blocked` es el único que no sale de la consulta de candidatas** (2026-08-23,
+  `cleaning-stall-blocks-next-stay`). Nació de un caso medido en `dev`: una vivienda en
+  `CLEANING_IN_PROGRESS` desde el 2026-08-16 con una reserva `CONFIRMED` del 19 al 23 que nunca
+  aplicó su check-in, y tres jobs informando `candidates: 0 … not_eligible: 0` sin mentir. Lo que
+  faltaba no era un cubo más en la clasificación de candidatas, sino **una segunda pregunta**,
+  hecha sobre el complemento de los estados origen.
+- **La detección se afinó dos veces durante la implementación, y las dos veces por medición.** La
+  definición literal del requisito —«la hora llegó y el estado no es origen»— describe también
+  **todo lo que está aguas abajo del trigger**, así que reportaba como atascada cada vivienda
+  `OCCUPIED_ESTIMATED` a mitad de estancia y cada `AWAITING_CLEANING` recién salida de un checkout,
+  durante 30 días: `blocked` acababa siendo el tamaño de la cartera activa. Las condiciones 3 y 4
+  —evidencia por reserva y el atajo del destino acotado a la única estancia vencida— son la
+  corrección, y la cuarta sólo apareció al correr el flujo completo contra la pila real.
+- **`CLEANING_ASSIGNMENT_EXPIRED` se retiró en vez de ganar emisor** (2026-08-23). Era la única
+  caducidad que el ciclo de limpieza tenía escrita —enum, fila de matriz y guarda— y **nadie la
+  emitía**: no estaba en `CADENCES`, ni en `DAILY_JOBS`, ni la construía ningún caso de uso. El
+  razonamiento de la retirada vive en
+  [`timeline-state-machine.md`](timeline-state-machine.md); aquí se anota porque este calendario es
+  donde habría vivido su emisor, y no lo tuvo nunca.
+- **Dos deudas declaradas de la colección de desajustes**, escritas aquí en vez de dejarse
+  descubrir: `PropertyRepository.list_all` no está paginado en origen —irrelevante con dos
+  viviendas, dos consultas grandes por petición con doscientas, y la palanca es filtrar por el
+  complemento de estados origen como hace el job—, y la lectura de evidencia filtra por
+  `metadata->>'reservation_id'`, que ningún índice cubre: `property_state_transitions` sólo tiene
+  `ix_property_state_transitions_property_id_created_at`, así que es un escaneo acotado por tenant
+  y por las reservas de la ventana. La palanca es un índice de expresión sobre
+  `(tenant_id, (metadata->>'reservation_id'))` si alguna vez pesa.
 - **Un `beat` colgado pero vivo pasa el healthcheck**: comprueba que el proceso es beat, no que
   esté planificando.
 - **Coste del filtro global medido**: ~280 µs por sentencia con 22 clases acotadas, ~14 % del
@@ -214,6 +309,16 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   informe por cubos.
 - `backend/app/properties/domain/clock_triggers.py` — ventana de candidatos, ventana de check-in
   y materialización de límites locales.
+- `backend/app/properties/domain/stalls.py` — `BlockedTransition` y `detect`, la definición única
+  del desajuste, pura y sin reloj propio: recibe `now`, la ventana del operador y la evidencia de
+  lo ya aplicado. Sus dos llamantes son el cubo `blocked` del job y la colección de lectura.
+- `backend/app/properties/application/use_cases.py` — además del caso de uso del reloj,
+  `ListBlockedTransitionsUseCase` y la función compartida `reservations_by_property`, que es lo que
+  hace imposible que el cubo y la colección usen ventanas distintas.
+- `backend/app/properties/domain/repositories.py` — `PropertyStateTransitionRepository.applied_clock_triggers`,
+  la evidencia de «esta transición ya se aplicó a esta reserva», leída como texto.
+- `backend/app/tenants/domain/repositories.py` — `TenantConfigRepository.checkin_window_hours`, la
+  lectura de una columna con su default que mantiene el `GET` sin escrituras.
 - `backend/app/notifications/{domain/escalation.py,application/use_cases.py}` — política de
   escalado pura y el caso de uso que la aplica.
 - `backend/scripts/measure_tenant_filter.py` — la medición del filtro global.

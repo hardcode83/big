@@ -2,6 +2,7 @@ import type {
   CleanerSummary,
   CleaningTask,
   CleaningTaskFilters,
+  CleaningTaskListItem,
   PaginatedResponse,
   PropertySummary,
 } from "./dto";
@@ -22,12 +23,18 @@ import type {
  * §23 `403`/`404`/`409`/`422` envelopes that `assignTask` can produce.
  */
 export interface CleaningDataSource {
-  /** One page of the tenant's cleaning tasks, filtered server-side (R1.1, R3). */
+  /**
+   * One page of the tenant's cleaning tasks, filtered server-side (R1.1, R3).
+   *
+   * `CleaningTaskListItem` and not `CleaningTask`: rows carry the assignment pre-flight,
+   * which only the listing answers (design D7). `assignTask` below still returns the base
+   * shape.
+   */
   listTasks(
     tenantId: string,
     filters: CleaningTaskFilters,
     page: number,
-  ): Promise<PaginatedResponse<CleaningTask>>;
+  ): Promise<PaginatedResponse<CleaningTaskListItem>>;
 
   /** The tenant's `role=CLEANER` catalog, active and inactive alike (design D4). */
   listCleaners(tenantId: string): Promise<CleanerSummary[]>;

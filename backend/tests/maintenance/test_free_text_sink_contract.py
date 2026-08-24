@@ -392,14 +392,14 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         #   fills them in `IncidentResponse.from_domain` — a read of the columns, on the way
         #   out. It cannot write them: a Pydantic DTO has no session, and the only writer of
         #   the row is the adapter above, whose `_MUTABLE_INCIDENT_COLUMNS` excludes both.
-        # * The two routers match on FastAPI's own `description=` route metadata — the
+        # * The **three** routers match on FastAPI's own `description=` route metadata — the
         #   documented reason `properties/api/router.py` forced the raw-SQL clause of this
         #   census to be quote-aware in the first place. `incidents_router.py` additionally
         #   matches on `assignment_note=payload.assignment_note`, which is the router
         #   forwarding the field to the use case — a pass-through, not a producer of text.
         #
         # What the entries cost is real and bounded: a genuine write appearing in one of
-        # these three would no longer be reported. It would still have to reach the database
+        # these four would no longer be reported. It would still have to reach the database
         # through the adapter, which is still gated, still allowlisted, and still the only
         # module with an `IncidentModel(...)` in it.
         # `api/schemas.py` gains `materials` for **two** reasons at once, and only one of them
@@ -420,6 +420,12 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
             "materials",
         },
         "maintenance/api/approvals_router.py": {"description"},
+        # `incident-photos` section 8. The narrowest entry of the four and the easiest to
+        # verify: the module is 40 lines, it names `description` exactly **once**, as the
+        # `description=` argument handed to `build_signed_media_router`, and it contains no
+        # reference to `IncidentModel`, no `.description =` assignment and no session at all.
+        # It cannot write a column; it declares OpenAPI prose for one anonymous route.
+        "maintenance/api/photos_router.py": {"description"},
         # `seed-data-demo-extension`: the demo seed is the third writer of both columns and the
         # first one outside `maintenance/`. It is here rather than waved through because its
         # contract is declared in the census — **closed form by discipline**: the three PRD §27

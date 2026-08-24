@@ -23,6 +23,7 @@ without one fails the suite.
 """
 
 import uuid
+from datetime import datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, Query, status
@@ -37,6 +38,7 @@ from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.properties.api.dependencies import (
     get_create_property_use_case,
+    get_list_blocked_transitions_use_case,
     get_list_properties_use_case,
     get_property_state_use_case,
     get_property_use_case,
@@ -45,12 +47,14 @@ from app.properties.api.dependencies import (
 from app.properties.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    BlockedTransitionPageResponse,
     CreatePropertyRequest,
     PropertyPageResponse,
     PropertyResponse,
     PropertyStateResponse,
     UpdatePropertyRequest,
 )
+from app.properties.application.use_cases import ListBlockedTransitionsUseCase
 from app.properties.application.property_admin import (
     CreatePropertyCommand,
     CreatePropertyUseCase,
@@ -230,3 +234,52 @@ async def update_property(
         now=now_utc(),
     )
     return PropertyResponse.from_domain(property)
+
+
+blocked_transitions_router = APIRouter(
+    prefix="/blocked-transitions",
+    tags=["properties"],
+    responses=AUTHENTICATED_RESPONSES,
+)
+"""A router of its own, and not a path under `/properties` (design D5).
+
+`dashboard-api` D7 already recorded why: a literal segment under `prefix="/properties"` collides
+with `/properties/{id}` and is resolved by registration order, and "una garantía de contrato no
+debe depender de eso". Registered in `main.py` as a second `include_router`, the same way
+`dashboard` serves its two prefixes from one module.
+"""
+
+
+@blocked_transitions_router.get(
+    "",
+    response_model=BlockedTransitionPageResponse,
+    summary="List the tenant's blocked transitions",
+    description=(
+        "Flats the calendar wanted to move and whose state would not admit it: the hour came, "
+        "the state is not a source of the trigger, and no transition is recorded for that "
+        "reservation. Derived on every read and never stored, so a stall disappears by itself "
+        "once it is resolved. Oldest first. `total` counts stalls, not properties — the "
+        "pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. "
+        "`trigger` and `blocking_state` are canonical literals; the detection window is the same "
+        "30 days back that bounds the clock jobs, so a stall older than that stops appearing "
+        "(`docs/celery-jobs.md`)."
+    ),
+)
+async def list_blocked_transitions(
+    authenticated: ReadDep,
+    use_case: Annotated[
+        ListBlockedTransitionsUseCase, Depends(get_list_blocked_transitions_use_case)
+    ],
+    now: Annotated[datetime, Depends(now_utc)],
+    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
+    per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
+) -> BlockedTransitionPageResponse:
+    result = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        now=now,
+        page=page,
+        per_page=per_page,
+    )
+    return BlockedTransitionPageResponse.build(
+        result.items, total=result.total, page=page, per_page=per_page
+    )

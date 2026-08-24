@@ -61,10 +61,15 @@
     "confirm": "Asignar",
     "sending": "Asignando…",
     "success": "Tarea asignada a {{name}}.",
+    "blocked": {
+      "propertyState": "No se puede asignar todavía: la vivienda no está pendiente de limpieza.",
+      "taskStatus": "No se puede asignar: esta tarea ya no admite un cambio de asignación."
+    },
     "error": {
       "forbidden": "No tienes permiso para asignar limpiezas.",
       "notFound": "Esa tarea de limpieza ya no existe.",
       "conflict": "Esa tarea ya no admite un cambio de asignación.",
+      "propertyState": "La vivienda todavía no está pendiente de limpieza.",
       "invalid": "Esa persona ya no es una limpiadora activa de este tenant.",
       "generic": "No se pudo asignar la limpieza. Vuelve a intentarlo."
     }

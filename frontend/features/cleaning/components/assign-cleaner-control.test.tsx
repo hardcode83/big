@@ -25,6 +25,7 @@ function renderControl(
         cleaners={cleaners}
         isPending={false}
         isBlocked={false}
+        blockedBy={null}
         {...overrides}
         onConfirm={onConfirm}
       />
@@ -124,6 +125,7 @@ describe("AssignCleanerControl (R4.1, R4.2, R5.1, R5.3, design D8)", () => {
           cleaners={cleaners}
           isPending={false}
           isBlocked
+          blockedBy={null}
           onConfirm={vi.fn()}
         />
       </I18nProvider>,
@@ -158,4 +160,94 @@ describe("AssignCleanerControl (R4.1, R4.2, R5.1, R5.3, design D8)", () => {
     const { container } = renderControl();
     expect(await getA11yViolations(container)).toEqual([]);
   });
+});
+
+describe("AssignCleanerControl blocked by the backend's pre-flight (R3.1, R3.4)", () => {
+  it("disables confirm and shows the reason, associated with the button", () => {
+    renderControl({ blockedBy: "PROPERTY_STATE" });
+
+    const reason = screen.getByText(
+      "No se puede asignar todavía: la vivienda no está pendiente de limpieza.",
+    );
+    expect(reason).toBeInTheDocument();
+    expect(confirm()).toBeDisabled();
+    // R3.1 asks for the motive to be *indicated*, and a visible line the button does not
+    // reference is not indicated to anyone using a screen reader.
+    expect(confirm()).toHaveAttribute("aria-describedby", reason.id);
+  });
+
+  it("keeps the select operable and selectable while the button is disabled (R3.4)", () => {
+    // The whole reason the select is not disabled: disabling a focused element sends focus
+    // to `<body>`. A manager can still choose; only sending is refused.
+    renderControl({ blockedBy: "PROPERTY_STATE" });
+
+    expect(select()).toBeEnabled();
+    select().focus();
+    expect(select()).toHaveFocus();
+    fireEvent.change(select(), { target: { value: "active-1" } });
+
+    expect(select()).toHaveValue("active-1");
+    expect(confirm()).toBeDisabled();
+  });
+
+  it("shows a different sentence for each cause", () => {
+    const { unmount } = renderControl({ blockedBy: "PROPERTY_STATE" });
+    const property = screen.getByRole("button", { name: "Asignar" }).getAttribute(
+      "aria-describedby",
+    );
+    const propertyText = document.getElementById(property ?? "")?.textContent;
+    unmount();
+
+    renderControl({ blockedBy: "TASK_STATUS" });
+    const taskText = document.getElementById(
+      screen.getByRole("button", { name: "Asignar" }).getAttribute(
+        "aria-describedby",
+      ) ?? "",
+    )?.textContent;
+
+    expect(propertyText).toBeTruthy();
+    expect(taskText).toBeTruthy();
+    expect(propertyText).not.toBe(taskText);
+  });
+
+  it("says nothing and describes nothing when it is not blocked", () => {
+    renderControl({ blockedBy: null });
+
+    expect(confirm()).not.toHaveAttribute("aria-describedby");
+    expect(
+      screen.queryByText(/No se puede asignar/),
+    ).not.toBeInTheDocument();
+  });
+
+  it("still refuses to confirm even after a valid pick (R3.1)", () => {
+    const { onConfirm } = renderControl({ blockedBy: "TASK_STATUS" });
+    fireEvent.change(select(), { target: { value: "active-1" } });
+
+    expect(confirm()).toBeDisabled();
+    fireEvent.click(confirm());
+
+    expect(onConfirm).not.toHaveBeenCalled();
+  });
+
+  it("renders the reason in English too (R2.4)", () => {
+    renderControl({ blockedBy: "PROPERTY_STATE" }, "en");
+
+    expect(
+      screen.getByText(
+        "Cannot be assigned yet: the property is not awaiting cleaning.",
+      ),
+    ).toBeInTheDocument();
+  });
+
+  it.each(["es", "en"] as const)(
+    "has no accessibility violations while blocked, in %s",
+    async (locale) => {
+      // Both locales, because the QA panel of this section noticed the blocked state was only
+      // ever run through axe in Spanish. The reason line is what `aria-describedby` points at,
+      // so a locale whose copy failed to render would break the association silently.
+      const { container } = renderControl({ blockedBy: "PROPERTY_STATE" }, locale);
+
+      expect(await getA11yViolations(container)).toEqual([]);
+    },
+  );
 });

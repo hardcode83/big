@@ -20,9 +20,13 @@ from typing import Annotated, Any
 
 from pydantic import BaseModel, ConfigDict, Field
 
-from app.cleaning.application.use_cases import UploadedCleaningPhoto
+from app.cleaning.application.use_cases import CleaningTaskListView, UploadedCleaningPhoto
 from app.cleaning.domain.entities import CleaningChecklistTemplate, CleaningTask
-from app.cleaning.domain.enums import CleaningTaskStatus, CleaningValidationStatus
+from app.cleaning.domain.enums import (
+    CleaningAssignmentBlocker,
+    CleaningTaskStatus,
+    CleaningValidationStatus,
+)
 from app.cleaning.domain.ports import (
     IncidentReport,
     IncidentReportedAcknowledgement,
@@ -40,6 +44,10 @@ from app.maintenance.domain.entities import (
     MAX_INCIDENT_TITLE,
 )
 from app.maintenance.domain.enums import IncidentStatus
+
+#: A cancellation reason is a sentence, not a document. Bounded like every other free-text field
+#: here so a request body cannot be used as storage (`cleaning-stall-blocks-next-stay` R3.1).
+MAX_CANCEL_REASON = 500
 
 MAX_PER_PAGE = 100
 # `page` needs a ceiling too, not just `per_page`: the value becomes a SQL OFFSET and a
@@ -159,6 +167,21 @@ class ValidateCleaningTaskRequest(BaseModel):
     validation_status: CleaningValidationStatus
 
 
+class CancelCleaningTaskRequest(BaseModel):
+    """`cleaning-stall-blocks-next-stay` R3.1.
+
+    `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+    `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+    exactly what has to be explainable six months later. It is recorded on
+    `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+    admits only real, non-sensitive columns of the entity.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Annotated[str, Field(min_length=1, max_length=MAX_CANCEL_REASON)]
+
+
 class CleaningTaskResponse(BaseModel):
     """Enumerated, never dumped from the entity — `notes` must not leak in (design D13)."""
 
@@ -239,8 +262,73 @@ class CleaningTaskContextResponse(BaseModel):
         return cls.model_validate(context)
 
 
+# A model's docstring is **published** as its schema `description`, so the one below says what a
+# consumer needs and the rest of the reasoning stays in this comment:
+#
+# * A second model rather than an optional field on `CleaningTaskResponse`, the way
+#   `PropertyListItemResponse` exists next to the property detail and for the same reason of
+#   shape (`cleaning-assign-preconditions` D5). The field on the shared model would oblige the
+#   eight endpoints that return it — `POST`, `GET /{id}`, `PATCH`, `accept`, `reject`, `start`,
+#   `complete`, `validate` — to read the flat's state to answer a question none of them was
+#   asked.
+# * Enumerated and built by hand like its sibling, **never** `from_attributes`: `notes` is a
+#   field of the entity and must not leak into any response (design D13 of `cleaning`).
+# * Not inherited from `CleaningTaskResponse` either. The duplication is the point: inheritance
+#   would make every future field of the detail model appear in the listing silently, and "the
+#   listing carries exactly these fields" is the property this file keeps.
+class CleaningTaskListItemResponse(BaseModel):
+    """One row of the cleaning-task listing: a task plus whether it can be assigned now."""
+
+    id: uuid.UUID
+    property_id: uuid.UUID
+    reservation_id: uuid.UUID | None
+    checklist_template_id: uuid.UUID
+    assigned_cleaner_id: uuid.UUID | None
+    status: CleaningTaskStatus
+    scheduled_start: datetime | None
+    scheduled_end: datetime | None
+    accepted_at: datetime | None
+    started_at: datetime | None
+    completed_at: datetime | None
+    validation_status: CleaningValidationStatus
+    validated_by_user_id: uuid.UUID | None
+    validated_at: datetime | None
+    created_at: datetime
+    updated_at: datetime
+    #: Why this row cannot be assigned right now, or `null` if it can (R3.1).
+    #:
+    #: A courtesy for the screen and **not** an authorisation: it is computed when the page is
+    #: read, so it can be stale by the time anyone clicks. The backend refuses again on the
+    #: mutation and that refusal is the authority (R3.3). `null` therefore means "nothing known
+    #: to be blocking", which is also what an unresolved flat yields.
+    assignment_blocked_by: CleaningAssignmentBlocker | None
+
+    @classmethod
+    def from_domain(cls, view: CleaningTaskListView) -> "CleaningTaskListItemResponse":
+        task = view.task
+        return cls(
+            id=task.id,
+            property_id=task.property_id,
+            reservation_id=task.reservation_id,
+            checklist_template_id=task.checklist_template_id,
+            assigned_cleaner_id=task.assigned_cleaner_id,
+            status=task.status,
+            scheduled_start=task.scheduled_start,
+            scheduled_end=task.scheduled_end,
+            accepted_at=task.accepted_at,
+            started_at=task.started_at,
+            completed_at=task.completed_at,
+            validation_status=task.validation_status,
+            validated_by_user_id=task.validated_by_user_id,
+            validated_at=task.validated_at,
+            created_at=task.created_at,
+            updated_at=task.updated_at,
+            assignment_blocked_by=view.blocker,
+        )
+
+
 class CleaningTaskPageResponse(BaseModel):
-    data: list[CleaningTaskResponse]
+    data: list[CleaningTaskListItemResponse]
     total: int
     page: int
     per_page: int
@@ -249,7 +337,7 @@ class CleaningTaskPageResponse(BaseModel):
     @classmethod
     def build(cls, items, total: int, page: int, per_page: int):
         return cls(
-            data=[CleaningTaskResponse.from_domain(item) for item in items],
+            data=[CleaningTaskListItemResponse.from_domain(item) for item in items],
             total=total,
             page=page,
             per_page=per_page,
