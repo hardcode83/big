@@ -498,7 +498,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `workspace-shell.test.tsx` y `field-public-guest-shell.test.tsx` siguen en verde —son
       la red que detecta si algún camino renderiza `Topbar` desde cliente. [R3.2, R3.7]
 
-## 7. Tonos de estado y severidad de incidencias
+## 7. Tonos de estado y severidad de incidencias <!-- panel: PASS 2026-08-24 -->
 
 <!-- ESTADO DEL ENTORNO al empezar la sección 7 (2026-08-24), porque no vive en
      ningún otro sitio y una sesión nueva lo tendría que redescubrir:
@@ -563,6 +563,14 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       Comprobar de paso que `features/pricing/lib/recommendation-status.test.ts` (solo
       comprueba que la clave existe) y la reexportación de `features/cleaning` siguen en
       verde sin tocarse. [R6.7]
+- [x] 7.4 **Añadida el 2026-08-24** (panel de la sección 7 → decisión de Jose → design D13):
+      `bg-card` no emite CSS. Seis ficheros de producción lo usan y `card` aparece cero veces
+      en `globals.css` —también cero en la base de la rama, así que es anterior a este change—,
+      de modo que esas seis superficies no pintan nada y R1.5 es falso mientras siga así. Las
+      seis pasan a `bg-surface`, que ya existe y es el token que el export quería ahí
+      («Cards use #181b25»). No se declara `--card`: duplicaría `--surface` y rompería el
+      conjunto de 25 de D2. El guard que lo detecta es la tercera comprobación de 8.1.
+      [R1.5, D13]
 
 ## 8. El guard: cero escalas crudas, cero `dark:`
 
@@ -573,6 +581,14 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       scrim de `components/ui/sheet.tsx`; `#555`/`#ccc` inline de `app/global-error.tsx`; los
       `*.test.*`). Hecho = el test pasa **y** su recuento va de la cifra medida en 1.2 a 0.
       [R6.6, R1.5]
+      **Tercera comprobación, añadida el 2026-08-24** (D13): además de lo que sobra —escalas
+      crudas y `dark:`— el guard mira lo que **falta**: una utilidad de color
+      (`bg-`/`text-`/`border-`/`ring-`…) que nombre un token que `globals.css` no declara en
+      `@theme inline`. Sin ella la sección 8 habría dado 0 sobre un árbol con seis superficies
+      sin pintar, que es justo lo que pasó con `bg-card` hasta que lo levantó el panel de la
+      sección 7. Ojo al detectar `dark:`: hay que **ignorar los comentarios**, porque
+      `lib/ui/status-tone.ts` explica en prosa por qué se quitó el variante y la palabra
+      aparece tres veces ahí dentro. [R6.6, R1.5, D13]
 
 ## 9. Documentación
 

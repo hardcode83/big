@@ -486,6 +486,50 @@ oscuro», que es el más común.
 Rechazado: una regla de ESLint — `no-restricted-syntax` sobre literales de clase es frágil con
 `cva` y `cn()`; un test que lee ficheros dice exactamente lo que R6.6 quiere contar.
 
+**Enmendado el 2026-08-24** (panel de la sección 7, revisor security): el guard lleva una
+**tercera** comprobación, la de D13 — una utilidad de color que nombra un token que el CSS no
+declara. Las dos primeras miran lo que sobra; ésta mira lo que falta, y es la única de las tres
+que habría visto el `bg-card` de D13.
+
+### D13 — `bg-card` no pinta nada, y el guard que lo habría visto
+
+**El hallazgo**, del panel de la sección 7: seis ficheros de producción visten sus tarjetas con
+`bg-card` —`features/dashboard/components/property-card.tsx:56`,
+`features/dashboard/components/detail/property-detail-sections.tsx:23`,
+`features/properties/components/list/properties-view.tsx:125`,
+`features/cleaning/components/cleaning-task-row.tsx:139`,
+`features/pricing/components/rule-row.tsx:69` y
+`features/pricing/components/recommendation-row.tsx:89`— y la cadena `card` aparece **cero**
+veces en `app/globals.css`. Esas seis superficies no pintan nada: caen al fondo de la página y
+la tarjeta se queda sin elevación contra él.
+
+**No es una regresión de este change**: `card` tampoco aparecía en `globals.css` en la base de
+la rama (`b5ee09a`), verificado en las dos puntas. Es un defecto que llevaba ahí desde antes y
+que la reescritura del bloque de color de la sección 2 ni introdujo ni arregló.
+
+**Elegido:** las seis pasan a `bg-surface`, y el guard de D12 gana la tercera comprobación.
+`--surface` ya existe, ya está expuesto en `@theme inline` como `--color-surface`, y es
+exactamente el token que el export quería aquí: la fila de §Paleta lo anota
+«E `surface-container-low` (DESIGN.md: «Cards use #181b25»)». O sea que el valor correcto para
+una tarjeta ya estaba declarado y con el hex del export; lo único que faltaba era que alguien
+lo nombrara.
+
+Entra en el alcance porque **R1.5** —«el color de cualquier superficie, texto o borde de la
+aplicación dependa del tema resuelto»— es falso mientras seis superficies dependan de nada. Y
+el guard hace falta aparte del arreglo: las dos comprobaciones que D12 tenía buscan escalas
+crudas y `dark:`, y `bg-card` no es ninguna de las dos, así que la sección 8 habría dado 0 sobre
+un árbol con seis superficies sin pintar. Un guard que sólo mira lo que sobra no ve lo que
+falta.
+
+Rechazado: declarar `--card` y `--card-foreground` en los dos temas — duplicaría el valor de
+`--surface` con otro nombre, subiría el conjunto de D2 de 25 a 27 tokens por nada y obligaría a
+medir un par nuevo en §Contraste medido. El token que hacía falta ya estaba.
+Rechazado: sólo el guard, con las seis como excepciones declaradas — deja el defecto en pie y
+convierte la lista de excepciones de D12, que hoy tiene tres entradas razonadas, en un vertedero.
+Rechazado: dejarlo para `visual-restyle-workspace` — es el change que traerá la primitiva
+`Card`, pero R1.5 es un criterio de aceptación de **éste**, y seis superficies sin color no lo
+cumplen.
+
 ## Paleta
 
 Semilla: `E` = valor literal del export (`DESIGN.md`), con el nombre del token de origen.

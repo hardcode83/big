@@ -66,7 +66,7 @@ export function RuleRow({ rule, properties }: RuleRowProps) {
   return (
     <li
       aria-labelledby={headingId}
-      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm"
+      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-sm"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <h3
