@@ -16,7 +16,7 @@ export async function GuestShell({ children }: { children: ReactNode }) {
   return (
     <ShellFrame
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
-      topbar={<Topbar start={<Brand label={t("common:appName")} />} />}
+      topbar={await Topbar({ start: <Brand label={t("common:appName")} /> })}
     >
       {children}
     </ShellFrame>

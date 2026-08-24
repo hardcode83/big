@@ -391,9 +391,67 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `undefined` deja el atributo **ausente**, que es el tercer estado. Nada de tema en
       Zustand ni resuelto solo en cliente. [R3.2, R3.3]
 
-## 6. El conmutador
+## 6. El conmutador <!-- panel: PASS 2026-08-24 -->
 
-- [ ] 6.1 Nuevo `frontend/features/shell/components/theme-switcher.tsx` (cliente): tres
+<!-- Panel de la sección 6 (2026-08-24): i18n PASS, architect FAIL(1), qa FAIL(2).
+     Todo cerrado.
+
+     CORRECCIÓN DE DISEÑO (no hallazgo, hecha durante la implementación): D5 y la
+     tarea 6.4 afirmaban que los cinco shells heredarían el `Topbar` async «sin
+     cambiar una línea». Falso. Lo montaban como elemento JSX y el renderizador de
+     cliente no puede resolver un componente async: desapareció el chrome entero y
+     cayeron 13 tests de shell buscando `role="banner"`. Una línea por shell
+     (`topbar={await Topbar({ start })}`), que es el patrón que el repo ya usaba
+     para Server Components async. Corregido en D5 y aquí sin pedir firma, y el
+     architect auditó esa decisión y la confirmó — con un criterio más afilado que
+     el mío: lo que distingue una corrección factual de un cambio de decisión no es
+     «hecho vs. decisión» sino si había ALTERNATIVAS entre las que elegir. D11 las
+     tenía (tres superficies o cuatro es elección de alcance); aquí, falsada la
+     afirmación, había exactamente un arreglo correcto, así que no había nada que
+     aprobar. Y el alcance se validó contra la frontera real del proposal («No se
+     toca ninguna pantalla»): los shells son chrome, no pantallas.
+
+     architect — comentario obsoleto en `topbar.tsx`: seguía afirmando «none of them
+     needs touching», justo lo que D5 retiró. Corregido en el diseño y olvidado en
+     el código que se entrega. Arreglado.
+
+     qa F1, el séptimo mutante que les pedí buscar — **nada protegía `type="button"`**.
+     Quitarlo sobrevivía los 16 tests. Y `Button` no pone `type` por defecto, así que
+     el `<button>` sería `type="submit"`: dentro de un `<form>` cada clic enviaría el
+     formulario y recargaría la página, que es literalmente lo que R3.4 prohíbe. Hoy
+     no hay form alrededor, así que era latente — y habría llegado a producción en
+     silencio para aparecer cuando el cambio de otra persona pusiera un form en el
+     topbar. Fijado, más el orden de los botones.
+
+     qa F2 — R3.7 no tenía ningún test ejecutable. La navegación real necesita
+     navegador. Lo que sí se puede aserir es la propiedad en la que descansa el
+     requisito: que la resolución es función pura de la cookie de la petición, sin
+     estado entre renders. Añadidos dos tests en `app/layout.test.tsx` (idempotencia
+     entre renders, y que una cookie cambiada manda sobre un valor recordado);
+     verificado por mutación que cachear el tema en `globalThis` los rompe. La mitad
+     de navegador queda declarada como no verificada, no implicada.
+
+     Y una cosa que salió de mi propio trabajo: el guard de R3.3 de la sección 5
+     marcó el conmutador nuevo, correctamente — tiene `"use client"`, `useState` y
+     nombra el tema. Pero es estado legítimo (la PREFERENCIA elegida, no el tema, que
+     llega del servidor como prop). Exento con su razón escrita y con una aserción
+     propia que cubre lo que la exención deja fuera: que recibe el tema por prop y
+     NUNCA lo lee en cliente (ni cookie, ni `matchMedia`, ni `localStorage`).
+     Verificado que las tres evasiones que la exención podría tapar fallan.
+
+     Lint rechazó `setState` dentro del efecto, así que `choice` pasa a derivado
+     (`requested ?? choiceOf(initial)`). Sale más simple y el architect señaló que
+     es MÁS fiel al patrón de D5, porque el `LocaleSwitcher` real también deriva su
+     valor actual en vez de guardarlo.
+
+     Pregunta abierta que qa dejó y que sí cuadra: midieron 130 ficheros / 1228
+     tests contra una base de 126/1192, con +3 ficheros/+19 tests sin explicar. Sale
+     exacto — su base se midió ANTES de la ronda de arreglos de la sección 5:
+     +server.test.ts (13), +layout.test.tsx (7), +theme-client-state.test.ts (7),
+     -7 en theme.test.ts al mover de ahí el bloque R3.3, +16 del conmutador. Nada
+     inexplicado. -->
+
+- [x] 6.1 Nuevo `frontend/features/shell/components/theme-switcher.tsx` (cliente): tres
       botones Claro/Oscuro/Sistema en un `role="group"` con `aria-label` traducido,
       `aria-pressed` sobre la **preferencia elegida** (no el tema resuelto), `tap-target` para
       los 44×44 px, y mutación en `useEffect` con el patrón `requested === null` del
@@ -401,18 +459,23 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `document.documentElement.dataset.theme`, sin recargar y sin mutar durante el render.
       «Sistema» borra la cookie (`max-age=0`) y hace `delete dataset.theme`.
       [R3.4, R3.5, R3.6]
-- [ ] 6.2 Rótulos `navigation.themeSwitcher.{label,light,dark,system}` en
+- [x] 6.2 Rótulos `navigation.themeSwitcher.{label,light,dark,system}` en
       `frontend/locales/es/navigation.json` y `frontend/locales/en/navigation.json`, nada
       hardcodeado. El test de paridad de catálogos ya vigente los cubre. [R3.5]
-- [ ] 6.3 Nuevo `frontend/features/shell/components/theme-switcher.test.tsx`: cubre las tres
+- [x] 6.3 Nuevo `frontend/features/shell/components/theme-switcher.test.tsx`: cubre las tres
       selecciones (cookie escrita, cookie borrada, atributo puesto y quitado), el
       `aria-pressed` correcto en el primer pintado a partir de la prop del servidor, el área
       táctil y axe. Es la verificación real del conmutador: en este worktree la app **no
       hidrata** con `PORT_OFFSET` (`sdd/project.md`), así que no hay pasada visual posible
       aquí y no se toca `next.config` para conseguirla. [R3.4, R3.5, R3.6]
-- [ ] 6.4 `frontend/features/shell/components/topbar.tsx` pasa a `async`, llama a
+- [x] 6.4 `frontend/features/shell/components/topbar.tsx` pasa a `async`, llama a
       `getServerTheme()` y su slot `end` por defecto se vuelve
-      `<><ThemeSwitcher …/><LocaleSwitcher /></>`. Los cinco shells lo heredan sin tocarse.
+      `<><ThemeSwitcher …/><LocaleSwitcher /></>`. **Corregido el 2026-08-24**: los cinco
+      shells NO lo heredan sin tocarse. Lo montaban como elemento JSX y un componente
+      async como elemento no lo resuelve el renderizador de cliente — 13 tests de shell
+      caían con «role banner» no encontrado. Una línea por shell:
+      `topbar={await Topbar({ start })}`, que es además el patrón que el repo ya usaba
+      para Server Components async. Es la red que la propia tarea anunciaba, y funcionó.
       Verificar antes de cerrar la sección que `shell-frame.test.tsx`,
       `workspace-shell.test.tsx` y `field-public-guest-shell.test.tsx` siguen en verde —son
       la red que detecta si algún camino renderiza `Topbar` desde cliente. [R3.2, R3.7]

@@ -111,5 +111,11 @@
     "label": "Language",
     "es": "Español",
     "en": "English"
+  },
+  "themeSwitcher": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "System"
   }
 }

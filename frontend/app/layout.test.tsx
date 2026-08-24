@@ -95,6 +95,47 @@ describe("RootLayout — the theme in the first paint (R3.2, R3.3, design D4)", 
     expect(html).toMatch(/<html[^>]*\blang="es"/);
   });
 
+  it("resolves the same theme on every render, which is what survives navigation", async () => {
+    /*
+     * R3.7: «WHILE se navega entre rutas, THE SYSTEM SHALL conservar el tema
+     * resuelto sin destello de tema incorrecto.»
+     *
+     * Real navigation cannot be exercised here — that needs a browser, and
+     * `npx playwright test` does not exist in this project yet. What CAN be
+     * asserted is the property the requirement rests on: resolution is a pure
+     * function of the request's cookie, with no state carried between renders. If
+     * it were stateful — a module-level cache, a memo keyed on something else —
+     * the second route in a session could render a different theme from the
+     * first, and that is precisely the flash R3.7 forbids.
+     *
+     * So this is the honest half: the mechanism is verified idempotent, and the
+     * absence of a visual flash in a real browser stays unverified until an e2e
+     * harness exists. Stated rather than implied, because a green test here does
+     * not mean someone watched the screen.
+     */
+    cookie.value = "dark";
+    const first = await markup();
+    const second = await markup();
+    const third = await markup();
+    expect(second).toBe(first);
+    expect(third).toBe(first);
+    expect(first).toContain('data-theme="dark"');
+  });
+
+  it("follows a changed cookie rather than a remembered value", async () => {
+    // The other half of statelessness: if a later request carries a different
+    // preference, the render must follow it. A cache would pass the idempotence
+    // check above and fail this one.
+    cookie.value = "dark";
+    expect(await markup()).toContain('data-theme="dark"');
+
+    cookie.value = "light";
+    expect(await markup()).toContain('data-theme="light"');
+
+    cookie.value = undefined;
+    expect(await markup()).not.toContain("data-theme");
+  });
+
   it("renders its children inside the document body", async () => {
     cookie.value = undefined;
     const html = await markup();

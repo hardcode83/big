@@ -25,7 +25,7 @@ export async function TechnicianShell({ children }: { children: ReactNode }) {
   return (
     <ShellFrame
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
-      topbar={<Topbar start={start} />}
+      topbar={await Topbar({ start })}
       footer={
         <ShellFooter
           versionLabels={{

@@ -161,7 +161,27 @@ Oscuro / Sistema) en un `role="group"` con `aria-label` traducido y `aria-presse
 
 Para que el botón activo sea correcto **en el primer pintado**, `Topbar` pasa a `async` y llama
 a `getServerTheme()`, pasando el valor como prop; su slot `end` por defecto se vuelve
-`<><ThemeSwitcher …/><LocaleSwitcher /></>`. Los cinco shells lo heredan sin cambiar una línea.
+`<><ThemeSwitcher …/><LocaleSwitcher /></>`.
+
+> **Corrección de 2026-08-24 (`/sdd:run`, sección 6).** Esta decisión afirmaba que «los cinco
+> shells lo heredan **sin cambiar una línea**», y es falso. La decisión —`Topbar` async— se
+> sostiene; la consecuencia predicha no. Los cinco shells montaban `Topbar` como **elemento
+> JSX** (`topbar={<Topbar start={start} />}`), y un componente async como elemento no lo puede
+> resolver el renderizador de cliente: bajo vitest + Testing Library el chrome entero
+> desaparecía y 13 tests de shell fallaban con «Unable to find an accessible element with the
+> role banner». No era un artefacto de carga ni un test mal escrito — el renderizador de
+> cliente genuinamente no puede renderizar un elemento async.
+>
+> El arreglo es una línea por shell: `topbar={await Topbar({ start })}`. Es además el patrón que
+> este repo ya usaba para los Server Components async —los cinco shells se **llaman y se
+> esperan**, no se renderizan como elemento—, así que `Topbar` se alinea con ellos en vez de
+> ser la excepción. Verificado: 86/86 tests de shell en verde, `typecheck` limpio y
+> `next build` compilando.
+>
+> Lo que esto cuesta y conviene no maquillar: el change toca cinco ficheros que el diseño daba
+> por intactos. No es una pantalla —son contenedores de chrome— así que no invade el «no se toca
+> ninguna pantalla» del proposal, pero sí amplía la huella en cinco ficheros y había que
+> decirlo.
 
 Área táctil: `Button size="sm"` es `h-9` (36 px), por debajo de los 44 exigidos, así que los
 botones llevan la utilidad `tap-target` que ya existe en `globals.css` (R3.5, y R5.3 la conserva).

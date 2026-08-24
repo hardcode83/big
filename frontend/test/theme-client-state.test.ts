@@ -72,6 +72,25 @@ const MAY_NAME_THEME = new Set([
   "lib/theme/server.ts",
   "lib/config/constants.ts",
   "app/layout.tsx",
+  /*
+   * The switcher, and the one entry that needs justifying rather than listing.
+   *
+   * It holds the chosen PREFERENCE in `useState` and mutates the document in an
+   * effect, which is what the broad net below is looking for — but it is not what
+   * R3.3 forbids. R3.3 forbids the THEME being client state: read on the client,
+   * hydrated after the first paint, flashing. The switcher never reads the theme;
+   * it receives it from the server as `initial` and only writes. The distinction
+   * is enforced by its own assertion further down, not lost by this exemption.
+   */
+  "features/shell/components/theme-switcher.tsx",
+  "features/shell/components/theme-switcher.test.tsx",
+  /*
+   * `Topbar` names the theme because it is where the server value is fetched and
+   * handed to the switcher. It is a Server Component with no `"use client"`, so
+   * it cannot be client state by construction — the check below asserts that
+   * rather than assuming it.
+   */
+  "features/shell/components/topbar.tsx",
   // Its tests.
   "lib/theme/theme.test.ts",
   "lib/theme/server.test.ts",
@@ -166,6 +185,36 @@ describe("R3.3 — the theme is never client state", () => {
     expect(layout).toMatch(/const\s+theme\s*=\s*await\s+getServerTheme\(\)/);
     expect(layout).toMatch(/data-theme=\{theme \?\? undefined\}/);
     expect(layout).not.toMatch(/^\s*["']use client["']/m);
+  });
+
+  it("the switcher receives the theme from the server and never reads it on the client", () => {
+    /*
+     * What the whitelist above gives up, asserted directly.
+     *
+     * The switcher is exempt from the broad net because it legitimately holds the
+     * chosen preference in client state. What it must NOT do is source the theme
+     * from the client — reading the cookie on mount, or `matchMedia`, or
+     * `localStorage` — because that is the flash R3.3 exists to prevent: the
+     * colours would already be right from the server-rendered attribute while the
+     * control corrected itself a tick later.
+     */
+    // `Topbar` is what hands it over, and it must stay on the server to do so.
+    const topbar = code("features/shell/components/topbar.tsx");
+    expect(topbar).not.toMatch(/^\s*["']use client["']/m);
+    expect(topbar).toMatch(/await\s+getServerTheme\(\)/);
+    expect(topbar).toMatch(/<ThemeSwitcher\s+initial=\{theme\}/);
+
+    const source = code("features/shell/components/theme-switcher.tsx");
+
+    // It takes the value as a prop.
+    expect(source).toMatch(/initial\s*:\s*Theme \| null/);
+    // And never sources it from the client.
+    expect(source).not.toMatch(/document\.cookie\s*\.\s*match/);
+    expect(source).not.toMatch(/\bmatchMedia\b/);
+    expect(source).not.toMatch(/\blocalStorage\b|\bsessionStorage\b/);
+    // Reading `document.cookie` at all would mean sourcing rather than writing;
+    // the only permitted contact is assignment.
+    expect(source).not.toMatch(/=\s*document\.cookie/);
   });
 
   it("no inline anti-flash script interpolates the cookie into JavaScript", () => {
