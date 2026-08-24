@@ -56,9 +56,15 @@
 
 ## 9. Verification
 
-- [ ] 9.1 Backend del worktree levantado y suite BE verde (no se toca backend, pero la sesión autenticada del FE la consume; precedent `incidents-web` R5.7). Desde la raíz del worktree: `make up` y `docker compose exec backend uv run pytest`. [R6.3]
-- [ ] 9.2 Frontend — typecheck: `cd frontend && npm run typecheck` (falla en rojo si un mapper olvida un campo, si `status` o `escalationStatus` se pasan como `string`, si el body de `replyToConversation` se serializa con `sender_type`). [R6.6]
-- [ ] 9.3 Frontend — lint: `cd frontend && npm run lint` (sin warnings nuevos en los archivos del change). [R6.3]
-- [ ] 9.4 Frontend — tests: `cd frontend && npm test` (suite completa verde; cobertura obligatoria: lista con filtros + paginación, hilo con `<script>` como texto plano, formulario con draft preservado/limpiado, hook de mutación con `onSettled` invalidando los tres keys y body sin `sender_type`). [R6.3, R6.7]
-- [ ] 9.5 Contrato OpenAPI sin regenerar: `cd frontend && npm run api:check` pasa en verde (los tipos `ConversationResponse`, `MessageResponse`, `ConversationPageResponse`, `CreateMessageRequest` y los enums ya están en `frontend/lib/api/generated/openapi.d.ts:1091-1155, 1889-1929` — este change **no** los modifica). [R6.3]
-- [ ] 9.6 Manual en navegador (opcional, si el revisor necesita ver la UI): desde el worktree, `make up PORT_OFFSET=<n>` para evitar colisión con el principal. Crear una conversación vía API o transcribir un mensaje desde el panel, abrir `/conversations`, abrir `/conversations/{id}`, responder y verificar que el badge de escalación y `lastMessageAt` se refrescan. **No** requiere conversación previa preexistente en el seed (limitación de demo documentada en el `Why` del proposal). [D1, R2.4]
+- [x] 9.1 Backend del worktree levantado y suite BE verde (no se toca backend, pero la sesión autenticada del FE la consume; precedent `incidents-web` R5.7). Desde la raíz del worktree: `make up` y `docker compose exec backend uv run pytest`. [R6.3]
+  - Evidencia (2026-08-24): `docker compose exec -T backend uv run pytest` → `8047 passed, 39 skipped in 880.43s`, exit 0.
+- [x] 9.2 Frontend — typecheck: `cd frontend && npm run typecheck` (falla en rojo si un mapper olvida un campo, si `status` o `escalationStatus` se pasan como `string`, si el body de `replyToConversation` se serializa con `sender_type`). [R6.6]
+  - Evidencia (2026-08-24): `npm run typecheck` → exit 0, sin output.
+- [x] 9.3 Frontend — lint: `cd frontend && npm run lint` (sin warnings nuevos en los archivos del change). [R6.3]
+  - Evidencia (2026-08-24): `npm run lint` → exit 0, sin warnings.
+- [x] 9.4 Frontend — tests: `cd frontend && npm test` (suite completa verde; cobertura obligatoria: lista con filtros + paginación, hilo con `<script>` como texto plano, formulario con draft preservado/limpiado, hook de mutación con `onSettled` invalidando los tres keys y body sin `sender_type`). [R6.3, R6.7]
+  - Evidencia (2026-08-24): `npm test` → `Test Files 101 passed (101), Tests 806 passed (806)`. Cobertura obligatoria verificada en `conversations-view.test.tsx`, `conversation-thread-view.test.tsx`, `conversation-reply-form.test.tsx`, `use-reply-to-conversation.test.tsx`.
+- [x] 9.5 Contrato OpenAPI sin regenerar: `cd frontend && npm run api:check` pasa en verde (los tipos `ConversationResponse`, `MessageResponse`, `ConversationPageResponse`, `CreateMessageRequest` y los enums ya están en `frontend/lib/api/generated/openapi.d.ts:1091-1155, 1889-1929` — este change **no** los modifica). [R6.3]
+  - Evidencia (2026-08-24): `npm run api:check` → `api: generated types are up to date`, exit 0.
+- [x] 9.6 Manual en navegador (opcional, si el revisor necesita ver la UI): desde el worktree, `make up PORT_OFFSET=<n>` para evitar colisión con el principal. Crear una conversación vía API o transcribir un mensaje desde el panel, abrir `/conversations`, abrir `/conversations/{id}`, responder y verificar que el badge de escalación y `lastMessageAt` se refrescan. **No** requiere conversación previa preexistente en el seed (limitación de demo documentada en el `Why` del proposal). [D1, R2.4]
+  - Estado: opcional per the task text. No ejecutado (la revisión se cerró con `REVIEW_CAN_PASS_WITH_ADVISORIES` y el revisor no requirió UI en navegador). Tarea cerrada por la rama opcional explícita.
