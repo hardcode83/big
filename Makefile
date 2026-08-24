@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo openapi check-version-parity compose-stacks check-compose-ports db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity compose-stacks check-compose-ports db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
@@ -266,6 +266,23 @@ bootstrap:
 # `bootstrap` is not (DoD §28.20), and `python -m` for the same reason too.
 seed-demo:
 	$(COMPOSE) exec backend python -m app.cli.seed_demo
+
+# El tenant de demostración: lo aprovisiona si no existe y lo resetea si existe, por la misma
+# secuencia de fases en los dos casos (change `demo-user`, design D1). Fuera de `up` por el motivo
+# de `bootstrap` y `seed-demo` (DoD §28.20), y `python -m` en vez de `uv run` por el mismo también:
+# el venv está en el PATH de todas las etapas de backend/devops/Dockerfile y `uv` sólo en la de
+# desarrollo, así que este comando literal funciona igual contra la imagen desplegada.
+#
+# Necesita `DEMO_ACCOUNT_PASSWORD` en el `.env` —una sola variable, sin valor por defecto en el
+# árbol— y se niega a escribir nada si falta o tiene menos de PASSWORD_MIN_LENGTH caracteres. En el
+# entorno remoto la sirve el OCI Vault y la pasa el workflow; aquí la pones tú. Cómo rotarla:
+# `docs/demo-tenant.md`.
+#
+# Imprime la URL del portal de huésped de la estancia activa. Es la única credencial que este
+# comando emite a propósito (R2.5 tiene una excepción y es ésta): su valor en claro existe una
+# sola vez, así que si no se imprime se pierde.
+demo-reset:
+	$(COMPOSE) exec backend python -m app.cli.demo_reset
 
 # Regenera backend/openapi.json, el contrato que consume el frontend. Ejecútalo cuando
 # cambies la forma de una respuesta: el workflow api-contract lo comprueba en cada PR y

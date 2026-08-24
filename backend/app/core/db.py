@@ -15,7 +15,11 @@ from sqlalchemy.orm import (
 )
 
 from app.core.config import settings
-from app.core.tenancy import TenantMarkedSessionError
+from app.core.tenancy import (
+    TenantMarkedSessionError,
+    TenantMismatchedSessionError,
+    TenantUnmarkedSessionError,
+)
 
 
 class Base(DeclarativeBase):
@@ -196,6 +200,37 @@ def bind_session_to_tenant(session: AsyncSession, tenant_id: uuid.UUID) -> None:
             "would repoint the global filter at another tenant mid-session"
         )
     session.info[TENANT_ID_SESSION_KEY] = tenant_id
+
+
+def require_session_bound_to(session: AsyncSession, tenant_id: uuid.UUID, *, write: str) -> None:
+    """The mirror of `require_unmarked_session`, for writes whose scope IS the marker.
+
+    Added by `demo-user` (2026-08-23) after its security panel measured what the delete phase of
+    `app/cli/demo_reset.py` actually emits. That phase issues a bulk `sqlalchemy.delete(Model)`
+    per tenant-scoped table and relies **entirely** on this session's marker for the
+    `tenant_id` predicate: `print(delete(GuestModel))` on an unmarked session is a bare
+    `DELETE FROM guests`. So on an unmarked session the phase does not fail — it silently empties
+    those tables **for every tenant in the database**, while the handful of statements that carry
+    their own explicit `WHERE` stay scoped, making the damage partial and self-inconsistent.
+
+    `bind_session_to_tenant` cannot catch that: it validates the marker against itself and never
+    against the tenant a caller then claims to be acting on. This does, and it checks both halves
+    — that a marker exists, and that it is the one the caller passed.
+
+    It lives here rather than beside its caller for the same reason `require_unmarked_session`
+    does: `tests/test_session_marking.py` bans every access to `session.info` in `app/` outside
+    this module, and that ban is what stops anyone switching the global filter off mid-request.
+
+    `write` names the caller in the message, because what a reader has to diagnose is "which
+    write ran unscoped", not "a session was not marked".
+    """
+    current = session.info.get(TENANT_ID_SESSION_KEY)
+    if current is None:
+        raise TenantUnmarkedSessionError(write=write, tenant_id=tenant_id)
+    if current != tenant_id:
+        raise TenantMismatchedSessionError(
+            write=write, marked=current, requested=tenant_id
+        )
 
 
 def require_unmarked_session(session: AsyncSession, *, read: str) -> None:

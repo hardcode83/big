@@ -358,11 +358,20 @@ def test_the_required_variables_are_exactly_the_ones_documented(
 
     Half of R7.4 is proven above: with every variable blank, `build_plan` refuses, so
     no default is baked into the code. The other half — that `.env.example` declares
-    those same names with no value — is NOT asserted here on purpose: the container
-    only mounts `backend/`, so the repo-root `.env.example` is unreachable from the
-    project's own test command, and a test that cannot run where the suite runs is
-    worse than none. That half is covered by the SDD documentation reviewer and by the
-    manual check of task 11.3.
+    those same names with no value — is not asserted here, and the reason has changed.
+
+    It used to be that it *could* not be: the container mounts only `backend/`, so the
+    repo-root `.env.example` was unreachable from the project's own test command, and a
+    test that cannot run where the suite runs is worse than none. The change `demo-user`
+    settled that differently for its own variable (2026-08-23): `docker-compose.yml` now
+    bind-mounts `.env.example` read-only at `/workspace/.env.example`, following the two
+    precedents beside it, and `tests/cli/test_demo_reset.py` reads the file and goes red
+    if anything appears to the right of the `=`.
+
+    So the obstacle is gone and only the scope is left: extending that assertion to these
+    eight names is a change to `auth-tenancy`'s contract and not to `demo-user`'s, so it
+    belongs to whoever touches R7.4 next. Until then this half stays covered by the SDD
+    documentation reviewer and the manual check of task 11.3.
     """
     # Blanked explicitly instead of relying on the container's ambient environment: a
     # developer who fills BOOTSTRAP_* in their own .env — which is exactly what

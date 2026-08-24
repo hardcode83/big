@@ -67,10 +67,11 @@ Allow dynamic-group autohostai-dev-runner to read secret-bundles in compartment 
              target.secret.id = '<media-access-key-id>',
              target.secret.id = '<media-secret-access-key>',
              target.secret.id = '<media-s3-endpoint>',
-             target.secret.id = '<media-region>'}
+             target.secret.id = '<media-region>',
+             target.secret.id = '<demo-account-password>'}
 ```
 
-**Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Los cuatro últimos entraron con `object-storage-provisioning` (2026-08-15), en el mismo `apply` que crea los secretos — que es la mitigación del punto 1 de abajo. **Este bloque es el espejo de `oci_identity_policy.dev_runner_read_secrets` en `main.tf` y tiene que contarlos igual**: si al auditar ves una enumeración viva con más entradas que esta, lo primero que hay que descartar es que este documento se quedó atrás, no que alguien ensanchó el acceso.
+**Una sola sentencia y una sola clase de condición**, desde el change `ingress-https-hardening` (2026-08-04). Los cuatro de medios entraron con `object-storage-provisioning` (2026-08-15) y el último, `demo-account-password`, con `demo-user` (2026-08-24), cada uno en el mismo `apply` que crea su secreto — que es la mitigación del punto 1 de abajo. Ese último lo lee el workflow `demo-reset` y no el deploy, y lo resuelve **por nombre** como el token del túnel, así que le vale igual esta condición por OCID. **Este bloque es el espejo de `oci_identity_policy.dev_runner_read_secrets` en `main.tf` y tiene que contarlos igual**: si al auditar ves una enumeración viva con más entradas que esta, lo primero que hay que descartar es que este documento se quedó atrás, no que alguien ensanchó el acceso.
 
 Tres cosas a tener presentes al añadir secretos en el futuro:
 

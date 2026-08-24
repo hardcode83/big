@@ -814,3 +814,73 @@ están en disco y `GET /api/v1/cleaning-photos/{id}` devolvería `404` para ese 
 `apply_plan` **converge**: crea la configuración con ese `storage_type` y la **actualiza si difiere**
 en una re-ejecución. Volver atrás es el mismo comando con `BOOTSTRAP_STORAGE_TYPE=LOCAL`.
 
+
+## 10. La contraseña del tenant de demostración (change `demo-user`)
+
+El entorno tiene un **segundo tenant**, `AutoHostAI Demo`, con cuatro cuentas de credenciales
+publicables y un reset diario (`.github/workflows/demo-reset.yml`, 03:15 UTC). Quién es quién, qué
+es y qué no es demostrable, y el diagnóstico de un reset en rojo: **[`docs/demo-tenant.md`](../../../docs/demo-tenant.md)**.
+Aquí va sólo la parte que es de infra: la contraseña.
+
+Terraform declara el secreto (`oci_vault_secret.demo_account_password`, nombre
+`autohostai-<env>-demo-account-password`) y su OCID entra en el mismo `statement` de
+`oci_identity_policy.dev_runner_read_secrets` que el resto — el mismo apply que lo crea, que es la
+mitigación de siempre: olvidarlo hace fallar el paso de lectura del Vault nombrando la clave.
+
+**El contenido no lo gobierna Terraform.** Nace como un `random_password` de 24 caracteres
+deliberadamente inerte —para que un entorno recién aplicado tenga credenciales que nadie conoce en
+vez de credenciales conocidas— y lleva `lifecycle { ignore_changes = [secret_content] }`, que es lo
+que hace que el valor que ponga una persona sobreviva al `apply` siguiente. Es el mismo canal
+out-of-band que §2 usa para la clave SSH, y por la misma razón que `steering/security.md` §8 acepta:
+lo elige una persona, así que no encaja en el patrón `random_*` → Vault del resto.
+
+### 10.1 Fijar o rotar el valor
+
+Forma acordada: **una frase corta y dictable por teléfono, del orden de 15 caracteres con guiones**.
+Tiene que superar `PASSWORD_MIN_LENGTH` (12); por debajo de ese umbral el propio sistema rechazaría
+que un visitante volviera a fijarla desde `POST /auth/change-password`.
+
+```bash
+# Desde tu portátil con el perfil de OCI configurado. En la VM: añade --auth instance_principal.
+# COMPARTMENT_OCID es el `compartment_ocid` de dev.tfvars.
+SECRET_ID="$(oci vault secret list --compartment-id "$COMPARTMENT_OCID" \
+  --query "data[?\"secret-name\"=='autohostai-dev-demo-account-password'].id | [0]" --raw-output)"
+
+oci vault secret update-base64 --secret-id "$SECRET_ID" \
+  --secret-content-content "$(printf '%s' 'tu-frase-con-guiones' | base64)"
+```
+
+**`printf` y no `echo`**: `echo` añade un salto de línea que se codifica *dentro* de la contraseña y
+produce una credencial que no coincide con lo que escribiste. El mismo filo que la clave SSH de §2,
+donde `base64 -i` lee de fichero y no lo tiene.
+
+**Y la VM sigue con la anterior hasta el reset siguiente.** El Vault es de dónde lo lee el workflow,
+no dónde lo usan las cuentas: la contraseña se aplica a las cuatro en la fase `converge` del reset.
+Para no esperar a las 03:15 UTC:
+
+```bash
+gh workflow run demo-reset.yml --ref main
+```
+
+**El valor concreto no se escribe en ningún fichero del repositorio**, y eso incluye este runbook.
+Su único hogar es el Vault.
+
+### 10.2 Verificación pendiente: que `ignore_changes` aguante
+
+**Hay que hacerla con el valor definitivo ya puesto y antes de publicar las credenciales a nadie.**
+Todo el procedimiento de 10.1 depende de que el provider de OCI respete `ignore_changes` sobre
+`secret_content`. Si no lo respeta, cada `terraform apply` devuelve el secreto al valor de
+`random_password`, el reset siguiente lo propaga a las cuatro cuentas y las credenciales publicadas
+dejan de funcionar **en silencio**, sin que nada se ponga en rojo.
+
+Se comprueba con un `plan` (§0, `action=plan` desde `main`):
+
+- **No propone cambios en `demo_account_password`** → aguanta. 10.1 es el procedimiento.
+- **Propone reescribir `secret_content`** → **no aplicar**. La contraseña publicada pasa a ser la que
+  genera `random_password` (que se lee del Vault, no del `tfstate` en claro), y rotarla es
+  `terraform apply -replace=random_password.demo_account`. En ese caso hay que corregir 10.1 y la
+  sección equivalente de `docs/demo-tenant.md`, que hoy documentan el otro camino.
+
+Antes del primer `apply` esta comprobación **no significa nada**: el secreto todavía no existe, así
+que el `plan` muestra una creación y no dice nada sobre si `ignore_changes` aguanta sobre un recurso
+ya creado con su valor definitivo dentro.

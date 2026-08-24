@@ -66,3 +66,4 @@
 | cleaning-assign-preconditions | new, design, tasks, run, review, ship, archive | 363030 | 1219226 | 313886120 | 183.5497 | 2026-08-22 | 2026-08-23 |
 | cleaning-stall-blocks-next-stay | design, tasks, run, review, ship, archive | 766276 | 1683373 | 401801053 | 230.5488 | 2026-08-23 | 2026-08-24 |
 | cleaner-photo-requirements | new, tasks, design, run, review | 293878 | 823543 | 130798113 | 87.7495 | 2026-08-23 | — |
+| demo-user | new, design, tasks, run, review, ship | 864745 | 1949488 | 406208405 | 257.5235 | 2026-08-23 | — |
