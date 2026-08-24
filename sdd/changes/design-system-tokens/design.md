@@ -341,8 +341,25 @@ relativo. La escala numérica por defecto de Tailwind (`text-sm`, `text-xs`, `te
 conserva**: la usan `Badge`, `Button` y media docena de componentes, y los roles del export son
 aditivos.
 
-El ritmo entra como `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,margin-mobile,margin-desktop}`
-en rem sobre la unidad de 4 px, junto al `--spacing` base que Tailwind ya usa para `p-4`.
+El ritmo entra como `--spacing` base más `--spacing-{gutter,margin-mobile,margin-desktop}`.
+
+> **Corrección de 2026-08-24 (`/sdd:run`, pasada visual; aprobada por Jose).** Esta decisión decía
+> `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,margin-mobile,margin-desktop}`, y los ocho pasos de
+> talla **rompían el layout**: Tailwind v4 resuelve `max-w-*` contra el espacio de nombres
+> `--spacing-*` cuando esas claves existen, así que `max-w-md` compilaba a
+> `max-width: var(--spacing-md)` — 12px en vez de 448px — y colapsaba 8 contenedores en 4 ficheros.
+> Verificado en navegador antes y después: el formulario de login pasa de 48px de ancho a 448, y
+> sus campos de 26 a 400.
+>
+> No se pierde nada: la escala numérica de Tailwind sobre 0.25rem **es** el ritmo del export, exacta
+> en los ocho pasos (`p-1`,`p-2`,`p-3`,`p-4`,`p-6`,`p-8`,`p-12`,`p-16`). Los tres nombres que no
+> colisionan se quedan. Enmienda bajada a `proposal.md` §R5.1, y `globals.tokens.test.ts` aserta
+> ahora la AUSENCIA de cualquier `--spacing-<talla>`.
+>
+> Lección que vale más que el arreglo: **ningún test de este change podía verlo**. Todos comprueban
+> que el token está declarado, y estaba declarado exactamente como el diseño pedía. El defecto vivía
+> en lo que declararlo provoca en otra utilidad, y eso sólo se ve renderizando. Los cinco revisores
+> de la sección 3 tampoco lo vieron, por lo mismo.
 
 Y los radios cuadran casi solos, comprobado contra los `calc()` de hoy: `rounded-md` vale hoy
 `0.375rem` y el export dice `md: 0.375rem`; `rounded-lg` vale `0.5rem` y el export dice
@@ -400,6 +417,26 @@ Rechazado: la tabla manual en `design.md` como única prueba — es lo que hay a
 aprobar la paleta, no para defenderla dentro de tres changes.
 Rechazado: Playwright con axe sobre la app real — cubriría el color compuesto de verdad, y
 `npx playwright test` aún no existe en el proyecto (llega con `hardening-release`).
+
+> **Hallazgo de método, 2026-08-24.** `sdd/project.md` documenta que en un worktree enlazado la app
+> **no hidrata** con `PORT_OFFSET`, y eso llevó a este change a dar por imposible cualquier pasada
+> visual. Es cierto **sólo para `next dev`**: Next 15+ bloquea las peticiones de desarrollo de
+> origen cruzado y el desplazamiento de puerto hace que el origen no cuadre (el síntoma es el
+> handshake fallido del WebSocket de HMR). **En producción no existe esa comprobación.** Sirviendo
+> el build con `next start` en un contenedor aparte con su propio puerto publicado
+> —`docker compose run --rm --no-deps -p 3042:3000 frontend sh -c 'npx next start -p 3000 -H 0.0.0.0'`—
+> la app hidrata (`hydrated: true`) y se puede conducir con el MCP de Playwright, que este proyecto
+> ya tiene activado.
+>
+> Con eso se verificó en navegador real lo que los tests no alcanzaban: el conmutador de tema
+> respondiendo a un clic (atributo, cookie, fondo y `aria-pressed` cambiando juntos, sin recarga),
+> «Sistema» borrando cookie y atributo, y **R3.7 — navegación entre rutas conservando el tema, con
+> el atributo llegando ya en el HTML del servidor**, que es el criterio que el panel había dado por
+> no verificable aquí. Y es lo que destapó el choque de `--spacing-*` con `max-w-*`.
+>
+> `sdd/project.md` merece esta corrección al archivar: su párrafo de `PORT_OFFSET` concluye que
+> «sirve para alcanzar la API desde el host, no para una pasada visual», y con `next start` sí sirve
+> para una pasada visual.
 
 ### D12 — Prohibir `dark:` y las escalas crudas con un guard, en vez de redefinir el variante
 

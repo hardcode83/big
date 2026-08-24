@@ -360,20 +360,39 @@ const TYPE_EXPECTED: Record<
   },
 };
 
-/** The eleven steps of DESIGN.md §spacing, on its 4px baseline unit. */
+/**
+ * The named ritmo steps, after the 2026-08-24 amendment to R5.1.
+ *
+ * Only three, and the eight t-shirt sizes are deliberately absent: naming them
+ * `--spacing-{sm,md,lg,…}` shadowed Tailwind v4's t-shirt namespace and made
+ * `max-w-md` compile to `max-width: var(--spacing-md)`. The export's eight steps
+ * are Tailwind's numeric scale exactly (p-1/2/3/4/6/8/12/16), so the aliases
+ * bought naming and cost layout.
+ */
 const SPACING_EXPECTED: Record<string, string> = {
-  "--spacing-xs": "0.25rem",
-  "--spacing-sm": "0.5rem",
-  "--spacing-md": "0.75rem",
-  "--spacing-lg": "1rem",
-  "--spacing-xl": "1.5rem",
-  "--spacing-2xl": "2rem",
-  "--spacing-3xl": "3rem",
-  "--spacing-4xl": "4rem",
   "--spacing-gutter": "1rem",
   "--spacing-margin-mobile": "1rem",
   "--spacing-margin-desktop": "2rem",
 };
+
+/**
+ * Names that must NEVER appear in the `--spacing-*` namespace, because Tailwind
+ * resolves `max-w-*`, `min-w-*` and friends against it when the key exists — so
+ * declaring one silently rewrites a layout utility.
+ */
+const FORBIDDEN_SPACING_NAMES = [
+  "xs",
+  "sm",
+  "md",
+  "lg",
+  "xl",
+  "2xl",
+  "3xl",
+  "4xl",
+  "5xl",
+  "6xl",
+  "7xl",
+] as const;
 
 /**
  * DESIGN.md §rounded, minus `DEFAULT` and `full` — see the assertion below for
@@ -422,8 +441,28 @@ describe("typography, ritmo and radii (design D10, R4.2-R4.4, R5.1)", () => {
     }
   });
 
-  it("declares the eleven ritmo steps on the 4px baseline unit", () => {
-    expect(Object.keys(SPACING_EXPECTED)).toHaveLength(11);
+  it("never declares a t-shirt-sized --spacing-* name, which would break max-w-*", () => {
+    /*
+     * The regression this exists to prevent, found by loading the app rather than
+     * by any assertion: with `--spacing-md` declared, Tailwind compiled
+     * `.max-w-md { max-width: var(--spacing-md) }` — 12px instead of 28rem — and
+     * every container using it collapsed. Eight call sites across four files, and
+     * nothing went red, because the token WAS declared exactly as the design
+     * asked; the defect was in what declaring it did somewhere else.
+     *
+     * So this asserts an absence. `gutter` and the margins are fine precisely
+     * because no Tailwind utility is named after them.
+     */
+    for (const name of FORBIDDEN_SPACING_NAMES) {
+      expect(
+        THEME_LITERAL[`--spacing-${name}`],
+        `--spacing-${name} shadows Tailwind's t-shirt namespace and rewrites max-w-${name}`,
+      ).toBeUndefined();
+    }
+  });
+
+  it("declares the three named ritmo steps that collide with nothing", () => {
+    expect(Object.keys(SPACING_EXPECTED)).toHaveLength(3);
     expect(THEME_LITERAL["--spacing"], "the baseline unit").toBe("0.25rem");
     for (const [name, value] of Object.entries(SPACING_EXPECTED)) {
       expect(THEME_LITERAL[name], name).toBe(value);

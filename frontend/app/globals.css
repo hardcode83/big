@@ -233,17 +233,31 @@
   --text-label-caps--letter-spacing: 0.06em;
   --text-label-caps--font-weight: 700;
 
-  /* Ritmo on the export's 4px baseline unit (R5.1). `--spacing` is the base
-   * Tailwind already multiplies for `p-4`; it is restated, not changed. */
+  /*
+   * Ritmo on the export's 4px baseline unit (R5.1, as amended 2026-08-24).
+   *
+   * `--spacing` is the base Tailwind multiplies for `p-4`; it is restated, not
+   * changed. The export's eight named steps are NOT declared, and that is a
+   * correction rather than an omission — naming them `--spacing-{sm,md,lg,xl,…}`
+   * collided with Tailwind v4's t-shirt-size namespace: `max-w-*` resolves
+   * against `--spacing-*` when those keys exist, so `max-w-md` compiled to
+   * `max-width: var(--spacing-md)` — 0.75rem instead of 28rem — and collapsed
+   * every container that used it. Found by loading the app in a browser; no unit
+   * test saw it, because they assert declarations and this is resolution.
+   *
+   * Nothing is lost by dropping them: Tailwind's numeric scale on a 0.25rem base
+   * IS the export's ritmo, exactly, in all eight steps —
+   *   xs  4px = p-1     xl  24px = p-6
+   *   sm  8px = p-2     2xl 32px = p-8
+   *   md 12px = p-3     3xl 48px = p-12
+   *   lg 16px = p-4     4xl 64px = p-16
+   * The named aliases were a second vocabulary for identical values, and that
+   * second vocabulary is what broke.
+   *
+   * `gutter` and the two margins DO stay: they collide with nothing (there is no
+   * `max-w-gutter`), and their names carry meaning no number conveys.
+   */
   --spacing: 0.25rem; /* 4px — the baseline unit */
-  --spacing-xs: 0.25rem; /* 4px */
-  --spacing-sm: 0.5rem; /* 8px */
-  --spacing-md: 0.75rem; /* 12px */
-  --spacing-lg: 1rem; /* 16px */
-  --spacing-xl: 1.5rem; /* 24px */
-  --spacing-2xl: 2rem; /* 32px */
-  --spacing-3xl: 3rem; /* 48px */
-  --spacing-4xl: 4rem; /* 64px */
   --spacing-gutter: 1rem; /* 16px */
   --spacing-margin-mobile: 1rem; /* 16px */
   --spacing-margin-desktop: 2rem; /* 32px */

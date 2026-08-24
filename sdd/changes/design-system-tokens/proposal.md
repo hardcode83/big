@@ -158,8 +158,9 @@ valores ni reintroducir números sueltos.
 
 Acceptance criteria:
 
-1. THE SYSTEM SHALL declarar en `@theme` la escala de espaciado de `DESIGN.md` sobre su unidad
-   base de 4 px (`xs`…`4xl`, gutter y márgenes de móvil y escritorio) y la escala de radios,
+1. THE SYSTEM SHALL declarar en `@theme` la unidad base de 4 px de la escala de espaciado de
+   `DESIGN.md` y sus pasos con nombre propio (gutter y márgenes de móvil y escritorio), y la
+   escala de radios,
    reemplazando el único `--radius` actual sin dejar sin valor a los `--radius-sm/md/lg` que
    hoy se derivan de él. THE SYSTEM SHALL NOT declarar un token de radio para un valor que
    Tailwind ya entrega, porque sería un token sin consumidor (design D2): eso excluye
@@ -181,6 +182,31 @@ Acceptance criteria:
    > y por eso tampoco se declara—, así que tratar los dos igual es lo que hace la regla
    > coherente en vez de una excepción. De ahí la segunda frase del criterio, que generaliza el
    > caso en vez de listar dos excepciones.
+
+   > **Segunda enmienda de 2026-08-24** (`/sdd:run`, pasada visual de la sección 6; aprobada por
+   > Jose). Este criterio enumeraba los ocho pasos de talla del export —`xs`…`4xl`— y declararlos
+   > como `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl}` **rompía el layout de la aplicación**. Tailwind
+   > v4 resuelve `max-w-*` contra el espacio de nombres `--spacing-*` cuando esas claves existen,
+   > así que `max-w-md` compilaba a `max-width: var(--spacing-md)` — 0.75rem en vez de 28rem — y
+   > colapsaba todo contenedor que lo usara: 8 usos en 4 ficheros, con el formulario de login a
+   > 48 px de ancho y sus campos a 26.
+   >
+   > **No lo cazó nada del aparato de verificación**: ni los tests —que asertan declaraciones, y
+   > el token estaba declarado exactamente como el diseño pedía— ni los cinco revisores del panel
+   > de la sección 3, porque el defecto no está en declarar el token sino en lo que declararlo
+   > hace en otro sitio, y para verlo hay que renderizar una página. Lo encontró Jose pidiendo ver
+   > la UI antes de mezclar.
+   >
+   > La enmienda no pierde ningún valor del export: la escala numérica de Tailwind sobre una base
+   > de 0.25rem **es** el ritmo del export, exacta en los ocho pasos — `xs`=`p-1` (4px),
+   > `sm`=`p-2`, `md`=`p-3`, `lg`=`p-4`, `xl`=`p-6`, `2xl`=`p-8`, `3xl`=`p-12`, `4xl`=`p-16`. Los
+   > alias con nombre eran un segundo vocabulario para valores idénticos, y ese segundo
+   > vocabulario es justo lo que chocó. `gutter`, `margin-mobile` y `margin-desktop` **se
+   > conservan** porque no colisionan con ninguna utilidad y porque ahí el nombre sí aporta un
+   > significado que ningún número da.
+   >
+   > Y queda un guard que aserta la AUSENCIA: `globals.tokens.test.ts` falla si alguien vuelve a
+   > declarar un `--spacing-<talla>`, con el motivo escrito al lado.
 2. THE SYSTEM SHALL declarar el borde de 1 px del export como token de color de borde,
    coherente en los dos temas.
 3. THE SYSTEM SHALL conservar intactas las utilidades y garantías que ya existen en
