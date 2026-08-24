@@ -197,20 +197,27 @@ Nada está pre-implementado: `backend/app/cli/demo_reset.py`, `.github/workflows
       `oci_identity_policy.dev_runner_read_secrets` (`infra/environments/dev/main.tf:237`), en
       el mismo apply que lo crea — es la mitigación que `object-storage-provisioning` ya
       declaró para sus cuatro. [R5.4, R5.6]
-- [ ] 8.3 **Post-merge: no se puede hacer desde esta rama.** `infra-dev.yml` acota `plan` y
-      `apply` a `refs/heads/main` —su comentario explica que el job lleva `CLOUDFLARE_API_TOKEN`,
-      con control del DNS y el TLS de toda la zona, y que una rama arbitraria ejecutaría su propia
-      definición del workflow con el secret dentro—, y además antes del `apply` el secreto no
-      existe, así que un `plan` mostraría una creación y no diría nada sobre `ignore_changes`.
-      Procedimiento, secuencia y las dos salidas posibles: `infra/environments/dev/RUNBOOK.md`
-      §10.2 («Verificación pendiente: que `ignore_changes` aguante»), que es su casa —era también
-      la entrada #1 de `BLOCKED.md`, borrada en `/sdd:review` (2026-08-24) por duplicar ese §10.2
-      sin añadirle nada. Verificar el riesgo de cabecera de
-      `design.md` **antes de publicar credenciales a nadie**: con el valor out-of-band ya puesto, un `terraform plan` que proponga reescribir
-      `secret_content` significa que `ignore_changes` no aguanta en el provider de OCI. Si
-      ocurre, la salida está escrita en Risks (la contraseña publicada pasa a ser la de
-      `random_password`, y la rotación es `terraform apply -replace`) y hay que decidirla con el
-      `plan` delante. [R2.2, R5.4]
+> **Post-merge, y antes de publicar las credenciales a nadie: verificar que `ignore_changes`
+> aguanta.** No es una tarea de la implementación local, y por eso no es una casilla: `infra-dev.yml`
+> acota `plan` **y** `apply` a `refs/heads/main` —su comentario explica que el job lleva
+> `CLOUDFLARE_API_TOKEN`, con control del DNS y el TLS de toda la zona, y que una rama arbitraria
+> ejecutaría su propia definición del workflow con el secret dentro—, así que no se puede planificar
+> desde aquí. Y aunque se pudiera: antes del `apply` el secreto no existe, de modo que un `plan`
+> mostraría una **creación** y no diría nada sobre si `ignore_changes` aguanta sobre un recurso ya
+> creado. La comprobación sólo significa algo con el valor definitivo dentro.
+>
+> Todo el diseño de la contraseña depende de que el provider de OCI respete
+> `lifecycle { ignore_changes = [secret_content] }` sobre
+> `oci_vault_secret.demo_account_password`: si no lo respeta, cada `terraform apply` devuelve el
+> secreto al valor de `random_password`, el reset siguiente lo propaga a las cuatro cuentas y las
+> credenciales publicadas dejan de funcionar **en silencio**, sin que nada se ponga en rojo.
+>
+> **Procedimiento, secuencia y las dos salidas posibles**: `infra/environments/dev/RUNBOOK.md`
+> §10.2, que es su casa. Resumen: poner el valor out-of-band con `oci vault secret update-base64`
+> (§10.1, con `printf` y no `echo`), lanzar `infra-dev` con `action=plan` desde `main`, y —si el
+> plan propone reescribir `secret_content`— no aplicar, porque entonces la rotación es
+> `terraform apply -replace=random_password.demo_account` y hay que corregir §10.1 y la sección
+> equivalente de `docs/demo-tenant.md`, que hoy documentan el otro camino. [R2.2, R5.4]
 
 ## 9. El workflow programado
 

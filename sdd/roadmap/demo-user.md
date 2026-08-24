@@ -79,3 +79,23 @@ Se eligió **`demo.autohostai.test`**: `.test` está reservado por RFC 6761, as�
 | Fuera | valoraciones (`revenue-reviews` sin empezar), pricing, cleaner-app, tech-app |
 
 Sobre las pantallas que están por aterrizar, decisión explícita del usuario: «ya veremos si llegamos a tiempo o no, vamos a empezar sin ellas».
+
+## 8. Pendiente tras el merge, antes de publicar credenciales (añadido en `/sdd:review`, 2026-08-24)
+
+Queda **una** verificación que no podía hacerse desde la rama del change, y que no es opcional:
+**que el provider de OCI respete `lifecycle { ignore_changes = [secret_content] }`** sobre
+`oci_vault_secret.demo_account_password`.
+
+Por qué no se hizo antes: `infra-dev.yml` acota `plan` y `apply` a `refs/heads/main` —el job lleva
+`CLOUDFLARE_API_TOKEN`, con control del DNS y el TLS de toda la zona `digitalsec.work`—, y antes del
+primer `apply` el secreto no existe, así que un `plan` mostraría una creación y no diría nada sobre
+si `ignore_changes` aguanta sobre un recurso ya creado.
+
+Por qué importa: **todo el diseño de la contraseña depende de eso.** Si no aguanta, cada
+`terraform apply` devuelve el secreto al valor de `random_password`, el reset siguiente lo propaga a
+las cuatro cuentas, y las credenciales publicadas dejan de funcionar **en silencio** — sin que nada
+se ponga en rojo.
+
+Secuencia: merge → `apply` (el secreto nace con el valor de `random_password`, inerte a propósito) →
+fijar el valor definitivo out-of-band → `plan` para verificar → **sólo entonces** publicar las
+credenciales. Procedimiento y las dos salidas posibles: `infra/environments/dev/RUNBOOK.md` §10.2.
