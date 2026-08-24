@@ -48,11 +48,20 @@ afterEach(() => {
   delete document.documentElement.dataset.theme;
 });
 
+/*
+ * Why the third label is a verb phrase while the other two are adjectives.
+ *
+ * «Sistema» read as a third colour, indistinguishable from «Oscuro» to anyone
+ * whose OS is already dark — reported from the browser on 2026-08-24. The button
+ * does not choose an appearance, it CEDES the choice back to
+ * `prefers-color-scheme`, and «Seguir al sistema» says that where a noun could
+ * not. The asymmetry with «Claro»/«Oscuro» is the point, not an oversight.
+ */
 describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
   it("is a labelled group with the three choices", () => {
     setup(null);
     expect(screen.getByRole("group", { name: "Tema" })).toBeInTheDocument();
-    for (const name of ["Claro", "Oscuro", "Sistema"]) {
+    for (const name of ["Claro", "Oscuro", "Seguir al sistema"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -66,7 +75,7 @@ describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
       </I18nProvider>,
     );
     expect(screen.getByRole("group", { name: "Theme" })).toBeInTheDocument();
-    for (const name of ["Light", "Dark", "System"]) {
+    for (const name of ["Light", "Dark", "Follow the system"]) {
       expect(screen.getByRole("button", { name })).toBeInTheDocument();
     }
   });
@@ -76,7 +85,7 @@ describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
     // `tap-target` utility is what satisfies R3.5. Asserted as the class because
     // jsdom computes no layout.
     setup(null);
-    for (const name of ["Claro", "Oscuro", "Sistema"]) {
+    for (const name of ["Claro", "Oscuro", "Seguir al sistema"]) {
       expect(screen.getByRole("button", { name })).toHaveClass("tap-target");
     }
   });
@@ -95,7 +104,7 @@ describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
      * put a form around the topbar.
      */
     setup(null);
-    for (const name of ["Claro", "Oscuro", "Sistema"]) {
+    for (const name of ["Claro", "Oscuro", "Seguir al sistema"]) {
       expect(screen.getByRole("button", { name })).toHaveAttribute(
         "type",
         "button",
@@ -115,7 +124,7 @@ describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
     expect([...buttons].map((button) => button.getAttribute("aria-label"))).toEqual([
       "Claro",
       "Oscuro",
-      "Sistema",
+      "Seguir al sistema",
     ]);
   });
 
@@ -155,7 +164,7 @@ describe("ThemeSwitcher — aria-pressed tracks the PREFERENCE (R3.5, D5)", () =
 
   it("presses «Sistema» when no preference is persisted", () => {
     setup(null);
-    expect(screen.getByRole("button", { name: "Sistema" })).toHaveAttribute(
+    expect(screen.getByRole("button", { name: "Seguir al sistema" })).toHaveAttribute(
       "aria-pressed",
       "true",
     );
@@ -163,7 +172,7 @@ describe("ThemeSwitcher — aria-pressed tracks the PREFERENCE (R3.5, D5)", () =
 
   it("presses exactly one button at a time", () => {
     setup("dark");
-    const pressed = ["Claro", "Oscuro", "Sistema"].filter(
+    const pressed = ["Claro", "Oscuro", "Seguir al sistema"].filter(
       (name) =>
         screen.getByRole("button", { name }).getAttribute("aria-pressed") ===
         "true",
@@ -179,9 +188,9 @@ describe("ThemeSwitcher — aria-pressed tracks the PREFERENCE (R3.5, D5)", () =
      * way to see that they are following the system.
      */
     setup("dark");
-    fireEvent.click(screen.getByRole("button", { name: "Sistema" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seguir al sistema" }));
     return waitFor(() => {
-      expect(screen.getByRole("button", { name: "Sistema" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Seguir al sistema" })).toHaveAttribute(
         "aria-pressed",
         "true",
       );
@@ -220,7 +229,7 @@ describe("ThemeSwitcher — the three selections (R3.4, R3.6)", () => {
     fireEvent.click(screen.getByRole("button", { name: "Oscuro" }));
     await waitFor(() => expect(cookieValue()).toBe("dark"));
 
-    fireEvent.click(screen.getByRole("button", { name: "Sistema" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seguir al sistema" }));
     await waitFor(() => {
       expect(cookieValue()).toBeUndefined();
       expect(attribute()).toBeUndefined();
@@ -262,7 +271,7 @@ describe("ThemeSwitcher — the three selections (R3.4, R3.6)", () => {
       expect(set).not.toMatch(/httponly|secure/i);
 
       written.length = 0;
-      fireEvent.click(screen.getByRole("button", { name: "Sistema" }));
+      fireEvent.click(screen.getByRole("button", { name: "Seguir al sistema" }));
       await waitFor(() => expect(written.length).toBeGreaterThan(0));
       // Expiry, not a `system` value: the absence of the cookie is the state.
       expect(written[0]).toContain("max-age=0");
@@ -274,9 +283,9 @@ describe("ThemeSwitcher — the three selections (R3.4, R3.6)", () => {
 
   it("never persists «system» as a cookie value", async () => {
     setup(null);
-    fireEvent.click(screen.getByRole("button", { name: "Sistema" }));
+    fireEvent.click(screen.getByRole("button", { name: "Seguir al sistema" }));
     await waitFor(() =>
-      expect(screen.getByRole("button", { name: "Sistema" })).toHaveAttribute(
+      expect(screen.getByRole("button", { name: "Seguir al sistema" })).toHaveAttribute(
         "aria-pressed",
         "true",
       ),
