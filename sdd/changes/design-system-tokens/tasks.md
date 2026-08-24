@@ -574,7 +574,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
 ## 8. El guard: cero escalas crudas, cero `dark:`
 
-- [ ] 8.1 Nuevo `frontend/test/color-tokens.test.ts` siguiendo el precedente de
+- [x] 8.1 Nuevo `frontend/test/color-tokens.test.ts` siguiendo el precedente de
       `test/eslint-boundaries.test.ts`: recorre `app/`, `components/`, `features/` y `lib/` y
       falla si encuentra una escala numérica de color de Tailwind o un `dark:` en código **no
       de test**, con las tres excepciones declaradas y razonadas de D12 (`bg-black/50` del
@@ -589,6 +589,14 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       sección 7. Ojo al detectar `dark:`: hay que **ignorar los comentarios**, porque
       `lib/ui/status-tone.ts` explica en prosa por qué se quitó el variante y la palabra
       aparece tres veces ahí dentro. [R6.6, R1.5, D13]
+      **Lo que encontró al escribirla** (2026-08-24): un segundo caso de la misma clase que
+      `bg-card`, no previsto en 7.4 — `text-destructive` en `login-form.tsx:64`,
+      `property-timeline.tsx:192` y `guest-fields.tsx:8`, con `--color-destructive` sin
+      declarar. Los tres mensajes de error heredaban `--foreground`. Pasan a
+      `text-state-error-text`, y `corePairs` de la auditoría de 4.1 gana las cinco familias
+      `state-*-text` sobre las cuatro superficies lisas (51 → 71 pares por tema, registro total
+      190 → 230), porque texto suelto sobre superficie no es el mismo par que texto sobre el
+      tinte del badge. Peor ratio de los 40 nuevos: 5.97:1. [R1.5, R1.6, D13]
 
 ## 9. Documentación
 

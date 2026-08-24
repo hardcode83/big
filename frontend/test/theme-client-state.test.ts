@@ -101,6 +101,14 @@ const MAY_NAME_THEME = new Set([
   "app/globals.contrast.test.ts",
   "test/css-tokens.ts",
   "test/wcag-contrast.ts",
+  /*
+   * The D12/D13 colour guard. It names the theme only as the literal
+   * `"@theme inline"`, the block it reads to learn which colour tokens exist —
+   * it holds no theme state and never reads the resolved theme. Added when it
+   * was written, rather than by loosening `NAMES_THEME` to spare it, which would
+   * have widened the net for every future file too.
+   */
+  "test/color-tokens.test.ts",
 ]);
 
 describe("R3.3 — the theme is never client state", () => {

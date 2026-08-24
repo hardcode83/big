@@ -225,6 +225,33 @@ function corePairs(theme: Theme): Pair[] {
     }
   }
 
+  /*
+   * The five state text tokens on a PLAIN surface, not on a badge tint.
+   *
+   * `badgePairs` measures them over their own 15% tint, which is the badge. But
+   * `text-state-error-text` also ships as bare error copy on an ordinary
+   * background — the login form's `role="alert"`, the guest-portal field error
+   * and the property timeline — and that is a different pair with a different
+   * number. It reached the tree as `text-destructive`, a token `globals.css`
+   * never declared, so those three messages painted nothing and inherited
+   * `--foreground`: an error that did not look like one. The D13 guard found it;
+   * this is the half that keeps it measured.
+   *
+   * All five families are measured, not just `error`, for the reason this file
+   * gives about `--muted`: the audit should not be narrower than what the app
+   * may paint, and any of the five is legitimate as bare text.
+   */
+  for (const tone of TONES) {
+    for (const surface of SURFACES) {
+      pairs.push({
+        label: `state-${tone}-text on ${surface}  [bare text, not a badge]`,
+        fg: t[`--state-${tone}-text`],
+        bg: t[surface],
+        kind: "text",
+      });
+    }
+  }
+
   return pairs;
 }
 
@@ -523,8 +550,8 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
     for (const theme of THEMES) {
       // 4 foreground + 4 muted-foreground + 3 paired roles + 4 primary-as-text
       // + 4 primary-as-border + 4 hover composites + 4 input + 4 ring
-      // + 20 state anchors
-      expect(corePairs(theme), `${theme.name} core`).toHaveLength(51);
+      // + 20 state anchors + 20 state text tokens as bare text (D13)
+      expect(corePairs(theme), `${theme.name} core`).toHaveLength(71);
       // 5 tones × 4 surfaces
       expect(badgePairs(theme), `${theme.name} badges`).toHaveLength(20);
       // 4 hairline + 20 badge edges
@@ -544,7 +571,7 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
       expect(
         core.filter((pair) => pair.kind === "text"),
         `${theme.name} core text pairs`,
-      ).toHaveLength(19);
+      ).toHaveLength(39);
       expect(
         core.filter((pair) => pair.kind === "ui"),
         `${theme.name} core ui pairs`,
@@ -604,7 +631,9 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
       ...badgePairs(theme),
       ...exceptionPairs(theme),
     ]);
-    expect(measured).toHaveLength(190);
+    // (71 core + 20 badges + 24 exceptions) × 2 themes. Was 190 before D13
+    // added the 20 bare-text state pairs per theme.
+    expect(measured).toHaveLength(230);
     for (const pair of measured) {
       expect(pair.fg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);
       expect(pair.bg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);

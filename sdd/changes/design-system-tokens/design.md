@@ -530,6 +530,27 @@ Rechazado: dejarlo para `visual-restyle-workspace` — es el change que traerá 
 `Card`, pero R1.5 es un criterio de aceptación de **éste**, y seis superficies sin color no lo
 cumplen.
 
+**Y no era el único.** Al escribir la tercera comprobación (tarea 8.1) apareció el segundo caso
+de la misma clase, que nadie había mirado: `text-destructive` en
+`features/auth/components/login-form.tsx:64`,
+`features/dashboard/components/detail/property-timeline.tsx:192` y
+`features/guest-portal/components/fields/guest-fields.tsx:8`. `--color-destructive` tampoco está
+declarado, así que los tres mensajes de error —incluido el `role="alert"` del formulario de
+login— heredaban `--foreground`: un error que no parecía un error. Pasan a
+`text-state-error-text`, que es el token de texto de error de D6 y ya estaba declarado.
+
+Eso obliga a ensanchar la auditoría de D11: `badgePairs` mide los `state-*-text` sobre su propio
+tinte al 15 %, que es el badge, pero texto de error suelto sobre una superficie lisa es **otro
+par con otro número**. `corePairs` gana las cinco familias × cuatro superficies (20 pares por
+tema, 51 → 71), medidas y en verde: 5.97:1 el peor —`state-warning-text` sobre `muted` en
+claro— y 12.89:1 el mejor. Se miden las cinco y no sólo `error` por la razón que el propio
+fichero da sobre `--muted`: la auditoría no debe ser más estrecha que lo que la aplicación puede
+pintar.
+
+Que el guard encontrara un segundo caso el mismo día que se escribió es el argumento de esta
+decisión, no una anécdota: dos defectos de superficie invisible convivían en `main` sin que
+ninguna comprobación de «lo que sobra» los viera.
+
 ## Paleta
 
 Semilla: `E` = valor literal del export (`DESIGN.md`), con el nombre del token de origen.
