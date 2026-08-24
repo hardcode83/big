@@ -299,17 +299,94 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `design.md`. Si algún par no coincide, manda el test: corregir el valor del token, no
       la excepción. [R1.6]
 
-## 5. El tema resuelto en servidor
+## 5. El tema resuelto en servidor <!-- panel: PASS 2026-08-24 -->
 
-- [ ] 5.1 `frontend/lib/config/constants.ts`: `THEME_COOKIE = "autohostai.theme"`,
+<!-- Panel de la sección 5 (2026-08-24): architect PASS, tenancy PASS,
+     security FAIL(2), qa FAIL(2). Todo cerrado. Primera sección con código de
+     runtime, así que entró tenancy al panel.
+
+     HALLAZGO 1, al que security y qa llegaron por separado — `getServerTheme()`,
+     que ES la frontera de confianza entera (cookie -> `resolveTheme` -> atributo
+     en `<html>` en el primer byte de HTML), no tenía NINGÚN test. Nada importaba
+     `server.ts`. qa lo demostró: cambiar la clave a `"autohostai.locale"` dejaba
+     173 tests en verde mientras el tema seguía en silencio a la cookie de idioma.
+     Y security dio el escenario que más importa: `return store.get(THEME_COOKIE)?.value as Theme`
+     es una «simplificación» plausible, TypeScript acepta el cast, y una cadena
+     controlada por el usuario acaba en un atributo de `<html>` con la suite verde.
+     Nuevo `lib/theme/server.test.ts` (13 tests) con el patrón que el repo ya
+     tenía —`lib/config/server.test.ts` mockea `next/headers` y llama directo—,
+     más dos aserciones de forma: que la lectura pasa POR `resolveTheme` y que
+     `import "server-only"` sigue en su sitio.
+
+     HALLAZGO 2 (qa) — la afirmación de R3.2 es sobre el PRIMER PINTADO, y yo la
+     estaba comprobando con un regex sobre el texto fuente de `layout.tsx`. Dije
+     que era el techo honesto y me equivoqué: qa construyó la prueba. Mockeando
+     `next/font/google` —que es lo que hacía fallar el import con «Inter is not a
+     function»— más el mock de `next/headers` que ya existía, se puede importar el
+     `layout.tsx` real, llamarlo y pasarlo por `renderToStaticMarkup` para leer el
+     HTML servido. Nuevo `app/layout.test.tsx` (7 tests): sin cookie NO sale el
+     atributo, con cookie sale el valor, con basura no sale nada ni se refleja la
+     entrada, y el atributo cae en `<html>` junto al `lang`. Se conservan los dos:
+     el de texto fija la intención, éste el comportamiento.
+
+     HALLAZGO 3 (security) — mi guard de R3.3 era escapable por tres sitios, y los
+     tres son lo que alguien escribiría de verdad:
+       · `/from\s+["']zustand["']/` no ve `zustand/react` ni `zustand/vanilla`,
+         que son entry points reales de v5.
+       · `/\btheme\b/i` no casa compuestos en camelCase: `themeMode`,
+         `colorTheme`, `themeState` — justo los nombres que tendría ese estado.
+       · R3.3 dice «ningún store de cliente» y yo sólo cubría Zustand: un
+         componente `"use client"` con `localStorage` + `useState`, o un context,
+         es estado de cliente que parpadea y no lo casaba nada.
+     Cerrados los tres, y el guard se mueve a `test/theme-client-state.test.ts`,
+     que es donde este proyecto tiene los guards que recorren el árbol
+     (`eslint-boundaries` hoy, `color-tokens` en la sección 8) — lo apuntó el
+     architect como decisión pendiente antes de que la 8 añada el suyo. Los tests
+     unitarios del mecanismo se quedan en `lib/theme/`.
+
+     Añadido además, y es lo que security dejó como riesgo hacia delante: la
+     AUSENCIA de script inline anti-parpadeo es hoy portante para la seguridad.
+     Resolver en servidor es lo que hace innecesario el
+     `<script>document.documentElement.dataset.theme = …</script>` (D4 rechaza
+     `next-themes` por eso). Si alguien lo añade, la cookie deja de ser valor de
+     atributo HTML —donde el escapado de React más `resolveTheme` la vuelven
+     inerte— y pasa a ser cadena de JavaScript, otro contexto con otras reglas. El
+     guard falla antes de que eso pase en silencio.
+
+     Riesgos aceptados que security dejó por escrito, ninguno hallazgo:
+       · sombreado de cookie desde un subdominio hermano — el impacto está topado
+         en «el usuario ve el otro tema» precisamente por la validación, y un
+         prefijo `__Host-` sería desproporcionado para una preferencia; R3.1 manda
+         «la misma postura que la de idioma» y `LOCALE_COOKIE` tiene ésta.
+       · huella digital: un bit que el usuario puso él mismo, `samesite=lax`, sin
+         PII, y cualquier página ya puede leer `prefers-color-scheme`. No añade
+         entropía que el cliente no publicara.
+       · los atributos de cookie de R3.1 (`path`, `samesite`, `max-age`) están
+         documentados pero aún no SE PONEN en ningún sitio: esta sección sólo lee.
+         El escritor es la sección 6.
+
+     Verificado por mutación que las dos que sobrevivían (clave de cookie
+     equivocada, `server-only` borrado) y las dos nuevas (store por
+     `zustand/react` con `themeMode`, cast en vez de `resolveTheme`) fallan ahora.
+     Y `resolveTheme` salió limpio del ataque: la puerta `typeof` va antes de
+     `includes`, `includes` usa SameValueZero —sin coerción, sin plegado de
+     mayúsculas, sin recorte— y no hay ninguna búsqueda de propiedad en el camino,
+     así que la contaminación de prototipo no tiene superficie.
+
+     Nota de entorno: los revisores mutaron el árbol en vivo y uno reportó cifras
+     contra un mutante; las cifras válidas son las de qa con la máquina tranquila
+     —126 ficheros / 1192 tests, TODO en verde, sin artefactos de carga—, que es
+     la primera pasada completa limpia de este change. -->
+
+- [x] 5.1 `frontend/lib/config/constants.ts`: `THEME_COOKIE = "autohostai.theme"`,
       `SUPPORTED_THEMES`, `type Theme`, `isTheme`, declarados junto a los del idioma y con la
       misma postura de cookie (`path=/`, `samesite=lax`, `max-age=31536000`, sin PII). [R3.1]
-- [ ] 5.2 Nuevos `frontend/lib/theme/theme.ts` (`resolveTheme(value) → Theme | null`,
+- [x] 5.2 Nuevos `frontend/lib/theme/theme.ts` (`resolveTheme(value) → Theme | null`,
       isomorfo, espejo de `resolveLocale`; `THEME_ATTRIBUTE = "data-theme"`) y
       `frontend/lib/theme/server.ts` (`getServerTheme()`, `import "server-only"`, espejo de
       `getServerLocale`). Test propio que fija la tabla de tres estados de D4, incluido el
       caso «valor basura» → `null`. [R3.1, R3.2]
-- [ ] 5.3 `frontend/app/layout.tsx`: `<html lang={locale} data-theme={theme ?? undefined}>`
+- [x] 5.3 `frontend/app/layout.tsx`: `<html lang={locale} data-theme={theme ?? undefined}>`
       con el tema resuelto en servidor, para que el primer pintado ya sea el correcto.
       `undefined` deja el atributo **ausente**, que es el tercer estado. Nada de tema en
       Zustand ni resuelto solo en cliente. [R3.2, R3.3]

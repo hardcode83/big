@@ -4,6 +4,7 @@ import { Inter, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 import { buildPublicRuntimeConfig } from "@/lib/config/public";
 import { getServerLocale } from "@/lib/i18n/server";
+import { getServerTheme } from "@/lib/theme/server";
 import { createRootMetadata } from "@/lib/metadata/create-route-metadata";
 import { AppProviders } from "./providers";
 
@@ -62,11 +63,22 @@ export default async function RootLayout({
   children: React.ReactNode;
 }) {
   const locale = await getServerLocale();
+  const theme = await getServerTheme();
   const config = buildPublicRuntimeConfig();
 
   return (
+    /*
+     * The theme is resolved on the SERVER and painted into the first HTML, next
+     * to the `lang` that already worked this way (design D4, R3.2).
+     *
+     * `theme ?? undefined` is load-bearing: React omits an attribute whose value
+     * is `undefined`, and that ABSENCE is the third state — it is what lets the
+     * `prefers-color-scheme` media query in `globals.css` decide. Writing `""`
+     * or `"system"` here would match no rule and pin every visitor to light.
+     */
     <html
       lang={locale}
+      data-theme={theme ?? undefined}
       className={`${inter.variable} ${jetBrainsMono.variable}`}
     >
       <body>
