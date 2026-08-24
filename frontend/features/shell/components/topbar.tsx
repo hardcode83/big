@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { getServerTheme } from "@/lib/theme/server";
+import { Separator } from "@/components/ui/separator";
 import { LocaleSwitcher } from "./locale-switcher";
 import { ThemeSwitcher } from "./theme-switcher";
 
@@ -39,6 +40,9 @@ export async function Topbar({
         {end ?? (
           <>
             <ThemeSwitcher initial={theme} />
+            {/* Decorative: it separates two unrelated controls, and announcing a
+              * divider between them would add noise, not orientation. */}
+            <Separator orientation="vertical" className="mx-1 h-6" />
             <LocaleSwitcher />
           </>
         )}

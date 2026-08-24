@@ -449,7 +449,25 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
      exacto — su base se midió ANTES de la ronda de arreglos de la sección 5:
      +server.test.ts (13), +layout.test.tsx (7), +theme-client-state.test.ts (7),
      -7 en theme.test.ts al mover de ahí el bloque R3.3, +16 del conmutador. Nada
-     inexplicado. -->
+     inexplicado.
+
+     REVISIÓN DE FORMA (2026-08-24, decidida por Jose tras la pasada visual): al ver
+     la topbar en un navegador real, tres pastillas de texto de tema junto a las dos
+     de idioma leían como cinco botones compitiendo. El tema pasa a tres botones de
+     ICONO (sol/luna/monitor de lucide, ya dependencia) con tooltip y `aria-label`
+     traducido, el idioma a un botón ÚNICO que muestra el locale activo y cambia al
+     otro, y un `Separator` vertical entre ambos. Cuatro cuadros en vez de cinco
+     pastillas.
+     Lo accesible se conserva y se comprobó en navegador: nombres accesibles
+     traducidos, `aria-pressed` sólo donde significa algo, 44×44 exactos, iconos
+     `aria-hidden` fuera del árbol. El cambio de semántica del idioma es deliberado
+     —dos botones eran opciones y `aria-pressed` decía cuál; uno solo es una acción,
+     así que su nombre dice qué HARÁ la pulsación— y se verificó antes de tocarlo que
+     `sdd/specs/frontend-foundation.md:43` fija el comportamiento y no el número de
+     botones, así que no contradice la spec viva.
+     Coste dicho: toca `locale-switcher.tsx`, preexistente y fuera de la lista de
+     ficheros declarada. Segunda ampliación de huella de la sección; las dos salieron
+     de mirar el resultado y no sólo los tests. -->
 
 - [x] 6.1 Nuevo `frontend/features/shell/components/theme-switcher.tsx` (cliente): tres
       botones Claro/Oscuro/Sistema en un `role="group"` con `aria-label` traducido,

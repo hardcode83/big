@@ -105,16 +105,28 @@ describe("ThemeSwitcher — the accessible group (R3.5, design D5)", () => {
 
   it("orders the buttons Claro, Oscuro, Sistema", () => {
     // Not required by any criterion, but the order is a deliberate constant and
-    // a silent reshuffle would move the control under the user's finger.
+    // a silent reshuffle would move the control under the user's finger. Read
+    // from `aria-label` rather than text content: the buttons are icon-only now,
+    // so their text content is empty and their name lives in the label.
     setup(null);
-    const labels = screen
+    const buttons = screen
       .getByRole("group", { name: "Tema" })
       .querySelectorAll("button");
-    expect([...labels].map((button) => button.textContent)).toEqual([
+    expect([...buttons].map((button) => button.getAttribute("aria-label"))).toEqual([
       "Claro",
       "Oscuro",
       "Sistema",
     ]);
+  });
+
+  it("hides the icon from the accessibility tree so the label is the whole name", () => {
+    // Icon-only buttons take their accessible name from `aria-label`. A visible
+    // `<svg>` without `aria-hidden` can leak into the computed name in some
+    // engines, which is how an icon button ends up announced twice.
+    const { container } = setup(null);
+    for (const svg of container.querySelectorAll("svg")) {
+      expect(svg).toHaveAttribute("aria-hidden", "true");
+    }
   });
 
   it("has no axe violations", async () => {

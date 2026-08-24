@@ -190,6 +190,33 @@ Rótulos nuevos bajo `navigation.themeSwitcher.{label,light,dark,system}` en `lo
 
 Rechazado: un único botón que cicla los tres estados — menos superficie y no hay forma honesta de
 comunicar tres estados con un `aria-pressed`.
+
+> **Revisión de forma de 2026-08-24 (`/sdd:run`, pasada visual; decidida por Jose).** Los tres
+> botones se mantienen —el rechazo de arriba sigue en pie, un botón que cicla no puede expresar
+> tres estados— pero pasan a ser **de icono**: sol, luna y monitor de `lucide-react`, que ya era
+> dependencia. Al verlo en el navegador, tres pastillas de texto junto a las dos del idioma leían
+> como cinco botones compitiendo en la topbar.
+>
+> Lo accesible no se pierde, y esto es la parte que importa: el icono va `aria-hidden`, el nombre
+> accesible sale del `aria-label` traducido —de modo que un lector de pantalla anuncia exactamente
+> lo mismo que con texto— y un tooltip lleva la misma palabra para quien ve, porque un icono solo
+> no distingue «claro» de «sistema». `size="icon"` del `Button` ya son 44×44, y se conserva
+> `tap-target` para que la garantía de R3.5 no dependa de la primitiva.
+>
+> Y **el conmutador de idioma pasa a un botón único** que muestra el locale activo y cambia al
+> otro, con un separador entre los dos controles. Eso cambia su semántica accesible a propósito:
+> dos botones eran un conjunto de opciones, así que `aria-pressed` decía cuál estaba vigente; uno
+> solo es una ACCIÓN, donde `aria-pressed` no significaría nada, y el nombre accesible tiene que
+> decir qué hará la pulsación («Cambiar idioma a English») y no qué dice el rótulo. Comprobado
+> antes de tocarlo que `sdd/specs/frontend-foundation.md:43` exige «an accessible topbar control
+> switches ES/EN» — fija el comportamiento, no el número de botones —, así que un control único no
+> contradice la spec viva. Su test se reescribió entero, incluida una aserción de que **no** hereda
+> `aria-pressed` por copia.
+>
+> Coste asumido y dicho: toca `locale-switcher.tsx`, que es un componente preexistente fuera de la
+> lista de ficheros que este change declaraba. Es la segunda ampliación de huella de la sección
+> —la primera fueron los cinco shells— y las dos salieron de mirar el resultado en vez de sólo
+> los tests.
 Rechazado: leer el tema en cliente al montar en vez de pasarlo desde servidor — el tema no
 parpadearía (lo pone el HTML) pero el *botón activo* sí, un tick después de hidratar.
 

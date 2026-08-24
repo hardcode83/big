@@ -110,7 +110,8 @@
   "localeSwitcher": {
     "label": "Idioma",
     "es": "Español",
-    "en": "English"
+    "en": "English",
+    "switchTo": "Cambiar idioma a {{language}}"
   },
   "themeSwitcher": {
     "label": "Tema",
