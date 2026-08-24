@@ -14,7 +14,17 @@ vi.mock("next/link", () => ({
 }));
 
 const useDashboardCards = vi.hoisted(() => vi.fn());
+const useBlockedTransitions = vi.hoisted(() => vi.fn());
 vi.mock("../hooks/use-dashboard-data", () => ({ useDashboardCards }));
+vi.mock("@/features/dashboard/stalls", () => ({
+  useBlockedTransitions,
+  BlockedTransitionsSection: ({ stalls }: { stalls: unknown[] }) =>
+    stalls.length > 0 ? (
+      <section>
+        <h4>Stalls ({stalls.length})</h4>
+      </section>
+    ) : null,
+}));
 
 function page(
   cards: PropertyDashboardCard[],
@@ -50,6 +60,13 @@ function renderView() {
 
 beforeEach(() => {
   useDashboardCards.mockReset();
+  useBlockedTransitions.mockReset();
+  // Default: stalls query is pending — the cards render with no stalls.
+  useBlockedTransitions.mockReturnValue({
+    isPending: true,
+    isError: false,
+    byPropertyId: new Map(),
+  });
 });
 
 describe("DashboardView (R1)", () => {
@@ -110,5 +127,48 @@ describe("DashboardView (R1)", () => {
     expect(grid).toHaveClass("items-stretch");
     expect(cards).toHaveLength(2);
     expect(cards.every((card) => card.classList.contains("h-full"))).toBe(true);
+  });
+
+  it("omits the stalls section when the stalls query is still pending (R1.4, blocked-transitions-web)", () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: page([sampleCard]),
+    });
+    useBlockedTransitions.mockReturnValue({
+      isPending: true,
+      isError: false,
+      byPropertyId: new Map(),
+    });
+    renderView();
+    expect(screen.getByText("REDES11")).toBeInTheDocument();
+    // No stalls heading rendered.
+    expect(screen.queryByText(/Stalls/)).toBeNull();
+  });
+
+  it("slices stalls by property id when the stalls query resolves", () => {
+    const byPropertyId = new Map<string, Array<{ reservation_id: string }>>([
+      ["pajaritos8", [{ reservation_id: "r-3" }]],
+    ]);
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: page([
+        sampleCard,
+        {
+          ...sampleCard,
+          propertyId: "pajaritos8",
+          propertyCode: "PAJARITOS8",
+        },
+      ]),
+    });
+    useBlockedTransitions.mockReturnValue({
+      isPending: false,
+      isError: false,
+      isSuccess: true,
+      byPropertyId,
+    });
+    renderView();
+    expect(screen.getByText("Stalls (1)")).toBeInTheDocument();
   });
 });

@@ -67,3 +67,4 @@
 | cleaning-stall-blocks-next-stay | design, tasks, run, review, ship, archive | 766276 | 1683373 | 401801053 | 230.5488 | 2026-08-23 | 2026-08-24 |
 | cleaner-photo-requirements | new, tasks, design, run, review, ship, archive | 294118 | 905142 | 145527899 | 100.3441 | 2026-08-23 | 2026-08-24 |
 | demo-user | new, design, tasks, run, review, ship, archive | 874656 | 2101808 | 447123139 | 283.8617 | 2026-08-23 | 2026-08-24 |
+| blocked-transitions-web | new, design, tasks, run | 679478 | 114239 | 22933759 | 17.7202 | 2026-08-24 | — |

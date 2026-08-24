@@ -25,7 +25,51 @@
     "nextAction": "Próxima acción",
     "responsible": "Responsable",
     "lastEvent": "Último evento",
-    "openDetail": "Ver detalle"
+    "openDetail": "Ver detalle",
+    "blocked": {
+      "title": "Bloqueos",
+      "window": "Esta lista sigue la misma ventana de 30 días que el job que la genera.",
+      "cancelCleaning": {
+        "label": "Cancelar limpieza",
+        "dialog": {
+          "title": "Cancelar limpieza",
+          "reason": {
+            "label": "Motivo",
+            "placeholder": "Explica brevemente por qué no se completará la limpieza",
+            "help": "Máximo 500 caracteres"
+          },
+          "confirm": "Cancelar limpieza",
+          "sending": "Cancelando…",
+          "error": {
+            "empty": "Indica un motivo para cancelar la limpieza.",
+            "generic": "No se pudo cancelar la limpieza. Vuelve a intentarlo en unos segundos."
+          }
+        }
+      },
+      "resolveIncident": {
+        "label": "Resolver incidencia",
+        "dialog": {
+          "title": "Resolver incidencia",
+          "finalCost": {
+            "label": "Coste final",
+            "placeholder": "0,00",
+            "help": "Importe positivo con dos decimales"
+          },
+          "confirm": "Resolver incidencia",
+          "sending": "Resolviendo…",
+          "error": {
+            "positive": "Introduce un importe positivo con dos decimales.",
+            "generic": "No se pudo resolver la incidencia. Vuelve a intentarlo en unos segundos."
+          }
+        }
+      },
+      "error": {
+        "fetch": "No se pudieron cargar los bloqueos de esta vivienda.",
+        "forbidden": "No tienes permiso para actuar sobre este bloqueo.",
+        "conflict": "Otra persona ya resolvió este bloqueo; recargando el panel.",
+        "generic": "No se pudo completar la acción sobre este bloqueo."
+      }
+    }
   },
   "cards": {
     "empty": {

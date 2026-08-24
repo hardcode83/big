@@ -14,12 +14,19 @@ import type { components } from "@/lib/api/generated/openapi";
  * permissions the frontend uses to hide something. A mirror that claimed to be
  * complete would go stale in silence the moment the backend adds a permission;
  * one that says what it covers only ever lies about what it enumerates.
+ *
+ * Since `blocked-transitions-web` R2.4 the mirror also covers
+ * `EXECUTE_INCIDENTS`, used by the dashboard card's resolve-incident action.
+ * The card never paints a button that would `403`: a row whose `ActionKind`
+ * resolves to `resolve-incident` shows the button only when this mirror says
+ * `true`.
  */
 type UserRole = components["schemas"]["UserRole"];
 
 export type Permission =
   | "MANAGE_CLEANING_TASKS"
-  | "MANAGE_PRICE_RECOMMENDATIONS";
+  | "MANAGE_PRICE_RECOMMENDATIONS"
+  | "EXECUTE_INCIDENTS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -32,7 +39,11 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   // queue she cannot decide, with the buttons hidden by the frontend while the
   // backend was granting them.
   TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS"],
-  PROPERTY_MANAGER: ["MANAGE_CLEANING_TASKS", "MANAGE_PRICE_RECOMMENDATIONS"],
+  PROPERTY_MANAGER: [
+    "MANAGE_CLEANING_TASKS",
+    "MANAGE_PRICE_RECOMMENDATIONS",
+    "EXECUTE_INCIDENTS",
+  ],
   CLEANER: [],
   TECHNICIAN: [],
 };

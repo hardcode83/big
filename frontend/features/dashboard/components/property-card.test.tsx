@@ -3,6 +3,8 @@ import { describe, expect, it, vi } from "vitest";
 import { getA11yViolations, render, screen } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 
+import type { BlockedTransitionSummary } from "@/features/dashboard/stalls";
+
 import type { PropertyDashboardCard } from "../data";
 import { PropertyCard } from "./property-card";
 
@@ -80,6 +82,76 @@ describe("PropertyCard (R1, R5)", () => {
         (section) => section.getAttribute("aria-label") ?? section.querySelector("h4")?.textContent,
       ),
     ).toEqual(["Incidencias abiertas", "Próxima acción", "Reserva", "Limpieza", "Último evento"]);
+  });
+
+  it("renders the blocked-transitions section when stalls are present, keeping region order (R1.3, blocked-transitions-web)", () => {
+    const stalls: BlockedTransitionSummary[] = [
+      {
+        property_id: "redes11",
+        property_code: "REDES11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-23T13:00:00Z",
+      },
+    ];
+
+    renderCard(<PropertyCard card={card} stalls={stalls} />);
+
+    // Section is rendered.
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Bloqueos" }),
+    ).toBeInTheDocument();
+
+    // Canonical literals are rendered in <code> tags.
+    expect(screen.getByText("CHECKIN_TIME_REACHED")).toBeInTheDocument();
+    expect(screen.getByText("AWAITING_CLEANING")).toBeInTheDocument();
+
+    // Region order preserved (R1.3): incidents → stalls → next action → reservation → cleaning → last event.
+    const sections = Array.from(
+      screen.getByRole("article").querySelectorAll("section"),
+    );
+    expect(
+      sections.map(
+        (section) =>
+          section.getAttribute("aria-label") ??
+          section.querySelector("h4")?.textContent,
+      ),
+    ).toEqual([
+      "Incidencias abiertas",
+      "Bloqueos",
+      "Próxima acción",
+      "Reserva",
+      "Limpieza",
+      "Último evento",
+    ]);
+  });
+
+  it("renders the blocked-transitions section under the en locale (R4.1)", () => {
+    const stalls: BlockedTransitionSummary[] = [
+      {
+        property_id: "redes11",
+        property_code: "REDES11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-23T13:00:00Z",
+      },
+    ];
+
+    renderCard(<PropertyCard card={card} stalls={stalls} />, "en");
+
+    expect(
+      screen.getByRole("heading", { level: 4, name: "Blockers" }),
+    ).toBeInTheDocument();
+  });
+
+  it("renders no stalls section when stalls is empty or undefined (R1.3)", () => {
+    const { rerender } = renderCard(<PropertyCard card={card} />);
+    expect(screen.queryByRole("heading", { level: 4, name: "Bloqueos" })).toBeNull();
+
+    rerender(<I18nProvider locale="es"><PropertyCard card={card} stalls={[]} /></I18nProvider>);
+    expect(screen.queryByRole("heading", { level: 4, name: "Bloqueos" })).toBeNull();
   });
 
   it("exposes a localized accessible detail link", () => {
