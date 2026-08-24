@@ -108,8 +108,14 @@
   "expandSidebar": "Expand sidebar",
   "collapseSidebar": "Collapse sidebar",
   "localeSwitcher": {
-    "label": "Language",
     "es": "Español",
-    "en": "English"
+    "en": "English",
+    "switchTo": "Switch language to {{language}}"
+  },
+  "themeSwitcher": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "Follow the system"
   }
 }

@@ -20,7 +20,7 @@ function Section({
   children: React.ReactNode;
 }) {
   return (
-    <section className="flex flex-col gap-2 rounded-lg border bg-card p-4">
+    <section className="flex flex-col gap-2 rounded-lg border bg-surface p-4">
       <h2 className="text-sm font-semibold text-foreground">{title}</h2>
       <div className="text-sm text-muted-foreground">{children}</div>
     </section>
