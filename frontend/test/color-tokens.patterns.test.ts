@@ -4,6 +4,7 @@ import {
   DARK_VARIANT,
   RAW_SCALE,
   STYLE_COLOR,
+  applyDirectives,
   arbitraryIsColor,
   arbitraryUtility,
   colorUtility,
@@ -39,12 +40,30 @@ const DECLARED = new Set([
   "state-error-text",
 ]);
 
+/**
+ * The ten typographic roles of D10, as the real guard reads them from the plain
+ * `@theme` block. They are font sizes, so no `--color-*` will ever declare them
+ * and check 3 has to be told, or every screen that uses one fails the build.
+ */
+const TEXT_ROLES = new Set([
+  "display-2xl",
+  "display-xl",
+  "display-lg-mobile",
+  "headline-lg",
+  "headline-md",
+  "body-lg",
+  "body-medium",
+  "body-base",
+  "data-mono",
+  "label-caps",
+]);
+
 /** What check 3 reports for a snippet: the utilities naming an unknown token. */
 function undeclared(source: string): string[] {
   const found: string[] = [];
   for (const match of stripCode(source).matchAll(colorUtility())) {
     const [utility, prefix, name] = match;
-    if (!namesAColorToken(prefix, name)) continue;
+    if (!namesAColorToken(prefix, name, TEXT_ROLES)) continue;
     if (!DECLARED.has(name)) found.push(utility);
   }
   return found;
@@ -109,6 +128,85 @@ describe("check 2 — the dark: variant", () => {
     const source = 'const u = "//cdn.example/x.png"; const c = "bg-emerald-100";';
     expect([...stripCode(source).matchAll(RAW_SCALE)].length).toBe(1);
   });
+
+  it.each([
+    // The one that mattered: it compiles to the very same OS-following rule and
+    // passed all five checks, so R6.5 was reopenable in a single line.
+    [
+      "the media query as an arbitrary variant",
+      'className="[@media(prefers-color-scheme:dark)]:bg-surface"',
+    ],
+    [
+      "the same on a declared text colour",
+      'className="[@media(prefers-color-scheme:dark)]:text-primary"',
+    ],
+    ["the query spaced out", 'className="[@media(prefers-color-scheme: dark)]:bg-surface"'],
+    /*
+     * Tailwind v4 turns `_` into a space inside an arbitrary variant, so this
+     * compiles to a REAL `@media (prefers-color-scheme: dark)` rule — verified
+     * with `@tailwindcss/cli`, not assumed. The first version of this fix only
+     * knew `\s*` and let it through all five checks, on a production component,
+     * one keystroke from the case it had just closed. Found by the section-11 QA
+     * reviewer; this row is why it cannot come back.
+     */
+    ["the underscore form Tailwind expands", 'className="[@media(prefers-color-scheme:_dark)]:bg-surface"'],
+    ["the underscore form capitalised", 'className="[@media(prefers-color-scheme:_DARK)]:bg-surface"'],
+    ["several underscores", 'className="[@media(prefers-color-scheme:__dark)]:text-primary"'],
+    /*
+     * The one that ended the arms race. `prefers-color-scheme` has exactly two
+     * values, so `not (… : light)` IS dark mode — and the word `dark` appears
+     * nowhere, so every pattern that matched the VALUE let it through. Compiled
+     * with the project's own `@tailwindcss/postcss` and confirmed against the
+     * real guard on a production component. Found by the section-11 QA reviewer
+     * on the re-review, after two previous fixes had each closed only the exact
+     * case the previous one missed.
+     */
+    ["the negated light query", 'className="[@media_not_(prefers-color-scheme:light)]:bg-surface"'],
+    ["the negated light query, spaced", 'className="[@media not (prefers-color-scheme: light)]:bg-surface"'],
+    ["a query that names no value at all", 'className="[@media(prefers-color-scheme)]:bg-surface"'],
+    // Tailwind lowercases nothing, so this is the same utility.
+    ["the keyword capitalised", 'className="DARK:bg-surface"'],
+  ])("catches %s", (_name, source) => {
+    expect([...stripCode(source).matchAll(DARK_VARIANT)].length).toBeGreaterThan(0);
+  });
+
+  it("does not fire on reading the OS preference from JavaScript", () => {
+    // `lib/theme/` legitimately calls this; it is not a Tailwind variant, and the
+    // `]:` anchor is what tells the two apart.
+    const source = 'const m = window.matchMedia("(prefers-color-scheme: dark)");';
+    expect([...stripCode(source).matchAll(DARK_VARIANT)]).toEqual([]);
+  });
+});
+
+describe("stripCode — comments go, strings stay", () => {
+  it("does not let a comment opener inside a string swallow the file", () => {
+    // Unanchored `/\*[\s\S]*?\*/` deleted everything from the string to the next
+    // comment close, live classes included, and reported zero violations.
+    const source = [
+      'const marker = "/*";',
+      'const c = "bg-red-500 dark:bg-blue-900";',
+      "/** doc */",
+    ].join("\n");
+    // Two raw scales in that class list, and the point is that neither is lost.
+    expect([...stripCode(source).matchAll(RAW_SCALE)].length).toBe(2);
+    expect([...stripCode(source).matchAll(DARK_VARIANT)].length).toBe(1);
+  });
+
+  it.each([
+    [
+      "after a letter inside an attribute",
+      '<img src="a//b.png" className="dark:bg-red-500" />',
+    ],
+    ["inside a template literal", "const u = `${a}//${b}`; const c = \"dark:bg-red-500\";"],
+    ["after a closing brace", "const x = {}//note\nconst c = \"dark:bg-red-500\";"],
+    ["after a closing paren", "f()//note\nconst c = \"dark:bg-red-500\";"],
+  ])("keeps the class when // follows %s", (_name, source) => {
+    expect([...stripCode(source).matchAll(DARK_VARIANT)].length).toBe(1);
+  });
+
+  it("still deletes a real line comment", () => {
+    expect([...stripCode('// dark:bg-red-500').matchAll(DARK_VARIANT)]).toEqual([]);
+  });
 });
 
 describe("check 3 — a utility naming a token that does not exist", () => {
@@ -153,6 +251,19 @@ describe("check 3 — a utility naming a token that does not exist", () => {
     ["text alignment", 'className="text-center"'],
   ])("does not fire on %s", (_name, source) => {
     expect(undeclared(source)).toEqual([]);
+  });
+
+  it.each([...TEXT_ROLES].map((role) => [role]))(
+    "does not fire on the typographic role text-%s",
+    (role) => {
+      expect(undeclared(`className="text-${role}"`)).toEqual([]);
+      expect(undeclared(`className="md:text-${role}"`)).toEqual([]);
+    },
+  );
+
+  it("still catches a text- name that is neither a colour token nor a role", () => {
+    // The roles are a declared set, not a licence for any `text-*` to pass.
+    expect(undeclared('className="text-headline-xl"')).toContain("text-headline-xl");
   });
 });
 
@@ -211,6 +322,10 @@ describe("check 5 — a hard-coded colour in a style or attribute", () => {
     // The JSX attribute form, where hard-coded hexes actually arrive: inline SVG.
     ["a fill attribute", '<path fill="#abc" />', "#abc"],
     ["a stopColor attribute", '<stop stopColor="#abc" />', "#abc"],
+    // A computed key is the same property to JavaScript, and the old pattern
+    // required the name to be followed directly by `:` or `=`.
+    ["a computed key", 'style={{ ["color"]: "#e11d48" }}', "#e11d48"],
+    ["a single-quoted computed key", "style={{ ['color']: '#e11d48' }}", "#e11d48"],
   ])("catches %s", (_name, source, expected) => {
     expect(styleColors(source)).toContain(expected);
   });
@@ -225,5 +340,28 @@ describe("check 5 — a hard-coded colour in a style or attribute", () => {
     ["a booking reference that looks like a hex", 'const r = "Booking.com #1234";'],
   ])("does not fire on %s", (_name, source) => {
     expect(styleColors(source)).toEqual([]);
+  });
+});
+
+describe("stylesheets — only what `@apply` names", () => {
+  const SHEET = `
+    /* a comment mentioning bg-emerald-100 */
+    .card { background-color: var(--color-surface); border-color: var(--color-border); }
+    @media (prefers-color-scheme: dark) { .card { color: #fff; } }
+    .promo { @apply bg-red-500 dark:bg-blue-900; }
+  `;
+
+  it("catches a raw scale and a theme variant inside @apply", () => {
+    const applied = applyDirectives(SHEET);
+    expect([...applied.matchAll(RAW_SCALE)].length).toBe(2);
+    expect([...applied.matchAll(DARK_VARIANT)].length).toBe(1);
+  });
+
+  it("ignores the stylesheet's own declarations, which are not utilities", () => {
+    // `border-color: var(--color-border)` reads as the prefix `border` naming an
+    // undeclared token `color`, and the media query reads as a theme variant.
+    // Feeding a stylesheet to the class patterns whole is how that happens.
+    expect(applyDirectives(SHEET)).not.toContain("border-color");
+    expect(applyDirectives(SHEET)).not.toContain("prefers-color-scheme");
   });
 });

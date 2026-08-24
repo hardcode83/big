@@ -9,6 +9,7 @@ import {
   NON_COLOR,
   RAW_SCALE,
   STYLE_COLOR,
+  applyDirectives,
   arbitraryIsColor,
   arbitraryUtility,
   colorUtility,
@@ -16,7 +17,7 @@ import {
   stripCode,
   styleValueIsHardCodedColor,
 } from "./color-tokens";
-import { declarationsOf, readCss } from "./css-tokens";
+import { declarationsOf, readCss, stripComments } from "./css-tokens";
 
 /**
  * The guard of design D12 and R6.6, and the third check D13 added.
@@ -32,17 +33,23 @@ import { declarationsOf, readCss } from "./css-tokens";
  * which this file prints. It follows `test/eslint-boundaries.test.ts`, already
  * the precedent for enforcing a repo rule with a test.
  *
- * Three checks, and the third is not a variation of the first two:
+ * Five checks, and the third is not a variation of the others:
  *
  *   1. a raw numeric Tailwind colour scale (`bg-emerald-100`, `text-gray-700`);
- *   2. a `dark:` variant;
- *   3. a colour utility naming a token `globals.css` does not declare.
+ *   2. a theme variant that follows the OS (`dark:`, or the same media query
+ *      written as an arbitrary variant);
+ *   3. a colour utility naming a token `globals.css` does not declare;
+ *   4. a colour that bypasses the token layer (`bg-[#e11d48]`, `bg-(--brand)`);
+ *   5. a hard-coded colour in an inline style or a JSX attribute.
  *
- * The first two look for what should not be there. The third looks for what is
- * MISSING, and only it could have caught `bg-card` — six shipped card surfaces
- * painting nothing at all, because `--color-card` was never declared (design
- * D13). A guard that only checks for surplus reads a tree with six invisible
- * surfaces as clean.
+ * All but the third look for what should not be there. The third looks for what
+ * is MISSING, and only it could have caught `bg-card` — six shipped card
+ * surfaces painting nothing at all, because `--color-card` was never declared
+ * (design D13). A guard that only checks for surplus reads a tree with six
+ * invisible surfaces as clean.
+ *
+ * Checks 4 and 5 arrived with the section-8 panel; the count above says five
+ * because saying three is what let two reviews read the list as exhaustive.
  */
 
 const FRONTEND = join(__dirname, "..");
@@ -97,6 +104,24 @@ function uiRoots(): string[] {
 const ROOTS = uiRoots();
 
 /**
+ * The scannable files that sit loose in `frontend/` rather than under a root.
+ *
+ * `uiRoots()` keeps only directories, so these are not walked — which is right
+ * (every one is build configuration, the same category as `scripts/` and
+ * `devops/`) but was silent, and silence is how the review of 2026-08-24 found
+ * it. Deriving and pinning the list applies this file's own rule to the last
+ * place it did not: a NEW loose file is a deliberate edit to the assertion
+ * below, where someone decides whether it ships UI.
+ */
+function looseRootFiles(): string[] {
+  return readdirSync(FRONTEND)
+    .filter((entry) => !entry.startsWith("."))
+    .filter((entry) => SCANNED_EXTENSION.test(entry))
+    .filter((entry) => !statSync(join(FRONTEND, entry)).isDirectory())
+    .sort();
+}
+
+/**
  * The three exceptions of D12, declared and reasoned rather than pattern-matched.
  *
  * Keyed by the exact file, so the exemption cannot spread: a second
@@ -122,6 +147,25 @@ const EXCEPTIONS: Record<string, readonly string[]> = {
  * file now answers «is the tree clean»; that one answers «do the patterns work».
  */
 
+/**
+ * Every extension that can carry a utility class.
+ *
+ * `.tsx?` alone was the whole scan until the review of 2026-08-24: a new
+ * `app/print.css` with `@apply bg-red-500 dark:bg-blue-900`, or any `.mjs`/`.jsx`
+ * component, was simply never opened — the patterns caught the string fine, the
+ * walk never handed it to them. Stylesheets are read through `applyDirectives`
+ * rather than whole (see there for why); everything else is read as source.
+ */
+const SCANNED_EXTENSION = /\.([cm]?jsx?|tsx?|css)$/;
+
+/** The text a file contributes to the scan: `@apply` lists for CSS, code otherwise. */
+function scannable(file: string): string {
+  const source = readFileSync(file, "utf8");
+  return file.endsWith(".css")
+    ? applyDirectives(stripComments(source))
+    : stripCode(source);
+}
+
 function sourceFiles(): string[] {
   const found: string[] = [];
   const walk = (dir: string) => {
@@ -132,13 +176,16 @@ function sourceFiles(): string[] {
         walk(full);
         continue;
       }
-      if (!/\.tsx?$/.test(entry)) continue;
+      if (!SCANNED_EXTENSION.test(entry)) continue;
       // D12 exempts tests: they may name classes, and pinning a class string is
       // exactly what `property-state-badge.test.tsx` exists to do.
       // Anchored to the extension, not a substring anywhere in the name: a
       // helper called `checkout.test.helpers.tsx` is not a test and must not
       // exempt itself from the guard by how it is named.
-      if (/\.test\.tsx?$/.test(entry)) continue;
+      // Every extension `SCANNED_EXTENSION` accepts, or the two lists disagree:
+      // a `foo.test.mjs` would be scanned as production code and its pinned class
+      // strings would count as violations.
+      if (/\.test\.[cm]?[jt]sx?$/.test(entry)) continue;
       found.push(full);
     }
   };
@@ -154,11 +201,28 @@ function allowed(file: string, needle: string): boolean {
   return (EXCEPTIONS[relative(file)] ?? []).includes(needle);
 }
 
+const GLOBALS = readCss(join(FRONTEND, "app/globals.css"));
+
 /** The colour tokens `@theme inline` exposes to Tailwind, as utility names. */
 const DECLARED_TOKENS = new Set(
-  Object.keys(declarationsOf(readCss(join(FRONTEND, "app/globals.css")), "@theme inline"))
+  Object.keys(declarationsOf(GLOBALS, "@theme inline"))
     .filter((name) => name.startsWith("--color-"))
     .map((name) => name.slice("--color-".length)),
+);
+
+/**
+ * The typographic roles of design D10, read from the PLAIN `@theme` block.
+ *
+ * `text-display-2xl` is a font size, not a colour, and check 3 has to know that
+ * from the same file the roles are declared in — otherwise the ten roles this
+ * change introduces fail the guard the moment a screen uses one. Modifier keys
+ * (`--text-body-lg--line-height`) are not roles, so they are dropped.
+ */
+const DECLARED_TEXT_ROLES = new Set(
+  Object.keys(declarationsOf(GLOBALS, "@theme"))
+    .filter((name) => name.startsWith("--text-"))
+    .map((name) => name.slice("--text-".length))
+    .filter((role) => !role.includes("--")),
 );
 
 const FILES = sourceFiles();
@@ -171,7 +235,7 @@ function scan(
 ): Violation[] {
   const violations: Violation[] = [];
   for (const file of FILES) {
-    const source = stripCode(readFileSync(file, "utf8"));
+    const source = scannable(file);
     for (const match of source.matchAll(pattern)) {
       const found = pick(match);
       if (found === null || allowed(file, found)) continue;
@@ -219,7 +283,7 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
      */
     const violations = scan(colorUtility(), (match) => {
       const [utility, prefix, name] = match;
-      if (!namesAColorToken(prefix, name)) return null;
+      if (!namesAColorToken(prefix, name, DECLARED_TEXT_ROLES)) return null;
       if (DECLARED_TOKENS.has(name)) return null;
       // The WHOLE utility, opacity modifier included, so D12's `bg-black/50`
       // exemption matches what it declares and reads as what it exempts.
@@ -272,6 +336,8 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     // empty list — a renamed directory, a bad join — all of them would pass.
     expect(FILES.length).toBeGreaterThan(100);
     expect(DECLARED_TOKENS.size).toBe(25);
+    // The ten typographic roles of D10, which check 3 must not read as colours.
+    expect(DECLARED_TEXT_ROLES.size).toBe(10);
 
     /*
      * The roots are DERIVED from the `frontend/` listing, so what needs pinning
@@ -292,5 +358,16 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     // Exactly D12's four today — and a NEW directory joins them by default,
     // which is the point of deriving rather than listing.
     expect(ROOTS).toEqual(["app", "components", "features", "lib"]);
+
+    // Build configuration, every one of them, and none renders anything. Pinned
+    // so a loose `.tsx` dropped in the root has to be looked at rather than
+    // skipped by the same `isDirectory` filter that skips these.
+    expect(looseRootFiles()).toEqual([
+      "eslint.config.mjs",
+      "next-env.d.ts",
+      "next.config.ts",
+      "postcss.config.mjs",
+      "vitest.config.ts",
+    ]);
   });
 });

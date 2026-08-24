@@ -39,8 +39,45 @@ const BANG = String.raw`!?`;
 export const RAW_SCALE =
   /\b(bg|text|border|ring|fill|stroke|outline|divide|decoration|shadow|accent|caret|placeholder|from|via|to)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
 
-/** The Tailwind variant, not the word. Comments are stripped before this runs. */
-export const DARK_VARIANT = /\bdark:/g;
+/**
+ * A theme variant that follows the OS instead of our `data-theme` attribute.
+ *
+ * Two forms, because the literal `dark:` is not the only way to write one. An
+ * arbitrary variant can embed the media query —
+ * `[@media(prefers-color-scheme:dark)]:bg-surface` — and compiles to the very
+ * same rule, so it reopens the measured R6.5 defect in one line while passing a
+ * check that only knows the keyword. Matching is case-insensitive because
+ * Tailwind lowercases nothing: `DARK:bg-surface` is the same utility.
+ *
+ * The bracket form is anchored on the `]:` that makes it a variant, so
+ * `matchMedia("(prefers-color-scheme: dark)")` — how `lib/theme/` legitimately
+ * reads the OS preference — is not a match.
+ *
+ * The bracket branch matches the FEATURE NAME ALONE — any arbitrary variant that
+ * mentions `prefers-color-scheme`, whatever it then says about it — and that
+ * generality is the whole lesson of three review rounds, not caution:
+ *   · the first version required the literal `dark:`, and
+ *     `[@media(prefers-color-scheme:dark)]:bg-surface` walked through it;
+ *   · the second matched `…:\s*dark`, and `…:_dark` walked through it, because
+ *     **Tailwind v4 expands `_` to a space inside an arbitrary value or variant**;
+ *   · the third would have matched `[\s_]*dark`, and
+ *     `[@media_not_(prefers-color-scheme:light)]:bg-surface` walked through THAT,
+ *     because the feature has only two values, so negating `light` IS dark and
+ *     the word `dark` never appears.
+ * Each of those compiles to a real `@media` rule — verified with the project's
+ * own `@tailwindcss/postcss`, not assumed — and each reopens the measured R6.5
+ * defect. Matching the value was always going to lose that race; matching the
+ * feature ends it, and costs nothing, because R1.5 forbids a consumer from
+ * following the OS preference AT ALL: colour comes from the resolved theme.
+ *
+ * Still anchored on the `]:` that makes it a variant, so
+ * `matchMedia("(prefers-color-scheme: dark)")` — how `lib/theme/` legitimately
+ * reads the preference — is not a match.
+ *
+ * Comments are stripped before this runs.
+ */
+export const DARK_VARIANT =
+  /\bdark:|\[[^\]]*prefers-color-scheme[^\]]*\]:/gi;
 
 /**
  * A colour utility and the token it names, e.g. `hover:bg-surface` → `surface`.
@@ -165,9 +202,14 @@ export function arbitraryIsColor(raw: string): boolean {
  *     walked straight through the one channel it was supposed to gate;
  *   · it required `:`, so the JSX attribute form `<path fill="#abc" />` — where
  *     hard-coded hexes actually arrive, in inline SVG — was never examined.
+ *
+ * And a fourth, found by the review of 2026-08-24: the name had to be followed
+ * directly by `:` or `=`, so a computed key — `{ ["color"]: "#e11d48" }`, which
+ * JavaScript treats as identical to the plain form — went through untouched.
+ * Hence the optional `"]` between the name and its separator.
  */
 export const STYLE_COLOR =
-  /\b([A-Za-z-]*[Cc]olor|background\w*|border\w*|outline\w*|fill|stroke|box-?[Ss]hadow|text-?[Ss]hadow|filter|stop-?[Cc]olor|flood-?[Cc]olor)\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
+  /\b([A-Za-z-]*[Cc]olor|background\w*|border\w*|outline\w*|fill|stroke|box-?[Ss]hadow|text-?[Ss]hadow|filter|stop-?[Cc]olor|flood-?[Cc]olor)\s*(?:["'`]\s*\])?\s*[:=]\s*(?:"([^"]*)"|'([^']*)'|`([^`]*)`)/g;
 
 /** Values that are legal on a colour property without hard-coding a colour. */
 const STYLE_VALUE_OK =
@@ -213,14 +255,77 @@ export function styleValueIsHardCodedColor(
  * regex.
  *
  * Strings are NOT stripped: a class name lives in a string literal, so that is
- * where the guard has to look. The `//` rule therefore excludes a preceding
- * quote as well as a colon, because `src="//cdn.example/x.png"` would otherwise
- * delete the rest of its line, live classes included.
+ * where the guard has to look.
+ *
+ * A scanner rather than two `replace` calls, because a comment delimiter has no
+ * meaning inside a string and a regex cannot know which it is looking at. The
+ * review of 2026-08-24 demonstrated both halves of that: `const marker = "/*";`
+ * made the unanchored block rule swallow everything up to the next `*` slash —
+ * live classes included, reported as zero violations — and the line rule, which
+ * only excluded a preceding quote or colon, deleted the rest of any line where
+ * `//` followed a letter, `}` or `)`, so `<img src="a//b.png" className="…"/>`
+ * lost its class. Walking the source keeps the two states apart by construction.
+ *
+ * Escapes are honoured outside strings too: that is what stops the `\/` of a
+ * regex literal such as `/https?:\/\//` from reading as a line comment.
  */
 export function stripCode(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
+  let out = "";
+  let i = 0;
+  while (i < source.length) {
+    const char = source[i];
+    if (char === '"' || char === "'" || char === "`") {
+      out += char;
+      i += 1;
+      while (i < source.length) {
+        if (source[i] === "\\") {
+          out += source.slice(i, i + 2);
+          i += 2;
+          continue;
+        }
+        out += source[i];
+        i += 1;
+        if (source[i - 1] === char) break;
+      }
+      continue;
+    }
+    if (char === "\\") {
+      out += source.slice(i, i + 2);
+      i += 2;
+      continue;
+    }
+    if (char === "/" && source[i + 1] === "*") {
+      const end = source.indexOf("*/", i + 2);
+      i = end === -1 ? source.length : end + 2;
+      continue;
+    }
+    if (char === "/" && source[i + 1] === "/") {
+      const end = source.indexOf("\n", i);
+      i = end === -1 ? source.length : end;
+      continue;
+    }
+    out += char;
+    i += 1;
+  }
+  return out;
+}
+
+/**
+ * The class list of every `@apply` directive in a stylesheet, and nothing else.
+ *
+ * This is the answer to «what does the guard do with CSS», and the reason it is
+ * not «scan it like a component»: a stylesheet's own declarations are not
+ * utility classes, and running the class patterns over them reports nonsense —
+ * `border-color: var(--color-border)` reads as the prefix `border` naming an
+ * undeclared token `color`, and `@media (prefers-color-scheme: dark)` reads as a
+ * theme variant. `@apply` is the one place a stylesheet does name utilities, so
+ * it is the one place the class patterns mean anything.
+ *
+ * No file uses `@apply` today (`app/globals.css` is the only stylesheet and has
+ * none), which is precisely why this had to be written before one does.
+ */
+export function applyDirectives(css: string): string {
+  return [...css.matchAll(/@apply\s+([^;}]+)/g)].map(([, list]) => list).join("\n");
 }
 
 /**
@@ -268,7 +373,20 @@ export const NON_COLOR: Record<string, RegExp> = {
  * `text-sm` is a size, `border-b` a side, `shadow-lg` an elevation. Shared by the
  * tree walk and by the pattern tests, so both classify identically; keeping a
  * second copy in the test was how eight rows disagreed with the guard.
+ *
+ * `textRoles` is the set of typographic roles the plain `@theme` block declares
+ * as `--text-*` (design D10), and it has to be passed in because `NON_COLOR.text`
+ * knows only Tailwind's numeric scale: without it `text-display-2xl` — a token
+ * this very change introduces — classifies as a colour utility naming an
+ * undeclared colour, and the first screen to use one fails the build asking for
+ * a `--color-display-2xl` that must not exist. D10 and D12 never conflicted; the
+ * guard was reading the wrong `@theme` block.
  */
-export function namesAColorToken(prefix: string, name: string): boolean {
+export function namesAColorToken(
+  prefix: string,
+  name: string,
+  textRoles: ReadonlySet<string>,
+): boolean {
+  if (prefix === "text" && textRoles.has(name)) return false;
   return !(NON_COLOR[prefix]?.test(name) ?? false);
 }

@@ -109,6 +109,15 @@ const MAY_NAME_THEME = new Set([
    * have widened the net for every future file too.
    */
   "test/color-tokens.test.ts",
+  /*
+   * The guard's own pattern table. It names the theme only inside SYNTHETIC class
+   * strings — `"[@media(prefers-color-scheme:dark)]:bg-surface"`, `"DARK:bg-surface"`
+   * — which are the cases proving check 2 catches a variant that follows the OS.
+   * They are fixtures, not code that runs against a theme, and rewording them to
+   * dodge this net would delete the coverage. Added 2026-08-24 with the fix for
+   * that bypass.
+   */
+  "test/color-tokens.patterns.test.ts",
 ]);
 
 describe("R3.3 — the theme is never client state", () => {

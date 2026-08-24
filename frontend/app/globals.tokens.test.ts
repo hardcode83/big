@@ -1,4 +1,4 @@
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
@@ -7,6 +7,7 @@ import {
   declaredNames as namesIn,
   declarationsOf as declarationsIn,
   readCss,
+  stripComments,
 } from "@/test/css-tokens";
 
 /**
@@ -609,6 +610,76 @@ describe("R4.1 — no font may be loaded from a CDN", () => {
       "utf8",
     ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
     expect(config).not.toMatch(/assetPrefix/);
+  });
+});
+
+/**
+ * Every file under `frontend/`, so an absence can be asserted about the TREE and
+ * not just about one directory. Build output and dependencies are skipped.
+ */
+function everyFile(dir: string, found: string[] = []): string[] {
+  for (const entry of readdirSync(dir, { withFileTypes: true })) {
+    if (entry.name === "node_modules" || entry.name === ".next") continue;
+    if (entry.name === "coverage" || entry.name === ".git") continue;
+    const full = join(dir, entry.name);
+    if (entry.isDirectory()) everyFile(full, found);
+    else found.push(full);
+  }
+  return found;
+}
+
+const FRONTEND_ROOT = join(__dirname, "..");
+const ALL_FILES = everyFile(FRONTEND_ROOT).map((f) =>
+  f.slice(FRONTEND_ROOT.length + 1),
+);
+
+describe("R1.1 — the token layer is the CSS, so there is no Tailwind config", () => {
+  /*
+   * R1.1: «THE SYSTEM SHALL NOT reintroducir `tailwind.config.js|ts`». The
+   * absence is a decision of `frontend-foundation` — `components.json` carries
+   * `"tailwind": {"config": ""}` — and until section 11 nothing named the file,
+   * so bringing it back would have failed nothing at all. Contrast R5.1, whose
+   * absence has been guarded since section 3.
+   *
+   * It matters because a config is a SECOND home for the token layer: v4 still
+   * reads one when `@config` points at it, and a `theme.extend.colors` there
+   * would define tokens `globals.css` knows nothing about — every parity and
+   * contrast guard in this file reads the CSS, so they would all stay green.
+   *
+   * Both assertions scan the whole tree, and that is the fix rather than a
+   * flourish: the first version checked only `frontend/tailwind.config.*` and
+   * only `globals.css`, and the section-11 QA reviewer walked straight through
+   * it with `lib/vendor/tailwind.config.js` plus an `app/print.css` carrying
+   * `@config "../lib/vendor/tailwind.config.js";` — 40 tests green, second token
+   * home installed. A guard against a file has to look where files can be.
+   */
+  const CONFIG_NAME = /(^|\/)tailwind\.config\.[cm]?[jt]s$/;
+
+  it("has no tailwind.config file anywhere in the tree, under any extension", () => {
+    const offenders = ALL_FILES.filter((file) => CONFIG_NAME.test(file));
+    expect(offenders, "R1.1 forbids a second home for the token layer").toEqual(
+      [],
+    );
+  });
+
+  it("no stylesheet anywhere points Tailwind at a config with @config", () => {
+    // `@config "./whatever.js"` loads a config under ANY name, so guarding the
+    // conventional filenames alone is not enough — and it need not be
+    // `globals.css` that does the pointing.
+    const offenders = ALL_FILES.filter((file) => file.endsWith(".css")).filter(
+      (file) =>
+        /@config\b/.test(
+          stripComments(readFileSync(join(FRONTEND_ROOT, file), "utf8")),
+        ),
+    );
+    expect(offenders).toEqual([]);
+  });
+
+  it("scans a tree that is actually there, so the two absences mean something", () => {
+    // Both assertions above are «found nothing». A broken walk would satisfy
+    // them silently, which is the failure mode this whole change is about.
+    expect(ALL_FILES.length).toBeGreaterThan(200);
+    expect(ALL_FILES).toContain("app/globals.css");
   });
 });
 
