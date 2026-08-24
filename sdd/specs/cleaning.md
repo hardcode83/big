@@ -308,6 +308,11 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
   SYSTEM SHALL responder `404`, igual que el checklist con un `item_id` desconocido. La plantilla
   declara los tipos admisibles **con independencia de su `required`**: un tipo opcional se puede
   subir, y lo que `required: true` gobierna es el cierre.
+- THE SYSTEM SHALL decir en el contrato publicado **dónde se leen los tipos declarados**, y no solo
+  que el desconocido da `404`: el conjunto que esta ruta acepta es exactamente el que
+  `GET /api/v1/cleaning-tasks/{id}/photo-requirements` enumera (§Los requisitos de foto de la
+  tarea), así que la relación entre las dos rutas es una garantía y no una coincidencia que el
+  cliente descubra probando identificadores.
 - IF la tarea no está en `IN_PROGRESS`, THEN THE SYSTEM SHALL responder `409` sin escribir nada:
   ni fila ni objeto en el almacén.
 - THE SYSTEM SHALL admitir **varias fotos del mismo `photo_type`** para una misma tarea, a
@@ -382,6 +387,27 @@ compartida y vive en [`specs/file-storage.md`](file-storage.md). Aquí está lo 
   (`CLEANING_PHOTO_URL_PREFIX`) **explícito** en cada punto de wiring, incluido `make seed-demo`, y
   NEVER SHALL depender del valor por defecto: aunque hoy coincida con el de limpieza, depender de él
   es lo que rompió al segundo consumidor, y el síntoma es un `403` que no parece un error de wiring.
+
+### Los requisitos de foto de la tarea
+
+- THE SYSTEM SHALL ofrecer las categorías de foto que la plantilla de una tarea declara —cada una
+  con su `label`, si el cierre la exige y si ya hay alguna subida— por el sub-recurso
+  `GET /api/v1/cleaning-tasks/{task_id}/photo-requirements`, y **no** ensanchando
+  `ChecklistResponse` ni `GET /{task_id}/context`. Es la cuarta proyección de solo lectura acotada a
+  una tarea, hermana de `/checklist`, `/context` y `/photos`.
+- THE SYSTEM SHALL servirla con `READ_CLEANING_TASKS` y el mismo acotamiento por fila que el resto
+  de esta capacidad, sin conceder `READ_CLEANING_TEMPLATES` ni `MANAGE_CLEANING_TEMPLATES` a ningún
+  rol: es lo que permite a una limpiadora ver los tres campos de su propia plantilla sin abrirle el
+  catálogo de plantillas del tenant.
+- THE SYSTEM SHALL reportar en ella lo que hay subido y NEVER SHALL derivar un veredicto de cierre:
+  las tres cláusulas de PRD §11 siguen aplicándose dentro de `CleaningTask.complete()` y en ningún
+  otro sitio (§Cierre y validación), y `CompletionEvidenceGatherer` sigue siendo el único
+  ensamblador de la evidencia. Lo que se comparte con el cierre es el **método del puerto**
+  `CleaningPhotoRepository.uploaded_photo_types`, no el ensamblado ni la comparación.
+
+Su comportamiento completo —el orden de la plantilla, la distinción entre *admisible* y
+*obligatorio*, lo que la respuesta nunca lleva y el catálogo de `404` de la ruta— vive en
+[`cleaner-photo-requirements.md`](cleaner-photo-requirements.md).
 
 ### Notificación y SLA
 
@@ -508,7 +534,9 @@ Su comportamiento completo —el sellado de `IncidentSource.CLEANER`, el víncul
   `CleaningCompletionEvidence`), `notifications.py`, `ports.py`, `repositories.py`
   (`CleaningPhotoRepository` y la consulta sin scoping de la ruta anónima), `exceptions.py`.
 - `backend/app/cleaning/application/use_cases.py` — provisión al checkout y los casos de uso del
-  ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local).
+  ciclo de vida, el checklist, las plantillas y las fotos (subida, listado y servido local), más
+  `GetPhotoRequirementsUseCase` y su `PhotoRequirementView`, que enumeran las categorías de foto de
+  la tarea sin tocar la maquinaria del cierre.
   `ListCleaningTasksUseCase` es además quien lee el estado de las viviendas de la página y devuelve
   cada tarea con su bloqueador ya resuelto.
 - `backend/app/properties/domain/repositories.py` y `properties/infrastructure/repositories.py` —

@@ -77,13 +77,16 @@ alcanza, contado sobre `backend/openapi.json`:
 | info de checkout previo | `checkout_at` de `/context` | `READ_CLEANING_TASKS` |
 | deadline del próximo check-in | `next_checkin_deadline` de `/context` | `READ_CLEANING_TASKS` |
 | checklist ítem a ítem con progreso | `GET /{id}/checklist` + `POST /{id}/checklist/{item_id}/complete` | `READ_` / `EXECUTE_` |
-| **botones de subir foto por categoría** | `POST /{id}/photos` — pero **las categorías no se pueden enumerar** | ver §3 |
+| botones de subir foto por categoría | `GET /{id}/photo-requirements` + `POST /{id}/photos` | `READ_` / `EXECUTE_` |
 | botón «reportar incidencia» | `POST /{id}/incidents` | `EXECUTE_CLEANING_TASKS` |
 | botón «finalizar limpieza» | `POST /{id}/complete` | `EXECUTE_CLEANING_TASKS` |
 
 Más `accept`/`reject`/`start`, que PRD §6 concede al rol y el ciclo de `specs/cleaning.md` sirve.
-Es decir: los dos repartos de 2026-08-18 (`cleaner-task-context`, `cleaner-incident-report`)
-hicieron su trabajo. Ocho de las nueve líneas son alcanzables hoy.
+Es decir: los tres repartos hicieron su trabajo —`cleaner-task-context` y `cleaner-incident-report`
+el 2026-08-18, `cleaner-photo-requirements` el 2026-08-24— y **las nueve líneas son alcanzables
+hoy**. La tabla de arriba se midió el 2026-08-23, cuando la novena todavía no lo era; la fila de
+las fotos se corrigió al archivar el tercer reparto (§3), y no queda ninguna línea de PRD §11 sin
+ruta que `CLEANER` alcance.
 
 Andamio ya en pie, para que el proposal futuro no lo redescubra: `CleanerShell`
 (`features/shell/components/cleaner-shell.tsx`, topbar sin sidebar ni bottom-nav),
@@ -121,7 +124,7 @@ map has a single entry. Whoever grants … adds the second»): la segunda entrad
 **Fuera de alcance, y nombrado**: una guarda de rol por ruta para los 12 destinos de `workspace`.
 Eso decide RBAC de frontend para el shell entero, no para `/cleaner`.
 
-### 3. Lo que la bloquea: las categorías de foto no son enumerables
+### 3. Lo que la bloqueaba: las categorías de foto no eran enumerables — **entregado**
 
 PRD §11 pide «botones de subir foto por categoría». Las categorías viven **solo** en
 `cleaning_checklist_templates.required_photos`, publicado en exactamente dos esquemas del contrato
@@ -136,6 +139,18 @@ Decisión de Jose el 2026-08-23: **tercer reparto de esta entrada por el mismo m
 `cleaner-photo-requirements` `[BE]` —análisis entero en
 [`cleaner-photo-requirements.md`](cleaner-photo-requirements.md)— y `cleaner-app` declara `needs:`
 sobre ella. Este `/sdd:new` se retoma cuando esté entregada.
+
+**Entregada el 2026-08-24** (PR #122). Todo el párrafo de arriba describe el hueco tal como estaba
+el 2026-08-23 y se conserva porque es la medición que justificó el reparto; lo que ya **no** es
+cierto es su última frase. Hoy `GET /api/v1/cleaning-tasks/{task_id}/photo-requirements` enumera las
+categorías con su `label`, su `required` y si ya hay una subida, con `READ_CLEANING_TASKS` y el
+acotamiento por fila que el rol ya tenía — sin conceder ningún permiso de plantilla. Comportamiento
+completo en [`sdd/specs/cleaner-photo-requirements.md`](../specs/cleaner-photo-requirements.md).
+
+Así que **este `/sdd:new` ya se puede retomar**: no le queda dependencia de backend. Lo que la
+entrada tiene por delante son las dos cosas que siguen siendo suyas, §1 (nombrar el piso en el
+listado exige una llamada a `/context` por tarea) y §2 (el aterrizaje por rol tras el login), más
+las dos pantallas.
 
 ### 4. La decisión de la regla 11 sobre `access_records.notes` se queda **sin dueño**
 
