@@ -15,14 +15,19 @@ explícitamente: «No hay frontend todavía: la bandeja de /conversations es de
 **Limitación de demo que se declara antes de empezar**: `backend/app/cli/seed_demo.py` no
 siembra `Conversation` ni `Message` (verificado: no existe `_seed_conversations` ni equivalente;
 la única conversación que crea el seed es de `Incident`, no de `messaging`). La bandeja
-abrirá **vacía** en el entorno demo (`make seed-demo` la deja vacía) y se puebla vía UI
-creando conversaciones o transcribiendo mensajes desde el panel. Esto es coherente con la
-naturaleza de la capability —las conversaciones nacen por un evento externo (mensaje del
-huésped, escalación de un intent o una transcripción) y el seed no las simula—, pero
-queda dicho aquí para que la review no lo cuente como fallo: si la demo necesita
-conversaciones precargadas, es una **futura extensión del seed**, no del FE, y queda fuera
-de esta entrada. La bandeja **es funcional** con la API sola y se demuestra creando al
-menos una conversación por la UI antes de abrir el listado.
+abrirá **vacía** en el entorno demo y `make seed-demo` mostrará legítimamente el estado
+vacío localizado del R2.4 — esta es la condición esperada de la demo, no un fallo. Las
+conversaciones nacen por un evento externo a esta entrada —un mensaje del huésped a través
+del portal, una escalación automática desde el pipeline de `messaging-ai` R4, o una
+transcripción manual desde el panel de gestión— y este change **no** las crea:
+`POST /api/v1/conversations` está explícitamente fuera de alcance (ver «Out of scope»).
+Para demostrar list / detail / reply fuera del entorno de tests, el operador de la demo
+necesita una conversación **previamente** creada por otra capability o productor legítimo
+de la API (p. ej. el pipeline de `messaging-ai` R4 disparado desde un `Incident` con intent
+`MAINTENANCE_ISSUE` / `ACCESS_PROBLEM`, o el portal del huésped si su change ya estuviera
+mergeado); sin esa conversación previa, la bandeja muestra el estado vacío del R2.4, que
+es el comportamiento correcto. Si la demo sistemática requiere conversaciones precargadas,
+eso es una **futura extensión del seed**, no del FE, y queda fuera de esta entrada.
 
 Entrada de roadmap: `conversations-inbox` (`needs: messaging-ai, frontend-auth-session`,
 ambas archivadas; size M, cuarta de la frontera al abrir esta propuesta).
@@ -335,10 +340,14 @@ Acceptance criteria:
 - **Seed de conversaciones y mensajes** — `seed-data-demo` no siembra `Conversation`/
   `Message` (verificado: `backend/app/cli/seed_demo.py` no tiene `_seed_conversations`
   ni equivalente; el único escritor de producción hoy es el pipeline de `messaging-ai`
-  R4). La bandeja abre vacía en demo y se puebla vía UI creando conversaciones o
-  transcribiendo mensajes desde el panel. Si la demo necesita conversaciones precargadas,
-  eso es una **futura extensión del seed**, no del FE, y queda fuera de esta entrada. La
-  bandeja **es funcional** con la API sola.
+  R4). En la demo, `make seed-demo` deja la bandeja legítimamente vacía y el R2.4 muestra
+  el estado vacío localizado — este es el comportamiento esperado, no un defecto.
+  Cualquier conversación que se necesite para demostrar list / detail / reply fuera de
+  tests debe existir **previamente** por otra capability o productor legítimo de la API;
+  este change **no** añade creación de conversaciones (siguiente bullet) ni siembra el
+  seed. Si la demo sistemática requiere conversaciones precargadas, eso es una **futura
+  extensión del seed**, no del FE, y queda fuera de esta entrada. La bandeja **es
+  funcional** con la API sola.
 - **Mutaciones del agregado distintas de responder**:
   - `POST /api/v1/conversations` (crear): no se invoca desde el panel; las conversaciones
     nacen por el pipeline de `messaging-ai` R4 (`MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`) o
@@ -378,8 +387,9 @@ Acceptance criteria:
 - **Adaptadores externos reales** (WhatsApp Business, SMTP, modelos IA) — `MockAIAdapter`
   y los adaptadores consola siguen siendo los del MVP. Esta entrada no introduce ni
   enchufa ninguno.
-- **`guest-portal` (creación de conversaciones por el huésped)** — vive en su entrada
-  propia archivada; aquí se consume la API que aquella ya estableció.
+- **`guest-portal` (creación de conversaciones por el huésped)** — vive en una
+  capability / change independiente y fuera de scope; aquí se consume la API que aquella
+  ya estableció, sin reabrir ni coordinarse con ella.
 
 ## Affected specs
 
