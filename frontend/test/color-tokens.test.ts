@@ -3,6 +3,19 @@ import { join } from "node:path";
 
 import { describe, expect, it } from "vitest";
 
+import {
+  COLOR_PREFIX,
+  DARK_VARIANT,
+  NON_COLOR,
+  RAW_SCALE,
+  STYLE_COLOR,
+  arbitraryIsColor,
+  arbitraryUtility,
+  colorUtility,
+  namesAColorToken,
+  stripCode,
+  styleValueIsHardCodedColor,
+} from "./color-tokens";
 import { declarationsOf, readCss } from "./css-tokens";
 
 /**
@@ -54,6 +67,23 @@ const NOT_UI = new Set([
   "locales", // JSON catalogues, no TS
   "devops", // Dockerfile and friends
   "scripts", // build tooling, never rendered
+  /*
+   * Test infrastructure, and the one entry that needs a reason rather than a
+   * label.
+   *
+   * R6.6 scopes the obligation to «código **no de test**», and D12 names four
+   * roots — so excluding `test/` is the design, not a gap. Deriving the roots
+   * briefly pulled it in, and that surfaced why it must not be: this guard's own
+   * pattern module lives in `test/color-tokens.ts`, and its `NON_COLOR` table
+   * contains strings like `from-font` (a text-decoration keyword) that read as
+   * colour utilities when regex source is scanned as if it were markup. The
+   * guard flagged itself.
+   *
+   * What this gives up is small and worth naming: a test helper that hard-codes
+   * a colour is not caught. Helpers do not ship, and `*.test.*` files were
+   * already exempt by D12 for the same reason.
+   */
+  "test",
 ]);
 
 function uiRoots(): string[] {
@@ -77,156 +107,20 @@ const EXCEPTIONS: Record<string, readonly string[]> = {
   "components/ui/sheet.tsx": ["bg-black/50"],
   // Replaces the `layout.tsx` that imports `globals.css`, so it literally has no
   // tokens available — the same reason it carries its i18n catalogue inline.
-  "app/global-error.tsx": ["#555", "#ccc"],
+  // The needles are the whole declared values, because check 5 now reports what
+  // it read rather than just the hex it found inside a shorthand.
+  "app/global-error.tsx": ["#555", "1px solid #ccc"],
 };
 
-/** Every numeric colour scale Tailwind ships, as the utilities that name one. */
-const RAW_SCALE =
-  /\b(bg|text|border|ring|fill|stroke|outline|divide|decoration|shadow|accent|caret|placeholder|from|via|to)-(slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/g;
-
-/** The Tailwind variant, not the word. See `stripCode` for why that matters. */
-const DARK_VARIANT = /\bdark:/g;
-
-/** Every prefix that can carry a colour. Shared by checks 3 and 4. */
-const COLOR_PREFIX =
-  "bg|text|border|ring|fill|stroke|outline|divide|decoration|accent|caret|placeholder|from|via|to|shadow";
-
-/**
- * An optional variant chain: `hover:`, `focus-visible:`, `sm:`, `group-hover:`,
- * and any stack of them.
+/*
+ * The patterns live in `./color-tokens`, driven from a table by
+ * `color-tokens.patterns.test.ts`.
  *
- * This exists because the first version of `COLOR_UTILITY` opened with
- * `(?<![\w:/-])`, and that lookbehind does not STRIP a variant — it excludes the
- * match entirely. At the `b` of `hover:bg-card` the preceding character is `:`,
- * the lookbehind fails, and nothing is reported. Nineteen live utilities in this
- * tree were invisible to check 3 for that reason, and `hover:text-destructive`
- * — one keystroke from the bug D13 exists to catch — produced zero violations.
- * Found by the section-8 security and QA reviewers.
+ * They were inline here until the section-8 panel found ten holes in two
+ * successive versions — every one invisible to the tree-level assertions below,
+ * which are green whenever the tree does not happen to exercise the break. This
+ * file now answers «is the tree clean»; that one answers «do the patterns work».
  */
-const VARIANT = "(?:[a-z][a-z0-9-]*:)*";
-
-/**
- * A colour utility and the token it names, e.g. `hover:bg-surface` → `surface`.
- *
- * The opacity modifier (`/15`) and the variant chain are outside the captured
- * name — matched and discarded, not excluded: `bg-state-error/15` names
- * `state-error`, and so does `hover:bg-state-error/15`.
- */
-const COLOR_UTILITY = new RegExp(
-  `(?<![\\w/-])${VARIANT}(${COLOR_PREFIX})-([a-z][a-z0-9-]*)(?:\\/\\d{1,3})?\\b`,
-  "g",
-);
-
-/**
- * A colour that bypasses the token layer entirely: an arbitrary value
- * (`bg-[#e11d48]`, `text-[oklch(.7_.2_20)]`) or Tailwind v4's CSS-variable
- * shorthand (`bg-(--danger)`).
- *
- * Checks 1 and 3 are both blind to these by construction — `RAW_SCALE` needs a
- * named palette and `COLOR_UTILITY` needs `[a-z]` after the prefix, so `[` and
- * `(` never match. That left the whole arbitrary-value channel ungated while the
- * guard reported zero, which is the failure mode this file is supposed to make
- * impossible. Raised independently by the architect and security reviewers.
- */
-const ARBITRARY_UTILITY = new RegExp(
-  `(?<![\\w/-])${VARIANT}(?:${COLOR_PREFIX})-(?:\\[([^\\]\\s]+)\\]|\\((--[^)\\s]+)\\))`,
-  "g",
-);
-
-/**
- * An arbitrary value that IS a colour: a hex, any CSS colour function, or a
- * variable reference.
- */
-const ARBITRARY_IS_COLOR =
-  /^(#|rgba?\(|hsla?\(|hwb\(|oklch\(|oklab\(|lab\(|lch\(|color\(|color-mix\(|var\(--|--)/i;
-
-/**
- * An arbitrary value that is plainly NOT a colour — a length, a number, a URL,
- * a computed dimension.
- *
- * `text-[0.6875rem]` is a font size, and `bg-[url(...)]` an image. Both share
- * the prefix of a colour utility and neither breaks R1.5, so neither is a
- * violation. Everything that is neither this nor `ARBITRARY_IS_COLOR` fails, so
- * an unrecognised form still fails closed.
- */
-const ARBITRARY_IS_DIMENSION =
-  /^(-?[\d.]+([a-z%]{1,4})?$|calc\(|clamp\(|min\(|max\(|url\(|length:|image:)/i;
-
-/**
- * A colour hex in an inline style, e.g. `style={{ color: "#555" }}`.
- *
- * Scoped to a CSS colour PROPERTY rather than matching bare `#abc123`, because
- * the tree contains `"Booking.com #1234"` — a booking reference that a naive
- * hex regex reads as a four-digit `#RGBA` shorthand. Anchoring on the property
- * name is what separates a colour from a number that starts with a hash.
- *
- * Without this check the `#555`/`#ccc` entry in `EXCEPTIONS` was INERT: no check
- * ever produced a hex needle, so `allowed()` was never consulted for one, and
- * the pinning assertion below advertised a bounded exemption for a channel that
- * was never gated. A second `style={{ color: "#555" }}` in any other component
- * passed silently. Found by the section-8 security reviewer.
- */
-const STYLE_HEX =
-  /\b(?:color|background|backgroundColor|borderColor|borderTopColor|borderRightColor|borderBottomColor|borderLeftColor|outlineColor|fill|stroke|caretColor|textDecorationColor|columnRuleColor|border|outline|boxShadow|textShadow)\s*:\s*"[^"]*?(#[0-9a-fA-F]{3,8})\b[^"]*"/g;
-
-/**
- * What each prefix can legally name that is NOT a colour.
- *
- * A whitelist, not a blacklist, and that is the whole design: an unrecognised
- * value fails and the message tells you the two ways out — declare the token, or
- * add the keyword here. A blacklist of known non-colours would pass anything
- * new, which is exactly how `bg-card` survived.
- */
-const NON_COLOR: Record<string, RegExp> = {
-  bg: /^(none|inherit|current|transparent|auto|cover|contain|center|top|bottom|left|right|repeat|repeat-x|repeat-y|no-repeat|repeat-round|repeat-space|fixed|local|scroll|clip-\w+|origin-\w+|blend-[\w-]+|gradient-to-[a-z]+|linear-[\w-]+|radial-[\w-]+|conic-[\w-]+)$/,
-  text: /^(inherit|current|transparent|xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|ellipsis|clip|wrap|nowrap|balance|pretty)$/,
-  // `s`/`e` are the logical (start/end) sides, absent from the tree today but a
-  // one-keystroke neighbour of `l`/`r` — flagged by the section-8 QA reviewer.
-  border: /^(inherit|current|transparent|none|solid|dashed|dotted|double|hidden|collapse|separate|spacing-[\w.]+|[xytrblse](-\d+)?|\d+)$/,
-  ring: /^(inherit|current|transparent|inset|offset-[\w-]+|\d+)$/,
-  fill: /^(none|inherit|current|transparent)$/,
-  stroke: /^(none|inherit|current|transparent|\d+)$/,
-  outline: /^(none|inherit|current|transparent|solid|dashed|dotted|double|hidden|offset-[\w-]+|\d+)$/,
-  divide: /^(inherit|current|transparent|solid|dashed|dotted|double|none|[xy](-reverse)?|\d+)$/,
-  decoration: /^(inherit|current|transparent|slice|clone|solid|double|dotted|dashed|wavy|auto|from-font|\d+)$/,
-  accent: /^(auto|inherit|current|transparent)$/,
-  caret: /^(inherit|current|transparent)$/,
-  placeholder: /^(inherit|current|transparent)$/,
-  // Gradient stops and coloured shadows. `RAW_SCALE` already listed these four
-  // prefixes, so a `from-emerald-500` failed — but `from-nonexistent-token` was
-  // never checked for existence at all, because check 3 did not know the prefix.
-  // Dormant today (no gradients or coloured shadows in the tree) and closed
-  // anyway: the section-8 QA reviewer found it by probing.
-  from: /^(inherit|current|transparent|\d{1,3}%)$/,
-  via: /^(inherit|current|transparent|\d{1,3}%)$/,
-  to: /^(inherit|current|transparent|\d{1,3}%)$/,
-  shadow: /^(none|inner|inherit|current|transparent|xs|sm|md|lg|xl|\d?xl)$/,
-};
-
-/**
- * Comments are stripped before anything is counted, and this is load-bearing.
- *
- * `lib/ui/status-tone.ts` explains in prose why the `dark:` variant was removed,
- * so the word appears three times inside a doc comment there. Counting it would
- * make the file that FIXED R6.5 the file that fails the guard for it — and the
- * obvious workaround, rewording the comment, would delete the explanation to
- * satisfy a regex. The same class of false positive that task 10.4 hit with
- * `fonts.googleapis.com`.
- *
- * Strings are NOT stripped: a class name lives in a string literal, so that is
- * precisely where the guard has to look.
- */
-function stripCode(source: string): string {
-  return source
-    .replace(/\/\*[\s\S]*?\*\//g, "")
-    // Not just `[^:]`: that guards `https://` but not a protocol-relative URL in
-    // a string — `src="//cdn.example/x.png" className="bg-red-500"` would have
-    // the rest of its line deleted, live class included, before any check ran.
-    // Excluding a preceding quote closes it. Raised as latent by the section-8
-    // security reviewer; measured at zero occurrences today, fixed anyway
-    // because a stripper that eats real code fails open.
-    .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
-}
 
 function sourceFiles(): string[] {
   const found: string[] = [];
@@ -323,10 +217,10 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
      * the token should be declared in `@theme inline`, or the value is a
      * non-colour Tailwind keyword that belongs in `NON_COLOR` above.
      */
-    const violations = scan(COLOR_UTILITY, (match) => {
+    const violations = scan(colorUtility(), (match) => {
       const [utility, prefix, name] = match;
+      if (!namesAColorToken(prefix, name)) return null;
       if (DECLARED_TOKENS.has(name)) return null;
-      if (NON_COLOR[prefix]?.test(name)) return null;
       // The WHOLE utility, opacity modifier included, so D12's `bg-black/50`
       // exemption matches what it declares and reads as what it exempts.
       return utility;
@@ -341,15 +235,9 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
      * R1.5 outright: a hard-coded colour cannot depend on the resolved theme.
      * Both were invisible to every other check here.
      */
-    const violations = scan(ARBITRARY_UTILITY, (match) => {
-      const value = match[1] ?? match[2] ?? "";
-      if (ARBITRARY_IS_COLOR.test(value)) return match[0];
-      // A length, a number, a URL: shares the prefix, is not a colour, breaks
-      // nothing. `text-[0.6875rem]` is the live example in this tree.
-      if (ARBITRARY_IS_DIMENSION.test(value)) return null;
-      // Neither — fail closed, as `NON_COLOR` does for the named forms.
-      return match[0];
-    });
+    const violations = scan(arbitraryUtility(), (match) =>
+      arbitraryIsColor(match[1] ?? match[2] ?? "") ? match[0] : null,
+    );
     expect(format(violations)).toEqual([]);
   });
 
@@ -363,7 +251,10 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
      * for the `layout.tsx` that imports `globals.css`, so it has no tokens to
      * name — the same reason it carries its i18n catalogue inline.
      */
-    const violations = scan(STYLE_HEX, (match) => match[1]);
+    const violations = scan(STYLE_COLOR, (match) => {
+      const value = match[2] ?? match[3] ?? match[4] ?? "";
+      return styleValueIsHardCodedColor(match[1], value) ? value.trim() : null;
+    });
     expect(format(violations)).toEqual([]);
   });
 
@@ -372,7 +263,7 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     // one is a deliberate edit to this assertion, with a reviewer attached.
     expect(EXCEPTIONS).toEqual({
       "components/ui/sheet.tsx": ["bg-black/50"],
-      "app/global-error.tsx": ["#555", "#ccc"],
+      "app/global-error.tsx": ["#555", "1px solid #ccc"],
     });
   });
 
@@ -396,10 +287,10 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
       "node_modules",
       "public",
       "scripts",
+      "test",
     ]);
-    // And the four D12 named are still among them, so deriving cannot narrow.
-    for (const root of ["app", "components", "features", "lib"]) {
-      expect(ROOTS, `${root} must be scanned`).toContain(root);
-    }
+    // Exactly D12's four today — and a NEW directory joins them by default,
+    // which is the point of deriving rather than listing.
+    expect(ROOTS).toEqual(["app", "components", "features", "lib"]);
   });
 });

@@ -600,13 +600,25 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       **Endurecido tras el panel de la sección 8** (arquitectura FAIL 1, security FAIL 3, QA 4
       hallazgos, los tres sobre el guard recién escrito): la variante se consume en vez de
       excluir la coincidencia —`hover:bg-card` no producía nada, y con él 10 utilidades
-      distintas del árbol—; `from`/`via`/`to`/`shadow` entran en la comprobación 3; dos
-      comprobaciones nuevas, valores arbitrarios (`bg-[#e11d48]`) y hex en estilo inline —sin
-      esta última la excepción `#555`/`#ccc` era inerte—; raíces derivadas en vez de las cuatro
-      a mano; fichero de test por extensión anclada. Cada agujero está probado por mutación:
-      ocho sondas dentro del árbol, todas en rojo, y dos negativas
-      (`text-[0.6875rem]`, `hover:bg-surface`) que siguen en verde. El límite que queda —clases
-      construidas dinámicamente— se declara en D12 en vez de insinuarse. [R6.6, R1.5, D12, D13]
+      distintas del árbol, **19 apariciones**—; `from`/`via`/`to`/`shadow` entran en la
+      comprobación 3; dos comprobaciones nuevas, valores arbitrarios (`bg-[#e11d48]`) y color
+      en estilo inline —sin esta última la excepción `#555`/`#ccc` era **inerte**: ninguna
+      comprobación emitía nunca un hex, así que `allowed()` no se consultaba para uno—; raíces
+      derivadas en vez de las cuatro a mano; fichero de test por extensión anclada.
+      **Cuidado con la cifra**: 27 es el total de coincidencias nuevas de la comprobación 3
+      (387 → 414) y se descompone en 19 de la variante más 8 de `shadow-*`; atribuir las 27 a
+      la variante sumaba dos defectos en un número, y lo cazaron arquitectura y QA por separado.
+      **Segunda vuelta del panel: diez agujeros más** —variante tipada `bg-(color:--brand)`,
+      `bg-Card` capitalizado, arbitrario con espacio, hex con comilla simple o plantilla,
+      `rgb()` y colores con nombre en estilo, la forma de atributo JSX `fill="#abc"`, huecos de
+      propiedades, y dos falsos positivos (`shadow-2xs`, `text-[0.6875rem/1]`) que habrían roto
+      una build. Los patrones se extraen a `test/color-tokens.ts` y
+      `test/color-tokens.patterns.test.ts` los recorre desde una tabla de **66 casos**, uno por
+      agujero: la corrección del guard deja de depender de lo que el árbol contenga hoy.
+      Comprobado por mutación contra el árbol real: **28 sondas, 20 en rojo y 8 negativas en
+      verde**. Dos límites declarados en D12 en vez de insinuados — clases construidas
+      dinámicamente, y que el guard comprueba existencia y no corrección semántica.
+      [R6.6, R1.5, D12, D13]
 
 ## 9. Documentación
 

@@ -495,8 +495,18 @@ que habría visto el `bg-card` de D13.
 tres sobre el mismo fichero). La primera versión del guard tenía cuatro agujeros, y el más
 grave es que se saltaba con un prefijo de variante: la mirada atrás `(?<![\w:/-])` no *quita*
 la variante, **excluye la coincidencia entera**, así que `hover:bg-card` no producía nada. Diez
-utilidades distintas del árbol (27 apariciones) eran invisibles, y `hover:text-destructive` —a
-una tecla del defecto que D13 existe para cazar— daba cero violaciones. Lo que quedó:
+utilidades distintas del árbol —**19 apariciones**— eran invisibles, y `hover:text-destructive`
+—a una tecla del defecto que D13 existe para cazar— daba cero violaciones.
+
+**Corregido el recuento** (panel de la sección 8, arquitectura y QA por separado): la primera
+redacción de este párrafo decía «27 apariciones», y 27 es el total de coincidencias nuevas de la
+comprobación 3 (387 → 414), no lo que arregló la variante. Se descompone en **19** de la
+variante y **8** de `shadow-*`, que entraron por el arreglo de prefijos, un defecto distinto.
+Sumar dos bugs en una cifra y presentarla como la de uno es exactamente el desvío que R6.6 pide
+evitar cuando exige que el recuento «quede registrado». La cifra de la variante es 19, y el
+comentario del propio fichero ya la tenía.
+
+Lo que quedó:
 
 - la variante se **consume** en vez de excluir la coincidencia;
 - `from`, `via`, `to` y `shadow` entran en la comprobación 3, que no los conocía aunque
@@ -512,9 +522,32 @@ una tecla del defecto que D13 existe para cazar— daba cero violaciones. Lo que
   `"Booking.com #1234"` — una referencia de reserva que un hex ingenuo lee como `#RGBA`;
 - las raíces se **derivan** del listado de `frontend/` menos una lista de exclusión fijada, en
   vez de las cuatro de D12 escritas a mano: un `hooks/` nuevo se escanea el día que aparece, y
-  `FILES.length` no se habría movido lo bastante para delatarlo;
+  `FILES.length` no se habría movido lo bastante para delatarlo. Hoy resuelven exactamente a las
+  cuatro de D12, y una aserción lo fija. **`test/` queda fuera a propósito**: R6.6 acota la
+  obligación a «código **no de test**», y al derivar entró un momento y enseñó por qué no debe —
+  el módulo de patrones de este guard vive en `test/color-tokens.ts`, y su tabla `NON_COLOR`
+  contiene cadenas como `from-font` que leídas como marcado parecen utilidades de color. El
+  guard se señaló a sí mismo;
 - el fichero de test se reconoce por extensión anclada, no por subcadena, para que un
   `checkout.test.helpers.tsx` no se exima solo por cómo se llama.
+
+**Segunda vuelta del panel, y la razón de extraer los patrones.** Sobre la versión endurecida
+el panel encontró **diez agujeros más** entre los tres revisores: variantes tipadas
+(`bg-(color:--brand)`), nombres capitalizados (`bg-Card`, que Tailwind compila a nada igual que
+`bg-card`), valores arbitrarios con espacio, hex en estilo con comilla simple o plantilla
+—nada en este proyecto obliga a comilla doble: no hay prettier ni regla de comillas—, colores
+no-hex en estilo (`rgb()`, `rebeccapurple`), la forma de **atributo** JSX (`fill="#abc"`, que es
+donde los hex a mano llegan de verdad: SVG en línea), huecos en la lista de propiedades
+(`accentColor`, `borderBlockColor`, `backgroundImage`), y dos falsos positivos que habrían roto
+la build de alguien: `shadow-2xs` —utilidad real del Tailwind 4.3.2 que este repo fija— y
+`text-[0.6875rem/1]`.
+
+Diez agujeros en dos versiones sucesivas, todos invisibles a un test que sólo afirma «el árbol
+está limpio». Como lo puso el revisor de arquitectura: el guard «se pondría verde con una regex
+rota siempre que el árbol no ejercite la rotura». Así que los patrones se extraen a
+`test/color-tokens.ts` y `test/color-tokens.patterns.test.ts` los recorre **desde una tabla**:
+66 casos, uno por agujero encontrado, con sus negativos. La corrección del guard deja de
+depender de lo que el árbol contenga hoy, y cerrar el siguiente agujero es añadir una fila.
 
 **Límite que el guard no cubre, y se declara en vez de insinuarse**: una clase construida
 dinámicamente (`` `bg-${tono}-100` ``, concatenación) no la ve ninguna de las cinco
@@ -522,6 +555,14 @@ comprobaciones. Es el mismo punto ciego por el que D12 rechazó la regla de ESLi
 hereda. En la práctica hoy no muerde —el proyecto ya usa tablas de consulta
 (`TONE_BADGE_CLASS`, `severityColorGroup`) en vez de armar clases— y además Tailwind no extrae
 esas clases, así que un desliz degrada a código muerto, no a un color silenciosamente erróneo.
+
+**Segundo límite declarado, por simetría con el anterior** (lo pidió el revisor de QA, y tiene
+razón en que declararlo es la mitad del trabajo): el guard comprueba que el token **existe**, no
+que sea el **correcto**. Cambiar `text-state-error-text` por `text-state-success-text` en un
+mensaje de error deja las cinco comprobaciones en verde, porque ambos tokens están declarados.
+Eso es semántica de sitio de llamada y sólo lo cazan aserciones de render; las hay para los
+badges de severidad (sección 7), y no para los tres mensajes de error de D13 —`guest-fields.tsx`
+no tiene fichero de test siquiera, hueco anterior a este change. Se declara y no se cierra.
 
 ### D13 — `bg-card` no pinta nada, y el guard que lo habría visto
 
