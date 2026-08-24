@@ -5,8 +5,21 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 import * as dataModule from "../../data";
 
+const useAuth = vi.hoisted(() =>
+  vi.fn(() => ({
+    user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+  })),
+);
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+  useAuth,
+  useHasPermission: (permission: string) => {
+    const { user } = useAuth();
+    if (!user) return false;
+    if (permission === "MANAGE_CONVERSATIONS") {
+      return user.role === "TENANT_OWNER" || user.role === "PROPERTY_MANAGER";
+    }
+    return false;
+  },
 }));
 
 vi.mock("@/lib/api/retry-policy", () => ({
@@ -85,6 +98,10 @@ const MESSAGES_WITH_PAGES = {
 
 describe("ConversationThreadView (R3)", () => {
   beforeEach(() => {
+    useAuth.mockReset();
+    useAuth.mockImplementation(() => ({
+      user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+    }));
     getMock.mockReset();
     listMessagesMock.mockReset();
     replyMock.mockReset();
@@ -207,10 +224,33 @@ describe("ConversationThreadView (R3)", () => {
     expect(lastCallArgs[1]).toBe("c1");
     expect(lastCallArgs[2]).toBe(2);
   });
+
+  it("does NOT render the reply form when the user lacks MANAGE_CONVERSATIONS (R6.4 / reg perm)", async () => {
+    // Re-mock `useAuth` for this test only: a CLEANER has no
+    // MANAGE_CONVERSATIONS (messaging-ai R7) so the form must not
+    // appear — the operator would otherwise always 403 on submit.
+    // Use `mockReturnValue` (not `mockReturnValueOnce`) because the
+    // view re-renders after the queries resolve and a second call
+    // would otherwise fall back to TENANT_OWNER from the implementation
+    // in the mock factory.
+    useAuth.mockReturnValue({
+      user: { tenant_id: "tenant-from-session", role: "CLEANER" },
+    });
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("channel.WHATSAPP")).toBeTruthy());
+    // Reply form is not rendered.
+    expect(view.container.querySelector("#reply-content")).toBeNull();
+    // Localized forbidden copy is shown instead.
+    expect(view.getByText("fields.forbidden")).toBeTruthy();
+  });
 });
 
 describe("ConversationThreadView — PENDING_HUMAN badge updates after reply (R6.7)", () => {
   beforeEach(() => {
+    useAuth.mockReset();
+    useAuth.mockImplementation(() => ({
+      user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+    }));
     replyMock.mockReset();
     listMessagesMock.mockReset();
     getMock.mockReset();

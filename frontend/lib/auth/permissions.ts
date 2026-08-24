@@ -17,12 +17,12 @@ import type { components } from "@/lib/api/generated/openapi";
  */
 type UserRole = components["schemas"]["UserRole"];
 
-export type Permission = "MANAGE_CLEANING_TASKS";
+export type Permission = "MANAGE_CLEANING_TASKS" | "MANAGE_CONVERSATIONS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
-  TENANT_OWNER: [],
-  PROPERTY_MANAGER: ["MANAGE_CLEANING_TASKS"],
+  TENANT_OWNER: ["MANAGE_CONVERSATIONS"],
+  PROPERTY_MANAGER: ["MANAGE_CLEANING_TASKS", "MANAGE_CONVERSATIONS"],
   CLEANER: [],
   TECHNICIAN: [],
 };

@@ -3,7 +3,26 @@
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { ApiError } from "@/lib/api";
+
 import { useReplyToConversation } from "../../hooks/use-reply-to-conversation";
+
+/**
+ * Map the mutation error to a localized error key (R6.4). The envelope
+ * (`message`, `details`, `code`) is intentionally never read — the keys
+ * here are exhaustive over the status codes that the UI distinguishes.
+ * Anything not enumerated falls back to the generic copy. The body the
+ * caller passes is `null` while the mutation has not been attempted.
+ */
+function replyErrorKey(error: unknown): string {
+  if (error instanceof ApiError) {
+    if (error.status === 422) return "thread.replyErrorValidation";
+    if (error.status === 401) return "thread.replyErrorUnauthorized";
+    if (error.status === 403) return "thread.replyErrorForbidden";
+    if (error.status === 404) return "thread.replyErrorNotFound";
+  }
+  return "thread.replyErrorGeneric";
+}
 
 /**
  * The reply form of a conversation (proposal R4, design D9).
@@ -93,7 +112,7 @@ export function ConversationReplyForm({
       </div>
       {error ? (
         <p role="alert" className="mt-2 text-sm text-destructive">
-          {t("thread.replyErrorGeneric")}
+          {t(replyErrorKey(error))}
         </p>
       ) : null}
     </form>

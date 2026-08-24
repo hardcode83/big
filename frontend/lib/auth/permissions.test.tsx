@@ -39,6 +39,30 @@ describe("useHasPermission (R4.3)", () => {
     expect(result.current).toBe(false);
   });
 
+  it("grants MANAGE_CONVERSATIONS to TENANT_OWNER", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_CONVERSATIONS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("grants MANAGE_CONVERSATIONS to PROPERTY_MANAGER", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_CONVERSATIONS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies MANAGE_CONVERSATIONS to CLEANER", () => {
+    useAuth.mockReturnValue({ user: { role: "CLEANER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_CONVERSATIONS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",

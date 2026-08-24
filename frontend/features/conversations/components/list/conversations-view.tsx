@@ -4,12 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { LoadingState } from "@/components/states";
+
 import type { ConversationEscalationStatus, ConversationFilters } from "../../data";
 import { mapConversationsError } from "../../lib/error-mapping";
 import { useConversations } from "../../hooks/use-conversations";
 import { ConversationsFilters } from "./conversations-filters";
 
-const ESCALATION_BADGE: Record<ConversationEscalationStatus, string> = {
+export const ESCALATION_BADGE: Record<ConversationEscalationStatus, string> = {
   NONE: "bg-gray-100 text-gray-700",
   PENDING_HUMAN: "bg-amber-100 text-amber-800",
   HUMAN_HANDLING: "bg-blue-100 text-blue-700",
@@ -38,7 +40,7 @@ export function ConversationsView() {
   const state = mapConversationsError(query);
 
   if (state.kind === "loading") {
-    return <p>{t("states:loading.label", { ns: "states" })}</p>;
+    return <LoadingState label={t("states:loading.label", { ns: "states" })} />;
   }
   if (state.kind === "forbidden") {
     return <p>{t("conversations:fields.forbidden")}</p>;
@@ -48,7 +50,7 @@ export function ConversationsView() {
   }
   if (state.kind === "not-found" || state.kind === "error") {
     return (
-      <div>
+      <div role="alert">
         <p>{t("states:error.title", { ns: "states" })}</p>
         <p>{t("states:error.description", { ns: "states" })}</p>
         <button

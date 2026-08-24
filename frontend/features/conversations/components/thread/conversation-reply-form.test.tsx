@@ -144,11 +144,61 @@ describe("ConversationReplyForm (R4, D9)", () => {
     expect(
       (view.container.querySelector("#reply-content") as HTMLTextAreaElement).value,
     ).toBe(longDraft);
-    // Localized validation copy (the locale key the form renders for any
-    // mutation error); the i18n mock returns the key verbatim.
-    expect(view.getByRole("alert").textContent).toBe("thread.replyErrorGeneric");
+    // Localized validation copy (the locale key the form renders for a
+    // 422 mutation error); the i18n mock returns the key verbatim.
+    expect(view.getByRole("alert").textContent).toBe("thread.replyErrorValidation");
     // Counter still reflects the (over-long) draft length — the UI never
     // short-circuits on proximity to 4000.
     expect(view.getByText(`fields.characterCount:${longDraft.length}`)).toBeTruthy();
+  });
+
+  it("surfaces the localized unauthorized copy on a 401 (R6.4)", async () => {
+    replyMock.mockRejectedValueOnce(
+      new ApiError({ code: "UNAUTHORIZED", message: "x", status: 401 }),
+    );
+    const view = render(<ConversationReplyForm conversationId={CONVERSATION_ID} />, {
+      wrapper,
+    });
+    const textarea = view.container.querySelector("#reply-content") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Hola" } });
+    fireEvent.submit(view.getByRole("button", { name: "thread.replySubmit" }).closest("form")!);
+    await waitFor(() => expect(view.getByRole("alert").textContent).toBe("thread.replyErrorUnauthorized"));
+  });
+
+  it("surfaces the localized forbidden copy on a 403 (R6.4)", async () => {
+    replyMock.mockRejectedValueOnce(
+      new ApiError({ code: "FORBIDDEN", message: "x", status: 403 }),
+    );
+    const view = render(<ConversationReplyForm conversationId={CONVERSATION_ID} />, {
+      wrapper,
+    });
+    const textarea = view.container.querySelector("#reply-content") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Hola" } });
+    fireEvent.submit(view.getByRole("button", { name: "thread.replySubmit" }).closest("form")!);
+    await waitFor(() => expect(view.getByRole("alert").textContent).toBe("thread.replyErrorForbidden"));
+  });
+
+  it("surfaces the localized not-found copy on a 404 (R6.4)", async () => {
+    replyMock.mockRejectedValueOnce(
+      new ApiError({ code: "NOT_FOUND", message: "x", status: 404 }),
+    );
+    const view = render(<ConversationReplyForm conversationId={CONVERSATION_ID} />, {
+      wrapper,
+    });
+    const textarea = view.container.querySelector("#reply-content") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Hola" } });
+    fireEvent.submit(view.getByRole("button", { name: "thread.replySubmit" }).closest("form")!);
+    await waitFor(() => expect(view.getByRole("alert").textContent).toBe("thread.replyErrorNotFound"));
+  });
+
+  it("falls back to the generic copy on a 5xx / non-ApiError (R6.4)", async () => {
+    replyMock.mockRejectedValueOnce(new Error("boom"));
+    const view = render(<ConversationReplyForm conversationId={CONVERSATION_ID} />, {
+      wrapper,
+    });
+    const textarea = view.container.querySelector("#reply-content") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Hola" } });
+    fireEvent.submit(view.getByRole("button", { name: "thread.replySubmit" }).closest("form")!);
+    await waitFor(() => expect(view.getByRole("alert").textContent).toBe("thread.replyErrorGeneric"));
   });
 });

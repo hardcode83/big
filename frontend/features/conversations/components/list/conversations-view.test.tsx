@@ -78,6 +78,8 @@ describe("ConversationsView (R2)", () => {
     const view = render(<ConversationsView />, { wrapper });
     await waitFor(() => expect(view.getByText("states:error.title")).toBeTruthy());
     expect(view.getByText("states:error.description")).toBeTruthy();
+    // R2.4 — error container has role="alert" so screen readers announce it.
+    expect(view.container.querySelector('[role="alert"]')).toBeTruthy();
     const retry = view.getByText("states:error.retry");
     retry.click();
     expect(listMock).toHaveBeenCalledTimes(2);

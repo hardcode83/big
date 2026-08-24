@@ -4,11 +4,15 @@ import Link from "next/link";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { LoadingState } from "@/components/states";
+import { useHasPermission } from "@/lib/auth";
+
 import { mapConversationsError } from "../../lib/error-mapping";
 import {
   useConversation,
   useConversationMessages,
 } from "../../hooks/use-conversations";
+import { ESCALATION_BADGE } from "../list/conversations-view";
 import { ConversationThreadMessages } from "./conversation-thread-messages";
 import { ConversationReplyForm } from "./conversation-reply-form";
 
@@ -48,9 +52,10 @@ export function ConversationThreadView({
   const messagesQuery = useConversationMessages(conversationId, messagesPage);
   const messagesState = mapConversationsError(messagesQuery);
   const conversationState = mapConversationsError(conversationQuery);
+  const canReply = useHasPermission("MANAGE_CONVERSATIONS");
 
   if (conversationState.kind === "loading") {
-    return <p>{t("states:loading.label", { ns: "states" })}</p>;
+    return <LoadingState label={t("states:loading.label", { ns: "states" })} />;
   }
   if (conversationState.kind === "not-found") {
     return (
@@ -65,7 +70,7 @@ export function ConversationThreadView({
     conversationState.kind === "error"
   ) {
     return (
-      <div>
+      <div role="alert">
         <p>{t("states:error.title", { ns: "states" })}</p>
         <p>{t("states:error.description", { ns: "states" })}</p>
         <button
@@ -112,6 +117,10 @@ export function ConversationThreadView({
       </header>
       <dl className="mb-4 grid grid-cols-2 gap-2 text-sm">
         <div>
+          <dt className="text-muted-foreground">{t("fields.id")}</dt>
+          <dd className="font-mono">{conversation.id}</dd>
+        </div>
+        <div>
           <dt className="text-muted-foreground">{t("fields.channel")}</dt>
           <dd>{t(`channel.${conversation.channel}`)}</dd>
         </div>
@@ -121,7 +130,16 @@ export function ConversationThreadView({
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.escalationStatus")}</dt>
-          <dd>{t(`escalationStatus.${conversation.escalationStatus}`)}</dd>
+          <dd>
+            <span
+              className={
+                ESCALATION_BADGE[conversation.escalationStatus] ??
+                "bg-gray-100 text-gray-700"
+              }
+            >
+              {t(`escalationStatus.${conversation.escalationStatus}`)}
+            </span>
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.language")}</dt>
@@ -130,6 +148,30 @@ export function ConversationThreadView({
         <div>
           <dt className="text-muted-foreground">{t("fields.aiEnabled")}</dt>
           <dd>{conversation.aiEnabled ? "✓" : "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.property")}</dt>
+          <dd className="font-mono">{conversation.propertyId}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.reservation")}</dt>
+          <dd className="font-mono">{conversation.reservationId ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.guest")}</dt>
+          <dd className="font-mono">{conversation.guestId ?? "—"}</dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.createdAtFull")}</dt>
+          <dd>
+            {conversation.createdAt.slice(0, 16).replace("T", " ")}
+          </dd>
+        </div>
+        <div>
+          <dt className="text-muted-foreground">{t("fields.updatedAt")}</dt>
+          <dd>
+            {conversation.updatedAt.slice(0, 16).replace("T", " ")}
+          </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.lastMessageAt")}</dt>
@@ -142,14 +184,14 @@ export function ConversationThreadView({
       </dl>
       <h2 className="text-base font-medium">{t("thread.messagesHeading")}</h2>
       {messagesState.kind === "loading" ? (
-        <p>{t("states:loading.label", { ns: "states" })}</p>
+        <LoadingState label={t("states:loading.label", { ns: "states" })} />
       ) : messagesState.kind === "forbidden" ? (
         <p>{t("fields.forbidden")}</p>
       ) : messagesState.kind === "validation" ? (
         <p>{t("fields.validation")}</p>
       ) : messagesState.kind === "not-found" ||
         messagesState.kind === "error" ? (
-        <div>
+        <div role="alert">
           <p>{t("states:error.title", { ns: "states" })}</p>
           <button
             type="button"
@@ -187,11 +229,19 @@ export function ConversationThreadView({
           )}
         </>
       )}
-      <h2 className="mt-4 text-base font-medium">{t("thread.replyHeading")}</h2>
-      <ConversationReplyForm
-        conversationId={conversationId}
-        onReplySuccess={() => setMessagesPage(1)}
-      />
+      {canReply ? (
+        <>
+          <h2 className="mt-4 text-base font-medium">{t("thread.replyHeading")}</h2>
+          <ConversationReplyForm
+            conversationId={conversationId}
+            onReplySuccess={() => setMessagesPage(1)}
+          />
+        </>
+      ) : (
+        <p className="mt-4 text-sm text-muted-foreground" role="status">
+          {t("fields.forbidden")}
+        </p>
+      )}
     </section>
   );
 }
