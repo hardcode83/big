@@ -572,7 +572,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       conjunto de 25 de D2. El guard que lo detecta es la tercera comprobación de 8.1.
       [R1.5, D13]
 
-## 8. El guard: cero escalas crudas, cero `dark:`
+## 8. El guard: cero escalas crudas, cero `dark:` <!-- panel: PASS 2026-08-24 -->
 
 - [x] 8.1 Nuevo `frontend/test/color-tokens.test.ts` siguiendo el precedente de
       `test/eslint-boundaries.test.ts`: recorre `app/`, `components/`, `features/` y `lib/` y
@@ -597,6 +597,16 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `state-*-text` sobre las cuatro superficies lisas (51 → 71 pares por tema, registro total
       190 → 230), porque texto suelto sobre superficie no es el mismo par que texto sobre el
       tinte del badge. Peor ratio de los 40 nuevos: 5.97:1. [R1.5, R1.6, D13]
+      **Endurecido tras el panel de la sección 8** (arquitectura FAIL 1, security FAIL 3, QA 4
+      hallazgos, los tres sobre el guard recién escrito): la variante se consume en vez de
+      excluir la coincidencia —`hover:bg-card` no producía nada, y con él 10 utilidades
+      distintas del árbol—; `from`/`via`/`to`/`shadow` entran en la comprobación 3; dos
+      comprobaciones nuevas, valores arbitrarios (`bg-[#e11d48]`) y hex en estilo inline —sin
+      esta última la excepción `#555`/`#ccc` era inerte—; raíces derivadas en vez de las cuatro
+      a mano; fichero de test por extensión anclada. Cada agujero está probado por mutación:
+      ocho sondas dentro del árbol, todas en rojo, y dos negativas
+      (`text-[0.6875rem]`, `hover:bg-surface`) que siguen en verde. El límite que queda —clases
+      construidas dinámicamente— se declara en D12 en vez de insinuarse. [R6.6, R1.5, D12, D13]
 
 ## 9. Documentación
 

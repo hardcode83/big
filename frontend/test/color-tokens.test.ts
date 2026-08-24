@@ -33,7 +33,38 @@ import { declarationsOf, readCss } from "./css-tokens";
  */
 
 const FRONTEND = join(__dirname, "..");
-const ROOTS = ["app", "components", "features", "lib"] as const;
+
+/**
+ * Directories that hold no shipped UI code, pinned so a NEW one is scanned by
+ * default rather than silently skipped.
+ *
+ * D12 named four roots — `app/`, `components/`, `features/`, `lib/` — but R6.6
+ * scopes the obligation to «el árbol de `frontend/`», and a hard-coded list
+ * cannot tell the difference between "this directory has no colours" and "this
+ * directory did not exist when the list was written". Someone adding `hooks/` or
+ * `widgets/` would get no coverage and no warning, and `FILES.length` would not
+ * move enough to notice. So the roots are derived and the EXCLUSIONS are what
+ * gets reviewed.
+ */
+const NOT_UI = new Set([
+  "node_modules", // dependencies
+  ".next", // build output
+  "coverage", // test output
+  "public", // static assets, no TS
+  "locales", // JSON catalogues, no TS
+  "devops", // Dockerfile and friends
+  "scripts", // build tooling, never rendered
+]);
+
+function uiRoots(): string[] {
+  return readdirSync(FRONTEND)
+    .filter((entry) => !entry.startsWith("."))
+    .filter((entry) => !NOT_UI.has(entry))
+    .filter((entry) => statSync(join(FRONTEND, entry)).isDirectory())
+    .sort();
+}
+
+const ROOTS = uiRoots();
 
 /**
  * The three exceptions of D12, declared and reasoned rather than pattern-matched.
@@ -56,14 +87,87 @@ const RAW_SCALE =
 /** The Tailwind variant, not the word. See `stripCode` for why that matters. */
 const DARK_VARIANT = /\bdark:/g;
 
+/** Every prefix that can carry a colour. Shared by checks 3 and 4. */
+const COLOR_PREFIX =
+  "bg|text|border|ring|fill|stroke|outline|divide|decoration|accent|caret|placeholder|from|via|to|shadow";
+
 /**
- * A colour utility and the token it names, e.g. `bg-surface` → `surface`.
+ * An optional variant chain: `hover:`, `focus-visible:`, `sm:`, `group-hover:`,
+ * and any stack of them.
  *
- * The opacity modifier (`/15`) and the variant prefix are deliberately outside
- * the captured name: `bg-state-error/15` names `state-error`.
+ * This exists because the first version of `COLOR_UTILITY` opened with
+ * `(?<![\w:/-])`, and that lookbehind does not STRIP a variant — it excludes the
+ * match entirely. At the `b` of `hover:bg-card` the preceding character is `:`,
+ * the lookbehind fails, and nothing is reported. Nineteen live utilities in this
+ * tree were invisible to check 3 for that reason, and `hover:text-destructive`
+ * — one keystroke from the bug D13 exists to catch — produced zero violations.
+ * Found by the section-8 security and QA reviewers.
  */
-const COLOR_UTILITY =
-  /(?<![\w:/-])(bg|text|border|ring|fill|stroke|outline|divide|decoration|accent|caret|placeholder)-([a-z][a-z0-9-]*)(?:\/\d{1,3})?\b/g;
+const VARIANT = "(?:[a-z][a-z0-9-]*:)*";
+
+/**
+ * A colour utility and the token it names, e.g. `hover:bg-surface` → `surface`.
+ *
+ * The opacity modifier (`/15`) and the variant chain are outside the captured
+ * name — matched and discarded, not excluded: `bg-state-error/15` names
+ * `state-error`, and so does `hover:bg-state-error/15`.
+ */
+const COLOR_UTILITY = new RegExp(
+  `(?<![\\w/-])${VARIANT}(${COLOR_PREFIX})-([a-z][a-z0-9-]*)(?:\\/\\d{1,3})?\\b`,
+  "g",
+);
+
+/**
+ * A colour that bypasses the token layer entirely: an arbitrary value
+ * (`bg-[#e11d48]`, `text-[oklch(.7_.2_20)]`) or Tailwind v4's CSS-variable
+ * shorthand (`bg-(--danger)`).
+ *
+ * Checks 1 and 3 are both blind to these by construction — `RAW_SCALE` needs a
+ * named palette and `COLOR_UTILITY` needs `[a-z]` after the prefix, so `[` and
+ * `(` never match. That left the whole arbitrary-value channel ungated while the
+ * guard reported zero, which is the failure mode this file is supposed to make
+ * impossible. Raised independently by the architect and security reviewers.
+ */
+const ARBITRARY_UTILITY = new RegExp(
+  `(?<![\\w/-])${VARIANT}(?:${COLOR_PREFIX})-(?:\\[([^\\]\\s]+)\\]|\\((--[^)\\s]+)\\))`,
+  "g",
+);
+
+/**
+ * An arbitrary value that IS a colour: a hex, any CSS colour function, or a
+ * variable reference.
+ */
+const ARBITRARY_IS_COLOR =
+  /^(#|rgba?\(|hsla?\(|hwb\(|oklch\(|oklab\(|lab\(|lch\(|color\(|color-mix\(|var\(--|--)/i;
+
+/**
+ * An arbitrary value that is plainly NOT a colour — a length, a number, a URL,
+ * a computed dimension.
+ *
+ * `text-[0.6875rem]` is a font size, and `bg-[url(...)]` an image. Both share
+ * the prefix of a colour utility and neither breaks R1.5, so neither is a
+ * violation. Everything that is neither this nor `ARBITRARY_IS_COLOR` fails, so
+ * an unrecognised form still fails closed.
+ */
+const ARBITRARY_IS_DIMENSION =
+  /^(-?[\d.]+([a-z%]{1,4})?$|calc\(|clamp\(|min\(|max\(|url\(|length:|image:)/i;
+
+/**
+ * A colour hex in an inline style, e.g. `style={{ color: "#555" }}`.
+ *
+ * Scoped to a CSS colour PROPERTY rather than matching bare `#abc123`, because
+ * the tree contains `"Booking.com #1234"` — a booking reference that a naive
+ * hex regex reads as a four-digit `#RGBA` shorthand. Anchoring on the property
+ * name is what separates a colour from a number that starts with a hash.
+ *
+ * Without this check the `#555`/`#ccc` entry in `EXCEPTIONS` was INERT: no check
+ * ever produced a hex needle, so `allowed()` was never consulted for one, and
+ * the pinning assertion below advertised a bounded exemption for a channel that
+ * was never gated. A second `style={{ color: "#555" }}` in any other component
+ * passed silently. Found by the section-8 security reviewer.
+ */
+const STYLE_HEX =
+  /\b(?:color|background|backgroundColor|borderColor|borderTopColor|borderRightColor|borderBottomColor|borderLeftColor|outlineColor|fill|stroke|caretColor|textDecorationColor|columnRuleColor|border|outline|boxShadow|textShadow)\s*:\s*"[^"]*?(#[0-9a-fA-F]{3,8})\b[^"]*"/g;
 
 /**
  * What each prefix can legally name that is NOT a colour.
@@ -76,7 +180,9 @@ const COLOR_UTILITY =
 const NON_COLOR: Record<string, RegExp> = {
   bg: /^(none|inherit|current|transparent|auto|cover|contain|center|top|bottom|left|right|repeat|repeat-x|repeat-y|no-repeat|repeat-round|repeat-space|fixed|local|scroll|clip-\w+|origin-\w+|blend-[\w-]+|gradient-to-[a-z]+|linear-[\w-]+|radial-[\w-]+|conic-[\w-]+)$/,
   text: /^(inherit|current|transparent|xs|sm|base|lg|xl|\d?xl|left|center|right|justify|start|end|ellipsis|clip|wrap|nowrap|balance|pretty)$/,
-  border: /^(inherit|current|transparent|none|solid|dashed|dotted|double|hidden|collapse|separate|spacing-[\w.]+|[xytrbl](-\d+)?|\d+)$/,
+  // `s`/`e` are the logical (start/end) sides, absent from the tree today but a
+  // one-keystroke neighbour of `l`/`r` — flagged by the section-8 QA reviewer.
+  border: /^(inherit|current|transparent|none|solid|dashed|dotted|double|hidden|collapse|separate|spacing-[\w.]+|[xytrblse](-\d+)?|\d+)$/,
   ring: /^(inherit|current|transparent|inset|offset-[\w-]+|\d+)$/,
   fill: /^(none|inherit|current|transparent)$/,
   stroke: /^(none|inherit|current|transparent|\d+)$/,
@@ -86,6 +192,15 @@ const NON_COLOR: Record<string, RegExp> = {
   accent: /^(auto|inherit|current|transparent)$/,
   caret: /^(inherit|current|transparent)$/,
   placeholder: /^(inherit|current|transparent)$/,
+  // Gradient stops and coloured shadows. `RAW_SCALE` already listed these four
+  // prefixes, so a `from-emerald-500` failed — but `from-nonexistent-token` was
+  // never checked for existence at all, because check 3 did not know the prefix.
+  // Dormant today (no gradients or coloured shadows in the tree) and closed
+  // anyway: the section-8 QA reviewer found it by probing.
+  from: /^(inherit|current|transparent|\d{1,3}%)$/,
+  via: /^(inherit|current|transparent|\d{1,3}%)$/,
+  to: /^(inherit|current|transparent|\d{1,3}%)$/,
+  shadow: /^(none|inner|inherit|current|transparent|xs|sm|md|lg|xl|\d?xl)$/,
 };
 
 /**
@@ -104,7 +219,13 @@ const NON_COLOR: Record<string, RegExp> = {
 function stripCode(source: string): string {
   return source
     .replace(/\/\*[\s\S]*?\*\//g, "")
-    .replace(/(^|[^:])\/\/.*$/gm, "$1");
+    // Not just `[^:]`: that guards `https://` but not a protocol-relative URL in
+    // a string — `src="//cdn.example/x.png" className="bg-red-500"` would have
+    // the rest of its line deleted, live class included, before any check ran.
+    // Excluding a preceding quote closes it. Raised as latent by the section-8
+    // security reviewer; measured at zero occurrences today, fixed anyway
+    // because a stripper that eats real code fails open.
+    .replace(/(^|[^:"'`\\])\/\/.*$/gm, "$1");
 }
 
 function sourceFiles(): string[] {
@@ -120,7 +241,10 @@ function sourceFiles(): string[] {
       if (!/\.tsx?$/.test(entry)) continue;
       // D12 exempts tests: they may name classes, and pinning a class string is
       // exactly what `property-state-badge.test.tsx` exists to do.
-      if (/\.test\./.test(entry)) continue;
+      // Anchored to the extension, not a substring anywhere in the name: a
+      // helper called `checkout.test.helpers.tsx` is not a test and must not
+      // exempt itself from the guard by how it is named.
+      if (/\.test\.tsx?$/.test(entry)) continue;
       found.push(full);
     }
   };
@@ -210,6 +334,39 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     expect(format(violations)).toEqual([]);
   });
 
+  it("has no colour that bypasses the token layer entirely (R1.5)", () => {
+    /*
+     * Arbitrary values and CSS-variable shorthand. `bg-[#e11d48]` satisfies
+     * R6.6's literal text — it is not a numeric Tailwind scale — while breaking
+     * R1.5 outright: a hard-coded colour cannot depend on the resolved theme.
+     * Both were invisible to every other check here.
+     */
+    const violations = scan(ARBITRARY_UTILITY, (match) => {
+      const value = match[1] ?? match[2] ?? "";
+      if (ARBITRARY_IS_COLOR.test(value)) return match[0];
+      // A length, a number, a URL: shares the prefix, is not a colour, breaks
+      // nothing. `text-[0.6875rem]` is the live example in this tree.
+      if (ARBITRARY_IS_DIMENSION.test(value)) return null;
+      // Neither — fail closed, as `NON_COLOR` does for the named forms.
+      return match[0];
+    });
+    expect(format(violations)).toEqual([]);
+  });
+
+  it("has no colour hex in an inline style outside the declared exception", () => {
+    /*
+     * This is what makes the `#555`/`#ccc` entry in `EXCEPTIONS` mean something.
+     * Until this check existed no needle was ever a hex, so that entry gated
+     * nothing while the assertion below claimed the list was bounded.
+     *
+     * `app/global-error.tsx` keeps its exemption on the merits: it substitutes
+     * for the `layout.tsx` that imports `globals.css`, so it has no tokens to
+     * name — the same reason it carries its i18n catalogue inline.
+     */
+    const violations = scan(STYLE_HEX, (match) => match[1]);
+    expect(format(violations)).toEqual([]);
+  });
+
   it("keeps the exception list to D12's three, so none can be smuggled in", () => {
     // An exception nobody re-reads becomes a hole. Pinning the list means adding
     // one is a deliberate edit to this assertion, with a reviewer attached.
@@ -224,5 +381,25 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     // empty list — a renamed directory, a bad join — all of them would pass.
     expect(FILES.length).toBeGreaterThan(100);
     expect(DECLARED_TOKENS.size).toBe(25);
+
+    /*
+     * The roots are DERIVED from the `frontend/` listing, so what needs pinning
+     * is the exclusion list — the only place a directory can now disappear from
+     * the scan. A new `hooks/` or `widgets/` is scanned the day it appears; a
+     * new exclusion is a deliberate edit to this assertion.
+     */
+    expect([...NOT_UI].sort()).toEqual([
+      ".next",
+      "coverage",
+      "devops",
+      "locales",
+      "node_modules",
+      "public",
+      "scripts",
+    ]);
+    // And the four D12 named are still among them, so deriving cannot narrow.
+    for (const root of ["app", "components", "features", "lib"]) {
+      expect(ROOTS, `${root} must be scanned`).toContain(root);
+    }
   });
 });

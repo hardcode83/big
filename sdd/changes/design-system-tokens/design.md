@@ -491,6 +491,38 @@ Rechazado: una regla de ESLint — `no-restricted-syntax` sobre literales de cla
 declara. Las dos primeras miran lo que sobra; ésta mira lo que falta, y es la única de las tres
 que habría visto el `bg-card` de D13.
 
+**Enmendado otra vez el 2026-08-24** (panel de la sección 8: arquitectura, security y QA, los
+tres sobre el mismo fichero). La primera versión del guard tenía cuatro agujeros, y el más
+grave es que se saltaba con un prefijo de variante: la mirada atrás `(?<![\w:/-])` no *quita*
+la variante, **excluye la coincidencia entera**, así que `hover:bg-card` no producía nada. Diez
+utilidades distintas del árbol (27 apariciones) eran invisibles, y `hover:text-destructive` —a
+una tecla del defecto que D13 existe para cazar— daba cero violaciones. Lo que quedó:
+
+- la variante se **consume** en vez de excluir la coincidencia;
+- `from`, `via`, `to` y `shadow` entran en la comprobación 3, que no los conocía aunque
+  `RAW_SCALE` sí;
+- **cuarta** comprobación, valores arbitrarios y variables CSS: `bg-[#e11d48]` cumple la letra
+  de R6.6 —no es una escala numérica— y viola R1.5 de plano. Distingue color de dimensión
+  (`text-[0.6875rem]` es un tamaño y no es violación) y falla en cerrado ante lo que no
+  reconoce;
+- **quinta**, hex en estilo inline. Sin ella la excepción `#555`/`#ccc` de `global-error.tsx`
+  era **inerte**: ninguna comprobación emitía nunca un hex, así que `allowed()` no se consultaba
+  para uno y la aserción que fija la lista prometía un límite sobre un canal que nadie vigilaba.
+  Va anclada al **nombre de la propiedad** CSS, no al `#`, porque el árbol tiene
+  `"Booking.com #1234"` — una referencia de reserva que un hex ingenuo lee como `#RGBA`;
+- las raíces se **derivan** del listado de `frontend/` menos una lista de exclusión fijada, en
+  vez de las cuatro de D12 escritas a mano: un `hooks/` nuevo se escanea el día que aparece, y
+  `FILES.length` no se habría movido lo bastante para delatarlo;
+- el fichero de test se reconoce por extensión anclada, no por subcadena, para que un
+  `checkout.test.helpers.tsx` no se exima solo por cómo se llama.
+
+**Límite que el guard no cubre, y se declara en vez de insinuarse**: una clase construida
+dinámicamente (`` `bg-${tono}-100` ``, concatenación) no la ve ninguna de las cinco
+comprobaciones. Es el mismo punto ciego por el que D12 rechazó la regla de ESLint, y el test lo
+hereda. En la práctica hoy no muerde —el proyecto ya usa tablas de consulta
+(`TONE_BADGE_CLASS`, `severityColorGroup`) en vez de armar clases— y además Tailwind no extrae
+esas clases, así que un desliz degrada a código muerto, no a un color silenciosamente erróneo.
+
 ### D13 — `bg-card` no pinta nada, y el guard que lo habría visto
 
 **El hallazgo**, del panel de la sección 7: seis ficheros de producción visten sus tarjetas con
