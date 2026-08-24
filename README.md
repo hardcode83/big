@@ -26,6 +26,7 @@ Al cabo de unos segundos:
 ```bash
 make bootstrap         # crea el tenant y los usuarios iniciales (ver abajo)
 make seed-demo         # llena ese tenant con el dataset de demo (ver abajo); exige bootstrap antes
+make demo-reset        # resetea el tenant de demostración de `dev` (ver abajo); exige DEMO_ACCOUNT_PASSWORD
 make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)
@@ -188,6 +189,22 @@ Ojo con una cosa que sorprende: los correos que PRD §27 publica para la propiet
 manager (`owner@adamar.test`, `manager@adamar.test`) **son los que tú pusiste en tu `.env`**,
 no algo que el comando imponga — los busca por rol. Todo lo demás, incluida la receta para
 refrescar un dataset que ha envejecido: [`docs/seed-demo.md`](docs/seed-demo.md).
+
+Hay además un **segundo tenant**, `AutoHostAI Demo`, que existe para enseñar el producto a alguien
+de fuera sin darle las cuentas del equipo: cuatro credenciales publicables y un reset diario que lo
+devuelve a su estado inicial con las fechas del día. Su comando es idempotente en el mismo sentido
+que los otros dos —aprovisiona si no existe, resetea si existe— y nombra su tenant por una constante
+del módulo, así que **no hay forma de apuntarlo al tenant de trabajo**:
+
+```bash
+make demo-reset   # borra, converge las cuatro contraseñas y vuelve a sembrar, con las fechas de hoy
+```
+
+Necesita `DEMO_ACCOUNT_PASSWORD` en tu `.env` (vacía en `.env.example`, sin valor por defecto en
+ninguna parte) y se niega a escribir nada si falta o tiene menos de 12 caracteres. En `dev` la sirve
+el OCI Vault y la pasa un workflow programado. Quién es quién, **qué no es demostrable todavía**,
+cómo se cambia la contraseña y qué hacer cuando el reset sale en rojo:
+[`docs/demo-tenant.md`](docs/demo-tenant.md).
 
 A partir de ahí **el resto de las cuentas se dan de alta por API**, sin volver a tocar la
 máquina: `POST /api/v1/users` crea el usuario y devuelve una contraseña temporal una sola vez.
