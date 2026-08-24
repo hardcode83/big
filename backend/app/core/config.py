@@ -354,6 +354,15 @@ class Settings(BaseSettings):
     seed_technician_email: str = ""
     seed_technician_password: str = ""
 
+    # The single password of the four demonstration accounts (`make demo-reset`, change
+    # `demo-user` design D3). No default, exactly like the eight BOOTSTRAP_*/SEED_* above: a
+    # default here would be a known credential shipped in the tree, and the demo tenant lives in
+    # a publicly reachable environment. Its floor is `PASSWORD_MIN_LENGTH`, checked by
+    # `app/cli/demo_reset.py:build_plan` before any transaction opens rather than by a
+    # `field_validator` — a short value has to fail the command, not refuse to boot the whole
+    # application, which would take the API down with it.
+    demo_account_password: str = ""
+
     # Both secret checks are FIELD validators, not model validators, and that is a security
     # property rather than a style choice. A `model_validator(mode="after")` reports the whole
     # settings input as the offending value, so any one failure printed every other secret in

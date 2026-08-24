@@ -50,6 +50,26 @@ class TenantConfigRepository(Protocol):
         """
         ...
 
+    async def checkin_window_hours(self, tenant_id: uuid.UUID) -> int:
+        """How many hours before check-in the operator's window opens, defaulted when unset.
+
+        Added by `cleaning-stall-blocks-next-stay` for `GET /api/v1/blocked-transitions`, whose
+        design D5 promises the collection "no guarda nada". `get_or_create` breaks that promise for
+        a tenant whose row does not exist yet: it stages an `INSERT` on a plain `GET`, reachable by
+        a role that does not hold `MANAGE_TENANT_SETTINGS`. Harmless today only because nothing on
+        that path commits — the kind of safety that stops being true quietly.
+
+        **Returns the one value its consumer needs, not a `TenantConfig`.** The first attempt
+        returned a transient entity built by `TenantConfig.with_defaults(...)`, and the section-4
+        panel pointed out that such an object carries a freshly minted `id` and real-looking
+        timestamps, so nothing but a docstring distinguished it from a persisted row. An `int`
+        cannot be mistaken for one, cannot be handed to a writer, and needs no warning.
+
+        Falls back to `TenantConfig.checkin_window_hours_before`'s own default, referenced rather
+        than repeated, so the API and a fresh tenant cannot disagree about what "unset" means.
+        """
+        ...
+
     async def apply_changes(
         self, tenant_id: uuid.UUID, values: Mapping[str, object]
     ) -> None:

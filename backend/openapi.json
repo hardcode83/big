@@ -255,6 +255,85 @@
         "title": "AssignIncidentRequest",
         "type": "object"
       },
+      "BlockedTransitionPageResponse": {
+        "description": "The pagination envelope of PRD §23, over the stalls rather than over the flats.\n\n`total` is how many stalls the tenant has, not how many properties were examined — see\n`ListBlockedTransitionsUseCase`, which pages the result precisely so a stalled flat cannot\nhide on page 3 of the source.",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/BlockedTransitionResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "total_pages": {
+            "title": "Total Pages",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "data",
+          "total",
+          "page",
+          "per_page",
+          "total_pages"
+        ],
+        "title": "BlockedTransitionPageResponse",
+        "type": "object"
+      },
+      "BlockedTransitionResponse": {
+        "description": "One transition the calendar required and the flat's state refused (R2.2).\n\n`trigger` and `blocking_state` travel as their **canonical literals, without prose**: the same\ntreatment `dashboard-api` gives `operational_state` (\"carries no colour: the colour mapping\nbelongs to the client\"). Translating them here would open a catalogue of strings for a\nconsumer that does not exist yet — this change is `[BE]` and ships the API, not the screen.\n\n`due_since` answers \"since when\", which is the number an operator actually wants: for REDES11,\nthe 19th of August and not the day somebody happened to look.",
+        "properties": {
+          "blocking_state": {
+            "title": "Blocking State",
+            "type": "string"
+          },
+          "due_since": {
+            "format": "date-time",
+            "title": "Due Since",
+            "type": "string"
+          },
+          "property_code": {
+            "title": "Property Code",
+            "type": "string"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "reservation_id": {
+            "format": "uuid",
+            "title": "Reservation Id",
+            "type": "string"
+          },
+          "trigger": {
+            "title": "Trigger",
+            "type": "string"
+          }
+        },
+        "required": [
+          "property_id",
+          "property_code",
+          "reservation_id",
+          "trigger",
+          "blocking_state",
+          "due_since"
+        ],
+        "title": "BlockedTransitionResponse",
+        "type": "object"
+      },
       "Body_import_reservations_csv_api_v1_integrations_pms_import_csv_post": {
         "properties": {
           "file": {
@@ -332,6 +411,23 @@
           "provenance"
         ],
         "title": "BuildProvenanceResponse",
+        "type": "object"
+      },
+      "CancelCleaningTaskRequest": {
+        "additionalProperties": false,
+        "description": "`cleaning-stall-blocks-next-stay` R3.1.\n\n`reason` is required and non-blank even though `PropertyStateMachine` does not demand one for\n`CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is\nexactly what has to be explainable six months later. It is recorded on\n`property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which\nadmits only real, non-sensitive columns of the entity.",
+        "properties": {
+          "reason": {
+            "maxLength": 500,
+            "minLength": 1,
+            "title": "Reason",
+            "type": "string"
+          }
+        },
+        "required": [
+          "reason"
+        ],
+        "title": "CancelCleaningTaskRequest",
         "type": "object"
       },
       "ChangePasswordRequest": {
@@ -3596,6 +3692,52 @@
           "currency"
         ],
         "title": "PendingApprovalResponse",
+        "type": "object"
+      },
+      "PhotoRequirementStateResponse": {
+        "description": "One photo category the task's template declares (`cleaner-photo-requirements` R2.1).\n\n**Four fields enumerated by hand, and no `from_attributes`** — the rule this module opens\nwith. The view it is built from carries only these four, but enumerating them is what makes\nR4.4 (\"ni el `id` de la plantilla, ni su `name`, ni su `property_id`, ni su `active`, ni sus\n`items` en crudo\") a property of this class rather than of whoever next edits the view.\n\n**`required` is not what the collection means.** Belonging to the collection says *the\nupload admits this type*; `required: true` says *the close demands it*. The column these\ncome from is named `required_photos` and holds entries that may perfectly well be optional\n— the domain says so of itself in `RequiredPhotoSpec`'s docstring — so the two facts are\npublished under two names and the ambiguity of the column name stops at the schema.\n\n`uploaded` reports what is already there and adjudicates nothing: whether the task may be\nclosed stays inside `CleaningTask.complete()`, which is the only place any clause of\nPRD §11 is applied.",
+        "properties": {
+          "label": {
+            "title": "Label",
+            "type": "string"
+          },
+          "photo_type": {
+            "title": "Photo Type",
+            "type": "string"
+          },
+          "required": {
+            "title": "Required",
+            "type": "boolean"
+          },
+          "uploaded": {
+            "title": "Uploaded",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "photo_type",
+          "label",
+          "required",
+          "uploaded"
+        ],
+        "title": "PhotoRequirementStateResponse",
+        "type": "object"
+      },
+      "PhotoRequirementsResponse": {
+        "description": "The photo categories of one task, in the order the template declares them.\n\nA single `data` key, the shape `ChecklistResponse` above and `CleaningPhotoListResponse`\nbelow already use: a top-level JSON array cannot grow a field later without breaking every\ngenerated client.\n\n**The class names deliberately do not start with `CleaningPhoto`.** That prefix already\ncollides in the published contract — `backend/openapi.json` carries\n`app__cleaning__api__schemas__CleaningPhotoResponse` and\n`app__dashboard__api__schemas__CleaningPhotoResponse`, mangled by module — and those mangled\nnames are what a frontend consumer writes by hand. A third collision would mangle the two\nthat survive today as well (design D3).",
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/PhotoRequirementStateResponse"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "PhotoRequirementsResponse",
         "type": "object"
       },
       "PriceRecommendationPageResponse": {
@@ -8073,6 +8215,89 @@
         ]
       }
     },
+    "/api/v1/blocked-transitions": {
+      "get": {
+        "description": "Flats the calendar wanted to move and whose state would not admit it: the hour came, the state is not a source of the trigger, and no transition is recorded for that reservation. Derived on every read and never stored, so a stall disappears by itself once it is resolved. Oldest first. `total` counts stalls, not properties — the pagination is of the result, so a stalled flat cannot hide on page 3 of the portfolio. `trigger` and `blocking_state` are canonical literals; the detection window is the same 30 days back that bounds the clock jobs, so a stall older than that stops appearing (`docs/celery-jobs.md`).",
+        "operationId": "list_blocked_transitions_api_v1_blocked_transitions_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/BlockedTransitionPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List the tenant's blocked transitions",
+        "tags": [
+          "properties"
+        ]
+      }
+    },
     "/api/v1/cleaning-checklist-templates": {
       "get": {
         "description": "Paginated with `page`/`per_page` (PRD §23). A template with `property_id` applies to that property only; one without it is the tenant-wide default, and the property-level template wins when both exist.",
@@ -8711,6 +8936,95 @@
         ]
       }
     },
+    "/api/v1/cleaning-tasks/{task_id}/cancel": {
+      "post": {
+        "description": "The exit the cleaning cycle did not have. A task in any live status becomes `CANCELLED` and the property's state is resolved **through `PropertyStateMachine`**, never written directly: with a guest still in the flat it lands on `OCCUPIED_ESTIMATED`, which is the state a blocked check-in never got to write. A replacement task is created unassigned unless a guest is in the flat right now — a cleaning nobody could perform would freeze the property again. `reason` is required and is recorded on the state transition. The partial evidence already gathered, checklist items and photos alike, is kept whole. A task that is already terminal answers `409` without writing anything.",
+        "operationId": "cancel_cleaning_task_api_v1_cleaning_tasks__task_id__cancel_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CancelCleaningTaskRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CleaningTaskResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "409": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task is not in a live status, or the property's state does not admit the cancellation."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Retire a cleaning that is not going to be completed",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
     "/api/v1/cleaning-tasks/{task_id}/checklist": {
       "get": {
         "description": "Driven by the task's template: an item nobody has touched still appears, and a completion for an item the template no longer declares does not.",
@@ -9098,6 +9412,85 @@
         ]
       }
     },
+    "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
+      "get": {
+        "description": "The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.\n\n**Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.\n\n**A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.\n\nOrder is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.\n\n`uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.\n\nAnswered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.",
+        "operationId": "get_photo_requirements_api_v1_cleaning_tasks__task_id__photo_requirements_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "task_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Task Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PhotoRequirementsResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably — or the task's checklist template no longer exists."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Which photo categories this cleaning task asks for",
+        "tags": [
+          "cleaning"
+        ]
+      }
+    },
     "/api/v1/cleaning-tasks/{task_id}/photos": {
       "get": {
         "description": "Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.\n\n`storage_key` is not a field of this response and never will be (R3.2): what the URL reveals depends on the tenant's `storage_type`, exactly as documented on the upload.",
@@ -9240,7 +9633,7 @@
                 }
               }
             },
-            "description": "The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably."
+            "description": "The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. **Which types the template does declare is readable at `GET /cleaning-tasks/{task_id}/photo-requirements`**, so this refusal never has to be discovered by trying."
           },
           "409": {
             "content": {

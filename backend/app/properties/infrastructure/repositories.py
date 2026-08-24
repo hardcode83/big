@@ -359,6 +359,36 @@ class SqlAlchemyPropertyStateTransitionRepository:
         )
         await self._session.flush()
 
+    async def applied_clock_triggers(
+        self, tenant_id: uuid.UUID, reservation_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, str]]:
+        """The `(reservation_id, trigger)` pairs already recorded (design D1, as amended).
+
+        Reads the two values straight out of `metadata` as text. `metadata->>'trigger'` is
+        never turned back into `PropertyStateTrigger` — see the port's docstring; the caller
+        compares against `trigger.value`.
+
+        No index covers `metadata->>'reservation_id'` (declared as debt in the design's
+        *Risks*), so the `IN` on the reservation ids is what keeps this bounded: it asks only
+        about stays the caller already loaded.
+        """
+        ids = [str(reservation_id) for reservation_id in reservation_ids]
+        if not ids:
+            return set()
+        reservation_key = PropertyStateTransitionModel.metadata_["reservation_id"].astext
+        trigger_key = PropertyStateTransitionModel.metadata_["trigger"].astext
+        result = await self._session.execute(
+            select(reservation_key, trigger_key).where(
+                PropertyStateTransitionModel.tenant_id == tenant_id,
+                reservation_key.in_(ids),
+            )
+        )
+        return {
+            (uuid.UUID(reservation_id), trigger)
+            for reservation_id, trigger in result.all()
+            if reservation_id is not None and trigger is not None
+        }
+
     async def last_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID
     ) -> PropertyStateTransition | None:

@@ -13,7 +13,7 @@ so this is the only way into a freshly deployed environment.
 import asyncio
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -42,7 +42,13 @@ class BootstrapConflictError(Exception):
 class SeedUser:
     name: str
     email: str
-    password: str
+    # `repr=False` (change `demo-user`): the generated `__repr__` rendered this in cleartext,
+    # so any `logger.debug(f"{plan!r}")` — or a pytest assertion failure that happened to embed
+    # a plan in its diff — printed a real user password. No caller does that today, which is
+    # exactly the state in which it is cheap to close. It matters most for the demonstration
+    # tenant, whose password `demo-user` R2.5 forbids emitting anywhere, but the reasoning is
+    # not specific to it: none of these passwords should be printable by accident.
+    password: str = field(repr=False)
     role: UserRole
 
 

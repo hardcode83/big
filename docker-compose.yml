@@ -101,6 +101,13 @@ services:
       # contract. Keep the host workflow visible read-only so the project test command works
       # both locally and in CI without embedding a duplicate fixture in backend/.
       - ./.github/workflows/deploy-dev.yml:/workspace/deploy-dev.yml:ro
+      # Same contract, one change later (`demo-user`): the scheduled reset's workflow is read as
+      # an executable contract too, because the link it publishes reaches the job summary by
+      # grepping the command's stdout — a seam nothing but a string connects. Without this the
+      # tests that pin it would skip locally and only run in CI, which is the state
+      # `tests/auth/test_bootstrap.py` warned about when it declined to write a test it could not
+      # run where the suite runs.
+      - ./.github/workflows/demo-reset.yml:/workspace/demo-reset.yml:ro
       # Same reason, one change later: `tests/test_rule11_ownership.py` walks the prose tree to
       # stop the ownership of a rule 11 sink being restated outside its table, and most of the
       # sites it guards are Markdown under `sdd/` and `docs/`. The container only mounts
@@ -113,6 +120,20 @@ services:
       # `docker-compose.deploy.yml` deliberately does not get them: it does not run the suite.
       - ./sdd:/workspace/sdd:ro
       - ./docs:/workspace/docs:ro
+      # Third instance of the same contract, one change later (`demo-user`): R2.1 says the
+      # demo password has no default anywhere in the tree, and half of that claim is that
+      # `.env.example` declares DEMO_ACCOUNT_PASSWORD by name with no value. Asserting it needs
+      # to READ the file, and the repo root is not mounted. Without this line the test could
+      # only run in CI, where the checkout is complete — and a test that cannot run where the
+      # suite runs is worse than none (`tests/auth/test_bootstrap.py` said so when it declined
+      # to write it).
+      #
+      # Read-only, and it discloses strictly less than this container already holds: `backend`
+      # receives the real `.env` through `env_file` and a `DATABASE_URL` with the actual
+      # POSTGRES_PASSWORD interpolated into it. The example file carries names without values
+      # except for the handful of avowedly local defaults rule 8 permits (`localdev`), so it
+      # adds nothing to the blast radius of the service that publishes 8000 on every interface.
+      - ./.env.example:/workspace/.env.example:ro
       # Fotos de limpieza y demás ficheros subidos (change `cleaning-photos-storage`, R1.3).
       # Volumen con nombre y NO un bind mount del árbol: `/app` es el repositorio por el bind
       # de arriba, así que sin este volumen las fotos aparecerían en `git status`. El

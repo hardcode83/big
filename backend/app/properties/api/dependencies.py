@@ -24,10 +24,13 @@ from app.properties.application.property_admin import (
     ListPropertiesUseCase,
     UpdatePropertyUseCase,
 )
+from app.properties.application.use_cases import ListBlockedTransitionsUseCase
 from app.properties.infrastructure.repositories import (
     SqlAlchemyPropertyRepository,
     SqlAlchemyPropertyStateTransitionRepository,
 )
+from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
 
 SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
@@ -52,6 +55,16 @@ def get_property_state_use_case(session: SessionDep) -> GetPropertyStateUseCase:
     return GetPropertyStateUseCase(
         properties=SqlAlchemyPropertyRepository(session),
         transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+    )
+
+
+def get_list_blocked_transitions_use_case(session: SessionDep) -> ListBlockedTransitionsUseCase:
+    """No unit of work: the collection is derived on read and writes nothing (design D5)."""
+    return ListBlockedTransitionsUseCase(
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        transitions=SqlAlchemyPropertyStateTransitionRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
     )
 
 

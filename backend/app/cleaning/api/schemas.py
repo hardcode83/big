@@ -45,6 +45,10 @@ from app.maintenance.domain.entities import (
 )
 from app.maintenance.domain.enums import IncidentStatus
 
+#: A cancellation reason is a sentence, not a document. Bounded like every other free-text field
+#: here so a request body cannot be used as storage (`cleaning-stall-blocks-next-stay` R3.1).
+MAX_CANCEL_REASON = 500
+
 MAX_PER_PAGE = 100
 # `page` needs a ceiling too, not just `per_page`: the value becomes a SQL OFFSET and a
 # 20-digit page number overflows int8, producing an unhandled driver error instead of a 422
@@ -161,6 +165,21 @@ class ValidateCleaningTaskRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
     validation_status: CleaningValidationStatus
+
+
+class CancelCleaningTaskRequest(BaseModel):
+    """`cleaning-stall-blocks-next-stay` R3.1.
+
+    `reason` is required and non-blank even though `PropertyStateMachine` does not demand one for
+    `CLEANING_CANCELLED` (it is not in its `manual` set): retiring the work of another person is
+    exactly what has to be explainable six months later. It is recorded on
+    `property_state_transitions.reason` and deliberately **not** in `audit_logs.changes`, which
+    admits only real, non-sensitive columns of the entity.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    reason: Annotated[str, Field(min_length=1, max_length=MAX_CANCEL_REASON)]
 
 
 class CleaningTaskResponse(BaseModel):
@@ -352,6 +371,62 @@ class ChecklistResponse(BaseModel):
     @classmethod
     def build(cls, views) -> "ChecklistResponse":
         return cls(data=[ChecklistItemStateResponse.from_view(view) for view in views])
+
+
+class PhotoRequirementStateResponse(BaseModel):
+    """One photo category the task's template declares (`cleaner-photo-requirements` R2.1).
+
+    **Four fields enumerated by hand, and no `from_attributes`** — the rule this module opens
+    with. The view it is built from carries only these four, but enumerating them is what makes
+    R4.4 ("ni el `id` de la plantilla, ni su `name`, ni su `property_id`, ni su `active`, ni sus
+    `items` en crudo") a property of this class rather than of whoever next edits the view.
+
+    **`required` is not what the collection means.** Belonging to the collection says *the
+    upload admits this type*; `required: true` says *the close demands it*. The column these
+    come from is named `required_photos` and holds entries that may perfectly well be optional
+    — the domain says so of itself in `RequiredPhotoSpec`'s docstring — so the two facts are
+    published under two names and the ambiguity of the column name stops at the schema.
+
+    `uploaded` reports what is already there and adjudicates nothing: whether the task may be
+    closed stays inside `CleaningTask.complete()`, which is the only place any clause of
+    PRD §11 is applied.
+    """
+
+    photo_type: str
+    label: str
+    required: bool
+    uploaded: bool
+
+    @classmethod
+    def from_view(cls, view) -> "PhotoRequirementStateResponse":
+        return cls(
+            photo_type=view.photo_type,
+            label=view.label,
+            required=view.required,
+            uploaded=view.uploaded,
+        )
+
+
+class PhotoRequirementsResponse(BaseModel):
+    """The photo categories of one task, in the order the template declares them.
+
+    A single `data` key, the shape `ChecklistResponse` above and `CleaningPhotoListResponse`
+    below already use: a top-level JSON array cannot grow a field later without breaking every
+    generated client.
+
+    **The class names deliberately do not start with `CleaningPhoto`.** That prefix already
+    collides in the published contract — `backend/openapi.json` carries
+    `app__cleaning__api__schemas__CleaningPhotoResponse` and
+    `app__dashboard__api__schemas__CleaningPhotoResponse`, mangled by module — and those mangled
+    names are what a frontend consumer writes by hand. A third collision would mangle the two
+    that survive today as well (design D3).
+    """
+
+    data: list[PhotoRequirementStateResponse]
+
+    @classmethod
+    def build(cls, views) -> "PhotoRequirementsResponse":
+        return cls(data=[PhotoRequirementStateResponse.from_view(view) for view in views])
 
 
 # --- cleaning photos --------------------------------------------------------------

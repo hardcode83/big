@@ -17,7 +17,7 @@ NOT hooked into `make up`: it needs SEED_* values a person has to choose.
 import asyncio
 import sys
 import uuid
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from functools import partial
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -117,6 +117,26 @@ from app.reservations.application.use_cases import (
     UpdateReservationUseCase,
 )
 from app.reservations.domain.entities import Reservation
+from app.guests.application.portal import IssueGuestAccessTokenUseCase
+from app.guests.application.use_cases import GuestActor
+from app.guests.infrastructure.models import GuestAccessTokenModel
+from app.guests.infrastructure.portal_repositories import (
+    SqlAlchemyGuestAccessTokenRepository,
+    SqlAlchemyPortalStayLocator,
+)
+from app.maintenance.application.use_cases import ReportIncidentFromConversationUseCase
+from app.messaging.application.use_cases import (
+    CreateConversationUseCase,
+    ProcessInboundGuestMessageUseCase,
+)
+from app.messaging.domain.enums import ConversationChannel, MessageIntent
+from app.messaging.infrastructure.ai import MockAIAdapter
+from app.messaging.infrastructure.channels import outbound_registry
+from app.messaging.infrastructure.models import ConversationModel
+from app.messaging.infrastructure.repositories import (
+    SqlAlchemyConversationRepository,
+    SqlAlchemyMessageRepository,
+)
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.domain.repositories import ReservationFilters
 from app.reservations.infrastructure.repositories import SqlAlchemyReservationRepository
@@ -153,7 +173,10 @@ class SeedIngestError(Exception):
 class SeedAccount:
     name: str
     email: str
-    password: str
+    # `repr=False`, for the reason spelled out on `bootstrap.SeedUser.password` (change
+    # `demo-user`): a generated `__repr__` that prints a real password is one stray debug log
+    # away from being a leak, and closing it costs nothing while nobody prints these.
+    password: str = field(repr=False)
     role: UserRole
 
 
@@ -256,6 +279,42 @@ _CHECKLIST_PHOTOS = (
     ("kitchen", "Cocina"),
     ("entrance", "Entrada"),
     ("damage_if_found", "Desperfecto, si lo hay"),
+)
+
+
+#: The guest messages the demo conversation is built from, and their expected intent.
+#:
+#: **Constants of the module, like `_CHECKLIST_ITEMS` and the titles of `SEED_INCIDENTS`** —
+#: which is also the contract row the census of rule 11 records for `messages.content` (the
+#: change `demo-user`, its D11): a closed catalogue held by discipline, not by code.
+#:
+#: The intent of each is **pinned by a test**, and that is not ceremony:
+#: `MockAIAdapter.generate_response` raises `KeyError` on purpose for `REFUND_OR_COMPENSATION`,
+#: `EMERGENCY` and `UNKNOWN`, so a text that drifted into one of those by accident would break
+#: the seed rather than seed a wrong thread. The two are chosen so the thread shows **both**
+#: branches R4.1 of `demo-user` names: one the AI answers from its template catalogue, and one
+#: that gets a person.
+#:
+#: Written in the tenant's language, and deliberately free of any word from
+#: `EMERGENCY_KEYWORDS` in the first one — "wifi" and "conexión" are the whole point of it.
+#: The language the demo conversation is opened in, and the language its texts are written in.
+#: A constant rather than a literal at the call site because the two **must** agree: D10 says the
+#: message texts are "en el idioma del tenant", and the pipeline detects each message's language
+#: per message and falls back to the conversation's. Both keyword tables it consults carry Spanish
+#: **and** English entries, so translating the constants below without moving this would leave the
+#: conversation declaring one language and carrying another — and the intents would still resolve,
+#: so nothing would fail. The test that pins these two together is what makes that impossible.
+SEED_CONVERSATION_LANGUAGE = "es"
+
+SEED_CONVERSATION_MESSAGES: tuple[tuple[str, MessageIntent], ...] = (
+    (
+        "Hola, el wifi de la casa no me deja conectar el portátil. ¿Me pasáis la contraseña?",
+        MessageIntent.WIFI,
+    ),
+    (
+        "Hay humo saliendo del horno y huele muy fuerte, ¿qué hago?",
+        MessageIntent.EMERGENCY,
+    ),
 )
 
 
@@ -471,6 +530,27 @@ def build_plan() -> SeedPlan:
     )
 
 
+async def resolve_known_accounts(
+    session: AsyncSession, plan: SeedPlan
+) -> dict[str, User | None]:
+    """The seed's unscoped account lookup, callable **before** anything marks the session.
+
+    Extracted by the change `demo-user` (design D10bis) and by nothing else: `apply_plan` used to
+    do this inline, which made it impossible for a caller to mark the session first. `demo_reset`
+    has to — its delete phase is scoped by the marker (its D4) and shares one transaction with the
+    seed (its D7) — so without this seam those three decisions could not all hold. Confirmed by
+    running it: on a marked session these lookups raise `TenantMarkedSessionError`.
+
+    Requires an **unmarked** session, like everything that goes through
+    `find_by_email_globally`. That is the point, not a limitation.
+    """
+    users = SqlAlchemyUserRepository(session)
+    return {
+        account.email: await users.find_by_email_globally(account.email)
+        for account in plan.accounts
+    }
+
+
 def _refuse_addresses_owned_by_another_tenant(
     plan: SeedPlan, known: dict[str, User | None], tenant_id: uuid.UUID
 ) -> None:
@@ -593,6 +673,8 @@ async def apply_plan(
     hasher: BcryptPasswordHasher,
     *,
     now: datetime | None = None,
+    known_accounts: dict[str, User | None] | None = None,
+    portal_links: list[str] | None = None,
 ) -> dict[str, int]:
     """Idempotent: a second run over a seeded database creates nothing (R1.2).
 
@@ -612,6 +694,11 @@ async def apply_plan(
         "cleaning_tasks": 0,
         "cleaning_photos": 0,
         "incidents": 0,
+        # The three the change `demo-user` adds (its R4): the conversation a visitor can read,
+        # its messages, and the portal token whose URL is the one thing R4.3 must publish.
+        "conversations": 0,
+        "messages": 0,
+        "guest_access_tokens": 0,
     }
 
     # Resolved BEFORE the session is marked, and the order is not interchangeable: the tenant
@@ -653,10 +740,15 @@ async def apply_plan(
     # comes back as `None`. The seed would then insert and get `EmailAlreadyExistsError` out of
     # the index — precisely the database-level failure R3.6 exists to replace with an
     # explanation. Amends design D11, which read this as a check the write loop could make.
-    known = {
-        account.email: await users.find_by_email_globally(account.email)
-        for account in plan.accounts
-    }
+    # Resolved here when nobody handed it in, which is every caller but `demo_reset` — so
+    # `make seed-demo` behaves exactly as before. `demo_reset` passes it because it has to mark
+    # the session for its own delete phase before calling this, and these lookups cannot run on
+    # a marked session (design D10bis of that change).
+    known = (
+        known_accounts
+        if known_accounts is not None
+        else await resolve_known_accounts(session, plan)
+    )
     # Judged here, with both answers in hand and nothing written yet — see the function's
     # docstring for why this cannot live inside the write loop (R3.6, D11).
     _refuse_addresses_owned_by_another_tenant(plan, known, tenant.id)
@@ -732,6 +824,7 @@ async def apply_plan(
             now=at,
             created=created,
             uploaded_keys=uploaded_keys,
+            portal_links=portal_links,
         )
         await uow.commit()
     except Exception:
@@ -762,6 +855,7 @@ async def _advance_the_clock(
     now: datetime,
     created: dict[str, int],
     uploaded_keys: list[str],
+    portal_links: list[str],
 ) -> None:
     """The second half of the run: make the dataset happen instead of writing it down (D1, D2).
 
@@ -896,6 +990,207 @@ async def _advance_the_clock(
         now=now,
         created=created,
     )
+
+    # Steps 13-14, added by the change `demo-user` (its R4): the two surfaces a visitor can
+    # actually look at that the dataset had no content for. They come last because both hang off
+    # the LIVE stay, which only exists in that state after step 11.
+    await _seed_conversation(
+        session,
+        tenant_id=tenant_id,
+        actor_user_id=actor_user_id,
+        property_id=redes.id,
+        reservation_id=airbnb.id,
+        guest_id=airbnb.guest_id,
+        now=live_start,
+        created=created,
+    )
+    await _issue_the_portal_link(
+        session,
+        tenant_id=tenant_id,
+        reservation_id=airbnb.id,
+        actor_user_id=actor_user_id,
+        now=now,
+        created=created,
+        portal_links=portal_links,
+    )
+
+
+def _messaging_pipeline_kwargs(session: AsyncSession) -> dict:
+    """The thirteen collaborators `ProcessInboundGuestMessageUseCase` takes.
+
+    Same shape `messaging/api/dependencies.py` builds for its routes, with the one difference
+    every use case in this module shares: the unit of work is the caller's, so the pipeline's
+    own `commit()` does not end the seed's single transaction.
+
+    `MockAIAdapter` is what makes R4.2 of `demo-user` true — deterministic, no I/O, no provider
+    credentials — and it is the same adapter the router injects, so the thread the demo shows is
+    the thread the product would have produced.
+    """
+    return {
+        "conversations": SqlAlchemyConversationRepository(session),
+        "messages": SqlAlchemyMessageRepository(session),
+        "ai": MockAIAdapter(),
+        "channels": outbound_registry(),
+        # Exactly as `messaging/api/dependencies.py::incident_reporting_port` builds it, down to
+        # the caller-owned boundary: handing it its own unit of work would let an incident land
+        # before the pipeline finished, leaving one nobody can trace back to a message.
+        "incidents": ReportIncidentFromConversationUseCase(
+            incidents=SqlAlchemyIncidentRepository(session),
+            audit=SqlAlchemyAuditLogRepository(session),
+            timeline=SqlAlchemyTimelineEventRepository(session),
+            uow=CallerOwnedUnitOfWork(),
+        ),
+        "timeline": SqlAlchemyTimelineEventRepository(session),
+        "notifications": SqlAlchemyNotificationLogRepository(session),
+        "users": SqlAlchemyUserRepository(session),
+        "guests": SqlAlchemyGuestRepository(session),
+        "configs": SqlAlchemyTenantConfigRepository(session),
+        "properties": SqlAlchemyPropertyRepository(session),
+        "reservations": SqlAlchemyReservationRepository(session),
+        "uow": CallerOwnedUnitOfWork(),
+    }
+
+
+async def _seed_conversation(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    property_id: uuid.UUID,
+    reservation_id: uuid.UUID,
+    guest_id: uuid.UUID | None,
+    now: datetime,
+    created: dict[str, int],
+) -> None:
+    """One conversation on the live stay, its messages driven through the real entry path.
+
+    R4.1/R4.4 of `demo-user`: the messages go through `ProcessInboundGuestMessageUseCase`, not
+    through the ORM, so what the demo shows is what the pipeline actually does — the message
+    persisted with its intent, `GUEST_MESSAGE_RECEIVED` on the timeline, the escalation policy
+    evaluated, and then either a templated reply or a person. Writing the rows directly would
+    have produced a thread that looks right and exercises nothing.
+
+    Idempotent by the same rule as everything else here: a conversation already on this stay
+    means a previous run seeded it, and a second one would be a second thread rather than a
+    no-op.
+    """
+    # Idempotency by a scoped read of the model, the way `_reservation_by_channel_id` and the
+    # rest of this module check theirs: `ConversationRepository` offers no lookup by reservation
+    # (its filters are status, escalation status and property), and inventing one on the
+    # repository for a seed's benefit would be production surface with a single caller.
+    already = (
+        await session.execute(
+            select(ConversationModel.id).where(
+                ConversationModel.reservation_id == reservation_id
+            )
+        )
+    ).scalar_one_or_none()
+    if already is not None:
+        return
+
+    conversation = await CreateConversationUseCase(
+        conversations=SqlAlchemyConversationRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+        uow=CallerOwnedUnitOfWork(),
+    ).execute(
+        tenant_id=tenant_id,
+        property_id=property_id,
+        channel=ConversationChannel.WHATSAPP,
+        reservation_id=reservation_id,
+        guest_id=guest_id,
+        language=SEED_CONVERSATION_LANGUAGE,
+        now=now,
+    )
+    created["conversations"] = created.get("conversations", 0) + 1
+
+    pipeline = ProcessInboundGuestMessageUseCase(**_messaging_pipeline_kwargs(session))
+    for offset, (content, _expected_intent) in enumerate(SEED_CONVERSATION_MESSAGES):
+        # Each message a minute apart, and historical like every other instant here (D3): a
+        # thread whose messages share a timestamp has no order a screen can show.
+        await pipeline.execute(
+            tenant_id=tenant_id,
+            conversation_id=conversation.id,
+            content=content,
+            actor_user_id=actor_user_id,
+            ip=None,
+            now=now + timedelta(minutes=offset),
+        )
+        created["messages"] = created.get("messages", 0) + 1
+
+
+async def _issue_the_portal_link(
+    session: AsyncSession,
+    *,
+    tenant_id: uuid.UUID,
+    reservation_id: uuid.UUID,
+    actor_user_id: uuid.UUID,
+    now: datetime,
+    created: dict[str, int],
+    portal_links: list[str] | None,
+) -> None:
+    """The guest-portal link for the live stay (R4.3 of `demo-user`).
+
+    **Minting and emitting are one decision, and that is the whole safety argument.** A caller
+    that does not ask for the link gets no token minted at all — because a token whose cleartext
+    nobody kept is strictly worse than no token: only its digest is stored, so the credential
+    exists and cannot ever be used or handed over, and the idempotency guard below then prevents
+    a later run from replacing it.
+
+    That is not hypothetical. `make seed-demo` runs against whatever `BOOTSTRAP_TENANT_NAME`
+    names — in practice the team's own `AutoHostAI Dev` — and R2.5's exception licenses emitting
+    **the demonstration tenant's** token, explicitly not "los de portal del tenant de trabajo".
+    Its three justifying facts (D19) all assume the demo: the token dies in the next reset, and
+    there is no next reset for the working tenant. So the QA and security panels of this section
+    arrived at the same place from opposite directions — one found the orphaned credential, the
+    other found that the bound lived in which caller passed a parameter rather than in the code.
+    Tying the mint to the ask puts the bound in the code.
+
+    The cleartext token exists **once**, in this call's return: only its digest is persisted. So
+    the URL is composed here and handed to the caller, which is the only reason `portal_links`
+    is a parameter — losing it means R4.3 cannot be satisfied at all, and re-issuing later would
+    revoke the one the demo just published.
+
+    `CallerOwnedUnitOfWork`, like everything else in this phase, so the token lands in the same
+    transaction as the dataset it belongs to.
+    """
+    if portal_links is None:
+        return
+
+    # Idempotent, and it has to be for a reason the rest of this module makes obvious: this use
+    # case **revokes and re-mints**, so calling it twice is not a no-op — it writes a second
+    # `GUEST_ACCESS_TOKEN_ISSUED` audit row and invalidates the link somebody may already have
+    # been given. A second `make seed-demo` must change nothing (R1.2 of `seed-data-demo`).
+    #
+    # This costs nothing for the demo reset, which is the caller that needs a fresh link every
+    # time: its delete phase empties `guest_access_tokens` before this runs, so there is never a
+    # live token to find and the mint always happens. The two requirements meet here rather than
+    # fighting: idempotent for the seed, always-fresh for the reset, one branch.
+    live = (
+        await session.execute(
+            select(GuestAccessTokenModel.id).where(
+                GuestAccessTokenModel.reservation_id == reservation_id,
+                GuestAccessTokenModel.revoked_at.is_(None),
+            )
+        )
+    ).scalar_one_or_none()
+    if live is not None:
+        return
+
+    token = await IssueGuestAccessTokenUseCase(
+        tokens=SqlAlchemyGuestAccessTokenRepository(session),
+        stays=SqlAlchemyPortalStayLocator(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        uow=CallerOwnedUnitOfWork(),
+    ).execute(
+        tenant_id=tenant_id,
+        reservation_id=reservation_id,
+        actor=GuestActor(user_id=actor_user_id),
+        now=now,
+    )
+    created["guest_access_tokens"] = created.get("guest_access_tokens", 0) + 1
+    portal_links.append(f"{settings.frontend_base_url}/guest/{token}")
 
 
 async def _seed_incidents(

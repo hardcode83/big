@@ -19,6 +19,7 @@ propiedad → AWAITING_CLEANING  +  CleaningTask creada   ← una sola transacci
         ▼
 limpiadora acepta        POST /accept
         │  (o rechaza → POST /reject: la tarea queda REJECTED y nace su reemplazo sin asignar)
+        │  (desde cualquier estado vivo el manager puede POST /cancel — §La salida de excepción)
         ▼
 limpiadora inicia        POST /start     → propiedad → CLEANING_IN_PROGRESS
         ▼
@@ -38,6 +39,59 @@ el manager valida        POST /validate   (PASSED | FAILED | WAIVED)
 Ninguna de esas flechas de estado de propiedad la escribe este módulo por su cuenta: todas
 pasan por `PropertyStateMachine`, que es el único sitio donde ocurre una transición
 (`sdd/steering/architecture.md`).
+
+## La salida de excepción: cancelar una limpieza que no va a cerrarse
+
+El ciclo de arriba supone que la limpieza termina. Cuando no va a terminar —la limpiadora no
+volvió, la tarea se creó sobre la vivienda equivocada— hay una salida explícita, añadida por
+`cleaning-stall-blocks-next-stay`:
+
+```bash
+curl -X POST .../api/v1/cleaning-tasks/<id>/cancel \\
+  -H 'Authorization: Bearer <token de manager>' \\
+  -d '{"reason":"la limpiadora no volvio"}'
+```
+
+**Por qué existe.** Sin ella, una limpieza abandonada congelaba la vivienda. El caso medido en
+`dev` el 2026-08-22: REDES11 llevaba en `CLEANING_IN_PROGRESS` desde el 16 con una estancia
+corriendo del 19 al 23, y las tres salidas de ese estado eran cerrar la limpieza —que
+`after_cleaning_completion` **se niega** a hacer con un huesped dentro— o inventarse una
+incidencia `HIGH`, que descongela la vivienda con un dato falso. `POST /reject` no servía: es el
+acto de la limpiadora y exige `ASSIGNED` o `ACCEPTED`.
+
+Lo que hay que saber para operarla:
+
+- **Quién**: `MANAGE_CLEANING_TASKS`, o sea el manager. No la limpiadora, que recibe `403`.
+- **Desde dónde**: cualquier estado vivo (`CREATED`, `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`). Una
+  tarea ya terminal —o en `PENDING_REVIEW`— responde `409` **con el estado en el mensaje**, y no
+  escribe nada.
+- **`reason` es obligatorio** y no puede ir en blanco. Se guarda en
+  `property_state_transitions.reason`, no en el diff auditado: `audit_logs.changes` sólo admite
+  columnas reales y no sensibles de la entidad. La fila de `AuditLog`
+  (`CLEANING_TASK_CANCELLED`) contesta quién y cuándo; la de la transición, por qué.
+- **Dónde acaba la vivienda**: lo decide la máquina de estados con el contexto real, nunca este
+  módulo. Con un huésped dentro queda en `OCCUPIED_ESTIMATED` —el estado que el check-in
+  bloqueado nunca llegó a escribir—; sin estancia activa, en `AWAITING_CLEANING`.
+- **Tarea de reemplazo**: se crea sin asignar (`CREATED`) **salvo** que haya una estancia activa
+  ahora mismo. Con el huésped dentro no se crea, porque nadie podría hacerla y volvería a
+  congelar la vivienda; el calendario ya provee, porque `process_checkouts` crea la limpieza al
+  checkout.
+- **La evidencia parcial se conserva entera**: ni los ítems de checklist marcados ni las fotos
+  subidas se borran. Las fotos son objetos en un almacén que ninguna transacción deshace, así que
+  un borrado a medias dejaría huérfanos de un lado o del otro; el trabajo que sí se hizo es
+  justo lo que hace falta para decidir si la limpieza se repite; y borrar evidencia por cancelar
+  contradiría el timeline inmutable del principio 1 de `product.md`. La tarea cancelada sigue
+  consultable con sus ítems y sus fotos por las rutas de siempre.
+- **Si la vivienda no se mueve** —cancelar la única tarea `CREATED` de una que ya estaba en
+  `AWAITING_CLEANING`— no es un error: la tarea se cancela igual y queda su fila de `AuditLog`.
+  En ese caso no hay fila de transición, así que el motivo vive sólo en la línea de log
+  `cleaning.cancel_without_state_change`.
+- **Si la vivienda tiene dos estancias solapadas** activas a la vez, la máquina se niega a
+  resolver y la cancelación responde `409`. Es un dato que hay que arreglar antes, no algo que
+  esta operación pueda decidir por su cuenta.
+
+Y lo que la cancelación **no** hace: no relaja el `409` de `POST /complete` con un huésped
+dentro, que es una garantía y no un defecto.
 
 ## Antes de que nada funcione: la plantilla de checklist
 
@@ -145,7 +199,42 @@ está en `sdd/specs/cleaning.md`, y la forma exacta de cada petición y respuest
 
 Qué fotos pide una tarea lo decide su plantilla, en el mismo `required_photos` del ejemplo de
 más arriba. Una plantilla sin ninguna foto `required` es legítima: entonces el cierre no exige
-ninguna.
+ninguna. **Y la limpiadora ya no tiene que saberlo de antemano**: hay una ruta que se lo dice,
+y es lo primero que hace la app.
+
+### Preguntar qué fotos pide
+
+```bash
+curl .../api/v1/cleaning-tasks/<task_id>/photo-requirements \
+  -H 'Authorization: Bearer <token de la limpiadora asignada>'
+```
+
+```json
+{"data": [{"photo_type": "kitchen", "label": "Cocina",            "required": true,  "uploaded": true},
+          {"photo_type": "before",  "label": "Antes de empezar",  "required": false, "uploaded": false}]}
+```
+
+Es la lista de botones que pinta la app, uno por categoría. Lo que conviene saber al operarla:
+
+- **Pertenecer a la lista y `required` son dos cosas distintas.** Estar en la lista significa
+  *esta foto se puede subir*; `required: true` significa además *sin ella no se cierra*. La
+  columna se llama `required_photos` y contiene entradas opcionales — el nombre engaña y no se
+  renombra, pero la respuesta no hereda la ambigüedad.
+- **Un `photo_type` que no está en esta lista es exactamente el que la subida responde `404`.**
+  Las dos rutas leen la misma plantilla, así que la relación es una garantía y no una
+  casualidad: no hace falta adivinar identificadores contra un `404`, ni descubrir lo que falta
+  fallando el cierre.
+- El orden es el que escribió quien creó la plantilla, que es el orden en que se hace el
+  trabajo. Es estable entre peticiones.
+- `uploaded` dice si ya hay **al menos una** foto de ese tipo en esta tarea. Es un hecho, no un
+  veredicto: si la tarea se puede cerrar o no lo contesta `/complete` y nadie más.
+- Responde **en cualquier estado** de la tarea, no solo en `IN_PROGRESS`: sirve justamente para
+  saber qué te van a pedir *antes* de empezar. La que sí exige `IN_PROGRESS` es la subida.
+- Una plantilla sin fotos declaradas responde `200` con `{"data": []}` — «esta tarea no pide
+  fotos» es una respuesta, no un error.
+- La lee la limpiadora asignada, y también el manager y el owner del tenant. **No hace falta
+  ningún permiso de plantillas**: la limpiadora sigue sin poder ver el catálogo de plantillas
+  del tenant, que es justo lo que esta ruta evita tener que abrirle.
 
 ### Subir
 
@@ -168,9 +257,10 @@ curl -X POST .../api/v1/cleaning-tasks/<task_id>/photos \
   Firefox no lo pintan.
 - La tarea tiene que estar **`IN_PROGRESS`**: contra cualquier otro estado es `409`. No se
   archiva evidencia de una limpieza que no ha empezado o que ya se cerró.
-- Un `photo_type` que la plantilla no declara es `404`. Una tarea de otro tenant o de otra
-  limpiadora, también `404`, y con el mismo cuerpo que un id inexistente — misma razón que en la
-  tabla de arriba.
+- Un `photo_type` que la plantilla no declara es `404` — y los que declara se leen en
+  [§Preguntar qué fotos pide](#preguntar-qué-fotos-pide), que existe para que este `404` no haya
+  que descubrirlo probando. Una tarea de otro tenant o de otra limpiadora, también `404`, y con
+  el mismo cuerpo que un id inexistente — misma razón que en la tabla de arriba.
 - Tope de tamaño **propio**, `PHOTO_UPLOAD_MAX_BYTES` (10 MB por defecto): por encima es `413`,
   cortado antes de leer el cuerpo entero. Si una foto no cabe, **sube esa variable y no
   `REQUEST_MAX_BYTES`**: el techo general lo comparten todas las rutas JSON, y subirlo por una
