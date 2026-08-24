@@ -253,8 +253,8 @@ tenant; R4.1 lo prohíbe.
 **1.4.11** exige 3:1 al límite visual de un *componente de interfaz* y no a una línea decorativa:
 
 - `--border` toma el valor que `DESIGN.md` manda explícitamente («Outlines are strictly defined
-  at 1px using `#262a34`») → oscuro `#262a34`, claro `#d5dbe8`. Mide **1.29:1** contra el fondo, y
-  se declara conforme: es la filaña tonal del export, el contorno de una tarjeta no identifica
+  at 1px using `#262a34`») → oscuro `#262a34`, claro `#d5dbe8`. Contra `--background` mide
+  **1.29:1** en oscuro y **1.23:1** en claro, y se declara conforme: es la franja tonal del export, el contorno de una tarjeta no identifica
   ningún control, y ninguna información depende de verla.
 - `--input`, que es el borde de los controles (`border-input` en la variante `outline` de
   `Button`), pasa a oscuro `#879390` —el `outline` del export— y claro `#6b7688`: **5.85:1** y
@@ -387,10 +387,23 @@ Badges, las 30 combinaciones (5 tonos × 3 superficies × 2 temas), texto sobre 
 al 15 %: **oscuro 7.32-10.02**, **claro 5.40-7.46**. Mínimo global **5.40** (ámbar claro sobre
 `background`). Cero fallos.
 
-Excepciones declaradas y su razón, ya en D9: `border` mide 1.29:1 (oscuro) / 1.32:1 (claro) y el
-borde de badge al 40 % mide 1.37-1.83:1 contra su propia superficie — líneas decorativas, no
+Excepciones declaradas y su razón, ya en D9: `border` **contra `--background`** mide 1.29:1
+(oscuro) / **1.23:1** (claro) y el borde de badge al 40 % mide 1.37-1.83:1 contra su propia
+superficie — líneas decorativas, no
 límites de control, y en ningún caso portadoras únicas de información (el badge lleva su rótulo
 traducido, así que WCAG 1.4.1 también queda cubierto).
+
+> **Corrección de 2026-08-24 (`/sdd:run`, panel de la sección 2).** Esta tabla decía 1.32:1
+> para el `border` claro. El valor real de `#d5dbe8` contra `--background` `#eef1f7` es
+> **1.23:1**; 1.33:1 es lo que mide contra `--surface` `#f8fafd` y 1.39:1 contra
+> `--surface-high` `#ffffff`. Es decir: la fila oscura se midió contra `--background` y la
+> clara contra `--surface`, así que **las dos filas del mismo par declarado describían pares
+> distintos**. No mueve ningún umbral —la excepción de D9 se sostiene por su razonamiento, no
+> por el número— pero sí el registro que pide R1.6, y `globals.contrast.test.ts` (tarea 4.1)
+> tiene que codificar el mismo par en los dos temas. Todas las demás cifras de esta sección se
+> recomputaron en la misma pasada y **coinciden exactamente**, incluidas las 30 combinaciones
+> de badge (oscuro 7.32-10.02, claro 5.40-7.46, mínimo global 5.40 en ámbar claro sobre
+> `background`) y el rango 1.37-1.83 del borde al 40 %.
 
 ## Changes by area
 

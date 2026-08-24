@@ -36,9 +36,59 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       y el equivalente para `dark:`. El design dice 68 usos en 4 ficheros y 25 `dark:`;
       se **mide**, no se hereda. [R6.6]
 
-## 2. La capa de color: tres bloques y su test de paridad
+## 2. La capa de color: tres bloques y su test de paridad <!-- panel: PASS 2026-08-24 -->
 
-- [ ] 2.1 Reescribir el bloque de color de `frontend/app/globals.css` con los **25 tokens**
+<!-- Nota de alcance de 2.1, levantada por el panel: `:root` queda con SOLO los 25
+     tokens de color, porque es lo que hace que comparar bloques enteros signifique
+     algo en el test de paridad. Eso obligó a sacar de `:root` el `--radius: 0.5rem`
+     de hoy y a dejar sus tres derivados como literales numéricamente idénticos
+     (`0.5rem` / `0.375rem` / `0.25rem` = `0.5rem` menos 0, 2px y 4px), un toque de
+     R5.1 que las etiquetas de 2.1 no mencionan. Sin cambio de valor ni de aspecto;
+     la escala de cinco pasos del export sigue siendo trabajo de 3.5. Los tokens no
+     temáticos (ritmo, tipografía, radios) van a `@theme`, no a `:root`. -->
+
+<!-- Panel de la sección 2 (2026-08-24): architect PASS, i18n PASS, documentation
+     PASS, qa PASS, security FAIL con 2 hallazgos, los dos aceptados y arreglados:
+       · R1.6 — el `border` claro estaba registrado a 1.32:1 y mide 1.23:1 (1.32 era
+         contra `--surface`, no contra `--background`), así que las dos filas del
+         mismo par declarado medían pares distintos. Corregido en design.md §D9 y
+         §Contraste medido, con nota de por qué se movió la cifra.
+       · D1 — el guard estaba anclado en selectores con nombre, así que un cuarto
+         bloque añadido después (una clase `.dark`, un `@media … light`) podía
+         redeclarar `--background`, ganar por orden y dejarlo verde. Añadida una
+         aserción que cuenta: cada token declarado exactamente 3 veces.
+     Y dos riesgos residuales que el panel nombró sin poder anclarlos en un `SHALL`
+     de la sección, arreglados igualmente porque eran ciertos:
+       · deriva correlacionada (el mismo valor equivocado en los DOS bloques oscuros)
+         y errata en un valor claro — ninguna es «deriva entre las copias», así que
+         ninguna aserción las veía. Cerradas fijando la tabla aprobada de design.md
+         §Paleta como valores esperados absolutos, que es además la evidencia de
+         R2.1/R2.2.
+       · el emparejador de llaves contaba `{`/`}` dentro de comentarios, así que un
+         comentario con una llave desbalanceada lo hacía desbordar al bloque
+         siguiente y fallar por una razón que no señalaba la causa. Se eliminan los
+         comentarios antes de parsear.
+     Verificado por mutación que los tres casos antes ciegos ahora fallan y que la
+     llave en comentario ya es inocua.
+
+     Segunda ronda: la re-revisión de security cerró el hallazgo de R1.6 y encontró
+     dos evasiones MÁS al guard, las dos confirmadas ejecutando, las dos arregladas:
+       · el recuento exigía `;` final, y CSS lo hace opcional en la última
+         declaración de un bloque. Un bloque de una sola declaración escrito sin él
+         repintaba `--background` y el guard seguía verde — y nada del proyecto lo
+         atrapa: `lint` es `eslint .`, que no lee `.css`, y no hay
+         prettier/stylelint/biome. El terminador pasa a `[;}]`.
+       · los 25 alias `--color-*` no se contaban, y son los que leen los
+         consumidores (este mismo fichero asserta sobre `var(--color-ring)`,
+         `var(--color-border)`, `var(--color-background)`). Un `:root { --color-background: … }`
+         posterior repintaba la app dejando los 25 tokens crudos intactos y
+         «aprobados». Se cuentan los alias (una vez cada uno) y se exige que haya
+         exactamente UN bloque `@theme inline`, porque `THEME_INLINE` lee el primero.
+     Verificado con las construcciones literales del revisor: las tres fallan ahora.
+     Corregido además `filaña` -> `franja` en design.md D9, errata dentro del texto
+     que la primera ronda reescribió. -->
+
+- [x] 2.1 Reescribir el bloque de color de `frontend/app/globals.css` con los **25 tokens**
       de design §Paleta (15 de núcleo + 10 de estado) en los tres bloques exactos de D1
       —`:root` (claro), `@media (prefers-color-scheme: dark) :root:not([data-theme="light"])`,
       y después `:root[data-theme="light"]` / `:root[data-theme="dark"]`— con `color-scheme`
@@ -46,11 +96,11 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       (`--color-*`), **sin** crear `tailwind.config.{js,ts}` (`components.json` mantiene
       `"tailwind": {"config": ""}`). `border` e `input` quedan separados con los valores de D9.
       [R1.1, R1.3, R1.4, R2.1, R2.2, R2.4, R5.2, R6.1]
-- [ ] 2.2 Nuevo `frontend/app/globals.tokens.test.ts`: parsea `globals.css`, extrae los tres
+- [x] 2.2 Nuevo `frontend/app/globals.tokens.test.ts`: parsea `globals.css`, extrae los tres
       bloques y afirma (a) que declaran el **mismo conjunto de nombres** de token y (b) que
       los dos bloques oscuros declaran **valores idénticos**. Es lo que hace segura la
       duplicación que impone D1. [R1.2]
-- [ ] 2.3 Verificar en el mismo test —o en uno hermano del fichero— que siguen presentes e
+- [x] 2.3 Verificar en el mismo test —o en uno hermano del fichero— que siguen presentes e
       intactos `@layer base` (incluido `:focus-visible`), el bloque
       `@media (prefers-reduced-motion: reduce)` y las utilidades `tap-target` (44×44) y
       `pb-safe`. Sin esto, R5.3 depende de que nadie los borre por descuido al reescribir
