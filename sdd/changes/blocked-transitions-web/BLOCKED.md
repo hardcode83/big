@@ -59,3 +59,27 @@
   `READY_FOR_PR`. Once the user picks a recovery path above and section 5 (and
   7.4) land — or section 5 is split into a new change — this file can be
   deleted.
+
+## Resolution chosen 2026-08-24
+
+- **Decision**: wait-and-resume (option 1). The user picked to keep the
+  change whole and ship sections 1-4, 6, 7.1-7.3 together with section 5
+  and 7.4 once the OQ1 backend PR lands in `main`. The split into a
+  separate `blocked-transitions-web-mutations` change was rejected.
+- **State**: implementation commit `83f5ae9` (sections 1-4, 6, 7.1-7.3)
+  and metrics commit `3807cfb` are on `sdd/blocked-transitions-web`,
+  ahead of `main` by 2 commits. `mark-local-verified` and `mark-ready`
+  were NOT called because `ensure_local_gates` would reject the
+  incomplete section 5 tasks AND the non-empty `BLOCKED.md`; both will
+  fire once section 5 (and 7.4) land.
+- **Resume command** (next agent who picks this up):
+  1. Verify the backend PR (OQ1: `BlockedTransitionResponse.cleaning_task_id`
+     and `incident_id`) is merged in `main` and the regenerated
+     `frontend/lib/api/generated/openapi.d.ts` carries both fields.
+  2. `cd` into this worktree on branch `sdd/blocked-transitions-web`.
+  3. Run `/sdd:run blocked-transitions-web`. The run skill will detect
+     the unchecked section 5 tasks plus 7.4 and execute them in order
+     (sections 5.1-5.7 in `tasks.md` order, then 7.4 in dev).
+  4. After the run completes (with all tasks checked and BLOCKED.md
+     empty), `/clear` and re-invoke `/sdd:review blocked-transitions-web`
+     in a fresh session to certify and reach `READY_FOR_PR`.
