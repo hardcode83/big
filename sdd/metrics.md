@@ -64,4 +64,4 @@
 | incident-photos | new, design, tasks, run, review, ship, archive | 424385 | 1360232 | 357150079 | 205.1286 | 2026-08-22 | 2026-08-23 |
 | pricing-web | new, design, tasks, run, review, ship, archive | 325336 | 973216 | 172901470 | 119.2598 | 2026-08-23 | 2026-08-23 |
 | cleaning-assign-preconditions | new, design, tasks, run, review, ship, archive | 363030 | 1219226 | 313886120 | 183.5497 | 2026-08-22 | 2026-08-23 |
-| design-system-tokens | new, design, tasks, run, review | 814834 | 1530846 | 262886978 | 187.3941 | 2026-08-23 | — |
+| design-system-tokens | new, design, tasks, run, review | 2936151 | 1993580 | 334040767 | 243.4167 | 2026-08-23 | — |
