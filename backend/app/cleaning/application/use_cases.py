@@ -1519,9 +1519,17 @@ class GetPhotoRequirementsUseCase(_TaskTransitionMixin):
             raise ChecklistTemplateNotFoundError(
                 "The task's checklist template no longer exists"
             )
-        spec = parse_template_content(
-            template.items, template.required_photos, template_id=template.id
-        )
+        # No `template_id=`, unlike the create path: R4.4 forbids **this response** publishing
+        # the template's `id`, and `parse_template_content` interpolates it into the
+        # `CleaningValidationError` message, which the error envelope then carries verbatim — so
+        # a stored row that stops parsing would answer a `CLEANER` with the identifier of a
+        # template she holds no `READ_CLEANING_TEMPLATES` to fetch.
+        #
+        # Scoped to this route on purpose, and that is not a system-wide guarantee: `/checklist`
+        # and the other `READ_CLEANING_TASKS` readers still pass `template_id=` and still name it
+        # on the same corrupted row. R4.4 is this route's requirement and this change's scope;
+        # the asymmetry is recorded in `design.md` §Residuos as a follow-up, not hidden here.
+        spec = parse_template_content(template.items, template.required_photos)
         uploaded = await self._photos.uploaded_photo_types(tenant_id, task.id)
         return [
             PhotoRequirementView(

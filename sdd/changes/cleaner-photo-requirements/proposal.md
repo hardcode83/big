@@ -137,7 +137,15 @@ Acceptance criteria:
    un parámetro de petición que lo ensanche.
 4. THE SYSTEM SHALL NOT publicar nada de la plantilla más allá de los tres campos de cada
    `RequiredPhotoSpec`: ni el `id` de la plantilla, ni su `name`, ni su `property_id`, ni su
-   `active`, ni sus `items` en crudo.
+   `active`, ni sus `items` en crudo. WHERE la fila almacenada ya no parsea, el mensaje del `422`
+   queda **fuera** de esta cláusula: `parse_template_content` lo comparte con la ruta de creación
+   —donde un `MANAGE_CLEANING_TEMPLATES` sí debe leer qué valor está repetido— y estrechar su
+   diagnóstico es un change propio. *(Enmendado en `/sdd:review`: la redacción original convertía
+   en incumplimiento literal la rama de `item_id` duplicado, que publica el valor repetido por ese
+   `422`. Lo que la cláusula protege se cumple íntegro en la respuesta `200` y en el `422` por
+   plantilla ilegible —de donde este change **sí** quitó el `template_id` (`use_cases.py`)—, y no
+   hay delta de información: los mismos `item_id` se leen en `/checklist` con el mismo permiso. El
+   detalle y el candidato de roadmap están en [`design.md`](design.md) §Residuos 2.)*
 5. THE SYSTEM SHALL fijar el conjunto de campos con un test propio, de modo que añadir uno sea un
    acto deliberado y no una deriva — el mismo mecanismo que `specs/cleaner-task-context.md` ya
    exige para sus once campos.

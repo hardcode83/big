@@ -315,6 +315,84 @@ caso análogo— sí la tiene. Está fuera del alcance de este change, que no es
 (D6). **Recomendación: candidata de roadmap propia**, con su propio panel, no una tarea de aquí.
 Si se acepta, `/sdd:archive` la añade a `sdd/roadmap.md` al cerrar este change.
 
+## Notas para el PR
+
+Vivían en `BLOCKED.md` §1, cuyo *resume command* era `/sdd:ship` — y el gate de ship rechaza un
+`BLOCKED.md` no vacío, así que ahí no se podían consumir nunca. Su home real es este documento,
+que ship lee.
+
+1. **La rama no nace de `origin/main`, y eso es deliberado.**
+   `sdd/cleaner-photo-requirements` arranca en `8dc7a18` (*«sdd(roadmap): partir
+   cleaner-photo-requirements y aplazar cleaner-app»*), que crea la entrada de roadmap y su nota
+   —la **premisa** de este change—. Ese commit vivía sólo en `sdd/cleaner-app`, sin mergear, así
+   que un worktree desde `origin/main` habría arrancado sin la semilla. **La descripción del PR
+   tiene que nombrar ese commit y su motivo**: un revisor que lo vea sin contexto lo leerá como
+   ruido fuera de alcance.
+2. **`sdd/cleaner-app` (local y remota) queda sin contenido propio tras el merge.** `cleaner-app`
+   está aplazada y no tiene `sdd/changes/cleaner-app/` en disco. Es candidata a borrado **después**
+   del merge, no antes.
+3. **La rama está 51 commits por detrás de `origin/main` y no auto-mergea.** Decidido en
+   `/sdd:review`: el rebase es trabajo de ship, para que el `implementation_sha` que este review
+   certifica describa exactamente el árbol que el panel leyó. Al shipear hay que resolver dos
+   conflictos —el bloque de imports de `backend/app/cleaning/api/tasks_router.py`, donde `main`
+   metió `get_cancel_cleaning_task_use_case` en la misma posición de la lista, y
+   `sdd/roadmap/tech-app.md`— y **regenerar después** `backend/openapi.json` y
+   `frontend/lib/api/generated/openapi.d.ts`: el `openapi.json` **sí** auto-mergea (comprobado con
+   `git merge-tree`), pero su resultado es un merge textual y no una salida del generador. Ojo con
+   leer verde el check de contrato: `api-contract.yml` regenera desde el código de **la rama** y lo
+   compara con el artefacto de **la rama**, así que mide coherencia interna, no actualidad — hoy
+   pasa mientras al `openapi.json` de la rama le faltan cuatro rutas que `main` ya publica
+   (`/blocked-transitions`, `/cleaning-tasks/{task_id}/cancel`, `/incident-photos/{photo_id}`,
+   `/incidents/{incident_id}/photos`).
+
+## Residuos
+
+Lo que el panel de `/sdd:review` encontró, se arregló en parte, y **queda nombrado en vez de
+cerrado en silencio**. Los dos primeros son candidatos de roadmap —`/sdd:archive` los añade a
+`sdd/roadmap.md` al cerrar este change, igual que OQ2—; los dos últimos son residuos aceptados.
+
+1. **El `template_id` en el mensaje del `422` sigue vivo en las rutas hermanas.** Este change lo
+   quitó de su propia lectura (R4.4), pero `GetChecklistUseCase` (`use_cases.py:1432`) y otros
+   tres llamantes alcanzables con `READ_CLEANING_TASKS` siguen pasándolo, así que sobre la misma
+   fila corrupta `GET /cleaning-tasks/{id}/checklist` responde `422` nombrando la plantilla. El
+   delta práctico de exposición es ~0 —la misma limpiadora, el mismo permiso, la misma fila— y
+   por eso no se ensancha el diff aquí: R4.4 es el requisito de **esta** ruta. Candidato de
+   roadmap: quitar `template_id=` de los llamantes de solo lectura, o dejar de interpolar
+   identificadores en mensajes que el sobre publica.
+2. **R4.4 y los `items` en crudo: la rama de `item_id` duplicado.**
+   `parse_template_content` interpola el **valor** del `item_id` repetido
+   (`value_objects.py:266`), y `errors.py:80` lo copia al sobre — así que una plantilla
+   almacenada con un `item_id` duplicado publica contenido de `items` por el `422` de esta ruta,
+   que es literalmente lo que R4.4 prohíbe. El test nuevo cubre la rama `items=[]`, no ésta.
+   Tampoco hay delta de información (los mismos `item_id` se leen en `/checklist` con el mismo
+   permiso), y arreglarlo bien es diagnóstico por posición en vez de por valor, en un parser que
+   comparten la ruta de creación y las de lectura: es un change propio, no una línea de aquí.
+   Va con el candidato de (1). **R4.4 queda enmendado en `proposal.md`** para que el `SHALL` que
+   herede la spec viva sea verdadero: el mensaje del `422` por fila corrupta está fuera de la
+   cláusula, y lo que ésta protege se cumple íntegro en el `200`. Sin la enmienda, archivar
+   dejaría en `sdd/specs/cleaner-photo-requirements.md` un `SHALL` que el código no satisface.
+3. **Aceptado: un veredicto dentro del *valor* de una cabecera que las dos rutas ya llevan.** El
+   conjunto cerrado de `BASELINE_RESPONSE_HEADERS` cierra los nombres —incluido lo que se monte
+   por encima de la ruta, que era la fuga que envenenaba la comparación con `/checklist`— pero
+   compara nombres, no valores. Una middleware global condicionada al *path* podría reescribir el
+   valor de una cabecera compartida; el patrón existe en el árbol (`MaxBodySizeMiddleware` mira el
+   path). Nada lo hace hoy, y los guards estructurales sobre `use_cases.py`, `dependencies.py` y
+   `schemas.py` lo dejan inalcanzable desde el código de esta capability. Se acepta.
+4. **Aceptado: el alcance de `_capability_nodes()`.** Cubre los cinco nodos que esta capability
+   posee —caso de uso, proveedor, handler y los dos esquemas—; no cubre
+   `infrastructure/repositories.py`, `value_objects.py`, `errors.py` ni `main.py`. Es deliberado:
+   son código compartido con el cierre y con el resto del dominio, y fijar su forma desde el
+   guard de esta ruta ataría changes ajenos. Lo que cubre el hueco es el cierre **conductual** de
+   los dos canales que un cliente lee —el conjunto de claves del cuerpo y el de cabeceras—, que no
+   depende de qué fichero calcule la fuga.
+
+**Nota sobre el método.** Tres rondas de guards (dos en `/sdd:run`, una en `/sdd:review`) cerraron
+cada una el sitio exacto de la fuga anterior, y la ronda siguiente encontró otra un fichero más
+allá: nombres prohibidos → forma exacta por fichero → fichero que faltaba → **valor** dentro de la
+forma. El patrón no era falta de rigor, era el eje: un AST sobre una lista de ficheros mantenida a
+mano vale lo que la última revisión. Lo que terminó el bucle fue cambiar de eje —fijar el `elt`
+entero, y cerrar por conducta el conjunto de claves y el de cabeceras— no una cuarta lista.
+
 **Resueltas antes de escribir este documento** (las tres que `BLOCKED.md` §2 dejó pendientes, y por
 las que `/sdd:tasks` se paró): dónde vive la capacidad → **D1**, ruta hermana; la forma de R3 contra
 el puerto → **D2**, `uploaded: bool` reutilizando `uploaded_photo_types()`; el nombre del esquema →

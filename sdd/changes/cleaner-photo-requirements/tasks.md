@@ -97,7 +97,7 @@ artefactos derivados, 5 verifica.
   y entonces no probaría nada (Riesgo 2).
   [R1.2, R1.3, R1.4, R1.5, R1.6, R2.1, R2.2, R3.1, R4.1, R4.2, R4.4, R4.5]
 
-## 3. Guards estructurales — lo que este change no debe hacer nunca
+## 3. Guards estructurales — lo que este change no debe hacer nunca <!-- panel: PASS 2026-08-24 (feature-scale, /sdd:review) -->
 
 - [x] 3.1 Un guard AST más en
   `backend/tests/cleaning/test_completion_clause_contract.py`: el módulo del caso de uso nuevo

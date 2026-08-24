@@ -63,6 +63,14 @@ TASKS = "/api/v1/cleaning-tasks"
 #: `tests/maintenance/test_incident_context_api.py`).
 PHOTO_REQUIREMENT_FIELDS = {"photo_type", "label", "required", "uploaded"}
 
+#: Every header this route answers with, written by hand for the same reason
+#: `PHOTO_REQUIREMENT_FIELDS` is: a set computed from the response would agree with any header
+#: added to it. `x-content-type-options` is `NoSniffMiddleware`'s, the other two are the server's;
+#: none of the three is this capability's. A verdict travels in a header as well as in a field
+#: (R3.2), and the diff against `/checklist` cannot see one that was added to both — which is
+#: what anything mounted above the route does.
+BASELINE_RESPONSE_HEADERS = {"content-length", "content-type", "x-content-type-options"}
+
 #: Deliberately not alphabetical and deliberately mixed on `required`: alphabetical order would
 #: let a `sorted()` implementation pass R1.3, and an all-required list could not tell
 #: `required_photos` from `required_photo_types()` (R2.2).
@@ -203,6 +211,86 @@ async def test_the_body_is_a_single_data_key(api, task_a, cleaner_a):
 
     assert set(body) == {"data"}
     assert "required_photos" not in body
+
+
+@pytest.mark.asyncio
+async def test_the_envelope_carries_no_verdict_key_of_its_own(api, task_a, cleaner_a):
+    """R3.2 — at the TOP level, which is the half the per-entry check cannot see.
+
+    `test_the_body_carries_no_verdict_field` above inspects the keys inside each `data` entry,
+    and the structural guard inspects `PhotoRequirementView`'s fields. Neither looks at the
+    envelope, so a `satisfied` computed on `PhotoRequirementsResponse` itself — a
+    `@computed_field`, whose body is a single `return` and therefore passes every shape guard in
+    `test_completion_clause_contract.py` — reaches the client and is caught only by
+    `test_the_body_is_a_single_data_key`, whose subject is naming hygiene (R2.1). If that
+    assertion is ever relaxed to admit a `meta` key, R3.2 would lose its only net for this shape.
+    R3.2 gets its own here, stated as its own requirement.
+    """
+    body = (await _get(api, task_a.id, cleaner_a)).json()
+
+    assert set(body) == {"data"}, (
+        f"the envelope grew {sorted(set(body) - {'data'})}. Whether the task may be closed is "
+        "answered by `CleaningTask.complete()` and by nothing else (R3.2, R3.3); this response "
+        "reports what is filed."
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_route_adds_no_response_header_of_its_own(api, task_a, cleaner_a):
+    """R3.2 — the other channel a client can read, closed behaviourally.
+
+    Every structural guard on this capability asserts the *shape of some file*, and the review
+    panel walked through three rounds of them the same way each time: by moving the derivation
+    to a file the round's whitelist did not list. The body was already closed by key
+    (`test_the_body_is_a_single_data_key`); a header was not closed by anything, and a completion
+    verdict reaches the client through one exactly as well as through a field.
+
+    So this asserts the channel instead of the source, and does not care which file would have
+    computed the leak — a `Response` taken by the handler, by a provider in `dependencies.py` or
+    by something listed in the route's `dependencies=` all fail here identically.
+
+    **Two assertions, because neither alone is enough**, and the first version of this test had
+    only the second:
+
+    * the **closed set** catches a header added from *above* the route — the `APIRouter`,
+      `include_router`, or app-wide middleware — which the comparison below cannot, because such
+      a header lands on `/checklist` too and the difference comes out empty. That is a real
+      escape and it was found by review, not imagined: the baseline is poisonable from above.
+    * the **comparison with `/checklist`** catches a header added to this route alone without
+      needing the constant to be right, and keeps the constant honest about what is shared: both
+      are `ReadDep` `GET`s behind the same middleware stack.
+
+    What neither covers is a verdict encoded in the *value* of a header both routes already
+    carry. That is named as an accepted residual in `design.md` §Residuos; the structural guards
+    on `use_cases.py`, `dependencies.py` and `schemas.py` are what make it unreachable from this
+    capability's own code, and nothing in the app conditions a header value on this path today.
+    """
+    mine = await _get(api, task_a.id, cleaner_a)
+    sibling = await api.get(
+        f"{TASKS}/{task_a.id}/checklist", headers=auth_header(api, cleaner_a)
+    )
+    assert mine.status_code == 200
+    assert sibling.status_code == 200, (
+        "the `/checklist` baseline did not answer 200; this test compares two live responses "
+        "and cannot tell you anything if one of them failed"
+    )
+
+    mine_names = {name.lower() for name in mine.headers}
+
+    assert mine_names == BASELINE_RESPONSE_HEADERS, (
+        f"the header set changed: {sorted(mine_names ^ BASELINE_RESPONSE_HEADERS)}. This is the "
+        "half a sibling comparison cannot do — a verdict header stamped from the `APIRouter`, "
+        "from `include_router` or from app-wide middleware lands on `/checklist` too, so the "
+        "difference below would be empty while both routes leaked. If the app genuinely grows a "
+        "global header, add it here on purpose."
+    )
+    extra = mine_names - {name.lower() for name in sibling.headers}
+    assert not extra, (
+        f"this route answers with headers its sibling does not: {sorted(extra)}. A header is a "
+        "verdict channel (R3.2): the projection reports what is uploaded and adjudicates "
+        "nothing. If a header is genuinely wanted here, it belongs on both read routes and in "
+        "this assertion, deliberately."
+    )
 
 
 @pytest.mark.asyncio
@@ -388,6 +476,46 @@ async def test_the_forbidden_search_is_not_vacuous(api, task_a, photo_template_a
     assert photo_template_a.items == TEMPLATE_ITEMS
     assert photo_template_a.property_id is not None
     assert photo_template_a.active is True
+
+
+@pytest.mark.asyncio
+async def test_a_stored_template_that_stops_parsing_does_not_name_itself(
+    api, db_session, tenant_a, property_a, cleaner_a
+):
+    """R4.4 on the FAILURE path, which the 200-path test above cannot reach.
+
+    `parse_template_content` interpolates its `template_id` into the `CleaningValidationError`
+    message, and the error envelope carries `str(exc)` verbatim — so a read path that passes the
+    id publishes it to whoever gets the 422. `CLEANER` holds no `READ_CLEANING_TEMPLATES`, which
+    makes that the template identifier of a row she cannot fetch, and R4.4 names the `id` first
+    among the things this response must not carry.
+
+    The row is written straight through the model, as a corrupted stored template would be: the
+    create endpoint validates, so this state is only reachable the ways it really happens — an
+    older writer, a seed, a support script, or a limit lowered under rows that already exist.
+    """
+    broken = await insert_template(
+        db_session, tenant_a, property_id=property_a.id, items=[], required_photos=PHOTOS
+    )
+    task = await insert_task(
+        db_session,
+        tenant_a,
+        property_a,
+        broken,
+        status=CleaningTaskStatus.CREATED,
+        cleaner=cleaner_a,
+    )
+
+    response = await _get(api, task.id, cleaner_a)
+
+    assert response.status_code == 422, (
+        f"expected the stored row to fail parsing, got {response.status_code} — if the parser "
+        "grew tolerant of empty `items` this test is no longer reaching the path it guards"
+    )
+    assert str(broken.id) not in response.text, (
+        "the 422 names the template. R4.4 forbids this response publishing the template's `id`, "
+        "and `parse_template_content` interpolates it only when a caller passes `template_id=`."
+    )
 
 
 @pytest.mark.asyncio

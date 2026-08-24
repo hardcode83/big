@@ -41,6 +41,12 @@ TASKS_ROUTER = (
     Path(__file__).resolve().parents[2] / "app" / "cleaning" / "api" / "tasks_router.py"
 )
 SCHEMAS = Path(__file__).resolve().parents[2] / "app" / "cleaning" / "api" / "schemas.py"
+DEPENDENCIES = (
+    Path(__file__).resolve().parents[2] / "app" / "cleaning" / "api" / "dependencies.py"
+)
+MAIN = Path(__file__).resolve().parents[2] / "app" / "main.py"
+#: The name `main.py` mounts this router under, for the guard on the mount itself.
+TASKS_ROUTER_MOUNTED_AS = "cleaning_tasks_router"
 
 
 def test_the_blocking_message_is_a_literal_that_cannot_grow_an_identifier() -> None:
@@ -329,6 +335,62 @@ def _route_handler(path: str) -> ast.AsyncFunctionDef:
     raise AssertionError(f"no route handler is registered for {path}")
 
 
+def _route_decorator(path: str) -> ast.Call:
+    """The `@router.get(...)` call itself, for the assertions that live in its keywords.
+
+    `_route_handler` returns the function; this returns the decorator, because `dependencies=`
+    is a keyword on the decorator and never reaches the function's signature at all.
+    """
+    for node in ast.walk(ast.parse(TASKS_ROUTER.read_text(encoding="utf-8"))):
+        if not isinstance(node, ast.AsyncFunctionDef):
+            continue
+        for decorator in node.decorator_list:
+            if (
+                isinstance(decorator, ast.Call)
+                and decorator.args
+                and isinstance(decorator.args[0], ast.Constant)
+                and decorator.args[0].value == path
+            ):
+                return decorator
+    raise AssertionError(f"no route decorator is registered for {path}")
+
+
+def _provider_node(name: str) -> ast.FunctionDef | ast.AsyncFunctionDef:
+    """The AST of one provider in `dependencies.py`, found by name in the module it lives in."""
+    for node in ast.parse(DEPENDENCIES.read_text(encoding="utf-8")).body:
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is not in {DEPENDENCIES}")
+
+
+def _schema_class(name: str) -> ast.ClassDef:
+    """The AST of one response schema, found by name in `schemas.py`."""
+    for node in ast.parse(SCHEMAS.read_text(encoding="utf-8")).body:
+        if isinstance(node, ast.ClassDef) and node.name == name:
+            return node
+    raise AssertionError(f"{name} is not in {SCHEMAS}")
+
+
+def _capability_nodes() -> dict[str, ast.AST]:
+    """Every node this capability owns, labelled — the scope the spelling checks run over.
+
+    Four files and five nodes: the use case, its provider, its handler and its two schemas.
+    Assembled here so that adding a sixth place for this capability's code means adding it to
+    one dict rather than remembering to add it to each assertion.
+    """
+    return {
+        f"`{PHOTO_REQUIREMENTS_USE_CASE}`": _photo_requirements_use_case_node(),
+        "`get_photo_requirements_use_case`": _provider_node(
+            "get_photo_requirements_use_case"
+        ),
+        f"the handler for `{PHOTO_REQUIREMENTS_ROUTE}`": _route_handler(
+            PHOTO_REQUIREMENTS_ROUTE
+        ),
+        "`PhotoRequirementStateResponse`": _schema_class("PhotoRequirementStateResponse"),
+        "`PhotoRequirementsResponse`": _schema_class("PhotoRequirementsResponse"),
+    }
+
+
 def _statements(node) -> list[ast.stmt]:
     """A function's body with its docstring removed."""
     return [
@@ -385,6 +447,84 @@ def test_the_projection_has_exactly_the_shape_that_reports_and_nothing_more() ->
     assert isinstance(generator.iter, ast.Attribute) and generator.iter.attr == "required_photos", (
         "the source is no longer `spec.required_photos`. R2.2 names it, and it is the only one "
         "that carries the `label` and the template's own order (R1.3)."
+    )
+
+
+def test_each_published_field_reads_its_own_photo_and_nothing_else() -> None:
+    """R3.2, R3.3 — the VALUE axis, which the statement shape above cannot see.
+
+    The guard above pins six statements, an unfiltered comprehension and its source, and stops
+    at the comprehension's `elt`. Two reviewers of this change independently walked in through
+    that gap, from opposite directions and both inside the single `Return`:
+
+        label=(f"{photo.label} !" if photo.photo_type not in uploaded else photo.label)
+        uploaded=(photo.photo_type in uploaded) and all(
+            q.photo_type in uploaded for q in spec.required_photos if q.required)
+
+    The second is a complete verdict on PRD §11's photo clause — *every required type filed* —
+    folded into a boolean that is supposed to mean one type. Neither trips anything: the outer
+    shape is untouched, `all()` is not a set method, and `in`/`not in` are deliberately
+    whitelisted so that R3.1's honest `photo.photo_type in uploaded` can exist at all.
+
+    So this pins the `elt` exactly, which is what the earlier rounds kept not doing: three
+    fields copied straight off the loop variable, and `uploaded` the one membership test, with
+    nothing wrapped around any of them. There is no room left inside `execute` after this — the
+    statements, the generator, the source and now every published value are each fixed — which
+    is the point. A blacklist has to be extended every time somebody is clever; this has to be
+    edited on purpose, and the edit is the review.
+    """
+    node = _photo_requirements_use_case_node()
+    execute = next(
+        n for n in node.body if isinstance(n, ast.AsyncFunctionDef) and n.name == "execute"
+    )
+    returned = _statements(execute)[-1].value
+    element = returned.elt
+    assert isinstance(element, ast.Call), "the comprehension stopped building a view directly"
+
+    assert not element.args, (
+        "the view is now built positionally. R4.4 turns on which four fields are published, and "
+        "keywords are what make that readable here and in `schemas.py`."
+    )
+    published = {keyword.arg: keyword.value for keyword in element.keywords}
+    assert set(published) == {"photo_type", "label", "required", "uploaded"}, (
+        f"the view now publishes {sorted(map(str, published))}. Four fields, and a fifth is a "
+        "verdict or a template leak whatever it is called (R3.2, R4.4)."
+    )
+
+    loop_variable = returned.generators[0].target
+    assert isinstance(loop_variable, ast.Name), "the comprehension now unpacks its loop variable"
+
+    for field in ("photo_type", "label", "required"):
+        value = published[field]
+        assert (
+            isinstance(value, ast.Attribute)
+            and value.attr == field
+            and isinstance(value.value, ast.Name)
+            and value.value.id == loop_variable.id
+        ), (
+            f"`{field}` is no longer `{loop_variable.id}.{field}` but "
+            f"`{ast.unparse(value)}`. These three are copied from the template row unchanged: "
+            "anything computed into one of them is a channel that carries whatever the "
+            "computation knows, and `label` is the one a reader would least suspect."
+        )
+
+    uploaded_value = published["uploaded"]
+    assert (
+        isinstance(uploaded_value, ast.Compare)
+        and len(uploaded_value.ops) == 1
+        and isinstance(uploaded_value.ops[0], ast.In)
+        and isinstance(uploaded_value.left, ast.Attribute)
+        and uploaded_value.left.attr == "photo_type"
+        and isinstance(uploaded_value.left.value, ast.Name)
+        and uploaded_value.left.value.id == loop_variable.id
+        and len(uploaded_value.comparators) == 1
+        and isinstance(uploaded_value.comparators[0], ast.Name)
+    ), (
+        f"`uploaded` is now `{ast.unparse(uploaded_value)}`. It is exactly one membership test "
+        f"— `{loop_variable.id}.photo_type in <the uploaded set>` — and nothing else (R3.1). "
+        "Anything joined onto it with `and`/`or`, or any call wrapped around it, can only be "
+        "reporting something this entry's own type does not determine: that is the close's "
+        "question, answered in `CleaningTask.complete()` and nowhere else (R3.3)."
     )
 
 
@@ -467,3 +607,182 @@ def test_the_response_schemas_only_copy_fields() -> None:
                 for n in ast.walk(method)
                 if isinstance(n, ast.Attribute) and n.attr == "headers"
             ], f"{name}.{method.name} touches response headers (R3.2)"
+
+
+# --- and the file the last three rounds each declared out of scope by comment ----------------
+#
+# The three guards above were the round-2 fix, and the `/sdd:review` panel walked through them
+# too: `dependencies.py` was named "wiring only" in this file's own prose while nothing read it.
+# A `Depends()`-injected callable may itself take a `Response` — FastAPI resolves one for any
+# dependency, not only for the path function — so the verdict simply moved one file further out
+# than the round had reached, which is the same escape in its fourth spelling.
+#
+# The lesson is not "add the next file". It is that a whitelist scoped by a hand-kept list of
+# paths is only ever as complete as the last review, so the two guards below fix the *scope*
+# instead of the spelling: this module is wiring, asserted rather than asserted-in-a-comment,
+# and the route declares no dependency that could carry a `Response` in. The channel itself is
+# closed behaviourally in `test_photo_requirements_api.py`, which compares this route's response
+# headers against a sibling's and so does not care which file computed a leak.
+
+
+def test_the_capabilitys_wiring_module_is_wiring_and_nothing_else() -> None:
+    """R3.2, R3.3 — `dependencies.py` in scope, because that is where the escape went next.
+
+    Every provider in the module is a single `return`, none takes a `Response` and none touches
+    `.headers`. All twenty-two already satisfied this when the guard was written: the point is
+    not to change the file but to stop its shape being a claim in a comment.
+
+    Module-wide and not just this capability's provider, deliberately. A leak needs somewhere to
+    live, and a *new* helper next to the real provider is cheaper to add than an edit to it —
+    scoping this to `get_photo_requirements_use_case` by name would be the spelling check this
+    file keeps learning not to write.
+    """
+    module = ast.parse(DEPENDENCIES.read_text(encoding="utf-8"))
+    providers = [
+        node
+        for node in module.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    ]
+    assert providers, "no providers found in dependencies.py — has the module moved?"
+
+    for provider in providers:
+        shape = [type(statement).__name__ for statement in _statements(provider)]
+        assert shape == ["Return"], (
+            f"`{provider.name}` is now shaped {shape}. This module wires adapters into use "
+            "cases and computes nothing: a completion verdict derived here reaches the client "
+            "through a header exactly as well as one derived in the router (R3.2, R3.3)."
+        )
+        annotations = {
+            ast.unparse(argument.annotation)
+            for argument in provider.args.args + provider.args.kwonlyargs
+            if argument.annotation is not None
+        }
+        assert not any("Response" in annotation for annotation in annotations), (
+            f"`{provider.name}` now takes a `Response`. FastAPI resolves one for any dependency, "
+            "not only for the path function, so this is a header channel out of the request "
+            "regardless of how few statements the route handler has (R3.2)."
+        )
+        assert not [
+            node
+            for node in ast.walk(provider)
+            if isinstance(node, ast.Attribute) and node.attr == "headers"
+        ], f"`{provider.name}` touches response headers (R3.2)"
+
+
+def test_the_route_declares_no_dependency_that_could_stamp_a_verdict() -> None:
+    """R3.2 — the `dependencies=` kwarg, which `_route_handler` above cannot see.
+
+    That helper matches on `decorator.args[0]`, the path. A `@router.get(..., dependencies=[
+    Depends(_stamp)])` is a *keyword* argument, so it never appears in the handler's own
+    signature and never changes its two-statement shape — the security reviewer of this change
+    named it as the invisible half of the `dependencies.py` escape. FastAPI runs those callables
+    for every request to the route and hands each one a `Response` if it asks.
+    """
+    decorator = _route_decorator(PHOTO_REQUIREMENTS_ROUTE)
+    declared = {keyword.arg for keyword in decorator.keywords}
+    assert "dependencies" not in declared, (
+        "the route now declares `dependencies=`. Anything listed there runs per request and may "
+        "take a `Response`, which is a verdict channel this route's guards cannot see from the "
+        "handler's body (R3.2). Authorisation belongs in `ReadDep`; nothing else belongs here."
+    )
+
+
+def test_no_dependency_is_injected_above_the_route_either() -> None:
+    """R3.2 — the two mounts that outrank the decorator, and outrank the sibling comparison too.
+
+    `dependencies=` can be attached three places, not one: on the route (above), on the
+    `APIRouter(...)` this module builds, and on `main.py`'s `include_router` of it. The upper two
+    are worse than the route-level one, because they apply to `/checklist` as well — and the
+    behavioural header test in `test_photo_requirements_api.py` measures this route **against**
+    `/checklist`, so a verdict header stamped from either mount appears on both sides and the
+    difference it computes comes out empty. The security reviewer of this change named that: the
+    baseline can be poisoned from above. This is the assertion that keeps it honest, and the
+    closed header set over there is the other half.
+    """
+    for node in ast.walk(ast.parse(TASKS_ROUTER.read_text(encoding="utf-8"))):
+        if (
+            isinstance(node, ast.Call)
+            and isinstance(node.func, ast.Name)
+            and node.func.id == "APIRouter"
+        ):
+            declared = {keyword.arg for keyword in node.keywords}
+            assert "dependencies" not in declared, (
+                "this module's `APIRouter` now declares `dependencies=`. Those callables run for "
+                "every route in it — including `/checklist`, which is the baseline the header "
+                "test compares against — and each may take a `Response` (R3.2)."
+            )
+            break
+    else:
+        raise AssertionError(f"no `APIRouter(...)` call found in {TASKS_ROUTER}")
+
+    mounts = [
+        node
+        for node in ast.walk(ast.parse(MAIN.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Attribute)
+        and node.func.attr == "include_router"
+        and node.args
+        and isinstance(node.args[0], ast.Name)
+        and node.args[0].id == TASKS_ROUTER_MOUNTED_AS
+    ]
+    assert len(mounts) == 1, (
+        f"expected exactly one `include_router({TASKS_ROUTER_MOUNTED_AS})` in {MAIN}, found "
+        f"{len(mounts)} — a second mount would answer the same path under other dependencies."
+    )
+    declared = {keyword.arg for keyword in mounts[0].keywords}
+    assert "dependencies" not in declared, (
+        f"`{TASKS_ROUTER_MOUNTED_AS}` is now mounted with `dependencies=`. Same channel as the "
+        "two above and the least visible of the three: it lives in `main.py`, nowhere near the "
+        "route it would stamp (R3.2)."
+    )
+
+
+def test_no_set_algebra_reaches_the_capabilitys_own_code() -> None:
+    """R2.2, R3.2, R3.3 — the spelling check, now actually wired to something.
+
+    `SET_ALGEBRA_OPS`, `CONTAINMENT_COMPARISONS` and `SET_METHODS` were declared by the round-1
+    fix and referenced by no assertion, so the lesson they record — the operations that compute
+    *what is missing*, which is the close's question and not the reporter's — was documented and
+    then unenforced. This is defence in depth behind the shape guards, not a replacement: the
+    shape guards are what actually hold the line, and a blacklist alone is what two rounds
+    already escaped.
+
+    `in`/`not in` are deliberately absent from `CONTAINMENT_COMPARISONS`: membership is exactly
+    the question a reporter answers, and `photo.photo_type in uploaded` is the projection's whole
+    job (R3.1).
+    """
+    for label, node in _capability_nodes().items():
+        offending_ops = [
+            type(inner.op).__name__
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.BinOp) and isinstance(inner.op, SET_ALGEBRA_OPS)
+        ]
+        assert not offending_ops, (
+            f"{label} now performs set algebra ({', '.join(offending_ops)}). A difference, an "
+            "intersection or a union computes what is missing — the close's question, answered "
+            "in `CleaningTask.complete()` and nowhere else (R3.3)."
+        )
+        offending_comparisons = [
+            type(op).__name__
+            for inner in ast.walk(node)
+            if isinstance(inner, ast.Compare)
+            for op in inner.ops
+            if isinstance(op, CONTAINMENT_COMPARISONS)
+        ]
+        assert not offending_comparisons, (
+            f"{label} now compares sets ({', '.join(offending_comparisons)}). `required <= "
+            "uploaded` is 'are all the required ones there?', which is a verdict (R3.2)."
+        )
+        offending_methods = sorted(
+            {
+                inner.func.attr
+                for inner in ast.walk(node)
+                if isinstance(inner, ast.Call)
+                and isinstance(inner.func, ast.Attribute)
+                and inner.func.attr in SET_METHODS
+            }
+        )
+        assert not offending_methods, (
+            f"{label} now calls {', '.join(offending_methods)} — the method spelling of the "
+            "same verdict (R3.2)."
+        )
