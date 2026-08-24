@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/cleaner-photo-requirements
 implementation_sha: a3f9603cae1dfe008ffa9497ee33c4650c9a66c1
 pr_number: 
 pr_url: 
