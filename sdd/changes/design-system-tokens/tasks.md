@@ -669,14 +669,14 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
 ## 10. Verificación
 
-- [ ] 10.1 Suite completa en verde: `docker compose exec -T frontend npm test` — comparada
+- [x] 10.1 Suite completa en verde: `docker compose exec -T frontend npm test` — comparada
       contra la cifra de partida de 1.2, no contra un número recordado. [R6.7]
-- [ ] 10.2 `docker compose exec -T frontend npm run lint` y
+- [x] 10.2 `docker compose exec -T frontend npm run lint` y
       `docker compose exec -T frontend npm run typecheck` en verde. [R6.7]
-- [ ] 10.3 `docker compose exec -T frontend npm run build` en verde — es lo que prueba que
+- [x] 10.3 `docker compose exec -T frontend npm run build` en verde — es lo que prueba que
       `next/font` descarga y autohospeda las dos familias en tiempo de build (D8), y el punto
       donde la dependencia de red fallaría ruidosamente. [R4.1]
-- [ ] 10.4 Comprobar en el build que no queda **ninguna** petición a `fonts.googleapis.com`
+- [x] 10.4 Comprobar en el build que no queda **ninguna** petición a `fonts.googleapis.com`
       ni a otro CDN de fuentes. **Enmendado el 2026-08-24** (panel de la sección 3,
       revisores documentation y security): el grep se hace sobre la **salida
       compilada** —`.js`, `.css`, `.html` de `.next`— y **excluye sourcemaps y
@@ -690,9 +690,52 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       La **regresión** la cubre el guard de R4.1 en `globals.tokens.test.ts`, que
       es lo que convierte esta comprobación de una vez en algo que no se puede
       deshacer sin ponerse en rojo. [R4.1]
-- [ ] 10.5 Registrar la salida del guard de 8.1 y del test de contraste de 4.1 como la
+- [x] 10.5 Registrar la salida del guard de 8.1 y del test de contraste de 4.1 como la
       evidencia que piden R6.6 y R1.6 — número final de escalas crudas (0) y ratio por par.
       [R1.6, R6.6]
+
+<!-- EVIDENCIA MEDIDA de la sección 10, el 2026-08-24. Todo con el stack de este
+     worktree (`PORT_OFFSET=41`) y los `docker compose cp` de §Worktree bootstrap
+     aplicados, que es lo que quita los dos ENOENT de entorno.
+
+     10.1 — Suite: 134 ficheros, 1330 tests, CERO fallos.
+       Partida de 1.2: 123 ficheros, 1130 tests. Delta +11 ficheros / +200 tests,
+       que son los de este change. Y los 25 fallos espurios que la medición de
+       partida arrastraba (timeouts de 5000 ms y «Worker forks emitted error», de
+       tener otros stacks de worktree vivos en la máquina) hoy son 0.
+
+     10.2 — `npm run lint` y `npm run typecheck`: limpios, sin salida.
+
+     10.3 — `npm run build`: verde. Es lo que prueba que `next/font` descarga y
+       autohospeda las dos familias en tiempo de build (D8).
+
+     10.4 — Fuentes, sobre la salida COMPILADA dentro del contenedor (el `.next`
+       vive en un volumen de Docker, no en el árbol del host: medirlo desde el
+       host da «0 ficheros escaneados», que es un verde falso, y por eso el script
+       aborta si no encuentra nada):
+         · 1457 ficheros compilados escaneados (.js/.css/.html, sin .map)
+         · 0 referencias a `fonts.googleapis.com`/`gstatic`/typekit/fontsource,
+           con comentarios eliminados — el comentario de `layout.tsx` que explica
+           que NO se pide nada contiene el dominio
+         · 39 declaraciones `@font-face`, TODAS a `../media` (origen propio,
+           `/_next/static/media/`); 0 URLs absolutas `http(s)` entre ellas
+         · 0 apariciones de `https?://` en los 5 chunks de CSS
+         · 4 HTML prerenderizados: 0 preloads `as="font"`, 0 `<link>` a CDN
+
+     10.5 — La evidencia que piden R6.6 y R1.6:
+       R6.6 · 218 ficheros de producción (no test) en `app/`, `components/`,
+              `features/`, `lib/`: **0 escalas numéricas de color** y **0 `dark:`**.
+              Partida: 68 y 25. El guard de 8.1 lo sostiene, y su corrección la
+              sostiene la tabla de 66 casos de `color-tokens.patterns.test.ts`.
+       R1.6 · Registro de 230 filas que imprime `globals.contrast.test.ts`:
+              182 pares afirmados entre **3.70:1 y 17.76:1**, cero FAIL; el más
+              justo es `input` sobre `--muted` a 3.70:1 contra un umbral de 3
+              (elemento de interfaz, WCAG 1.4.11). Las otras 48 filas son las
+              excepciones declaradas de D9 —hairline decorativo y borde de badge—,
+              medidas e impresas pero sin umbral, entre 1.00:1 y 1.82:1. La de
+              1.00:1 es real y está razonada: en oscuro `--border` y `--muted` son
+              el mismo valor, así que el borde de una tarjeta sobre `bg-muted` es
+              literalmente invisible. -->
 
 <!-- R2.3 no se activa: la paleta clara quedó aprobada por Jose el 2026-08-23
      (design.md §Open questions 1), así que el change entrega los dos temas y no
