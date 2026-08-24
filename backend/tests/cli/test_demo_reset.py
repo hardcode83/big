@@ -2667,6 +2667,13 @@ def test_main_prints_the_portal_link_it_was_given(
 
     out = capsys.readouterr().out
     assert url in out
+    # And the line carries PORTAL_LINE_PREFIX, which is the half of this seam the workflow greps
+    # for. Asserting only `url in out` left the two halves free to drift: the workflow-side tests
+    # pin the constant inside the .yml, but nothing tied it to what the command actually prints,
+    # so renaming the literal here kept the whole suite green while the link silently stopped
+    # reaching the job summary (R4.3). Found by the /sdd:review panel, 2026-08-24 — the exact
+    # seam BLOCKED.md asked a reviewer to look at, and what the constant's own docstring warns of.
+    assert f"{demo_reset.PORTAL_LINE_PREFIX}: {url}" in out
     # And still never the password, which the same exception explicitly does not cover.
     assert DEMO_PASSWORD not in out
 
@@ -2710,17 +2717,18 @@ def _workflow_text() -> str:
 
     Same two-candidate shape `tests/test_rule11_ownership.py` and the `.env.example` test use, and
     for the same reason: the backend container mounts only `./backend`, so the repo root is not
-    reachable from where the suite runs. `docker-compose.yml` mounts this file for the provenance
-    regression already, at `/workspace/deploy-dev.yml`; this one resolves by the repository layout
-    in CI, where the checkout is complete.
+    reachable from where the suite runs. `docker-compose.yml` already mounted `deploy-dev.yml` for
+    the provenance regression, and this change adds the same mount for this file at
+    `/workspace/demo-reset.yml`, so it resolves locally as well as in CI.
     """
     for candidate in _WORKFLOW_CANDIDATES:
         if candidate.is_file():
             return candidate.read_text(encoding="utf-8")
     pytest.skip(
-        "demo-reset.yml is not reachable from this container; it resolves in CI by the "
-        "repository layout. Not asserted as a failure because, unlike `.env.example`, this file "
-        "has no bind mount and adding one for a single test is not worth the shared-infra change."
+        "demo-reset.yml is not reachable from this container, which should not normally happen: "
+        "`docker-compose.yml` mounts it read-only at /workspace/demo-reset.yml, the first candidate "
+        "above. Kept as a skip rather than a failure so that a stack brought up from an older "
+        "compose file degrades instead of reporting a defect that is not in the code."
     )
 
 
@@ -2734,6 +2742,81 @@ def test_the_workflow_greps_for_the_line_the_command_actually_prints() -> None:
     which is why this is pinned rather than trusted.
     """
     assert demo_reset.PORTAL_LINE_PREFIX in _workflow_text()
+
+
+def test_the_workflow_keeps_the_portal_token_out_of_any_shared_persistent_path() -> None:
+    """D19: the job summary is the ONLY channel by which the portal token reaches anyone.
+
+    The command's stdout is teed to a file so the summary step can grep it, and *where* that file
+    lives is a security property rather than a detail. `/tmp` on the self-hosted runner is shared
+    and persistent: a token written there stays readable by any local user until the next 03:15 run
+    overwrites it — a second channel, and D19's bounding of R2.5's single exception rests on there
+    being none. `RUNNER_TEMP` is emptied by the runner around every job, so the file cannot outlive
+    the run even if the cleanup below is skipped.
+
+    Stated as the universal it is, not as two examples of it: the first version of this test banned
+    the one literal path the fix had replaced and asserted the replacement was present, which left
+    an ADDED sink green — a second `tee`, a `cp` to `/tmp`, or an `upload-artifact` step, any of
+    which reopens the channel the docstring says is closed. Raised by the `/sdd:review` security
+    panel on 2026-08-24, one round after the same panel raised the underlying fix.
+    """
+    import re
+
+    import yaml
+
+    job = yaml.safe_load(_workflow_text())["jobs"]["reset"]
+    steps = job["steps"]
+    scripts = [step.get("run") or "" for step in steps]
+
+    # No sink under a shared, persistent path — whatever it is named.
+    for script in scripts:
+        assert "/tmp/" not in script, "no step may write the command's output under a shared /tmp"
+
+    # And every reference to the file goes through RUNNER_TEMP, which the runner empties per job.
+    for script in scripts:
+        for match in re.finditer(r"\S*demo-reset\.out", script):
+            assert re.search(r"\$\{?RUNNER_TEMP\}?/demo-reset\.out$", match.group(0)), (
+                f"{match.group(0)!r} must live under $RUNNER_TEMP"
+            )
+
+    # An artifact outlives the run by its retention period, which is the same channel by post.
+    for step in steps:
+        assert "upload-artifact" not in (step.get("uses") or "")
+
+
+def test_the_workflow_deletes_the_intermediate_output_even_when_the_reset_fails() -> None:
+    """D19, second half: the file that carried the token is removed unconditionally.
+
+    `if: always()` is the load-bearing part — a cleanup gated on success would leave the token
+    behind on exactly the runs where something went wrong.
+
+    Two things this asserts carefully, both because the first version got them wrong in the
+    direction that cries wolf on correct code — the hazard
+    `test_the_workflow_does_not_publish_the_password_in_its_summary` already records for this file.
+    The ordering is asserted against the steps that actually **read the file**, not against every
+    step that writes the job summary: those coincide today, but a second summary step that never
+    touches the file, or a legitimate mid-job cleanup, would have failed the earlier form without
+    the property being broken. And the condition is matched as a substring, so `${{ always() }}`
+    and `always() && …` — both equally valid — do not red correct code.
+    """
+    import yaml
+
+    steps = yaml.safe_load(_workflow_text())["jobs"]["reset"]["steps"]
+
+    def _mentions(step: dict) -> bool:
+        return "demo-reset.out" in (step.get("run") or "")
+
+    cleanups = [i for i, step in enumerate(steps) if _mentions(step) and "rm -f" in step["run"]]
+    readers = [i for i, step in enumerate(steps) if _mentions(step) and i not in cleanups]
+
+    assert cleanups, "no step removes the file that carried the portal token"
+    for i in cleanups:
+        assert "always()" in (steps[i].get("if") or ""), (
+            "the cleanup must not be gated on the reset succeeding"
+        )
+
+    assert readers, "no step reads the file, so the tee has no purpose"
+    assert max(readers) < min(cleanups), "the cleanup must run after the last reader"
 
 
 def test_the_workflow_shares_the_deploy_jobs_concurrency_group() -> None:

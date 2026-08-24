@@ -65,6 +65,10 @@ jobs:
         run: |
           set -euo pipefail
           source /etc/autohostai-deploy.env
+          if [ -z "${OCI_VAULT_ID:-}" ]; then
+            echo "::error::falta la variable de repo OCI_VAULT_ID, necesaria para resolver por nombre la contraseña de demostración" >&2
+            exit 1
+          fi
           name="autohostai-${ENV}-demo-account-password"
           val="$(oci --auth instance_principal secrets secret-bundle get-secret-bundle-by-name \
             --secret-name "$name" --vault-id "$OCI_VAULT_ID" \
@@ -97,7 +101,7 @@ jobs:
           docker compose -f docker-compose.deploy.yml run --rm --no-deps -T \
             -e DEMO_ACCOUNT_PASSWORD \
             -e BOOTSTRAP_STORAGE_TYPE=S3 \
-            backend python -m app.cli.demo_reset | tee /tmp/demo-reset.out
+            backend python -m app.cli.demo_reset | tee "$RUNNER_TEMP/demo-reset.out"
 
       # La URL del portal se publica y **no** se enmascara: el `::add-mask::` de arriba cubre la
       # contraseña y sólo la contraseña (D19, última nota). Es la excepción única y nombrada de
@@ -112,11 +116,11 @@ jobs:
             echo "Credenciales y qué es demostrable: \`docs/demo-tenant.md\`."
             echo "La contraseña **no** se imprime aquí ni en ningún log: vive sólo en el OCI Vault."
             echo
-            if grep -q 'guest portal for the active stay' /tmp/demo-reset.out; then
+            if grep -q 'guest portal for the active stay' "$RUNNER_TEMP/demo-reset.out"; then
               echo "### Portal de huésped de la estancia activa"
               echo
               echo '```'
-              grep 'guest portal for the active stay' /tmp/demo-reset.out | sed 's/^demo_reset: //'
+              grep 'guest portal for the active stay' "$RUNNER_TEMP/demo-reset.out" | sed 's/^demo_reset: //'
               echo '```'
               echo
               echo "Muere en el reset siguiente: cada ejecución acuña uno nuevo y revoca el anterior."
@@ -124,3 +128,13 @@ jobs:
               echo "_El comando no emitió enlace de portal en esta ejecución._"
             fi
           } >> "$GITHUB_STEP_SUMMARY"
+
+      # El token del portal es la excepción única de R2.5 (D19), y su acotamiento se apoya en que
+      # el resumen del job sea el ÚNICO canal por el que llega a alguien. El fichero intermedio no
+      # puede sobrevivir al job: el workspace del runner self-hosted es compartido y persistente,
+      # así que un `tee` sin borrado deja un token vivo legible en la máquina hasta el reset
+      # siguiente. Va en `RUNNER_TEMP` (que GitHub limpia entre jobs) y además se borra aquí de
+      # forma explícita, con `if: always()` para que un reset en rojo tampoco lo deje atrás.
+      - name: Borrar la salida intermedia, que lleva el token del portal
+        if: always()
+        run: rm -f "$RUNNER_TEMP/demo-reset.out"

@@ -202,7 +202,10 @@ Nada está pre-implementado: `backend/app/cli/demo_reset.py`, `.github/workflows
       con control del DNS y el TLS de toda la zona, y que una rama arbitraria ejecutaría su propia
       definición del workflow con el secret dentro—, y además antes del `apply` el secreto no
       existe, así que un `plan` mostraría una creación y no diría nada sobre `ignore_changes`.
-      Detalle, secuencia y salidas en `BLOCKED.md` #1. Verificar el riesgo de cabecera de
+      Procedimiento, secuencia y las dos salidas posibles: `infra/environments/dev/RUNBOOK.md`
+      §10.2 («Verificación pendiente: que `ignore_changes` aguante»), que es su casa —era también
+      la entrada #1 de `BLOCKED.md`, borrada en `/sdd:review` (2026-08-24) por duplicar ese §10.2
+      sin añadirle nada. Verificar el riesgo de cabecera de
       `design.md` **antes de publicar credenciales a nadie**: con el valor out-of-band ya puesto, un `terraform plan` que proponga reescribir
       `secret_content` significa que `ignore_changes` no aguanta en el provider de OCI. Si
       ocurre, la salida está escrita en Risks (la contraseña publicada pasa a ser la de
@@ -263,8 +266,8 @@ Nada está pre-implementado: `backend/app/cli/demo_reset.py`, `.github/workflows
 >   límite en este tenant— y `users.created_at`/`id`/`last_login_at`.
 > - **El bloqueo de login por 10 fallos**: cualquiera puede bloquear las cuatro cuentas publicadas
 >   15 minutos con ~40 intentos, indefinidamente. Sólo disponibilidad, aceptado, pero dicho.
-> - **La rotación de la contraseña** es la de la entrada 1 de `BLOCKED.md`, y depende de cómo salga
->   esa verificación: si `ignore_changes` no aguanta, el procedimiento es
+> - **La rotación de la contraseña** es la de la tarea 8.3 (`RUNBOOK.md` §10.2), y depende de cómo
+>   salga esa verificación: si `ignore_changes` no aguanta, el procedimiento es
 >   `terraform apply -replace` y no `oci vault secret update-base64`.
 
 
