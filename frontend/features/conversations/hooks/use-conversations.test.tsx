@@ -12,8 +12,17 @@ import {
   useConversations,
 } from "./use-conversations";
 
+// `vi.hoisted` so the mock factory can close over a mutable value: tests
+// reassign `mockUser` to simulate "no authenticated user", "wrong tenant",
+// or any other auth state without re-mocking the module per test.
+const { mockUser } = vi.hoisted(() => ({
+  mockUser: { user: { tenant_id: "tenant-from-session" } } as {
+    user: { tenant_id: string } | null;
+  },
+}));
+
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+  useAuth: () => mockUser,
 }));
 
 const listMock = vi.fn();
@@ -109,6 +118,37 @@ describe("useConversations / useConversation / useConversationMessages (D1)", ()
     });
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(listMessagesMock).toHaveBeenCalledWith(TENANT_ID, "c1", 1, 20);
+  });
+});
+
+describe("useConversations / useConversation / useConversationMessages — no auth (R6.1, security.md rule 1)", () => {
+  beforeEach(() => {
+    listMock.mockReset();
+    getMock.mockReset();
+    listMessagesMock.mockReset();
+  });
+
+  it("useConversations throws when there is no authenticated user", () => {
+    mockUser.user = null;
+    expect(() =>
+      renderHook(() => useConversations({}), { wrapper: freshWrapper() }),
+    ).toThrow(/authenticated tenant context/);
+  });
+
+  it("useConversation throws when there is no authenticated user", () => {
+    mockUser.user = null;
+    expect(() =>
+      renderHook(() => useConversation("c1"), { wrapper: freshWrapper() }),
+    ).toThrow(/authenticated tenant context/);
+  });
+
+  it("useConversationMessages throws when there is no authenticated user", () => {
+    mockUser.user = null;
+    expect(() =>
+      renderHook(() => useConversationMessages("c1"), {
+        wrapper: freshWrapper(),
+      }),
+    ).toThrow(/authenticated tenant context/);
   });
 });
 

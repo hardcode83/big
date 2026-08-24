@@ -82,4 +82,44 @@ describe("ConversationsView (R2)", () => {
     retry.click();
     expect(listMock).toHaveBeenCalledTimes(2);
   });
+
+  it("disables both prev and next on a single page (R2.5)", async () => {
+    // total: 1, perPage: 20 → lastPage = 1, page = 1: both ends.
+    listMock.mockResolvedValue(PAGE_WITH_ROWS);
+    const view = render(<ConversationsView />, { wrapper });
+    await waitFor(() => expect(view.getByRole("link")).toBeTruthy());
+    const prev = view.getByRole("button", { name: "conversations:fields.prevPage" });
+    const next = view.getByRole("button", { name: "conversations:fields.nextPage" });
+    expect(prev.hasAttribute("disabled")).toBe(true);
+    expect(next.hasAttribute("disabled")).toBe(true);
+  });
+
+  it("clicking 'next' advances the page and refetches with the new page number (R2.5)", async () => {
+    // total: 45, perPage: 20 → lastPage = 3, page starts at 1.
+    listMock.mockImplementation(async (_tenantId, filters) => ({
+      items: [
+        {
+          id: "c1",
+          channel: "WHATSAPP" as const,
+          status: "OPEN" as const,
+          escalationStatus: "PENDING_HUMAN" as const,
+          lastMessageAt: "2026-08-22T10:00:00Z",
+          createdAt: "2026-08-22T09:00:00Z",
+        },
+      ],
+      total: 45,
+      page: (filters.page as number | undefined) ?? 1,
+      perPage: 20,
+    }));
+    const view = render(<ConversationsView />, { wrapper });
+    await waitFor(() => expect(view.getByRole("link")).toBeTruthy());
+    const next = view.getByRole("button", { name: "conversations:fields.nextPage" });
+    expect(next.hasAttribute("disabled")).toBe(false);
+    const callsBefore = listMock.mock.calls.length;
+    next.click();
+    await waitFor(() => expect(listMock.mock.calls.length).toBeGreaterThan(callsBefore));
+    // Last call must carry page = 2.
+    const lastCallArgs = listMock.mock.calls.at(-1)!;
+    expect(lastCallArgs[1].page).toBe(2);
+  });
 });

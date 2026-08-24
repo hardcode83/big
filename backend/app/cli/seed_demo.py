@@ -12,6 +12,14 @@ what keeps the seed from becoming a second writer with its own copy of the invar
 
 Deliberately NOT an Alembic data migration, for the reasons `bootstrap.py` already gives, and
 NOT hooked into `make up`: it needs SEED_* values a person has to choose.
+
+**Intentionally NOT seeded** (ASSUMPTION): `Conversation` and `Message` (the `messaging-ai`
+aggregate). The inbox in `frontend/app/(workspace)/conversations/` is therefore empty after
+`make seed-demo` — that is the documented empty state of the FE, not a seed bug. Conversations
+are produced by the pipeline of `messaging-ai` R4, by the guest portal, or by a manual
+transcription from the operations panel; creating them here is a future change, not this one.
+See the proposal of `conversations-inbox` (sdd/changes/conversations-inbox/proposal.md) for the
+full limitation.
 """
 
 import asyncio

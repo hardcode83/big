@@ -68,11 +68,11 @@ export function ConversationsView() {
   const isLastPage = state.data.page >= lastPage;
   const onPrev = () => {
     if (isFirstPage) return;
-    setFilters((prev) => ({ ...prev, page: (state.data.page ?? 1) - 1 }));
+    setFilters((prev) => ({ ...prev, page: state.data.page - 1 }));
   };
   const onNext = () => {
     if (isLastPage) return;
-    setFilters((prev) => ({ ...prev, page: (state.data.page ?? 1) + 1 }));
+    setFilters((prev) => ({ ...prev, page: state.data.page + 1 }));
   };
 
   return (

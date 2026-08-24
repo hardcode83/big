@@ -51,14 +51,14 @@ export function ConversationReplyForm({
     mutation.mutate({ content: draft });
   };
 
-  // On success, clear the draft and notify the parent. `useEffect` is
-  // not strictly needed for state synchronization with mutation events
-  // here, because the form is the **only** place that owns the draft.
-  // We listen via `isSuccess` and clear on the next render where the
-  // form is mounted with the success flag — once. This avoids two
-  // sources of truth.
+  // On success, clear the draft and notify the parent. This is React's
+  // "adjusting state during render" pattern: the branch is only taken on
+  // the render where `isSuccess` first flips true with a non-empty draft,
+  // and React re-renders synchronously before painting, so the visible UI
+  // is always the cleared form. `useEffect` is intentionally not used:
+  // the form is the only owner of the draft, so there is nothing to
+  // synchronize with another store.
   if (mutation.isSuccess && draft !== "" && !isInFlight) {
-    // schedule a clear: defer to avoid set-state-during-render warnings.
     setDraft("");
     onReplySuccess?.();
   }

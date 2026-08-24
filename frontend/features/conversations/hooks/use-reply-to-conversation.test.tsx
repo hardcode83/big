@@ -4,12 +4,20 @@ import { renderHook, waitFor } from "@testing-library/react";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import * as dataModule from "../data";
-import { HttpConversationsSource } from "../data/http/http-conversations-source";
 import { conversationsKeys } from "./query-keys";
 import { useReplyToConversation } from "./use-reply-to-conversation";
 
+// `vi.hoisted` so the mock factory can close over a mutable value: tests
+// for the no-auth path reassign `mockUser.user = null` without re-mocking
+// the module per test.
+const { mockUser } = vi.hoisted(() => ({
+  mockUser: { user: { tenant_id: "tenant-from-session" } } as {
+    user: { tenant_id: string } | null;
+  },
+}));
+
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: { tenant_id: "tenant-from-session" } }),
+  useAuth: () => mockUser,
 }));
 
 const replyMock = vi.fn();
@@ -117,5 +125,41 @@ describe("useReplyToConversation (D9)", () => {
     expect(calledWith).toContainEqual(
       conversationsKeys.messagesPrefix(TENANT_ID, CONVERSATION_ID),
     );
+  });
+});
+
+describe("useReplyToConversation — no auth (R6.1, security.md rule 1)", () => {
+  beforeEach(() => {
+    replyMock.mockReset();
+  });
+
+  it("the mutation throws when there is no authenticated user", async () => {
+    mockUser.user = null;
+    const { result } = renderHook(() => useReplyToConversation(CONVERSATION_ID), {
+      wrapper: freshWrapper(),
+    });
+    result.current.mutate({ content: "Hola" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(result.current.error?.message).toMatch(/tenant context/);
+    expect(replyMock).not.toHaveBeenCalled();
+  });
+
+  it("onSettled is a no-op when there is no authenticated user (no cross-tenant invalidation)", async () => {
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false }, mutations: { retry: false } },
+    });
+    const invalidateSpy = vi.spyOn(client, "invalidateQueries");
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    mockUser.user = null;
+    const { result } = renderHook(() => useReplyToConversation(CONVERSATION_ID), {
+      wrapper,
+    });
+    result.current.mutate({ content: "Hola" });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    // The hook checks `if (!tenantId) return` before invalidating: a
+    // missing-tenant mutation must NOT invalidate anyone else's cache.
+    expect(invalidateSpy).not.toHaveBeenCalled();
   });
 });

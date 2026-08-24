@@ -21,14 +21,17 @@ vi.mock("react-i18next", () => ({
 
 const getMock = vi.fn();
 const listMessagesMock = vi.fn();
+const replyMock = vi.fn();
 vi.spyOn(dataModule, "getConversationsDataSource").mockImplementation(
   () =>
     ({
       getConversation: getMock,
       listMessages: listMessagesMock,
+      replyToConversation: replyMock,
     }) as unknown as ReturnType<typeof dataModule.getConversationsDataSource>,
 );
 
+import { fireEvent } from "@testing-library/react";
 import { ConversationThreadView } from "./conversation-thread-view";
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -84,8 +87,21 @@ describe("ConversationThreadView (R3)", () => {
   beforeEach(() => {
     getMock.mockReset();
     listMessagesMock.mockReset();
+    replyMock.mockReset();
     getMock.mockResolvedValue(CONVERSATION);
     listMessagesMock.mockResolvedValue(MESSAGES);
+    replyMock.mockResolvedValue({
+      id: "m1",
+      conversationId: "c1",
+      senderType: "MANAGER" as const,
+      senderUserId: "u1",
+      content: "Hola",
+      language: "es",
+      aiGenerated: false,
+      confidenceScore: null,
+      intent: null,
+      createdAt: "2026-08-22T10:00:00Z",
+    });
   });
 
   it("renders the localized 'not found' state when the conversation is unknown or another tenant's", async () => {
@@ -101,6 +117,37 @@ describe("ConversationThreadView (R3)", () => {
     const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
     await waitFor(() => expect(view.getByText("states:error.title")).toBeTruthy());
     expect(view.getByText("states:error.retry")).toBeTruthy();
+  });
+
+  it("a 403 on the messages sub-query shows the localized 'forbidden' copy (R3.7)", async () => {
+    // The conversation header resolves successfully, but the messages
+    // list is forbidden — e.g. the policy was tightened between the two
+    // requests and the user lost read access. The view shows the
+    // distinct localized 403 copy on the messages pane rather than the
+    // generic error.
+    getMock.mockResolvedValue(CONVERSATION);
+    listMessagesMock.mockRejectedValueOnce(
+      new ApiError({ status: 403, code: "FORBIDDEN", message: "nope" }),
+    );
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("channel.WHATSAPP")).toBeTruthy());
+    expect(view.getByText("fields.forbidden")).toBeTruthy();
+  });
+
+  it("a 403 on the conversation itself maps to the generic error state (R3.7)", async () => {
+    // A user from another tenant hitting `/conversations/[id]` for a
+    // foreign conversation gets the same 403 — by design, the UI does
+    // not filter existence — and the view shows the generic error
+    // state, NOT the distinct 'forbidden' copy (that copy is reserved
+    // for the messages sub-query).
+    getMock.mockRejectedValueOnce(
+      new ApiError({ status: 403, code: "FORBIDDEN", message: "nope" }),
+    );
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("states:error.title")).toBeTruthy());
+    expect(view.getByText("states:error.retry")).toBeTruthy();
+    // Distinct forbidden copy does NOT appear here.
+    expect(view.queryByText("fields.forbidden")).toBeNull();
   });
 
   it("renders the loading state initially and the conversation header once the data resolves", async () => {
@@ -159,5 +206,52 @@ describe("ConversationThreadView (R3)", () => {
     expect(lastCallArgs[0]).toBe("tenant-from-session");
     expect(lastCallArgs[1]).toBe("c1");
     expect(lastCallArgs[2]).toBe(2);
+  });
+});
+
+describe("ConversationThreadView — PENDING_HUMAN badge updates after reply (R6.7)", () => {
+  beforeEach(() => {
+    replyMock.mockReset();
+    listMessagesMock.mockReset();
+    getMock.mockReset();
+    listMessagesMock.mockResolvedValue(MESSAGES);
+    replyMock.mockResolvedValue({
+      id: "m1",
+      conversationId: "c1",
+      senderType: "MANAGER" as const,
+      senderUserId: "u1",
+      content: "Ya te respondo",
+      language: "es",
+      aiGenerated: false,
+      confidenceScore: null,
+      intent: null,
+      createdAt: "2026-08-22T10:01:00Z",
+    });
+  });
+
+  it("the escalation badge flips from PENDING_HUMAN to HUMAN_HANDLING after a successful reply", async () => {
+    // Two-phase mock: first call returns PENDING_HUMAN, the refetch
+    // after the reply mutation invalidates the detail query returns
+    // HUMAN_HANDLING. The badge in the header must reflect the second
+    // value without a manual reload (R3.8 / D9 — invalidation in
+    // onSettled).
+    const initial = { ...CONVERSATION, escalationStatus: "PENDING_HUMAN" as const };
+    const after = { ...CONVERSATION, escalationStatus: "HUMAN_HANDLING" as const };
+    getMock.mockImplementation(async () =>
+      getMock.mock.calls.length === 1 ? initial : after,
+    );
+
+    const view = render(<ConversationThreadView conversationId="c1" />, { wrapper });
+    await waitFor(() => expect(view.getByText("escalationStatus.PENDING_HUMAN")).toBeTruthy());
+
+    const textarea = view.container.querySelector("#reply-content") as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "Ya te respondo" } });
+    fireEvent.submit(view.getByRole("button", { name: "thread.replySubmit" }).closest("form")!);
+
+    await waitFor(() =>
+      expect(view.getByText("escalationStatus.HUMAN_HANDLING")).toBeTruthy(),
+    );
+    // The stale badge text is gone from the DOM.
+    expect(view.queryByText("escalationStatus.PENDING_HUMAN")).toBeNull();
   });
 });
