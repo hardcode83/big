@@ -137,8 +137,10 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
      cicd — el comentario de `layout.tsx` (citando D8) hablaba del «job Production
      build» de frontend-tests.yml, y ese job no existe: es un PASO del job
-     `provenance-contract`. Y son TRES sitios de build, no dos — falta
-     `build-frontend` de deploy-dev.yml. Corregido en el comentario y en D8.
+     `provenance-contract`. Y no son dos sitios de build. La cuenta de esta pasada
+     (tres) la superó la review del 2026-08-24, que encontró el cuarto:
+     `multiarch-build-check.yml`. La lista vive ahora en un único sitio, D8
+     §«Dónde corre ese build»; el comentario de `layout.tsx` apunta a ella.
      Cerrado de paso el peor caso: el runner self-hosted de la VM no construye,
      sólo hace `docker compose pull`, así que la descarga de fuentes no pasa por ahí.
 
@@ -170,15 +172,25 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       tres modificadores (`--line-height`, `--letter-spacing`, `--font-weight`), convirtiendo
       los px del export a `rem` y dejando el tracking en `em` (D10). La escala numérica por
       defecto de Tailwind (`text-sm`, `text-xs`, `text-lg`) **se conserva**. [R4.3]
-- [x] 3.4 `globals.css`: declarar los 11 pasos `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,
-      margin-mobile,margin-desktop}` en rem sobre la unidad de 4 px, junto al `--spacing` base.
-      [R5.1]
-- [x] 3.5 `globals.css`: sustituir `--radius` y sus tres `calc()` derivados por
-      `--radius-{sm,md,lg,xl,full}` con valores literales del export. Comprobar —no dar por
-      hecho— que el `rounded` desnudo de Tailwind v4 vale ya `0.25rem` y por tanto el
-      `DEFAULT` del export no necesita declararse; dejar el resultado escrito. Asumido y
-      aceptado: `rounded-sm` pasa de `0.25rem` a `0.125rem` (botón de cierre de `Sheet`).
-      [R5.1]
+- [x] 3.4 `globals.css`: declarar el ritmo sobre la unidad de 4 px, junto al `--spacing` base.
+      **Cuerpo reescrito por la segunda enmienda de R5.1 (2026-08-24)**: pedía los 11 pasos
+      `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,margin-mobile,margin-desktop}`, y declarar
+      las ocho tallas **rompía el layout** — Tailwind v4 resuelve `max-w-*` contra el espacio de
+      nombres `--spacing-*`, así que `max-w-md` compilaba a `0.75rem` en vez de `28rem`. Lo
+      entregado y verificado son `--spacing` más **tres** pasos con nombre (`gutter`,
+      `margin-mobile`, `margin-desktop`), que no colisionan con ninguna utilidad; la escala
+      numérica de Tailwind ES el ritmo del export en los ocho pasos. El razonamiento completo
+      está en el propio R5.1 del proposal, y `globals.tokens.test.ts` aserta además la
+      **ausencia** de cualquier `--spacing-<talla>`. [R5.1]
+- [x] 3.5 `globals.css`: sustituir `--radius` y sus tres `calc()` derivados por radios
+      literales del export. **Cuerpo reescrito por la enmienda de R5.1 (2026-08-24)**: pedía
+      `--radius-{sm,md,lg,xl,full}` y `full` se retiró — `rounded-full` emite
+      `calc(infinity * 1px)` y no lee ningún token, así que declararlo era un token con cero
+      consumidores (la retractación razonada está en el comentario de panel de esta sección).
+      Lo entregado son **cuatro**: `sm`/`md`/`lg`/`xl`. Comprobar —no dar por hecho— que el
+      `rounded` desnudo de Tailwind v4 vale ya `0.25rem` y por tanto el `DEFAULT` del export no
+      necesita declararse; dejar el resultado escrito. Asumido y aceptado: `rounded-sm` pasa de
+      `0.25rem` a `0.125rem` (botón de cierre de `Sheet`). [R5.1]
 - [x] 3.6 Extender `globals.tokens.test.ts` (o añadir aserciones) para que los roles
       tipográficos, la escala de ritmo y los radios declarados sean los del export y no un
       subconjunto: cuenta y nombres. [R4.3, R5.1]
@@ -667,6 +679,17 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       estilos deja de describir una paleta placeholder», cuando no había sección— y se ha
       corregido en la tabla de Changes by area.
 
+- [x] 9.3 **Ancla para `/sdd:archive`: `docs/design-system-tokens.md`.** Esta tarea no crea la
+      página —`sdd/steering/documentation.md:18` la sitúa **al archivar**—, la deja anclada para
+      que haya sobre qué actuar. Motivo: el change entrega una capability de cara al usuario, el
+      selector de tema de tres estados en la topbar de los cinco shells, con rótulos ES/EN y
+      cookie `autohostai.theme`; es el mismo criterio que dio página a
+      `docs/frontend-auth-session.md` y a `docs/app-version-visibility.md`. Contenido esperado:
+      cómo se elige tema, qué significa «Sistema», dónde se guarda la preferencia y qué se ve
+      sin cookie — cómo se usa y se opera, enlazando a la spec en vez de repetir su EARS.
+      El ancla vive también en «Otra documentación afectada» del proposal.
+      [documentation.md:18]
+
 ## 10. Verificación
 
 - [x] 10.1 Suite completa en verde: `docker compose exec -T frontend npm test` — comparada
@@ -740,3 +763,322 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 <!-- R2.3 no se activa: la paleta clara quedó aprobada por Jose el 2026-08-23
      (design.md §Open questions 1), así que el change entrega los dos temas y no
      hay bloqueo que registrar ni alcance alternativo que ejecutar. -->
+
+## 11. Remediación de la review del 2026-08-24
+
+Sección abierta por `/sdd:review` (veredicto FAIL, 22 hallazgos tras deduplicar; el
+detalle y sus referentes están en `BLOCKED.md`). Las tres decisiones que la review dejó
+abiertas las resolvió Jose el 2026-08-24 y bajan aquí ya cerradas: 11.7, 11.8 y 11.9.
+
+**Lo estructural, que conviene leer antes de tocar nada.** Diez de los hallazgos comparten
+una sola causa: las enmiendas de `/sdd:run` **se añadieron en vez de aplicarse**. Los
+recuentos de tokens, el número de comprobaciones del guard, el inventario de ficheros y la
+lista de sitios de build viven a la vez en `proposal.md`, `design.md` (prosa del D# *y*
+tabla de Changes by area), `tasks.md` (cuerpo de tarea *y* comentario de panel),
+`frontend/README.md` y comentarios en código. Cada enmienda había que propagarla a cinco
+sitios y llegó a dos o tres. Arreglar las diez copias sin arreglar eso deja el mismo defecto
+esperando a la próxima enmienda: de ahí 11.11.
+
+### El guard de la sección 8 (nunca llegó a PASS)
+
+- [x] 11.1 **El guard rechaza los tokens tipográficos del propio change.** La comprobación 3
+      de `frontend/test/color-tokens.test.ts:210-229` clasifica como violación las diez
+      utilidades `text-<rol>` de D10: `DECLARED_TOKENS` se construye filtrando `--color-*`
+      (`:158-161`) y `NON_COLOR.text` (`frontend/test/color-tokens.ts:236`) sólo admite la
+      escala numérica de Tailwind, así que `namesAColorToken("text","display-2xl")` da `true`
+      y el nombre no está en el conjunto. Hoy está **dormido** —cero consumidores medidos en
+      `app|components|features|lib`— pero el primer consumidor pone el build en rojo con un
+      mensaje que pide declarar un token de color que no debe existir, y `landing-public` y
+      `visual-restyle-workspace` existen para aplicar esos roles.
+      Arreglo: clasificar un `text-*` también contra las declaraciones `--text-*` del bloque
+      `@theme` llano, con el helper `declarationsOf` que ya se usa para `@theme inline`. No es
+      DESIGN-CONFLICT: D10 y D12 son compatibles, el guard lee el bloque equivocado.
+      Añadir a la tabla de `color-tokens.patterns.test.ts` un caso por los diez roles.
+      [R1.5, R6.6, D10, D12]
+- [x] 11.2 **Cerrar el bypass que reabre el defecto que el change existe para cerrar.**
+      `className="[@media(prefers-color-scheme:dark)]:bg-surface"` pasa las **cinco**
+      comprobaciones: `DARK_VARIANT` (`/\bdark:/g`) no dispara porque la cadena lleva
+      `scheme:dark)`, y el lookbehind `(?<![\w/-])` de `colorUtility()` se satisface con los
+      `:` previos, así que `bg-surface` se lee como token declarado legítimo. En una página
+      forzada a claro con `data-theme="light"` sobre un sistema oscuro la utilidad dispara
+      igual y pinta la superficie oscura: exactamente el defecto R6.5 que este change cerró,
+      reabrible en una línea. Igual con `[@media(prefers-color-scheme:dark)]:text-primary` y
+      con `DARK:bg-surface` en mayúsculas.
+      Arreglo: detectar la consulta de media embebida como variante de tema, no sólo el
+      literal `dark:`, y hacer la detección insensible a mayúsculas. Caso en la tabla de
+      patrones. [R1.5, R6.5, R6.6, D12]
+- [x] 11.3 **Los dos agujeros de `stripCode`** (`frontend/test/color-tokens.ts:220-224`), sin
+      violación viva hoy pero son riesgo de regresión: (a) `/\*[\s\S]*?\*\//g` no está
+      anclado, así que un literal de cadena que contenga `/*` borra todo hasta el siguiente
+      `*/` —probado: `const marker = "/*";` seguido de `className="bg-red-500
+      dark:bg-blue-900"` y un `/** doc */` posterior da **0 violaciones**—; y (b) la regla de
+      `//` sólo excluye `: " ' \`` antes de las barras, así que cualquier `//` tras una letra,
+      `}` o `)` borra el resto de la línea (`<img src="a//b.png" className="dark:bg-red-500"/>`
+      y una plantilla `${a}//${b}` dan 0). Verificado que hoy no esconde nada: los únicos dos
+      tramos eliminados del árbol de producción que contienen una utilidad de color son
+      comentarios legítimos (`app/layout.tsx:11`, `lib/ui/status-tone.ts:13`), así que el 0
+      registrado en 10.5 es honesto. Casos en la tabla de patrones. [R6.6, D12]
+- [x] 11.4 **El guard no lee CSS ni JS.** `sourceFiles()`
+      (`frontend/test/color-tokens.test.ts:135`) acepta sólo `/\.tsx?$/`, así que ningún
+      `.css`, `.js`, `.jsx` ni `.mjs` se escanea: un `@apply bg-red-500 dark:bg-blue-900` en
+      un `app/print.css` nuevo es invisible. Los **patrones** sí cazan esa cadena —está
+      probado—, la ceguera es sólo del recorrido de ficheros. Relacionado: `uiRoots()` filtra
+      por `isDirectory`, así que un `.tsx` suelto en la raíz de `frontend/` tampoco se lee.
+      Hoy sin violación: `app/globals.css` es el único CSS y va a 0/0 medido.
+      Arreglo: ampliar la extensión aceptada y decidir por escrito qué hace el guard con
+      `@apply`. [R6.6, D12]
+- [x] 11.5 **Clave computada en `style`.** `STYLE_COLOR` exige que el nombre de la propiedad
+      vaya seguido de `:` o `=`, así que `<div style={{ ["color"]: "#e11d48" }} />` da 0
+      violaciones mientras la forma llana `{ color: "#e11d48" }` sí se caza. Caso en la tabla
+      de patrones. [R1.5, R6.6, D12]
+- [x] 11.6 **R1.1 exige una ausencia que nada vigila.** Hoy no existe `tailwind.config.js|ts`
+      y su ausencia es una decisión de `frontend-foundation` (`components.json` lleva
+      `"tailwind": {"config": ""}`), pero ningún test nombra el fichero: nada falla si vuelve.
+      Añadir el guard de ausencia, con el motivo al lado, como el de R5.1 —que el panel
+      verificó por mutación que falla de verdad al reintroducir `--spacing-md`. [R1.1]
+
+### Las tres decisiones de Jose (2026-08-24)
+
+- [x] 11.7 **Enmendar R6.4 a la ubicación real** (decisión: enmendar el criterio, no mover el
+      código). R6.4 (`proposal.md:241`) manda unificar los dos `SEVERITY_COLOR` «en la única
+      tabla de `lib/ui/`» y la tabla vive en
+      `frontend/features/incidents/lib/severity-tone.ts:28`. La sustancia se cumple —las dos
+      copias byte a byte murieron, `TONE_BADGE_CLASS` es la única paleta y el `SHALL` de
+      `sdd/specs/frontend-foundation.md:38` queda satisfecho— y `design.md:256-269` ya lo
+      argumenta, pero el criterio nunca se enmendó, así que la spec que se escriba al
+      archivar afirmaría una ubicación que el código no usa.
+      Motivo de la enmienda, que es el del propio criterio: R6.4 dice que «la severidad de
+      incidencia y los estados de PRD §9.1 significan cosas distintas y sólo comparten
+      paleta», así que el vocabulario de severidad pertenece al dominio de incidencias y lo
+      que tiene un único hogar es la **paleta**, en `lib/ui/status-tone.ts`.
+      Escribir la enmienda con fecha y motivo en `proposal.md` R6.4, en la forma de las dos
+      de R5.1. [R6.4]
+- [x] 11.8 **Anclar `docs/design-system-tokens.md`** (decisión: crear la página al archivar).
+      `sdd/steering/documentation.md:18` obliga a una página `docs/<capability>.md` al
+      archivar un change que introduce una capability de cara a usuarios u operación, y este
+      entrega un control de usuario —selector de tema de tres estados en la topbar de los
+      cinco shells, rótulos ES/EN, cookie `autohostai.theme`—, el mismo criterio que dio
+      página a `docs/frontend-auth-session.md` y `docs/app-version-visibility.md`. Hoy
+      `tasks.md` §9, la fila Docs de `design.md:754` y «Affected specs» del proposal nombran
+      sólo `frontend/README.md`: sin ancla, `/sdd:archive` no tiene sobre qué actuar y la
+      obligación se salta en silencio. Añadir el ancla en §9 y en «Affected specs».
+      [documentation.md:18]
+- [x] 11.9 **Borrar la clave huérfana** (decisión: se queda el botón único). `81b4faa`
+      rediseñó `features/shell/components/locale-switcher.tsx:60-86` de un `role="group"` de
+      dos botones con `aria-pressed` a un único botón de acción con tooltip, y
+      `localeSwitcher.label` quedó sin ningún consumidor en
+      `locales/{es,en}/navigation.json:111`. El test de paridad compara conjuntos de claves,
+      así que no distingue muerta de viva y la deuda es invisible. Borrar las dos entradas.
+      Dejar además escrito en el change que el rediseño del LocaleSwitcher fue creep de
+      alcance asumido —ningún requisito lo autoriza: R3.5 gobierna sólo el control de tema y
+      `proposal.md:44` dice «No se toca ninguna pantalla»— para que la spec del archivado no
+      lo presente como planificado. [R3.5]
+
+### La deriva documental
+
+- [x] 11.10 Corregir las diez copias que sobrevivieron a sus propias enmiendas. Cada una con
+      su cifra real medida, no incrementada (`design.md` y `tasks.md` son del change;
+      `frontend/README.md` y `layout.tsx` son del árbol):
+      - `design.md:744` — dice «11 pasos `--spacing-*`, 5 `--radius-*`»; real: `--spacing`
+        base + **3** pasos con nombre (`globals.css:260-263`) y **4** radios (`:283-286`).
+        Ambas cifras describen el estado que rompía `max-w-*` y se revirtió. **No tocar**
+        `design.md:30-31`, que describe el export y es correcto.
+      - `tasks.md:173-175` — la tarea 3.4 sigue marcada `[x]` mandando declarar los once
+        pasos `--spacing-{xs…4xl}`, y en todo el fichero no hay nota de la segunda enmienda.
+        Reescribir el cuerpo conservando el `[x]` y apuntando a la enmienda. Igual con 3.5,
+        que arrastra `--radius-{…,full}` aunque su retractación sí esté en `:114-120`.
+      - `design.md:752-753` — la fila Guards nombra 3 ficheros; el change entrega 9, y faltan
+        justo `test/color-tokens.ts` y `test/color-tokens.patterns.test.ts`, que la enmienda
+        de D12 (`:546-550`) decide crear.
+      - `design.md:744-754` — el inventario enumera 19 ficheros; el diff lleva **49** fuera de
+        `sdd/`. Ausentes los diez arreglos de D13, los cinco shells, `locale-switcher.tsx` y
+        doce módulos de test: las dos ampliaciones de huella que D5 (`:181-184`) insistió en
+        decir en voz alta no llegaron a la tabla.
+      - `frontend/app/layout.tsx:18-21` — el comentario **abre** afirmando lo que D8 corrigió
+        («la job "Production build"… **ambos** tienen red») y se corrige a sí mismo en el
+        párrafo siguiente: borrar la frase superada en vez de dejar las dos.
+      - Y la enumeración corregida de D8 sigue incompleta: falta un **cuarto** sitio de build,
+        `.github/workflows/multiarch-build-check.yml:35-48` (`target: prod`,
+        `linux/amd64,linux/arm64`), que atraviesa el mismo stage `builder` y baja las fuentes
+        dos veces por ejecución. Corregir en `design.md:295` y en el comentario de
+        `layout.tsx`, anotando su filtro `paths` (que es por qué rara vez corre).
+      - `frontend/README.md:126` — anuncia los diez roles como «`text-display-2xl` …
+        `text-label-sm`»; el token es `--text-label-caps` (`globals.css:231`) y `label-sm` no
+        existe en el árbol. Quien siga el README escribe una clase que no compila nada, y la
+        comprobación 3 no lo caza porque sólo mira color.
+      - `frontend/README.md:132` — describe el guard con **tres** comprobaciones y remata con
+        «Lo que no ven:», presentando la lista como exhaustiva; hay **cinco**
+        (`color-tokens.test.ts:189,197,210,231,244`) más dos meta-guards (`:261,:270`). Las
+        dos omitidas son la cuarta y la quinta de D12, así que el lector queda creyendo que
+        `bg-[#e11d48]` y un hex en `style={{…}}` están sin vigilar. Conservar tal cual los dos
+        puntos ciegos declarados.
+      - `frontend/README.md:118` — «vive **entera** en `app/globals.css`, expuesta por
+        `@theme inline`»: `@theme inline` es `:129-166` (color y las dos familias) mientras
+        tipografía, ritmo y radios están en un `@theme` llano (`:176-287`), y el propio fichero
+        explica por qué. Distinguir los dos bloques y su regla: dependiente del tema →
+        `inline`; literal → llano.
+      - `frontend/README.md:85` y `:30` — §Server/Client Components no lista `ThemeSwitcher`
+        ni la convención de `Topbar` asíncrono, y la línea de `lib/` no lista `lib/theme/`.
+      [documentation.md:17, documentation.md:34, R5.1, D5, D8, D12, D13]
+- [x] 11.11 **Darle un único hogar a los hechos que hoy tienen cinco.** Es la tarea que evita
+      que 11.10 se repita en la próxima enmienda, y sin ella lo demás es cosmética. Decidir y
+      dejar escrito dónde vive cada uno de estos cuatro hechos, y que los demás sitios
+      **apunten** en vez de repetir: (a) el conjunto de tokens declarados y sus recuentos —el
+      candidato natural es `globals.css` con sus tests de recuento (`toBe(25)` ya existe), y
+      que `design.md` y el README citen el test en vez de un número; (b) el número y la
+      naturaleza de las comprobaciones del guard —candidato: `color-tokens.test.ts`, con el
+      README describiendo el criterio y no la lista; (c) el inventario de ficheros tocados
+      —candidato: el propio diff, con la tabla de `design.md` describiendo áreas y no
+      enumerando ficheros; (d) los sitios de build que bajan fuentes —candidato: un único
+      párrafo, referenciado desde `layout.tsx`. Si algún hecho tiene que estar duplicado por
+      fuerza, que lo vigile un test de paridad, que es lo que D1 ya hace con los dos bloques
+      oscuros. [rules.md §1, documentation.md:34]
+
+### Re-verificación
+
+- [x] 11.12 Suite, lint y typecheck en verde otra vez, con la cifra **medida** y comparada
+      contra la de 10.1 (134 ficheros, 1330 tests) —no incrementada—, más los `docker compose
+      cp` de §Worktree bootstrap aplicados y `rtk proxy` para las cifras, porque un
+      «PASS (0) FAIL (0)» filtrado es una colección fallida disfrazada de verde. Registrar
+      también el recuento de casos de `color-tokens.patterns.test.ts` (66 antes de esta
+      sección) y volver a medir la evidencia de R6.6. [R6.7, R6.6]
+- [x] 11.13 Renombrar la rama a la convención antes de que nada la certifique:
+      `git branch -m sdd/design-system-tokens`. Hoy es `hardcode83/design-system-tokens`
+      (nombre que deja el bootstrap del worktree) y no hay rama remota; `STATE.md` todavía no
+      registra `head_branch`, así que nada está corrompido, pero `mark-ready` graba como
+      evidencia de merge la rama activa y `/sdd:ship` publica ese nombre. El renombrado es
+      local, no mueve código y no toca el registro de worktrees, que resuelve por ruta.
+<!-- EVIDENCIA MEDIDA de la sección 11, el 2026-08-24. Stack de este worktree, con
+     los `docker compose cp` de §Worktree bootstrap aplicados, y todas las cifras por
+     `rtk proxy` porque un «PASS (0) FAIL (0)» filtrado es una colección fallida
+     disfrazada de verde.
+
+     Suite completa  ->  134 ficheros, 1358 tests, 0 fallos (22,8 s).
+       Partida de 10.1: 134 ficheros, 1330 tests. Diferencia +28, TODA de esta
+       sección y ningún fichero nuevo: la sección 11 no crea módulos, añade casos.
+       Contada, no incrementada — la cifra sale de la ejecución de arriba.
+     lint (`eslint .`)        -> limpio.
+     typecheck (`tsc --noEmit`) -> limpio.
+     build (`next build`)     -> verde, las 20 rutas emitidas.
+
+     Recuento de casos del guard, medido:
+       test/color-tokens.patterns.test.ts   92 casos  (66 antes de esta sección, +26)
+       test/color-tokens.test.ts             7 casos
+       app/globals.tokens.test.ts           33 casos  (31 antes, +2 por el guard R1.1)
+       test/theme-client-state.test.ts       7 casos
+
+     Evidencia de R6.6, vuelta a medir y no recordada: las cinco comprobaciones de
+     `color-tokens.test.ts` pasan con la lista de violaciones VACÍA sobre el árbol
+     entero, así que el recuento de escalas crudas de color sigue en **0**, el de
+     `dark:` en **0**, el de utilidades nombrando un token no declarado en **0**, el
+     de colores arbitrarios en **0** y el de colores incrustados en estilo en **0**
+     (fuera de las dos excepciones declaradas de D12, que el sexto test fija).
+
+     Y la parte que importa más que las cifras: cada arreglo de 11.1-11.6 se verificó
+     POR MUTACIÓN contra el árbol real, porque un guard verde que no puede ponerse
+     rojo es exactamente el defecto que esta sección cierra. Las cinco mutaciones,
+     aplicadas y revertidas una a una:
+       tailwind.config.ts creado                                -> 2 tests en rojo (11.6)
+       `[@media(prefers-color-scheme:dark)]:bg-surface` en un
+         componente de producción                               -> 1 test en rojo (11.2)
+       `{ ["color"]: "#e11d48" }` en un componente               -> 1 test en rojo (11.5)
+       `app/print.css` nuevo con `@apply bg-red-500 dark:bg-blue-900`
+                                                                -> 3 tests en rojo (11.4)
+       `text-display-2xl` en un componente de producción         -> VERDE, que es el
+         arreglo de 11.1: el rol tipográfico deja de leerse como token de color.
+     Árbol restaurado y suite verde otra vez tras las cinco. -->
+
+<!-- PANEL de la sección 11, primera vuelta (2026-08-24). Cinco revisores en paralelo:
+     architect FAIL(3), qa FAIL(2), cicd FAIL(2), documentation PASS(0), i18n PASS(0).
+     Los siete hallazgos se aceptaron y se arreglaron; ninguno se descartó.
+
+     LO GRAVE, y la lección de la vuelta: DOS de los arreglos de 11.1-11.6 estaban
+     incompletos, y en los dos casos por lo mismo — la mutación que probé cerraba el
+     caso exacto, no su generalización.
+
+     · qa-1 [R1.5, R6.6] Tailwind v4 expande `_` a espacio dentro de una variante
+       arbitraria, así que `[@media(prefers-color-scheme:_dark)]:bg-surface` compila a
+       una regla `@media (prefers-color-scheme: dark)` REAL —el revisor lo comprobó con
+       `@tailwindcss/cli`, no lo supuso— y pasaba las cinco comprobaciones. Es decir: el
+       arreglo de 11.2 cerró el bypass con espacio y dejó abierto el mismo bypass con
+       guion bajo, a un carácter de distancia. Cerrado con `[\s_]*`; tres filas nuevas
+       en la tabla de patrones.
+       Nota sobre mi propia verificación, que merece quedar escrita: al intentar
+       reproducirlo inyecté la clase en `components/ui/badge.tsx` con un reemplazo de
+       `className="`, y ese fichero usa `cva` y NO CONTIENE esa cadena — la mutación fue
+       un no-op y el «7/7 en verde» que leí no probaba nada. Repetida sobre
+       `version-badge.tsx` (que sí la tiene) el bypass se reprodujo de verdad, y el
+       arreglo se verificó contra las cuatro formas. Una mutación que no se aplica se
+       lee igual que un guard que no salta.
+     · qa-2 [R1.1] El guard de ausencia de 11.6 miraba sólo `frontend/tailwind.config.*`
+       (la raíz) y sólo `@config` dentro de `globals.css`. Con
+       `lib/vendor/tailwind.config.js` + un `app/print.css` que lo referencie por
+       `@config`, el segundo hogar de tokens entra con 40 tests en verde. Ahora las dos
+       aserciones recorren el árbol entero, con su propio guard de recorrido no vacío.
+     · architect-1 [D12] La ampliación a `.css`/`@apply` estaba escrita en el código, en
+       la cabecera del guard y en el README, pero NO en D12 — que es justo el defecto
+       que esta sección dice cerrar. D12 enmendado.
+     · architect-2 [R1.5, R6.6] La laguna de `applyDirectives` (una hoja de estilos que
+       declare color a pelo, o su propio bloque `prefers-color-scheme`, es invisible) no
+       estaba declarada. Añadida a «Lo que no ven» del README y como tercer límite de D12.
+     · architect-3 [D12] `SCANNED_EXTENSION` aceptaba `.mjs`/`.cjs` pero la exención de
+       test seguía en `/\.test\.[jt]sx?$/`. Simetrizado.
+     · cicd-1 [D8, 11.11] «ver el riesgo abierto en la tarea 11.14» era un puntero roto:
+       11.14 es la vuelta del panel y no decide nada sobre arm64/QEMU. Sustituido por la
+       aceptación del riesgo CON su motivo y su condición de salida, dentro de D8.
+     · cicd-2 [D8] «invocada directamente (`make`, local)» era falso: ningún target del
+       Makefile construye la etapa. Corregido con las citas verificadas a mano
+       (`Makefile:253`, `docker-compose.yml:238-242`, `target: dev`) — y de paso corregida
+       la cita que el propio revisor dio mal (`53-55` es el servicio `migrate`).
+
+     Cifras tras los arreglos, medidas con `rtk proxy`:
+       suite completa  ->  134 ficheros, 1362 tests, 0 fallos
+       lint, typecheck ->  limpios
+       patterns        ->  95 casos (92 antes de esta vuelta)
+       globals.tokens  ->  34 casos
+     Mutaciones de esta vuelta, todas aplicadas y revertidas: las cuatro formas de la
+     variante embebida (`_dark`, `_DARK`, `__dark`, ` dark`) fallan; `tailwind.config.mts`
+     anidado falla; config anidado + `@config` desde otra hoja falla (2 tests). Árbol
+     verificado limpio antes y después (`git status --porcelain`).
+
+     UNA AFIRMACIÓN DE REVISOR QUE NO SE ACEPTÓ, por ser falsa: documentation dio por
+     hecho que el README de la RAÍZ lista ahora `lib/theme/`. No lo hace, y no debe: su
+     sección de estructura es de granularidad de directorio de primer nivel
+     (`frontend/`, `backend/`), que este change no altera. Lo que se corrigió es la línea
+     `lib/` de `frontend/README.md`. Comprobado a mano, no inferido.
+
+     DOS COSAS MÁS QUE NO SE ACEPTARON, esta vez DE MÍ MISMO, y que merece la pena
+     escribir para no reeditarlas en la próxima vuelta:
+
+     · La enmienda a D12 terminaba con «La tabla de patrones va por **95 casos**» —una
+       cifra viva en prosa, dos líneas después de haber sustituido la cifra equivalente
+       por un puntero al fichero con el razonamiento de que no debe vivir en prosa. El
+       revisor de arquitectura lo cazó; retirado.
+     · La aceptación del riesgo arm64/QEMU decía que «los otros tres sitios sí ejercitan
+       la descarga en cada PR sobre amd64, así que lo único sin cubrir es la
+       emulación». Falso: `deploy-dev.yml:103` condiciona el sitio 3 a `main` y construye
+       sólo `linux/arm64` —no amd64—, y `multiarch-build-check.yml` está filtrado por
+       `paths`. Sólo **uno** de los cuatro sitios ejerce amd64 en cada PR
+       (`frontend-tests.yml`, con `pull_request: {}` sin filtro, a propósito), y la
+       primera descarga emulada ocurre **dentro del job de deploy**. El fallo sería rojo
+       que no publica imagen, la VM seguiría sirviendo la anterior —sustituido por esa
+       versión, que es la verdad medida contra los ficheros.
+
+     Cifras tras los arreglos: suite 134 ficheros / 1365 tests / 0 fallos (98 casos en
+     `color-tokens.patterns.test.ts`); lint y typecheck limpios. Las siete formas de
+     variante embebida mutadas en `version-badge.tsx` y todas en rojo
+     (`_dark`/`_DARK`/`__dark`/espaciada/`dark`/`DARK`/negación `not light`). La única
+     negación que ya compilaba a regla real —la `not (prefers-color-scheme: light)`—
+     mutada en el mismo fichero y en rojo, restaurado.
+
+     LO APRENDIDO, que es la razón por la que el ciclo se rompió en la segunda vuelta:
+     perseguir el VALOR de la media query (`dark`) era perder la carrera. Las tres
+     formas que se colaron tenían en común una sola cosa —mencionar la característica—
+     y eso es exactamente lo que el patrón actual detecta. La diferencia entre «una
+     mutación cierra el caso» y «una mutación cierra la clase» es el shape del
+     referente, no el cuidado del revisor. -->
+
+- [x] 11.14 Segunda vuelta del panel **sólo sobre lo arreglado** (`architect`, `qa`,
+      `documentation`, `i18n`, `cicd`; `security` y `tenancy` cerraron en PASS sin hallazgos y
+      esta sección no toca su superficie). Es la segunda de las dos vueltas que el contrato de
+      review permite: si hiciera falta una tercera, se para y se presenta lo abierto.

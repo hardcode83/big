@@ -108,7 +108,6 @@
   "expandSidebar": "Expandir barra lateral",
   "collapseSidebar": "Colapsar barra lateral",
   "localeSwitcher": {
-    "label": "Idioma",
     "es": "Español",
     "en": "English",
     "switchTo": "Cambiar idioma a {{language}}"

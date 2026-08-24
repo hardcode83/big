@@ -44,6 +44,18 @@ duplicados en `features/incidents/` se unifican ahí con ellas.
 **No se toca ninguna pantalla, ni el backend, ni el contrato de API.** Lo que cambia de
 aspecto lo hace porque consumía los tokens, no porque se haya editado.
 
+> **Con una excepción, registrada el 2026-08-24 (`/sdd:review`) y asumida por Jose**: al mirar
+> la topbar en un navegador, el conmutador de idioma preexistente se rediseñó de un
+> `role="group"` de dos botones con `aria-pressed` a un único botón de acción con tooltip
+> (`features/shell/components/locale-switcher.tsx`, commit `81b4faa`). **Ningún requisito lo
+> autoriza** —R3.5 gobierna sólo el control de tema— y la frase de arriba lo excluía. Se hizo
+> para que la topbar no leyera como cinco pastillas compitiendo una vez el control de tema
+> entró a su lado, se verificó que `sdd/specs/frontend-foundation.md:43` fija el comportamiento
+> del conmutador y no su número de botones, y nada se rompió. Queda escrito como **creep de
+> alcance asumido**, no como trabajo planificado, para que la spec del archivado no lo presente
+> como tal. Su único residuo material, la clave i18n `localeSwitcher.label` que quedó sin
+> consumidor, se borró en la tarea 11.9.
+
 ## Requirements
 
 ### R1 — La capa de tokens, con los dos temas bajo un selector vencible
@@ -238,10 +250,27 @@ Acceptance criteria:
    semánticos en que hoy ya está `gray`, sin cambiar qué tono corresponde a qué estado.
 3. WHEN un estado operacional no está mapeado, THE SYSTEM SHALL seguir pintándolo con el tono
    gris (`stateColorGroup` mantiene su fallback `?? "gray"`), en los dos temas.
-4. THE SYSTEM SHALL unificar los dos mapas `SEVERITY_COLOR` de `features/incidents/` en la
-   única tabla de `lib/ui/`, sobre tokens, cumpliendo el `SHALL` de
-   `frontend-foundation.md:38`; reutilizar un tono no fusiona vocabularios: la severidad de
-   incidencia y los estados de PRD §9.1 significan cosas distintas y solo comparten paleta.
+4. THE SYSTEM SHALL unificar los dos mapas `SEVERITY_COLOR` de `features/incidents/` en una
+   única tabla, sobre tokens, cumpliendo el `SHALL` de `frontend-foundation.md:38`; reutilizar
+   un tono no fusiona vocabularios: la severidad de incidencia y los estados de PRD §9.1
+   significan cosas distintas y solo comparten paleta. Lo que vive en `lib/ui/` es la **paleta**
+   (`status-tone.ts`); el vocabulario de severidad vive en su dominio,
+   `features/incidents/lib/severity-tone.ts`.
+
+   > **Enmienda de 2026-08-24** (`/sdd:review`, decisión de Jose: enmendar el criterio, no mover
+   > el código). El criterio decía «en la única tabla de `lib/ui/`» y la tabla se implementó en
+   > `features/incidents/lib/severity-tone.ts`. La sustancia se cumplió —las dos copias byte a
+   > byte murieron, `TONE_BADGE_CLASS` quedó como única paleta y el `SHALL` de
+   > `frontend-foundation.md:38` se satisface—, pero la ubicación literal no, y sin enmienda la
+   > spec que se escribiera al archivar afirmaría como `SHALL` una ruta que el código no usa.
+   >
+   > El motivo de la enmienda es el del propio criterio, que su última frase ya decía: severidad
+   > y estado operacional **significan cosas distintas y solo comparten paleta**. Lo que tiene
+   > que tener un único hogar, entonces, es la paleta —y lo tiene, en `lib/ui/status-tone.ts`—,
+   > mientras que el vocabulario de severidad es del dominio de incidencias y pertenece a
+   > `features/incidents/`. Ponerlo en `lib/ui/` habría sido justo la fusión de vocabularios que
+   > el criterio prohíbe. La desviación ya estaba razonada en `design.md` §D7; esto la sube al
+   > requisito, que es donde la spec la leerá.
 5. WHEN se pinta un badge de severidad con el tema oscuro activo, THE SYSTEM SHALL usar un par
    fondo/texto legible, cerrando el defecto actual.
 6. THE SYSTEM SHALL dejar el árbol de `frontend/` sin ninguna referencia a una escala numérica
@@ -291,6 +320,19 @@ Acceptance criteria:
   follows the OS preference» dejan de describir el sistema; la nota de línea 38 sobre la tabla
   única de tonos se amplía con la severidad de incidencias, y las primitivas de
   `components/ui/` pasan a describirse sobre tokens de marca.
+
+## Otra documentación afectada
+
+- `docs/design-system-tokens.md` — *(no existe aún — se crea al archivar)*: la página de
+  capability que exige `sdd/steering/documentation.md:18`, porque este change entrega un
+  control **de cara al usuario** —el selector de tema de tres estados en la topbar de los cinco
+  shells, con rótulos ES/EN y la cookie `autohostai.theme`—, el mismo criterio que dio página a
+  `docs/frontend-auth-session.md` y a `docs/app-version-visibility.md`. Orientada a cómo se usa
+  y se opera (elegir tema, qué hace «Sistema», dónde se guarda la preferencia y qué pasa sin
+  cookie), enlazando a la spec en vez de repetirla. Anclada aquí y en `tasks.md` §9 porque sin
+  ancla `/sdd:archive` no tiene sobre qué actuar y la obligación se salta en silencio.
+- `frontend/README.md` — se modifica en la sección 9 de `tasks.md`: gana la sección de estilos
+  que hoy no tiene.
 
 ## Notas de fase
 
