@@ -159,9 +159,28 @@ valores ni reintroducir números sueltos.
 Acceptance criteria:
 
 1. THE SYSTEM SHALL declarar en `@theme` la escala de espaciado de `DESIGN.md` sobre su unidad
-   base de 4 px (`xs`…`4xl`, gutter y márgenes de móvil y escritorio) y la escala de radios
-   (`sm`, base, `md`, `lg`, `xl`, `full`), reemplazando el único `--radius` actual sin dejar
-   sin valor a los `--radius-sm/md/lg` que hoy se derivan de él.
+   base de 4 px (`xs`…`4xl`, gutter y márgenes de móvil y escritorio) y la escala de radios,
+   reemplazando el único `--radius` actual sin dejar sin valor a los `--radius-sm/md/lg` que
+   hoy se derivan de él. THE SYSTEM SHALL NOT declarar un token de radio para un valor que
+   Tailwind ya entrega, porque sería un token sin consumidor (design D2): eso excluye
+   `DEFAULT` y `full`, y deja la escala en `sm`, `md`, `lg`, `xl`.
+
+   > **Enmienda de 2026-08-24** (`/sdd:run`, panel de la sección 3, DESIGN-CONFLICT del
+   > architect; aprobada por Jose). Este criterio enumeraba los seis pasos del export
+   > —`sm`, base, `md`, `lg`, `xl`, `full`— y `full` no es implementable como token: compilando
+   > Tailwind v4 se comprueba que `rounded-full` emite `border-radius: calc(infinity * 1px)` y
+   > **no lee `var(--radius-full)`**, así que el token no puede alcanzar a la utilidad; y no hay
+   > en todo `frontend/` una sola referencia a `rounded-full`, a `var(--radius-full)` ni a la
+   > forma arbitraria `rounded-(--radius-full)`. Declararlo era exactamente el antipatrón que D2
+   > rechaza por escrito («declarar los 56 nombres × 2 temas fabricaría más de treinta tokens
+   > sin consumidor»).
+   >
+   > La enmienda no pierde nada del diseño: `calc(infinity * 1px)` redondea la esquina por
+   > completo, que es lo que el `9999px` del export quiere decir. Y es **el mismo razonamiento
+   > que ya se había aceptado para `DEFAULT`** —cuyo `0.25rem` coincide con el `rounded` desnudo
+   > y por eso tampoco se declara—, así que tratar los dos igual es lo que hace la regla
+   > coherente en vez de una excepción. De ahí la segunda frase del criterio, que generaliza el
+   > caso en vez de listar dos excepciones.
 2. THE SYSTEM SHALL declarar el borde de 1 px del export como token de color de borde,
    coherente en los dos temas.
 3. THE SYSTEM SHALL conservar intactas las utilidades y garantías que ya existen en

@@ -233,10 +233,57 @@ con pila de reserva del sistema. `next/font` **descarga los ficheros en tiempo d
 sirve desde `/_next/static`**: en runtime no hay ni una petición a `fonts.googleapis.com`, que es
 lo que R4.1 pide.
 
-Lo que sí introduce es una **dependencia de red en `npm run build`**, y el build corre en la
-etapa `builder` del `frontend/devops/Dockerfile` y en el job «Production build» de
-`.github/workflows/frontend-tests.yml`. Los dos tienen red, y el fallo sería ruidoso (build
-roto), no silencioso. Verificado además que ningún test importa `app/layout.tsx`: los dos que lo
+Lo que sí introduce es una **dependencia de red en `npm run build`**, y el fallo sería ruidoso
+(build roto), no silencioso — `next build`, al contrario que `next dev`, trata el fallo de
+descarga de `next/font/google` como fatal.
+
+> **Corrección de 2026-08-24 (`/sdd:run`, panel de la sección 3, revisor cicd).** Esta decisión
+> decía «la etapa `builder` del `frontend/devops/Dockerfile` y el job «Production build» de
+> `.github/workflows/frontend-tests.yml`. Los dos tienen red». Dos inexactitudes, ambas
+> comprobadas contra los ficheros:
+> 1. **No existe ningún job llamado «Production build».** Es un *paso* —«Production build and
+>    public artifact disclosure gate»— dentro del job `provenance-contract`
+>    (`frontend-tests.yml:53`, con `npm run build` en la 61). El job `frontend-tests` no
+>    construye nunca. Quien buscara ese job miraría el equivocado.
+> 2. **Son tres sitios, no dos.** Falta el job `build-frontend` de
+>    `.github/workflows/deploy-dev.yml:101`, que construye la imagen vía
+>    `docker/build-push-action` con `target: prod` y por tanto atraviesa `builder`.
+>
+> Lo sustantivo se sostiene y queda además cerrado el peor caso que se temía: los tres corren en
+> `ubuntu-latest` (GitHub-hosted) con red y sin `--network=none` ni bandera offline, y **el
+> runner self-hosted de la VM de dev no construye el frontend** — su job `deploy`
+> (`deploy-dev.yml:149`, `runs-on: [self-hosted, dev]`) sólo hace `docker compose pull` desde
+> GHCR, así que la descarga de fuentes no ocurre ahí y no hace falta salida HTTPS a
+> `fonts.gstatic.com` en la VM. Tampoco hay `cache-from`/`cache-to` ni `actions/cache` en
+> ninguno de los workflows, así que no hay riesgo de que la descarga quede cacheada y rancia.
+
+**`subsets: ["latin"]` no restringe lo que se emite**, medido el 2026-08-24 sobre el build real:
+la salida trae 13 ficheros `.woff2` con bloques `unicode-range` de cirílico, griego y vietnamita
+además del latino. Cuesta **tamaño de imagen, no bytes de runtime**, porque `unicode-range` es lo
+que decide si el navegador descarga la cara. Se deja como está: recortarlo de verdad exige
+`next/font/local` con los ejes curados a mano, que es la alternativa rechazada abajo.
+
+**Riesgo de cadena de suministro, aceptado con su condición de salida escrita.** La etapa `deps`
+corre `npm ci` contra `package-lock.json`, que lleva un hash `sha512` por paquete; los binarios
+de fuente son **el único insumo de build sin entrada de lockfile, sin checksum y sin SRI** — 13
+ficheros de un tercero que después se sirven desde nuestro origen. Se acepta porque explotarlo
+exige comprometer la infraestructura de Google o la confianza TLS del host de build, y la carga
+es una fuente, no script: no hay ejecución de código en nuestro origen ni acceso a sesión o a
+datos de tenant. Lo que queda escrito es **cuándo deja de ser aceptable**, para no tener que
+volver a razonarlo: (a) el día que entre una CSP con `font-src`, o (b) el día que un build de
+imagen deba ser reproducible u offline — y ojo, que (b) ya es medio verdad, porque el mismo
+commit produce bytes de fuente distintos con el tiempo y una caída de `gstatic` rompe el build de
+imagen **incluido el de un redespliegue de rollback**. La salida es la alternativa rechazada de
+abajo, `next/font/local`.
+
+Y una consecuencia de R4.2 que conviene tener escrita porque **sí cambia el aspecto de dos
+pantallas ya entregadas**: mapear `--font-mono` hace que la utilidad `font-mono` que Tailwind ya
+traía —usada en `features/reservations/components/detail/reservation-detail-sections.tsx:39` y en
+`features/shell/components/version-badge.tsx:93`— pase a pintar JetBrains Mono en vez de la
+monoespaciada por defecto del navegador. Es exactamente el tipo de cambio que el proposal declara
+esperado («Lo que cambia de aspecto lo hace porque consumía los tokens, no porque se haya
+editado»), y no es lo que R4.4 prohíbe: R4.4 habla del rol `data-mono`, que este change no aplica
+a ninguna pantalla. Verificado además que ningún test importa `app/layout.tsx`: los dos que lo
 nombran (`features/provenance/disclosure.test.ts:14` y `workflow-contract.test.ts:242`) lo leen
 como **texto** con `readFileSync`, así que `next/font` no entra nunca en vitest y no hace falta
 mock.
@@ -280,10 +327,30 @@ en rem sobre la unidad de 4 px, junto al `--spacing` base que Tailwind ya usa pa
 Y los radios cuadran casi solos, comprobado contra los `calc()` de hoy: `rounded-md` vale hoy
 `0.375rem` y el export dice `md: 0.375rem`; `rounded-lg` vale `0.5rem` y el export dice
 `lg: 0.5rem`. **Solo `sm` cambia**, de `0.25rem` a `0.125rem` (lo usa el botón de cierre de
-`Sheet`). Se declaran `--radius-{sm,md,lg,xl,full}` con valores literales y desaparece
-`--radius` con sus tres `calc()` derivados (R5.1). El `DEFAULT: 0.25rem` del export coincide con
-el `rounded` desnudo de Tailwind v4, así que no se declara — con una tarea que lo verifique en
-vez de darlo por hecho.
+`Sheet` — comprobado que es el único consumidor de `rounded-sm` en el árbol). Se declaran
+`--radius-{sm,md,lg,xl}` con valores literales y desaparece `--radius` con sus tres `calc()`
+derivados (R5.1).
+
+**Ni `DEFAULT` ni `full` se declaran, por la misma razón dos veces**: Tailwind ya entrega el
+valor del export, así que un token no tendría consumidor. Las dos mitades se comprobaron
+compilando Tailwind en el contenedor, no dando nada por hecho (tarea 3.5):
+
+- `.rounded` emite `border-radius: 0.25rem` como **literal fijo**, no `var(--radius-DEFAULT)`.
+  Es exactamente el `DEFAULT: 0.25rem` del export.
+- `.rounded-full` emite `border-radius: calc(infinity * 1px)`, **no** `var(--radius-full)`.
+  Redondea la esquina por completo, que es lo que el `9999px` del export quiere decir, y la
+  utilidad no puede leer un token aunque exista.
+
+> **Enmienda de 2026-08-24** (panel de la sección 3, DESIGN-CONFLICT del architect; aprobada por
+> Jose). R5.1 enumeraba `full` y esta decisión lo declaraba. Se retiró al comprobar que además de
+> ser inalcanzable por la utilidad, **no hay en todo `frontend/` una sola referencia** a
+> `rounded-full`, a `var(--radius-full)` ni a `rounded-(--radius-full)`: era un token con cero
+> consumidores, el antipatrón que D2 rechaza por escrito. La enmienda bajó a `proposal.md` §R5.1,
+> que es donde tenía que llegar para que la spec viva no herede un `SHALL` falso.
+
+Para que la ausencia no se reintroduzca por descuido, `globals.tokens.test.ts` afirma las dos
+cosas: que los cuatro pasos declarados son exactamente los que tienen consumidor, y que
+`--radius-DEFAULT` y `--radius-full` **no** están.
 
 ### D11 — La auditoría de contraste es un test, no una tabla de una sola vez
 

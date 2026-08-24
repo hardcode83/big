@@ -312,6 +312,310 @@ describe("token blocks (design D1, R1.2)", () => {
   });
 });
 
+/**
+ * The literal half of the token layer: typography, ritmo and radii, in a plain
+ * `@theme` block because they do not vary by theme (design D10).
+ *
+ * Pinned by NAME and by COUNT, not by containment — the failure R4.3/R5.1 guard
+ * against is a partial port, where a role or a step is quietly missing and every
+ * consumer silently falls back to Tailwind's numeric scale.
+ */
+const THEME_LITERAL = declarationsOf("@theme");
+
+/** The ten roles of DESIGN.md §typography, in the export's own order. */
+const TYPE_ROLES = [
+  "display-2xl",
+  "display-xl",
+  "display-lg-mobile",
+  "headline-lg",
+  "headline-md",
+  "body-lg",
+  "body-medium",
+  "body-base",
+  "data-mono",
+  "label-caps",
+] as const;
+
+/** Size, line-height, letter-spacing and weight, straight from the export. */
+const TYPE_EXPECTED: Record<
+  string,
+  { size: string; lineHeight: string; tracking: string; weight: string }
+> = {
+  "display-2xl": {
+    size: "3.5rem",
+    lineHeight: "4rem",
+    tracking: "-0.03em",
+    weight: "800",
+  },
+  "display-xl": {
+    size: "2.75rem",
+    lineHeight: "3.25rem",
+    tracking: "-0.025em",
+    weight: "800",
+  },
+  "display-lg-mobile": {
+    size: "2.25rem",
+    lineHeight: "2.75rem",
+    tracking: "-0.02em",
+    weight: "800",
+  },
+  "headline-lg": {
+    size: "2rem",
+    lineHeight: "2.5rem",
+    tracking: "-0.02em",
+    weight: "700",
+  },
+  "headline-md": {
+    size: "1.5rem",
+    lineHeight: "2rem",
+    tracking: "-0.015em",
+    weight: "600",
+  },
+  "body-lg": {
+    size: "1rem",
+    lineHeight: "1.5rem",
+    tracking: "-0.005em",
+    weight: "400",
+  },
+  "body-medium": {
+    size: "0.875rem",
+    lineHeight: "1.25rem",
+    tracking: "0em",
+    weight: "500",
+  },
+  "body-base": {
+    size: "0.875rem",
+    lineHeight: "1.25rem",
+    tracking: "0em",
+    weight: "400",
+  },
+  "data-mono": {
+    size: "0.8125rem",
+    lineHeight: "1.125rem",
+    tracking: "-0.01em",
+    weight: "500",
+  },
+  "label-caps": {
+    size: "0.6875rem",
+    lineHeight: "0.875rem",
+    tracking: "0.06em",
+    weight: "700",
+  },
+};
+
+/** The eleven steps of DESIGN.md §spacing, on its 4px baseline unit. */
+const SPACING_EXPECTED: Record<string, string> = {
+  "--spacing-xs": "0.25rem",
+  "--spacing-sm": "0.5rem",
+  "--spacing-md": "0.75rem",
+  "--spacing-lg": "1rem",
+  "--spacing-xl": "1.5rem",
+  "--spacing-2xl": "2rem",
+  "--spacing-3xl": "3rem",
+  "--spacing-4xl": "4rem",
+  "--spacing-gutter": "1rem",
+  "--spacing-margin-mobile": "1rem",
+  "--spacing-margin-desktop": "2rem",
+};
+
+/**
+ * DESIGN.md §rounded, minus `DEFAULT` and `full` — see the assertion below for
+ * why both are absent, which is the same reason twice.
+ */
+const RADIUS_EXPECTED: Record<string, string> = {
+  "--radius-sm": "0.125rem",
+  "--radius-md": "0.375rem",
+  "--radius-lg": "0.5rem",
+  "--radius-xl": "0.75rem",
+};
+
+describe("typography, ritmo and radii (design D10, R4.2-R4.4, R5.1)", () => {
+  it("declares all TEN typographic roles, with all four properties each", () => {
+    expect(TYPE_ROLES).toHaveLength(10);
+    for (const role of TYPE_ROLES) {
+      const expected = TYPE_EXPECTED[role];
+      expect(THEME_LITERAL[`--text-${role}`], role).toBe(expected.size);
+      expect(THEME_LITERAL[`--text-${role}--line-height`], role).toBe(
+        expected.lineHeight,
+      );
+      expect(THEME_LITERAL[`--text-${role}--letter-spacing`], role).toBe(
+        expected.tracking,
+      );
+      expect(THEME_LITERAL[`--text-${role}--font-weight`], role).toBe(
+        expected.weight,
+      );
+    }
+  });
+
+  it("declares no role beyond the export's ten, so the set is the export's", () => {
+    // A count, so an invented eleventh role is a failure rather than a surprise.
+    const declared = Object.keys(THEME_LITERAL)
+      .filter((name) => name.startsWith("--text-"))
+      .filter((name) => !name.includes("--", 2));
+    expect(new Set(declared)).toEqual(
+      new Set(TYPE_ROLES.map((role) => `--text-${role}`)),
+    );
+  });
+
+  it("keeps Tailwind's numeric text scale available, since Badge and Button use it", () => {
+    // D10: the roles are additive. Overriding `--text-sm` here would silently
+    // resize every existing component, which is out of this change's scope.
+    for (const name of ["--text-xs", "--text-sm", "--text-base", "--text-lg"]) {
+      expect(THEME_LITERAL[name], `${name} must NOT be redefined`).toBeUndefined();
+    }
+  });
+
+  it("declares the eleven ritmo steps on the 4px baseline unit", () => {
+    expect(Object.keys(SPACING_EXPECTED)).toHaveLength(11);
+    expect(THEME_LITERAL["--spacing"], "the baseline unit").toBe("0.25rem");
+    for (const [name, value] of Object.entries(SPACING_EXPECTED)) {
+      expect(THEME_LITERAL[name], name).toBe(value);
+    }
+    // Every step is a whole multiple of the 4px unit — that is what «ritmo» means.
+    for (const [name, value] of Object.entries(SPACING_EXPECTED)) {
+      const px = Number.parseFloat(value) * 16;
+      expect(px % 4, `${name} = ${px}px is not a multiple of 4`).toBe(0);
+    }
+  });
+
+  it("declares the radius scale and drops the old --radius with its calc() chain", () => {
+    for (const [name, value] of Object.entries(RADIUS_EXPECTED)) {
+      expect(THEME_LITERAL[name], name).toBe(value);
+    }
+    // R5.1: the single `--radius` and the three values derived from it are gone,
+    // and nothing is left referring to it.
+    expect(CSS).not.toMatch(/--radius\s*:/);
+    expect(CSS).not.toContain("calc(var(--radius)");
+  });
+
+  it("declares neither DEFAULT nor full, because Tailwind already delivers both", () => {
+    // One reason applied twice, and both halves verified by compiling Tailwind
+    // rather than assumed (task 3.5):
+    //   · `rounded` emits `border-radius: 0.25rem` as a hardcoded literal, which
+    //     IS the export's `DEFAULT: 0.25rem`.
+    //   · `rounded-full` emits `border-radius: calc(infinity * 1px)`, which
+    //     rounds the corner fully exactly as the export's `9999px` intends — and
+    //     it does not read `var(--radius-full)`, so a token could not reach it.
+    // Declaring either would be a token no utility and no component consumes,
+    // which is the anti-pattern design D2 names. R5.1 originally enumerated
+    // `full`; amended 2026-08-24 after the section-3 panel raised the conflict.
+    expect(THEME_LITERAL["--radius-DEFAULT"]).toBeUndefined();
+    expect(THEME_LITERAL["--radius-default"]).toBeUndefined();
+    expect(THEME_LITERAL["--radius-full"]).toBeUndefined();
+  });
+
+  it("declares exactly the four radius steps that have a consumer", () => {
+    const declared = Object.keys(THEME_LITERAL).filter((name) =>
+      name.startsWith("--radius-"),
+    );
+    expect(new Set(declared)).toEqual(new Set(Object.keys(RADIUS_EXPECTED)));
+  });
+
+  it("maps --font-sans and --font-mono onto the next/font variables, each with a fallback stack", () => {
+    // R4.2. The `var(--font-*)` reference is what ties the token to the
+    // self-hosted face; the rest of the stack is what renders before it arrives.
+    expect(THEME_INLINE["--font-sans"]).toContain("var(--font-inter)");
+    expect(THEME_INLINE["--font-sans"]).toContain("system-ui");
+    expect(THEME_INLINE["--font-sans"]).toContain("sans-serif");
+    expect(THEME_INLINE["--font-mono"]).toContain(
+      "var(--font-jetbrains-mono)",
+    );
+    expect(THEME_INLINE["--font-mono"]).toContain("ui-monospace");
+    expect(THEME_INLINE["--font-mono"]).toContain("monospace");
+  });
+});
+
+/**
+ * R4.1 has two halves and only one of them was pinned.
+ *
+ * "SHALL cargar Inter y JetBrains Mono a través de `next/font`" is covered by the
+ * font-token assertion above. "SHALL NOT cargar ninguna fuente desde
+ * `fonts.googleapis.com` ni desde ningún otro CDN" was covered by nothing: an
+ * `@import url("https://fonts.googleapis.com/…")` at the top of `globals.css`
+ * used to pass the whole suite and every CI job green.
+ *
+ * That is not a hypothetical. The copy-paste source is IN this repository:
+ * `docs/design/2026-08-23-stitch-export/*​/code.html` carries
+ * `preconnect` pairs to `fonts.googleapis.com`/`fonts.gstatic.com` in seven
+ * files and loads `Material Symbols Outlined` from Google Fonts, and this change
+ * ships no self-hosted counterpart for those icons. The first task that touches
+ * icons is the moment someone pastes one of those lines.
+ *
+ * Scoped by an explicit FILE LIST and by exact FORM rather than by a tree-wide
+ * grep for the domain, for two reasons: a tree-wide grep would trip on
+ * `docs/design/` (which is a design artefact and must keep its markup), and a
+ * name-based grep is trivially sidestepped — `assetPrefix` moves all thirteen
+ * self-hosted faces off-origin without any of these strings appearing, because
+ * every emitted `src` is relative.
+ */
+const FONT_SOURCE_FILES = ["globals.css", "layout.tsx"] as const;
+
+/** Source with comments removed, so prose ABOUT a CDN is not mistaken for a use of one. */
+function sourceWithoutComments(file: string): string {
+  return readFileSync(join(__dirname, file), "utf8")
+    .replace(/\/\*[\s\S]*?\*\//g, "")
+    .replace(/^\s*\/\/.*$/gm, "");
+}
+
+describe("R4.1 — no font may be loaded from a CDN", () => {
+  it.each(FONT_SOURCE_FILES)(
+    "%s names no third-party font host outside a comment",
+    (file) => {
+      const source = sourceWithoutComments(file);
+      expect(source).not.toMatch(/fonts\.googleapis\.com/);
+      expect(source).not.toMatch(/fonts\.gstatic\.com/);
+      // Any absolute or protocol-relative URL at all — the prohibition is
+      // «ni desde ningún otro CDN», so a different host is not a loophole.
+      expect(source).not.toMatch(/https?:\/\//);
+      expect(source).not.toMatch(/url\(\s*['"]?\/\//);
+    },
+  );
+
+  it("globals.css imports nothing but tailwindcss, and never through url()", () => {
+    const imports = [
+      ...sourceWithoutComments("globals.css").matchAll(/@import\s+([^;]+);/g),
+    ].map(([, spec]) => spec.trim());
+    expect(imports).toEqual(['"tailwindcss"']);
+  });
+
+  it("globals.css declares no @font-face of its own", () => {
+    // `next/font` emits the `@font-face` rules at build time, pointing at
+    // `/_next/static/media`. A hand-written one here is the other way a remote
+    // `src` could enter.
+    expect(sourceWithoutComments("globals.css")).not.toMatch(/@font-face/i);
+  });
+
+  it("layout.tsx adds no link/preconnect/preload element", () => {
+    // `next/font` needs none of these; their only use here would be reaching a
+    // third party. Checked as a form, so a host this test does not know about
+    // is caught too.
+    const source = sourceWithoutComments("layout.tsx");
+    expect(source).not.toMatch(/<link\b/i);
+    expect(source).not.toMatch(/rel=["'](preconnect|preload|stylesheet)["']/i);
+  });
+
+  it("loads both families through next/font, not through a stylesheet", () => {
+    const source = sourceWithoutComments("layout.tsx");
+    expect(source).toMatch(
+      /from\s+["']next\/font\/(google|local)["']/,
+    );
+    expect(source).toMatch(/\bInter\s*\(/);
+    expect(source).toMatch(/\bJetBrains_Mono\s*\(/);
+  });
+
+  it("next.config declares no assetPrefix, which would move every face off-origin", () => {
+    // The bypass a name-based guard cannot see: all thirteen emitted `src`
+    // values are relative, so one `assetPrefix` key sends them to a CDN without
+    // any font host appearing in the source. There is no CSP in this repo to
+    // catch it at runtime either.
+    const config = readFileSync(
+      join(__dirname, "..", "next.config.ts"),
+      "utf8",
+    ).replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "");
+    expect(config).not.toMatch(/assetPrefix/);
+  });
+});
+
 describe("preserved guarantees (R5.3)", () => {
   it("keeps the visible focus indicator in @layer base", () => {
     expect(CSS).toContain("@layer base");

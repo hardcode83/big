@@ -106,28 +106,80 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `pb-safe`. Sin esto, R5.3 depende de que nadie los borre por descuido al reescribir
       el fichero. [R5.3]
 
-## 3. Tipografía, ritmo y radios
+## 3. Tipografía, ritmo y radios <!-- panel: PASS 2026-08-24 -->
 
-- [ ] 3.1 `frontend/app/layout.tsx`: cargar `Inter` y `JetBrains_Mono` desde
+<!-- Panel de la sección 3 (2026-08-24): architect PASS + 1 DESIGN-CONFLICT,
+     documentation PASS, qa PASS(1), cicd FAIL(1), security FAIL(1). Todo cerrado.
+
+     DESIGN-CONFLICT — `--radius-full`, resuelto con decisión de Jose: se RETIRA.
+     R5.1 enumeraba `full`, pero compilando Tailwind v4 se ve que `rounded-full`
+     emite `calc(infinity * 1px)` y no lee `var(--radius-full)`; y no hay en todo
+     `frontend/` una referencia a `rounded-full`, `var(--radius-full)` ni
+     `rounded-(--radius-full)`. Token con cero consumidores = el antipatrón que D2
+     rechaza. Es además el mismo razonamiento ya aceptado para `DEFAULT`, así que
+     tratar los dos igual hace la regla coherente. Enmienda bajada a proposal.md
+     §R5.1 (no sólo a design.md, para que la spec viva no herede un SHALL falso) y
+     a design.md D10. La escala queda en `sm`/`md`/`lg`/`xl`.
+
+     R4.1 — security y qa convergieron, por separado, en el mismo agujero: la mitad
+     SHALL NOT no estaba cubierta por nada. Un `@import url("https://fonts.googleapis.com/…")`
+     en `globals.css:1` pasaba la suite entera y todos los jobs en verde. Y el
+     origen del copy-paste está DENTRO del repo: `docs/design/2026-08-23-stitch-export/*/code.html`
+     lleva `preconnect` a googleapis/gstatic en 7 ficheros y carga Material Symbols
+     desde Google Fonts sin contrapartida autohospedada en este change. Añadido un
+     guard en `globals.tokens.test.ts` por FORMA exacta y LISTA de ficheros fija
+     —no por grep del dominio, que tropezaría con `docs/design/` y que además se
+     sortea—. Cubre: dominios fuera de comentario, cualquier `https?://`,
+     `@import url(`, `@font-face` propio, `<link>`/`preconnect`/`preload`, y
+     `assetPrefix` en `next.config.ts`, que era la evasión que ningún grep de
+     nombres podía ver (los 13 `src` emitidos son relativos). Verificado con las
+     cuatro construcciones: las cuatro fallan.
+
+     cicd — el comentario de `layout.tsx` (citando D8) hablaba del «job Production
+     build» de frontend-tests.yml, y ese job no existe: es un PASO del job
+     `provenance-contract`. Y son TRES sitios de build, no dos — falta
+     `build-frontend` de deploy-dev.yml. Corregido en el comentario y en D8.
+     Cerrado de paso el peor caso: el runner self-hosted de la VM no construye,
+     sólo hace `docker compose pull`, así que la descarga de fuentes no pasa por ahí.
+
+     security, aceptado con condición escrita en D8 (no es hallazgo): los binarios
+     de fuente son el único insumo de build sin lockfile, checksum ni SRI. Se acepta
+     —la carga es una fuente, no script— y queda escrito CUÁNDO deja de aceptarse:
+     al entrar una CSP con `font-src`, o al exigirse un build reproducible/offline.
+     Medido también que `subsets: ["latin"]` NO restringe lo emitido (salen bloques
+     `unicode-range` cirílico/griego/vietnamita): cuesta tamaño de imagen, no bytes
+     de runtime. Anotado en D8 y en el comentario.
+
+     qa, anotado en D8 y no hallazgo: mapear `--font-mono` hace que la utilidad
+     `font-mono` preexistente cambie de aspecto en dos pantallas ya entregadas
+     (`reservation-detail-sections.tsx:39`, `version-badge.tsx:93`). Es el cambio
+     que el proposal declara esperado, y no es lo que R4.4 prohíbe — R4.4 habla del
+     rol `data-mono`, que no se aplica a ninguna pantalla.
+
+     documentation — task 10.4 enmendada: el grep va sobre la salida compilada y
+     excluye sourcemaps, porque el comentario que explica que no se pide nada al CDN
+     contiene el dominio y los `.map` lo embeben. La regresión la cubre el guard. -->
+
+- [x] 3.1 `frontend/app/layout.tsx`: cargar `Inter` y `JetBrains_Mono` desde
       `next/font/google` (`subsets: ["latin"]`, `display: "swap"`, `variable:
       "--font-inter"` / `"--font-jetbrains-mono"`) y poner sus clases en `<html>`. Ninguna
       referencia a `fonts.googleapis.com` ni a otro CDN en el árbol. [R4.1]
-- [ ] 3.2 `globals.css`: mapear en `@theme inline` `--font-sans` y `--font-mono` a esas
+- [x] 3.2 `globals.css`: mapear en `@theme inline` `--font-sans` y `--font-mono` a esas
       variables, cada una con su pila de reserva del sistema declarada. [R4.2, R4.4]
-- [ ] 3.3 `globals.css`: declarar los **10 roles** de `DESIGN.md` como `--text-<rol>` con sus
+- [x] 3.3 `globals.css`: declarar los **10 roles** de `DESIGN.md` como `--text-<rol>` con sus
       tres modificadores (`--line-height`, `--letter-spacing`, `--font-weight`), convirtiendo
       los px del export a `rem` y dejando el tracking en `em` (D10). La escala numérica por
       defecto de Tailwind (`text-sm`, `text-xs`, `text-lg`) **se conserva**. [R4.3]
-- [ ] 3.4 `globals.css`: declarar los 11 pasos `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,
+- [x] 3.4 `globals.css`: declarar los 11 pasos `--spacing-{xs,sm,md,lg,xl,2xl,3xl,4xl,gutter,
       margin-mobile,margin-desktop}` en rem sobre la unidad de 4 px, junto al `--spacing` base.
       [R5.1]
-- [ ] 3.5 `globals.css`: sustituir `--radius` y sus tres `calc()` derivados por
+- [x] 3.5 `globals.css`: sustituir `--radius` y sus tres `calc()` derivados por
       `--radius-{sm,md,lg,xl,full}` con valores literales del export. Comprobar —no dar por
       hecho— que el `rounded` desnudo de Tailwind v4 vale ya `0.25rem` y por tanto el
       `DEFAULT` del export no necesita declararse; dejar el resultado escrito. Asumido y
       aceptado: `rounded-sm` pasa de `0.25rem` a `0.125rem` (botón de cierre de `Sheet`).
       [R5.1]
-- [ ] 3.6 Extender `globals.tokens.test.ts` (o añadir aserciones) para que los roles
+- [x] 3.6 Extender `globals.tokens.test.ts` (o añadir aserciones) para que los roles
       tipográficos, la escala de ritmo y los radios declarados sean los del export y no un
       subconjunto: cuenta y nombres. [R4.3, R5.1]
 
@@ -239,7 +291,19 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `next/font` descarga y autohospeda las dos familias en tiempo de build (D8), y el punto
       donde la dependencia de red fallaría ruidosamente. [R4.1]
 - [ ] 10.4 Comprobar en el build que no queda **ninguna** petición a `fonts.googleapis.com`
-      ni a otro CDN de fuentes: grep sobre el árbol y sobre la salida servida. [R4.1]
+      ni a otro CDN de fuentes. **Enmendado el 2026-08-24** (panel de la sección 3,
+      revisores documentation y security): el grep se hace sobre la **salida
+      compilada** —`.js`, `.css`, `.html` de `.next`— y **excluye sourcemaps y
+      comentarios**, porque el comentario de `layout.tsx` que explica que NO se
+      pide nada a ese dominio contiene el dominio, y los `.map` embeben el
+      comentario. Un grep ingenuo da un positivo falso y R4.1 habla de peticiones
+      en runtime, que es lo que mide el grep estrecho. Lo que hay que comprobar,
+      y ya está medido: los `@font-face` emitidos apuntan todos a
+      `/_next/static/media/` (origen propio), cero `https?://` en el chunk de CSS,
+      cero preloads `as="font"`, cero `<link>` de fuente en el HTML prerenderizado.
+      La **regresión** la cubre el guard de R4.1 en `globals.tokens.test.ts`, que
+      es lo que convierte esta comprobación de una vez en algo que no se puede
+      deshacer sin ponerse en rojo. [R4.1]
 - [ ] 10.5 Registrar la salida del guard de 8.1 y del test de contraste de 4.1 como la
       evidencia que piden R6.6 y R1.6 — número final de escalas crudas (0) y ratio por par.
       [R1.6, R6.6]

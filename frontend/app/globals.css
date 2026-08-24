@@ -154,13 +154,122 @@
   --color-state-info-text: var(--state-info-text);
   --color-state-neutral-text: var(--state-neutral-text);
 
-  /* Radii keep today's effective values (0.5rem / 0.5rem−2px / 0.5rem−4px) as
-   * literals: `--radius` cannot stay in `:root`, which now holds ONLY the
-   * theme-dependent colour tokens so the parity guard can compare whole blocks.
-   * Task 3.5 replaces this with the export's five-step scale. */
-  --radius-lg: 0.5rem;
+  /* The two families of the export, self-hosted by `next/font` in
+   * `app/layout.tsx` (design D8). Each carries a system fallback stack, so text
+   * is readable before the face arrives and if it never does (R4.2). */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/*
+ * Typography, ritmo and radii (design D10). Literal values, so a plain `@theme`
+ * rather than `@theme inline`: these do not vary by theme and must not live in
+ * `:root`, which holds only the 25 theme-dependent colour tokens.
+ *
+ * The export states sizes in px; they are converted to `rem` so text follows the
+ * browser's base size. Tracking stays in `em` because it is already relative.
+ */
+@theme {
+  /* The ten typographic roles of DESIGN.md, each with its three modifiers, which
+   * is the `@theme` API in Tailwind v4: one utility (`text-display-2xl`) sets
+   * size, line-height, tracking and weight together (R4.3).
+   *
+   * Tailwind's own numeric scale (`text-xs`, `text-sm`, `text-lg`…) is KEPT:
+   * `Badge`, `Button` and half a dozen components use it, and these roles are
+   * additive, not a replacement. */
+  --text-display-2xl: 3.5rem; /* 56px */
+  --text-display-2xl--line-height: 4rem; /* 64px */
+  --text-display-2xl--letter-spacing: -0.03em;
+  --text-display-2xl--font-weight: 800;
+
+  --text-display-xl: 2.75rem; /* 44px */
+  --text-display-xl--line-height: 3.25rem; /* 52px */
+  --text-display-xl--letter-spacing: -0.025em;
+  --text-display-xl--font-weight: 800;
+
+  --text-display-lg-mobile: 2.25rem; /* 36px */
+  --text-display-lg-mobile--line-height: 2.75rem; /* 44px */
+  --text-display-lg-mobile--letter-spacing: -0.02em;
+  --text-display-lg-mobile--font-weight: 800;
+
+  --text-headline-lg: 2rem; /* 32px */
+  --text-headline-lg--line-height: 2.5rem; /* 40px */
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 700;
+
+  --text-headline-md: 1.5rem; /* 24px */
+  --text-headline-md--line-height: 2rem; /* 32px */
+  --text-headline-md--letter-spacing: -0.015em;
+  --text-headline-md--font-weight: 600;
+
+  --text-body-lg: 1rem; /* 16px */
+  --text-body-lg--line-height: 1.5rem; /* 24px */
+  --text-body-lg--letter-spacing: -0.005em;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-medium: 0.875rem; /* 14px */
+  --text-body-medium--line-height: 1.25rem; /* 20px */
+  --text-body-medium--letter-spacing: 0em;
+  --text-body-medium--font-weight: 500;
+
+  --text-body-base: 0.875rem; /* 14px */
+  --text-body-base--line-height: 1.25rem; /* 20px */
+  --text-body-base--letter-spacing: 0em;
+  --text-body-base--font-weight: 400;
+
+  /* The monospaced data role (R4.4). Declared as a token; this change applies it
+   * to no screen — that is `visual-restyle-workspace`. */
+  --text-data-mono: 0.8125rem; /* 13px */
+  --text-data-mono--line-height: 1.125rem; /* 18px */
+  --text-data-mono--letter-spacing: -0.01em;
+  --text-data-mono--font-weight: 500;
+
+  --text-label-caps: 0.6875rem; /* 11px */
+  --text-label-caps--line-height: 0.875rem; /* 14px */
+  --text-label-caps--letter-spacing: 0.06em;
+  --text-label-caps--font-weight: 700;
+
+  /* Ritmo on the export's 4px baseline unit (R5.1). `--spacing` is the base
+   * Tailwind already multiplies for `p-4`; it is restated, not changed. */
+  --spacing: 0.25rem; /* 4px — the baseline unit */
+  --spacing-xs: 0.25rem; /* 4px */
+  --spacing-sm: 0.5rem; /* 8px */
+  --spacing-md: 0.75rem; /* 12px */
+  --spacing-lg: 1rem; /* 16px */
+  --spacing-xl: 1.5rem; /* 24px */
+  --spacing-2xl: 2rem; /* 32px */
+  --spacing-3xl: 3rem; /* 48px */
+  --spacing-4xl: 4rem; /* 64px */
+  --spacing-gutter: 1rem; /* 16px */
+  --spacing-margin-mobile: 1rem; /* 16px */
+  --spacing-margin-desktop: 2rem; /* 32px */
+
+  /* Radii as literals, replacing the single `--radius` and its three `calc()`
+   * derivations (R5.1).
+   *
+   * Verified by compiling Tailwind rather than assumed (task 3.5): bare
+   * `rounded` emits `border-radius: 0.25rem` as a HARDCODED literal, not
+   * `var(--radius-DEFAULT)` — so the export's `DEFAULT: 0.25rem` already holds
+   * and needs no declaration. `rounded-sm/md/lg/xl` DO read these vars.
+   *
+   * Accepted consequence, also from D10: `rounded-sm` goes from `0.25rem` to
+   * `0.125rem`, which is the close button of `Sheet`.
+   *
+   * FOUR steps, not the export's six: neither `DEFAULT` nor `full` is declared,
+   * for one reason applied twice — Tailwind already delivers the export's value,
+   * so a token would have no consumer (design D2, and R5.1 as amended
+   * 2026-08-24). `rounded` hardcodes `0.25rem`, which is the export's `DEFAULT`;
+   * `rounded-full` compiles to `calc(infinity * 1px)`, which rounds a corner
+   * fully exactly as the export's `9999px` intends, and it cannot read a token
+   * even if one existed. Both verified by compiling Tailwind, not assumed. */
+  --radius-sm: 0.125rem;
   --radius-md: 0.375rem;
-  --radius-sm: 0.25rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 @layer base {
