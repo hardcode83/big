@@ -183,16 +183,90 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       tipográficos, la escala de ritmo y los radios declarados sean los del export y no un
       subconjunto: cuenta y nombres. [R4.3, R5.1]
 
-## 4. La auditoría de contraste, como test
+## 4. La auditoría de contraste, como test <!-- panel: PASS 2026-08-24 -->
 
-- [ ] 4.1 Nuevo `frontend/app/globals.contrast.test.ts`: parsea los hex de los tres bloques,
+<!-- Panel de la sección 4 (2026-08-24): architect FAIL(1 DESIGN-CONFLICT),
+     security FAIL(2 bloqueantes + 5 no bloqueantes), qa FAIL(2). Todo cerrado.
+
+     DESIGN-CONFLICT (architect) — D11 decía «las tres superficies» y la auditoría
+     mide cuatro, y la ampliación estaba anotada en OTRA sección. Peor que la
+     contradicción: cambié lo que una decisión decidió auto-aprobándomelo, cuando
+     D10 lleva «aprobada por Jose». Resuelto con decisión de Jose: se mantienen las
+     cuatro superficies y la enmienda baja al PROPIO texto de D11, con firma. La
+     distinción que el architect marcó y que vale recordar: la cifra del borde de
+     D9 era una corrección numérica (el diseño afirmaba algo falso, no hace falta
+     permiso); ampliar el conjunto de superficies cambia el alcance de la decisión,
+     y eso sí pasa por la regla de desviación.
+
+     BLOQUEANTE 1 (security, confirmado por qa F1) — `--primary` se aseraba sólo a
+     3:1 mientras la app lo usa como TEXTO de tamaño normal. Invisible porque
+     `--primary` y `--ring` valen lo mismo, así que el único par que tocaba primary
+     era `ring on <surface>` con umbral 3:1. `text-primary` es `text-sm` en cinco
+     ficheros entregados, y qa añadió `border border-primary` en
+     `property-card.tsx:87`, que es un límite 1.4.11. Demostrado, no teórico: con
+     light `--primary: #7c727e` los 7 tests pasaban mientras esos enlaces quedaban
+     a 4.07:1 y 3.71:1. Añadidos pares primary-como-texto (4.5:1),
+     primary-como-borde (3:1) y el compuesto `hover:bg-primary/90` del Button.
+
+     BLOQUEANTE 2 (security) — la premisa del badge era FALSA en el árbol actual.
+     El comentario afirmaba como hecho que `TONE_BADGE_CLASS` pinta
+     `bg-state-X/15 text-state-X-text border-state-X/40`, y `status-tone.ts` sigue
+     con escalas crudas: eso es trabajo de 7.1. Corregido a futuro explícito, y la
+     obligación de fijar el acoplamiento queda escrita EN la tarea 7.1 — si 7.1
+     escribe `/20` o `text-state-warning`, las 20 combinaciones seguirían verdes
+     midiendo algo que la app no pinta.
+
+     No bloqueantes, todos aceptados y arreglados:
+       · comparar redondeado dejaba pasar un fallo real: `#007eb7` sobre blanco
+         mide 4.4986 y redondea a «4.50 ok». Las puertas comparan sin redondear;
+         el redondeo se queda en el registro, que es para humanos.
+       · `themeCount()` era circular — qa lo probó: quitar `--muted` de `SURFACES`
+         dejaba tres aserciones EN VERDE, y lo único que lo cazaba era un
+         `toHaveLength(40)` hermano, por casualidad de que `badgePairs` itera los
+         mismos arrays. `corePairs`, la mitad grande, no tenía recuento propio.
+         Sustituido por literales que eligió una persona (48/20/24) más el pin de
+         `SURFACES`/`TONES`/`THEMES`.
+       · la excepción del borde se registraba en 1 de 4 superficies — la misma
+         asimetría que el panel de la sección 2 corrigió en design.md. Ahora itera,
+         y con ello sale a la luz que en oscuro `--border` == `--muted` (#262a34),
+         o sea ratio 1.00: el borde de una tarjeta sobre `bg-muted` es literalmente
+         invisible. D9 lo cubre por decorativo, pero el número está registrado.
+       · añadida una aserción de que sólo existen las DOS formas exentas que D9
+         declara, porque el total por sí solo permitía migrar un par de un conjunto
+         aserido al exento sin mover ninguna cuenta.
+       · escrito por qué `--secondary` y `--accent` no son superficies, con los
+         números que vencerían si `bg-secondary` se generalizara (3.54 / 2.85 /
+         4.32, todos bajo umbral).
+
+     Veredictos que el panel cerró sin cambio de código:
+       · 4.99 con +0.49 de holgura: riesgo aceptado, no hallazgo. AA es 4.5 y pasa;
+         «SHALL corregirlo» se dispara por incumplimiento, no por margen fino. PERO
+         security corrigió el énfasis de mi nota: el margen más fino de la paleta es
+         `secondary-foreground` sobre `--secondary` en oscuro, **4.60 (+0.10)**, no
+         el 4.99. Corregido en design.md.
+       · `compositeOver`: confirmado por ESPECIFICACIÓN (CSS Color 5 interpola con
+         alfa premultiplicado; `transparent` es negro transparente a alfa 0, así que
+         el resultado des-premultiplica a exactamente C). Y una corrección
+         epistémica que vale más que el veredicto: mi justificación era «dos
+         derivaciones coinciden», y dos implementaciones del MISMO modelo
+         equivocado también coincidirían. Reescrita sobre la especificación.
+       · `parseHex(undefined)` lanza, así que una errata de token es fallo duro y
+         no un `toEqual([])` vacío que pasa. Cierra la duda de vacuidad.
+       · el refactor a `test/css-tokens.ts` no debilitó nada: qa re-corrió las
+         siete clases de mutación de la sección 2 y las siete siguen cazándose.
+
+     Verificado con las construcciones literales de los revisores: la mutación de
+     security (que pasaba los 7) y el encogimiento de qa (que dejaba 3 en verde)
+     ahora fallan; la excepción exenta sigue en verde sin blanquear nada. -->
+
+- [x] 4.1 Nuevo `frontend/app/globals.contrast.test.ts`: parsea los hex de los tres bloques,
       calcula el ratio WCAG de cada par declarado —incluida la composición `color-mix` de los
       badges al 15 % sobre las tres superficies— y falla por debajo de 4.5:1 (texto) y 3:1
       (controles), con las excepciones de D9 (`border`, borde de badge al 40 %) como lista
       explícita y comentada. Su salida **es** el registro por par que pide el requisito; el
       helper `getA11yViolations` de `test/render.tsx` desactiva `color-contrast` a propósito
       y no puede cubrirlo. [R1.6]
-- [ ] 4.2 Cotejar los números que produce el test contra la tabla §Contraste medido de
+- [x] 4.2 Cotejar los números que produce el test contra la tabla §Contraste medido de
       `design.md`. Si algún par no coincide, manda el test: corregir el valor del token, no
       la excepción. [R1.6]
 
@@ -245,6 +319,17 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       text-state-success-text border-state-success/40`). El tono `gray` pasa a
       `state-neutral`, que es el gris de PRD §9.1 que `DESIGN.md` no define. No cambia qué
       tono corresponde a qué estado. [R6.1, R6.2, R6.5, R1.5]
+      **Obligación añadida el 2026-08-24** (panel de la sección 4, security): al
+      tokenizar esta tabla hay que **fijar el acoplamiento** que
+      `globals.contrast.test.ts` da por supuesto. Esa auditoría modela el badge
+      como `bg-state-X/15` + `text-state-X-text` + `border-state-X/40`, pero esos
+      valores los toma del diseño (D6), no del código: si aquí se escribe `/20`,
+      o `text-state-warning` en vez de `text-state-warning-text`, las 20
+      combinaciones de badge del test siguen en verde midiendo algo que la app ya
+      no pinta. Así que 7.1 debe **asertar las cadenas reales** de
+      `TONE_BADGE_CLASS` contra esas alfas y sufijos —o mejor, derivar los
+      números de las cadenas— y quitar el «future tense» del comentario de
+      `badgePairs`.
 - [ ] 7.2 Nuevo `frontend/features/incidents/lib/severity-tone.ts` con
       `SEVERITY_COLOR_GROUP: Record<IncidentSeverity, Tone>` = `{LOW: "gray", MEDIUM: "blue",
       HIGH: "amber", CRITICAL: "red"}` y `severityColorGroup()` con su `?? "gray"`; los dos

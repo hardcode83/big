@@ -2,6 +2,13 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import {
+  darkMediaAt,
+  declaredNames as namesIn,
+  declarationsOf as declarationsIn,
+  readCss,
+} from "@/test/css-tokens";
+
 /**
  * The guard that makes design D1's duplication safe instead of fragile.
  *
@@ -18,65 +25,17 @@ import { describe, expect, it } from "vitest";
  */
 
 /**
- * Comments are stripped before anything else parses this file.
- *
- * `declarationsOf` counts raw `{`/`}` characters, so a brace living inside a
- * comment — someone writing «the `@theme {` rule…» in prose — would make the
- * matcher overrun into the next block. The overrun does not fail cleanly: it
- * merges a later block's declarations into the one being read, which shows up as
- * three unrelated assertions failing with a message that points nowhere near the
- * comment that caused it. Removing comments first deletes the whole failure
- * class instead of documenting it.
+ * Parsed by the shared helper in `test/css-tokens.ts` rather than a local copy:
+ * this parser already had one real bug (it counted braces inside comments and
+ * overran into the next block), and `app/globals.contrast.test.ts` needs the
+ * same three blocks. Two copies would be two places for that to come back.
  */
-const CSS = readFileSync(join(__dirname, "globals.css"), "utf8").replace(
-  /\/\*[\s\S]*?\*\//g,
-  "",
-);
+const CSS = readCss(join(__dirname, "globals.css"));
 
-/**
- * Custom-property declarations inside the top-level rule whose selector is
- * exactly `selector`.
- *
- * Hand-written brace matching rather than a regex: the file nests
- * (`@media { :root { … } }`) and a lazy `\{([^}]*)\}` would stop at the first
- * inner brace. `startFrom` lets the caller scope the search to a region, which
- * is how the media-query block is read without matching the bare `:root` above
- * it.
- */
-function declarationsOf(
-  selector: string,
-  startFrom = 0,
-): Record<string, string> {
-  const at = CSS.indexOf(`${selector} {`, startFrom);
-  if (at === -1) {
-    throw new Error(`selector not found in globals.css: ${selector}`);
-  }
-  let depth = 0;
-  let end = -1;
-  for (let i = CSS.indexOf("{", at); i < CSS.length; i += 1) {
-    if (CSS[i] === "{") depth += 1;
-    else if (CSS[i] === "}") {
-      depth -= 1;
-      if (depth === 0) {
-        end = i;
-        break;
-      }
-    }
-  }
-  const body = CSS.slice(CSS.indexOf("{", at) + 1, end);
-  const declarations: Record<string, string> = {};
-  // A declaration ends at `;`, at the block's `}`, or — for the last one in a
-  // block — at nothing at all, because CSS makes the final semicolon optional.
-  // `body` excludes the closing brace, so `$` is what covers that third case.
-  for (const [, name, value] of body.matchAll(
-    /(--[a-z0-9-]+)\s*:\s*([^;}]+)(?:[;}]|$)/gi,
-  )) {
-    declarations[name] = value.trim();
-  }
-  return declarations;
-}
+const declarationsOf = (selector: string, startFrom = 0) =>
+  declarationsIn(CSS, selector, startFrom);
 
-const MEDIA_DARK_AT = CSS.indexOf("@media (prefers-color-scheme: dark)");
+const MEDIA_DARK_AT = darkMediaAt(CSS);
 
 const LIGHT = declarationsOf(":root");
 const DARK_MEDIA = declarationsOf(
@@ -93,9 +52,7 @@ const THEME_INLINE = declarationsOf("@theme inline");
  * WITH duplicates — the occurrence counts are the point. Selector-anchored
  * lookups cannot see a block they were not told about; this can.
  */
-const declaredNames = [
-  ...CSS.matchAll(/(--[a-z0-9-]+)\s*:\s*([^;}]+)[;}]/gi),
-].map(([, name]) => name);
+const declaredNames = namesIn(CSS);
 
 const CORE_TOKENS = [
   "--background",

@@ -356,8 +356,20 @@ cosas: que los cuatro pasos declarados son exactamente los que tienen consumidor
 
 **Elegido:** `app/globals.contrast.test.ts` parsea los valores hexadecimales de los tres bloques
 de `globals.css`, calcula el ratio WCAG de cada par declarado (incluida la composición
-`color-mix` de los badges al 15 % sobre las tres superficies) y falla por debajo del umbral
-—4.5:1 texto, 3:1 controles— con las excepciones de D9 declaradas como lista explícita.
+`color-mix` de los badges al 15 % sobre las **cuatro** superficies —`background`, `surface`,
+`surface-high` y `muted`, porque `bg-muted` es un fondo real de este árbol y dejarlo fuera haría
+la auditoría más estrecha que la aplicación) y falla por debajo del umbral —4.5:1 texto, 3:1
+controles— con las excepciones de D9 declaradas como lista explícita.
+
+> **Enmienda de 2026-08-24 (`/sdd:run`, panel de la sección 4; aprobada por Jose).** Esta
+> decisión decía «las **tres** superficies», y la auditoría mide cuatro. La ampliación es un
+> superconjunto estricto —nada que pasara antes queda exento— y mueve dos suelos, los dos
+> registrados en §Contraste medido: el de texto de badge de 5.40 a **4.99** (sigue pasando AA,
+> umbral 4.5) y el de las anclas `state-*` de 4.21 a **3.81** (sigue pasando 3:1). Se enmienda
+> **aquí**, en el texto de la decisión, y no sólo como nota en otra sección: quien lea D11 para
+> saber qué mide el test tiene que encontrarlo en D11. Y se enmienda con aprobación explícita,
+> igual que D10, porque cambia lo que una decisión decidió y no sólo una cifra equivocada como la
+> corrección de D9 — que los números sigan pasando no vuelve la ampliación auto-aprobable.
 
 Es la única forma de que R1.6 («la comprobación SHALL quedar registrada con su ratio medido por
 par») siga siendo verdad después de este change: el helper `getA11yViolations` de `test/render.tsx`
@@ -453,6 +465,37 @@ Claro, texto: `foreground` **11.67 / 12.62 / 13.20**; `muted-foreground` **6.05 
 Badges, las 30 combinaciones (5 tonos × 3 superficies × 2 temas), texto sobre el ancla compuesta
 al 15 %: **oscuro 7.32-10.02**, **claro 5.40-7.46**. Mínimo global **5.40** (ámbar claro sobre
 `background`). Cero fallos.
+
+> **Ampliación de 2026-08-24 (`/sdd:run`, tarea 4.1).** Esta tabla mide sobre **tres**
+> superficies —`background`, `surface`, `surface-high`— y el test de contraste mide sobre
+> **cuatro**, añadiendo `muted`, porque `bg-muted` es un fondo real en este árbol y dejarlo fuera
+> haría la auditoría más estrecha que la aplicación. Las 28 cifras de arriba se reproducen
+> **exactas** desde `globals.css` (cotejo de la tarea 4.2, cero discrepancias). Lo que cambia al
+> añadir la cuarta superficie son los rangos, y en un sitio importa:
+>
+> | serie | 3 superficies (esta tabla) | 4 superficies (el test) |
+> |---|---|---|
+> | badges, texto, oscuro | 7.32-10.02 | 6.47-10.02 |
+> | badges, texto, claro | 5.40-7.46 | **4.99**-7.46 |
+> | borde de badge al 40 % (exento) | 1.37-1.83 | 1.35-1.83 |
+> | anclas `state-*` (umbral 3:1) | 4.21-8.67 | 3.81-8.67 |
+>
+> **Y el margen más fino de la paleta no es éste.** Es `secondary-foreground` sobre `--secondary`
+> en oscuro: **4.60**, es decir **+0.10** sobre AA. Ese par sí está aserido, así que una regresión
+> se ve; pero si algún change futuro toca `--secondary` o su foreground, ése es el número sin
+> holgura, no el 4.99 de abajo. Levantado por el revisor de seguridad en el panel de la sección 4,
+> corrigiendo el énfasis de esta misma nota.
+>
+> **El suelo real de los badges es 4.99, no 5.40**: `state-warning-text` sobre un badge ámbar al 15 % encima de
+> `muted`, en claro. Sigue pasando AA —el umbral es 4.5— pero el margen es **+0.49 y no +0.90**,
+> la mitad de lo que esta tabla sugería. Se deja escrito porque es exactamente el número que un
+> cambio futuro puede tirar sin darse cuenta: oscurecer `muted` un poco en claro, o mover
+> `state-warning-text`, pone un badge por debajo de AA, y quien mirara sólo el 5.40 creería tener
+> el doble de holgura. El test mide los 40 pares en cada ejecución, así que se enteraría; esta
+> nota es para quien lea la tabla y no el test.
+>
+> Las anclas `state-*` bajan a 3.81 (rojo oscuro sobre `muted`) por la misma razón, y siguen
+> sobre su umbral de 3:1. Ninguna combinación falla en ninguno de los dos conjuntos.
 
 Excepciones declaradas y su razón, ya en D9: `border` **contra `--background`** mide 1.29:1
 (oscuro) / **1.23:1** (claro) y el borde de badge al 40 % mide 1.37-1.83:1 contra su propia

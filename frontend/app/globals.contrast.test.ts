@@ -1,0 +1,475 @@
+import { join } from "node:path";
+import { describe, expect, it } from "vitest";
+
+import { readCss, themeBlocks } from "@/test/css-tokens";
+import {
+  AA_LARGE_TEXT_AND_UI,
+  AA_NORMAL_TEXT,
+  compositeOver,
+  contrastRatio,
+  round2,
+} from "@/test/wcag-contrast";
+
+/**
+ * The contrast audit R1.6 requires, as a test rather than as a table (design
+ * D11).
+ *
+ * R1.6: «IF un par fondo/texto de cualquiera de los dos temas no alcanza el
+ * contraste WCAG 2.2 AA (4.5:1 texto normal, 3:1 texto grande y elementos de
+ * interfaz), THEN THE SYSTEM SHALL corregirlo antes de darse por entregado, y la
+ * comprobación SHALL quedar registrada con su ratio medido por par.»
+ *
+ * Two halves, and the second is why this is a test:
+ *   · the threshold half is the assertions below;
+ *   · «registrada con su ratio medido por par» is the table this file PRINTS.
+ *     A markdown table in design.md ages the moment someone retouches a hex; a
+ *     test that recomputes from `globals.css` cannot.
+ *
+ * It has to be bespoke because the obvious tool cannot do it: `getA11yViolations`
+ * in `test/render.tsx` disables the `color-contrast` rule on purpose — «Colour-
+ * contrast needs real rendering; jsdom can't compute it reliably» — so axe is
+ * structurally unable to cover this. Playwright could, and `npx playwright test`
+ * does not exist in this project yet (it arrives with `hardening-release`).
+ */
+
+const CSS = readCss(join(__dirname, "globals.css"));
+const { light: LIGHT, darkMedia: DARK } = themeBlocks(CSS);
+
+/**
+ * The surfaces a foreground can land on. `background`, `surface` and
+ * `surface-high` are the three declared in design §Paleta; `muted` is included
+ * because `bg-muted` is a real backdrop in this codebase, and leaving it out
+ * would make the audit narrower than the app.
+ *
+ * Worth recording, because two reviewers reached different numbers from it:
+ * design.md's stated `state-*` range of «4.21-8.67» is the THREE-surface range;
+ * including `muted` moves the floor to 3.81 (dark `state-error` on `muted`).
+ * Both are correct about different sets, and nothing crosses its threshold
+ * either way — verified by the assertions below, which use all four.
+ */
+const SURFACES = ["--background", "--surface", "--surface-high", "--muted"] as const;
+
+/*
+ * Why `--secondary` and `--accent` are NOT in that list, written down because an
+ * unexplained omission is indistinguishable from an oversight:
+ *
+ *   · `--accent` is value-identical to `--muted` in both themes, so including it
+ *     would add rows without adding coverage.
+ *   · `--secondary` is a backdrop in exactly one place (`components/ui/badge.tsx`
+ *     variant `secondary`) and it always carries `text-secondary-foreground`,
+ *     which IS measured as a paired role (10.22 light / 4.60 dark).
+ *
+ * The reason to record it rather than just do it: if `--secondary` ever becomes a
+ * general backdrop, these are the numbers that would come due — dark
+ * `muted-foreground` on it is 3.54, `input` on it 2.85, badge info text over it
+ * 4.32. All below their thresholds. Whoever makes `bg-secondary` general has to
+ * add it here and fix those.
+ */
+
+const TONES = ["success", "warning", "error", "info", "neutral"] as const;
+
+type Theme = { name: string; tokens: Record<string, string> };
+
+const THEMES: Theme[] = [
+  { name: "light", tokens: LIGHT },
+  { name: "dark", tokens: DARK },
+];
+
+/**
+ * Every pair the audit measures, with the threshold that applies to it.
+ *
+ * `ui` is WCAG 2.2 **1.4.11 Non-text Contrast** (3:1), which applies to the
+ * visual boundary of a *component*. `text` is 1.4.3 (4.5:1). The distinction is
+ * not cosmetic: it is exactly what separates `--input` from `--border` in design
+ * D9, and getting it wrong in either direction either fails a control that is
+ * fine or passes one that is not.
+ */
+type Pair = {
+  label: string;
+  fg: string;
+  bg: string;
+  kind: "text" | "ui";
+  /**
+   * A declared D9 exception: measured and recorded, but no threshold applies.
+   * Flagged rather than inferred from the label, so the register never prints
+   * «FAIL» against a pair that was never required to pass — this register IS the
+   * artefact R1.6 asks for, and one that reads as twenty-one failures is worse
+   * than none.
+   */
+  exempt?: true;
+};
+
+function corePairs(theme: Theme): Pair[] {
+  const t = theme.tokens;
+  const pairs: Pair[] = [];
+
+  // Body and secondary text, on every surface they can sit on.
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `foreground on ${surface}`,
+      fg: t["--foreground"],
+      bg: t[surface],
+      kind: "text",
+    });
+    pairs.push({
+      label: `muted-foreground on ${surface}`,
+      fg: t["--muted-foreground"],
+      bg: t[surface],
+      kind: "text",
+    });
+  }
+
+  // The paired roles: each foreground token against the surface it names.
+  for (const role of ["primary", "secondary", "accent"] as const) {
+    pairs.push({
+      label: `${role}-foreground on ${role}`,
+      fg: t[`--${role}-foreground`],
+      bg: t[`--${role}`],
+      kind: "text",
+    });
+  }
+
+  /*
+   * `--primary` as TEXT, which is the axis the app actually uses and the one this
+   * audit was blind to.
+   *
+   * `text-primary` is normal-size body text — `text-sm`, 14px, normal weight — in
+   * five shipped places: `reservations/…/reservation-detail-view.tsx:46,79`,
+   * `reservations/…/reservations-view.tsx:154`,
+   * `dashboard/…/property-card.tsx:146`, `properties/…/properties-view.tsx:49`.
+   * So it owes 4.5:1 under 1.4.3, not 3:1.
+   *
+   * It was invisible here because `--primary` and `--ring` hold the same value in
+   * both themes, so the only pair that touched primary was `ring on <surface>` at
+   * the 3:1 UI threshold. The gap was demonstrable, not theoretical: with light
+   * `--primary: #7c727e` every assertion in this file passed while those five
+   * links sat at 4.07:1 on `--background` and 3.71:1 on `--muted`.
+   */
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `primary as text on ${surface}`,
+      fg: t["--primary"],
+      bg: t[surface],
+      kind: "text",
+    });
+  }
+
+  /*
+   * `--primary` as a UI boundary (1.4.11, 3:1): `border border-primary` at
+   * `dashboard/…/property-card.tsx:87`. Same token, different threshold, because
+   * what applies depends on the role the colour plays.
+   */
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `primary as border on ${surface}`,
+      fg: t["--primary"],
+      bg: t[surface],
+      kind: "ui",
+    });
+  }
+
+  /*
+   * The other live composite in the tree: `hover:bg-primary/90` on the default
+   * `Button` (`components/ui/button.tsx:12`), which keeps
+   * `text-primary-foreground`. A hover state still has to be readable.
+   */
+  pairs.push({
+    label: "primary-foreground on primary/90 over --background (hover:bg-primary/90)",
+    fg: t["--primary-foreground"],
+    bg: compositeOver(t["--primary"], t["--background"], 0.9),
+    kind: "text",
+  });
+
+  // Control boundaries and the focus ring — 1.4.11, not 1.4.3.
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `input on ${surface}`,
+      fg: t["--input"],
+      bg: t[surface],
+      kind: "ui",
+    });
+    pairs.push({
+      label: `ring on ${surface}`,
+      fg: t["--ring"],
+      bg: t[surface],
+      kind: "ui",
+    });
+  }
+
+  // The five state anchors as graphic tokens: fills, dots, borders (3:1).
+  for (const tone of TONES) {
+    for (const surface of SURFACES) {
+      pairs.push({
+        label: `state-${tone} on ${surface}`,
+        fg: t[`--state-${tone}`],
+        bg: t[surface],
+        kind: "ui",
+      });
+    }
+  }
+
+  return pairs;
+}
+
+/**
+ * The badge pairs — the ones that need composition, and the reason a naive audit
+ * of declared values would be wrong.
+ *
+ * Design D6 specifies that `TONE_BADGE_CLASS` WILL render
+ * `bg-state-X/15 text-state-X-text border-state-X/40`, so the text never sits on
+ * `--state-X` itself: it sits on that anchor composited at 15% over whatever
+ * surface is behind the badge. D6 measured `#10B981` on its own 15% tint at
+ * 2.3:1, which is why `state-*-text` exists as a separate token at all.
+ *
+ * **Future tense on purpose.** As of this section `lib/ui/status-tone.ts` still
+ * ships raw `emerald-100`/`amber-900` scales — the tokenisation is section 7's
+ * task 7.1. So the 15%, the 40% and the `-text` suffix are premises this audit
+ * takes from the design, not facts it reads from the code, and an unpinned
+ * premise is how the figures below could stay green while the badge a user sees
+ * goes unmeasured: if 7.1 lands `/20`, or `text-state-warning` instead of
+ * `text-state-warning-text`, nothing here would notice.
+ *
+ * Task 7.1 therefore carries the obligation to pin this coupling — to assert the
+ * real `TONE_BADGE_CLASS` strings against the alphas and suffixes modelled here,
+ * or better, to derive these numbers from those strings. Recorded in tasks.md so
+ * it is not left to memory.
+ */
+function badgePairs(theme: Theme): Pair[] {
+  const t = theme.tokens;
+  const pairs: Pair[] = [];
+  for (const tone of TONES) {
+    for (const surface of SURFACES) {
+      const tint = compositeOver(t[`--state-${tone}`], t[surface], 0.15);
+      pairs.push({
+        label: `state-${tone}-text on state-${tone}/15 over ${surface} (${tint})`,
+        fg: t[`--state-${tone}-text`],
+        bg: tint,
+        kind: "text",
+      });
+    }
+  }
+  return pairs;
+}
+
+/**
+ * The declared exceptions, from design D9 — measured and recorded, but not
+ * asserted against a threshold.
+ *
+ * These are NOT failures being waved through. WCAG 1.4.11 governs the visual
+ * boundary of a *component*; a hairline that divides content is decorative, and
+ * no information depends on seeing it (every badge carries its own translated
+ * label, so WCAG 1.4.1 is satisfied by the text, not the border). D9 rejected
+ * raising `--border` to 3:1 explicitly: «cumpliría un requisito que WCAG no
+ * impone y borraría la estética de hairline».
+ *
+ * They are still computed and printed, because an exception whose number nobody
+ * measures is how the light `--border` figure came to be recorded against the
+ * wrong surface in the first place — it said 1.32 (its ratio against `surface`)
+ * while its dark counterpart was quoted against `background`.
+ */
+function exceptionPairs(theme: Theme): Pair[] {
+  const t = theme.tokens;
+  const pairs: Pair[] = [];
+
+  /*
+   * The hairline on EVERY surface, not just `--background`.
+   *
+   * Recording it on one surface of four is the same asymmetry the section-2
+   * panel corrected in design.md, where the dark row was quoted against
+   * `background` and the light row against `surface` — two rows of one declared
+   * pair describing different pairs. R1.6 asks for the ratio «por par», so the
+   * fix is to iterate, exactly as the other two lists do.
+   *
+   * It also surfaces something worth knowing: in dark, `--border` and `--muted`
+   * are the same value (`#262a34`), so a bordered card on `bg-muted` has a
+   * border at ratio 1.00 — literally invisible. D9's reasoning still covers it
+   * (decorative, carries no information, no control boundary), but the number
+   * should be in the register rather than discovered later.
+   */
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `border on ${surface}  [decorative hairline, D9]`,
+      fg: t["--border"],
+      bg: t[surface],
+      kind: "ui",
+      exempt: true,
+    });
+  }
+  for (const tone of TONES) {
+    for (const surface of SURFACES) {
+      const tint = compositeOver(t[`--state-${tone}`], t[surface], 0.15);
+      const edge = compositeOver(t[`--state-${tone}`], t[surface], 0.4);
+      pairs.push({
+        label: `state-${tone}/40 edge on its own /15 tint over ${surface}  [badge border, D9]`,
+        fg: edge,
+        bg: tint,
+        kind: "ui",
+        exempt: true,
+      });
+    }
+  }
+  return pairs;
+}
+
+function threshold(kind: Pair["kind"]): number {
+  return kind === "text" ? AA_NORMAL_TEXT : AA_LARGE_TEXT_AND_UI;
+}
+
+/** The record R1.6 asks for: every pair, its measured ratio, its verdict. */
+function report(theme: Theme, pairs: Pair[], heading: string): string[] {
+  const lines = [`\n  ${theme.name.toUpperCase()} — ${heading}`];
+  for (const pair of pairs) {
+    const ratio = round2(contrastRatio(pair.fg, pair.bg));
+    const need = threshold(pair.kind);
+    const verdict = pair.exempt ? "n/a " : ratio >= need ? "ok  " : "FAIL";
+    const requirement = pair.exempt ? "exempt " : `needs ${need}`;
+    lines.push(
+      `    ${verdict} ${ratio.toFixed(2).padStart(6)}:1  (${requirement}) ${pair.label}`,
+    );
+  }
+  return lines;
+}
+
+describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
+  it.each(THEMES)("$name — every text pair reaches 4.5:1", (theme) => {
+    // Compares the UNROUNDED ratio. Rounding first lets a real failure through:
+    // `#007eb7` on white measures 4.4986:1 — below AA — and rounds to «4.50 ok».
+    // Rounding belongs in the register, which is for humans, not in the gate.
+    const failures = [...corePairs(theme), ...badgePairs(theme)]
+      .filter((pair) => pair.kind === "text")
+      .map((pair) => ({ pair, ratio: contrastRatio(pair.fg, pair.bg) }))
+      .filter(({ ratio }) => ratio < AA_NORMAL_TEXT)
+      .map(({ pair, ratio }) => `${pair.label}: ${round2(ratio)}:1`);
+    expect(failures).toEqual([]);
+  });
+
+  it.each(THEMES)(
+    "$name — every control boundary and graphic token reaches 3:1",
+    (theme) => {
+      // Unrounded, for the same reason as the text gate above.
+      const failures = corePairs(theme)
+        .filter((pair) => pair.kind === "ui")
+        .map((pair) => ({
+          pair,
+          ratio: contrastRatio(pair.fg, pair.bg),
+        }))
+        .filter(({ ratio }) => ratio < AA_LARGE_TEXT_AND_UI)
+        .map(({ pair, ratio }) => `${pair.label}: ${round2(ratio)}:1`);
+      expect(failures).toEqual([]);
+    },
+  );
+
+  it("measures the 40 badge combinations, five tones over four surfaces in both themes", () => {
+    // A count, so a tone or a surface silently dropping out of the audit is a
+    // failure rather than a quieter pass.
+    const all = THEMES.flatMap((theme) => badgePairs(theme));
+    expect(all).toHaveLength(TONES.length * SURFACES.length * THEMES.length);
+    expect(all).toHaveLength(40);
+  });
+
+  it("keeps state-*-text as a distinct token, because the anchor alone would fail", () => {
+    // D6's rejected alternative, re-measured here so the rejection stays true:
+    // using the anchor as its own text colour («text-state-success») fails in
+    // light for all five tones. If that ever stops being true the token could be
+    // dropped — and this is where we would find out.
+    const wouldFail = THEMES.flatMap((theme) =>
+      TONES.flatMap((tone) =>
+        SURFACES.map((surface) => {
+          const anchor = theme.tokens[`--state-${tone}`];
+          const tint = compositeOver(anchor, theme.tokens[surface], 0.15);
+          return {
+            label: `${theme.name} ${tone} on ${surface}`,
+            ratio: round2(contrastRatio(anchor, tint)),
+          };
+        }),
+      ),
+    ).filter(({ ratio }) => ratio < AA_NORMAL_TEXT);
+    expect(wouldFail.length).toBeGreaterThan(0);
+  });
+
+  it("covers every category at its expected size, counted independently", () => {
+    /*
+     * Hardcoded literals, NOT derived from `SURFACES`/`TONES`.
+     *
+     * The previous version compared the total against a `themeCount()` computed
+     * from those same constants, which cannot see a SHRINK: deleting `--muted`
+     * from `SURFACES` moved both sides together and left every assertion green.
+     * The only thing that caught it was a sibling `toHaveLength(40)`, and that
+     * was luck — `badgePairs` happens to iterate the same arrays, while
+     * `corePairs`, the larger half, had no independent count at all.
+     *
+     * So the shared constants are pinned first, and each category's size is
+     * stated as a number a human chose.
+     */
+    expect(SURFACES).toHaveLength(4);
+    expect(TONES).toHaveLength(5);
+    expect(THEMES).toHaveLength(2);
+
+    for (const theme of THEMES) {
+      // 4 foreground + 4 muted-foreground + 3 paired roles + 4 primary-as-text
+      // + 4 primary-as-border + 1 hover composite + 4 input + 4 ring
+      // + 20 state anchors
+      expect(corePairs(theme), `${theme.name} core`).toHaveLength(48);
+      // 5 tones × 4 surfaces
+      expect(badgePairs(theme), `${theme.name} badges`).toHaveLength(20);
+      // 4 hairline + 20 badge edges
+      expect(exceptionPairs(theme), `${theme.name} exceptions`).toHaveLength(24);
+    }
+  });
+
+  it("declares exactly D9's two exception kinds, so none can be smuggled in", () => {
+    // D9 declares TWO exempt shapes and no others: the decorative hairline and
+    // the badge edge at 40%. Asserting the total alone would let a pair migrate
+    // out of the asserted sets into the exempt one without changing any count.
+    for (const theme of THEMES) {
+      const kinds = new Set(
+        exceptionPairs(theme).map((pair) =>
+          pair.label.includes("[decorative hairline, D9]")
+            ? "hairline"
+            : pair.label.includes("[badge border, D9]")
+              ? "badge-edge"
+              : `UNDECLARED: ${pair.label}`,
+        ),
+      );
+      expect(kinds).toEqual(new Set(["hairline", "badge-edge"]));
+      // And every exempt pair really is flagged, so `exempt` cannot be implied
+      // by a label alone.
+      expect(exceptionPairs(theme).every((pair) => pair.exempt)).toBe(true);
+    }
+    // Conversely, nothing in the asserted sets is exempt — no laundering.
+    for (const theme of THEMES) {
+      const asserted = [...corePairs(theme), ...badgePairs(theme)];
+      expect(asserted.some((pair) => pair.exempt)).toBe(false);
+    }
+  });
+
+  it("records the ratio of every pair, which is the register R1.6 requires", () => {
+    const lines: string[] = [
+      "\nWCAG 2.2 AA contrast register — recomputed from globals.css",
+    ];
+    for (const theme of THEMES) {
+      lines.push(...report(theme, corePairs(theme), "core pairs"));
+      lines.push(...report(theme, badgePairs(theme), "badges (anchor at 15%)"));
+      lines.push(
+        ...report(theme, exceptionPairs(theme), "declared D9 exceptions"),
+      );
+    }
+    // The register is the artefact, so it is emitted rather than merely computed.
+    console.log(lines.join("\n"));
+
+    // Every pair must be a real measurement. A missing token yields `undefined`,
+    // which `parseHex` throws on rather than silently scoring — so this also
+    // pins that a token rename cannot quietly empty the audit.
+    const measured = THEMES.flatMap((theme) => [
+      ...corePairs(theme),
+      ...badgePairs(theme),
+      ...exceptionPairs(theme),
+    ]);
+    expect(measured).toHaveLength(184);
+    for (const pair of measured) {
+      expect(pair.fg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(pair.bg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);
+      expect(contrastRatio(pair.fg, pair.bg)).toBeGreaterThanOrEqual(1);
+    }
+  });
+});
