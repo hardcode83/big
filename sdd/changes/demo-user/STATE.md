@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/demo-user
 implementation_sha: d79f1a42ad749219c2a1c647dfde3b28e4ef9ce1
 pr_number: 
 pr_url: 
