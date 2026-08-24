@@ -257,7 +257,36 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
 
      Verificado con las construcciones literales de los revisores: la mutación de
      security (que pasaba los 7) y el encogimiento de qa (que dejaba 3 en verde)
-     ahora fallan; la excepción exenta sigue en verde sin blanquear nada. -->
+     ahora fallan; la excepción exenta sigue en verde sin blanquear nada.
+
+     Segunda ronda: la re-revisión dio PASS(0 bloqueantes) y verificó los siete
+     hallazgos por mutación, pero encontró tres más, los tres arreglados:
+       · N1 — arreglé las puertas para comparar sin redondear y me dejé el
+         REGISTRO, que es el artefacto de R1.6. Con `--primary: #247e3c`
+         (4.499978:1) el registro imprimía «ok 4.50» sobre un par que la puerta
+         rechazaba: respuesta equivocada en el entregable, no detalle cosmético.
+         Ahora el veredicto sale del valor exacto y sólo el número se redondea.
+       · N2 — `kind` era el eje de blanqueo que los literales de tamaño no ven:
+         pasar `foreground` de `text` a `ui` baja su umbral de 4.5 a 3.0, no mueve
+         ninguna cuenta, no pone `exempt`, y dejaba los 9 tests en verde. Es el
+         agujero del hallazgo 4 un campo más allá. Fijado el reparto text/ui por
+         categoría (19/32 en core, 20/0 en badges).
+       · N3 — el compuesto `hover:bg-primary/90` que acabo de añadir estaba
+         medido en 1 de 4 superficies, reintroduciendo justo la asimetría que el
+         hallazgo 5 había quitado. Un Button no está clavado a `--background`: su
+         suelo es 5.18 sobre `surface-high`, no el 5.32 que anunciaba. Ahora itera.
+
+     Y una condición que security puso al aceptar el aplazamiento del acoplamiento
+     del badge a 7.1, que conviene no perder: **el guard 8.1 NO lo cubre**. 8.1
+     falla ante escalas crudas de Tailwind, así que un `/20` o un
+     `text-state-warning` pasarían por él mientras `badgePairs` mide un badge que la
+     app ya no pinta. Si la sección 7 se descoparra o se partiera a otro change, la
+     obligación tiene que viajar con ella o convertirse en tripwire entonces.
+
+     Confirmado también, contra el árbol y no de palabra: `--secondary` y `--accent`
+     no necesitan el trato de `--primary` (cero usos desnudos de `text-secondary`,
+     `text-accent`, `border-secondary`, `border-accent` ni variantes), y 4.60 es de
+     verdad el margen más fino de la paleta — nada por debajo. -->
 
 - [x] 4.1 Nuevo `frontend/app/globals.contrast.test.ts`: parsea los hex de los tres bloques,
       calcula el ratio WCAG de cada par declarado —incluida la composición `color-mix` de los

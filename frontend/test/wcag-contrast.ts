@@ -55,14 +55,21 @@ export function contrastRatio(a: string, b: string): number {
  * which is what this does.
  *
  * Grounded in the spec rather than in agreement between implementations.
- * CSS Color 5 interpolates with **premultiplied** alpha, and `transparent` is
- * transparent black at alpha 0, whose premultiplied components are all zero.
- * So `color-mix(in oklab, C 15%, transparent)` gives alpha = 0.15·1 + 0.85·0 =
- * 0.15 and premultiplied components 0.15·C, which un-premultiply to exactly C:
- * hue and chroma preserved, no darkening toward black, and the choice of `oklab`
- * is irrelevant to the result for a mix against transparent. The browser then
- * paints that translucent layer with ordinary source-over — Cr = Cs·As +
- * Cb·(1−As) on gamma-encoded sRGB — which is what this computes.
+ * **CSS Color 4** §"Interpolating with alpha" is what requires interpolation to
+ * use *premultiplied* alpha; CSS Color 5 defines `color-mix()` and delegates to
+ * that rule. `transparent` is transparent black — `rgb(0 0 0 / 0)` — whose
+ * premultiplied components are all zero. So `color-mix(in oklab, C 15%,
+ * transparent)` gives alpha = 0.15·1 + 0.85·0 = 0.15 and premultiplied
+ * components 0.15·C, which un-premultiply to exactly C: hue and chroma
+ * preserved, no darkening toward black, and the choice of `oklab` is irrelevant
+ * to the result for a mix against transparent. The browser then paints that
+ * translucent layer with source-over.
+ *
+ * The formula below, Cr = Cs·As + Cb·(1−As), is the **opaque-backdrop reduction**
+ * of source-over. That holds here because every `backdrop` passed in is an opaque
+ * hex token. A caller compositing onto an already-translucent backdrop would need
+ * the general form, which also carries the backdrop's alpha — this function would
+ * be wrong for that, so do not reach for it there.
  *
  * Stated that way deliberately. This function's earlier justification was that
  * it reproduced design.md's independently-derived table across thirty values,

@@ -64,6 +64,15 @@ const SURFACES = ["--background", "--surface", "--surface-high", "--muted"] as c
  * `muted-foreground` on it is 3.54, `input` on it 2.85, badge info text over it
  * 4.32. All below their thresholds. Whoever makes `bg-secondary` general has to
  * add it here and fix those.
+ *
+ * There is a SECOND trigger, less obvious than the first: a `border-secondary` or
+ * `border-accent` shipping anywhere. Today both tokens only ever appear as
+ * backdrops carrying their own paired foreground, which is why the
+ * `${role}-foreground on ${role}` pairs cover them. A border has no paired
+ * foreground to piggyback on, so it would owe its own 3:1 `ui` pair here.
+ * Verified as of this section: bare `text-secondary`, `text-accent`,
+ * `border-secondary`, `border-accent` and their ring/fill/stroke variants are all
+ * absent from shipped code.
  */
 
 const TONES = ["success", "warning", "error", "info", "neutral"] as const;
@@ -172,13 +181,20 @@ function corePairs(theme: Theme): Pair[] {
    * The other live composite in the tree: `hover:bg-primary/90` on the default
    * `Button` (`components/ui/button.tsx:12`), which keeps
    * `text-primary-foreground`. A hover state still has to be readable.
+   *
+   * On every surface, because a `Button` is not pinned to `--background`. Its
+   * floor is 5.18 over `--surface-high`, not the 5.32 that recording only
+   * `--background` would advertise — the same one-surface-of-four asymmetry the
+   * hairline exception had, which is easy to reintroduce while fixing.
    */
-  pairs.push({
-    label: "primary-foreground on primary/90 over --background (hover:bg-primary/90)",
-    fg: t["--primary-foreground"],
-    bg: compositeOver(t["--primary"], t["--background"], 0.9),
-    kind: "text",
-  });
+  for (const surface of SURFACES) {
+    pairs.push({
+      label: `primary-foreground on primary/90 over ${surface} (hover:bg-primary/90)`,
+      fg: t["--primary-foreground"],
+      bg: compositeOver(t["--primary"], t[surface], 0.9),
+      kind: "text",
+    });
+  }
 
   // Control boundaries and the focus ring — 1.4.11, not 1.4.3.
   for (const surface of SURFACES) {
@@ -319,12 +335,16 @@ function threshold(kind: Pair["kind"]): number {
 function report(theme: Theme, pairs: Pair[], heading: string): string[] {
   const lines = [`\n  ${theme.name.toUpperCase()} — ${heading}`];
   for (const pair of pairs) {
-    const ratio = round2(contrastRatio(pair.fg, pair.bg));
+    // The VERDICT comes from the unrounded ratio, the printed NUMBER is rounded.
+    // Deciding on the rounded value let the register print «ok 4.50» about a pair
+    // the gate rejects at 4.499978 — and since this register is the artefact R1.6
+    // asks for, that is a wrong answer in the deliverable, not a cosmetic slip.
+    const exact = contrastRatio(pair.fg, pair.bg);
     const need = threshold(pair.kind);
-    const verdict = pair.exempt ? "n/a " : ratio >= need ? "ok  " : "FAIL";
+    const verdict = pair.exempt ? "n/a " : exact >= need ? "ok  " : "FAIL";
     const requirement = pair.exempt ? "exempt " : `needs ${need}`;
     lines.push(
-      `    ${verdict} ${ratio.toFixed(2).padStart(6)}:1  (${requirement}) ${pair.label}`,
+      `    ${verdict} ${round2(exact).toFixed(2).padStart(6)}:1  (${requirement}) ${pair.label}`,
     );
   }
   return lines;
@@ -407,13 +427,37 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
 
     for (const theme of THEMES) {
       // 4 foreground + 4 muted-foreground + 3 paired roles + 4 primary-as-text
-      // + 4 primary-as-border + 1 hover composite + 4 input + 4 ring
+      // + 4 primary-as-border + 4 hover composites + 4 input + 4 ring
       // + 20 state anchors
-      expect(corePairs(theme), `${theme.name} core`).toHaveLength(48);
+      expect(corePairs(theme), `${theme.name} core`).toHaveLength(51);
       // 5 tones × 4 surfaces
       expect(badgePairs(theme), `${theme.name} badges`).toHaveLength(20);
       // 4 hairline + 20 badge edges
       expect(exceptionPairs(theme), `${theme.name} exceptions`).toHaveLength(24);
+
+      /*
+       * And the text/ui SPLIT, pinned separately.
+       *
+       * `kind` is what selects the threshold, so it is a laundering axis the size
+       * literals cannot see: flipping `foreground` from `text` to `ui` drops its
+       * requirement from 4.5 to 3.0, changes no count, sets no `exempt`, and used
+       * to leave every assertion in this file green. Body text silently
+       * reclassified as a UI boundary is exactly the confusion this file warns
+       * about where it defines `kind`.
+       */
+      const core = corePairs(theme);
+      expect(
+        core.filter((pair) => pair.kind === "text"),
+        `${theme.name} core text pairs`,
+      ).toHaveLength(19);
+      expect(
+        core.filter((pair) => pair.kind === "ui"),
+        `${theme.name} core ui pairs`,
+      ).toHaveLength(32);
+      expect(
+        badgePairs(theme).filter((pair) => pair.kind === "text"),
+        `${theme.name} badge text pairs`,
+      ).toHaveLength(20);
     }
   });
 
@@ -465,7 +509,7 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
       ...badgePairs(theme),
       ...exceptionPairs(theme),
     ]);
-    expect(measured).toHaveLength(184);
+    expect(measured).toHaveLength(190);
     for (const pair of measured) {
       expect(pair.fg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);
       expect(pair.bg, pair.label).toMatch(/^#[0-9a-f]{6}$/i);
