@@ -7,16 +7,21 @@ import * as dataModule from "../../data";
 
 const useAuth = vi.hoisted(() =>
   vi.fn(() => ({
-    user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+    user: { tenant_id: "tenant-from-session", role: "PROPERTY_MANAGER" },
   })),
 );
 vi.mock("@/lib/auth", () => ({
   useAuth,
+  // The hook is mocked to mirror `backend/app/auth/domain/policy.py` D17:
+  // reading conversations is shared with the owner, operating them is the
+  // manager's alone. `TENANT_OWNER` therefore returns false here, exactly
+  // like the real `useHasPermission` does. The dedicated test below swaps
+  // the role to `CLEANER` to assert the form is hidden for non-operators.
   useHasPermission: (permission: string) => {
     const { user } = useAuth();
     if (!user) return false;
     if (permission === "MANAGE_CONVERSATIONS") {
-      return user.role === "TENANT_OWNER" || user.role === "PROPERTY_MANAGER";
+      return user.role === "PROPERTY_MANAGER";
     }
     return false;
   },
@@ -100,7 +105,7 @@ describe("ConversationThreadView (R3)", () => {
   beforeEach(() => {
     useAuth.mockReset();
     useAuth.mockImplementation(() => ({
-      user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+      user: { tenant_id: "tenant-from-session", role: "PROPERTY_MANAGER" },
     }));
     getMock.mockReset();
     listMessagesMock.mockReset();
@@ -227,12 +232,12 @@ describe("ConversationThreadView (R3)", () => {
 
   it("does NOT render the reply form when the user lacks MANAGE_CONVERSATIONS (R6.4 / reg perm)", async () => {
     // Re-mock `useAuth` for this test only: a CLEANER has no
-    // MANAGE_CONVERSATIONS (messaging-ai R7) so the form must not
+    // MANAGE_CONVERSATIONS (messaging-ai R7 / D17) so the form must not
     // appear — the operator would otherwise always 403 on submit.
     // Use `mockReturnValue` (not `mockReturnValueOnce`) because the
     // view re-renders after the queries resolve and a second call
-    // would otherwise fall back to TENANT_OWNER from the implementation
-    // in the mock factory.
+    // would otherwise fall back to the default `PROPERTY_MANAGER` from
+    // the mock factory, which does have the permission.
     useAuth.mockReturnValue({
       user: { tenant_id: "tenant-from-session", role: "CLEANER" },
     });
@@ -249,7 +254,7 @@ describe("ConversationThreadView — PENDING_HUMAN badge updates after reply (R6
   beforeEach(() => {
     useAuth.mockReset();
     useAuth.mockImplementation(() => ({
-      user: { tenant_id: "tenant-from-session", role: "TENANT_OWNER" },
+      user: { tenant_id: "tenant-from-session", role: "PROPERTY_MANAGER" },
     }));
     replyMock.mockReset();
     listMessagesMock.mockReset();

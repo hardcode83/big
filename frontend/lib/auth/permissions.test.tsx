@@ -39,12 +39,12 @@ describe("useHasPermission (R4.3)", () => {
     expect(result.current).toBe(false);
   });
 
-  it("grants MANAGE_CONVERSATIONS to TENANT_OWNER", () => {
+  it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not operate (messaging-ai D17)", () => {
     useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
     const { result } = renderHook(() =>
       useHasPermission("MANAGE_CONVERSATIONS"),
     );
-    expect(result.current).toBe(true);
+    expect(result.current).toBe(false);
   });
 
   it("grants MANAGE_CONVERSATIONS to PROPERTY_MANAGER", () => {
@@ -57,6 +57,22 @@ describe("useHasPermission (R4.3)", () => {
 
   it("denies MANAGE_CONVERSATIONS to CLEANER", () => {
     useAuth.mockReturnValue({ user: { role: "CLEANER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_CONVERSATIONS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies MANAGE_CONVERSATIONS to TECHNICIAN", () => {
+    useAuth.mockReturnValue({ user: { role: "TECHNICIAN" } });
+    const { result } = renderHook(() =>
+      useHasPermission("MANAGE_CONVERSATIONS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies MANAGE_CONVERSATIONS to SUPER_ADMIN (the policy keeps super_admin outside the tenant's operational surface)", () => {
+    useAuth.mockReturnValue({ user: { role: "SUPER_ADMIN" } });
     const { result } = renderHook(() =>
       useHasPermission("MANAGE_CONVERSATIONS"),
     );
