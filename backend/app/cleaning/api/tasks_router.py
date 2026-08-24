@@ -35,6 +35,7 @@ from app.cleaning.api.dependencies import (
     get_list_cleaning_photos_use_case,
     get_list_cleaning_tasks_use_case,
     get_cancel_cleaning_task_use_case,
+    get_photo_requirements_use_case,
     get_reject_cleaning_task_use_case,
     get_report_task_incident_use_case,
     get_start_cleaning_task_use_case,
@@ -54,6 +55,7 @@ from app.cleaning.api.schemas import (
     CleaningTaskPageResponse,
     CleaningTaskResponse,
     CreateCleaningTaskRequest,
+    PhotoRequirementsResponse,
     ReportTaskIncidentRequest,
     TaskIncidentReportedResponse,
     ValidateCleaningTaskRequest,
@@ -69,6 +71,7 @@ from app.cleaning.application.use_cases import (
     GetChecklistUseCase,
     GetCleaningTaskContextUseCase,
     GetCleaningTaskUseCase,
+    GetPhotoRequirementsUseCase,
     ListCleaningPhotosUseCase,
     ListCleaningTasksUseCase,
     CancelCleaningTaskUseCase,
@@ -454,7 +457,9 @@ _PHOTO_UPLOAD_RESPONSES: dict[int | str, dict[str, Any]] = {
         "description": (
             "The `photo_type` is not declared by the task's template, or the task does not "
             "exist for this caller — another tenant's task and another cleaner's task are "
-            "both answered this way, indistinguishably."
+            "both answered this way, indistinguishably. **Which types the template does "
+            "declare is readable at `GET /cleaning-tasks/{task_id}/photo-requirements`**, so "
+            "this refusal never has to be discovered by trying."
         ),
     },
     409: {
@@ -658,6 +663,88 @@ async def list_cleaning_photos(
         now=now_utc(),
     )
     return CleaningPhotoListResponse.build(photos)
+
+
+# The only status this projection adds, on the same criterion as the two catalogues above: each
+# entry is a row of `app/cleaning/api/errors.py::_MAPPING` reached from this handler's own raise
+# sites, not a guess.
+#
+#   404 ← `CleaningTaskNotFoundError` from `_load_task`, for an unknown task, another tenant's
+#         task and another cleaner's task alike.
+#   404 ← `ChecklistTemplateNotFoundError` when the task's template no longer exists, which is
+#         the same failure the close already answers for the same cause.
+#
+# There is deliberately **no `409`**: this route answers whatever the task's status, exactly as
+# `/checklist` does, so no `InvalidCleaningTransitionError` can reach it. And the `422` is not
+# declared, for the reason `_PHOTO_UPLOAD_RESPONSES` gives: FastAPI injects it for the validated
+# `task_id` and `_point_errors_at_envelope` rewrites it to the envelope.
+_PHOTO_REQUIREMENTS_RESPONSES: dict[int | str, dict[str, Any]] = {
+    404: {
+        "model": ErrorEnvelope,
+        "description": (
+            "The task does not exist for this caller — an unknown id, another tenant's task "
+            "and another cleaner's task are all answered this way, indistinguishably — or the "
+            "task's checklist template no longer exists."
+        ),
+    },
+}
+
+
+@router.get(
+    "/{task_id}/photo-requirements",
+    response_model=PhotoRequirementsResponse,
+    summary="Which photo categories this cleaning task asks for",
+    responses=_PHOTO_REQUIREMENTS_RESPONSES,
+    description=(
+        "The photo categories the task's checklist template declares, each with the label the "
+        "template's author wrote, whether the close demands it, and whether one has already "
+        "been uploaded. It exists so a `CLEANER` can be shown **a button per category** "
+        "without holding `READ_CLEANING_TEMPLATES`.\n\n"
+        "**Belonging to this collection and `required` are two different facts.** A "
+        "`photo_type` listed here may be uploaded; `required: true` additionally means the "
+        "close will refuse without it. An optional category is listed, because the upload "
+        "admits it.\n\n"
+        "**A `photo_type` that is not in this collection is exactly what "
+        "`POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the "
+        "same template, so the relation is a guarantee and not a coincidence to be discovered "
+        "by trying identifiers.\n\n"
+        "Order is the template's own — the order its author declared, which is the order the "
+        "work is done in — and it is stable across requests.\n\n"
+        "`uploaded` reports what is already filed and decides nothing: whether the task may be "
+        "closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. "
+        "A template that declares no photo answers `200` with an empty collection, never a "
+        "`404`.\n\n"
+        "Answered whatever the task's status: the cleaner needs to know what will be asked of "
+        "her **before** starting, not only while in progress. A `CLEANER` reaches only the "
+        "tasks assigned to them; a manager or owner reaches every task of their tenant, and "
+        "that restriction comes from the token's persisted role — no request field can widen "
+        "it."
+    ),
+)
+async def get_photo_requirements(
+    authenticated: ReadDep,
+    task_id: uuid.UUID,
+    use_case: Annotated[
+        GetPhotoRequirementsUseCase, Depends(get_photo_requirements_use_case)
+    ],
+    client_ip: Annotated[str, Depends(get_client_ip)],
+) -> PhotoRequirementsResponse:
+    """`READ_CLEANING_TASKS`, plus the row-level rule derived inside the use case.
+
+    `ReadDep` and not `ExecuteDep`: a manager and an owner read this too, exactly as they read
+    `/checklist` and `/photos`. No new permission is declared, and none is needed — reading
+    three fields of the task's own template server-side is not `READ_CLEANING_TEMPLATES`, which
+    would open the tenant's whole template catalogue.
+
+    The half that keeps a cleaner to her own tasks is not declared here and cannot be: it comes
+    from `CleaningActor.restrict_to_cleaner_id`, off the role persisted on the user's row.
+    """
+    views = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        task_id=task_id,
+        actor=_actor(authenticated, client_ip),
+    )
+    return PhotoRequirementsResponse.build(views)
 
 
 @router.post(

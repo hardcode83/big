@@ -1686,6 +1686,97 @@ class GetChecklistUseCase:
         ]
 
 
+@dataclass(frozen=True)
+class PhotoRequirementView:
+    """One row of `GET /cleaning-tasks/{id}/photo-requirements` (`cleaner-photo-requirements` R1).
+
+    The mirror of `ChecklistItemView` above, field for field, because the domain already says
+    the two halves of PRD §11's evidence are one rule expressed twice
+    (`CleaningCompletionEvidence`'s docstring): `{item_id, label, required, completed}` there,
+    `{photo_type, label, required, uploaded}` here.
+
+    `uploaded` is a boolean and not a count: the column it comes from answers set membership
+    (`CleaningPhotoRepository.uploaded_photo_types`), and a caller that wants the exact count
+    already has `GET /cleaning-tasks/{id}/photos`, which publishes `photo_type` per photo.
+    """
+
+    photo_type: str
+    label: str
+    required: bool
+    uploaded: bool
+
+
+class GetPhotoRequirementsUseCase(_TaskTransitionMixin):
+    """R1 — the photo types the task's template declares, each with its upload state.
+
+    Inherits `_TaskTransitionMixin` for `_load_task` alone, exactly as
+    `ListCleaningPhotosUseCase` does and for exactly the same two rules: the task is resolved
+    **inside the tenant**, and a `CLEANER` only reaches the tasks assigned to them. That is what
+    makes R1.5's "404 indistinguible entre las tres causas" inherited rather than reimplemented —
+    the four other attributes the mixin annotates are not set here and `_transition` is never
+    called.
+
+    **The order of the two reads is load-bearing, and `_load_task` is always first.**
+    `uploaded_photo_types` answers an empty set for a task that is not this tenant's — its
+    declared safe direction, which blocks a close rather than granting one — and publishing that
+    emptiness would be answering `200` to a caller who owns nothing. Resolving the task first is
+    what makes the case unreachable instead of merely harmless.
+
+    Driven by `spec.required_photos`, the **tuple**, and never by `photo_types()` or
+    `required_photo_types()`: the tuple is the only source that carries the `label`, its order is
+    the one the template's author wrote (R1.3), and iterating it is what keeps a `required: false`
+    type in the collection (R2.2) — the upload admits it, so the enumeration has to name it.
+
+    It reports what is uploaded and decides nothing: no clause of PRD §11 is applied here, and
+    the comparison that governs the close stays inside `CleaningTask.complete()` by way of
+    `CompletionEvidenceGatherer` (R3.2-R3.4).
+    """
+
+    def __init__(
+        self,
+        *,
+        tasks: CleaningTaskRepository,
+        templates: CleaningChecklistTemplateRepository,
+        photos: CleaningPhotoRepository,
+    ) -> None:
+        self._tasks = tasks
+        self._templates = templates
+        self._photos = photos
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, task_id: uuid.UUID, actor: CleaningActor
+    ) -> list[PhotoRequirementView]:
+        task = await self._load_task(tenant_id, task_id, actor)
+        # No look at `task.status` anywhere below (R1.4): the cleaner needs to know what will be
+        # asked of her *before* starting, not only while in progress, exactly like `/checklist`.
+        template = await self._templates.get(tenant_id, task.checklist_template_id)
+        if template is None:
+            raise ChecklistTemplateNotFoundError(
+                "The task's checklist template no longer exists"
+            )
+        # No `template_id=`, unlike the create path: R4.4 forbids **this response** publishing
+        # the template's `id`, and `parse_template_content` interpolates it into the
+        # `CleaningValidationError` message, which the error envelope then carries verbatim — so
+        # a stored row that stops parsing would answer a `CLEANER` with the identifier of a
+        # template she holds no `READ_CLEANING_TEMPLATES` to fetch.
+        #
+        # Scoped to this route on purpose, and that is not a system-wide guarantee: `/checklist`
+        # and the other `READ_CLEANING_TASKS` readers still pass `template_id=` and still name it
+        # on the same corrupted row. R4.4 is this route's requirement and this change's scope;
+        # the asymmetry is recorded in `design.md` §Residuos as a follow-up, not hidden here.
+        spec = parse_template_content(template.items, template.required_photos)
+        uploaded = await self._photos.uploaded_photo_types(tenant_id, task.id)
+        return [
+            PhotoRequirementView(
+                photo_type=photo.photo_type,
+                label=photo.label,
+                required=photo.required,
+                uploaded=photo.photo_type in uploaded,
+            )
+            for photo in spec.required_photos
+        ]
+
+
 class CompleteChecklistItemUseCase(_TaskLifecycleBase):
     """R4.2-R4.5 — ticking one item, idempotently."""
 

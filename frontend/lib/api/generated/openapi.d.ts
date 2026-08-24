@@ -210,6 +210,23 @@ export interface paths {
      */
     post: operations["report_task_incident_api_v1_cleaning_tasks__task_id__incidents_post"];
   };
+  "/api/v1/cleaning-tasks/{task_id}/photo-requirements": {
+    /**
+     * Which photo categories this cleaning task asks for
+     * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
+     *
+     * **Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.
+     *
+     * **A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.
+     *
+     * Order is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.
+     *
+     * `uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.
+     *
+     * Answered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.
+     */
+    get: operations["get_photo_requirements_api_v1_cleaning_tasks__task_id__photo_requirements_get"];
+  };
   "/api/v1/cleaning-tasks/{task_id}/photos": {
     /**
      * List a cleaning task's photos
@@ -2422,6 +2439,54 @@ export interface components {
       id: string;
       /** Label */
       label: string;
+    };
+    /**
+     * PhotoRequirementsResponse
+     * @description The photo categories of one task, in the order the template declares them.
+     *
+     * A single `data` key, the shape `ChecklistResponse` above and `CleaningPhotoListResponse`
+     * below already use: a top-level JSON array cannot grow a field later without breaking every
+     * generated client.
+     *
+     * **The class names deliberately do not start with `CleaningPhoto`.** That prefix already
+     * collides in the published contract — `backend/openapi.json` carries
+     * `app__cleaning__api__schemas__CleaningPhotoResponse` and
+     * `app__dashboard__api__schemas__CleaningPhotoResponse`, mangled by module — and those mangled
+     * names are what a frontend consumer writes by hand. A third collision would mangle the two
+     * that survive today as well (design D3).
+     */
+    PhotoRequirementsResponse: {
+      /** Data */
+      data: components["schemas"]["PhotoRequirementStateResponse"][];
+    };
+    /**
+     * PhotoRequirementStateResponse
+     * @description One photo category the task's template declares (`cleaner-photo-requirements` R2.1).
+     *
+     * **Four fields enumerated by hand, and no `from_attributes`** — the rule this module opens
+     * with. The view it is built from carries only these four, but enumerating them is what makes
+     * R4.4 ("ni el `id` de la plantilla, ni su `name`, ni su `property_id`, ni su `active`, ni sus
+     * `items` en crudo") a property of this class rather than of whoever next edits the view.
+     *
+     * **`required` is not what the collection means.** Belonging to the collection says *the
+     * upload admits this type*; `required: true` says *the close demands it*. The column these
+     * come from is named `required_photos` and holds entries that may perfectly well be optional
+     * — the domain says so of itself in `RequiredPhotoSpec`'s docstring — so the two facts are
+     * published under two names and the ambiguity of the column name stops at the schema.
+     *
+     * `uploaded` reports what is already there and adjudicates nothing: whether the task may be
+     * closed stays inside `CleaningTask.complete()`, which is the only place any clause of
+     * PRD §11 is applied.
+     */
+    PhotoRequirementStateResponse: {
+      /** Label */
+      label: string;
+      /** Photo Type */
+      photo_type: string;
+      /** Required */
+      required: boolean;
+      /** Uploaded */
+      uploaded: boolean;
     };
     /**
      * PMSProvider
@@ -4859,6 +4924,59 @@ export interface operations {
     };
   };
   /**
+   * Which photo categories this cleaning task asks for
+   * @description The photo categories the task's checklist template declares, each with the label the template's author wrote, whether the close demands it, and whether one has already been uploaded. It exists so a `CLEANER` can be shown **a button per category** without holding `READ_CLEANING_TEMPLATES`.
+   *
+   * **Belonging to this collection and `required` are two different facts.** A `photo_type` listed here may be uploaded; `required: true` additionally means the close will refuse without it. An optional category is listed, because the upload admits it.
+   *
+   * **A `photo_type` that is not in this collection is exactly what `POST /cleaning-tasks/{task_id}/photos` answers `404` for.** The two routes read the same template, so the relation is a guarantee and not a coincidence to be discovered by trying identifiers.
+   *
+   * Order is the template's own — the order its author declared, which is the order the work is done in — and it is stable across requests.
+   *
+   * `uploaded` reports what is already filed and decides nothing: whether the task may be closed is answered by `POST /cleaning-tasks/{task_id}/complete` and by nothing else. A template that declares no photo answers `200` with an empty collection, never a `404`.
+   *
+   * Answered whatever the task's status: the cleaner needs to know what will be asked of her **before** starting, not only while in progress. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant, and that restriction comes from the token's persisted role — no request field can widen it.
+   */
+  get_photo_requirements_api_v1_cleaning_tasks__task_id__photo_requirements_get: {
+    parameters: {
+      path: {
+        task_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["PhotoRequirementsResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description The task does not exist for this caller — an unknown id, another tenant's task and another cleaner's task are all answered this way, indistinguishably — or the task's checklist template no longer exists. */
+      404: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
    * List a cleaning task's photos
    * @description Every photo uploaded for the task, oldest first, each with a **signed URL valid for 3600 s** minted for this response. A `CLEANER` reaches only the tasks assigned to them; a manager or owner reaches every task of their tenant. That restriction comes from the token's persisted role and no request field can widen it.
    *
@@ -4944,7 +5062,7 @@ export interface operations {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };
       };
-      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. */
+      /** @description The `photo_type` is not declared by the task's template, or the task does not exist for this caller — another tenant's task and another cleaner's task are both answered this way, indistinguishably. **Which types the template does declare is readable at `GET /cleaning-tasks/{task_id}/photo-requirements`**, so this refusal never has to be discovered by trying. */
       404: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
