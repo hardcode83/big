@@ -531,7 +531,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
      El arreglo correcto es el de esta sección — que cambie el TOKEN, no que exista
      un variante. -->
 
-- [ ] 7.1 `frontend/lib/ui/status-tone.ts`: las cinco entradas de `TONE_BADGE_CLASS` pasan a
+- [x] 7.1 `frontend/lib/ui/status-tone.ts`: las cinco entradas de `TONE_BADGE_CLASS` pasan a
       **una** cadena sin `dark:`, sobre los tokens `state-*` y `state-*-text` con los
       modificadores de opacidad de Tailwind v4 (`bg-state-success/15
       text-state-success-text border-state-success/40`). El tono `gray` pasa a
@@ -548,7 +548,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       `TONE_BADGE_CLASS` contra esas alfas y sufijos —o mejor, derivar los
       números de las cadenas— y quitar el «future tense» del comentario de
       `badgePairs`.
-- [ ] 7.2 Nuevo `frontend/features/incidents/lib/severity-tone.ts` con
+- [x] 7.2 Nuevo `frontend/features/incidents/lib/severity-tone.ts` con
       `SEVERITY_COLOR_GROUP: Record<IncidentSeverity, Tone>` = `{LOW: "gray", MEDIUM: "blue",
       HIGH: "amber", CRITICAL: "red"}` y `severityColorGroup()` con su `?? "gray"`; los dos
       `SEVERITY_COLOR` duplicados de
@@ -558,7 +558,7 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       Cierra el incumplimiento de `sdd/specs/frontend-foundation.md:38`. [R6.3, R6.4]
       Nota de alcance (D6): esos badges son `<span>` sin `border`, así que **no** se les añade
       ancho de borde aquí — eso sería tocar una pantalla.
-- [ ] 7.3 Actualizar `frontend/components/property-state-badge.test.tsx`, único test que fija
+- [x] 7.3 Actualizar `frontend/components/property-state-badge.test.tsx`, único test que fija
       cadenas de clase exactas (13 `dark:` + 24 escalas crudas), a las nuevas cadenas.
       Comprobar de paso que `features/pricing/lib/recommendation-status.test.ts` (solo
       comprueba que la clave existe) y la reexportación de `features/cleaning` siguen en

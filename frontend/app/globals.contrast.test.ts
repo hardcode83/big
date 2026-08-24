@@ -1,6 +1,7 @@
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 
+import { TONE_BADGE_CLASS, type Tone } from "@/lib/ui/status-tone";
 import { readCss, themeBlocks } from "@/test/css-tokens";
 import {
   AA_LARGE_TEXT_AND_UI,
@@ -228,37 +229,84 @@ function corePairs(theme: Theme): Pair[] {
 }
 
 /**
- * The badge pairs — the ones that need composition, and the reason a naive audit
- * of declared values would be wrong.
+ * The badge shape, read out of `lib/ui/status-tone.ts` instead of restated here.
  *
- * Design D6 specifies that `TONE_BADGE_CLASS` WILL render
+ * Design D6 has `TONE_BADGE_CLASS` render
  * `bg-state-X/15 text-state-X-text border-state-X/40`, so the text never sits on
  * `--state-X` itself: it sits on that anchor composited at 15% over whatever
  * surface is behind the badge. D6 measured `#10B981` on its own 15% tint at
  * 2.3:1, which is why `state-*-text` exists as a separate token at all.
  *
- * **Future tense on purpose.** As of this section `lib/ui/status-tone.ts` still
- * ships raw `emerald-100`/`amber-900` scales — the tokenisation is section 7's
- * task 7.1. So the 15%, the 40% and the `-text` suffix are premises this audit
- * takes from the design, not facts it reads from the code, and an unpinned
- * premise is how the figures below could stay green while the badge a user sees
- * goes unmeasured: if 7.1 lands `/20`, or `text-state-warning` instead of
- * `text-state-warning-text`, nothing here would notice.
- *
- * Task 7.1 therefore carries the obligation to pin this coupling — to assert the
- * real `TONE_BADGE_CLASS` strings against the alphas and suffixes modelled here,
- * or better, to derive these numbers from those strings. Recorded in tasks.md so
- * it is not left to memory.
+ * Those numbers used to be premises this file took from the design, and that was
+ * a hole: had task 7.1 landed `/20`, or `text-state-warning` instead of
+ * `text-state-warning-text`, the forty figures below would have stayed green
+ * while measuring a badge the app no longer paints. So the alphas, the anchor and
+ * the text token are now PARSED from the shipped strings, and the shape itself is
+ * asserted — an unparseable entry drops out of the audit, which the size
+ * assertions then reject.
  */
+const BADGE_CLASS_SHAPE =
+  /^bg-state-([a-z]+)\/(\d{1,3}) text-state-([a-z]+)-text border-state-([a-z]+)\/(\d{1,3})$/;
+
+type BadgeSpec = {
+  tone: Tone;
+  anchor: string;
+  bgAlpha: number;
+  borderAlpha: number;
+  textToken: string;
+};
+
+type BadgeParse =
+  | { ok: true; spec: BadgeSpec }
+  | { ok: false; tone: Tone; reason: string };
+
+function parseBadgeClass(tone: Tone, classes: string): BadgeParse {
+  const match = BADGE_CLASS_SHAPE.exec(classes);
+  if (match === null) {
+    return { ok: false, tone, reason: `does not match D6's shape: "${classes}"` };
+  }
+  const [, bgAnchor, bgAlpha, textAnchor, borderAnchor, borderAlpha] = match;
+  if (bgAnchor !== textAnchor || bgAnchor !== borderAnchor) {
+    return {
+      ok: false,
+      tone,
+      reason: `mixes anchors (bg ${bgAnchor}, text ${textAnchor}, border ${borderAnchor})`,
+    };
+  }
+  return {
+    ok: true,
+    spec: {
+      tone,
+      anchor: bgAnchor,
+      bgAlpha: Number(bgAlpha) / 100,
+      borderAlpha: Number(borderAlpha) / 100,
+      textToken: `--state-${textAnchor}-text`,
+    },
+  };
+}
+
+const BADGE_PARSES: BadgeParse[] = (
+  Object.keys(TONE_BADGE_CLASS) as Tone[]
+).map((tone) => parseBadgeClass(tone, TONE_BADGE_CLASS[tone]));
+
+const BADGE_SPECS: BadgeSpec[] = BADGE_PARSES.flatMap((parse) =>
+  parse.ok ? [parse.spec] : [],
+);
+
+/** The badge pairs — the ones that need composition, over every surface. */
 function badgePairs(theme: Theme): Pair[] {
   const t = theme.tokens;
   const pairs: Pair[] = [];
-  for (const tone of TONES) {
+  for (const spec of BADGE_SPECS) {
     for (const surface of SURFACES) {
-      const tint = compositeOver(t[`--state-${tone}`], t[surface], 0.15);
+      const tint = compositeOver(
+        t[`--state-${spec.anchor}`],
+        t[surface],
+        spec.bgAlpha,
+      );
       pairs.push({
-        label: `state-${tone}-text on state-${tone}/15 over ${surface} (${tint})`,
-        fg: t[`--state-${tone}-text`],
+        label: `${spec.textToken.slice(2)} on state-${spec.anchor}/${spec.bgAlpha * 100} over ${surface} (${tint})`,
+        fg: t[spec.textToken],
         bg: tint,
         kind: "text",
       });
@@ -311,12 +359,13 @@ function exceptionPairs(theme: Theme): Pair[] {
       exempt: true,
     });
   }
-  for (const tone of TONES) {
+  for (const spec of BADGE_SPECS) {
     for (const surface of SURFACES) {
-      const tint = compositeOver(t[`--state-${tone}`], t[surface], 0.15);
-      const edge = compositeOver(t[`--state-${tone}`], t[surface], 0.4);
+      const anchor = t[`--state-${spec.anchor}`];
+      const tint = compositeOver(anchor, t[surface], spec.bgAlpha);
+      const edge = compositeOver(anchor, t[surface], spec.borderAlpha);
       pairs.push({
-        label: `state-${tone}/40 edge on its own /15 tint over ${surface}  [badge border, D9]`,
+        label: `state-${spec.anchor}/${spec.borderAlpha * 100} edge on its own /${spec.bgAlpha * 100} tint over ${surface}  [badge border, D9]`,
         fg: edge,
         bg: tint,
         kind: "ui",
@@ -379,11 +428,53 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
     },
   );
 
+  it("pins the shipped badge strings to the shape this audit measures", () => {
+    /*
+     * The coupling task 7.1 owed this file.
+     *
+     * Everything above reads the alphas, the anchor and the text token out of
+     * `TONE_BADGE_CLASS`, so a drift there moves the numbers rather than
+     * invalidating them silently. What parsing alone cannot catch is a string
+     * that stops being a badge at all — `bg-muted text-muted-foreground` parses
+     * to nothing, drops its four pairs, and would leave a smaller audit passing.
+     * So: all five tones parse, and they parse to D6's numbers.
+     */
+    const unparseable = BADGE_PARSES.flatMap((parse) =>
+      parse.ok ? [] : [`${parse.tone}: ${parse.reason}`],
+    );
+    expect(unparseable).toEqual([]);
+    expect(BADGE_SPECS).toHaveLength(5);
+
+    // The anchors the badges reach, against the tones the CSS declares: neither
+    // set may be a subset of the other. `gray` maps to `state-neutral`, which is
+    // R6.1's whole point — the fifth PRD §9.1 family, absent from DESIGN.md.
+    expect(new Set(BADGE_SPECS.map((spec) => spec.anchor))).toEqual(
+      new Set(TONES),
+    );
+
+    // D6's literals, stated once. A deliberate change to the design updates this
+    // line; an accidental one fails here instead of quietly re-basing the audit.
+    for (const spec of BADGE_SPECS) {
+      expect(spec.bgAlpha, `${spec.tone} background alpha`).toBe(0.15);
+      expect(spec.borderAlpha, `${spec.tone} border alpha`).toBe(0.4);
+    }
+
+    // And no `dark:` survives: R6.5's defect was that Tailwind's `dark:` follows
+    // `prefers-color-scheme`, never our `data-theme` attribute.
+    for (const [tone, classes] of Object.entries(TONE_BADGE_CLASS)) {
+      expect(classes, `${tone} must not carry a dark: variant`).not.toContain(
+        "dark:",
+      );
+    }
+  });
+
   it("measures the 40 badge combinations, five tones over four surfaces in both themes", () => {
     // A count, so a tone or a surface silently dropping out of the audit is a
     // failure rather than a quieter pass.
     const all = THEMES.flatMap((theme) => badgePairs(theme));
-    expect(all).toHaveLength(TONES.length * SURFACES.length * THEMES.length);
+    expect(all).toHaveLength(
+      BADGE_SPECS.length * SURFACES.length * THEMES.length,
+    );
     expect(all).toHaveLength(40);
   });
 
@@ -393,12 +484,16 @@ describe("WCAG 2.2 AA contrast audit (R1.6, design D11)", () => {
     // light for all five tones. If that ever stops being true the token could be
     // dropped — and this is where we would find out.
     const wouldFail = THEMES.flatMap((theme) =>
-      TONES.flatMap((tone) =>
+      BADGE_SPECS.flatMap((spec) =>
         SURFACES.map((surface) => {
-          const anchor = theme.tokens[`--state-${tone}`];
-          const tint = compositeOver(anchor, theme.tokens[surface], 0.15);
+          const anchor = theme.tokens[`--state-${spec.anchor}`];
+          const tint = compositeOver(
+            anchor,
+            theme.tokens[surface],
+            spec.bgAlpha,
+          );
           return {
-            label: `${theme.name} ${tone} on ${surface}`,
+            label: `${theme.name} ${spec.anchor} on ${surface}`,
             ratio: round2(contrastRatio(anchor, tint)),
           };
         }),

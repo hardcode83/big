@@ -18,18 +18,27 @@ import { render, screen } from "@/test/render";
  * checks text, aria-label/heading structure and href; the second checks
  * `items-stretch`/`h-full` on the grid wrapper. So both would stay green even if
  * the extraction of the two color maps (design D2) got a color wrong. That is
- * why the exact class strings are pinned here, character for character,
- * including the `dark:` variants.
+ * why the exact class strings are pinned here, character for character.
+ *
+ * Restated rather than imported, deliberately: importing `TONE_BADGE_CLASS`
+ * would assert the component against the same constant it renders from, which is
+ * a tautology. A second hand-written copy is what makes an accidental edit to
+ * the palette fail here.
+ *
+ * The strings carry no `dark:` variant any more (design D6): the badge colour
+ * comes from `--state-*`, which the theme redefines, so one string serves both
+ * themes. The variant had to go — Tailwind's `dark:` follows
+ * `prefers-color-scheme`, never our `data-theme` attribute, so on a page forced
+ * dark over a light system these badges painted their light variant. Confirmed
+ * in the browser on `/dashboard` before the fix (R6.5).
  */
 
 const EXPECTED_CLASS: Record<StateColorGroup, string> = {
-  green:
-    "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-800",
-  blue: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800",
-  amber:
-    "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800",
-  red: "bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-200 dark:border-red-800",
-  gray: "bg-muted text-muted-foreground border-border",
+  green: "bg-state-success/15 text-state-success-text border-state-success/40",
+  blue: "bg-state-info/15 text-state-info-text border-state-info/40",
+  amber: "bg-state-warning/15 text-state-warning-text border-state-warning/40",
+  red: "bg-state-error/15 text-state-error-text border-state-error/40",
+  gray: "bg-state-neutral/15 text-state-neutral-text border-state-neutral/40",
 };
 
 /** One representative state per color group, per the PRD §9.1 mapping. */
