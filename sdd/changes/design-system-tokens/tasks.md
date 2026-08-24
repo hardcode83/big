@@ -572,7 +572,21 @@ suite corre dentro del contenedor (`sdd/project.md` §Commands / §Worktree boot
       conjunto de 25 de D2. El guard que lo detecta es la tercera comprobación de 8.1.
       [R1.5, D13]
 
-## 8. El guard: cero escalas crudas, cero `dark:` <!-- panel: PASS 2026-08-24 -->
+## 8. El guard: cero escalas crudas, cero `dark:` <!-- panel: FIXED 2026-08-24 sin tercera vuelta -->
+
+<!-- ESTADO DEL PANEL, porque «PASS» aquí sería falso y `/sdd:review` se lo creería:
+     esta cabecera dijo PASS un rato, escrito antes de que el panel terminara. Luego
+     arquitectura, security y QA devolvieron FAIL, dos veces seguidas, sobre el guard.
+
+     Ronda 1: 4 agujeros (variante, `from`/`via`/`to`/`shadow`, arbitrarios, hex inerte).
+     Ronda 2: 10 más, y la extracción de los patrones a `test/color-tokens.ts` con
+     tabla de 66 casos. Los dos límites que quedan están declarados en D12.
+
+     Las dos rondas de arreglo que permite el flujo están gastadas, así que la ronda 2
+     NO la ha revisado nadie: su evidencia es la tabla de patrones y 28 sondas de
+     mutación contra el árbol (20 en rojo, 8 negativas en verde), medidas por mí.
+     Quien quiera cerrar esto con revisión ajena: `/sdd:review design-system-tokens`,
+     que corre a escala de feature y cubre el fichero entero. -->
 
 - [x] 8.1 Nuevo `frontend/test/color-tokens.test.ts` siguiendo el precedente de
       `test/eslint-boundaries.test.ts`: recorre `app/`, `components/`, `features/` y `lib/` y
