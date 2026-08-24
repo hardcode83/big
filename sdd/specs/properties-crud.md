@@ -176,6 +176,15 @@ propiedad está dentro de su tenant.
   `property_state_transitions` ni ningún `TimelineEvent`: crear no es transitar, y no existe tipo
   de evento de creación de propiedad.
 
+- **El módulo sirve además una colección que no es de propiedades**:
+  `GET /api/v1/blocked-transitions` (`READ_PROPERTIES`), las viviendas a las que el reloj exigió una
+  transición que su estado no admite. Vive en un **segundo router** con su propio prefijo —colgar un
+  segmento literal del router de `/properties` colisionaría con `/properties/{id}`— y su
+  comportamiento se especifica donde se define el hecho que sirve, en
+  [`celery-jobs.md`](celery-jobs.md) §Desajustes entre el calendario y el estado, para no
+  duplicarlo. Se nombra aquí porque quien busque la superficie de lectura de `properties` la
+  encontraría incompleta sin ella.
+
 **Cómo se sostiene la garantía, que no es uniforme y conviene no describir como si lo fuera**:
 `update_details` y `set_wifi_password` nombran exactamente lo que escriben, de modo que sus
 **firmas** hacen irrepresentable un cambio de estado. `add` recibe una `Property` entera y por eso

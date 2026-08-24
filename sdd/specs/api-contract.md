@@ -234,7 +234,7 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 86 de las 98 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 88 de las 100 operaciones lo
   referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
@@ -261,6 +261,15 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   (`GET /api/v1/incident-photos/{photo_id}`) porque un `<img src>` no puede mandar
   `Authorization`. Las otras no: la proyección de contexto del técnico exige `READ_INCIDENTS` como
   el resto del módulo, y las dos rutas autenticadas de foto también.
+- **Las dos rutas de `cleaning-stall-blocks-next-stay` entraron autenticadas y con permiso
+  declarado** (2026-08-23): `POST /api/v1/cleaning-tasks/{task_id}/cancel`
+  (`MANAGE_CLEANING_TASKS`) y `GET /api/v1/blocked-transitions` (`READ_PROPERTIES`), la segunda
+  servida por un **segundo router del módulo `properties`** con su propio prefijo, porque colgar un
+  segmento literal del router de `/properties` colisiona con `/properties/{id}`. Es el mismo patrón
+  con que `dashboard` sirve sus dos prefijos. La cancelación declara `200/401/403/409/422` y no
+  declara el `404` cross-tenant que sí emite, igual que sus cinco rutas hermanas del ciclo de la
+  tarea: es convención del módulo y no una regresión de esta capacidad, y lo que la enumeración de
+  arriba prohíbe es justamente ese catálogo plausible por endpoint.
 - **Las siete rutas de `messaging` entraron igual** (2026-08-16), todas bajo
   `/api/v1/conversations` y repartidas entre `READ_CONVERSATIONS` y `MANAGE_CONVERSATIONS`
   ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación
