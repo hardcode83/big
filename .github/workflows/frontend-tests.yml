@@ -90,7 +90,26 @@ jobs:
         if: ${{ steps.install.outcome == 'success' && !cancelled() }}
         continue-on-error: true
         working-directory: frontend
-        run: npm test
+        # `next-env.d.ts` es un fichero gitignored que Next.js genera en el
+        # primer `next dev`/`next build`. El guard de `test/color-tokens.test.ts`
+        # lo lista entre los ficheros sueltos de la raíz del frontend, así
+        # que en CI hay que crearlo explícitamente antes de los tests para
+        # que la aserción cuadre tanto en local como en el runner. El
+        # contenido se limita a la plantilla que emite `next` y al `routes.d.ts`
+        # generado bajo `.next/dev/types/`, así que también se siembra ese
+        # directorio vacío para que el `import` resuelva.
+        run: |
+          mkdir -p .next/dev/types
+          printf '%s\n' \
+            '/// <reference types="next" />' \
+            '/// <reference types="next/image-types/global" />' \
+            'import "./.next/dev/types/routes.d.ts";' \
+            '' \
+            '// NOTE: This file should not be edited' \
+            '// see https://nextjs.org/docs/app/api-reference/config/typescript for more information.' \
+            > next-env.d.ts
+          : > .next/dev/types/routes.d.ts
+          npm test
 
       - name: Lint (ESLint)
         id: lint
