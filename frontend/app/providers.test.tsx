@@ -33,6 +33,7 @@ describe("AppProviders (D10)", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
         locale="es"
       >
