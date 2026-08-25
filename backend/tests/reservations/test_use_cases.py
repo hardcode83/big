@@ -83,6 +83,20 @@ def world():
                 reservations=self.reservations, timeline=self.timeline, uow=self.uow
             )
 
+        def get_use_case(self) -> GetReservationUseCase:
+            return GetReservationUseCase(
+                reservations=self.reservations,
+                guests=self.guests,
+                properties=self.properties,
+            )
+
+        def list_use_case(self) -> ListReservationsUseCase:
+            return ListReservationsUseCase(
+                reservations=self.reservations,
+                properties=self.properties,
+                guests=self.guests,
+            )
+
         async def create(self, **overrides):
             command = CreateReservationCommand(
                 property_id=overrides.pop("property_id", self.property_a.id),
@@ -397,9 +411,9 @@ class TestReads:
     async def test_the_detail_carries_the_guest_without_document_data(self, world) -> None:
         reservation = await world.create(guest_id=world.guest_a.id)
 
-        detail = await GetReservationUseCase(
-            reservations=world.reservations, guests=world.guests
-        ).execute(tenant_id=world.tenant_a, reservation_id=reservation.id)
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
 
         assert detail.reservation.id == reservation.id
         assert detail.guest is not None
@@ -410,9 +424,9 @@ class TestReads:
     async def test_the_detail_of_a_reservation_without_guest_has_none(self, world) -> None:
         reservation = await world.create()
 
-        detail = await GetReservationUseCase(
-            reservations=world.reservations, guests=world.guests
-        ).execute(tenant_id=world.tenant_a, reservation_id=reservation.id)
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
 
         assert detail.guest is None
 
@@ -421,9 +435,78 @@ class TestReads:
         reservation = await world.create()
 
         with pytest.raises(ReservationNotFoundError):
-            await GetReservationUseCase(
-                reservations=world.reservations, guests=world.guests
-            ).execute(tenant_id=world.tenant_b, reservation_id=reservation.id)
+            await world.get_use_case().execute(
+                tenant_id=world.tenant_b, reservation_id=reservation.id
+            )
+
+    @pytest.mark.asyncio
+    async def test_the_detail_carries_the_property_identity_when_it_resolves(
+        self, world
+    ) -> None:
+        """R2.1: the detail populates `property_name`/`property_internal_code` from the
+        resolved Property in the SAME request, not from a second client call.
+        """
+        reservation = await world.create()
+
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
+
+        assert detail.property_name == world.property_a.name
+        assert detail.property_internal_code == world.property_a.internal_code
+
+    @pytest.mark.asyncio
+    async def test_the_detail_degrades_to_none_when_property_is_of_another_tenant(
+        self, world
+    ) -> None:
+        """R2.2 + D5: a `property_id` pointing at another tenant's row does NOT 404 the
+        reservation; the reservation resolves, the property-derived fields are None with
+        their key, and the rest of the response is intact.
+
+        Constructed by replacing the reservation's `property_id` with the neighbour's
+        AFTER creation; the aggregate has no "create cross-tenant" path by design.
+        """
+        reservation = await world.create()
+        reservation.property_id = world.property_b.id
+
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
+
+        assert detail.property_name is None
+        assert detail.property_internal_code is None
+        # `property_id` itself is preserved — the FK is the truth, the derived labels
+        # are the projection (R1.3 / R3.1 analogue for the detail, and D5).
+        assert detail.reservation.property_id == world.property_b.id
+        assert detail.guest is None  # the reservation was created without a guest
+
+    @pytest.mark.asyncio
+    async def test_the_detail_carries_the_guest_full_name_when_it_resolves(
+        self, world
+    ) -> None:
+        """R4.1: detail exposes `guest_full_name` (in the response DTO) — the model
+        carries it via `Reservation.guest_full_name`. The source is `GuestSummary`,
+        not the entity (D4)."""
+        reservation = await world.create(guest_id=world.guest_a.id)
+
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
+
+        assert detail.reservation.guest_full_name == world.guest_a.full_name
+
+    @pytest.mark.asyncio
+    async def test_the_detail_carries_none_guest_full_name_when_no_guest(
+        self, world
+    ) -> None:
+        """R3.2 / R4.2: a reservation without a guest has `guest_full_name` None."""
+        reservation = await world.create()
+
+        detail = await world.get_use_case().execute(
+            tenant_id=world.tenant_a, reservation_id=reservation.id
+        )
+
+        assert detail.reservation.guest_full_name is None
 
     @pytest.mark.asyncio
     async def test_the_listing_never_includes_another_tenants_rows(self, world) -> None:
@@ -440,10 +523,68 @@ class TestReads:
             now=NOW,
         )
 
-        page = await ListReservationsUseCase(reservations=world.reservations).execute(
+        page = await world.list_use_case().execute(
             tenant_id=world.tenant_a, filters=ReservationFilters(), page=1, per_page=20
         )
 
         assert [item.id for item in page.items] == [mine.id]
         assert page.total == 1
         assert theirs.id not in {item.id for item in page.items}
+
+    @pytest.mark.asyncio
+    async def test_the_listing_enriches_every_item_with_property_and_guest_identity(
+        self, world
+    ) -> None:
+        """R1.1+R3.1: the list resolves the property and the guest of every row in the
+        page via batch reads, then attaches their identity fields. Two reservations with
+        distinct properties and a guest each exercise both readers.
+        """
+        other_property = world.properties.add_property(
+            _property(world.tenant_a, "PAJARITOS8")
+        )
+        first = await world.create()
+        second = await world.create(
+            property_id=other_property.id, guest_id=world.guest_a.id
+        )
+
+        page = await world.list_use_case().execute(
+            tenant_id=world.tenant_a, filters=ReservationFilters(), page=1, per_page=20
+        )
+
+        ordered = sorted(page.items, key=lambda item: str(item.id))
+        assert len(ordered) == 2
+        by_id = {item.id: item for item in ordered}
+
+        assert by_id[first.id].property_name == world.property_a.name
+        assert by_id[first.id].property_internal_code == world.property_a.internal_code
+        # First was created without a guest.
+        assert by_id[first.id].guest_full_name is None
+
+        assert by_id[second.id].property_name == other_property.name
+        assert by_id[second.id].property_internal_code == other_property.internal_code
+        assert by_id[second.id].guest_full_name == world.guest_a.full_name
+
+    @pytest.mark.asyncio
+    async def test_the_listing_degrades_to_none_when_property_is_of_another_tenant(
+        self, world
+    ) -> None:
+        """R1.2 / R3.3 + D5: a reservation whose `property_id` points at the neighbour's
+        property still appears in the listing with `property_name` and
+        `property_internal_code` as None (with their key), the same shape the detail
+        gives. Id and `gross_amount` etc. are still set.
+        """
+        reservation = await world.create()
+        reservation.property_id = world.property_b.id
+
+        page = await world.list_use_case().execute(
+            tenant_id=world.tenant_a, filters=ReservationFilters(), page=1, per_page=20
+        )
+
+        assert len(page.items) == 1
+        item = page.items[0]
+        assert item.id == reservation.id
+        assert item.property_name is None
+        assert item.property_internal_code is None
+        assert item.guest_full_name is None
+        # `property_id` is the FK truth and stays — R1.3.
+        assert item.property_id == world.property_b.id

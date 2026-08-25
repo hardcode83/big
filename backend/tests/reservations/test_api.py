@@ -7,6 +7,7 @@ not become a `403`, the idempotent `204`, and the `409` the unique constraint pr
 import pytest
 
 from app.auth.domain.enums import UserRole
+from app.guests.infrastructure.models import GuestModel
 from app.reservations.infrastructure.models import ReservationModel
 from app.timeline.domain.enums import TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
@@ -228,6 +229,117 @@ class TestRead:
         )
 
         assert [row["id"] for row in response.json()["data"]] == [spanning.json()["id"]]
+
+    @pytest.mark.asyncio
+    async def test_the_listing_carries_property_and_guest_identity(
+        self, api, manager, create_payload, property_a, tenant_a, db_session
+    ) -> None:
+        """R1.1 / R3.1: the listing exposes property_name, property_internal_code,
+        and guest_full_name for every row that resolves in the tenant."""
+        guest = GuestModel(tenant_id=tenant_a.id, full_name="Jane Doe", email="jane@example.com")
+        db_session.add(guest)
+        await db_session.flush()
+
+        created = await _create(api, manager, create_payload, guest_id=str(guest.id))
+
+        response = await api.get(
+            "/api/v1/reservations?page=1&per_page=10", headers=auth_header(api, manager)
+        )
+
+        assert response.status_code == 200
+        rows = response.json()["data"]
+        assert len(rows) == 1
+        [row] = rows
+        assert row["id"] == created.json()["id"]
+        # The three new fields are populated from the linked Property/Guest.
+        assert row["property_name"] == "Redes 11"
+        assert row["property_internal_code"] == "REDES11"
+        assert row["guest_full_name"] == "Jane Doe"
+        # The original FK ids remain (R1.3, R3.1) — the new layer is added, not a substitute.
+        assert row["property_id"] == str(property_a.id)
+        assert row["guest_id"] == str(guest.id)
+
+    @pytest.mark.asyncio
+    async def test_the_detail_carries_property_and_guest_identity(
+        self, api, manager, create_payload, tenant_a, db_session
+    ) -> None:
+        """R2.1 / R4.1: the detail endpoint exposes the same three derived fields."""
+        guest = GuestModel(tenant_id=tenant_a.id, full_name="Jane Doe", email="jane@example.com")
+        db_session.add(guest)
+        await db_session.flush()
+
+        created = await _create(api, manager, create_payload, guest_id=str(guest.id))
+        reservation_id = created.json()["id"]
+
+        response = await api.get(
+            f"/api/v1/reservations/{reservation_id}", headers=auth_header(api, manager)
+        )
+
+        assert response.status_code == 200
+        body = response.json()
+        assert body["property_name"] == "Redes 11"
+        assert body["property_internal_code"] == "REDES11"
+        assert body["guest_full_name"] == "Jane Doe"
+
+    @pytest.mark.asyncio
+    async def test_the_listing_degrades_to_null_when_property_is_of_another_tenant(
+        self, api, manager, db_session, property_a, property_b
+    ) -> None:
+        """R1.2: a row whose `property_id` points to another tenant's property yields
+        null for the derived fields, with the keys still present in the body.
+
+        Inserted directly because `CreateReservationUseCase` refuses a foreign-tenant
+        `property_id` at the write side (same technique as `test_identity_isolation.py`).
+        The DB FK allows it because `property_id` is a single-column FK to `properties.id`
+        (not composite with `tenant_id`), which is what makes the cross-tenant case
+        reachable on disk.
+        """
+        import datetime
+
+        # Seed a tenant-A reservation that points at tenant-B's property.
+        crossing = ReservationModel(
+            tenant_id=manager.tenant_id,
+            property_id=property_b.id,
+            channel="DIRECT",
+            check_in_date=datetime.date(2026, 8, 1),
+            check_out_date=datetime.date(2026, 8, 4),
+            nights=3,
+        )
+        db_session.add(crossing)
+        await db_session.flush()
+
+        # And a normal one to confirm the listing still serves both rows.
+        seeded = await _create(api, manager, lambda: {  # type: ignore[arg-type]
+            "property_id": str(property_a.id),
+            "channel": "DIRECT",
+            "check_in_date": "2026-09-01",
+            "check_out_date": "2026-09-04",
+            "adults": 2,
+        })
+
+        response = await api.get(
+            "/api/v1/reservations?page=1&per_page=10", headers=auth_header(api, manager)
+        )
+
+        assert response.status_code == 200
+        rows = {row["id"]: row for row in response.json()["data"]}
+        assert str(crossing.id) in rows
+        cross_row = rows[str(crossing.id)]
+        seeded_row = rows[seeded.json()["id"]]
+
+        # The cross-tenant row: derived fields null with key, FK id present.
+        assert cross_row["property_id"] == str(property_b.id)
+        assert cross_row["property_name"] is None
+        assert "property_name" in cross_row
+        assert cross_row["property_internal_code"] is None
+        assert "property_internal_code" in cross_row
+        # The rest of the row survives — only the FK failed to resolve.
+        assert cross_row["check_in_date"] == "2026-08-01"
+        assert cross_row["currency"] == "EUR"
+
+        # The normal row: derived fields populated from the tenant's own property.
+        assert seeded_row["property_name"] == "Redes 11"
+        assert seeded_row["property_internal_code"] == "REDES11"
 
 
 class TestUpdateAndCancel:

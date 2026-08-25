@@ -111,6 +111,14 @@ class Reservation:
     cleaning_required: bool = True
     special_requests: str | None = None
     internal_notes: str | None = None
+    # The next three are derived — populated by the read-model composition of
+    # `reservation-property-identity` (R1, R2, R3, R4), never persisted. They live on
+    # the entity so a single `from_domain` carries the whole row the use case hands to
+    # the response DTO; tests assert on the response DTO to pin what may join here
+    # (`backend/tests/reservations/test_response_identity_fields.py`, R5.4/D6).
+    property_name: str | None = None
+    property_internal_code: str | None = None
+    guest_full_name: str | None = None
 
     def __post_init__(self) -> None:
         """Only the stay-length invariant, on purpose.

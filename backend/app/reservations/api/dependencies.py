@@ -58,8 +58,13 @@ def get_reservation_use_case(session: SessionDep) -> GetReservationUseCase:
     return GetReservationUseCase(
         reservations=SqlAlchemyReservationRepository(session),
         guests=SqlAlchemyGuestRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
     )
 
 
 def get_list_reservations_use_case(session: SessionDep) -> ListReservationsUseCase:
-    return ListReservationsUseCase(reservations=SqlAlchemyReservationRepository(session))
+    return ListReservationsUseCase(
+        reservations=SqlAlchemyReservationRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        guests=SqlAlchemyGuestRepository(session),
+    )
