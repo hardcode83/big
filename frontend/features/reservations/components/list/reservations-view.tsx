@@ -163,7 +163,9 @@ function ReservationRow({ row }: { row: ReservationSummaryDto }) {
       <td className="border-b px-2 py-1">{t(`status.${row.status}`)}</td>
       <td className="border-b px-2 py-1">{row.channel}</td>
       <td className="border-b px-2 py-1">
-        {row.grossAmount ?? ""} {row.currency}
+        {row.grossAmount !== null
+          ? `${row.grossAmount} ${row.currency}`
+          : "—"}
       </td>
     </tr>
   );
