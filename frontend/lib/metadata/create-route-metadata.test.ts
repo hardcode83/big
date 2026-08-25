@@ -143,4 +143,71 @@ describe("every other route id stays noindex (R2.2)", () => {
     const meta = await createRootMetadata();
     expect(meta.robots).toEqual({ index: false, follow: false });
   });
+
+  /*
+   * Design D4's load-bearing claim: "no future descriptor can flip a flag
+   * and become indexable by accident." This is the structural guard — every
+   * entry in `routeRegistry` is exercised through `createMetadataFromKeys`
+   * (the helper every descriptor except landing goes through), and the
+   * resolved `robots.index` is asserted to be `false`. Today the helper
+   * hard-codes the value; the test pins the invariant so a future helper
+   * added next to it that emits `index: true` would be caught at the
+   * descriptor walk rather than at the production robots.txt.
+   */
+  it("every non-landing descriptor yields robots: { index: false } from createMetadataFromKeys", async () => {
+    cookie.value = undefined;
+    for (const route of routeRegistry) {
+      if (route.id === "landing") continue;
+      const meta = await createMetadataFromKeys({
+        titleKey:
+          route.metadataTitleKey ??
+          `navigation:routes.${route.id}.title`,
+        descriptionKey:
+          route.metadataDescriptionKey ??
+          `navigation:routes.${route.id}.description`,
+      });
+      expect(
+        meta.robots,
+        `${route.id} (${route.metadataTitleKey}) must stay noindex`,
+      ).toEqual({ index: false, follow: false });
+    }
+  });
+
+  /*
+   * The companion to the previous test: of every descriptor in
+   * `routeRegistry`, the landing is the only one that produces
+   * `robots: { index: true }`. Asserting it both ways — every descriptor
+   * through `createMetadataFromKeys` is noindex AND the landing through
+   * `createLandingMetadata` is indexable — closes the loop the design
+   * promises.
+   */
+  it("only the landing descriptor yields robots: { index: true }", async () => {
+    cookie.value = undefined;
+
+    const landingMeta = await createLandingMetadata();
+    expect(landingMeta.robots).toEqual({ index: true, follow: true });
+
+    for (const route of routeRegistry) {
+      if (route.id === "landing") continue;
+      const meta = await createMetadataFromKeys({
+        titleKey:
+          route.metadataTitleKey ??
+          `navigation:routes.${route.id}.title`,
+        descriptionKey:
+          route.metadataDescriptionKey ??
+          `navigation:routes.${route.id}.description`,
+      });
+      // Next's `Metadata.robots` is `Robots | string`; a future helper
+      // emitting either the structured form or the string form of
+      // "index, follow" would indexable a descriptor by accident. Both
+      // shapes must be absent.
+      expect(
+        meta.robots,
+        `${route.id} (${route.metadataTitleKey}) must NOT be indexable`,
+      ).not.toEqual({ index: true, follow: true });
+      expect(meta.robots, `${route.id} must NOT be the indexable string`).not.toBe(
+        "index, follow",
+      );
+    }
+  });
 });
