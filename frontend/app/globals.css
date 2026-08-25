@@ -317,6 +317,13 @@
   }
 }
 
+/* Smooth scroll for the `#features` anchor in the landing marketing nav
+ * (change `landing-public`, design D10). The browser's native
+ * jump-to-anchor behaviour does the rest; no client island needed. */
+html {
+  scroll-behavior: smooth;
+}
+
 /* Minimum 44×44px touch targets for primary tap surfaces (design D14). */
 @utility tap-target {
   min-height: 44px;
