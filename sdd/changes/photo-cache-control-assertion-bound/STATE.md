@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/photo-cache-control-assertion-bound
 implementation_sha: 06d94cd65239979c13bf1386117d0d32f43e1185
 pr_number: 
 pr_url: 
