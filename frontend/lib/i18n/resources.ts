@@ -20,6 +20,8 @@ import esProperties from "@/locales/es/properties.json";
 import enProperties from "@/locales/en/properties.json";
 import esPricing from "@/locales/es/pricing.json";
 import enPricing from "@/locales/en/pricing.json";
+import esLanding from "@/locales/es/landing.json";
+import enLanding from "@/locales/en/landing.json";
 
 /** i18next namespaces (design D13). */
 export const NAMESPACES = [
@@ -34,6 +36,7 @@ export const NAMESPACES = [
   "cleaning",
   "properties",
   "pricing",
+  "landing",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -51,6 +54,7 @@ export const resources = {
     cleaning: esCleaning,
     properties: esProperties,
     pricing: esPricing,
+    landing: esLanding,
   },
   en: {
     common: enCommon,
@@ -64,5 +68,6 @@ export const resources = {
     cleaning: enCleaning,
     properties: enProperties,
     pricing: enPricing,
+    landing: enLanding,
   },
 } as const;

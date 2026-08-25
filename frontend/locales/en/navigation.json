@@ -97,6 +97,10 @@
     "guest": {
       "title": "Guest portal",
       "description": "Instructions and support for your stay."
+    },
+    "landing": {
+      "title": "AutoHostAI",
+      "description": "Public product page, on one operational console."
     }
   },
   "more": "More",

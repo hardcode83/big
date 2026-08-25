@@ -97,6 +97,10 @@
     "guest": {
       "title": "Portal del huésped",
       "description": "Instrucciones y soporte para tu estancia."
+    },
+    "landing": {
+      "title": "AutoHostAI",
+      "description": "Página pública del producto, en una sola consola operativa."
     }
   },
   "more": "Más",
