@@ -7,9 +7,11 @@ import { ThemeSwitcher } from "./theme-switcher";
 
 /**
  * Topbar landmark (design D6). Server Component container: `start` carries
- * context (brand, nav trigger, breadcrumbs or page title) and `end` defaults to
- * the theme and locale switchers (two client islands). The container itself ships
- * no client JS.
+ * context (brand, nav trigger, breadcrumbs or page title), `center` is the
+ * marketing navigation slot used by `/` only (the landing passes
+ * `<MarketingNav />` here, see design D3), and `end` defaults to the theme and
+ * locale switchers (two client islands). The container itself ships no client
+ * JS.
  *
  * `async` because the theme has to be resolved on the server and handed to
  * `ThemeSwitcher` as a prop, so the right button is pressed in the first paint
@@ -26,9 +28,11 @@ import { ThemeSwitcher } from "./theme-switcher";
  */
 export async function Topbar({
   start,
+  center,
   end,
 }: {
   start?: ReactNode;
+  center?: ReactNode;
   end?: ReactNode;
 }) {
   const theme = await getServerTheme();
@@ -36,6 +40,9 @@ export async function Topbar({
   return (
     <header className="flex h-14 shrink-0 items-center justify-between gap-3 border-b bg-background px-4">
       <div className="flex min-w-0 items-center gap-3">{start}</div>
+      {center ? (
+        <div className="flex min-w-0 items-center gap-3">{center}</div>
+      ) : null}
       <div className="flex items-center gap-2">
         {end ?? (
           <>
