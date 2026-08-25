@@ -39,7 +39,7 @@ export async function WorkspaceShell({ children }: { children: ReactNode }) {
     <ShellFrame
       skipLink={<SkipLink label={t("navigation:skipToContent")} />}
       sidebar={<Sidebar profile={PROFILE} />}
-      topbar={<Topbar start={start} />}
+      topbar={await Topbar({ start })}
       footer={
         <ShellFooter
           versionLabels={{

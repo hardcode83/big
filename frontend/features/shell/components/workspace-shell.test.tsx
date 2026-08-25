@@ -138,7 +138,15 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
 
   it("renders the locale switcher in the topbar", async () => {
     await renderShell();
-    expect(screen.getByRole("group", { name: "Idioma" })).toBeInTheDocument();
+    // The locale control became a single action button on 2026-08-24, so there
+    // is no longer a `role="group"` named «Idioma» — its accessible name now
+    // states what pressing it does.
+    expect(
+      screen.getByRole("button", { name: "Cambiar idioma a English" }),
+    ).toBeInTheDocument();
+    // And the theme control sits beside it, which is what this assertion is
+    // really guarding: that the topbar's default `end` slot is mounted.
+    expect(screen.getByRole("group", { name: "Tema" })).toBeInTheDocument();
   });
 
   it("opens the More sheet, closes on Escape and returns focus to the trigger", async () => {
