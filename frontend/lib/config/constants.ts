@@ -38,6 +38,16 @@ export type Theme = (typeof SUPPORTED_THEMES)[number];
  */
 export const THEME_COOKIE = "autohostai.theme";
 
+/**
+ * Non-sensitive presence flag (design D1 of `landing-public`). The cookie carries
+ * only the literal `"1"` to signal that the JS runtime held a session at some
+ * point; it is read on the server to decide whether `/` redirects to `/dashboard`
+ * (R1.2). Same posture as `THEME_COOKIE`/`LOCALE_COOKIE`: `path=/`, `samesite=lax`,
+ * no `expires` (browser session), no `secure` in dev so localhost works, and no
+ * personal data — no token, no user id, no tenant id.
+ */
+export const SESSION_PRESENT_COOKIE = "autohostai.session.present";
+
 export function isTheme(value: unknown): value is Theme {
   return (
     typeof value === "string" &&

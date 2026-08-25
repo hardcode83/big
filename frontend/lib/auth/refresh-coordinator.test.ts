@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import {
   clearSessionTokens,
@@ -6,9 +6,32 @@ import {
   setSessionTokens,
 } from "@/lib/auth/session-store";
 import { refreshSession } from "@/lib/auth/refresh-coordinator";
+import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
+
+function readPresenceCookie(): string | null {
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  const match = cookies.find((entry) => entry.startsWith(`${SESSION_PRESENT_COOKIE}=`));
+  return match ? match.slice(SESSION_PRESENT_COOKIE.length + 1) : null;
+}
+
+function clearAllCookies(): void {
+  document.cookie.split("; ").forEach((entry) => {
+    const name = entry.split("=")[0];
+    if (name) {
+      document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
+    }
+  });
+}
 
 describe("refresh coordinator", () => {
-  afterEach(() => clearSessionTokens());
+  beforeEach(() => {
+    clearAllCookies();
+  });
+
+  afterEach(() => {
+    clearSessionTokens();
+    clearAllCookies();
+  });
 
   it("shares one refresh and atomically replaces the pair", async () => {
     setSessionTokens({ accessToken: "old-access", refreshToken: "old-refresh" });
@@ -33,6 +56,7 @@ describe("refresh coordinator", () => {
       accessToken: "new-access",
       refreshToken: "new-refresh",
     });
+    expect(readPresenceCookie()).toBe("1");
   });
 
   it("fans out one failure, cleans once, and makes no second refresh", async () => {
@@ -53,6 +77,7 @@ describe("refresh coordinator", () => {
     ]);
     expect(refresh).toHaveBeenCalledOnce();
     expect(getSessionTokens()).toBeNull();
+    expect(readPresenceCookie()).toBeNull();
     await expect(refreshSession(refresh)).rejects.toThrow("No refresh token available");
     expect(refresh).toHaveBeenCalledOnce();
   });

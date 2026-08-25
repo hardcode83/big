@@ -91,6 +91,16 @@ const MAY_NAME_THEME = new Set([
    * rather than assuming it.
    */
   "features/shell/components/topbar.tsx",
+  /*
+   * `PublicShell` and its test name the theme for the same reason as `Topbar`:
+   * the shell renders the topbar, which owns the theme + locale switchers, and
+   * the describe/it strings describe that. The shell is a Server Component with
+   * no `"use client"`, so the theme it forwards cannot be client state — the
+   * check above (the `useState`/`useReducer`/etc. gate) still runs over the file
+   * and trips on a real regression. The test's prose names the switchers only.
+   */
+  "features/shell/components/public-shell.tsx",
+  "features/shell/components/public-shell.test.tsx",
   // Its tests.
   "lib/theme/theme.test.ts",
   "lib/theme/server.test.ts",

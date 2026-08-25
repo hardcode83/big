@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "title": "AutoHostAI — The operational layer for your vacation rental",
+    "description": "AutoHostAI centralises reservations, cleaning, maintenance and incidents in one operational console for short-term rentals."
+  },
+  "hero": {
+    "eyebrow": "Operational layer for short-term rentals",
+    "title": "One console for your entire short-term rental operation",
+    "subtitle": "AutoHostAI connects your PMS to cleaning, maintenance, incidents and reporting. Your team works from the same information — no spreadsheets falling out of date."
+  },
+  "marketing": {
+    "login": "Sign in",
+    "featuresAnchor": "Features"
+  },
+  "features": {
+    "reservations": {
+      "title": "Centralised reservations",
+      "body": "A single view of every stay: check-ins, check-outs, payments and last-minute changes, synced with your PMS."
+    },
+    "cleaning": {
+      "title": "Cleaning and maintenance",
+      "body": "Tasks, handover photos and reminders that close the loop between your cleaning crew, technicians and guests."
+    },
+    "incidents": {
+      "title": "Incident control",
+      "body": "Open, assign and close with a traceable history. Every incident knows which stay and property it belongs to."
+    },
+    "analytics": {
+      "title": "Operational analytics",
+      "body": "Response time, effective occupancy and per-stay cost — the numbers that actually move your bottom line."
+    }
+  },
+  "stats": {
+    "line1": "One console for your operation",
+    "line2": "Built on the stack your team already trusts"
+  },
+  "cta": {
+    "title": "Try it with your own properties",
+    "buttonLabel": "Get started",
+    "buttonHref": "/login"
+  },
+  "footer": {
+    "product": [],
+    "company": [],
+    "legal": [],
+    "copyright": "© 2026 AutoHostAI"
+  }
+}
