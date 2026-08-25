@@ -22,6 +22,7 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "./session-store";
+import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 export type AuthStatus =
@@ -62,6 +63,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return subscribeToSessionExpired(() => {
       setUser(null);
+      clearSessionPresent();
       setStatus("expired");
     });
   }, []);
@@ -78,11 +80,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
         });
+        markSessionPresent();
         const currentUser = await clients.apiClient.request("/api/v1/auth/me");
         setUser(currentUser);
         setStatus("authenticated");
       } catch (error) {
         clearSessionTokens();
+        clearSessionPresent();
         setUser(null);
         setStatus("error");
         throw error;
@@ -115,6 +119,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       // Logout is best-effort; local credentials are always discarded below.
     } finally {
       clearSessionTokens();
+      clearSessionPresent();
       setUser(null);
       setStatus("anonymous");
     }

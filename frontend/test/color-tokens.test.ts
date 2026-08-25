@@ -135,6 +135,11 @@ const EXCEPTIONS: Record<string, readonly string[]> = {
   // The needles are the whole declared values, because check 5 now reports what
   // it read rather than just the hex it found inside a shorthand.
   "app/global-error.tsx": ["#555", "1px solid #ccc"],
+  // Renders standalone HTML via `next/og` for the Open Graph image. The
+  // generated PNG ships as a static asset and never reaches the runtime CSS
+  // tree, so the same no-tokens-available argument applies — the colours
+  // are inlined in the JSX `style` prop.
+  "app/opengraph-image.tsx": ["#006b5f", "#ffffff"],
 };
 
 /*
@@ -328,6 +333,7 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     expect(EXCEPTIONS).toEqual({
       "components/ui/sheet.tsx": ["bg-black/50"],
       "app/global-error.tsx": ["#555", "1px solid #ccc"],
+      "app/opengraph-image.tsx": ["#006b5f", "#ffffff"],
     });
   });
 
