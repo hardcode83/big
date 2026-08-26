@@ -92,8 +92,8 @@ credencial no alcanza nada fuera de su tenant, y que `saas-cross-tenant` sigue c
 
 ### Las fases, la transacción y los códigos de salida
 
-- THE SYSTEM SHALL declarar diez fases nombradas y en orden: `configuration`, `refusal`, `prepare`,
-  `bootstrap`, `scope`, `delete`, `converge`, `seed`, `storage-sweep`, `clear-lock`.
+- THE SYSTEM SHALL declarar once fases nombradas y en orden: `configuration`, `refusal`, `prepare`,
+  `bootstrap`, `scope`, `delete`, `converge`, `seed`, `storage-sweep`, `purge-audit`, `clear-lock`.
 - THE SYSTEM SHALL ejecutar `prepare` … `seed` dentro de **una sola transacción**, de modo que un
   fallo en cualquiera de ellas revierta también el borrado: la base queda sin cambios parciales.
 - THE SYSTEM SHALL ejecutar `storage-sweep` y `clear-lock` **después** del commit y fuera de la
@@ -112,13 +112,52 @@ credencial no alcanza nada fuera de su tenant, y que `saas-cross-tenant` sigue c
   la metadata del esquema, de modo que una tabla nueva con una clave ajena exija una decisión
   explícita y un ciclo caiga en CI y no en la VM.
 - THE SYSTEM SHALL preservar cuatro tablas: `tenants`, `tenant_configs`, `users` y `audit_logs`. El
-  registro de auditoría se mantiene intacto por requisito, y `users` con él porque
+  registro de auditoría se mantiene intacto por requisito (y `users` con él, porque
   `audit_logs.actor_user_id` es `ON DELETE SET NULL`: borrar una y conservar la otra rompería el
-  registro por cualquiera de los dos lados.
+  registro por cualquiera de los dos lados), **pero** esa preservación lleva una **retención de
+  `DEMO_AUDIT_RETENTION_DAYS` = 7 días** que aplica el comando tras el commit — ver «Retención del
+  `audit_logs`» más abajo. La constante vive en `backend/app/cli/demo_reset.py` y no en `Settings`,
+  no en variable de entorno y no en base de datos, igual que `DEMO_TENANT_NAME` y la política de
+  contraseñas: es una decisión de ingeniería, no de despliegue.
 - THE SYSTEM SHALL converger `tenants.timezone` a `Europe/Madrid` y `tenants.country` a `ES`,
   informando del valor anterior cuando lo restaura. `timezone` decide el día al que se ancla el
   dataset entero, así que dejarla a merced de un visitante sería dejarle mover las fechas de la demo.
 - THE SYSTEM SHALL anclar las fechas del dataset al día del **calendario del tenant**, no al de UTC.
+
+### Retención del `audit_logs`
+
+- THE SYSTEM SHALL declarar `DEMO_AUDIT_RETENTION_DAYS = 7` como constante del módulo
+  `backend/app/cli/demo_reset.py`, alineada con las demás constantes del comando, y THE SYSTEM SHALL
+  NOT exponer esa ventana como variable de entorno, campo de `Settings` ni columna de base de
+  datos.
+- WHEN la fase `purge-audit` del comando corre, THE SYSTEM SHALL borrar las filas de `audit_logs`
+  cuyo `tenant_id` es el del tenant de demostración y cuyo `created_at` es **estrictamente anterior**
+  al corte `started_at - DEMO_AUDIT_RETENTION_DAYS`, donde `started_at` es el reloj capturado por la
+  fase `prepare` de la misma ejecución (`started_at - INTERVAL '7 days'`).
+- THE SYSTEM SHALL ejecutar ese `DELETE` **únicamente** sobre el tenant de demostración, sobre una
+  sesión ya marcada al tenant (`require_session_bound_to`), y THE SYSTEM SHALL NOT abrir una segunda
+  sesión ni saltarse el marcador. WHERE el `tenant_id` resuelto no es el del demo, THE SYSTEM SHALL
+  rechazar la fase con código 2 sin escribir nada — la guarda es la constante del módulo, y la del
+  `WHERE tenant_id = :tenant_id` literal es redundancia explícita sobre el listener.
+- THE SYSTEM SHALL añadir la fase `purge-audit` a la enumeración `PHASES` en la posición **entre**
+  `storage-sweep` y `clear-lock`, y SHALL ejecutarla **fuera** de la transacción del reset, igual
+  que `storage-sweep` y `clear-lock`: un fallo del `DELETE` no puede revertir el reset ya
+  comprometido.
+- IF la fase `purge-audit` falla, THEN THE SYSTEM SHALL recoger el fallo como una nota con la forma
+  `purge-audit: failed with <ClassName> (detail withheld on purpose)`, y SHALL NOT emitir la
+  contraseña, su hash, ningún token de sesión ni el detalle de un `SQLAlchemyError` — el mismo
+  contrato que `clear_login_locks` y `storage-sweep`. El fallo degradado es exit 0, no 2.
+- THE SYSTEM SHALL escribir **antes** del `DELETE` una fila de auditoría de la propia fase
+  `purge-audit`, con `action='AUDIT_LOG_PURGED'`, `entity_type='AUDIT_LOG'`,
+  `entity_id=uuid.uuid5(tenant_id, "demo-audit-purge")`, `actor_user_id=NULL`, y `changes` con
+  `deleted_count` (entero, escrito con `0` porque el conteo se conoce sólo tras el `DELETE`) y
+  `cutoff` (la `cutoff.isoformat()` usada). La fila pasa por `AuditLogFactory.build` + `ChangeSet`
+  para que la regla 11 de `steering/security.md` siga cumpliéndose por construcción.
+- THE SYSTEM SHALL auditar la fila dentro de la propia fase exactamente una vez — si la escritura
+  inicial falla, la nota degradada se reporta sin reentrar en `audit.add`.
+- WHEN el reset termina con éxito, THE SYSTEM SHALL emitir en su informe el número de filas de
+  `audit_logs` purgadas bajo `audit_logs_purged=N` y el `cutoff` usado, junto al resto de los
+  recuentos.
 
 ### El barrido de objetos del almacén
 
@@ -248,7 +287,8 @@ Los tres son decisiones tomadas con su motivo escrito, no descuidos:
 - Comando: `backend/app/cli/demo_reset.py` — constantes del tenant y de las cuatro cuentas, `PHASES`,
   `build_plan`, `refuse_if_the_working_tenant_is_the_demo_tenant`,
   `refuse_a_tenant_that_only_shares_the_name`, `delete_the_tenants_rows`,
-  `converge_the_demo_passwords`, `collect_storage_keys`, `sweep_storage`, `clear_login_locks`, `main`.
+  `converge_the_demo_passwords`, `collect_storage_keys`, `sweep_storage`, `clear_login_locks`,
+  `purge_old_audit_logs`, `_safe_purge_old_audit_logs`, `main`.
 - Vías que compone: `bootstrap.apply_plan` y `seed_demo.apply_plan`
   (`backend/app/cli/{bootstrap,seed_demo}.py`); la conversación y el enlace de portal viven en
   `seed_demo.py` (ver [`seed-data-demo.md`](seed-data-demo.md)).

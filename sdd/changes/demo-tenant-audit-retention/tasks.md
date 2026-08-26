@@ -1,0 +1,47 @@
+# Tasks: demo-tenant-audit-retention
+
+## 1. Audit vocabulary — `ENTITY_AUDIT_LOG`, `AUDIT_LOG_PURGED`, `AUDITABLE_FIELDS["AUDIT_LOG"]`
+
+- [ ] 1.1 Add `ENTITY_AUDIT_LOG = "AUDIT_LOG"` constant and register it in `ENTITY_TYPES` (`backend/app/audit/domain/actions.py:340-361`). The constant goes beside the other `ENTITY_*` declarations at the top of the file. [R3.1]
+- [ ] 1.2 Add `AUDIT_LOG_PURGED = "AUDIT_LOG_PURGED"` constant and register it in `ACTIONS` (`backend/app/audit/domain/actions.py:363-423`). [R3.1]
+- [ ] 1.3 Add `"AUDIT_LOG": frozenset({"deleted_count", "cutoff"})` to `AUDITABLE_FIELDS` (`backend/app/audit/domain/value_objects.py:111`). [R3.1]
+- [ ] 1.4 Create `backend/tests/audit/test_audit_log_vocabulary.py` following `test_incident_photo_vocabulary.py` as the template: assert membership in `ENTITY_TYPES`/`ACTIONS`/`AUDITABLE_FIELDS`, an exhaustive-namespace scan over `actions` to pin that the change adds exactly one action and one entity type, the allowlist shape, and that `ChangeSet(actions.ENTITY_AUDIT_LOG).diff("deleted_count", None, 0)` does not raise — covering the smoke test for `_storable` on an `int` (counter) and an `isoformat()` datetime string (cutoff). [R3.1]
+
+## 2. Demo command core — constant, `started_at`, `purge_old_audit_logs`
+
+- [ ] 2.1 Add `DEMO_AUDIT_RETENTION_DAYS = 7` constant next to `PASSWORD_MAX_BYTES`/`PASSWORD_MIN_LENGTH` in `backend/app/cli/demo_reset.py` (around line 104, beside the other module constants). [R1.2]
+- [ ] 2.2 In the `prepare` phase of `apply_plan` (`backend/app/cli/demo_reset.py:925-947`), capture `report.started_at = _now()` so `purge-audit` can derive a deterministic cutoff later (D3). [R2.1]
+- [ ] 2.3 Add `started_at: datetime | None = None` and `purged_audit_count: int = 0` to the `DemoResetReport` dataclass (`backend/app/cli/demo_reset.py:295-335`), and include them in the redacted `__repr__` so the report's existing disclosure discipline is preserved. [R2.4]
+- [ ] 2.4 Implement `async def purge_old_audit_logs(session: AsyncSession, tenant_id: uuid.UUID, cutoff: datetime) -> int` in `backend/app/cli/demo_reset.py` (D5): call `require_session_bound_to(session, tenant_id, write="the demo reset's purge-audit phase")`, execute a single `text("DELETE FROM audit_logs WHERE tenant_id = :tenant_id AND created_at < :cutoff")` with bind params, and return `result.rowcount`. [R1.1, R1.3]
+
+## 3. Phase wire-up — `purge-audit` between `storage-sweep` and `clear-lock`
+
+- [ ] 3.1 Insert `"purge-audit"` into `PHASES` between `"storage-sweep"` and `"clear-lock"` (`backend/app/cli/demo_reset.py:134-145`). [R2.1]
+- [ ] 3.2 Implement `async def _safe_purge_old_audit_logs(tenant_id: uuid.UUID, started_at: datetime) -> tuple[int, str | None]` in `backend/app/cli/demo_reset.py` (D7/D8): compute `cutoff = started_at - timedelta(days=DEMO_AUDIT_RETENTION_DAYS)`, write the **audit row first** (calling `AuditLogFactory.build` with `entity_type=actions.ENTITY_AUDIT_LOG`, `action=actions.AUDIT_LOG_PURGED`, `entity_id=uuid.uuid5(tenant_id, "demo-audit-purge")`, `actor_user_id=None`, `actor_ip=None`, and a `ChangeSet(actions.ENTITY_AUDIT_LOG).diff("deleted_count", None, count).diff("cutoff", None, cutoff.isoformat())`), then call `purge_old_audit_logs`; on any `Exception`, append a note of the form `f"purge-audit: failed with {type(exc).__name__} (detail withheld on purpose)"` (matching `clear_login_locks`' shape) and return `(0, note)` without re-raising. [R1.1, R2.2, R2.3, R3.1, R3.2, R3.3]
+- [ ] 3.3 In `run()` (`backend/app/cli/demo_reset.py:1048-1077`), add `async with _phase("purge-audit", report):` between the existing `storage-sweep` and `clear-lock` blocks; inside it call `report.counts["audit_logs_purged"], note = await _safe_purge_old_audit_logs(report.tenant_id, report.started_at)` and append `note` to `report.notes` if non-`None`. [R2.1, R2.2, R2.4]
+
+## 4. Update existing tests — `PHASES` tuple and phases-in-report assertions
+
+- [ ] 4.1 Update `assert demo_reset.PHASES == (...)` at `backend/tests/cli/test_demo_reset.py:703-714` to include `"purge-audit"` between `"storage-sweep"` and `"clear-lock"`. [R2.1]
+- [ ] 4.2 Update `assert first.phases == list(demo_reset.PHASES)` (and the symmetric `second.phases` assertion below it) at `backend/tests/cli/test_demo_reset.py:2177-2181` — these comparisons already go through `list(PHASES)`, so they auto-track once 4.1 lands; verify and re-run to confirm. [R2.1]
+
+## 5. New tests — `purge_old_audit_logs`, `_safe_purge_old_audit_logs`, wire-up
+
+- [ ] 5.1 In `backend/tests/cli/test_demo_reset.py`, add `test_purge_old_audit_logs_deletes_rows_older_than_cutoff`: seed `audit_logs` with three rows (`> cutoff`, `< cutoff`, exactly at cutoff), call `purge_old_audit_logs(session, tenant_id, cutoff)`, assert `result == 1` and that only the post-cutoff row remains. Use a marked session; verify a session **not** bound to the tenant raises via `require_session_bound_to` (D5's guard). [R1.1, R1.3]
+- [ ] 5.2 Add `test_purge_old_audit_logs_refuses_a_session_bound_to_a_different_tenant`: bind the session to another tenant id and assert `require_session_bound_to` rejects; verifies R1.4 ("WHERE el `tenant_id` resuelto no es el del demo, THE SYSTEM SHALL rechazar la fase con código 2 sin escribir nada") at the SQL boundary, not just at the `run()` dispatch. [R1.4]
+- [ ] 5.3 Add `test_safe_purge_old_audit_logs_writes_the_audit_row_before_the_delete`: monkeypatch `purge_old_audit_logs` to record the call order; assert the `AuditLogRepository.add` was called with an `AuditLog` whose `action == AUDIT_LOG_PURGED`, `entity_type == ENTITY_AUDIT_LOG`, `actor_user_id is None`, `changes` has both `deleted_count` and `cutoff`. Verifies R3.1 and R3.2 by construction (the audit row exists whether or not the `DELETE` later succeeds). [R3.1, R3.2]
+- [ ] 5.4 Add `test_safe_purge_old_audit_logs_degrades_when_the_delete_fails`: monkeypatch `purge_old_audit_logs` to raise `RuntimeError("simulated DB error")`, call `_safe_purge_old_audit_logs`, assert it returns `(0, note)` with `note` matching the `clear_login_locks`-style format (`"purge-audit: failed with RuntimeError (detail withheld on purpose)"`) and **no** traceback of the original error is in `note`. Verifies R2.3 ("emitir la fase y la clase … SHALL NOT emitir la contraseña, su hash, ningún token de sesión ni el detalle de un `SQLAlchemyError`"). [R2.3]
+- [ ] 5.5 Add `test_safe_purge_old_audit_logs_degrades_when_the_audit_row_write_fails`: monkeypatch `audit.add` to raise, assert `_safe_purge_old_audit_logs` returns `(0, note)` without re-entering `audit.add` (call count is 1). Verifies R3.3 ("THE SYSTEM SHALL NO auditar la fila dentro de la propia fase si la fase ya falló al intentar escribir la fila inicial"). [R3.3]
+- [ ] 5.6 Add `test_a_full_reset_terminates_with_purge_audit_in_phases_and_count_in_report` (modeled on the `test_first_and_second_run_round_trip` at line 2170): run the full `apply_plan` twice, assert `report.phases` contains `"purge-audit"`, and `report.counts["audit_logs_purged"]` is an `int` ≥ 0; if seeded audit rows are < 7 days old, the count is 0 — the assertion is on presence and type, not value. [R2.4]
+- [ ] 5.7 Add `test_purge_audit_does_not_run_when_prepare_did_not_run`: skip `prepare` (raise inside it), assert the resulting `report.phases` does **not** contain `"purge-audit"` — verifies the existing `run()` invariant that `apply_plan` must have returned before `purge-audit` is invoked (the D8 rationale). [R2.1, R2.2]
+
+## 6. Spec & docs
+
+- [ ] 6.1 In `sdd/specs/demo-tenant.md`, amend the «Qué borra y qué preserva» section (lines 109-117) so the `audit_logs` preservation sentence cites the 7-day retention; add a new EARS block as a sibling section named «Retención del audit_logs» mirroring the format of the existing requirements (`THE SYSTEM SHALL` …) with the criterion from R1.1 and R1.2. [R4.2]
+- [ ] 6.2 In `docs/demo-tenant.md`, add a «Retención del audit_logs» section stating: period (7 days), when it runs (during the daily reset, between `storage-sweep` and `clear-lock`), what it preserves (rows from the last reset, by construction of the cutoff), and the only way to see older history (download the row before the next reset, **not** supported by the product). [R4.1]
+
+## 7. Verification
+
+- [ ] 7.1 Backend tests pass: `docker compose exec backend uv run pytest backend/tests/audit/ backend/tests/cli/test_demo_reset.py -x` (from `project.md` Commands; the worktree workaround in `project.md` §"Worktree bootstrap" does not affect `pytest` since tests run over the compose network). [R1, R2, R3, R4]
+- [ ] 7.2 Lint passes: `docker compose exec backend uv run ruff check backend/app/cli/demo_reset.py backend/app/audit/domain/actions.py backend/app/audit/domain/value_objects.py backend/tests/audit/test_audit_log_vocabulary.py backend/tests/cli/test_demo_reset.py` (project does not declare a top-level lint command — `backend` uses `ruff` via dependency; verify with `uv run ruff check …` inside the container). [R1, R2, R3]
+- [ ] 7.3 Manual end-to-end: `make up`, then `make demo-reset` (or `docker compose exec -T backend python -m app.cli.demo_reset`), and confirm stdout contains `phases … → purge-audit → …` and either `audit_logs_purged=0` (first reset, no rows > 7 days) or a positive count; confirm stderr carries no SQLAlchemy detail even if the inner `DELETE` is forced to fail (e.g., temporarily point at an unreachable DB host and observe the degradation note, then restore). [R2.3, R2.4]

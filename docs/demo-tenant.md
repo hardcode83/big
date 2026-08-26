@@ -185,8 +185,11 @@ El reset promete un estado «indistinguible de un aprovisionamiento desde cero e
 se lee sobre **lo que la API y las pantallas devuelven**: la composición del dataset, los estados
 operacionales, el timeline y las fechas. Cuatro cosas quedan fuera, y conviene tenerlas presentes:
 
-- **`audit_logs`**, que se conserva a propósito y por tanto **crece sin límite** en este tenant. Es
-  la tabla que ningún endpoint lee, así que un visitante no la ve; quien mire la base de datos, sí.
+- **`audit_logs`** de los últimos **7 días**, que se conservan a propósito. Pasado ese plazo, la
+  fase `purge-audit` del comando los borra al final del reset (ver «Retención del `audit_logs`»
+  abajo). La fila del propio purgado —una por ejecución, con `action='AUDIT_LOG_PURGED'` y
+  `entity_type='AUDIT_LOG'`— se queda dentro de la ventana, así que la huella del último borrado
+  es lo último que desaparece.
 - **`users.created_at` y `users.id`** de las cuatro cuentas: las filas se conservan porque la
   contraseña se **converge** en vez de recrearse.
 - **`users.last_login_at`**: cada login de un visitante la mueve, cualquier lector con
@@ -200,6 +203,32 @@ Lo que **sí** se restaura de esas cuatro filas, y no es cosmético: la contrase
 y el `name` y el `phone` — que son el único canal de desfiguración duradera del tenant, porque
 `PATCH /users/{id}` los acepta de quien tenga `MANAGE_USERS` y son el único contenido escribible por
 un visitante que el reset conserva.
+
+## Retención del `audit_logs`
+
+El `audit_logs` del tenant demo es la **única** tabla nightly-reset que nunca se vacía: se conserva
+porque el registro de auditoría es valioso, y porque cada reset añade filas de convergencia (una
+por cuenta convergida) más las del propio purgado. Sin un corte, crece sin límite — y por eso el
+comando aplica una retención.
+
+- **Periodo**: 7 días. La constante `DEMO_AUDIT_RETENTION_DAYS` vive en `backend/app/cli/demo_reset.py`,
+  junto a `DEMO_TENANT_NAME` y la política de contraseñas; no está en `Settings`, no es variable de
+  entorno, no es columna de base de datos. Es una decisión de ingeniería, no de despliegue.
+- **Cuándo corre**: durante el reset diario, en la fase `purge-audit` (entre `storage-sweep` y
+  `clear-lock`), fuera de la transacción. Si falla, el reset sigue verde y se reporta como una
+  nota con la forma `purge-audit: failed with <ClassName> (detail withheld on purpose)`.
+- **Qué preserva**: por construcción del corte, **las filas del último reset** (sus `created_at`
+  caen dentro de la ventana de 7 días). Lo que se borra es el histórico más antiguo — típicamente la
+  acumulación de resets anteriores.
+- **Auditoría del propio purgado**: antes del `DELETE`, la fase escribe una fila en `audit_logs` con
+  `action='AUDIT_LOG_PURGED'`, `entity_type='AUDIT_LOG'`, `entity_id` derivado deterministamente
+  del tenant id (`uuid.uuid5(tenant_id, "demo-audit-purge")`) y `actor_user_id=None` — un comando
+  CLI no tiene identidad que registrar. La fila pasa por `AuditLogFactory.build` + `ChangeSet`,
+  así que la regla 11 de seguridad se cumple por construcción.
+- **Cómo se ve el histórico más antiguo**: la única forma soportada es **descargar la fila antes
+  del siguiente reset** — no hay endpoint, ni vista, ni exportación automática. La retención
+  borra lo que la demo no necesita mantener; quien necesite auditoría histórica tiene que sacarla
+  por su cuenta, y la ventana de 7 días es la holgura con la que cuenta.
 
 ## Ver también
 

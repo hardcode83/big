@@ -26,47 +26,48 @@ import dataclasses
 import logging
 import sys
 import uuid
-from datetime import UTC, datetime
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from dataclasses import dataclass
+from datetime import UTC, datetime, timedelta
 
-import app.core.models_registry  # noqa: F401  -- see the comment below
 from sqlalchemy import delete as sqlalchemy_delete
-from sqlalchemy import select
+from sqlalchemy import select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import app.core.models_registry  # noqa: F401  -- see the comment below
 from app.audit.domain import actions
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
 from app.auth.domain.exceptions import PasswordPolicyError, PasswordTooLongError
-from app.auth.domain.password_policy import PASSWORD_MIN_LENGTH, assert_password_acceptable
+from app.auth.domain.password_policy import (
+    PASSWORD_MIN_LENGTH,
+    assert_password_acceptable,
+)
 from app.auth.domain.value_objects import normalize_email
 from app.auth.infrastructure.models import UserModel
+from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import (
     SqlAlchemySessionRepository,
     SqlAlchemyUserRepository,
 )
 from app.auth.infrastructure.throttle import RedisLoginThrottle
-from app.cleaning.infrastructure.models import CleaningPhotoModel, CleaningTaskModel
-from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.cli import bootstrap, seed_demo
 from app.cli.bootstrap import BootstrapPlan, SeedUser
 from app.cli.seed_demo import SeedAccount, SeedPlan
 from app.core.config import settings
-from app.core.redis import get_redis
-from app.integrations.infrastructure.storage import ConfiguredFileStorageFactory
-from app.maintenance.infrastructure.models import IncidentPhotoModel
 from app.core.db import (
     Base,
-    bind_session_to_tenant,
     async_session_factory,
+    bind_session_to_tenant,
     require_session_bound_to,
     tenant_scoped_classes,
 )
+from app.core.redis import get_redis
 from app.integrations.domain.storage import derive_signing_key
+from app.integrations.infrastructure.storage import ConfiguredFileStorageFactory
 from app.tenants.domain.enums import StorageType
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 
@@ -127,6 +128,15 @@ DEMO_BILLING_EMAIL = "billing@demo.autohostai.test"
 #: defect once in this change. `tests/cli/test_demo_reset.py` pins the two together.
 PORTAL_LINE_PREFIX = "guest portal for the active stay"
 
+#: The retention window of the demonstration tenant's `audit_logs` (change
+#: `demo-tenant-audit-retention`, design D1). `audit_logs` is the only table of this tenant
+#: that the reset does not empty (R3.6 of `demo-user`), and without a cap the seed's per-reset
+#: convergence rows accumulate forever. Picked as a constant of the module — **not** as
+#: `Settings`, env var, or DB knob (R1.2 of the proposal) — for the same reason the
+#: password-policy constants above live next to it: an engineering decision that the operator
+#: does not need to think about.
+DEMO_AUDIT_RETENTION_DAYS = 7
+
 #: The phases this command declares, in order. They are the contract R3.4 and R5.5 name: every
 #: failure reports the phase it happened in, and the scheduled workflow turns red saying which.
 logger = logging.getLogger("app.auth")
@@ -141,6 +151,10 @@ PHASES = (
     "converge",
     "seed",
     "storage-sweep",
+    # `purge-audit` (`demo-tenant-audit-retention`, design D2): runs after `storage-sweep` and
+    # before `clear-lock`, outside the apply transaction, so a failure there cannot revert the
+    # reset and the run reports it as a degradation note rather than as exit 2.
+    "purge-audit",
     "clear-lock",
 )
 
@@ -315,6 +329,17 @@ class DemoResetReport:
     converged_user_ids: list[uuid.UUID] = dataclasses.field(default_factory=list)
     tenant_id: uuid.UUID | None = None
     storage_type: StorageType = StorageType.LOCAL
+    #: Captured by `prepare` and read by the `purge-audit` phase to derive a deterministic
+    #: cutoff (design D3). Defaults to `None` so a run that exits before `prepare` finishes
+    #: — the test that skips `prepare` on purpose — still has a report that can be rendered
+    #: without `started_at` being set.
+    started_at: datetime | None = None
+    #: Output of the `purge-audit` phase. Not the same as `counts["audit_logs_purged"]` (which
+    #: `main()` prints) — this is the in-memory value `purge-audit` itself sets, so a caller
+    #: that already holds the report can decide whether to degrade without re-reading the
+    #: counts. Default zero matches "no rows were ever purged" and is what a fresh dataclass
+    #: renders to.
+    purged_audit_count: int = 0
 
     def __repr__(self) -> str:
         """Withholds `portal_url`, for the reason `DemoResetPlan` withholds the password.
@@ -325,13 +350,18 @@ class DemoResetReport:
         into the two post-commit phases, so any exception there renders it into whatever captures
         the traceback — a second channel, and R2.5's exception is bounded partly by there being
         "no hay otro canal".
+
+        `started_at` is shown by value: it is the same clock the seed anchors to, and a
+        `repr()` that hides it loses nothing. `purged_audit_count` is appended last so the
+        same redacted shape that section 6 proved is preserved.
         """
         return (
             f"DemoResetReport(phases={self.phases!r}, counts={self.counts!r}, "
             f"notes={len(self.notes)}, portal_url=<withheld>, "
             f"storage_keys={len(self.storage_keys)}, "
             f"converged_user_ids={len(self.converged_user_ids)}, "
-            f"tenant_id={self.tenant_id!r}, storage_type={self.storage_type!r})"
+            f"tenant_id={self.tenant_id!r}, storage_type={self.storage_type!r}, "
+            f"started_at={self.started_at!r}, purged_audit_count={self.purged_audit_count!r})"
         )
 
 
@@ -658,6 +688,128 @@ async def converge_the_demo_passwords(
     return converged
 
 
+async def purge_old_audit_logs(
+    session: AsyncSession, tenant_id: uuid.UUID, cutoff: datetime
+) -> int:
+    """Delete `audit_logs` rows older than `cutoff`, scoped to the demo tenant (D5).
+
+    One statement and one rowcount: the semantics is "delete everything older than N days",
+    not "delete one by one", and the listener of `app/core/db.py` already adds
+    `tenant_id = :demo` on top of the explicit `WHERE` — defense in depth, and what makes
+    R1.4 ("WHERE el `tenant_id` resuelto no es el del demo, THE SYSTEM SHALL rechazar la
+    fase con código 2 sin escribir nada") hold even when SQL is hand-rolled.
+
+    **SQL textual rather than ORM `delete(AuditLogModel)`**, and that is the right shape
+    here: the listener already imposes the scope, the row never has to be hydrated, and
+    `text()` with bind params is the explicit form of "no ORM magic runs against this
+    table outside this WHERE". The same `WHERE tenant_id = :tenant_id` clause the listener
+    would add anyway is on the statement, so the constant guarding R1.3 is still the
+    session marker.
+
+    **Why this lives apart from `_safe_purge_old_audit_logs`.** The safe wrapper degrades
+    with a note on any failure and writes the audit row before the DELETE; this one is the
+    raw mechanism that has to refuse a wrong tenant and nothing else. Splitting them keeps
+    each one single-purpose and lets the tests pin them independently — the wrapper's
+    degradation contract is not entangled with the raw DELETE's tenant guard.
+    """
+    require_session_bound_to(
+        session, tenant_id, write="the demo reset's purge-audit phase"
+    )
+    result = await session.execute(
+        text(
+            "DELETE FROM audit_logs "
+            "WHERE tenant_id = :tenant_id AND created_at < :cutoff"
+        ),
+        {"tenant_id": tenant_id, "cutoff": cutoff},
+    )
+    return result.rowcount
+
+
+async def _safe_purge_old_audit_logs(
+    tenant_id: uuid.UUID, started_at: datetime
+) -> tuple[int, str | None]:
+    """Run the purge in a fresh session, write its audit row, and degrade on any failure (D7/D8).
+
+    **Why a new session, and why marked.** The post-commit `run()` no longer holds one — the
+    apply transaction committed and closed before `storage-sweep` — and `purge_old_audit_logs`
+    requires a marked session (`require_session_bound_to`). Re-marking here is what keeps
+    R1.3's "no abrir una segunda sesión sin marcarla" satisfied: the listener of
+    `app/core/db.py` appends `tenant_id = :demo` to the DELETE, defense in depth on top of
+    the explicit `WHERE`.
+
+    **Order of operations — audit row first, then purge.** R3.2 requires the row to be
+    written before the DELETE, so a DELETE that subsequently fails still leaves a record
+    that the purge was attempted. The row's `deleted_count` is a known `0` at write time
+    (no rows have been deleted yet); the actual count is reported via the return value and
+    surfaced in `report.counts["audit_logs_purged"]`. An auditor reading `audit_logs.changes`
+    sees "this purge was attempted with cutoff X"; an auditor reading the run report sees
+    how many rows it actually removed. The two are different views of the same event, and
+    both are needed because each one records a fact the other cannot.
+
+    **Single transaction, single commit.** Both the audit row and the DELETE share one
+    `session.commit()`; if either raises, neither persists. That is what makes the trail
+    honest: a row in `audit_logs` always describes a purge that actually happened.
+
+    **Degradation matches `clear_login_locks`' shape** (D7): any failure becomes a note of
+    the form `f"purge-audit: failed with <class> (detail withheld on purpose)"`, never a
+    re-raise, and the returned count is `0` on failure — the count is unknown when the audit
+    row was never written, and the report should not lie about what it did.
+
+    Returns `(count, note)` so the caller can pin the count into `report.counts` and append
+    the note to `report.notes` if any — same shape as `clear_login_locks`' `(uncleared_ids,
+    notes)`. Skips and returns `(0, None)` if `tenant_id` or `started_at` is `None` —
+    `prepare` did not run, so there is no cutoff to compute from. The skip is silent by
+    design: the count is unknown, not zero, and the run did not promise a purge.
+    """
+    if tenant_id is None or started_at is None:
+        return (0, None)
+    cutoff = started_at - timedelta(days=DEMO_AUDIT_RETENTION_DAYS)
+    # `apply_plan` populates `started_at` from `prepare` and `tenant_id` from `scope`. Both
+    # fields default to `None` so a caller that never reached those phases — a stubbed-out
+    # `apply_plan` in tests, or a future path that exits between `refusal` and `prepare` —
+    # still has a renderable report. The safe thing here is to skip rather than guess:
+    # there is no cutoff to compute from, no tenant to scope to, and reporting a "purged 0
+    # rows" would lie about what was attempted.
+    try:
+        async with async_session_factory() as session:
+            bind_session_to_tenant(session, tenant_id)
+            audit = SqlAlchemyAuditLogRepository(session)
+            # Audit row FIRST (R3.2): even if `purge_old_audit_logs` then fails, this row
+            # tells the trail the purge was attempted. `deleted_count` is `0` at write time
+            # because no rows have been deleted yet; the actual count is reported via the
+            # return value and `report.counts["audit_logs_purged"]`. Sharing one
+            # `session.commit()` keeps the row and the DELETE atomic — the trail never
+            # describes a purge that did not actually happen.
+            purge_audit_row = AuditLogFactory.build(
+                tenant_id=tenant_id,
+                action=actions.AUDIT_LOG_PURGED,
+                entity_type=actions.ENTITY_AUDIT_LOG,
+                entity_id=uuid.uuid5(tenant_id, "demo-audit-purge"),
+                actor_user_id=None,
+                actor_ip=None,
+                changes=(
+                    ChangeSet(actions.ENTITY_AUDIT_LOG)
+                    .diff("deleted_count", None, 0)
+                    .diff("cutoff", None, cutoff.isoformat())
+                ),
+                # `started_at` is the same clock the seed anchors to, which keeps the
+                # `created_at` of the audit row consistent with the run it records. The row
+                # is also `started_at`-relative — its `created_at` is `started_at`, which is
+                # the floor of "today's run", so a future purge with the same cutoff will
+                # preserve it (D, Risks).
+                now=started_at,
+            )
+            await audit.add(tenant_id, purge_audit_row)
+            count = await purge_old_audit_logs(session, tenant_id, cutoff)
+            await session.commit()
+        return (count, None)
+    except Exception as exc:  # noqa: BLE001
+        return (
+            0,
+            f"purge-audit: failed with {type(exc).__name__} (detail withheld on purpose)",
+        )
+
+
 async def clear_login_locks(user_ids: list[uuid.UUID]) -> list[uuid.UUID]:
     """Lift the login lockout for the converged accounts. Never raises (D9.5).
 
@@ -946,6 +1098,14 @@ async def apply_plan(
                 )
             ).scalar_one_or_none() or StorageType.LOCAL
 
+        # Captured HERE so the `purge-audit` phase can derive a deterministic cutoff
+        # (design D3). Reading it again inside `purge-audit` would shift the cutoff by the
+        # time the reset takes to run — minutes today, irrelevant against 7 days; if the
+        # reset ever grows to hours, the drift stays proportional to the period and the
+        # rule stays correct. `prepare` is the only phase guaranteed to run before the
+        # post-commit phases, so this is the only correct place.
+        report.started_at = _now()
+
     async with _phase("bootstrap", report):
         report.counts.update(await bootstrap.apply_plan(session, plan.bootstrap, hasher))
 
@@ -1064,6 +1224,20 @@ async def run(plan: DemoResetPlan) -> DemoResetReport:
                 report.storage_keys, report.tenant_id, report.storage_type
             )
         )
+
+    async with _phase("purge-audit", report):
+        # `purge_old_audit_logs` opens and marks its own session (`_safe_purge_old_audit_logs`
+        # does the same), so this phase re-uses `report.tenant_id` — the demo tenant
+        # resolved during `scope` — without touching the closed session above. The count and
+        # the optional degradation note land in the report's shared fields; a failure here
+        # adds a note and exits 0, exactly like `storage-sweep` and `clear-lock`.
+        count, note = await _safe_purge_old_audit_logs(
+            report.tenant_id, report.started_at
+        )
+        report.counts["audit_logs_purged"] = count
+        report.purged_audit_count = count
+        if note is not None:
+            report.notes.append(note)
 
     async with _phase("clear-lock", report):
         uncleared = await clear_login_locks(report.converged_user_ids)
