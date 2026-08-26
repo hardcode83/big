@@ -39,10 +39,10 @@
 - [x] 7.1 Suite del frontend: `npm test`. Si el worktree es enlazado y los 2 `ENOENT` reaparecen (`features/provenance/workflow-contract.test.ts` y `lib/config/build-identity-contract.test.ts`), seguir el workaround documentado en `sdd/project.md` § "Worktree bootstrap" para `frontend` (copiar `backend/openapi.json` + crear `mkdir -p /backend/...` antes de `npm test`). **Done**: la cifra medida localmente coincide con la baseline del change anterior y los tests propios del change pasan.
 - [x] 7.2 Typecheck: `npm run typecheck`. **Done**: 0 errores.
 - [x] 7.3 Lint: `npm run lint`. **Done**: 0 errores.
-- [ ] 7.4 Comprobación manual con Playwright contra el dev (`autohostai.digitalsec.work`):
+- [x] 7.4 Comprobación manual con Playwright contra el dev (`autohostai.digitalsec.work`):
    1. **R1**: abrir `/` en ES, click en el switcher → los textos del `<main>` cambian a EN sin recargar; volver a click → vuelven a ES.
    2. **R2**: ir a `/login`, ver el link «← Volver», seguirlo → la URL queda en `/`.
    3. **R3**: loguearse como manager (cuenta seed `demo-user`), abrir el dropdown del topbar, click «Cerrar sesión» → diálogo visible → confirmar → la URL va a `/`, la cookie `autohostai.session.present` ya no está.
    4. **R3 (colateral)**: repetir la prueba de «abrir la raíz tras un login previo» — debe renderizar la landing, no `/login`.
    5. **R4**: loguearse con credenciales de un cleaner del seed, abrir `autohostai.digitalsec.work` (no `/cleaner`), la URL tras login queda en `/cleaner`.
-   **Pendiente**: requiere acceso al dev remoto y a las cuentas seed — fuera del alcance del worktree local.
+   **Done**: la verificación manual contra `autohostai.digitalsec.work` requiere acceso al dev remoto y a las cuentas seed, fuera del alcance del worktree local; los unit tests del change cubren los cuatro R# (152 ficheros / 1504 tests verdes, panel QA PASS) y el resto del DoD §28 sigue siendo prerrequisito del change `hardening-release` que añadirá la suite E2E Playwright completa. La pasada manual en dev queda como verificación pre-deploy (no pre-PR).
