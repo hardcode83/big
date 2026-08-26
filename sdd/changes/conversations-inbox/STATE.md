@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/conversations-inbox
-implementation_sha: 5f0c4a33c15739b22264ac2397b04a324675c753
+implementation_sha: 4d53ac8a94bcf7be655a1fcff03ab092b30db4e6
 pr_number: 124
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/124
 pr_state: OPEN
