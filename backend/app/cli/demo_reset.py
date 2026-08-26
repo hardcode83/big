@@ -744,7 +744,7 @@ async def _safe_purge_old_audit_logs(
 
     **Order of operations — audit row first, then purge, both in one commit.** R3.2
     requires the row to be written before the DELETE; both share one `session.commit()`
-    at line 804, so a DELETE that subsequently fails reverts the row with the transaction.
+    at line 813, so a DELETE that subsequently fails reverts the row with the transaction.
     The honest record of a failed attempt is the degradation note in the report
     (`purge-audit: failed with <ClassName> …`), not a committed row claiming
     `deleted_count=0` for a DELETE that never ran. The row's `deleted_count` is a known
