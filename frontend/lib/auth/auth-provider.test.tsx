@@ -434,6 +434,7 @@ function renderAuthWithCache(cache: QueryClient, inner?: ReactNode) {
     <RuntimeConfigProvider
       config={{
         apiBaseUrl: "",
+        appUrl: "",
         appEnv: "test",
         defaultLocale: "es",
         featureFlags: {},
