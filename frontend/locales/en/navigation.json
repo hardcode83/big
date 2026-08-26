@@ -125,5 +125,10 @@
     "light": "Light",
     "dark": "Dark",
     "system": "Follow the system"
+  },
+  "userMenu": {
+    "triggerLabel": "User menu",
+    "logout": "Sign out",
+    "anonymous": "User"
   }
 }

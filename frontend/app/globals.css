@@ -154,6 +154,11 @@
   --color-state-info-text: var(--state-info-text);
   --color-state-neutral-text: var(--state-neutral-text);
 
+  /* shadcn-style semantic aliases for destructive actions (logout, delete).
+   * Mapped onto the existing `state-error` palette so we keep one colour story. */
+  --color-destructive: var(--state-error);
+  --color-destructive-foreground: var(--surface-high);
+
   /* The two families of the export, self-hosted by `next/font` in
    * `app/layout.tsx` (design D8). Each carries a system fallback stack, so text
    * is readable before the face arrives and if it never does (R4.2). */

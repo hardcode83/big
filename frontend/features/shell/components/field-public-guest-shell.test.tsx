@@ -8,7 +8,22 @@ import { PublicShell } from "@/features/shell/components/public-shell";
 import { GuestShell } from "@/features/shell/components/guest-shell";
 
 const nav = vi.hoisted(() => ({ pathname: "/cleaner" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  // The cleaner/technician tops include the LocaleSwitcher (which now calls
+  // router.refresh() after writing the cookie). The tests never trigger the
+  // switcher, so a stable no-op spy is enough.
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+// Cleaner/technician tops now include the UserMenu (public-zone-hardening
+// R3/D2), which calls `useAuth()` to render the email trigger. The shell
+// tests do not exercise the menu itself, so a stub user is enough.
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    user: { email: "field@example.com" },
+    logout: vi.fn(),
+  }),
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));

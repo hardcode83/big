@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { FormEvent, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
@@ -7,6 +8,7 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/errors";
 import { useAuth } from "@/lib/auth";
+import { roleHome } from "../lib/role-home";
 
 function safeReturnTo(value: string | null): string {
   if (
@@ -31,7 +33,7 @@ function safeReturnTo(value: string | null): string {
 
 export function LoginForm() {
   const { t } = useTranslation("auth");
-  const { login, status } = useAuth();
+  const { login, status, user } = useAuth();
   const router = useRouter();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
@@ -43,7 +45,13 @@ export function LoginForm() {
     try {
       await login(email, password);
       const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      router.replace(safeReturnTo(returnTo));
+      // `?returnTo=` (when valid) wins — that is the visitor's intent. Without
+      // it, the role the backend just told us about decides (R4 + design D6):
+      // managers land on /dashboard, cleaners and technicians on their shells.
+      // `user` is set inside `auth-provider.login()` via the `/auth/me` call,
+      // so we do not pay an extra round-trip here.
+      const next = returnTo ? safeReturnTo(returnTo) : roleHome(user?.role);
+      router.replace(next);
     } catch (cause) {
       setError(cause instanceof ApiError && cause.code === "INVALID_CREDENTIALS"
         ? t("invalidCredentials")
@@ -94,6 +102,12 @@ export function LoginForm() {
       <Button type="submit" disabled={submitting}>
         {submitting ? t("loading") : t("submit")}
       </Button>
+      <Link
+        href="/"
+        className="tap-target self-start text-sm font-medium text-muted-foreground hover:text-foreground"
+      >
+        {t("backToLanding")}
+      </Link>
     </form>
   );
 }

@@ -125,5 +125,10 @@
     "light": "Claro",
     "dark": "Oscuro",
     "system": "Seguir al sistema"
+  },
+  "userMenu": {
+    "triggerLabel": "Menú de usuario",
+    "logout": "Cerrar sesión",
+    "anonymous": "Usuario"
   }
 }

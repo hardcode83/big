@@ -130,6 +130,10 @@ function looseRootFiles(): string[] {
 const EXCEPTIONS: Record<string, readonly string[]> = {
   // A scrim: identical in both themes by design, and not a numeric scale.
   "components/ui/sheet.tsx": ["bg-black/50"],
+  // The AlertDialog uses the same scrim rationale as the Sheet above — the
+  // overlay sits in front of the page in both themes, and naming it with a
+  // token would just hide a literal in one more level of indirection.
+  "components/ui/alert-dialog.tsx": ["bg-black/50"],
   // Replaces the `layout.tsx` that imports `globals.css`, so it literally has no
   // tokens available — the same reason it carries its i18n catalogue inline.
   // The needles are the whole declared values, because check 5 now reports what
@@ -327,11 +331,12 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     expect(format(violations)).toEqual([]);
   });
 
-  it("keeps the exception list to D12's three, so none can be smuggled in", () => {
+  it("keeps the exception list to D12's four, so none can be smuggled in", () => {
     // An exception nobody re-reads becomes a hole. Pinning the list means adding
     // one is a deliberate edit to this assertion, with a reviewer attached.
     expect(EXCEPTIONS).toEqual({
       "components/ui/sheet.tsx": ["bg-black/50"],
+      "components/ui/alert-dialog.tsx": ["bg-black/50"],
       "app/global-error.tsx": ["#555", "1px solid #ccc"],
       "app/opengraph-image.tsx": ["#006b5f", "#ffffff"],
     });
@@ -341,7 +346,11 @@ describe("colour tokens (R6.6, R1.5, design D12 + D13)", () => {
     // Every assertion above is «found nothing». If `sourceFiles()` returned an
     // empty list — a renamed directory, a bad join — all of them would pass.
     expect(FILES.length).toBeGreaterThan(100);
-    expect(DECLARED_TOKENS.size).toBe(25);
+    // 25 raw tokens (15 core + 10 state) + 2 destructive aliases mapped onto
+    // `state-error`/`surface-high` (public-zone-hardening). The aliases live in
+    // the same `@theme inline` block, so they inflate the alias count without
+    // adding a third block of raw colour values.
+    expect(DECLARED_TOKENS.size).toBe(27);
     // The ten typographic roles of D10, which check 3 must not read as colours.
     expect(DECLARED_TEXT_ROLES.size).toBe(10);
 

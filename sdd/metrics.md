@@ -73,3 +73,4 @@
 | landing-public | new, design, tasks, run, review, ship, archive | 2164329 | 293924 | 98099071 | 67.2193 | 2026-08-24 | 2026-08-25 |
 | reservation-amount-empty-render | new, design, tasks, run, review, ship, archive | 1348948 | 185290 | 33771859 | 28.5487 | 2026-08-24 | 2026-08-25 |
 | photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
+| public-zone-hardening | new, design, tasks, run, review | 1063847 | 186733 | 36048722 | 28.0119 | 2026-08-26 | — |
