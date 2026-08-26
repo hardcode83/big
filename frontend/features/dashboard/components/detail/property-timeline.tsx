@@ -189,7 +189,7 @@ export function PropertyTimeline({ propertyId }: { propertyId: string }) {
         <p
           id="timeline-range-error"
           role="alert"
-          className="text-xs text-destructive"
+          className="text-xs text-state-error-text"
         >
           {t("timeline.range.errorInverse")}
         </p>

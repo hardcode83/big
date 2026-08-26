@@ -121,19 +121,25 @@ export function DetailFinancialBlock({
         <div>
           <dt className="text-muted-foreground">{t("fields.gross")}</dt>
           <dd>
-            {grossAmount ?? ""} {currency}
+            {grossAmount !== null
+              ? `${grossAmount} ${currency}`
+              : "—"}
           </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.net")}</dt>
           <dd>
-            {netAmount ?? ""} {currency}
+            {netAmount !== null
+              ? `${netAmount} ${currency}`
+              : "—"}
           </dd>
         </div>
         <div>
           <dt className="text-muted-foreground">{t("fields.ota")}</dt>
           <dd>
-            {otaCommission ?? ""} {currency}
+            {otaCommission !== null
+              ? `${otaCommission} ${currency}`
+              : "—"}
           </dd>
         </div>
       </dl>

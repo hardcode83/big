@@ -1,0 +1,48 @@
+{
+  "meta": {
+    "title": "AutoHostAI — La capa operativa de tu alquiler vacacional",
+    "description": "AutoHostAI centraliza reservas, limpieza, mantenimiento e incidencias en una sola consola operativa para viviendas turísticas."
+  },
+  "hero": {
+    "eyebrow": "Capa operativa para viviendas turísticas",
+    "title": "Una consola para toda tu operación de alquiler vacacional",
+    "subtitle": "AutoHostAI conecta tu PMS con la limpieza, el mantenimiento, las incidencias y los reportes. Tu equipo trabaja sobre la misma información, sin hojas de cálculo que se desactualizan."
+  },
+  "marketing": {
+    "login": "Iniciar sesión",
+    "featuresAnchor": "Características"
+  },
+  "features": {
+    "reservations": {
+      "title": "Reservas centralizadas",
+      "body": "Una sola vista de cada estancia: check-ins, check-outs, pagos y cambios de última hora, sincronizados con tu PMS."
+    },
+    "cleaning": {
+      "title": "Limpieza y mantenimiento",
+      "body": "Tareas, fotos de entrega y recordatorios que cierran el ciclo entre tu equipo de limpieza, tus técnicos y tus huéspedes."
+    },
+    "incidents": {
+      "title": "Control de incidencias",
+      "body": "Apertura, asignación y cierre con un historial trazable. Cada incidencia sabe a qué estancia y propiedad pertenece."
+    },
+    "analytics": {
+      "title": "Analítica operativa",
+      "body": "Tiempo de respuesta, ocupación efectiva y costes por estancia — los números que de verdad mueven tu cuenta de resultados."
+    }
+  },
+  "stats": {
+    "line1": "Una consola para tu operación",
+    "line2": "Construido sobre la pila que tu equipo ya confía"
+  },
+  "cta": {
+    "title": "Pruébalo con tus propias propiedades",
+    "buttonLabel": "Empezar",
+    "buttonHref": "/login"
+  },
+  "footer": {
+    "product": [],
+    "company": [],
+    "legal": [],
+    "copyright": "© 2026 AutoHostAI"
+  }
+}

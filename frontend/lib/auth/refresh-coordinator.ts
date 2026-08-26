@@ -5,6 +5,7 @@ import {
   setSessionTokens,
   type SessionTokens,
 } from "./session-store";
+import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
 
 export type RefreshTokens = (refreshToken: string) => Promise<SessionTokens>;
 
@@ -49,11 +50,13 @@ export function refreshSession(refreshTokens: RefreshTokens): Promise<SessionTok
         throw new SessionInvalidatedError();
       }
       setSessionTokens(next);
+      markSessionPresent();
       return next;
     })
     .catch((error: unknown) => {
       if (getSessionGeneration() === generation) {
         clearSessionTokens();
+        clearSessionPresent();
       }
       throw error;
     })

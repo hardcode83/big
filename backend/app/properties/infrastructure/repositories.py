@@ -8,7 +8,7 @@ No method commits: the transactional boundary is the use case (design D4).
 """
 
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -151,6 +151,38 @@ class SqlAlchemyPropertyRepository:
         # The rationale is narrowness — see the port docstring, which also says which security
         # rule this is NOT.
         return {row.id: row.current_operational_state for row in result}
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> Sequence[Property]:
+        """One statement for N properties (`reservation-property-identity` D2).
+
+        Symmetric to `SqlAlchemyGuestRepository.list_for_ids`. Three rules from the port that
+        this is the place to keep, not paraphrase:
+
+        - Empty input returns `[]` without a SQL round-trip (no `IN ()`).
+        - A property not of this tenant is simply absent from the result; the caller keys by
+          `id`, so the neighbour's id and a nonexistent one look the same.
+        - `None`/duplicate ids in the input are filtered out before the SQL, so the sequence
+          cannot hold an `id = ANY(ARRAY[NULL::uuid])` surprise.
+
+        Selects whole rows: this is the readable batch the listing uses to populate
+        `property_name` and `property_internal_code`, not a narrow summary, so there is no
+        narrower projection to defend than `_to_property` already does for `list_by_state`.
+        """
+        # De-`None` and dedupe here, not in the SQL: an `id = ANY(ARRAY[...])` over a
+        # Python-level sequence with `None`s is exactly the surprise the port's docstring
+        # warns against, and deduping also costs nothing — Python sets in microseconds.
+        cleaned = {property_id for property_id in property_ids if property_id is not None}
+        if not cleaned:
+            return []
+        result = await self._session.execute(
+            select(PropertyModel).where(
+                PropertyModel.tenant_id == tenant_id,
+                PropertyModel.id.in_(list(cleaned)),
+            )
+        )
+        return [_to_property(model) for model in result.scalars()]
 
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         if property.tenant_id != tenant_id:

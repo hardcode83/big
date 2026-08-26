@@ -74,6 +74,7 @@ describe("authenticated surface integration", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <I18nProvider locale="es">

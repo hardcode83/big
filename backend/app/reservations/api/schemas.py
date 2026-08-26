@@ -142,6 +142,15 @@ class ReservationResponse(BaseModel):
     cleaning_required: bool
     special_requests: str | None
     internal_notes: str | None
+    # The next three are derived — populated by the read-model composition of
+    # `reservation-property-identity` (R1, R2, R3, R4), never accepted from the client.
+    # A `None` value with the key intact is the deliberate "degrade, don't 404" outcome
+    # when the FK did not resolve in the tenant (R1.2 / R2.2 / R3.3 / R4.2 + D5), and the
+    # R5.4/D6 pin test asserts this DTO does not grow any other field from `Property` or
+    # `GuestSummary` without being told to.
+    property_name: str | None = None
+    property_internal_code: str | None = None
+    guest_full_name: str | None = None
     created_at: datetime
     updated_at: datetime
 
@@ -173,6 +182,13 @@ class ReservationResponse(BaseModel):
             cleaning_required=reservation.cleaning_required,
             special_requests=reservation.special_requests,
             internal_notes=reservation.internal_notes,
+            # The three identity fields ride on the entity — the use case populates them
+            # once and `from_domain` carries them. The pin test enforces that **no
+            # additional** `Property`/`GuestSummary` field sneaks in here, so a future
+            # caller cannot read `property.address_line1` by adding one more line below.
+            property_name=reservation.property_name,
+            property_internal_code=reservation.property_internal_code,
+            guest_full_name=reservation.guest_full_name,
             created_at=reservation.created_at,
             updated_at=reservation.updated_at,
         )
@@ -183,6 +199,12 @@ class ReservationDetailResponse(ReservationResponse):
 
     @classmethod
     def from_detail(cls, detail: ReservationDetail) -> "ReservationDetailResponse":
+        # The three derived identity fields are populated on `detail.reservation`
+        # by `GetReservationUseCase.execute`, so `from_domain` already carries them.
+        # `detail.property_name`/`property_internal_code` exist on the read model
+        # for callers that have only the `ReservationDetail`, not the response — the
+        # two values are equal by construction, and the use-case tests (`test_use_cases`)
+        # pin that. Re-forwarding them here would be double-setting.
         base = ReservationResponse.from_domain(detail.reservation)
         return cls(
             **base.model_dump(),

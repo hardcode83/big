@@ -16,6 +16,7 @@ describe("public runtime config (D15)", () => {
     delete process.env.BACKEND_INTERNAL_URL;
     delete process.env.NEXT_PUBLIC_APP_VERSION;
     delete process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT;
+    delete process.env.NEXT_PUBLIC_APP_URL;
   });
 
   afterEach(() => {
@@ -34,6 +35,7 @@ describe("public runtime config (D15)", () => {
       featureFlags: {},
       appVersion: "0.1.0+2026-07-30.a2f3c1d",
       buildCommitShort: "a2f3c1d",
+      appUrl: "",
     });
   });
 
@@ -77,6 +79,7 @@ describe("public runtime config (D15)", () => {
       "featureFlags",
       "appVersion",
       "buildCommitShort",
+      "appUrl",
     ]);
   });
 
@@ -195,6 +198,34 @@ describe("public runtime config (D15)", () => {
     expect(featureFlags).toEqual({});
     expect(Object.isFrozen(featureFlags)).toBe(true);
   });
+
+  it("falls back to empty string when NEXT_PUBLIC_APP_URL is unset or off-shape", () => {
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+
+    process.env.NEXT_PUBLIC_APP_URL = "   ";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+
+    process.env.NEXT_PUBLIC_APP_URL = "not-a-url";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+
+    process.env.NEXT_PUBLIC_APP_URL = "/relative/only";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+
+    process.env.NEXT_PUBLIC_APP_URL = "ftp://example.com";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+
+    process.env.NEXT_PUBLIC_APP_URL = "javascript:alert(1)";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("");
+  });
+
+  it("passes a valid absolute URL through unchanged", () => {
+    process.env.NEXT_PUBLIC_APP_URL = "https://app.autohostai.com/";
+    const config = buildPublicRuntimeConfig();
+    expect(config.appUrl).toBe("https://app.autohostai.com/");
+
+    process.env.NEXT_PUBLIC_APP_URL = "http://localhost:3000";
+    expect(buildPublicRuntimeConfig().appUrl).toBe("http://localhost:3000/");
+  });
 });
 
 describe("RuntimeConfigProvider", () => {
@@ -212,6 +243,7 @@ describe("RuntimeConfigProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <Probe />

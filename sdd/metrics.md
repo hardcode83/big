@@ -67,4 +67,8 @@
 | cleaning-stall-blocks-next-stay | design, tasks, run, review, ship, archive | 766276 | 1683373 | 401801053 | 230.5488 | 2026-08-23 | 2026-08-24 |
 | cleaner-photo-requirements | new, tasks, design, run, review, ship, archive | 294118 | 905142 | 145527899 | 100.3441 | 2026-08-23 | 2026-08-24 |
 | demo-user | new, design, tasks, run, review, ship, archive | 874656 | 2101808 | 447123139 | 283.8617 | 2026-08-23 | 2026-08-24 |
-| demo-tenant-audit-retention | new, design, tasks, run, review | 3724197 | 265380 | 54736647 | 52.6307 | 2026-08-24 | — |
+| demo-tenant-audit-retention | new, design, tasks, run, review, ship | 3963033 | 270533 | 56607765 | 54.8893 | 2026-08-24 | — |
+| design-system-tokens | new, design, tasks, run, review, ship, archive | 3109813 | 2017252 | 343062928 | 249.3879 | 2026-08-23 | 2026-08-24 |
+| landing-public | new, design, tasks, run, review, ship, archive | 2164329 | 293924 | 98099071 | 67.2193 | 2026-08-24 | 2026-08-25 |
+| reservation-amount-empty-render | new, design, tasks, run, review, ship, archive | 1348948 | 185290 | 33771859 | 28.5487 | 2026-08-24 | 2026-08-25 |
+| photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |

@@ -61,7 +61,7 @@ export function LoginForm() {
     >
       <h1 className="text-2xl font-semibold text-foreground">{t("title")}</h1>
       {error ? (
-        <p role="alert" className="text-sm text-destructive">
+        <p role="alert" className="text-sm text-state-error-text">
           {error}
         </p>
       ) : null}

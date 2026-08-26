@@ -12,6 +12,7 @@ import {
 
 import {
   createAuthenticatedClients,
+  notifySessionExpired,
   subscribeToSessionExpired,
 } from "@/lib/api/authenticated-client";
 import type { components } from "@/lib/api/generated/openapi";
@@ -22,6 +23,8 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "./session-store";
+import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
+import { purgeSessionCache } from "./session-cache-purge";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 export type AuthStatus =
@@ -53,15 +56,20 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       onStatusChange: (nextStatus) => {
         setStatus(nextStatus);
       },
-      onSessionExpired: () => {
-        setUser(null);
-      },
+      // Funnel the 401 → refresh-failure path through the same listener the
+      // feature clients use (D3 row 4). The listener at the useEffect below
+      // purges the cache before resetting user/status, so a session that the
+      // AuthProvider's own apiClient loses through refresh failure ends up in
+      // the same state as any other 401.
+      onSessionExpired: notifySessionExpired,
     });
   }, [apiBaseUrl]);
 
   useEffect(() => {
     return subscribeToSessionExpired(() => {
+      purgeSessionCache();
       setUser(null);
+      clearSessionPresent();
       setStatus("expired");
     });
   }, []);
@@ -78,11 +86,14 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           accessToken: tokens.access_token,
           refreshToken: tokens.refresh_token,
         });
+        purgeSessionCache();
+        markSessionPresent();
         const currentUser = await clients.apiClient.request("/api/v1/auth/me");
         setUser(currentUser);
         setStatus("authenticated");
       } catch (error) {
         clearSessionTokens();
+        clearSessionPresent();
         setUser(null);
         setStatus("error");
         throw error;
@@ -98,6 +109,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
       setStatus("authenticated");
       return true;
     } catch {
+      purgeSessionCache();
       setUser(null);
       setStatus("expired");
       return false;
@@ -114,7 +126,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } catch {
       // Logout is best-effort; local credentials are always discarded below.
     } finally {
+      purgeSessionCache();
       clearSessionTokens();
+      clearSessionPresent();
       setUser(null);
       setStatus("anonymous");
     }

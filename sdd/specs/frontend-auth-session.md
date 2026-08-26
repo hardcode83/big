@@ -55,7 +55,25 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   de navegación interna segura.
 - WHEN el usuario cierra sesión, THE SYSTEM SHALL intentar
   `POST /api/v1/auth/logout` si existe sesión, limpiar siempre el almacén en
-  memoria y devolver la UX a `/login`.
+  memoria, purgar la caché de consultas del `QueryClient` singleton y devolver
+  la UX a `/login`.
+- IF el `POST /api/v1/auth/logout` falla o no existe sesión, THEN THE SYSTEM
+  SHALL purgar igualmente la caché de consultas del `QueryClient` singleton y
+  limpiar el almacén en memoria — la limpieza local es incondicional.
+- WHEN el `AuthProvider` reemplaza la identidad autenticada por un usuario
+  cuyo `id` o `tenant_id` difiere del anterior —incluido el paso a `null` por
+  expiración o por refresh fallido, y el paso `null → user` del primer login
+  del runtime—, THE SYSTEM SHALL purgar todas las entradas del `QueryClient`
+  singleton **antes** de que el nuevo estado sea visible para el resto de la
+  app.
+- THE SYSTEM SHALL purgar la caché con `QueryClient.clear()` (vacía
+  `queryCache`, `mutationCache` y el estado no reactivo), sin discriminar por
+  clave ni condicionar la purga al evento que disparó el cambio: el logout
+  explícito y cualquier otra transición de identidad son el mismo hecho desde
+  el punto de vista de la caché.
+- THE SYSTEM SHALL integrar la función de purga como dependencia en un único
+  sentido (`lib/auth → lib/query`), sin introducir un `useEffect` paralelo ni
+  mover el `QueryClient` ni su ciclo de vida fuera de `lib/query`.
 - THE SYSTEM SHALL proteger las superficies workspace, cleaner y technician
   con `AuthGuard`, y SHALL dejar sin guard JWT la shell pública y el portal guest.
 - THE SYSTEM SHALL tratar rol y tenant como datos de contexto para UI y SHALL
@@ -69,13 +87,19 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
 - IF falta una clave de `auth` en cualquiera de los locales, THEN THE SYSTEM
   SHALL fallar el test automatizado de paridad.
 - THE SYSTEM SHALL verificar login, identidad, errores, refresh, logout, ausencia
-  de persistencia y redirección client-side mediante tests.
+  de persistencia, redirección client-side y purga del `QueryClient` singleton
+  en cada transición de identidad del runtime (logout, swap de usuario, refresh
+  fallido y expiración notificada) mediante tests.
 
 ## Key files
 
 - `frontend/lib/auth/session-store.ts` — tokens efímeros.
 - `frontend/lib/auth/refresh-coordinator.ts` — refresh single-flight.
 - `frontend/lib/auth/auth-provider.tsx` — contexto y ciclo de sesión.
+- `frontend/lib/auth/session-cache-purge.ts` — purga del `QueryClient`
+  singleton en cada transición de identidad del runtime.
+- `frontend/lib/query/query-client.ts` — `QueryClient` singleton y
+  `QueryClient.clear()` consumido por `session-cache-purge.ts`.
 - `frontend/lib/api/client.ts` — transporte tipado y hook de `401`.
 - `frontend/features/auth/components/login-form.tsx` — formulario y retorno seguro.
 - `frontend/features/auth/components/auth-guard.tsx` — guard client-side de UX.

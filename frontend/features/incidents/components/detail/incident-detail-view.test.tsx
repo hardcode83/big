@@ -5,6 +5,8 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import esIncidents from "@/locales/es/incidents.json";
 import esStates from "@/locales/es/states.json";
 import { ApiError } from "@/lib/api";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
+import { severityColorGroup } from "../../lib/severity-tone";
 
 const useIncidentMock = vi.hoisted(() => vi.fn());
 vi.mock("../../hooks/use-incidents", () => ({
@@ -235,5 +237,45 @@ describe("IncidentDetailView", () => {
     expect(container.textContent).not.toMatch(/€|\$|EUR|USD|GBP/);
     // "—" for null final_cost
     expect(container.textContent).toContain("—");
+  });
+
+  /**
+   * The wiring, not the map — raised by the QA panel on section 7.
+   *
+   * `severity-tone.test.ts` proves the enum→tone map is right and this file
+   * proved the label renders, but nothing asserted the badge takes its colour
+   * from the severity. `severityColorGroup(status)` instead of `severity` is a
+   * plausible typo at the call site, and it used to keep every test green.
+   *
+   * Two severities, deliberately: `DETAIL` ships `severity: "LOW"` with
+   * `status: "CLASSIFIED"`, and both resolve to `gray`, so LOW alone proves
+   * nothing. `CRITICAL` resolves to `red` while its status stays `CLASSIFIED`,
+   * which is what makes the wrong field visible.
+   */
+  it.each([
+    ["LOW", "CLASSIFIED"],
+    ["CRITICAL", "CLASSIFIED"],
+  ] as const)(
+    "colours the %s badge from the severity, not the status (R6.4, D7)",
+    (severity, status) => {
+      useIncidentMock.mockReturnValue({
+        isPending: false,
+        isError: false,
+        isSuccess: true,
+        data: { ...DETAIL, severity, status },
+        refetch: vi.fn(),
+      });
+      renderDetail();
+      const badge = screen.getByText(esIncidents.severity[severity]);
+      expect(badge.className).toBe(
+        TONE_BADGE_CLASS[severityColorGroup(severity)],
+      );
+    },
+  );
+
+  it("gives CRITICAL and LOW different tones, so the test above discriminates", () => {
+    expect(TONE_BADGE_CLASS[severityColorGroup("CRITICAL")]).not.toBe(
+      TONE_BADGE_CLASS[severityColorGroup("LOW")],
+    );
   });
 });
