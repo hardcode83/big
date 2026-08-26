@@ -1,3 +1,5 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
@@ -9,6 +11,7 @@ import {
 } from "@/lib/auth/session-store";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
+import { makeQueryClient } from "@/lib/query/query-client";
 import { act, fireEvent, render, screen } from "@/test/render";
 
 function readPresenceCookie(): string | null {
@@ -394,5 +397,299 @@ describe("AuthProvider", () => {
     expect(await screen.findByTestId("status")).toHaveTextContent("expired");
     expect(fetchImpl).toHaveBeenCalledOnce();
     expect(getSessionTokens()).toBeNull();
+  });
+});
+
+/**
+ * Cache-invariant tests (design D5): every identity transition in `AuthProvider`
+ * must purge the singleton `QueryClient` so that the next user logged into the
+ * same tab cannot read cached data from the previous one. The QueryClient
+ * returned by `getQueryClient()` is replaced with a fresh per-test instance so
+ * the assertions only see what the test wrote, and so a future HMR or shared
+ * state in the browser singleton cannot bleed across tests.
+ */
+const cacheClientRef = vi.hoisted(() => ({
+  current: null as QueryClient | null,
+}));
+
+vi.mock("@/lib/query/query-client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/lib/query/query-client")>();
+  return {
+    ...actual,
+    // When a cache-invariant test has registered a mock client, return that.
+    // Otherwise fall back to the real singleton so pre-existing tests
+    // (which never touched the cache) keep working after `AuthProvider`
+    // started calling `purgeSessionCache()` at every identity transition.
+    getQueryClient: () => cacheClientRef.current ?? actual.getQueryClient(),
+  };
+});
+
+function freshCache(): QueryClient {
+  cacheClientRef.current = makeQueryClient();
+  return cacheClientRef.current;
+}
+
+function renderAuthWithCache(cache: QueryClient, inner?: ReactNode) {
+  return render(
+    <RuntimeConfigProvider
+      config={{
+        apiBaseUrl: "",
+        appUrl: "",
+        appEnv: "test",
+        defaultLocale: "es",
+        featureFlags: {},
+        appVersion: "",
+        buildCommitShort: "",
+      }}
+    >
+      <QueryClientProvider client={cache}>
+        <AuthProvider>
+          <Probe />
+          {inner}
+        </AuthProvider>
+      </QueryClientProvider>
+    </RuntimeConfigProvider>,
+  );
+}
+
+describe("AuthProvider — query cache purge on identity transitions", () => {
+  afterEach(() => {
+    cacheClientRef.current = null;
+  });
+
+  it("purges the query cache when logout completes (R4.1)", async () => {
+    const cache = freshCache();
+    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    const fetchImpl = vi.fn().mockResolvedValue(new Response(null, { status: 204 }));
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function LogoutProbe() {
+      const { logout } = useAuth();
+      return <button onClick={() => void logout()}>logout</button>;
+    }
+
+    renderAuthWithCache(cache, <LogoutProbe />);
+    cache.setQueryData(["tenant", "t-1", "properties"], [{ id: "p-1" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "logout" }));
+
+    await screen.findByTestId("status");
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("purges the query cache even when the POST /auth/logout fails (R1.2)", async () => {
+    const cache = freshCache();
+    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "expired" } }),
+        { status: 401 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function LogoutProbe() {
+      const { logout } = useAuth();
+      return <button onClick={() => void logout()}>logout</button>;
+    }
+
+    renderAuthWithCache(cache, <LogoutProbe />);
+    cache.setQueryData(["tenant", "t-1", "properties"], [{ id: "p-1" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "logout" }));
+
+    await screen.findByTestId("status");
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("purges the query cache when a same-tenant user swap completes (R5.1)", async () => {
+    const cache = freshCache();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "user-1",
+            email: "user-1@example.com",
+            name: "User One",
+            preferred_language: "es",
+            role: "TENANT_OWNER",
+            tenant_id: "tenant-1",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "user-2",
+            email: "user-2@example.com",
+            name: "User Two",
+            preferred_language: "es",
+            role: "TENANT_OWNER",
+            tenant_id: "tenant-1",
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function LoginProbe() {
+      const { login } = useAuth();
+      return (
+        <button
+          onClick={() =>
+            void login("user-1@example.com", "secret").then(() =>
+              login("user-2@example.com", "secret"),
+            )
+          }
+        >
+          login
+        </button>
+      );
+    }
+
+    renderAuthWithCache(cache, <LoginProbe />);
+    cache.setQueryData(["tenant", "tenant-1", "properties"], [{ id: "p-1" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "login" }));
+
+    await screen.findByTestId("status");
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("purges the query cache when a cross-tenant user swap completes (R5.1 — OQ3)", async () => {
+    const cache = freshCache();
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "user-1",
+            email: "user-1@example.com",
+            name: "User One",
+            preferred_language: "es",
+            role: "TENANT_OWNER",
+            tenant_id: "tenant-1",
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            access_token: "access",
+            refresh_token: "refresh",
+            token_type: "bearer",
+            expires_in: 900,
+          }),
+          { status: 200 },
+        ),
+      )
+      .mockResolvedValueOnce(
+        new Response(
+          JSON.stringify({
+            id: "user-2",
+            email: "user-2@example.com",
+            name: "User Two",
+            preferred_language: "es",
+            role: "TENANT_OWNER",
+            tenant_id: "tenant-2",
+          }),
+          { status: 200 },
+        ),
+      );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function LoginProbe() {
+      const { login } = useAuth();
+      return (
+        <button
+          onClick={() =>
+            void login("user-1@example.com", "secret").then(() =>
+              login("user-2@example.com", "secret"),
+            )
+          }
+        >
+          login
+        </button>
+      );
+    }
+
+    renderAuthWithCache(cache, <LoginProbe />);
+    cache.setQueryData(["tenant", "tenant-1", "properties"], [{ id: "p-1" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "login" }));
+
+    await screen.findByTestId("status");
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("purges the query cache when refresh fails and falls back to expired (R2.1)", async () => {
+    const cache = freshCache();
+    setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
+    const fetchImpl = vi.fn().mockResolvedValue(
+      new Response(
+        JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "expired" } }),
+        { status: 401 },
+      ),
+    );
+    vi.stubGlobal("fetch", fetchImpl);
+
+    function RefreshProbe() {
+      const { refresh } = useAuth();
+      return <button onClick={() => void refresh()}>refresh</button>;
+    }
+
+    renderAuthWithCache(cache, <RefreshProbe />);
+    cache.setQueryData(["tenant", "tenant-1", "properties"], [{ id: "p-1" }]);
+
+    fireEvent.click(screen.getByRole("button", { name: "refresh" }));
+
+    await screen.findByTestId("status");
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("purges the query cache when the session-expired listener fires (R5.2)", async () => {
+    const cache = freshCache();
+    renderAuthWithCache(cache);
+    cache.setQueryData(["tenant", "tenant-1", "properties"], [{ id: "p-1" }]);
+
+    act(() => notifySessionExpired());
+
+    expect(cache.getQueryCache().getAll()).toHaveLength(0);
   });
 });
