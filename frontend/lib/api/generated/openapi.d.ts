@@ -970,11 +970,15 @@ export interface components {
     BlockedTransitionResponse: {
       /** Blocking State */
       blocking_state: string;
+      /** Cleaning Task Id */
+      cleaning_task_id?: string | null;
       /**
        * Due Since
        * Format: date-time
        */
       due_since: string;
+      /** Incident Id */
+      incident_id?: string | null;
       /** Property Code */
       property_code: string;
       /**

@@ -299,10 +299,34 @@
             "title": "Blocking State",
             "type": "string"
           },
+          "cleaning_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Task Id"
+          },
           "due_since": {
             "format": "date-time",
             "title": "Due Since",
             "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
           },
           "property_code": {
             "title": "Property Code",

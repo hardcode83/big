@@ -178,6 +178,24 @@ class FakeIncidentReader:
     async def list_open_for_property(self, tenant_id, property_id) -> Sequence[IncidentSummary]:
         return list(self.open_by_property.get(property_id, []))
 
+    async def list_open_for_properties(
+        self, tenant_id, property_ids
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """Test double for the batch sibling added by `blocked-transition-response-ids` (R3.4).
+
+        Mirrors the production contract: returns `dict[property_id, incident_id]` (NOT a
+        summary — the port is narrow per `steering/backend-architecture.md`'s "puertos
+        pequeños y por rol" rule). Sparse mapping (a property with no open incident is
+        absent), first occurrence per property wins. Existing tests keep
+        `open_by_property[pid][0]` as the newest by convention; we project to its id.
+        """
+        wanted = set(property_ids)
+        by_property: dict[uuid.UUID, uuid.UUID] = {}
+        for pid, summaries in self.open_by_property.items():
+            if pid in wanted and summaries and pid not in by_property:
+                by_property[pid] = summaries[0].id
+        return by_property
+
 
 @dataclass
 class FakeOwnerApprovalReader:

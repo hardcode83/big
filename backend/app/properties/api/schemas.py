@@ -423,6 +423,13 @@ class BlockedTransitionResponse(BaseModel):
     trigger: str
     blocking_state: str
     due_since: datetime
+    # Action ids (R2.1, R2.2 of `blocked-transition-response-ids`): the resource a button on the
+    # dashboard would call a mutation against. Optional because the lookup is "open task/incident
+    # on the property" and the absence is a real answer, not a missing value — see R2.3 and R2.4.
+    # Never accept these from request input; they are populated server-side from
+    # `cleaning_tasks`/`incidents` rows tenant-scoped to the verified token (R3).
+    cleaning_task_id: uuid.UUID | None = None
+    incident_id: uuid.UUID | None = None
 
     @classmethod
     def from_row(cls, row: BlockedTransitionRow) -> "BlockedTransitionResponse":
@@ -433,6 +440,12 @@ class BlockedTransitionResponse(BaseModel):
             trigger=row.mismatch.trigger.value,
             blocking_state=row.mismatch.blocking_state.value,
             due_since=row.mismatch.due_since,
+            # Action ids populated by `ActionIdResolver` in `ListBlockedTransitionsUseCase`
+            # (R2 of `blocked-transition-response-ids`). The row carries them as `None`
+            # until the resolver fills them in; a `None` here serialises to JSON `null`
+            # and is what the dashboard's mutation buttons render as "no resource to call".
+            cleaning_task_id=row.cleaning_task_id,
+            incident_id=row.incident_id,
         )
 
 
