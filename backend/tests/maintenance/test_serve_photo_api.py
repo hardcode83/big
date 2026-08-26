@@ -55,6 +55,15 @@ JPEG = b"\xff\xd8\xff" + b"\x11" * 64
 PNG = b"\x89PNG\r\n\x1a\n" + b"\x22" * 64
 WEBP = b"RIFF\x00\x00\x00\x00WEBP" + b"\x33" * 64
 
+# What the route's `max-age` is bounded by: `exp - request_time - BOUND_SECONDS`, i.e. what
+# was left of the signature when the request was issued, minus a processing-time margin.
+# Motivated by `abs(3600 - 3594)` = 6 s measured 2026-08-23 during the QA panel of
+# `demo-user` (archived 2026-08-24); strictly larger than that worst case to leave headroom
+# on slower hosts. Editable if a future run observes a larger gap — both clocks are wall
+# (`time.time()` / `datetime.now(timezone.utc)`), so NTP drift on the host is not a reason
+# to inflate this.
+BOUND_SECONDS = 10
+
 pytestmark = pytest.mark.asyncio
 
 
@@ -203,20 +212,85 @@ async def test_the_bytes_carry_nosniff_exactly_once(photo_api, world, db_session
 async def test_the_bytes_carry_a_private_cache_control_bounded_by_the_signature(
     photo_api, world, db_session
 ):
-    """R4.5 — `private, max-age=<what is left of the signature>`."""
+    """R4.5 — `private, max-age=<what is left of the signature, minus a processing margin>`.
+
+    The bound is computed against `request_time` (captured once, **before** the GET) rather
+    than `time.time()` evaluated at the assert, so the test cannot turn red because the
+    host's scheduler moved the test process between the response and the assertion: that
+    was the failure mode observed on 2026-08-23 (`abs(3600 - 3594) = 6 s`, panel QA of
+    `demo-user`, archived 2026-08-24).
+    """
     await _local(db_session, world.tenant.id)
     photo = await _upload(photo_api, world, db_session)
     _, exp, _ = _parts(photo["url"])
 
+    request_time = time.time()
     response = await photo_api.get(photo["url"])
 
     cache_control = response.headers["cache-control"]
     assert cache_control.startswith("private, max-age=")
     max_age = int(cache_control.rsplit("=", 1)[1])
-    remaining = int(exp) - int(time.time())
-    assert 0 < max_age <= SIGNED_URL_TTL_SECONDS
-    # Within a couple of seconds of what is actually left, not merely under the ceiling.
-    assert abs(max_age - remaining) <= 5
+
+    assert 0 < max_age <= SIGNED_URL_TTL_SECONDS, (
+        f"max-age={max_age} fuera de la cota del TTL: "
+        f"0 < max-age <= {SIGNED_URL_TTL_SECONDS}"
+    )
+    assert max_age <= int(exp) - int(request_time), (
+        f"max-age={max_age} promete más de lo que le queda a la firma "
+        f"al recibir la petición (exp={exp}, request_time={request_time})"
+    )
+    assert max_age >= int(exp) - int(request_time) - BOUND_SECONDS, (
+        f"max-age={max_age} recorta demasiado: el servidor devolvió "
+        f"al menos {BOUND_SECONDS} s menos de lo que quedaba "
+        f"(exp={exp}, request_time={request_time}, BOUND_SECONDS={BOUND_SECONDS})"
+    )
+
+
+@pytest.mark.parametrize("expires_in", [30, 5])
+async def test_max_age_does_not_exceed_the_signature_remaining_at_request_time(
+    photo_api, world, db_session, expires_in
+):
+    """The upper bound of the cache-control cannot be told apart from the TTL ceiling
+    when the signature lasts 3600 s — this case exists to exercise it with a deliberately
+    short signature so a runaway server separates by a factor of 120× (3600 vs 30) or 720×
+    (3600 vs 5).
+
+    The URL is minted directly with `sign_storage_key` over the freshly-uploaded photo's
+    `storage_key`, same pattern as `_signed` in
+    `test_every_refusal_branch_answers_the_same_body_byte_for_byte`. The route does not
+    accept a custom `expires_in`, so this is the only way to land a short-lived signature
+    without modifying the production endpoint.
+    """
+    import uuid
+
+    from sqlalchemy import select
+
+    await _local(db_session, world.tenant.id)
+    photo = await _upload(photo_api, world, db_session)
+    row = (
+        await db_session.execute(
+            select(IncidentPhotoModel).where(
+                IncidentPhotoModel.id == uuid.UUID(photo["id"])
+            )
+        )
+    ).scalar_one()
+
+    expiry = int(time.time()) + expires_in
+    sig = sign_storage_key(
+        signing_key=_signing_key(), key=row.storage_key, expiry=expiry
+    )
+    short_url = f"{PHOTOS}/{photo['id']}?exp={expiry}&sig={sig}"
+
+    request_time = time.time()
+    response = await photo_api.get(short_url)
+
+    cache_control = response.headers["cache-control"]
+    assert cache_control.startswith("private, max-age=")
+    max_age = int(cache_control.rsplit("=", 1)[1])
+    assert max_age <= int(expiry) - int(request_time), (
+        f"max-age={max_age} excede lo que quedaba al recibir la petición "
+        f"(exp={expiry}, request_time={request_time}, ttl firmado={expires_in})"
+    )
 
 
 # --- the four refusals, one body (R4.3) -----------------------------------------------
