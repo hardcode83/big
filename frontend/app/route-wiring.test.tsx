@@ -1,4 +1,4 @@
-import { describe, expect, it, vi } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { CleaningView } from "@/features/cleaning";
 import { PropertyDetailView } from "@/features/dashboard";
@@ -9,13 +9,35 @@ const redirectMock = vi.hoisted(() =>
     throw new Error(`REDIRECT:${url}`);
   }),
 );
+const cookie = vi.hoisted(() => ({ value: undefined as string | undefined }));
 vi.mock("next/navigation", () => ({ redirect: redirectMock }));
+vi.mock("next/headers", () => ({
+  cookies: async () => ({
+    get: () => (cookie.value ? { value: cookie.value } : undefined),
+  }),
+}));
+
+afterEach(() => {
+  cookie.value = undefined;
+  redirectMock.mockReset();
+});
 
 describe("route wiring (tasks 7.2–7.6)", () => {
-  it("redirects the root to /dashboard", async () => {
-    const RootPage = (await import("@/app/(workspace)/page")).default;
-    expect(() => RootPage()).toThrow("REDIRECT:/dashboard");
-    expect(redirectMock).toHaveBeenCalledWith("/dashboard");
+  it("redirects the root to /dashboard when the session presence cookie is set", async () => {
+    cookie.value = "1";
+    const RootPage = (await import("@/app/page")).default;
+    await expect(RootPage()).rejects.toThrow("REDIRECT:/dashboard");
+    expect(redirectMock).toHaveBeenCalledWith("/dashboard", "replace");
+  });
+
+  it("renders the landing when the session presence cookie is absent", async () => {
+    cookie.value = undefined;
+    const RootPage = (await import("@/app/page")).default;
+    const element = await RootPage();
+    // The landing is wrapped in PublicShell and contains the hero
+    // section — a Server Component, so we look at the rendered JSX.
+    expect(element.type.name || element.type.displayName).toBeTruthy();
+    expect(redirectMock).not.toHaveBeenCalled();
   });
 
   it("wires the property detail page to PropertyDetailView with the awaited id", async () => {

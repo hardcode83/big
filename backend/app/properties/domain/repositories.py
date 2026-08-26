@@ -34,7 +34,7 @@ than aborting the batch.
 """
 
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -185,6 +185,39 @@ class PropertyRepository(Protocol):
         A tenant's portfolio is small by construction (units someone physically manages), so the
         risk is understood rather than overlooked — but a caller that only needs a subset should
         add a narrower method rather than filter this one in memory.
+        """
+        ...
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> Sequence[Property]:
+        """The properties named in `property_ids`, within `tenant_id` (`reservation-property-identity` D2).
+
+        The narrow batch reader that lets a listing resolve N property rows in ONE statement
+        instead of one per row. Symmetric to `GuestRepository.list_for_ids`
+        (`backend/app/guests/domain/repositories.py:32`): both compose a list response with
+        `tenant_id` explicit on each call, the same tenant-scoping choice `dashboard-api` D2
+        fixes and `guest-portal-api` defended against cross-tenant joins.
+
+        **Empty input short-circuits without querying.** A `list` row with no derivable ids
+        must not emit `IN ()`, for the same reason `list_by_state` refuses an empty `states`
+        (its own docstring): an empty collection is a structural "no candidates here", not a
+        SQL construct.
+
+        **Absent keys, not `None` mappings.** A property that does not resolve in the tenant —
+        neither neighbour nor non-existent — is **absent** from the returned sequence. The
+        caller keys by `id`; the absent and the dangling `property_id` are indistinguishable
+        from here, exactly as in `states_for` and `list_by_state`.
+
+        **`None` and duplicates in the input are silently dropped.** A `list` endpoint that
+        walks rows producing `property_id` or `None` could otherwise hand the batch reader a
+        sequence with `None`s, and `id = ANY(ARRAY[NULL::uuid])` is its own surprise. Tested
+        one notch higher than here, so a caller does not need to filter first.
+
+        The shape is `Sequence[Property]` rather than `dict[UUID, Property]` because the
+        caller already has the ids — that is what it is indexing by — and turning the batch
+        into a map was the work this method exists to centralise (so does
+        `GuestRepository.list_for_ids`, returning `Sequence[GuestSummary]`).
         """
         ...
 

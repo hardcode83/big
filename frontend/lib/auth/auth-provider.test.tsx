@@ -1,6 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { AuthProvider, useAuth } from "@/lib/auth";
 import { notifySessionExpired } from "@/lib/api/authenticated-client";
@@ -9,9 +9,25 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
+import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
 import { makeQueryClient } from "@/lib/query/query-client";
 import { act, fireEvent, render, screen } from "@/test/render";
+
+function readPresenceCookie(): string | null {
+  const cookies = document.cookie ? document.cookie.split("; ") : [];
+  const match = cookies.find((entry) => entry.startsWith(`${SESSION_PRESENT_COOKIE}=`));
+  return match ? match.slice(SESSION_PRESENT_COOKIE.length + 1) : null;
+}
+
+function clearAllCookies(): void {
+  document.cookie.split("; ").forEach((entry) => {
+    const name = entry.split("=")[0];
+    if (name) {
+      document.cookie = `${name}=; path=/; max-age=0; samesite=lax`;
+    }
+  });
+}
 
 function Probe() {
   const { status, user } = useAuth();
@@ -35,6 +51,7 @@ function renderAuth() {
         featureFlags: {},
         appVersion: "",
         buildCommitShort: "",
+        appUrl: "",
       }}
     >
       <AuthProvider>
@@ -45,8 +62,13 @@ function renderAuth() {
 }
 
 describe("AuthProvider", () => {
+  beforeEach(() => {
+    clearAllCookies();
+  });
+
   afterEach(() => {
     clearSessionTokens();
+    clearAllCookies();
     vi.unstubAllGlobals();
   });
 
@@ -103,6 +125,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>
@@ -119,6 +142,7 @@ describe("AuthProvider", () => {
     expect(screen.getByTestId("role")).toHaveTextContent("TENANT_OWNER");
     expect(screen.getByTestId("tenant")).toHaveTextContent("tenant-1");
     expect(getSessionTokens()).toEqual({ accessToken: "access", refreshToken: "refresh" });
+    expect(readPresenceCookie()).toBe("1");
     expect(new Headers(fetchImpl.mock.calls[1][1].headers).get("Authorization")).toBe(
       "Bearer access",
     );
@@ -153,6 +177,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>
@@ -166,6 +191,7 @@ describe("AuthProvider", () => {
 
     expect(await screen.findByTestId("status")).toHaveTextContent("error");
     expect(getSessionTokens()).toBeNull();
+    expect(readPresenceCookie()).toBeNull();
   });
 
   it("invalidates provider state when a shared client reports session expiration", async () => {
@@ -211,6 +237,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>
@@ -227,6 +254,7 @@ describe("AuthProvider", () => {
 
     expect(screen.getByTestId("status")).toHaveTextContent("expired");
     expect(screen.getByTestId("user")).toHaveTextContent("none");
+    expect(readPresenceCookie()).toBeNull();
   });
 
   it("logs out locally even when the backend logout is unavailable", async () => {
@@ -253,6 +281,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>
@@ -266,6 +295,7 @@ describe("AuthProvider", () => {
 
     expect(await screen.findByTestId("status")).toHaveTextContent("anonymous");
     expect(getSessionTokens()).toBeNull();
+    expect(readPresenceCookie()).toBeNull();
     expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
@@ -301,6 +331,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>
@@ -351,6 +382,7 @@ describe("AuthProvider", () => {
           featureFlags: {},
           appVersion: "",
           buildCommitShort: "",
+          appUrl: "",
         }}
       >
         <AuthProvider>

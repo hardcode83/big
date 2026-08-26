@@ -11,7 +11,7 @@ docstring), so the check in `add` is the only thing between a bug and a cross-te
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -37,11 +37,14 @@ class SqlAlchemyGuestRepository:
         return _to_summary(model) if model is not None else None
 
     async def list_for_ids(
-        self, tenant_id: uuid.UUID, guest_ids: Sequence[uuid.UUID]
+        self, tenant_id: uuid.UUID, guest_ids: Collection[uuid.UUID]
     ) -> Sequence[GuestSummary]:
         """One statement for N guests (`dashboard-api` R1.7).
 
-        An empty batch short-circuits rather than emitting `IN ()`.
+        An empty batch short-circuits rather than emitting `IN ()`. `Collection` accepts
+        `set`/`frozenset`, which matters now that `ListReservationsUseCase` deduplicates
+        ids from a page before calling (`reservation-property-identity` D3) — and the
+        symmetric `PropertyRepository.list_for_ids` widened for the same reason.
         """
         if not guest_ids:
             return []

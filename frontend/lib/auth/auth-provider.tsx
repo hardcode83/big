@@ -23,6 +23,7 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "./session-store";
+import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
 import { purgeSessionCache } from "./session-cache-purge";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
@@ -68,6 +69,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     return subscribeToSessionExpired(() => {
       purgeSessionCache();
       setUser(null);
+      clearSessionPresent();
       setStatus("expired");
     });
   }, []);
@@ -85,11 +87,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
           refreshToken: tokens.refresh_token,
         });
         purgeSessionCache();
+        markSessionPresent();
         const currentUser = await clients.apiClient.request("/api/v1/auth/me");
         setUser(currentUser);
         setStatus("authenticated");
       } catch (error) {
         clearSessionTokens();
+        clearSessionPresent();
         setUser(null);
         setStatus("error");
         throw error;
@@ -124,6 +128,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     } finally {
       purgeSessionCache();
       clearSessionTokens();
+      clearSessionPresent();
       setUser(null);
       setStatus("anonymous");
     }

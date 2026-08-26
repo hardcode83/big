@@ -261,6 +261,21 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
   },
   // ---- Public ----
   {
+    id: "landing",
+    pattern: "/",
+    href: "/",
+    titleKey: "landing:meta.title",
+    descriptionKey: "landing:meta.description",
+    // The shell metadata uses the same landing copy as the page body so the
+    // SERP card and the page agree on what the visitor is about to read.
+    metadataTitleKey: "landing:meta.title",
+    metadataDescriptionKey: "landing:meta.description",
+    breadcrumbKeys: crumbs("landing"),
+    icon: "LogIn",
+    profile: "public",
+    match: "exact",
+  },
+  {
     id: "login",
     pattern: "/login",
     href: "/login",

@@ -53,7 +53,7 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
   return (
     <article
       aria-labelledby={headingId}
-      className="flex h-full min-w-0 flex-col gap-4 rounded-lg border bg-card p-4 shadow-sm"
+      className="flex h-full min-w-0 flex-col gap-4 rounded-lg border bg-surface p-4 shadow-sm"
     >
       <header className="flex items-start justify-between gap-3">
         <h3

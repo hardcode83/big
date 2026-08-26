@@ -2,14 +2,10 @@
 
 import { useTranslation } from "react-i18next";
 
-import type { IncidentDetailDto } from "../../data";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 
-const SEVERITY_COLOR: Record<string, string> = {
-  LOW: "bg-gray-100 text-gray-700",
-  MEDIUM: "bg-blue-100 text-blue-700",
-  HIGH: "bg-amber-100 text-amber-800",
-  CRITICAL: "bg-red-100 text-red-700",
-};
+import type { IncidentDetailDto } from "../../data";
+import { severityColorGroup } from "../../lib/severity-tone";
 
 function fmtUtc(value: string): string {
   return value.slice(0, 16).replace("T", " ");
@@ -49,9 +45,7 @@ export function DetailHeader({
     <header>
       <h2>{title}</h2>
       <span
-        className={
-          SEVERITY_COLOR[severity] ?? "bg-gray-100 text-gray-700"
-        }
+        className={TONE_BADGE_CLASS[severityColorGroup(severity)]}
       >
         {t(`severity.${severity}`)}
       </span>
