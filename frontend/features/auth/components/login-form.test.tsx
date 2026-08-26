@@ -7,10 +7,14 @@ import { LoginForm } from "./login-form";
 const mocks = vi.hoisted(() => ({
   login: vi.fn(),
   replace: vi.fn(),
+  // R4: a successful `login()` populates `user` via `/auth/me`, and the form
+  // picks the destination from `user.role`. `null` makes the four legacy
+  // "no role" assertions fall through to roleHome's default (`/dashboard`).
+  user: null as null | { role: string },
 }));
 
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ login: mocks.login, status: "anonymous" }),
+  useAuth: () => ({ login: mocks.login, status: "anonymous", user: mocks.user }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -30,6 +34,7 @@ describe("LoginForm", () => {
   beforeEach(() => {
     mocks.login.mockReset();
     mocks.replace.mockReset();
+    mocks.user = null;
     window.history.replaceState({}, "", "/login?returnTo=%2Fdashboard");
   });
 
@@ -92,5 +97,41 @@ describe("LoginForm", () => {
       "No se ha podido iniciar sesión. Inténtalo de nuevo.",
     );
     expect(mocks.replace).not.toHaveBeenCalled();
+  });
+
+  // R4 — login without `?returnTo=` picks the shell from the role returned by
+  // `/auth/me` (already cached on `user` by the AuthProvider).
+  it("redirects a CLEANER to /cleaner when no returnTo is present", async () => {
+    window.history.replaceState({}, "", "/login");
+    mocks.user = { role: "CLEANER" };
+    mocks.login.mockResolvedValue(undefined);
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
+
+    await waitFor(() => expect(mocks.login).toHaveBeenCalled());
+    expect(mocks.replace).toHaveBeenCalledWith("/cleaner");
+  });
+
+  it("redirects a TECHNICIAN to /tech when no returnTo is present", async () => {
+    window.history.replaceState({}, "", "/login");
+    mocks.user = { role: "TECHNICIAN" };
+    mocks.login.mockResolvedValue(undefined);
+    renderForm();
+
+    fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
+
+    await waitFor(() => expect(mocks.login).toHaveBeenCalled());
+    expect(mocks.replace).toHaveBeenCalledWith("/tech");
+  });
+
+  // R2 — a visible back-link under the submit button takes the visitor back
+  // to the landing without going through the browser back button.
+  it("renders a back-link to the landing below the submit button", () => {
+    renderForm();
+    const link = screen.getByRole("link", { name: /Volver a la landing/ });
+    expect(link).toHaveAttribute("href", "/");
+    // 44×44 touch target — same primitive guarantee the rest of the chrome uses.
+    expect(link).toHaveClass("tap-target");
   });
 });

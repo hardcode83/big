@@ -4,7 +4,12 @@ import { render, screen } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { PublicShell } from "@/features/shell/components/public-shell";
 
-vi.mock("next/navigation", () => ({ usePathname: () => "/login" }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => "/login",
+  // The PublicShell tops include the LocaleSwitcher, which calls
+  // router.refresh() after writing the cookie (public-zone-hardening R1).
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));

@@ -101,6 +101,20 @@ const MAY_NAME_THEME = new Set([
    */
   "features/shell/components/public-shell.tsx",
   "features/shell/components/public-shell.test.tsx",
+  /*
+   * `WorkspaceShell`, `CleanerShell`, `TechnicianShell` resolve the theme on the
+   * server so they can pass it to `ThemeSwitcher` inside the `end` slot they
+   * pass to `Topbar`. Same posture as `PublicShell` and `Topbar` themselves:
+   * the shell is a Server Component with no `"use client"`, so the value it
+   * forwards cannot be client state. The `useState`/`useReducer`/etc. gate above
+   * still trips on a real regression — these exemptions only remove the name
+   * from the broad `/theme/i` sweep.
+   * (Added in `public-zone-hardening` when the `end` slot moved from
+   * `Topbar`'s default into the per-shell overrides.)
+   */
+  "features/shell/components/workspace-shell.tsx",
+  "features/shell/components/cleaner-shell.tsx",
+  "features/shell/components/technician-shell.tsx",
   // Its tests.
   "lib/theme/theme.test.ts",
   "lib/theme/server.test.ts",

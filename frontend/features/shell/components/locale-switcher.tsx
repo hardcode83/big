@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 import { Languages } from "lucide-react";
 
@@ -44,18 +45,36 @@ import {
  */
 export function LocaleSwitcher() {
   const { i18n, t } = useTranslation("navigation");
+  const router = useRouter();
   const current = (i18n.resolvedLanguage ?? SUPPORTED_LOCALES[0]) as Locale;
   const next = SUPPORTED_LOCALES.find((locale) => locale !== current) as Locale;
   const [requested, setRequested] = useState<Locale | null>(null);
+
+  // Hold `i18n` and `router` behind refs so the effect's only dep that triggers
+  // a re-run is `requested`. `useTranslation` returns a new `i18n` reference
+  // after `changeLanguage` fires (the hook re-subscribes to languageChanged),
+  // and putting that in the deps would queue `router.refresh()` twice per click.
+  const i18nRef = useRef(i18n);
+  const routerRef = useRef(router);
+  useEffect(() => {
+    i18nRef.current = i18n;
+    routerRef.current = router;
+  });
 
   useEffect(() => {
     if (requested === null) {
       return;
     }
-    void i18n.changeLanguage(requested);
+    void i18nRef.current.changeLanguage(requested);
     document.cookie = `${LOCALE_COOKIE}=${requested}; path=/; max-age=31536000; samesite=lax`;
     document.documentElement.lang = requested;
-  }, [requested, i18n]);
+    // Re-fetch the current segment so Server Components of the landing
+    // (LandingView, Hero, MarketingNav, FeaturesGrid, StatsBand, FinalCta,
+    // LandingFooter) re-execute with the new locale cookie. The cookie write
+    // above is synchronous, so the refresh's request carries it in its
+    // headers. See proposal R1 + design D1.
+    routerRef.current.refresh();
+  }, [requested]);
 
   // «Cambiar idioma a English» — names the destination, not the current state,
   // because pressing it is what it does.
