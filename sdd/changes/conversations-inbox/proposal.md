@@ -76,8 +76,9 @@ El shell del workspace no cambia: las claves `routes.conversations.{title,descri
 estaban y ya prometen «Bandeja de conversaciones». La sesión autenticada viene de
 `frontend-auth-session`, y la autorización RBAC del backend (R7 de `messaging-ai.md`) es
 quien realmente decide a qué datos llega cada usuario — `MANAGER` y `OWNER` ven el inbox
-del tenant con `READ_CONVERSATIONS` (la propietaria **lee** y no opera, per `messaging-ai`
-D17 / `docs/messaging-ai.md` RBAC), y solo `MANAGER` recibe `MANAGE_CONVERSATIONS` para
+del tenant con `READ_CONVERSATIONS` (la propietaria **lee** y no opera, per el D17 del
+archived `sdd/changes/archive/2026-08-17-messaging-ai/design.md` y la tabla RBAC de
+`docs/messaging-ai.md` §«Quién puede hacer qué»), y solo `MANAGER` recibe `MANAGE_CONVERSATIONS` para
 contestar (la UI lo aplica como `useHasPermission("MANAGE_CONVERSATIONS")` que oculta el
 formulario al `OWNER`). El aislamiento por tenant lo fuerza el `JOIN` con `conversations`
 que la spec R1 declara como **único** mecanismo de aislamiento (no es defensa en
@@ -231,8 +232,9 @@ Acceptance criteria:
 
 ### R4 — Respuesta humana en `/conversations/[id]`
 
-**As a** manager del workspace (único rol con `MANAGE_CONVERSATIONS` per `messaging-ai`
-D17; la propietaria lee pero no opera), **I want** responder manualmente a una
+**As a** manager del workspace (único rol con `MANAGE_CONVERSATIONS` per el D17 del
+archived `sdd/changes/archive/2026-08-17-messaging-ai/design.md`; la propietaria lee pero
+no opera), **I want** responder manualmente a una
 conversación que la IA ha escalado o que requiere intervención, **so that** el huésped
 reciba una respuesta de una persona y la conversación pase a `HUMAN_HANDLING` (R5 de
 `messaging-ai.md`: `take_over` ocurre como efecto lateral del POST `/messages` cuando la
