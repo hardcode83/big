@@ -180,8 +180,11 @@ con intent `MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`, portal del huésped, transcripc
 - THE SYSTEM SHALL ejecutar la suite del feature con el mismo target que
   [`frontend-foundation.md`](frontend-foundation.md) §Testing (`npm run typecheck`,
   `npm run lint`, `npm test`), SHALL pasar `npm run api:check` sin regenerar el
-  contrato (los tipos ya están en `frontend/lib/api/generated/openapi.d.ts:1091-1155`,
-  `:1889-1929`), y SHALL demostrarlo en la suite de verificación del change.
+  contrato — los símbolos `ConversationStatus`, `ConversationEscalationStatus`,
+  `ConversationChannel`, `MessageSenderType`, `ConversationResponse`,
+  `ConversationPageResponse`, `MessageResponse`, `CreateMessageRequest` viven en
+  `frontend/lib/api/generated/openapi.d.ts` y SHALL demostrarse en la suite de
+  verificación del change.
 
 ## Key files
 
@@ -212,7 +215,9 @@ con intent `MAINTENANCE_ISSUE`/`ACCESS_PROBLEM`, portal del huésped, transcripc
   `<ConversationThreadView conversationId={id} />`.
 - `frontend/app/route-coverage.test.ts` — registro de las dos rutas reales.
 - `frontend/locales/{es,en}/conversations.json` — las seis secciones de etiquetas.
-- `frontend/lib/api/generated/openapi.d.ts:1091-1155, :1889-1929` — los tipos
-  consumidos (no regenerados por este change).
+- `frontend/lib/api/generated/openapi.d.ts` — los tipos consumidos
+  (`ConversationStatus`, `ConversationEscalationStatus`, `ConversationChannel`,
+  `MessageSenderType`, `ConversationResponse`, `ConversationPageResponse`,
+  `MessageResponse`, `CreateMessageRequest`); no regenerados por este change.
 - El backend que sirve las cuatro llamadas vive en [`messaging-ai.md`](messaging-ai.md);
   este spec solo cubre la cara FE.
