@@ -3055,12 +3055,16 @@ async def test_purge_old_audit_logs_refuses_a_session_bound_to_a_different_tenan
 async def test_safe_purge_old_audit_logs_writes_the_audit_row_before_the_delete(
     db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """R3.1 + R3.2 — the audit row exists whether or not the DELETE later succeeds.
+    """R3.1 + R3.2 — the audit row is written before the DELETE.
 
     `purge_old_audit_logs` is patched to record the call order without touching the
     database: the assertion is on the order, not on what the DELETE did. The audit row's
     fields are checked by hand because `audit.add` is the chokepoint and its argument is
-    the only place where the rule 11 contract is enforced.
+    the only place where the rule 11 contract is enforced. Note that the audit row does
+    NOT survive a DELETE failure — the row and the DELETE share one `session.commit()`,
+    so the row only persists if the DELETE also persists (atomic semantics; the proposal
+    amendment in this change drops the OLD R3.2 "survives failure" wording and the test
+    only pins temporal order, which is what R3.2 now requires).
     """
     demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
     await db_session.commit()
@@ -3111,8 +3115,10 @@ async def test_safe_purge_old_audit_logs_degrades_when_the_delete_fails(
     The note format matches `clear_login_locks`' shape so the operator-facing surface
     stays uniform: phase name, exception class, and an explicit "detail withheld on
     purpose" rather than the bare class name. The `(0, note)` return is what task 5.7 of
-    the proposal pinned as the contract — the run keeps reporting success even though
-    the audit row was written and the DELETE raised.
+    the proposal pinned as the contract — the run keeps reporting success. Note that
+    because the audit row and the DELETE share one `session.commit()`, the row is
+    reverted with the transaction on DELETE failure; the degradation note is the
+    honest record of the attempt, not a committed audit row.
     """
     demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
     await db_session.commit()

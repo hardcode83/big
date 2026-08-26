@@ -694,17 +694,20 @@ async def purge_old_audit_logs(
     """Delete `audit_logs` rows older than `cutoff`, scoped to the demo tenant (D5).
 
     One statement and one rowcount: the semantics is "delete everything older than N days",
-    not "delete one by one", and the listener of `app/core/db.py` already adds
-    `tenant_id = :demo` on top of the explicit `WHERE` — defense in depth, and what makes
-    R1.4 ("WHERE el `tenant_id` resuelto no es el del demo, THE SYSTEM SHALL rechazar la
-    fase con código 2 sin escribir nada") hold even when SQL is hand-rolled.
+    not "delete one by one". The scope guard is `require_session_bound_to` below — the
+    session marker the caller carries is what enforces R1.3 ("no abrir una segunda sesión
+    sin marcarla"), and the explicit `WHERE tenant_id = :tenant_id` in the SQL is
+    redundant defense visible in the query itself. The listener of `app/core/db.py`
+    does **not** fire here: its `do_orm_execute` is ORM-only, and the `text(...)` of
+    this DELETE bypasses it by design — `backend/app/core/db.py:79-82` is the authority.
+    Mentioning the listener as a net would credit it with scope it does not have.
 
     **SQL textual rather than ORM `delete(AuditLogModel)`**, and that is the right shape
-    here: the listener already imposes the scope, the row never has to be hydrated, and
-    `text()` with bind params is the explicit form of "no ORM magic runs against this
-    table outside this WHERE". The same `WHERE tenant_id = :tenant_id` clause the listener
-    would add anyway is on the statement, so the constant guarding R1.3 is still the
-    session marker.
+    here: the row never has to be hydrated, and `text()` with bind params is the explicit
+    form of "no ORM magic runs against this table outside this WHERE". The
+    `WHERE tenant_id = :tenant_id` clause is on the statement as well, so R1.4's
+    "rechazar con código 2 sin escribir nada" holds at the SQL boundary, pinned by
+    `test_purge_old_audit_logs_refuses_a_session_bound_to_a_different_tenant`.
 
     **Why this lives apart from `_safe_purge_old_audit_logs`.** The safe wrapper degrades
     with a note on any failure and writes the audit row before the DELETE; this one is the
@@ -733,15 +736,21 @@ async def _safe_purge_old_audit_logs(
     **Why a new session, and why marked.** The post-commit `run()` no longer holds one — the
     apply transaction committed and closed before `storage-sweep` — and `purge_old_audit_logs`
     requires a marked session (`require_session_bound_to`). Re-marking here is what keeps
-    R1.3's "no abrir una segunda sesión sin marcarla" satisfied: the listener of
-    `app/core/db.py` appends `tenant_id = :demo` to the DELETE, defense in depth on top of
-    the explicit `WHERE`.
+    R1.3's "no abrir una segunda sesión sin marcarla" satisfied: the session marker is what
+    enforces the scope, with the explicit `WHERE tenant_id = :tenant_id` in the DELETE as
+    redundant defense visible in the SQL. The listener of `app/core/db.py` does **not**
+    fire on this `text(...)` — its `do_orm_execute` is ORM-only — so calling it out as
+    a net here would be the same misattribution `purge_old_audit_logs`' docstring avoids.
 
-    **Order of operations — audit row first, then purge.** R3.2 requires the row to be
-    written before the DELETE, so a DELETE that subsequently fails still leaves a record
-    that the purge was attempted. The row's `deleted_count` is a known `0` at write time
-    (no rows have been deleted yet); the actual count is reported via the return value and
-    surfaced in `report.counts["audit_logs_purged"]`. An auditor reading `audit_logs.changes`
+    **Order of operations — audit row first, then purge, both in one commit.** R3.2
+    requires the row to be written before the DELETE; both share one `session.commit()`
+    at line 804, so a DELETE that subsequently fails reverts the row with the transaction.
+    The honest record of a failed attempt is the degradation note in the report
+    (`purge-audit: failed with <ClassName> …`), not a committed row claiming
+    `deleted_count=0` for a DELETE that never ran. The row's `deleted_count` is a known
+    `0` at write time (no rows have been deleted yet); the actual count is reported via
+    the return value and surfaced in `report.counts["audit_logs_purged"]`. An auditor
+    reading `audit_logs.changes`
     sees "this purge was attempted with cutoff X"; an auditor reading the run report sees
     how many rows it actually removed. The two are different views of the same event, and
     both are needed because each one records a fact the other cannot.
@@ -774,12 +783,12 @@ async def _safe_purge_old_audit_logs(
         async with async_session_factory() as session:
             bind_session_to_tenant(session, tenant_id)
             audit = SqlAlchemyAuditLogRepository(session)
-            # Audit row FIRST (R3.2): even if `purge_old_audit_logs` then fails, this row
-            # tells the trail the purge was attempted. `deleted_count` is `0` at write time
-            # because no rows have been deleted yet; the actual count is reported via the
-            # return value and `report.counts["audit_logs_purged"]`. Sharing one
-            # `session.commit()` keeps the row and the DELETE atomic — the trail never
-            # describes a purge that did not actually happen.
+            # Audit row FIRST (R3.2 temporal half): the row is written before the DELETE so
+            # the change set's `deleted_count=0` is captured against the run's `now`.
+            # Sharing one `session.commit()` keeps the row and the DELETE atomic — the
+            # trail never describes a purge that did not actually happen. On a DELETE
+            # failure, both revert; the honest record of the attempt is the degradation
+            # note in the report (`purge-audit: failed with <ClassName> …`).
             purge_audit_row = AuditLogFactory.build(
                 tenant_id=tenant_id,
                 action=actions.AUDIT_LOG_PURGED,
