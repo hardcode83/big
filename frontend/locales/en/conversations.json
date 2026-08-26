@@ -1,0 +1,71 @@
+{
+  "status": {
+    "OPEN": "Open",
+    "RESOLVED": "Resolved",
+    "ESCALATED": "Escalated",
+    "CLOSED": "Closed"
+  },
+  "escalationStatus": {
+    "NONE": "No escalation",
+    "PENDING_HUMAN": "Waiting for a person",
+    "HUMAN_HANDLING": "With a person",
+    "RESOLVED": "Escalation resolved"
+  },
+  "channel": {
+    "WHATSAPP": "WhatsApp",
+    "AIRBNB_MSG": "Airbnb message",
+    "BOOKING_MSG": "Booking message",
+    "EMAIL": "Email",
+    "PHONE_TRANSCRIPT": "Phone transcript",
+    "MANUAL": "Manual"
+  },
+  "senderType": {
+    "GUEST": "Guest",
+    "OWNER": "Owner",
+    "MANAGER": "You",
+    "AI": "AI",
+    "SYSTEM": "System"
+  },
+  "fields": {
+    "channel": "Channel",
+    "status": "Status",
+    "escalationStatus": "Escalation",
+    "lastMessageAt": "Last message",
+    "createdAt": "Created",
+    "id": "Identifier",
+    "property": "Property",
+    "guest": "Guest",
+    "reservation": "Reservation",
+    "language": "Language",
+    "aiEnabled": "AI enabled",
+    "updatedAt": "Updated at",
+    "createdAtFull": "Created at",
+    "intent": "Intent",
+    "senderUserIdSection": "Sender",
+    "senderUserIdNote": "The identifier cannot be resolved to a name in this view",
+    "notFound": "Conversation not found",
+    "backToList": "Back to inbox",
+    "clearFilters": "Clear filters",
+    "prevPage": "Previous page",
+    "nextPage": "Next page",
+    "forbidden": "You don't have permission to view this conversation",
+    "validation": "The submitted data is invalid",
+    "characterCount": "{{count}} / 4000 characters"
+  },
+  "thread": {
+    "title": "Conversation",
+    "messagesHeading": "Messages",
+    "noMessages": "There are no messages in this conversation yet.",
+    "replyHeading": "Reply",
+    "replyPlaceholder": "Write your reply to the guest…",
+    "replySubmit": "Send",
+    "replyCancel": "Cancel",
+    "replySending": "Sending…",
+    "replySuccess": "Your reply has been sent.",
+    "replyErrorGeneric": "We couldn't send your reply. Please try again.",
+    "replyErrorValidation": "The message exceeds 4000 characters or is invalid.",
+    "replyErrorUnauthorized": "Your session has expired. Please sign in again.",
+    "replyErrorForbidden": "You don't have permission to reply to this conversation.",
+    "replyErrorNotFound": "The conversation no longer exists."
+  }
+}

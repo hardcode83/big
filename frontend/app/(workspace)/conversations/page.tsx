@@ -1,12 +1,12 @@
 import type { Metadata } from "next";
 
+import { ConversationsView } from "@/features/conversations";
 import { routeMetadata } from "@/features/shell";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("conversations");
 }
 
 export default function Page() {
-  return <RoutePlaceholder routeId="conversations" />;
+  return <ConversationsView />;
 }
