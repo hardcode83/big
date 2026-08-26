@@ -56,7 +56,7 @@
 | reservations-web | new, design, tasks, run, review, ship, archive | 6417003 | 730572 | 110301435 | 106.3682 | 2026-08-17 | 2026-08-20 |
 | incidents-web | new, design, tasks, run, review, ship, archive | 2581925 | 277525 | 109796724 | 74.7461 | 2026-08-20 | 2026-08-20 |
 | cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
-| conversations-inbox | new, design, tasks, run, review, ship | 5864766 | 730657 | 134771654 | 114.9761 | 2026-08-22 | — |
+| conversations-inbox | new, design, tasks, run, review, ship, archive | 6926822 | 959736 | 177776397 | 147.5157 | 2026-08-22 | 2026-08-26 |
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
 | cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
 | properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
