@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/session-cache-purge-on-logout
 implementation_sha: fd05ee49074c5d9226dbe15752312e9d0e74d663
 pr_number: 
 pr_url: 
