@@ -448,6 +448,12 @@ AUDITABLE_FIELDS: Mapping[str, frozenset[str]] = {
     # rejects every other field of this entity by construction, which is what
     # `tests/pricing/test_free_text_sink_contract.py` pins.
     "PRICE_RECOMMENDATION": frozenset({"status"}),
+    # `demo-tenant-audit-retention`. Two fields and nothing else: the demo reset's `purge-audit`
+    # phase records how many rows it removed and the cutoff it used, and those are the only
+    # facts a future review needs from this row. Neither is a rule-3 value, so neither needs an
+    # entry on `REDACT_ONLY_FIELDS` — `deleted_count` is an `int` and `cutoff` is the
+    # `cutoff.isoformat()` string the command writes.
+    "AUDIT_LOG": frozenset({"deleted_count", "cutoff"}),
 }
 
 #: Fields that may appear in an entity's audit row **only** as `{"changed": true}`, keyed by

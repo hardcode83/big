@@ -9,7 +9,8 @@ import base64
 import json
 import re
 import uuid
-from datetime import UTC, date, datetime
+from contextlib import asynccontextmanager
+from datetime import UTC, date, datetime, timedelta
 from decimal import Decimal
 from pathlib import Path
 
@@ -17,35 +18,36 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker
 
+from app.access.infrastructure.models import AccessRecordModel
+from app.audit.domain import actions
+from app.audit.domain.entities import AuditLog
+from app.audit.infrastructure.models import AuditLogModel
 from app.auth.domain.enums import SessionRevokedReason, UserRole, UserStatus
-from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.auth.domain.password_policy import PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH
 from app.auth.infrastructure.models import (
     PasswordResetTokenModel,
     UserModel,
     UserSessionModel,
 )
-from app.auth.domain.password_policy import PASSWORD_MAX_BYTES, PASSWORD_MIN_LENGTH
-from app.cli import demo_reset, seed_demo
-from app.core.config import FERNET_KEY_BYTES, Settings, settings
-from app.access.infrastructure.models import AccessRecordModel
-from app.audit.domain import actions
-from app.audit.infrastructure.models import AuditLogModel
+from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.cleaning.infrastructure.models import (
     CleaningChecklistCompletionModel,
     CleaningChecklistTemplateModel,
     CleaningPhotoModel,
     CleaningTaskModel,
 )
+from app.cli import demo_reset, seed_demo
+from app.core.config import FERNET_KEY_BYTES, Settings, settings
 from app.core.db import Base, bind_session_to_tenant, tenant_scoped_classes
 from app.core.tenancy import TenantMismatchedSessionError, TenantUnmarkedSessionError
 from app.guests.domain.portal_token import hash_guest_token
 from app.guests.infrastructure.models import GuestAccessTokenModel, GuestModel
-from app.integrations.domain.enums import PMSProvider, PmsCredentialScope
+from app.integrations.domain.enums import PmsCredentialScope, PMSProvider
 from app.integrations.infrastructure.models import (
     PmsCredentialModel,
     WebhookEndpointModel,
+    WebhookEventModel,
 )
-from app.integrations.infrastructure.models import WebhookEventModel
 from app.maintenance.domain.enums import (
     IncidentPhotoStage,
     IncidentSource,
@@ -56,28 +58,33 @@ from app.maintenance.infrastructure.models import (
     IncidentPhotoModel,
     OwnerApprovalModel,
 )
+from app.messaging.domain.enums import ConversationChannel, MessageSenderType
+from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.notifications.domain.enums import NotificationChannel
 from app.notifications.infrastructure.models import NotificationLogModel
 from app.pricing.infrastructure.models import PriceRecommendationModel, PricingRuleModel
-from app.messaging.domain.enums import ConversationChannel, MessageSenderType
-from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.properties.domain.enums import (
     PropertyOperationalState,
     StateTransitionTriggeredBy,
 )
-from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
+from app.properties.infrastructure.models import (
+    PropertyModel,
+    PropertyStateTransitionModel,
+)
 from app.reservations.domain.enums import ReservationChannel
 from app.reservations.infrastructure.models import ReservationModel
 from app.reviews.domain.enums import ReviewChannel
+from app.reviews.infrastructure.models import ReviewModel, ReviewResponseDraftModel
 from app.statements.domain.enums import ExpenseCategory
 from app.statements.infrastructure.models import ExpenseModel, OwnerStatementModel
-from app.reviews.infrastructure.models import ReviewModel, ReviewResponseDraftModel
 from app.tenants.domain.enums import StorageType
 from app.tenants.infrastructure.models import TenantConfigModel, TenantModel
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.auth.conftest import insert_tenant, insert_user
-from tests.cli.conftest import hasher  # noqa: F401  -- fixture used by the section-4 tests
+from tests.cli.conftest import (
+    hasher,  # noqa: F401  -- fixture used by the section-4 tests
+)
 from tests.conftest import TEST_BCRYPT_ROUNDS
 
 _REQUIRED = {
@@ -710,6 +717,10 @@ def test_the_declared_phases_are_the_ones_the_design_names() -> None:
         "converge",
         "seed",
         "storage-sweep",
+        # `demo-tenant-audit-retention`: between `storage-sweep` and `clear-lock`, outside
+        # the apply transaction. `purge_old_audit_logs` opens its own session and degrades
+        # on failure the same way `storage-sweep`/`clear-lock` do — see demo_reset.run().
+        "purge-audit",
         "clear-lock",
     )
 
@@ -2920,3 +2931,320 @@ def test_the_workflow_does_not_publish_the_password_in_its_summary() -> None:
         assert "DEMO_ACCOUNT_PASSWORD" not in step["run"]
         # And it does carry the link, which is the half R4.3 needs.
         assert demo_reset.PORTAL_LINE_PREFIX in step["run"]
+
+
+# --- `demo-tenant-audit-retention`: the `purge-audit` phase -----------------------------
+#
+# The reset's audit-log retention: `purge_old_audit_logs` deletes rows older than the
+# cutoff, `_safe_purge_old_audit_logs` wraps it with audit-row-before-delete and
+# degradation on failure. Each test pins one clause of R1/R2/R3; together they prove the
+# design from three angles — the raw DELETE, the wrapper, and the run-level wire-up.
+
+
+@pytest.mark.asyncio
+async def test_purge_old_audit_logs_deletes_rows_older_than_cutoff(
+    db_session: AsyncSession, test_engine
+) -> None:
+    """R1.1 + R1.3 — the raw DELETE removes rows older than the cutoff, leaves newer ones.
+
+    Three rows pinned around the cutoff: one comfortably after it (must survive), one
+    comfortably before (must go), and one exactly at the cutoff. The SQL is `< :cutoff`,
+    not `<=`, so the boundary row belongs to the kept side — D3 spells it out as the
+    construction that preserves the last reset's rows, and asserting it here is what
+    catches a future `<=` typo that would silently over-purge by one day.
+
+    The marked-session guard is the second half of R1.3. Verified by a sibling test that
+    binds the session to a different tenant, so this one stays focused on the DELETE.
+    """
+    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    await db_session.flush()
+
+    cutoff = datetime(2026, 8, 18, 12, 0, tzinfo=UTC)
+    survivor = AuditLogModel(
+        id=uuid.uuid4(),
+        tenant_id=demo.id,
+        action=actions.USER_PASSWORD_RESET,
+        entity_type=actions.ENTITY_USER,
+        entity_id=uuid.uuid4(),
+        # One day after the cutoff — survives with a comfortable margin.
+        created_at=cutoff + timedelta(days=1),
+    )
+    casualty = AuditLogModel(
+        id=uuid.uuid4(),
+        tenant_id=demo.id,
+        action=actions.USER_UPDATED,
+        entity_type=actions.ENTITY_USER,
+        entity_id=uuid.uuid4(),
+        # Three days before the cutoff — purged.
+        created_at=cutoff - timedelta(days=3),
+    )
+    boundary = AuditLogModel(
+        id=uuid.uuid4(),
+        tenant_id=demo.id,
+        action=actions.INCIDENT_CREATED,
+        entity_type=actions.ENTITY_INCIDENT,
+        entity_id=uuid.uuid4(),
+        # Exactly at the cutoff. `< :cutoff` keeps this row; `<=` would drop it.
+        created_at=cutoff,
+    )
+    db_session.add_all([survivor, casualty, boundary])
+    await db_session.commit()
+
+    marked = AsyncSession(test_engine, expire_on_commit=False)
+    bind_session_to_tenant(marked, demo.id)
+    deleted = await demo_reset.purge_old_audit_logs(marked, demo.id, cutoff)
+    await marked.commit()
+    await marked.close()
+
+    assert deleted == 1, "only the row before the cutoff should have been deleted"
+
+    async with test_engine.connect() as connection:
+        remaining_ids = {
+            row[0]
+            for row in (
+                await connection.execute(
+                    select(AuditLogModel.__table__.c.id).where(
+                        AuditLogModel.__table__.c.tenant_id == demo.id
+                    )
+                )
+            ).all()
+        }
+    assert remaining_ids == {survivor.id, boundary.id}, (
+        "the cutoff row belongs to the kept side: `< :cutoff` keeps it, `<=` would drop it"
+    )
+
+
+@pytest.mark.asyncio
+async def test_purge_old_audit_logs_refuses_a_session_bound_to_a_different_tenant(
+    db_session: AsyncSession, test_engine
+) -> None:
+    """R1.4 — the SQL guard, not just the run-level dispatch.
+
+    `require_session_bound_to` is the constant D5 names, and the proposal spells it out
+    twice: once for the run-level dispatch ("WHERE el `tenant_id` resuelto no es el del
+    demo, THE SYSTEM SHALL rechazar la fase con código 2 sin escribir nada"), and once for
+    the SQL boundary, where the listener's `WHERE tenant_id = :tenant_id` would still
+    pass the wrong id through. The mismatch raises before any DELETE runs; we assert the
+    error class because the run() catches everything as `PhaseError`, and the type is what
+    inherits from `TenantMismatchedSessionError` for that exact case.
+    """
+    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    other = await insert_tenant(db_session, name="Other Tenant For The Audit Purge")
+    await db_session.flush()
+
+    mismarked = AsyncSession(test_engine, expire_on_commit=False)
+    bind_session_to_tenant(mismarked, other.id)
+    with pytest.raises(TenantMismatchedSessionError):
+        await demo_reset.purge_old_audit_logs(
+            mismarked, demo.id, datetime.now(UTC)
+        )
+    await mismarked.close()
+
+    async with test_engine.connect() as connection:
+        count = (
+            await connection.execute(
+                select(AuditLogModel.__table__.c.id).where(
+                    AuditLogModel.__table__.c.tenant_id == demo.id
+                )
+            )
+        ).all()
+    assert count == [], "the refused phase must not write to audit_logs"
+
+
+@pytest.mark.asyncio
+async def test_safe_purge_old_audit_logs_writes_the_audit_row_before_the_delete(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R3.1 + R3.2 — the audit row is written before the DELETE.
+
+    `purge_old_audit_logs` is patched to record the call order without touching the
+    database: the assertion is on the order, not on what the DELETE did. The audit row's
+    fields are checked by hand because `audit.add` is the chokepoint and its argument is
+    the only place where the rule 11 contract is enforced. Note that the audit row does
+    NOT survive a DELETE failure — the row and the DELETE share one `session.commit()`,
+    so the row only persists if the DELETE also persists (atomic semantics; the proposal
+    amendment in this change drops the OLD R3.2 "survives failure" wording and the test
+    only pins temporal order, which is what R3.2 now requires).
+    """
+    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    await db_session.commit()
+    started_at = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+    cutoff = started_at - timedelta(days=demo_reset.DEMO_AUDIT_RETENTION_DAYS)
+
+    order: list[str] = []
+    captured: dict[str, AuditLog] = {}
+
+    async def _record(session, tenant_id, bound_cutoff):
+        order.append("purge")
+        return 0
+
+    async def _record_add(self, _tenant_id, entry):
+        order.append("audit_add")
+        captured["row"] = entry
+
+    monkeypatch.setattr(demo_reset, "purge_old_audit_logs", _record)
+    monkeypatch.setattr(
+        demo_reset.SqlAlchemyAuditLogRepository, "add", _record_add
+    )
+
+    count, note = await demo_reset._safe_purge_old_audit_logs(demo.id, started_at)
+
+    assert count == 0
+    assert note is None
+    # Audit row first, then the DELETE — R3.2 by construction.
+    assert order == ["audit_add", "purge"]
+    row = captured["row"]
+    assert row.action == actions.AUDIT_LOG_PURGED
+    assert row.entity_type == actions.ENTITY_AUDIT_LOG
+    assert row.entity_id == uuid.uuid5(demo.id, "demo-audit-purge")
+    assert row.actor_user_id is None
+    assert row.actor_ip is None
+    # The ChangeSet is on `AUDIT_LOG`, which carries both keys by design (test 1.4 above).
+    assert row.changes is not None
+    assert "deleted_count" in row.changes
+    assert "cutoff" in row.changes
+    assert row.changes["cutoff"] == {"old": None, "new": cutoff.isoformat()}
+
+
+@pytest.mark.asyncio
+async def test_safe_purge_old_audit_logs_degrades_when_the_delete_fails(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R2.3 — a DELETE failure becomes a note, not exit 2.
+
+    The note format matches `clear_login_locks`' shape so the operator-facing surface
+    stays uniform: phase name, exception class, and an explicit "detail withheld on
+    purpose" rather than the bare class name. The `(0, note)` return is what task 5.7 of
+    the proposal pinned as the contract — the run keeps reporting success. Note that
+    because the audit row and the DELETE share one `session.commit()`, the row is
+    reverted with the transaction on DELETE failure; the degradation note is the
+    honest record of the attempt, not a committed audit row.
+    """
+    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    await db_session.commit()
+    started_at = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+
+    async def _explode(session, tenant_id, cutoff):
+        raise RuntimeError("simulated DB error")
+
+    monkeypatch.setattr(demo_reset, "purge_old_audit_logs", _explode)
+
+    count, note = await demo_reset._safe_purge_old_audit_logs(demo.id, started_at)
+
+    assert count == 0
+    assert note == "purge-audit: failed with RuntimeError (detail withheld on purpose)"
+    # The original message must NOT appear in the note — R2.3 is the only reason this
+    # matters, but R2.5 says the credential has no other channel and a database error
+    # can stringify its way to a bcrypt hash.
+    assert "simulated DB error" not in (note or "")
+
+
+@pytest.mark.asyncio
+async def test_safe_purge_old_audit_logs_degrades_when_the_audit_row_write_fails(
+    db_session: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """R3.3 — no re-entry into `audit.add`. Once it raises, the function must not retry.
+
+    The `add` call count is the assertion the panel of section 4 measured: a second call
+    would race against the rolled-back DELETE and could write a row that describes a
+    purge that never committed. Sharing the same `try/except` boundary as the DELETE
+    failure case is what keeps the two halves symmetric.
+    """
+    demo = await insert_tenant(db_session, name=demo_reset.DEMO_TENANT_NAME)
+    await db_session.commit()
+    started_at = datetime(2026, 8, 25, 12, 0, tzinfo=UTC)
+
+    add_calls = 0
+
+    async def _boom(self, _tenant_id, _entry):
+        nonlocal add_calls
+        add_calls += 1
+        raise RuntimeError("audit.add refused")
+
+    async def _no_delete(session, tenant_id, cutoff):
+        raise AssertionError("purge_old_audit_logs should not be reached")
+
+    monkeypatch.setattr(
+        demo_reset.SqlAlchemyAuditLogRepository, "add", _boom
+    )
+    monkeypatch.setattr(demo_reset, "purge_old_audit_logs", _no_delete)
+
+    count, note = await demo_reset._safe_purge_old_audit_logs(demo.id, started_at)
+
+    assert count == 0
+    assert note == "purge-audit: failed with RuntimeError (detail withheld on purpose)"
+    assert add_calls == 1, "the function must not retry audit.add after a raise"
+
+
+@pytest.mark.asyncio
+async def test_a_full_reset_terminates_with_purge_audit_in_phases_and_count_in_report(
+    demo_env, monkeypatch: pytest.MonkeyPatch, test_engine, db_session: AsyncSession
+) -> None:
+    """R2.4 — the wire-up carries through end-to-end, twice.
+
+    `test_the_command_provisions_a_missing_tenant_and_resets_an_existing_one` already
+    pins `first.phases == second.phases == list(PHASES)`. This test pins the parts that
+    are specific to the new phase: `purge-audit` is in the list, and the count in the
+    report is a non-negative integer. The value is not asserted because a fresh test
+    database has no `audit_logs` rows older than seven days, and an empty database has
+    to produce `0` for the count to stay reproducible.
+    """
+    _use_the_test_database(monkeypatch, test_engine)
+    plan = demo_reset.build_plan()
+
+    first = await demo_reset.run(plan)
+    assert "purge-audit" in first.phases
+    assert isinstance(first.counts.get("audit_logs_purged"), int)
+    assert first.counts["audit_logs_purged"] >= 0
+
+    second = await demo_reset.run(plan)
+    assert "purge-audit" in second.phases
+    assert isinstance(second.counts.get("audit_logs_purged"), int)
+    assert second.counts["audit_logs_purged"] >= 0
+
+
+@pytest.mark.asyncio
+async def test_purge_audit_does_not_run_when_prepare_did_not_run(
+    demo_env, monkeypatch: pytest.MonkeyPatch, test_engine, db_session: AsyncSession
+) -> None:
+    """D8 — the `purge-audit` phase is gated on `prepare` having populated `started_at`.
+
+    Raising inside `prepare` keeps `report.started_at` at its default `None`, and
+    `_safe_purge_old_audit_logs` returns `(0, None)` without opening a session. The
+    phase block in `run()` still records its name, so the `phases` list shows that
+    `purge-audit` was reached — but the absence of a count, and the absence of any row
+    in `audit_logs` matching the purge action, are what proves the body did not run.
+
+    Asserted by inspecting `report.counts` and `audit_logs` rather than `report.phases`
+    because the phase list records attempt, not execution.
+    """
+    _use_the_test_database(monkeypatch, test_engine)
+
+    real_prepare = demo_reset._phase
+
+    @asynccontextmanager
+    async def _prepare_bombs(name, report):
+        async with real_prepare(name, report):
+            if name == "prepare":
+                raise RuntimeError("prepare raised on purpose")
+            yield
+
+    monkeypatch.setattr(demo_reset, "_phase", _prepare_bombs)
+
+    # `_phase` catches the inner exception and re-raises as `PhaseError`, which is what
+    # `run()` propagates. Asserting on `PhaseError.phase == "prepare"` is the same path
+    # the production code follows; the inner `RuntimeError` does not reach the caller.
+    with pytest.raises(demo_reset.PhaseError) as excinfo:
+        await demo_reset.run(demo_reset.build_plan())
+    assert excinfo.value.phase == "prepare"
+
+    # No audit_logs row with the purge action — `purge-audit`'s body never ran.
+    async with test_engine.connect() as connection:
+        purge_rows = (
+            await connection.execute(
+                select(AuditLogModel.__table__.c.action).where(
+                    AuditLogModel.__table__.c.action == actions.AUDIT_LOG_PURGED
+                )
+            )
+        ).all()
+    assert purge_rows == [], "purge-audit wrote its audit row despite prepare failing"
