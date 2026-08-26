@@ -15,7 +15,8 @@ para una fase post-commit: `run()` (`backend/app/cli/demo_reset.py:1048-1077`) e
 `notes` en vez de abortar — el mismo patrón que sirve para `purge-audit`. El corte
 por antigüedad puede apoyarse en `audit_logs.created_at`, ya indexado en
 `ix_audit_logs_tenant_id_actor_user_id_created_at` (`backend/app/audit/infrastructure/models.py:41-45`),
-cuyo prefijo `(tenant_id, created_at)` cubre la consulta del purgado. La auditoría
+cuyo prefijo izquierdo `(tenant_id)` cubre la parte selectiva de la consulta del purgado
+(el `WHERE created_at < :cutoff` se evalúa sobre las filas así acotadas). La auditoría
 del propio purgado tiene que pasar por `AuditLogFactory.build`, que valida `entity_type`
 contra `actions.ENTITY_TYPES` (`backend/app/audit/domain/services.py:55-64`) — `AUDIT_LOG`
 **no** está en el vocabulario cerrado, así que escribir la fila requiere ampliarlo.
@@ -119,15 +120,23 @@ async def purge_old_audit_logs(
 ```
 
 Why:
-- La sesión ya está marcada al tenant demo (R1.3): el listener de
-  `app/core/db.py` añade `tenant_id = :demo` aunque el SQL ya lo lleve, defensa en
-  profundidad (R3 del security steering: la guarda real es la constante).
+- La sesión ya está marcada al tenant demo (R1.3): `require_session_bound_to(session,
+  tenant_id, write="the demo reset's purge-audit phase")` rechaza la operación si la
+  sesión no está marcada al tenant demo o lo está a otro tenant — esa es la guarda
+  **real** del scope del `DELETE` (R3 del security steering: la constante manda). El
+  parámetro `:tenant_id` en el `WHERE` es redundancia explícita sobre esa guarda,
+  redactada como defensa en profundidad visible: si el `require_session_bound_to`
+  cambiara de contrato, el `WHERE` seguiría acotando el `DELETE` al tenant resuelto,
+  y un test a nivel de SQL (`test_purge_old_audit_logs_refuses_a_session_bound_to_a_different_tenant`)
+  pina ese comportamiento. **El listener de `app/core/db.py` no entra aquí** — su
+  `do_orm_execute` solo cubre `select/update/delete` ORM, y el `text(...)` de este
+  `DELETE` lo esquiva por construcción; mencionarlo como red sería atribuirle un
+  alcance que su propio docstring (`backend/app/core/db.py:79-82`) excluye.
 - Un solo statement atómico: la semántica es "borrar todo lo más viejo de N días",
   no "borrar uno a uno"; `rowcount` lo cuenta sin un `SELECT` adicional.
 - SQL crudo en lugar del ORM (`delete(AuditLogModel).where(...)`): la consulta no
-  usa el ORM para nada (no hay hidratación de filas a borrar), el listener ya
-  impone el scope, y el SQL directo es la forma explícita de "no se ejecuta nada
-  fuera de este WHERE".
+  usa el ORM para nada (no hay hidratación de filas a borrar), y el SQL directo es
+  la forma explícita de "no se ejecuta nada fuera de este WHERE".
 
 Rejected:
 - ORM `delete(AuditLogModel)`: funciona, pero introduce una indirección sin
@@ -244,8 +253,10 @@ Rejected:
 
 - **Schema**: sin cambios. `audit_logs.created_at` ya está indexado por
   `ix_audit_logs_tenant_id_actor_user_id_created_at`
-  (`backend/app/audit/infrastructure/models.py:41-45`); el prefijo `(tenant_id, created_at)`
-  cubre la consulta del purgado sin índice nuevo.
+  (`backend/app/audit/infrastructure/models.py:41-45`); el índice es
+  `(tenant_id, actor_user_id, created_at DESC)`, y el prefijo izquierdo `(tenant_id)`
+  basta para acotar la consulta del purgado — el `WHERE created_at < :cutoff` se
+  evalúa sobre las filas así seleccionadas. Sin índice nuevo.
 - **API REST**: sin cambios. No se exponen filas de auditoría hoy y este change no
   abre esa superficie.
 - **Config / env**: sin cambios. `DEMO_AUDIT_RETENTION_DAYS` es constante del módulo

@@ -76,8 +76,12 @@ Acceptance criteria:
    `actor_user_id=NULL` (la sesión es del runner, no de una persona), pasando por
    `AuditLogFactory.build` + `ChangeSet` para que la regla 11 de `steering/security.md`
    siga cumpliéndose por construcción.
-2. THE SYSTEM SHALL escribir esa fila **antes** del `DELETE`, de modo que sobreviva a un
-   fallo del propio purgado.
+2. THE SYSTEM SHALL escribir esa fila **antes** del `DELETE`. La fila y el `DELETE` comparten
+   una sola transacción: si el `DELETE` falla, la transacción revierte también la fila, y la
+   nota degradada nombra la clase de la excepción sin describir un purgado que no ocurrió.
+   El registro honesto del intento fallido es la nota del informe (`purge-audit: failed
+   with <ClassName> …`), no una fila de auditoría con `deleted_count=0` por un `DELETE` que
+   nunca llegó a ejecutarse.
 3. THE SYSTEM SHALL NO auditar la fila dentro de la propia fase si la fase ya falló al
    intentar escribir la fila inicial: el error se reporta en el informe sin reentrar.
 

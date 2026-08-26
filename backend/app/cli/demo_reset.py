@@ -726,7 +726,7 @@ async def purge_old_audit_logs(
 
 
 async def _safe_purge_old_audit_logs(
-    tenant_id: uuid.UUID, started_at: datetime
+    tenant_id: uuid.UUID | None, started_at: datetime | None
 ) -> tuple[int, str | None]:
     """Run the purge in a fresh session, write its audit row, and degrade on any failure (D7/D8).
 
