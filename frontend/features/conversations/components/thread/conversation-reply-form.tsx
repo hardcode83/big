@@ -111,7 +111,7 @@ export function ConversationReplyForm({
         </button>
       </div>
       {error ? (
-        <p role="alert" className="mt-2 text-sm text-destructive">
+        <p role="alert" className="mt-2 text-sm text-state-error-text">
           {t(replyErrorKey(error))}
         </p>
       ) : null}

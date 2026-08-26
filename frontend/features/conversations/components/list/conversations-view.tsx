@@ -12,10 +12,10 @@ import { useConversations } from "../../hooks/use-conversations";
 import { ConversationsFilters } from "./conversations-filters";
 
 export const ESCALATION_BADGE: Record<ConversationEscalationStatus, string> = {
-  NONE: "bg-gray-100 text-gray-700",
-  PENDING_HUMAN: "bg-amber-100 text-amber-800",
-  HUMAN_HANDLING: "bg-blue-100 text-blue-700",
-  RESOLVED: "bg-emerald-100 text-emerald-700",
+  NONE: "bg-muted text-muted-foreground",
+  PENDING_HUMAN: "bg-state-warning text-state-warning-text",
+  HUMAN_HANDLING: "bg-state-info text-state-info-text",
+  RESOLVED: "bg-state-success text-state-success-text",
 };
 
 function formatDateTime(value: string | null): string {
@@ -112,7 +112,7 @@ export function ConversationsView() {
                   <span
                     className={
                       ESCALATION_BADGE[row.escalationStatus] ??
-                      "bg-gray-100 text-gray-700"
+                      "bg-muted text-muted-foreground"
                     }
                   >
                     {t(

@@ -134,7 +134,7 @@ export function ConversationThreadView({
             <span
               className={
                 ESCALATION_BADGE[conversation.escalationStatus] ??
-                "bg-gray-100 text-gray-700"
+                "bg-muted text-muted-foreground"
               }
             >
               {t(`escalationStatus.${conversation.escalationStatus}`)}
