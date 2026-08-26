@@ -4,7 +4,9 @@ Three rules this module exists to enforce:
 
 * **No request schema has a `tenant_id`** — the effective tenant comes only from the verified
   token (R2.2), so one sent in a body is rejected by `extra="forbid"` and never reaches a use
-  case.
+  case. The same applies to the **query surface**: `BlockedTransitionListQuery` (R3.3 of
+  `blocked-transition-response-ids`) carries `extra="forbid"` so `?tenant_id=…` is rejected with
+  `422` rather than silently dropped.
 * **No response schema has the wifi password, in any form.** `PropertyResponse` structurally
   lacks the field; what it carries is the derived `has_wifi_password` boolean (R5.2). Rule 3 of
   `steering/security.md` names `wifi_password` first among the values that are never plaintext,
@@ -403,6 +405,25 @@ class PropertyPageResponse(BaseModel):
             per_page=per_page,
             total_pages=(total + per_page - 1) // per_page if per_page else 0,
         )
+
+
+class BlockedTransitionListQuery(BaseModel):
+    """Query parameters of `GET /api/v1/blocked-transitions` (R3.3, R4.4 of
+    `blocked-transition-response-ids`).
+
+    The two pagination fields are bound to a Pydantic model (not raw `Query(...)` ints) so the
+    model can carry `extra="forbid"`: an unknown query key — most importantly `tenant_id` — is
+    rejected with `422` rather than silently dropped by FastAPI's default param parsing. The
+    endpoint has no body, so the body half of R4.4 is structurally unreachable; this guard covers
+    the query-string half. See `BlockedTransitionResponse` for the response-side counterpart and
+    `test_action_id_isolation.py::test_tenant_id_in_query_string_is_rejected_with_422` for the
+    assertion that the rejection actually fires.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    page: Annotated[int, Field(ge=1, le=MAX_PAGE)] = 1
+    per_page: Annotated[int, Field(ge=1, le=MAX_PER_PAGE)] = 20
 
 
 class BlockedTransitionResponse(BaseModel):

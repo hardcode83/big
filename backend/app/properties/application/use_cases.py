@@ -569,9 +569,12 @@ class ListBlockedTransitionsUseCase:
                 for row in rows
             ]
 
-        # Oldest stall first, which is the order an operator triages in, with the ids as
-        # tiebreakers so a page boundary cannot repeat or skip a row when two stalls share an
-        # instant — the same reason `PropertyRepository.list` promises a stable sort.
+        # Oldest stall first, which is the order an operator triages in. The four-component
+        # key (due_since, property_id, reservation_id, trigger) is already total because the
+        # last component is an enum literal — so a page boundary cannot repeat or skip a row
+        # when two stalls share an instant, the same reason `PropertyRepository.list` promises
+        # a stable sort. The two action ids (`cleaning_task_id`, `incident_id`) are NOT part
+        # of the key: the dashboar reads them after ordering, not before.
         rows.sort(
             key=lambda row: (
                 row.mismatch.due_since,

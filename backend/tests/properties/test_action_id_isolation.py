@@ -258,18 +258,28 @@ async def test_tenant_b_incident_id_is_b_only_and_excludes_a(
 
 
 @pytest.mark.asyncio
-async def test_a_cross_tenant_task_is_not_exposed_on_the_listing(
+async def test_a_cleaning_stall_with_no_live_task_lists_with_null_id_even_if_neighbour_has_one(
     api, db_session, tenant_a, tenant_b, users_by_role_a
 ) -> None:
-    """R4.3 — a tenant A flat stalled in CLEANING_IN_PROGRESS, but tenant B ALSO has
-    a stall on a different flat, and tenant B's task is the only live task for that
-    property. Tenant A's response: only A's stall listed, only A's task id (or null
-    if A has no task).
+    """R4.3 / R2.3 — tenant A's stall lists with `cleaning_task_id = null` when A has no live
+    task for the stalled property, even when tenant B has a live task on its own property.
 
-    The cross-tenant leak scenario this test rules out: tenant A's endpoint
-    somehow including tenant B's stall or task id in its response. The pre-existing
-    `test_a_neighbours_stall_is_invisible` (line 209 of test_blocked_transitions_api.py)
-    already proves the stall row is filtered; this test extends that to the action id.
+    Why this test is enough for R4.3: the cross-tenant invariant the proposal names
+    ("vivienda del tenant A aparece en `blocking_state` de limpieza pero la tarea que la
+    desbloquearía pertenece al tenant B — `cleaning_task_id` SHALL ser `null`") is upheld
+    **structurally**, not by a runtime check. `cleaning_tasks.property_id` always points
+    to a `properties.id` row whose `tenant_id` matches the task's own `tenant_id` — a
+    cleaning task is anchored to a property in the same tenant. There is therefore no
+    database state where "the task that would unblock A's flat belongs to B", because
+    `property_id` cannot span tenants. The resolver's `WHERE tenant_id == :tenant_id`
+    filter is the second line of defence, not the first.
+
+    What this test catches: a regression where the resolver or the SQL drops the
+    `tenant_id` filter and joins across tenants by `property_id` alone — B's task would
+    then surface in A's response because B's task is on B's property (and `property_id`
+    is the resolver's other input). The pre-existing
+    `test_a_neighbours_stall_is_invisible` already proves the **stall** row is filtered;
+    this test extends the guarantee to the action id.
     """
     a_prop = await _stalled_property(
         db_session, tenant_a, internal_code="A-X",
@@ -291,7 +301,9 @@ async def test_a_cross_tenant_task_is_not_exposed_on_the_listing(
         ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
     )
     assert response.status_code == 200, response.text
-    [entry] = response.json()["data"]
+    body = response.json()
+    assert body["total"] == 1, body  # only A's stall lists
+    [entry] = body["data"]
     assert entry["property_code"] == "A-X"
     assert entry["cleaning_task_id"] is None  # A has no task → null
     assert entry["cleaning_task_id"] != str(b_task.id)  # not B's either
@@ -301,24 +313,24 @@ async def test_a_cross_tenant_task_is_not_exposed_on_the_listing(
 
 
 @pytest.mark.asyncio
-async def test_tenant_id_in_query_string_is_ignored(
+async def test_tenant_id_in_query_string_is_rejected_with_422(
     api, db_session, tenant_a, tenant_b, users_by_role_a
 ) -> None:
-    """R4.4 — `tenant_id` on the query string must NOT route to the other tenant's data.
+    """R4.4 — `tenant_id` on the query string MUST be rejected with `422`.
 
-    The handler reads `tenant_id` from the verified token (`authenticated.context.tenant_id`)
-    and ignores any client-supplied `tenant_id`. The endpoint declares only `page` and
-    `per_page` as Query parameters; FastAPI silently ignores the unknown `tenant_id`
-    key (which is the safe default — accepting an unknown key with no effect is better
-    than crashing the request). What matters is that the response carries the calling
-    tenant's data, NOT the query-parameter tenant's.
+    The query surface is bound to `BlockedTransitionListQuery` (R3.3 of
+    `blocked-transition-response-ids`), which carries `extra="forbid"`. FastAPI therefore
+    returns `422` for any unknown query key, instead of silently dropping it. The assertion
+    is the literal "rechazada con 422" the proposal and tasks list as the contract; if a
+    future change reverts the model back to per-parameter `Query(ge=…, le=…)`, this test
+    fails and forces the contract back into place.
     """
+    # Seed both tenants so the test would have something to leak if the guard broke.
     a_prop = await _stalled_property(
         db_session, tenant_a, internal_code="A-Q",
         state=PropertyOperationalState.CLEANING_IN_PROGRESS,
     )
     await _stay(db_session, a_prop)
-
     b_prop = await _stalled_property(
         db_session, tenant_b, internal_code="B-Q",
         state=PropertyOperationalState.CLEANING_IN_PROGRESS,
@@ -329,11 +341,26 @@ async def test_tenant_id_in_query_string_is_ignored(
         f"{ENDPOINT}?tenant_id={tenant_b.id}",
         headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER]),
     )
-    assert response.status_code == 200
+
+    assert response.status_code == 422, (
+        f"`?tenant_id=…` must be rejected by `extra=\"forbid\"` on "
+        f"`BlockedTransitionListQuery` (R3.3, R4.4 of `blocked-transition-response-ids`); "
+        f"got {response.status_code} {response.text!r} instead. A 200 here means the model "
+        f"was reverted to per-parameter Query(ge, le) and the guard silently dropped the "
+        f"unknown key — the cross-tenant seam would re-open at the next route edit."
+    )
+    # The project wraps every 4xx/5xx in the PRD §23 envelope (`app/core/errors.py`), not
+    # FastAPI's default `{"detail": [...]}`. The serialised Pydantic errors land under
+    # `error.details.errors`, each with a `loc` that names the rejected field. Assert
+    # `tenant_id` is named there so a future regression that drops a *different* unknown
+    # field cannot pass by accident.
     body = response.json()
-    assert body["total"] == 1
-    [entry] = body["data"]
-    assert entry["property_code"] == "A-Q"  # NOT B-Q
+    assert "error" in body, f"expected PRD §23 envelope, got {body!r}"
+    errors = body.get("error", {}).get("details", {}).get("errors", [])
+    assert any(
+        isinstance(err, dict) and "tenant_id" in (err.get("loc") or [])
+        for err in errors
+    ), f"expected `tenant_id` to be named in the 422 envelope; got {body!r}"
 
 
 # --- R4.5: batch discipline — one call per family per page ---
