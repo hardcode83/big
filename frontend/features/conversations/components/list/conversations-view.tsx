@@ -5,18 +5,13 @@ import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { LoadingState } from "@/components/states";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 
-import type { ConversationEscalationStatus, ConversationFilters } from "../../data";
+import type { ConversationFilters } from "../../data";
 import { mapConversationsError } from "../../lib/error-mapping";
+import { escalationTone } from "../../lib/escalation-tone";
 import { useConversations } from "../../hooks/use-conversations";
 import { ConversationsFilters } from "./conversations-filters";
-
-export const ESCALATION_BADGE: Record<ConversationEscalationStatus, string> = {
-  NONE: "bg-muted text-muted-foreground",
-  PENDING_HUMAN: "bg-state-warning text-state-warning-text",
-  HUMAN_HANDLING: "bg-state-info text-state-info-text",
-  RESOLVED: "bg-state-success text-state-success-text",
-};
 
 function formatDateTime(value: string | null): string {
   if (!value) return "—";
@@ -110,10 +105,7 @@ export function ConversationsView() {
                 <td>{t(`conversations:status.${row.status}`)}</td>
                 <td>
                   <span
-                    className={
-                      ESCALATION_BADGE[row.escalationStatus] ??
-                      "bg-muted text-muted-foreground"
-                    }
+                    className={TONE_BADGE_CLASS[escalationTone(row.escalationStatus)]}
                   >
                     {t(
                       `conversations:escalationStatus.${row.escalationStatus}`,

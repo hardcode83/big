@@ -6,13 +6,14 @@ import { useTranslation } from "react-i18next";
 
 import { LoadingState } from "@/components/states";
 import { useHasPermission } from "@/lib/auth";
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
 
 import { mapConversationsError } from "../../lib/error-mapping";
+import { escalationTone } from "../../lib/escalation-tone";
 import {
   useConversation,
   useConversationMessages,
 } from "../../hooks/use-conversations";
-import { ESCALATION_BADGE } from "../list/conversations-view";
 import { ConversationThreadMessages } from "./conversation-thread-messages";
 import { ConversationReplyForm } from "./conversation-reply-form";
 
@@ -132,10 +133,7 @@ export function ConversationThreadView({
           <dt className="text-muted-foreground">{t("fields.escalationStatus")}</dt>
           <dd>
             <span
-              className={
-                ESCALATION_BADGE[conversation.escalationStatus] ??
-                "bg-muted text-muted-foreground"
-              }
+              className={TONE_BADGE_CLASS[escalationTone(conversation.escalationStatus)]}
             >
               {t(`escalationStatus.${conversation.escalationStatus}`)}
             </span>
