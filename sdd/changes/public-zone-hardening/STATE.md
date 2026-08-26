@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/public-zone-hardening
 implementation_sha: 06436e4c6e5b9a78e2e12f409892f9d03dc007b1
 pr_number: 
 pr_url: 
