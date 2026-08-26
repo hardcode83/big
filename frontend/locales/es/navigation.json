@@ -128,6 +128,7 @@
   },
   "userMenu": {
     "triggerLabel": "Menú de usuario",
-    "logout": "Cerrar sesión"
+    "logout": "Cerrar sesión",
+    "anonymous": "Usuario"
   }
 }

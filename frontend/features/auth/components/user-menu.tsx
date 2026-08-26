@@ -25,7 +25,6 @@ import {
 import { useAuth } from "@/lib/auth";
 
 const EMAIL_MAX = 24;
-const FALLBACK_LABEL = "Usuario";
 
 /**
  * Topbar user control for the three authenticated shells (workspace, cleaner,
@@ -58,9 +57,10 @@ export function UserMenu() {
   const [open, setOpen] = useState(false);
 
   const email = user?.email;
+  const fallbackLabel = t("navigation:userMenu.anonymous");
   const triggerLabel = email && email.length > EMAIL_MAX
     ? `${email.slice(0, EMAIL_MAX - 1)}…`
-    : (email ?? FALLBACK_LABEL);
+    : (email ?? fallbackLabel);
   const ariaTriggerLabel = t("navigation:userMenu.triggerLabel");
 
   async function handleLogout() {
