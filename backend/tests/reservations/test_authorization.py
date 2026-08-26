@@ -143,3 +143,50 @@ async def test_a_forbidden_answer_never_reveals_whether_the_resource_exists(
 
     assert real.status_code == invented.status_code == 403
     assert real.json() == invented.json()
+
+
+@pytest.mark.asyncio
+async def test_the_new_derived_fields_do_not_relax_the_role_gate(
+    api, users_by_role_a, create_payload
+) -> None:
+    """R6.3 / tasks 3.3: a `CLEANER` and a missing token get the same `403` / `401`
+    on the listing and detail endpoints even though the response schema now carries
+    `property_name`, `property_internal_code`, and `guest_full_name`.
+
+    A future regression that hid the new fields behind a stricter permission would
+    either pass this test (gate still works) or fail it (gate leaked); the test that
+    *promised* to assert the body shape with the new fields is this one.
+    """
+    reservation_id = await _seed_reservation(api, users_by_role_a, create_payload)
+
+    # 1. CLEANER (no READ_RESERVATIONS) — still 403 on listing and detail.
+    cleaner = auth_header(api, users_by_role_a[UserRole.CLEANER])
+    listing = await api.get("/api/v1/reservations", headers=cleaner)
+    detail = await api.get(f"/api/v1/reservations/{reservation_id}", headers=cleaner)
+    assert listing.status_code == 403
+    assert detail.status_code == 403
+    # The 403 envelope is the standard error envelope, not the derived-fields response.
+    listing_body = listing.json()
+    detail_body = detail.json()
+    assert set(listing_body) == {"error"}
+    assert listing_body["error"]["code"] == "FORBIDDEN"
+    assert set(detail_body) == {"error"}
+    assert detail_body["error"]["code"] == "FORBIDDEN"
+
+    # 2. Missing token — still 401 on both endpoints.
+    listing_no_auth = await api.get("/api/v1/reservations")
+    detail_no_auth = await api.get(f"/api/v1/reservations/{reservation_id}")
+    assert listing_no_auth.status_code == 401
+    assert detail_no_auth.status_code == 401
+
+    # 3. A reader's response actually carries the new fields — guards against a
+    # future `from_domain` regression that would silently strip them.
+    reader = auth_header(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    body = (await api.get("/api/v1/reservations", headers=reader)).json()
+    assert body["data"], "the seeded reservation should appear in the listing"
+    [row] = body["data"]
+    assert row["id"] == reservation_id
+    assert row["property_name"] == "Redes 11"
+    assert row["property_internal_code"] == "REDES11"
+    assert "guest_full_name" in row  # key present even when the seed has no guest
+    assert row["guest_full_name"] is None  # null-with-key, not absent

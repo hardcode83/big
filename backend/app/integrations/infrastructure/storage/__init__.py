@@ -22,7 +22,9 @@ from app.integrations.domain.storage import (
     StorageWriteError,
 )
 from app.integrations.infrastructure.storage.local import (
+    CLEANING_PHOTO_URL_PREFIX,
     DEFAULT_SIGNED_URL_PREFIX,
+    INCIDENT_PHOTO_URL_PREFIX,
     MEDIA_ROOT,
     LocalFileStorage,
 )

@@ -234,8 +234,14 @@ resource "oci_identity_policy" "dev_runner_read_secrets" {
   # apply que los crea, que es la mitigación del riesgo que el design declara: olvidarlos haría
   # fallar el paso «Render .env» del deploy nombrando la clave — el comportamiento correcto, pero
   # un viaje de ida y vuelta evitable.
+  #
+  # `demo_account_password` (change `demo-user`) entra por lo mismo y en el mismo apply que lo
+  # crea. Su lector no es el deploy sino el workflow `demo-reset`, que lo resuelve **por nombre**
+  # como hace el del túnel — así que le vale igual esta condición por OCID, por la razón escrita
+  # arriba: `GetSecretBundleByName` exige el mismo permiso y OCI resuelve nombre→OCID antes de
+  # autorizar.
   statements = [
-    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}'}",
+    "Allow dynamic-group ${oci_identity_dynamic_group.dev_runner.name} to read secret-bundles in compartment id ${var.compartment_ocid} where any {target.secret.id = '${oci_vault_secret.github_app_key.id}', target.secret.id = '${oci_vault_secret.postgres_password.id}', target.secret.id = '${oci_vault_secret.jwt_secret_key.id}', target.secret.id = '${oci_vault_secret.encryption_key.id}', target.secret.id = '${oci_vault_secret.cloudflare_tunnel_token.id}', target.secret.id = '${oci_vault_secret.media_access_key_id.id}', target.secret.id = '${oci_vault_secret.media_secret_access_key.id}', target.secret.id = '${oci_vault_secret.media_s3_endpoint.id}', target.secret.id = '${oci_vault_secret.media_region.id}', target.secret.id = '${oci_vault_secret.demo_account_password.id}'}",
   ]
 }
 
@@ -352,6 +358,47 @@ resource "oci_vault_secret" "jwt_secret_key" {
   secret_content {
     content_type = "BASE64"
     content      = base64encode(random_password.jwt.result)
+  }
+}
+
+# La contraseña de las cuatro cuentas del tenant de demostración (change `demo-user`, design D12).
+#
+# `random_password` **no es la contraseña que se publica**: es el valor con el que el secreto nace
+# para que nunca haya un default en el árbol, y para que un entorno recién aplicado tenga
+# credenciales inertes en lugar de conocidas hasta que una persona fije las de verdad. La
+# publicada la pone alguien out-of-band con `oci vault secret update-base64` (RUNBOOK), que es el
+# mismo canal que la regla 8 de `steering/security.md` ya acepta para la clave SSH — y su forma la
+# acordó el gate del design: una frase corta y dictable por teléfono, del orden de 15 caracteres,
+# **por encima de `PASSWORD_MIN_LENGTH`** para que un visitante que la cambie pueda volver a
+# ponerla desde `POST /auth/change-password`.
+#
+# `ignore_changes = [secret_content]` es exactamente lo que hace que ese valor sobreviva al apply
+# siguiente. Y es el riesgo de cabecera del design: si el provider de OCI no lo respetara, cada
+# apply devolvería la contraseña al valor generado y el reset siguiente la propagaría a las cuatro
+# cuentas **en silencio**, dejando las credenciales publicadas sin funcionar. Se verifica con el
+# primer `plan` teniendo ya el valor out-of-band puesto, **antes de publicar nada a nadie**: un
+# `plan` que proponga reescribir `secret_content` es la señal. Si no aguanta, la salida escrita en
+# Risks es no depender de `ignore_changes` —la publicada pasa a ser la que genera `random_password`,
+# leída del Vault— y la rotación es `terraform apply -replace`.
+resource "random_password" "demo_account" {
+  length  = 24
+  special = false # mismo motivo que las de arriba: nada que complique una URL ni un `.env`
+}
+
+resource "oci_vault_secret" "demo_account_password" {
+  compartment_id = var.compartment_ocid
+  vault_id       = oci_kms_vault.dev.id
+  key_id         = oci_kms_key.dev_secrets.id
+  secret_name    = "autohostai-${var.env}-demo-account-password"
+  secret_content {
+    content_type = "BASE64"
+    content      = base64encode(random_password.demo_account.result)
+  }
+
+  lifecycle {
+    # El contenido lo gobierna una persona a partir del primer apply, no Terraform. Sin esto, el
+    # valor publicado duraría hasta el siguiente `terraform apply`.
+    ignore_changes = [secret_content]
   }
 }
 

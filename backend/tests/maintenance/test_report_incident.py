@@ -115,6 +115,8 @@ async def _report(
     source: IncidentSource = IncidentSource.CLEANER,
     actor: IncidentActor | None = ACTOR,
     property_id: uuid.UUID = PROPERTY_ID,
+    reported_by_user_id: uuid.UUID | None = None,
+    cleaning_task_id: uuid.UUID | None = None,
 ) -> Incident:
     use_case = ReportIncidentUseCase(
         incidents=_FakeIncidents(journal),
@@ -131,6 +133,8 @@ async def _report(
         description=DESCRIPTION,
         actor=actor,
         now=NOW,
+        reported_by_user_id=reported_by_user_id,
+        cleaning_task_id=cleaning_task_id,
     )
 
 
@@ -309,3 +313,114 @@ async def test_nothing_it_writes_is_reachable_from_another_tenant(db_session, wo
             per_page=50,
         )
     ).items
+
+
+# --- the two parameters `cleaner-incident-report` adds (R3.3, R4.3; design D4, D10) ---------
+#
+# The amended D5 of 2026-08-16 removed `reservation_id` and `reported_by_user_id` because both
+# "arrastraban la misma precondición sin descargar y hoy no tienen llamante", and set the rule
+# for whoever brought the first: add the parameter **together with** the lookup that makes it
+# safe. These tests are that rule being honoured rather than repealed.
+
+
+@pytest.mark.asyncio
+async def test_the_two_new_parameters_default_to_none_so_existing_callers_are_untouched() -> None:
+    """R4.2, and the reason `app/cli/seed_demo.py` needed no edit at all.
+
+    Keyword-only with a `None` default: a call written before this change produces exactly the
+    entity it produced before.
+    """
+    journal = _Journal()
+
+    incident = await _report(journal)
+
+    assert incident.reported_by_user_id is None
+    assert incident.cleaning_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_both_ids_reach_the_entity_when_the_caller_has_them() -> None:
+    """R3.3 and R4.3. Passed separately and not derived from one another: "who reported" and
+    "who is acting" are two concepts, and collapsing them would silently change what the demo
+    seed writes (D4's rejected alternative)."""
+    journal = _Journal()
+    reporter = uuid.uuid4()
+    task = uuid.uuid4()
+
+    incident = await _report(journal, reported_by_user_id=reporter, cleaning_task_id=task)
+
+    assert incident.reported_by_user_id == reporter
+    assert incident.cleaning_task_id == task
+    # The actor is a different person from the reporter in this call, which is the case that
+    # proves the use case does not derive one from the other.
+    assert ACTOR.user_id != reporter
+
+
+@pytest.mark.asyncio
+async def test_the_audit_row_broadcasts_the_task_when_there_is_one() -> None:
+    """D10: an incident's audit row records what it was anchored against — which is why
+    `reservation_id` is in the allowlist — and "during which cleaning" is the same anchor.
+
+    An identifier and never text, so rule 11's excepción 2 ("no se propaga") is untouched.
+    """
+    journal = _Journal()
+    task = uuid.uuid4()
+
+    await _report(journal, cleaning_task_id=task)
+
+    entry = journal.only("audit")
+    assert isinstance(entry, AuditLog)
+    assert entry.changes == {
+        "source": {"old": None, "new": "CLEANER"},
+        "status": {"old": None, "new": "OPEN"},
+        "cleaning_task_id": {"old": None, "new": str(task)},
+    }
+
+
+@pytest.mark.asyncio
+async def test_the_audit_row_omits_the_key_entirely_when_there_is_no_task() -> None:
+    """`ChangeSet.diff` always inserts the key, so calling it unconditionally would stamp
+    `{"old": null, "new": null}` on every incident the portal, the pipeline and the seed
+    create. `audit_logs` is append-only, so that null would be permanent."""
+    journal = _Journal()
+
+    await _report(journal, source=IncidentSource.GUEST)
+
+    entry = journal.only("audit")
+    assert isinstance(entry, AuditLog)
+    assert "cleaning_task_id" not in entry.changes
+
+
+@pytest.mark.asyncio
+async def test_the_timeline_carries_the_task_id_only_when_there_is_one() -> None:
+    """Identifiers only, and the key absent rather than present-and-null for the same reason
+    the audit row omits it: `timeline_events` is append-only."""
+    journal = _Journal()
+    task = uuid.uuid4()
+
+    incident = await _report(journal, cleaning_task_id=task)
+
+    event = journal.only("timeline")
+    assert isinstance(event, TimelineEvent)
+    assert event.metadata == {
+        "incident_id": str(incident.id),
+        "source": IncidentSource.CLEANER.value,
+        "cleaning_task_id": str(task),
+    }
+    # And still nothing of what was typed.
+    assert TITLE not in str(event.metadata)
+    assert DESCRIPTION not in str(event.metadata)
+
+
+@pytest.mark.asyncio
+async def test_the_timeline_omits_the_key_when_the_incident_has_no_cleaning() -> None:
+    journal = _Journal()
+
+    incident = await _report(journal, source=IncidentSource.GUEST)
+
+    event = journal.only("timeline")
+    assert isinstance(event, TimelineEvent)
+    assert event.metadata == {
+        "incident_id": str(incident.id),
+        "source": IncidentSource.GUEST.value,
+    }

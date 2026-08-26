@@ -17,17 +17,18 @@ from tests.route_walk import flatten_routes
 # login and refresh are the endpoints that mint credentials, so they cannot require
 # one; the rest is FastAPI's own generated documentation.
 #
-# `GET /api/v1/cleaning-photos/{photo_id}` is the fourth kind and the only one that serves
-# tenant data (`cleaning-photos-storage`, design D7). It cannot require a token because a
+# `GET /api/v1/cleaning-photos/{photo_id}` is the fourth kind, and since `incident-photos` one
+# of **two** that serve tenant data — `GET /api/v1/incident-photos/{photo_id}` is the other, and
+# the same factory builds both (that change's D5). It cannot require a token because a
 # browser fetching an `<img src>` sends no `Authorization` header, so a signed URL gated on
 # one would work for nothing. **Its authorisation is the HMAC in its query string**, verified
-# by `ServeLocalCleaningPhotoUseCase` against the object key read from the database — a key
+# by `ServeSignedObjectUseCase` against the object key read from the database — a key
 # that begins with `tenants/{tenant_id}/`, so a valid signature proves the caller was handed a
 # URL minted for that photo of that tenant. Refusals answer one constant `403` body for
 # "wrong", "expired", "tampered" and "no such photo" alike, so the exemption does not hand an
 # unauthenticated caller an existence oracle. Pinned in `tests/cleaning/test_serve_photo_api.py`
-# and `tests/cleaning/test_serve_photo_use_case.py`; the entry below is the visible diff this
-# allowlist exists to force.
+# and `tests/integrations/test_signed_serving_use_case.py`; the entry below is the visible diff
+# this allowlist exists to force.
 #
 # Keyed on (METHOD, path), not on path alone. R3.3 names the exemptions with their verb
 # — "POST /api/v1/auth/login" — and a bare-path allowlist exempts every method on that
@@ -49,6 +50,15 @@ ANONYMOUS_ENDPOINTS = {
     # UPDATE (R3.2), and one indistinguishable error for every failure (R3.3).
     ("POST", "/api/v1/auth/reset-password"),
     ("GET", "/api/v1/cleaning-photos/{photo_id}"),
+    # `incident-photos` R4.1/R4.6, design D12. Anonymous for exactly the reason the cleaning
+    # one above is, and it is the **second route in the application that serves object bytes
+    # against an HMAC signature** — the two are built by one factory
+    # (`app/integrations/api/signed_media.py`, design D5), so the reasoning that governs the
+    # cleaning entry governs this one and is not restated.
+    #
+    # It is the twelfth entry in this census, not the second: the proposal said "second" while
+    # counting only the signed-media routes, and design D12 corrected that in writing.
+    ("GET", "/api/v1/incident-photos/{photo_id}"),
     # `reservations-webhooks`: anonymous because the route token IS the credential (rule 12(b) of
     # `steering/security.md`), paired with the provider's static per-tenant header (12(a)). A
     # provider cannot hold a JWT, and ADR 0006 measured that none of the eleven evaluated
@@ -367,17 +377,38 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/cleaning-tasks",
         "/api/v1/cleaning-tasks/{task_id}",
         "/api/v1/cleaning-tasks/{task_id}/accept",
+        # `cleaning-stall-blocks-next-stay` R3.1: the exit the cycle lacked, restricted to
+        # `MANAGE_CLEANING_TASKS`. Asserted per role in `tests/cleaning/test_tasks_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/cancel",
         "/api/v1/cleaning-tasks/{task_id}/checklist",
         "/api/v1/cleaning-tasks/{task_id}/checklist/{item_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/complete",
         "/api/v1/cleaning-tasks/{task_id}/context",
+        # `cleaner-incident-report`: the cleaner opens an incident from her own task. Gated on
+        # `EXECUTE_CLEANING_TASKS`, which no other role holds, so it needed no new permission —
+        # and it lives here rather than under `/api/v1/incidents` precisely so that module's
+        # "no creation route" invariant survives (R1.2).
+        "/api/v1/cleaning-tasks/{task_id}/incidents",
+        # `cleaner-photo-requirements` R4.1: `READ_CLEANING_TASKS`, **no new permission**, on the
+        # same reasoning as the context path above. It is the read half of the photo path right
+        # below it — the cleaner is told which categories exist instead of discovering them by
+        # trying identifiers against that route's 404 — and reading three fields of the task's
+        # own template server-side is deliberately not `READ_CLEANING_TEMPLATES` (R4.2), which
+        # would open the tenant's whole template catalogue to resolve one row. The row-level
+        # half is again derived from the persisted role and invisible to this snapshot.
+        # Asserted per role in `tests/cleaning/test_photo_requirements_api.py`.
+        "/api/v1/cleaning-tasks/{task_id}/photo-requirements",
         "/api/v1/cleaning-tasks/{task_id}/photos",
         "/api/v1/cleaning-tasks/{task_id}/reject",
         "/api/v1/cleaning-tasks/{task_id}/start",
         "/api/v1/cleaning-tasks/{task_id}/validate",
-        # `maintenance`: the twelve routes of its D14. Every one of them is authenticated —
-        # the module has no anonymous door, and the only surface that creates an incident
-        # without a session is the guest portal's, which is in `ANONYMOUS_ENDPOINTS`.
+        # `maintenance`: sixteen authenticated routes now, fifteen here plus the owner approval
+        # below — fourteen until `incident-photos` added `POST` and `GET` on `.../photos`, and
+        # thirteen before `tech-cycle-completion` added `reject`. Every one of *these* is
+        # authenticated. The module does have an anonymous door, exactly one, and it is not on
+        # this router: `GET /api/v1/incident-photos/{photo_id}` is in `ANONYMOUS_ENDPOINTS`
+        # above (R4.6). The only surface that creates an incident without a session is still
+        # the guest portal's, also in `ANONYMOUS_ENDPOINTS`.
         # Asserted per role in `tests/maintenance/test_api_incidents.py`.
         "/api/v1/incidents",
         "/api/v1/incidents/{incident_id}",
@@ -385,9 +416,32 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/incidents/{incident_id}/assign",
         "/api/v1/incidents/{incident_id}/cancel",
         "/api/v1/incidents/{incident_id}/classify",
+        # `tech-incident-context` R4.1: `READ_INCIDENTS`, **no new permission**, and a
+        # `TECHNICIAN` narrowed to their own rows by the persisted role rather than by anything
+        # this table can see. Its own authorisation cases — `CLEANER` refused, guest token
+        # refused — are in `tests/maintenance/test_incident_context_api.py`.
+        "/api/v1/incidents/{incident_id}/context",
+        # `tech-cycle-completion` R2.3: renamed from `/start`, same `EXECUTE_INCIDENTS`. The
+        # old path is gone rather than aliased — there was no consumer to protect.
+        "/api/v1/incidents/{incident_id}/en-route",
+        # `tech-cycle-completion` R1.6: `EXECUTE_INCIDENTS`, the same gate the rest of the
+        # technician's cycle uses, and **no new permission**. The row-level half — only the
+        # assignee, or a `PROPERTY_MANAGER` unblocking — is derived inside the use case from
+        # the persisted role, which is the kind of restriction this snapshot cannot see. Its
+        # per-role cases are in `tests/maintenance/test_api_authorization.py`.
+        "/api/v1/incidents/{incident_id}/reject",
+        # `incident-photos` R2.2/R3.2: the upload takes `EXECUTE_INCIDENTS` and the listing
+        # `READ_INCIDENTS`, both **already existing** — `ROLE_PERMISSIONS` is untouched, so
+        # uploading stays with the `TECHNICIAN` and `PROPERTY_MANAGER` while listing adds the
+        # `TENANT_OWNER`. One path, two methods; asserted per role in
+        # `tests/maintenance/test_api_authorization.py`.
+        #
+        # The change's third route, `GET /api/v1/incident-photos/{photo_id}`, is anonymous and
+        # lives in `ANONYMOUS_ENDPOINTS` instead — deliberately not hung off this router, whose
+        # every path carries a `require(...)`.
+        "/api/v1/incidents/{incident_id}/photos",
         "/api/v1/incidents/{incident_id}/resolve",
         "/api/v1/incidents/{incident_id}/resume",
-        "/api/v1/incidents/{incident_id}/start",
         "/api/v1/incidents/{incident_id}/wait-parts",
         "/api/v1/owner-approvals/{approval_id}/respond",
         "/api/v1/reservations",
@@ -403,6 +457,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/properties",
         "/api/v1/properties/{property_id}",
         "/api/v1/properties/{property_id}/state",
+        # `cleaning-stall-blocks-next-stay` D5: a path of its own rather than a literal segment
+        # under `/properties`, which would collide with `/properties/{property_id}`. Read with
+        # `READ_PROPERTIES` (D6), so the owner sees her own stalled flat; asserted per role in
+        # `tests/properties/test_blocked_transitions_api.py`.
+        "/api/v1/blocked-transitions",
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",

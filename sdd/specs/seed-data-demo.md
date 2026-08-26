@@ -22,6 +22,13 @@ estados: los recorre enteros sin pasar por HTTP.
 No crea el tenant: lo **completa**. `make bootstrap` sigue siendo lo único que da la primera
 entrada a un entorno nuevo (ver spec `auth-tenancy`), y este comando presupone su resultado.
 
+Desde el 2026-08-24 el dataset llega además a dos superficies que antes quedaban vacías —una
+**conversación** con el huésped, procesada por la vía real de entrada, y un **enlace de portal de
+huésped** para la estancia activa— y `apply_plan` tiene un segundo llamante: el comando del tenant de
+demostración (ver [`demo-tenant.md`](demo-tenant.md)), que lo reutiliza tal cual en vez de escribir un
+seed propio. Eso convierte a este módulo en la pieza compartida por los dos tenants del entorno, y es
+la razón de que varias de sus decisiones se lean como parametrizaciones en lugar de constantes.
+
 ## Requirements
 
 ### Un comando de seed reproducible
@@ -52,8 +59,14 @@ entrada a un entorno nuevo (ver spec `auth-tenancy`), y este comando presupone s
   variables propias: es lo que nombra al tenant a completar, así que vacía es *configuración que
   falta* y no *un tenant que no existe* — el mensaje de la precondición mandaría al lector a
   `make bootstrap` por una variable que nunca rellenó.
-- THE SYSTEM SHALL no formar parte de `make up` ni de ningún workflow de CD, y THE SYSTEM SHALL NOT
-  ser una migración de datos de Alembic — necesita valores que elige una persona.
+- THE SYSTEM SHALL no formar parte de `make up`, y THE SYSTEM SHALL NOT ser una migración de datos de
+  Alembic — necesita valores que elige una persona.
+- `make seed-demo` sigue **fuera de todo workflow de CD**, y sus seis variables sin default son lo que
+  lo sostiene. Lo que sí corre programado desde el 2026-08-24 es `apply_plan`, reutilizado por el
+  comando del tenant de demostración, que un workflow con `schedule:` ejecuta a diario. La diferencia
+  importa y no es formal: ese llamante no toma del entorno ni el tenant ni las cuentas —los lleva en
+  constantes— y trae sus propios rechazos, así que lo que llegó a CD es la *función*, nunca el comando
+  parametrizado por `.env`. Ver [`demo-tenant.md`](demo-tenant.md).
 
 ### La regla de escritura: caso de uso, si no entidad y puerto, nunca modelo ORM
 
@@ -338,6 +351,36 @@ incluye **trabajo de campo**, un actor único deja de ser posible sin saltarse i
 - THE SYSTEM SHALL NOT escribir la tabla de incidencias por ninguna vía que no sea un caso de uso de
   `maintenance`.
 
+### La conversación, procesada por la vía real de entrada
+
+- WHEN el seed corre, THE SYSTEM SHALL crear una conversación anclada a la **estancia activa** y a su
+  huésped mediante `CreateConversationUseCase`, y THE SYSTEM SHALL hacer entrar cada mensaje del
+  huésped por `ProcessInboundGuestMessageUseCase`, separados un minuto entre sí.
+- THE SYSTEM SHALL NOT escribir las filas de `messages` directamente: un hilo insertado a mano parece
+  correcto y no ejercita nada — ni la clasificación de intención, ni la política de escalado, ni la
+  respuesta automática, que es justo lo que la conversación existe para enseñar. Es la misma regla de
+  escritura que el resto del comando, aplicada a `messaging-ai`.
+- THE SYSTEM SHALL usar `MockAIAdapter` —el mismo adaptador que inyecta el router real—, de modo que
+  la siembra **no dependa de red ni de credenciales** de ningún proveedor de IA.
+- THE SYSTEM SHALL elegir dos textos constantes que caigan en las intenciones `WIFI` y `EMERGENCY`,
+  **pineadas por test** contra el intent que deben producir, porque son las que ejercitan las dos
+  ramas del pipeline: la respuesta con plantilla y el escalado a una persona. El pineado no es celo:
+  `MockAIAdapter.generate_response` lanza `KeyError` a propósito para tres intents, así que un texto
+  que derivara a la rama equivocada rompería el seed.
+- THE SYSTEM SHALL escribir en el idioma que la conversación declara.
+
+### El enlace del portal de huésped, emitido una sola vez
+
+- WHERE el llamante **pide** el enlace, THE SYSTEM SHALL emitir un token de portal para la estancia
+  activa mediante `IssueGuestAccessTokenUseCase`, persistiendo únicamente su digest, y SHALL devolver
+  la URL en claro al llamante — que es la única vez que ese valor existe.
+- WHERE el llamante **no** lo pide, THE SYSTEM SHALL no mintar ningún token. Es lo que hace
+  `make seed-demo` sobre el tenant de trabajo: el enlace es una necesidad del tenant de demostración,
+  no del dataset, y mintar un token de acceso anónimo en el entorno del equipo sería regalarlo.
+- WHERE la estancia ya tiene un token vivo y no revocado, THE SYSTEM SHALL no acuñar un segundo, de
+  modo que una segunda ejecución no invalide el enlace ya publicado. En el reset del tenant de
+  demostración eso no se nota, porque su fase de borrado limpia `guest_access_tokens` antes.
+
 ### Idempotencia por identidad estable
 
 - THE SYSTEM SHALL identificar cada entidad por una clave que **no depende del día**: las
@@ -495,8 +538,12 @@ Las seis variables son **obligatorias y sin default en el árbol**, declaradas v
   mínimas que la detección de tipo acepta. Sustituirlas es material de marketing, no de seed.
 - **No toca la política de la máquina de estados ni las cadencias del scheduler.** Si el estado con
   el que abre la demo no gusta, la discusión es de [`timeline-state-machine.md`](timeline-state-machine.md).
-- **No siembra aprobaciones de gasto, costes, pricing, statements, reviews ni conversaciones**: §27
-  no los describe.
+- **No siembra aprobaciones de gasto, costes, pricing, statements ni reviews**: §27 no los describe.
+  Las **conversaciones sí** se siembran desde el 2026-08-24, aunque §27 tampoco las describa: las pidió
+  `demo-user` porque una demo con la bandeja vacía no enseña la mensajería con IA, que es media
+  propuesta de valor del producto. `reviews` sigue fuera por un motivo distinto y más duro —
+  `backend/app/reviews/` no tiene capa de aplicación ni router, así que sus filas no las leería ningún
+  endpoint— y su casa es la entrada `revenue-reviews`.
 - **No introduce un discriminador de entorno (`APP_ENV`)**, así que **no hay rechazo por entorno**.
   La protección son las variables obligatorias sin default y la ausencia de este comando de
   cualquier workflow de CD. Riesgo residual asumido: quien tenga shell en la VM de dev y rellene
@@ -523,6 +570,8 @@ Las seis variables son **obligatorias y sin default en el árbol**, declaradas v
   `UpdateReservationUseCase` (`backend/app/reservations/application/use_cases.py`),
   `ReservationIngestor` (`backend/app/integrations/application/ingest.py`),
   `AdvancePropertyStatesUseCase` (`backend/app/properties/application/use_cases.py`),
+  `CreateConversationUseCase` y `ProcessInboundGuestMessageUseCase` con `MockAIAdapter`
+  (`backend/app/messaging/`), `IssueGuestAccessTokenUseCase` (portal de huésped),
   `CreateChecklistTemplateUseCase`, `ProvisionCleaningTaskUseCase`, `AcceptCleaningTaskUseCase`,
   `StartCleaningTaskUseCase`, `CompleteChecklistItemUseCase`, `UploadCleaningPhotoUseCase` y
   `CompleteCleaningTaskUseCase` (`backend/app/cleaning/application/use_cases.py`),
@@ -539,6 +588,9 @@ Las seis variables son **obligatorias y sin default en el árbol**, declaradas v
   que el conjunto de llamantes de `require_unmarked_session` es exactamente el declarado, y
   límite 2 del listener de `backend/app/core/db.py`.
 - Tests: `backend/tests/cli/test_seed_demo.py` (directorio nuevo a propósito — el seed no pertenece
-  a un dominio, atraviesa cinco).
+  a un dominio, atraviesa cinco). Los de la conversación y el enlace de portal viven ahí también;
+  `backend/tests/cli/test_demo_reset.py` los ejercita como llamante.
+- Segundo llamante de `apply_plan`: `backend/app/cli/demo_reset.py`
+  (ver [`demo-tenant.md`](demo-tenant.md)).
 - Documentación: `docs/seed-demo.md` (dataset, credenciales como *lo que pones en tu `.env`*,
   envejecimiento y cómo empezar de cero), `README.md` §«Entrar en la aplicación».

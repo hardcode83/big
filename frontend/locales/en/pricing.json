@@ -1,0 +1,143 @@
+{
+  "tabs": {
+    "label": "Pricing sections",
+    "recommendations": "Recommendations",
+    "rules": "Rules"
+  },
+  "separator": "·",
+  "recommendations": {
+    "list": {
+      "label": "Price recommendations",
+      "empty": {
+        "title": "No recommendations",
+        "description": "No recommendations match the selected filters."
+      },
+      "error": {
+        "title": "Could not load the recommendations",
+        "description": "Try again in a few seconds."
+      }
+    },
+    "columns": {
+      "property": "Property",
+      "date": "Night",
+      "recommendedPrice": "Recommended price",
+      "status": "Status",
+      "explanation": "Show the calculation"
+    }
+  },
+  "status": {
+    "DRAFT": "Draft",
+    "RECOMMENDED": "Recommended",
+    "APPROVED": "Approved",
+    "APPLIED_EXTERNAL": "Published",
+    "REJECTED": "Rejected"
+  },
+  "identity": {
+    "unavailable": "Identity unavailable",
+    "loading": "Loading identity…",
+    "portfolio": "Whole portfolio"
+  },
+  "filters": {
+    "property": {
+      "label": "Property",
+      "all": "All properties"
+    },
+    "dateFrom": { "label": "From" },
+    "dateTo": { "label": "To" },
+    "status": {
+      "label": "Status",
+      "all": "All statuses"
+    },
+    "active": {
+      "label": "In force",
+      "all": "All rules",
+      "true": "Active only",
+      "false": "Inactive only"
+    }
+  },
+  "pagination": {
+    "label": "Recommendations pagination",
+    "previous": "Previous page",
+    "next": "Next page",
+    "pageOfTotal": "Page {{page}} of {{totalPages}}",
+    "totalItems": "{{total}} in total"
+  },
+  "decide": {
+    "approve": "Approve",
+    "reject": "Reject",
+    "markPublished": "Mark as published",
+    "confirm": "Confirm",
+    "cancel": "Cancel",
+    "sending": "Sending…",
+    "success": "Recommendation updated.",
+    "confirmQuestion": {
+      "APPROVED": "Approve this price?",
+      "REJECTED": "Reject this price?",
+      "APPLIED_EXTERNAL": "Mark this price as published?"
+    },
+    "error": {
+      "forbidden": "You do not have permission to decide price recommendations.",
+      "notFound": "That recommendation no longer exists.",
+      "conflict": "That recommendation is no longer in the state you thought. Reload the list.",
+      "invalid": "That move is not valid for this recommendation.",
+      "generic": "Could not save the decision. Try again."
+    }
+  },
+  "generate": {
+    "button": "Regenerate now",
+    "sending": "Generating…",
+    "report": "Generation ran: {{created}} created, {{updated}} updated, {{preserved}} preserved, {{skipped}} skipped.",
+    "error": {
+      "forbidden": "You do not have permission to generate recommendations.",
+      "invalid": "Cannot generate for the selected property.",
+      "generic": "Could not generate. Try again."
+    }
+  },
+  "rules": {
+    "list": {
+      "label": "Pricing rules",
+      "empty": {
+        "title": "No pricing rules",
+        "description": "No rules match the selected filters."
+      },
+      "error": {
+        "title": "Could not load the rules",
+        "description": "Try again in a few seconds."
+      }
+    },
+    "columns": {
+      "name": "Name",
+      "scope": "Scope",
+      "active": "In force",
+      "band": "Price band",
+      "minPrice": "Minimum",
+      "basePrice": "Base",
+      "maxPrice": "Maximum",
+      "maxDailyChangePct": "Maximum daily change (%)",
+      "modifiers": "Modifiers"
+    },
+    "scope": {
+      "portfolio": "Whole portfolio"
+    },
+    "active": {
+      "true": "Active",
+      "false": "Inactive"
+    },
+    "modifiers": {
+      "weekday": "Weekday: {{count}}",
+      "leadTime": "Lead time: {{count}}",
+      "occupancy": "Occupancy: {{count}}",
+      "seasonality": "Seasonality: {{count}}",
+      "event": "Events: {{count}}"
+    },
+    "pagination": {
+      "label": "Pricing rules pagination"
+    }
+  },
+  "read": {
+    "error": {
+      "forbidden": "You do not have permission to view this tenant's pricing.",
+      "generic": "Try again in a few seconds."
+    }
+  }
+}

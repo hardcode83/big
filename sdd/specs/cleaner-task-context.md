@@ -157,12 +157,22 @@ en un listado.
 - **El contexto embebido en el listado.** `CleaningTaskPageResponse` no lo lleva: lo decidirá
   `cleaner-app` con una pantalla real delante, y con 2 viviendas en el MVP N es 1-3.
 - **Códigos de acceso y `access_records.notes`.** `CLEANER` no tiene `READ_ACCESS_RECORDS` y
-  PRD §11 no pide accesos en esta pantalla. La decisión de steering aparcada en
-  `sdd/roadmap/cleaner-app.md` sobre las cuatro columnas auditables-no-denylisted **no se dispara
-  aquí**, y éste es el por qué no: lo que la dispara es que el conjunto de lectores de una de esas
-  columnas crezca a un rol que hoy no la tiene, y esta proyección no lee ninguna de las cuatro.
+  PRD §11 no pide accesos en esta pantalla. La decisión de steering que
+  `sdd/roadmap/cleaner-app.md` tenía aparcada sobre las cuatro columnas auditables-no-denylisted **no
+  se disparó aquí**, y éste es el por qué no: lo que la dispara es que el conjunto de lectores de una
+  de esas columnas crezca a un rol que hoy no la tiene, y esta proyección no lee ninguna de las
+  cuatro. **La disparó [`tech-incident-context`](tech-incident-context.md) el 2026-08-21**, que sí
+  lee `access_notes`: le dio la excepción 6 del censo de la regla 11 y sacó las tres notas de
+  `properties` del listado paginado. Lo que sigue pendiente de aquella decisión es el cifrado en
+  reposo de las cuatro columnas —entrada `plaintext-sink-encryption-at-rest`— y `access_records.notes`,
+  que sigue siendo de `cleaner-app`.
 - **Instrucciones de limpieza.** PRD §11 enumera nueve cosas y no pide `cleaning_notes`. Excluirlo
   no es quedarse corto.
+- **Los requisitos de foto de la tarea.** El `SHALL` de *once campos y solo once* es lo que los
+  mandó a una ruta hermana en vez de aquí: meterlos habría exigido **enmendarlo**, no ampliarlo.
+  Viven en [`cleaner-photo-requirements`](cleaner-photo-requirements.md), sobre
+  `GET /cleaning-tasks/{task_id}/photo-requirements`, con este mismo permiso y este mismo
+  acotamiento por fila. Esta ruta no se tocó al añadirlos.
 
 ## Key files
 

@@ -12,7 +12,7 @@
     },
     "timeline": {
       "title": "Cronología",
-      "description": "Historial de eventos operativos de todas las propiedades."
+      "description": "Historial de eventos operativos de una vivienda."
     },
     "properties": {
       "title": "Propiedades",
@@ -101,6 +101,10 @@
     "guest": {
       "title": "Portal del huésped",
       "description": "Instrucciones y soporte para tu estancia."
+    },
+    "landing": {
+      "title": "AutoHostAI",
+      "description": "Página pública del producto, en una sola consola operativa."
     }
   },
   "more": "Más",
@@ -112,8 +116,14 @@
   "expandSidebar": "Expandir barra lateral",
   "collapseSidebar": "Colapsar barra lateral",
   "localeSwitcher": {
-    "label": "Idioma",
     "es": "Español",
-    "en": "English"
+    "en": "English",
+    "switchTo": "Cambiar idioma a {{language}}"
+  },
+  "themeSwitcher": {
+    "label": "Tema",
+    "light": "Claro",
+    "dark": "Oscuro",
+    "system": "Seguir al sistema"
   }
 }

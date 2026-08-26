@@ -72,6 +72,52 @@ también aparece en el agregado `GET /api/v1/properties/{id}/dashboard` y en la 
 `GET /api/v1/dashboard/properties`; los tres están documentados en
 [`docs/dashboard.md`](dashboard.md).
 
+## Cuando el calendario quiere mover una vivienda y su estado no lo admite
+
+`GET /api/v1/blocked-transitions` lista los **desajustes**: viviendas a las que el reloj exigió una
+transición que su estado operacional no admite. Lo lee cualquier rol con `READ_PROPERTIES`, o sea
+el manager **y la propietaria** — no expone nada que ella no vea ya en su card del dashboard.
+
+```bash
+curl .../api/v1/blocked-transitions \
+  -H 'Authorization: Bearer <token de manager o propietaria>'
+```
+
+Cada entrada dice qué pasa y desde cuándo:
+
+| Campo | Qué es |
+|---|---|
+| `property_id` / `property_code` | La vivienda, por id y por el código con el que se la reconoce |
+| `reservation_id` | La reserva cuyo instante llegó y no se pudo aplicar |
+| `trigger` | El trigger que no pudo aplicarse (`CHECKIN_WINDOW_OPENED`, `CHECKIN_TIME_REACHED`, `CHECKOUT_TIME_REACHED`), en su literal canónico |
+| `blocking_state` | El estado que lo impide (`CLEANING_IN_PROGRESS`, `MAINTENANCE_REQUIRED`…), también canónico |
+| `due_since` | **Desde cuándo** está vencido, que es el dato que se quiere: para REDES11, el 19 de agosto y no el día en que alguien miró |
+
+`trigger` y `blocking_state` viajan sin prosa a propósito: traducirlos aquí estrenaría un catálogo
+de cadenas para un consumidor que todavía no existe — este change entrega API, no pantalla.
+
+Cuatro cosas que hay que saber al operarla:
+
+- **Se calcula en cada petición y no guarda nada.** Un desajuste desaparece de la lista en cuanto
+  se resuelve —cancelando la limpieza, resolviendo la incidencia— sin que nadie tenga que cerrar
+  nada. No hay fila que quede abierta, y por tanto no hay fila que alguien olvide cerrar.
+- **`total` cuenta desajustes, no viviendas revisadas.** La paginación es del **resultado**: se
+  examina la cartera entera y se paginan los atascos. Paginar la fuente reproduciría el bug
+  original —una vivienda atascada en la página 3 volvería a ser invisible—.
+- **La ventana es la misma de los jobs de reloj**: 30 días atrás y 2 adelante. Un atasco de más de
+  30 días **deja de aparecer** y necesita una transición manual; el detalle está en
+  [`celery-jobs.md`](celery-jobs.md) §Viviendas atascadas.
+- **Una vivienda `OUT_OF_SERVICE` o `BLOCKED_BY_OWNER` con una reserva confirmada cuya hora llegó
+  sí aparece.** Es intencionado —hay una reserva que nadie va a poder cumplir— pero significa que
+  retirar una vivienda sin cancelar sus reservas genera avisos hasta que se cancelen.
+
+**Deuda declarada, con su palanca escrita.** La lectura recorre **todas** las viviendas del tenant
+(`PropertyRepository.list_all`, sin paginar en origen) y detecta sobre cada una. Con dos viviendas
+es irrelevante; con doscientas son dos consultas grandes por petición. La palanca, cuando pese:
+filtrar en la consulta por el **complemento** de los estados origen de cada trigger, que es
+exactamente lo que ya hace el job (`AdvancePropertyStatesUseCase._count_blocked`). Se escribe aquí
+para que se encuentre cuando haga falta, en vez de descubrirse midiendo.
+
 ## La contraseña del wifi entra y no vuelve a salir
 
 Se puede enviar en el alta y en la edición, y se guarda cifrada. **No se puede leer de vuelta por
@@ -101,6 +147,65 @@ el mensaje lo distingue. Un lote no se aborta entero por una vivienda retirada.
 
 Volver a activarla es el mismo `PATCH` con `status: "ACTIVE"`.
 
+## Las tres notas de texto libre salen del listado, y siguen en el detalle
+
+`GET /api/v1/properties` **ya no devuelve** `access_notes`, `cleaning_notes` ni
+`emergency_notes`. `GET /api/v1/properties/{id}` las sigue devolviendo las tres, y el `POST` y el
+`PATCH` las siguen aceptando: lo que cambia es sólo el listado paginado.
+
+El motivo es de volumen, no de permisos. Quien tiene `READ_PROPERTIES` podía pedir una sola
+respuesta con las instrucciones de acceso de **todas** las viviendas del tenant, y ésa era la
+única superficie que las servía a granel. Sacarlas del listado es la forma que se eligió cuando
+`tech-incident-context` amplió el público de `access_notes` al rol `TECHNICIAN`; el contrato de la
+regla 11 de `sdd/steering/security.md` exige que la forma se implemente y no sólo se documente, y
+ésta es la implementación. El razonamiento completo, y por qué se rechazó cifrarlas en reposo
+—responde a otra amenaza, y cubre por igual a una cuarta columna que vive en otro módulo—, está
+en la excepción 6 de ese documento.
+
+**Las tres, no sólo `access_notes`**: es un solo esquema y el mismo coste, y un listado que
+esconde una nota y muestra dos no es una forma que nadie pueda explicar dentro de seis meses.
+
+Si una pantalla necesita una nota, pide el detalle de esa vivienda. Coste conocido: una pantalla
+que quisiera mostrar notas de varias viviendas a la vez pasa de una petición a N — y con dos
+viviendas en el MVP, N es dos.
+
+## Ver el portfolio desde `/properties`
+
+`properties-web` graduó la ruta: donde antes había un cartel de «en preparación» ahora está el
+índice del portfolio, **sólo lectura**, sobre `GET /api/v1/properties`. Es la única pantalla donde
+se ve el `status` de una vivienda —`ACTIVE` o `INACTIVE` no aparecía en ninguna parte del
+frontend— y el único sitio donde un UUID de propiedad, de los que `/reservations` e `/incidents`
+imprimen en crudo, se resuelve a un nombre.
+
+Cada fila lleva **seis** cosas y nada más: nombre (que es el enlace al detalle), código interno,
+ciudad, capacidad (huéspedes · habitaciones · baños), estado operacional con su color de PRD §9.1,
+y `status`. El resto de lo que el listado devuelve —dirección, país, zona horaria, horas de
+entrada/salida por defecto, WiFi, vínculo con el PMS, sellos de tiempo— son datos de ficha: están
+en el detalle, no en la lista.
+
+Hay **dos filtros**, que son exactamente los dos que el endpoint acepta: situación (`status`) y
+estado operacional, cada uno con un «todos». No hay búsqueda por texto, ni ordenación elegible, ni
+filtro por ciudad: harían falta cambios en el backend. Cambiar un filtro vuelve a la página 1 — sin
+eso, filtrar desde la página 3 puede caer en una página que el conjunto filtrado no tiene y devolver
+un vacío indistinguible de «no hay ninguna así».
+
+En móvil no hay que arrastrar la tabla de lado a lado: por debajo de `sm` cada vivienda es una
+tarjeta apilada con pares etiqueta/valor, y la tabla de seis columnas aparece desde `sm`. Se hizo
+así a propósito, porque con scroll lateral el dato que hay que desplazar para leer es justo `status`.
+
+**Las notas de texto libre y la contraseña del WiFi no salen ahí**, y no por omisión: el listado no
+las devuelve (ver la sección de arriba) y la pantalla no pide el detalle de cada fila para
+rellenarlas — eso reconstruiría la superficie de bulto que se cerró a propósito, y encima con una
+llamada por vivienda.
+
+Quién la ve es cosa del backend, no de la pantalla: no hay guarda de permiso en el frontend.
+`PROPERTY_MANAGER` y `TENANT_OWNER` ven el listado; `CLEANER`, `TECHNICIAN` y `SUPER_ADMIN` reciben
+un estado «prohibido» localizado, que es el `403` del backend con otra cara. Un `401` no se pinta
+como error sino como carga, para que la pantalla no parpadee mientras se rota el token.
+
+El *qué hace* con sus criterios verificables está en
+[`sdd/specs/properties-crud.md`](../sdd/specs/properties-crud.md) §«La pantalla del portfolio».
+
 ## Qué queda registrado
 
 Cada alta y cada edición escriben una fila en `audit_logs`, en la misma transacción que el cambio:
@@ -112,7 +217,8 @@ De los campos sensibles y de los de texto libre (`access_notes`, `cleaning_notes
 
 ## Lo que todavía no existe
 
-- **No hay pantalla**: esto es API. El frontend de propiedades llega con `dashboard-web`.
+- **No hay pantalla para dar de alta, editar ni retirar**: eso sigue siendo sólo API. La pantalla
+  que sí existe es de lectura y está arriba, en «Ver el portfolio desde `/properties`».
 - **Las credenciales del PMS no se tocan por API**, ni siquiera enmascaradas. Se gestionan con
   `python -m app.integrations.cli.pms_credentials`, y es a propósito: una credencial robada da
   escritura sobre la cuenta del cliente, así que no existe superficie HTTP que pueda filtrarla.

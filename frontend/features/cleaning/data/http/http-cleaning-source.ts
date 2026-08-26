@@ -6,16 +6,20 @@ import type {
   CleanerSummary,
   CleaningTask,
   CleaningTaskFilters,
+  CleaningTaskListItem,
   PaginatedResponse,
   PropertySummary,
 } from "../dto";
 
 type TaskPageResponse = components["schemas"]["CleaningTaskPageResponse"];
 type TaskResponse = components["schemas"]["CleaningTaskResponse"];
+type TaskListItemResponse =
+  components["schemas"]["CleaningTaskListItemResponse"];
 type UserPageResponse = components["schemas"]["UserPageResponse"];
 type UserResponse = components["schemas"]["UserResponse"];
 type PropertyPageResponse = components["schemas"]["PropertyPageResponse"];
-type PropertyResponse = components["schemas"]["PropertyResponse"];
+type PropertyListItemResponse =
+  components["schemas"]["PropertyListItemResponse"];
 
 /** One page of tasks per request; `page` is what the pagination control moves (R1.5). */
 const TASKS_PER_PAGE = 20;
@@ -62,6 +66,22 @@ function mapTask(value: TaskResponse): CleaningTask {
   };
 }
 
+/**
+ * The listing row: `mapTask`'s fields plus the pre-flight verdict.
+ *
+ * Two mappers rather than an optional field on one, mirroring the two response models the
+ * backend publishes (design D7). `?? null` is the backward half of the deploy-skew window:
+ * a frontend newer than its backend receives a body without the key, and a row that offers
+ * the button and lets the server refuse is the correct degradation (R3.3) — the alternative
+ * would be `undefined` reaching the component and disabling a control that works.
+ */
+function mapListItem(value: TaskListItemResponse): CleaningTaskListItem {
+  return {
+    ...mapTask(value),
+    assignmentBlockedBy: value.assignment_blocked_by ?? null,
+  };
+}
+
 function mapCleaner(value: UserResponse): CleanerSummary {
   return {
     id: value.id,
@@ -70,7 +90,7 @@ function mapCleaner(value: UserResponse): CleanerSummary {
   };
 }
 
-function mapProperty(value: PropertyResponse): PropertySummary {
+function mapProperty(value: PropertyListItemResponse): PropertySummary {
   return {
     id: value.id,
     name: value.name,
@@ -85,7 +105,7 @@ export class HttpCleaningSource implements CleaningDataSource {
     _tenantId: string,
     filters: CleaningTaskFilters,
     page: number,
-  ): Promise<PaginatedResponse<CleaningTask>> {
+  ): Promise<PaginatedResponse<CleaningTaskListItem>> {
     const response: TaskPageResponse = await this.client.request<
       "/api/v1/cleaning-tasks",
       "GET"
@@ -104,7 +124,7 @@ export class HttpCleaningSource implements CleaningDataSource {
         },
       },
     );
-    return mapPage(response, mapTask);
+    return mapPage(response, mapListItem);
   }
 
   async listCleaners(_tenantId: string): Promise<CleanerSummary[]> {

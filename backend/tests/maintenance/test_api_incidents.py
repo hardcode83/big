@@ -150,7 +150,7 @@ async def test_the_happy_path_of_every_route(api, world, db_session) -> None:
 
     for route, expected in (
         ("accept", IncidentStatus.ACCEPTED),
-        ("start", IncidentStatus.IN_PROGRESS),
+        ("en-route", IncidentStatus.IN_PROGRESS),
         ("wait-parts", IncidentStatus.WAITING_EXTERNAL_PARTS),
         ("resume", IncidentStatus.IN_PROGRESS),
     ):
@@ -166,6 +166,238 @@ async def test_the_happy_path_of_every_route(api, world, db_session) -> None:
     assert resolved.status_code == 200
     assert resolved.json()["status"] == IncidentStatus.RESOLVED.value
     assert resolved.json()["resolved_at"] is not None
+
+
+async def test_the_old_start_route_no_longer_exists(api, world, db_session) -> None:
+    """R2.3 — "se renombra, no se duplica", proved against the app's own route table.
+
+    A `404` and not a `405`: FastAPI answers `405` when the path matches and the method does
+    not, so a `404` is what says the path itself is gone. There was no consumer to protect
+    (measured: nothing under `frontend/`, no CLI, no scheduler), which is why the rename does
+    not leave an alias behind.
+    """
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+
+    response = await api.post(f"{INCIDENTS}/{incident.id}/start", headers=technician)
+
+    assert response.status_code == 404
+
+
+# --- The refusal over HTTP (R1.6, R1.8) -------------------------------------------------
+
+
+@pytest.mark.parametrize("origin", ["assigned", "accepted"])
+async def test_rejecting_over_http_from_both_origins(
+    api, world, db_session, origin: str
+) -> None:
+    """R1.1, R1.2, R1.6 — and the body it answers with shows the caller the three cleared
+    fields, which is what a client needs to redraw the screen."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if origin == "accepted":
+        assert (
+            await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+        ).status_code == 200
+
+    response = await api.post(f"{INCIDENTS}/{incident.id}/reject", headers=technician)
+
+    assert response.status_code == 200
+    body = response.json()
+    assert body["status"] == IncidentStatus.CLASSIFIED.value
+    assert body["assigned_technician_id"] is None
+    assert body["eta_at"] is None
+
+
+async def test_rejecting_out_of_order_is_a_409(api, world, db_session) -> None:
+    """R1.8 in the PRD §23 envelope — `CLASSIFIED` is not an origin of `reject`."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/reject", headers=auth_header(api, world.manager)
+    )
+
+    assert response.status_code == 409
+    assert response.json()["error"]["code"] == "CONFLICT"
+
+
+async def test_rejecting_a_closed_incident_is_a_409(api, world, db_session) -> None:
+    """R1.8's first branch: a terminal incident admits no move at all."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.RESOLVED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/reject", headers=auth_header(api, world.manager)
+    )
+
+    assert response.status_code == 409
+
+
+# --- The ETA over HTTP (R3.2, R3.4, R3.6) -----------------------------------------------
+
+
+@pytest.mark.parametrize("route", ["accept", "en-route"])
+async def test_the_two_routes_accept_an_eta(api, world, db_session, route: str) -> None:
+    """R3.2 — and only these two take a body at all."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if route == "en-route":
+        await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+    eta = (NOW + timedelta(days=400)).isoformat()
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/{route}", json={"eta_at": eta}, headers=technician
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["eta_at"] is not None
+
+
+@pytest.mark.parametrize("route", ["accept", "en-route"])
+async def test_the_two_routes_still_work_with_no_body_at_all(
+    api, world, db_session, route: str
+) -> None:
+    """D6 — the parameter is `IncidentEtaRequest | None = None`, so the pre-change call shape
+    is untouched. Worth its own test: making the body required would be a silent break of
+    every existing caller."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if route == "en-route":
+        await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+
+    response = await api.post(f"{INCIDENTS}/{incident.id}/{route}", headers=technician)
+
+    assert response.status_code == 200, response.text
+    assert response.json()["eta_at"] is None
+
+
+@pytest.mark.parametrize("route", ["accept", "en-route"])
+async def test_an_eta_in_the_past_is_a_422(api, world, db_session, route: str) -> None:
+    """R3.4 over HTTP — `MaintenanceValidationError` maps to `422 VALIDATION_ERROR`."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if route == "en-route":
+        await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/{route}",
+        json={"eta_at": "2020-01-01T10:00:00+00:00"},
+        headers=technician,
+    )
+
+    assert response.status_code == 422
+    assert response.json()["error"]["code"] == "VALIDATION_ERROR"
+
+
+@pytest.mark.parametrize("route", ["accept", "en-route"])
+async def test_an_eta_without_a_timezone_is_a_422(
+    api, world, db_session, route: str
+) -> None:
+    """D6 — without the explicit `tzinfo` check this is a `TypeError` and an undeclared 500."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if route == "en-route":
+        await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/{route}",
+        json={"eta_at": "2099-01-01T10:00:00"},
+        headers=technician,
+    )
+
+    assert response.status_code == 422
+
+
+@pytest.mark.parametrize("route", ["accept", "en-route"])
+async def test_an_unknown_field_in_the_eta_body_is_a_422(
+    api, world, db_session, route: str
+) -> None:
+    """R3.6 — `extra="forbid"` is what makes that a `422` and not a convention."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    if route == "en-route":
+        await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/{route}",
+        json={"eta_at": None, "assigned_technician_id": str(uuid.uuid4())},
+        headers=technician,
+    )
+
+    assert response.status_code == 422
+
+
+# --- The materials over HTTP (R4.1, R4.2) -----------------------------------------------
+
+
+async def test_resolving_accepts_and_returns_the_materials(
+    api, world, db_session
+) -> None:
+    """R4.1, R4.2 — and the value comes back on the response, stripped."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/en-route", headers=technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/resolve",
+        json={"final_cost": "60.00", "materials": "  Dos codos de 22 mm  "},
+        headers=technician,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["materials"] == "Dos codos de 22 mm"
+
+
+async def test_an_empty_materials_string_is_a_422(api, world, db_session) -> None:
+    """D7 — "sin materiales" is said by omitting the field, not by sending `""`.
+
+    `str_strip_whitespace=True` with `min_length=1` is what makes a whitespace-only value a
+    `422` too, which is the case a bare `min_length` would let through.
+    """
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/en-route", headers=technician)
+
+    for value in ("", "   "):
+        response = await api.post(
+            f"{INCIDENTS}/{incident.id}/resolve",
+            json={"final_cost": "60.00", "materials": value},
+            headers=technician,
+        )
+        assert response.status_code == 422, value
+
+
+async def test_over_long_materials_is_a_422(api, world, db_session) -> None:
+    """R4.1 — bounded in the request schema as well as in the DDL, so this is a `422` rather
+    than a driver error that aborts the transaction."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/en-route", headers=technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/resolve",
+        json={"final_cost": "60.00", "materials": "x" * 2001},
+        headers=technician,
+    )
+
+    assert response.status_code == 422
+
+
+async def test_materials_is_refused_on_the_other_bodies(api, world, db_session) -> None:
+    """R4.2 — "NEVER SHALL aceptarlo en ninguna otra ruta", made a `422` by `extra="forbid"`."""
+    incident = await _assigned(api, world, db_session)
+    technician = auth_header(api, world.technician)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/accept",
+        json={"materials": "Dos codos"},
+        headers=technician,
+    )
+
+    assert response.status_code == 422
 
 
 async def test_cancelling_is_its_own_route(api, world, db_session) -> None:
@@ -184,7 +416,7 @@ async def test_a_step_out_of_order_is_a_409(api, world, db_session) -> None:
     incident = await _assigned(api, world, db_session)
 
     response = await api.post(
-        f"{INCIDENTS}/{incident.id}/start", headers=auth_header(api, world.technician)
+        f"{INCIDENTS}/{incident.id}/en-route", headers=auth_header(api, world.technician)
     )
 
     assert response.status_code == 409
@@ -267,7 +499,7 @@ async def test_the_second_gate_answers_with_the_parked_incident(
     incident = await _assigned(api, world, db_session)
     technician = auth_header(api, world.technician)
     await api.post(f"{INCIDENTS}/{incident.id}/accept", headers=technician)
-    await api.post(f"{INCIDENTS}/{incident.id}/start", headers=technician)
+    await api.post(f"{INCIDENTS}/{incident.id}/en-route", headers=technician)
 
     response = await api.post(
         f"{INCIDENTS}/{incident.id}/resolve",
@@ -284,6 +516,129 @@ async def test_the_second_gate_answers_with_the_parked_incident(
     approvals = await db_session.execute(select(OwnerApprovalModel))
     approval = approvals.scalars().one()
     assert approval.related_type is OwnerApprovalRelatedType.MAINTENANCE_COST
+
+
+# --- The optional note on `assign` (R3.2, R3.3) ------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("body_extra", "expected"),
+    [
+        ({}, None),
+        ({"assignment_note": None}, None),
+        ({"assignment_note": "Portal code 4821."}, "Portal code 4821."),
+    ],
+)
+async def test_assign_accepts_the_note_as_an_optional_field(
+    api, world, db_session, body_extra: dict, expected: str | None
+) -> None:
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={"technician_id": str(world.technician.id), **body_extra},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 200
+    stored = await db_session.get(IncidentModel, incident.id)
+    await db_session.refresh(stored)
+    assert stored.assignment_note == expected
+
+
+async def test_a_note_over_the_bound_is_a_422(api, world, db_session) -> None:
+    """The pydantic half of D6's two-sided bound. The DDL is the other half
+    (`tests/maintenance/test_models.py`); without this the driver would raise instead of the
+    PRD §23 envelope answering."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={"technician_id": str(world.technician.id), "assignment_note": "x" * 2001},
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_assign_body_still_forbids_an_unknown_field(api, world, db_session) -> None:
+    """R3.2 — `extra="forbid"` survives the new field, so a `tenant_id` is still refused."""
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    response = await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={
+            "technician_id": str(world.technician.id),
+            "tenant_id": str(uuid.uuid4()),
+        },
+        headers=auth_header(api, world.manager),
+    )
+
+    assert response.status_code == 422
+
+
+async def test_the_incident_contract_does_not_gain_the_note(api, world, db_session) -> None:
+    """R3.3 of `tech-incident-context` — the note lives on the projection and nowhere else.
+
+    Asserted as the **exact** key set of both bodies, so a `from_attributes` slip or a field
+    appended to `IncidentResponse` reddens here rather than being noticed in a client.
+
+    It did exactly that when `tech-cycle-completion` added `eta_at` and `materials` (its R3.1,
+    R4.1, design D8). Both are deliberate additions to this contract and both appear in the
+    **listing** as well as the detail, because one schema serves both. What the test is
+    guarding stays untouched: `assignment_note` is still absent, and so is everything that
+    identifies the reporter (`reported_by_guest_token`, `reported_by_user_id`) and the raw
+    classifier verdict (`ai_classification`).
+    """
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+    await api.post(
+        f"{INCIDENTS}/{incident.id}/assign",
+        json={
+            "technician_id": str(world.technician.id),
+            "assignment_note": "Portal code 4821.",
+        },
+        headers=auth_header(api, world.manager),
+    )
+    manager = auth_header(api, world.manager)
+
+    detail = await api.get(f"{INCIDENTS}/{incident.id}", headers=manager)
+    listing = await api.get(INCIDENTS, headers=manager)
+
+    expected = {
+        "id",
+        "property_id",
+        "reservation_id",
+        "source",
+        "category",
+        "severity",
+        "status",
+        "title",
+        "description",
+        "ai_summary",
+        "assigned_technician_id",
+        "owner_approval_required",
+        "estimated_cost",
+        "approved_cost",
+        "final_cost",
+        "resolved_at",
+        "created_at",
+        "updated_at",
+        # `tech-cycle-completion` R3.1/R4.1 — added on purpose, listing included (D8).
+        "eta_at",
+        "materials",
+    }
+    assert set(detail.json()) == expected
+    assert set(listing.json()["items"][0]) == expected
+    # The point of the test, restated so a future widening of `expected` cannot quietly
+    # swallow it: the note and the reporter's identity are still out.
+    for absent in (
+        "assignment_note",
+        "reported_by_guest_token",
+        "reported_by_user_id",
+        "ai_classification",
+    ):
+        assert absent not in detail.json()
+        assert absent not in listing.json()["items"][0]
 
 
 # --- There is no creation route (D14) ---------------------------------------------------

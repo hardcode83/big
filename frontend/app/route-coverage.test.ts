@@ -20,19 +20,30 @@ function findPageFiles(dir: string): string[] {
 // Real (non-placeholder) pages that cover a registered route without a
 // `routeId` prop. As modules graduate from placeholder to implemented, they are
 // listed here by path suffix → route id (dashboard-web-frontend: dashboard,
-// property-detail; cleaning-manager-view: cleaning).
+// property-detail; cleaning-manager-view: cleaning; properties-web: properties;
+// timeline-web: timeline; pricing-web: pricing).
+//
+// The bare `page.tsx` is the root at `/`, which the `landing-public` change
+// promoted from the `(workspace)` group — it now wires the `landing` route.
+// It MUST stay LAST: `Object.entries` iterates in insertion order and the
+// matching is `endsWith(suffix)`, so the generic `"page.tsx"` would swallow
+// every other entry first.
 const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/cleaning/page.tsx": "cleaning",
   "(workspace)/dashboard/page.tsx": "dashboard",
+  "(workspace)/properties/page.tsx": "properties",
   "(workspace)/properties/[id]/page.tsx": "property-detail",
+  "(workspace)/timeline/page.tsx": "timeline",
   "(workspace)/reservations/page.tsx": "reservations",
   "(workspace)/reservations/[id]/page.tsx": "reservation-detail",
   "(workspace)/incidents/page.tsx": "incidents",
   "(workspace)/incidents/[id]/page.tsx": "incident-detail",
-  "(workspace)/conversations/page.tsx": "conversations",
+"(workspace)/conversations/page.tsx": "conversations",
   "(workspace)/conversations/[id]/page.tsx": "conversation-detail",
+  "(workspace)/pricing/page.tsx": "pricing",
   "(public)/login/page.tsx": "login",
   "(guest)/guest/[token]/page.tsx": "guest",
+  "page.tsx": "landing",
 };
 
 function routeIdOf(file: string): string | undefined {
@@ -60,11 +71,11 @@ describe("App Router coverage (tasks 7.2–7.6)", () => {
   });
 
   it("has a page for every PRD §24 surface with no orphan pages", () => {
-    // Every page file either covers a routeId (placeholder or real) or is the
-    // (workspace) root redirect.
+    // Every page file covers a routeId — the (workspace) root redirect was
+    // promoted to a real landing page in `landing-public`.
     const uncovered = pageFiles.filter(
       (file) => routeIdOf(file) === undefined,
     );
-    expect(uncovered.length).toBe(1); // only the (workspace) root redirect
+    expect(uncovered.length).toBe(0);
   });
 });

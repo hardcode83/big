@@ -27,7 +27,7 @@ app/         Composición de rutas y layouts. Los page.tsx son adaptadores finos
 app/api/     La única pieza de servidor: [...path]/route.ts reenvía /api/ al backend.
 features/    Módulos por dominio. features/shell/ es el Application Shell.
 components/  Primitivas shadcn/ui (components/ui) y estados (components/states).
-lib/         Infraestructura transversal: api, config, i18n, query, metadata.
+lib/         Infraestructura transversal: api, config, i18n, query, metadata, theme.
 locales/     Catálogos i18n es/ y en/.
 test/        Setup y helpers de test.
 ```
@@ -77,11 +77,13 @@ Cada ruta renderiza `RoutePlaceholder` (Server Component) → `ModulePlaceholder
 2. Sustituir el `RoutePlaceholder` del `page.tsx` por el componente real del feature.
 3. Definir query options/keys del feature (ver TanStack Query) y sus contratos con backend.
 4. Añadir sus estados (`loading.tsx`/`error.tsx`) componiendo `LoadingState`/`ErrorState`.
-5. Añadir sus claves i18n en `locales/es` y `locales/en`.
+5. Añadir sus claves i18n en `locales/es` y `locales/en`, y registrar el namespace en `lib/i18n/resources.ts` (import, array `NAMESPACES` y las tablas `es`/`en`).
+6. **Registrar la página en `REAL_PAGE_ROUTE_IDS` de `app/route-coverage.test.ts`.** Ese test deduce el `routeId` de cada página leyendo su prop `routeId="…"`, que sólo existe mientras la página es un `RoutePlaceholder`; en cuanto deja de serlo, la página queda «sin cubrir» y el test de páginas huérfanas falla. Es su mecanismo previsto, no un defecto — pero no lo ve ningún test del feature, sólo la suite completa.
 
 ## Server / Client Components y rendimiento
 
-- Layouts y pages son **Server Components** por defecto. El shell completo **no** es una frontera cliente: los wrappers de shell (`WorkspaceShell`, …), `ShellFrame`, `Topbar`, `Brand`, `SkipLink`, `PageHeader` y `RoutePlaceholder` son Server Components y resuelven su texto estático en servidor (`getServerT`). `"use client"` se coloca en el límite más bajo posible, solo en las islas interactivas: `Sidebar`/collapse y `TabletNavTrigger` (store Zustand), `BottomNavigation`/`MoreMenu`, `NavLink`, `Breadcrumbs`/`PageTitle` (navegación cliente), `LocaleSwitcher`, y `OverlayAutoCloser` (cierre de overlays al navegar).
+- Layouts y pages son **Server Components** por defecto. El shell completo **no** es una frontera cliente: los wrappers de shell (`WorkspaceShell`, …), `ShellFrame`, `Topbar`, `Brand`, `SkipLink`, `PageHeader` y `RoutePlaceholder` son Server Components y resuelven su texto estático en servidor (`getServerT`). `"use client"` se coloca en el límite más bajo posible, solo en las islas interactivas: `Sidebar`/collapse y `TabletNavTrigger` (store Zustand), `BottomNavigation`/`MoreMenu`, `NavLink`, `Breadcrumbs`/`PageTitle` (navegación cliente), `LocaleSwitcher`, `ThemeSwitcher` (escribe la cookie de tema), y `OverlayAutoCloser` (cierre de overlays al navegar).
+- **`Topbar` es un Server Component `async`**, porque lee el tema de la cookie por request para montar el `ThemeSwitcher`. Los cinco wrappers de shell que la componen (`WorkspaceShell`, `PublicShell`, `CleanerShell`, `TechnicianShell`, `GuestShell`) son `async` por lo mismo. Sigue sin ser una frontera cliente: lo asíncrono es la lectura, no la interactividad.
 - App Router aporta code splitting por ruta. El registro es serializable (nombres de icono, no imports de features), así los módulos futuros quedan fuera del bundle del shell hasta navegar su ruta.
 - No se usan APIs experimentales de cache. `next/dynamic` se reserva para widgets cliente pesados en su propio change.
 
@@ -112,6 +114,24 @@ Zustand no necesita provider. No se añaden providers de theme/analytics/flags.
 
 El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tipa sus cuerpos JSON y respuestas de éxito. No contiene endpoints, DTOs escritos a mano, wrappers, repositorios ni servicios de dominio. La integración `frontend-auth-session` usa sus hooks `getHeaders` y `onUnauthorized` para añadir el access token efímero, renovar una sesión elegible tras un `401`, reintentar una vez y excluir los endpoints de autenticación; el login, la sesión en memoria, el logout best-effort y los guards client-side de UX viven en `lib/auth` y `features/auth`. Los errores siguen pasando por `ApiError` y `parseApiError`; nunca se persisten tokens ni se lee Zustand para la sesión.
 
+## Diseño: tokens, temas y tipografía
+
+La capa de color, tipografía, ritmo y radios vive **entera** en `app/globals.css`, en **dos bloques `@theme` distintos**, y la regla que los separa importa al añadir un token: lo que depende del tema va en `@theme inline`, que mapea el token de Tailwind sobre la variable que cada bloque de tema redefine (`--color-surface: var(--surface)`); lo que es literal e igual en los dos temas —tipografía, ritmo, radios— va en un `@theme` llano, que no debe pasar por `:root`. El propio fichero lo explica junto a cada bloque. No hay `tailwind.config.js` ni `.ts` en ninguna de sus extensiones, su ausencia es deliberada (`components.json` lleva `"tailwind": {"config": ""}`) y desde este change hay un test que falla si alguien la reintroduce.
+
+**La paleta de color, en tres bloques** —cuántos tokens son exactamente lo asertan `app/globals.tokens.test.ts` y la comprobación de tokens declarados de `test/color-tokens.test.ts`, que es donde no puede quedarse atrás—: el tema claro en `:root`, y el oscuro **dos veces** — bajo `@media (prefers-color-scheme: dark)` acotado con `:root:not([data-theme="light"])`, y otra vez en `:root[data-theme="dark"]`. Los dos bloques oscuros son idénticos valor por valor y un test de paridad lo vigila; están duplicados para que el atributo pueda vencer a la preferencia del sistema **en las dos direcciones**, forzando claro sobre un sistema oscuro igual que oscuro sobre uno claro.
+
+**El tema se resuelve en el servidor, calcado del idioma.** Cookie `autohostai.theme` (validada contra `light|dark`, sin valor por defecto: su ausencia significa «lo que diga el sistema»), leída por request y volcada en `<html data-theme>`. No hay provider, no hay estado de cliente y no hay script anti-flash: el atributo llega en el HTML del servidor, así que no hay un primer pintado que corregir. El conmutador (`features/shell/components/theme-switcher.tsx`) es una isla de cliente que **escribe** la cookie y nunca lee el tema.
+
+**Ningún componente necesita una variante `dark:`**, y no es estilo sino corrección: el `dark:` de Tailwind sigue a `prefers-color-scheme` y **nunca** a nuestro atributo, así que en una página forzada a oscuro sobre un sistema claro un `dark:` no dispara. El color lo cambia el token, no el variante.
+
+**Tipografía**: `Inter` (texto) y `JetBrains Mono` (código y cifras), cargadas con `next/font/google`, que descarga los ficheros en **tiempo de build** y los sirve desde el propio origen bajo `/_next/static/media/`. No se pide nada a `fonts.googleapis.com` en runtime. Diez roles semánticos, de `text-display-2xl` a `text-label-caps`, cada uno con su interlineado, tracking y peso; los nombres exactos son los `--text-*` del `@theme` llano de `globals.css`.
+
+**Ritmo y radios**: la unidad base es `--spacing: 0.25rem`, o sea la escala numérica de Tailwind (`p-1`, `p-4`, `p-8`) es el ritmo del diseño. Los ocho pasos con nombre del export **no** se declaran: `max-w-*` resuelve contra `--spacing-*` en Tailwind v4, así que declarar `--spacing-md` hacía que `max-w-md` valiera 0.75rem en vez de 28rem y colapsaba cada contenedor de la aplicación. Sobreviven `--spacing-gutter` y los dos márgenes, que no chocan con nada. Los radios son cuatro literales (`sm`/`md`/`lg`/`xl`).
+
+**Contraste**: `app/globals.contrast.test.ts` recalcula desde `globals.css` el ratio de cada par de los dos temas contra WCAG 2.2 AA e **imprime la tabla**; una tabla en markdown envejece en cuanto alguien retoca un hex, y un test que la recompute no puede.
+
+**Dos guards, y conviene saber qué NO cubren.** `test/color-tokens.test.ts` recorre `app/`, `components/`, `features/` y `lib/` —todo `.ts(x)`, `.js(x)`/`.mjs` y, en las hojas de estilo, las clases que nombra un `@apply`— buscando color que no pase por la capa de tokens; la comprobación más interesante es la que exige que la utilidad nombre un token **declarado**, porque es la que encuentra la clase de defecto en que `bg-card` no pintaba nada durante meses. **Cuántas comprobaciones son y qué mira cada una lo dice la cabecera del propio fichero**, que es donde no puede quedarse atrás: aquí decía tres cuando ya eran cinco, y presentaba la lista como exhaustiva. Sus patrones viven en `test/color-tokens.ts` y `test/color-tokens.patterns.test.ts` los recorre desde una tabla, porque un guard que sólo afirma «el árbol está limpio» se pone verde con una regex rota mientras el árbol no ejercite la rotura; cada agujero que ha encontrado una review es una fila de esa tabla. Lo que no ven, declarado y no insinuado: una clase construida dinámicamente (`` `bg-${tono}` ``); que el token **exista** no prueba que sea el **correcto**; y **una hoja de estilos que declare color a pelo** —fuera de un `@apply`— es invisible, incluido un `@media (prefers-color-scheme: dark)` propio, porque de un `.css` sólo se leen las clases que nombra un `@apply` (una hoja no es un componente: pasarle los patrones de clase entera reporta disparates). Hoy no muerde: `app/globals.css` es la única hoja del árbol y es donde la capa de tokens vive por diseño.
+
 ## Internacionalización (ES/EN)
 
 `i18next` + `react-i18next`, namespaces `common`, `navigation`, `states` y `auth` en `locales/{es,en}`. **Toda string visible pasa por claves i18n; nada hardcodeado.** El locale se resuelve por cookie `autohostai.locale` (validada contra `es|en`, fallback `es`), server-side por request, y se sincroniza con `<html lang>`. Un test de paridad falla ante claves ausentes en cualquiera de los dos idiomas.
@@ -137,13 +157,15 @@ El cliente relaciona cada ruta con los métodos HTTP declarados en OpenAPI y tip
 - `server.ts` (`server-only`): variables privadas/runtime; nunca importable desde un Client Component.
 - `public.ts`: allowlist explícita del subconjunto público serializable (`apiBaseUrl`, `appEnv`, `defaultLocale`, `featureFlags` vacío). `apiBaseUrl` tiene por defecto el valor vacío para usar rutas same-origin a través del proxy existente. Nada se vuelca desde `process.env`.
 - `runtime-config-provider.tsx`: acceso cliente al snapshot público.
-- `constants.ts`: defaults no sensibles (locale `es`, cookie de locale).
+- `constants.ts`: defaults no sensibles (locale `es`, cookie de locale, cookie de tema y los dos temas admitidos).
 
 El código de aplicación no lee `process.env` fuera de esta frontera. `BACKEND_INTERNAL_URL` permanece server-only y no se consume al renderizar el shell; `apiBaseUrl` no lo expone al navegador. Las feature flags futuras se declararán en el registro tipado central (hoy vacío).
 
 ## Testing
 
 Vitest + Testing Library + jest-dom + axe-core. Tests colocados junto al módulo (`*.test.ts[x]`); helpers en `test/`. Cobertura de esta fundación: registro de rutas y cobertura PRD §24, aislamiento de navegación por perfil, active route, estados distinguibles, i18n y paridad de catálogos, config (allowlist/sin secretos), metadata (noindex, sin IDs/tokens), error boundaries y accesibilidad (axe + comprobación manual de teclado/foco/viewports). No se mockean endpoints ni datos de negocio.
+
+La capa de diseño añade cuatro comprobaciones propias, descritas arriba: paridad de los dos bloques oscuros, auditoría de contraste WCAG que imprime su tabla, el guard de tokens de color y la tabla de patrones de ese guard. El contraste no lo cubre axe: `getA11yViolations` desactiva `color-contrast` a propósito, porque jsdom no puede calcularlo con fiabilidad.
 
 ## Límites de autenticación frontend
 

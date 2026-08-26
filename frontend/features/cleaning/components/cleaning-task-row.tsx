@@ -7,7 +7,11 @@ import { Badge } from "@/components/ui/badge";
 import { useHasPermission } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 
-import type { CleanerSummary, CleaningTask, PropertySummary } from "../data";
+import type {
+  CleanerSummary,
+  CleaningTaskListItem,
+  PropertySummary,
+} from "../data";
 import type { Directory, Identity } from "../lib/directory";
 import { resolveIdentity } from "../lib/directory";
 import { STATUS_BADGE_CLASS, statusColorGroup } from "../lib/task-status";
@@ -26,7 +30,14 @@ import { AssignCleanerControl } from "./assign-cleaner-control";
  * the role holds `MANAGE_CLEANING_TASKS` (R4.3).
  */
 export interface CleaningTaskRowProps {
-  task: CleaningTask;
+  /**
+   * A **listing** row, so it carries `assignmentBlockedBy` (design D7). The row passes that
+   * value straight through to the control and derives nothing from it — which is exactly
+   * what keeps "no business logic in components" true here (`steering/frontend.md`, design
+   * D9). Deriving it in the client from the property catalog's `current_operational_state`
+   * would have meant re-implementing the state machine's matrix on this side.
+   */
+  task: CleaningTaskListItem;
   properties: Directory<PropertySummary>;
   cleaners: Directory<CleanerSummary>;
   /**
@@ -125,7 +136,7 @@ export function CleaningTaskRow({
   return (
     <li
       aria-labelledby={headingId}
-      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm"
+      className="flex min-w-0 flex-col gap-3 rounded-lg border bg-surface p-4 shadow-sm"
     >
       <div className="flex min-w-0 items-start justify-between gap-3">
         <h3
@@ -166,6 +177,7 @@ export function CleaningTaskRow({
               cleaners={Array.from(cleaners.index.values())}
               isPending={assignment.isPending}
               isBlocked={assignment.isBlocked}
+              blockedBy={task.assignmentBlockedBy}
               onConfirm={assignment.onConfirm}
             />
           ) : null}

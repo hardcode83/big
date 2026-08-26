@@ -97,6 +97,63 @@ def technician_assignment_notification(
     )
 
 
+#: The `notification_type` of the row a refusal leaves for the manager (R1.4, design D3).
+#:
+#: A **plain string constant and not a member of `NotificationType`**, which is what `guests`
+#: already does with `LEGAL_REGISTRATION_FAILED`, and for its three reasons: `NotificationType`
+#: is the sixteen canonical names of PRD §14 and this is not one of them; the column is free
+#: text since `domain-foundation-financial`, so there is **no migration**; and
+#: `escalation_for` returns `None` for a type it does not recognise, which is exactly the "no
+#: SLA deadline and no escalation" R1.4 demands — obtained by construction rather than by an
+#: omission somebody could later fill in.
+NOTIFICATION_TYPE_INCIDENT_REJECTED = "INCIDENT_REJECTED"
+
+
+def incident_rejection_notification(
+    *,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    property_id: uuid.UUID,
+    manager_id: uuid.UUID,
+    recipient_contact: str,
+    now: datetime,
+) -> NotificationLog:
+    """What the manager is told when the technician says no (R1.4).
+
+    **No `sla_deadline_at`, on purpose** (D3): a refusal *is* the answer, so nobody is late —
+    the deadline the assignment opened is cancelled by the use case, and this row opens no new
+    one. There is no escalation policy for this type either, so a deadline here would produce a
+    breach that escalates to nobody, which is the same reasoning `owner_approval_notification`
+    records above.
+
+    Subject and body are a constant plus identifiers, never the content of another row — the
+    contract rule 11 of `sdd/steering/security.md` fixes for
+    `notification_logs.subject`/`body`. Nothing here reads the incident's `title`,
+    `description`, `ai_summary` or the note the manager had written for the technician.
+
+    The polymorphic pair points at the **incident** like its two siblings, so everything this
+    module notifies about one incident is reachable by one query.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=manager_id,
+        recipient_contact=recipient_contact,
+        channel=NotificationChannel.IN_APP,
+        notification_type=NOTIFICATION_TYPE_INCIDENT_REJECTED,
+        created_at=now,
+        updated_at=now,
+        subject="Incident rejected by the technician",
+        body=(
+            f"A technician rejected an incident and it is awaiting reassignment. "
+            f"Incident {incident_id}, property {property_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_INCIDENT,
+        related_id=incident_id,
+    )
+
+
 def owner_approval_notification(
     *,
     tenant_id: uuid.UUID,

@@ -1,0 +1,458 @@
+<!DOCTYPE html><html class="dark" lang="es"><head>
+<meta charset="utf-8">
+<meta content="width=device-width, initial-scale=1.0" name="viewport">
+<title>Reservas - PropManage AI</title>
+<script src="https://cdn.tailwindcss.com?plugins=forms,container-queries"></script>
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&amp;family=JetBrains+Mono:wght@500&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Material+Symbols+Outlined:wght,FILL@100..700,0..1&amp;display=swap" rel="stylesheet">
+<script id="tailwind-config">
+        tailwind.config = {
+          darkMode: "class",
+          theme: {
+            extend: {
+              "colors": {
+                      "tertiary-fixed-dim": "#00daf3",
+                      "surface-container-lowest": "#0a0e17",
+                      "on-background": "#dfe2ef",
+                      "text-secondary": "#94A3B8",
+                      "on-surface": "#dfe2ef",
+                      "on-error-container": "#ffdad6",
+                      "background": "#0f131c",
+                      "outline": "#879390",
+                      "surface-variant": "#31353f",
+                      "surface-bright": "#353943",
+                      "inverse-surface": "#dfe2ef",
+                      "error": "#ffb4ab",
+                      "secondary-fixed-dim": "#bcc7de",
+                      "surface-container": "#1c2029",
+                      "on-tertiary": "#00363d",
+                      "state-success": "#10B981",
+                      "inverse-primary": "#006b5f",
+                      "surface-elevated": "#131D31",
+                      "inverse-on-surface": "#2c303a",
+                      "on-primary-container": "#00302a",
+                      "on-error": "#690005",
+                      "tertiary": "#00daf3",
+                      "tertiary-container": "#009fb2",
+                      "surface-container-low": "#181b25",
+                      "secondary-container": "#3e495d",
+                      "tertiary-fixed": "#9cf0ff",
+                      "error-container": "#93000a",
+                      "surface-dim": "#0f131c",
+                      "on-tertiary-container": "#002f35",
+                      "surface-container-high": "#262a34",
+                      "text-primary": "#F8FAFC",
+                      "primary-fixed-dim": "#70d8c8",
+                      "on-surface-variant": "#bcc9c5",
+                      "primary-container": "#32a192",
+                      "on-primary-fixed-variant": "#005048",
+                      "on-secondary-container": "#aeb9d0",
+                      "on-secondary-fixed": "#111c2d",
+                      "surface-tint": "#70d8c8",
+                      "surface": "#0f131c",
+                      "secondary": "#bcc7de",
+                      "on-tertiary-fixed-variant": "#004f58",
+                      "surface-container-highest": "#31353f",
+                      "surface-highlight": "#1E293B",
+                      "text-muted": "#64748B",
+                      "on-tertiary-fixed": "#001f24",
+                      "on-primary": "#003731",
+                      "secondary-fixed": "#d8e3fb",
+                      "state-warning": "#F59E0B",
+                      "state-info": "#38BDF8",
+                      "primary": "#70d8c8",
+                      "state-error": "#EF4444",
+                      "on-secondary-fixed-variant": "#3c475a",
+                      "outline-variant": "#3d4946",
+                      "on-primary-fixed": "#00201c",
+                      "on-secondary": "#263143",
+                      "primary-fixed": "#8df5e4"
+              },
+              "borderRadius": {
+                      "DEFAULT": "0.125rem",
+                      "lg": "0.25rem",
+                      "xl": "0.5rem",
+                      "full": "0.75rem"
+              },
+              "spacing": {
+                      "lg": "16px",
+                      "md": "12px",
+                      "unit": "4px",
+                      "margin-mobile": "16px",
+                      "xl": "24px",
+                      "margin-desktop": "32px",
+                      "4xl": "64px",
+                      "sm": "8px",
+                      "gutter": "16px",
+                      "3xl": "48px",
+                      "2xl": "32px",
+                      "xs": "4px"
+              },
+              "fontFamily": {
+                      "headline-lg": [
+                              "Inter"
+                      ],
+                      "display-xl": [
+                              "Inter"
+                      ],
+                      "headline-md": [
+                              "Inter"
+                      ],
+                      "data-mono": [
+                              "JetBrains Mono"
+                      ],
+                      "display-lg-mobile": [
+                              "Inter"
+                      ],
+                      "body-base": [
+                              "Inter"
+                      ],
+                      "body-lg": [
+                              "Inter"
+                      ],
+                      "display-2xl": [
+                              "Inter"
+                      ],
+                      "body-medium": [
+                              "Inter"
+                      ],
+                      "label-caps": [
+                              "Inter"
+                      ]
+              },
+              "fontSize": {
+                      "headline-lg": [
+                              "32px",
+                              {
+                                      "lineHeight": "40px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "700"
+                              }
+                      ],
+                      "display-xl": [
+                              "44px",
+                              {
+                                      "lineHeight": "52px",
+                                      "letterSpacing": "-0.025em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "headline-md": [
+                              "24px",
+                              {
+                                      "lineHeight": "32px",
+                                      "letterSpacing": "-0.015em",
+                                      "fontWeight": "600"
+                              }
+                      ],
+                      "data-mono": [
+                              "13px",
+                              {
+                                      "lineHeight": "18px",
+                                      "letterSpacing": "-0.01em",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "display-lg-mobile": [
+                              "36px",
+                              {
+                                      "lineHeight": "44px",
+                                      "letterSpacing": "-0.02em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-base": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "body-lg": [
+                              "16px",
+                              {
+                                      "lineHeight": "24px",
+                                      "letterSpacing": "-0.005em",
+                                      "fontWeight": "400"
+                              }
+                      ],
+                      "display-2xl": [
+                              "56px",
+                              {
+                                      "lineHeight": "64px",
+                                      "letterSpacing": "-0.03em",
+                                      "fontWeight": "800"
+                              }
+                      ],
+                      "body-medium": [
+                              "14px",
+                              {
+                                      "lineHeight": "20px",
+                                      "letterSpacing": "0",
+                                      "fontWeight": "500"
+                              }
+                      ],
+                      "label-caps": [
+                              "11px",
+                              {
+                                      "lineHeight": "14px",
+                                      "letterSpacing": "0.06em",
+                                      "fontWeight": "700"
+                              }
+                      ]
+              }
+      },
+          },
+        }
+    </script>
+<style>
+        /* Custom styles for specific effects not purely coverable by tailwind classes */
+        .glass-panel {
+            background: rgba(24, 27, 37, 0.6);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+        }
+        .btn-primary-glow {
+            box-shadow: 0 4px 14px 0 rgba(0, 137, 123, 0.2);
+        }
+        .btn-primary-glow:hover {
+            box-shadow: 0 6px 20px 0 rgba(0, 137, 123, 0.3);
+            transform: translateY(-1px);
+        }
+        /* Custom Scrollbar for dark theme */
+        ::-webkit-scrollbar {
+            width: 8px;
+            height: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: #0f131c; 
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #262a34; 
+            border-radius: 4px;
+        }
+        ::-webkit-scrollbar-thumb:hover {
+            background: #31353f; 
+        }
+    </style>
+</head>
+<body class="bg-background text-on-surface font-body-base min-h-screen flex selection:bg-primary/30 selection:text-primary-fixed">
+<!-- SideNavBar (Shared Component) -->
+<aside class="bg-surface-container-low dark:bg-surface-container-low h-screen w-64 fixed left-0 top-0 border-r border-outline-variant shadow-sm z-40 hidden md:flex flex-col">
+<div class="flex flex-col h-full py-xl px-lg">
+<!-- Brand Header -->
+<div class="flex items-center gap-md mb-2xl px-sm">
+<img class="w-8 h-8 rounded-full object-cover" data-alt="A sleek, minimalist geometric logo for a property management AI platform. The logo features sharp angles and a high-tech emerald green and dark teal color palette, set against a dark background, reflecting a professional and advanced AI-driven aesthetic." src="https://lh3.googleusercontent.com/aida-public/AB6AXuCYeeCbPaaXBfZsQqmSRK8rEGDu6jTYaKGO2x__Wziqkb6Ynn-RgjDTavmLtGFLQ-ywzrDjtzOCLrrvk3ty7jwO-qy1Jus_h9gy4ysY0fi77s6oYIhYhmigp_Qc6nhraBmqSPQT4iEqutYy3qAvhnAX-wci9wHQHv5R3rlDom6b6C6T9pa2UEbAEJLV2FQmwzzX-sXowV9DH3VSsKxSkVwrjJzd9UIOOmiwOuYjajRbTKapzrwGpwYn">
+<div>
+<h1 class="font-headline-md text-headline-md font-bold text-primary dark:text-primary truncate">AutoHostAI</h1>
+<p class="font-label-caps text-label-caps text-text-muted">Panel de Control</p>
+</div>
+</div>
+<!-- Navigation Links -->
+<nav class="flex-1 space-y-unit overflow-y-auto">
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">dashboard</span>
+<span class="font-body-medium">Dashboard</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">domain</span>
+<span class="font-body-medium">Propiedades</span>
+</a>
+<!-- Active Navigation Item -->
+<a class="flex items-center gap-md px-lg py-md bg-secondary-container text-on-secondary-container rounded-xl font-body-medium hover:bg-surface-variant transition-colors duration-200 active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 1;">calendar_month</span>
+<span class="font-body-medium">Reservas</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">analytics</span>
+<span class="font-body-medium">Analítica</span>
+</a>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl active:scale-95 transition-transform" href="#">
+<span class="material-symbols-outlined" style="font-variation-settings: 'FILL' 0;">settings</span>
+<span class="font-body-medium">Configuración</span>
+</a>
+</nav>
+<!-- CTA & Footer Tabs -->
+<div class="mt-auto space-y-md pt-xl border-t border-surface-container-high">
+<button class="w-full bg-[#00897b] text-white py-md rounded-xl font-body-medium btn-primary-glow flex justify-center items-center gap-sm transition-all">
+<span class="material-symbols-outlined">add</span>
+                    Añadir Propiedad
+                </button>
+<a class="flex items-center gap-md px-lg py-md text-on-surface-variant hover:text-on-surface hover:bg-surface-variant transition-colors duration-200 rounded-xl" href="#">
+<span class="material-symbols-outlined">help</span>
+<span class="font-body-medium">Ayuda</span>
+</a>
+</div>
+</div>
+</aside>
+<!-- Main Content Area -->
+<main class="flex-1 ml-0 md:ml-64 flex flex-col min-h-screen">
+<!-- TopAppBar (Shared Component) -->
+<header class="bg-surface/80 dark:bg-surface/80 backdrop-blur-xl sticky top-0 w-full z-30 flex justify-between items-center h-16 px-margin-desktop border-b border-outline-variant shadow-sm hidden md:flex">
+<!-- Search Bar Area (Left aligned per JSON) -->
+<div class="flex-1 flex items-center">
+<h2 class="font-headline-md text-headline-md font-bold text-primary">Reservations</h2>
+</div>
+<!-- Trailing Actions -->
+<div class="flex items-center gap-lg">
+<button class="text-on-surface-variant hover:text-primary transition-all active:scale-95">
+<span class="material-symbols-outlined">language</span>
+</button>
+<button class="text-on-surface-variant hover:text-primary transition-all active:scale-95 relative">
+<span class="material-symbols-outlined">notifications</span>
+<span class="absolute top-0 right-0 w-2 h-2 bg-state-error rounded-full"></span>
+</button>
+<img alt="Avatar de usuario" class="w-8 h-8 rounded-full border border-surface-container-high object-cover" data-alt="A small, circular avatar portrait of a professional property manager. The individual looks confident and welcoming, set against a dark, corporate-style background. High-quality corporate headshot style." src="https://lh3.googleusercontent.com/aida-public/AB6AXuBmSEvznvX6guvvMkGeMPBK1CY_Ax5IAL-uT0LPb8WrAv2s7OIJU83qjq5oqxfczCDfCUENzzjrfJbTB4gXhSx5isrfeYls-gPbHo04WlGldREsp8NceiG0txYQliTxEzm1bGZZRNMbQ5iPWSUtIq69PaLPWmTqnBeAvnH05CDQUMerWlbiZHOXTALjPf_DbefcTJH_jfPJBXN1VbgVvh8WuzaAZVAUjapF4a05TxF_f4ZUFLi83x_y">
+</div>
+</header>
+<!-- Page Content Canvas -->
+<div class="flex-1 p-margin-mobile md:p-margin-desktop max-w-7xl mx-auto w-full flex flex-col gap-xl">
+<!-- Page Header & Actions -->
+<div class="flex flex-col md:flex-row justify-between items-start md:items-center gap-md">
+<div>
+<h1 class="font-headline-lg text-headline-lg text-on-surface">Reservations</h1>
+<p class="font-body-base text-text-muted mt-unit">Manage and monitor all your property bookings.</p>
+</div>
+<!-- Language Toggle (Simulating top right in the image for page level if TopAppBar is hidden or redundant) -->
+<div class="flex bg-surface-container-low border border-surface-container-high rounded-lg p-unit">
+<button class="px-md py-sm font-body-medium rounded-md text-text-muted hover:text-on-surface transition-colors">Español</button>
+<button class="px-md py-sm font-body-medium rounded-md bg-surface-highlight text-on-surface shadow-sm">English</button>
+</div>
+</div>
+<!-- Filters Area -->
+<div class="glass-panel border border-surface-container-high rounded-xl p-lg flex flex-wrap items-end gap-lg">
+<div class="flex flex-col gap-sm">
+<label class="font-label-caps text-text-muted">Status</label>
+<div class="relative">
+<select class="appearance-none bg-surface-container border border-surface-container-high text-on-surface font-body-base rounded-lg px-md py-sm pr-10 focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-48">
+<option>Status</option>
+<option>Confirmed</option>
+<option>Pending</option>
+<option>Cancelled</option>
+</select>
+<span class="material-symbols-outlined absolute right-md top-1/2 -translate-y-1/2 text-text-muted pointer-events-none">expand_more</span>
+</div>
+</div>
+<div class="flex flex-col gap-sm">
+<label class="font-label-caps text-text-muted">Check-in</label>
+<div class="relative">
+<input class="bg-surface-container border border-surface-container-high text-on-surface font-body-base rounded-lg px-md py-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-48 custom-date-input" placeholder="dd/mm/aaaa" type="date">
+</div>
+</div>
+<div class="flex flex-col gap-sm">
+<label class="font-label-caps text-text-muted">Check-out</label>
+<div class="relative">
+<input class="bg-surface-container border border-surface-container-high text-on-surface font-body-base rounded-lg px-md py-sm focus:outline-none focus:border-primary focus:ring-1 focus:ring-primary w-48 custom-date-input" placeholder="dd/mm/aaaa" type="date">
+</div>
+</div>
+<button class="px-lg py-sm border border-outline-variant text-text-muted rounded-lg font-body-medium hover:text-primary hover:border-primary hover:bg-primary/5 transition-all h-[38px]">
+                    Clear filters
+                </button>
+</div>
+<!-- Data Table Container -->
+<div class="bg-surface-container-low border border-surface-container-high rounded-xl overflow-hidden shadow-sm flex-1">
+<div class="overflow-x-auto">
+<table class="w-full text-left border-collapse">
+<thead>
+<tr class="border-b border-surface-container-high bg-surface-container-low">
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Guest</th>
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Property</th>
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Stay</th>
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Status</th>
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Channel</th>
+<th class="py-md px-lg font-body-medium text-text-secondary whitespace-nowrap">Amount</th>
+</tr>
+</thead>
+<tbody class="font-data-mono text-on-surface">
+<!-- Row 1 -->
+<tr class="border-b border-surface-container-high hover:bg-surface-variant/50 transition-colors group cursor-pointer">
+<td class="py-md px-lg">
+<a class="text-primary hover:underline underline-offset-4" href="#">--</a>
+</td>
+<td class="py-md px-lg text-text-muted group-hover:text-on-surface transition-colors">c889a4f1-9b93-42ba-8caa-ece01c234ff2</td>
+<td class="py-md px-lg whitespace-nowrap">2026-08-21 → 2026-08-22</td>
+<td class="py-md px-lg">
+<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-state-success/10 text-state-success border border-state-success/20">
+                                        Confirmed
+                                    </span>
+</td>
+<td class="py-md px-lg font-body-base">DIRECT</td>
+<td class="py-md px-lg text-right md:text-left">EUR</td>
+</tr>
+<!-- Row 2 -->
+<tr class="border-b border-surface-container-high hover:bg-surface-variant/50 transition-colors group cursor-pointer">
+<td class="py-md px-lg">
+<a class="text-primary hover:underline underline-offset-4 truncate block max-w-[200px]" href="#">6f3011e0-9849-4fc4-93c5-86a79227b3f8</a>
+</td>
+<td class="py-md px-lg text-text-muted group-hover:text-on-surface transition-colors truncate max-w-[200px]">981b5c2e-11a4-401b-8459-a97d88b2c14e</td>
+<td class="py-md px-lg whitespace-nowrap">2026-08-19 → 2026-08-23</td>
+<td class="py-md px-lg">
+<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-state-success/10 text-state-success border border-state-success/20">
+                                        Confirmed
+                                    </span>
+</td>
+<td class="py-md px-lg font-body-base">BOOKING</td>
+<td class="py-md px-lg text-right md:text-left">EUR</td>
+</tr>
+<!-- Row 3 -->
+<tr class="border-b border-surface-container-high hover:bg-surface-variant/50 transition-colors group cursor-pointer">
+<td class="py-md px-lg">
+<a class="text-primary hover:underline underline-offset-4 truncate block max-w-[200px]" href="#">6f58be00-ad8c-4be1-81f7-b9cdd0a5c152</a>
+</td>
+<td class="py-md px-lg text-text-muted group-hover:text-on-surface transition-colors truncate max-w-[200px]">981b5c2e-11a4-401b-8459-a97d88b2c14e</td>
+<td class="py-md px-lg whitespace-nowrap">2026-08-14 → 2026-08-15</td>
+<td class="py-md px-lg">
+<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-state-success/10 text-state-success border border-state-success/20">
+                                        Confirmed
+                                    </span>
+</td>
+<td class="py-md px-lg font-body-base">AIRBNB</td>
+<td class="py-md px-lg text-right md:text-left">350.00 EUR</td>
+</tr>
+<!-- Row 4 -->
+<tr class="hover:bg-surface-variant/50 transition-colors group cursor-pointer">
+<td class="py-md px-lg">
+<a class="text-primary hover:underline underline-offset-4 truncate block max-w-[200px]" href="#">930adc39-ec74-4d92-92c3-936a70c9c76f</a>
+</td>
+<td class="py-md px-lg text-text-muted group-hover:text-on-surface transition-colors truncate max-w-[200px]">981b5c2e-11a4-401b-8459-a97d88b2c14e</td>
+<td class="py-md px-lg whitespace-nowrap">2026-08-06 → 2026-08-09</td>
+<td class="py-md px-lg">
+<span class="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-state-warning/10 text-state-warning border border-state-warning/20">
+                                        Pending
+                                    </span>
+</td>
+<td class="py-md px-lg font-body-base">DIRECT</td>
+<td class="py-md px-lg text-right md:text-left">EUR</td>
+</tr>
+</tbody>
+</table>
+</div>
+<!-- Pagination -->
+<div class="p-lg border-t border-surface-container-high flex justify-start gap-md">
+<button class="px-md py-sm bg-surface-container border border-surface-container-high rounded-lg text-text-muted cursor-not-allowed opacity-50 font-body-medium text-sm">Previous page</button>
+<button class="px-md py-sm bg-surface-container border border-surface-container-high rounded-lg text-on-surface hover:border-primary hover:text-primary transition-colors font-body-medium text-sm">Next page</button>
+</div>
+</div>
+<!-- Version info / Provenance -->
+<div class="mt-auto pt-lg flex justify-between items-center text-xs text-text-muted font-data-mono">
+<span class="bg-surface-container px-2 py-1 rounded">0.1.0+2026-08-22.26c37c0</span>
+<span class="">Build provenance</span>
+</div>
+</div>
+<!-- Footer (Shared Component) -->
+<footer class="bg-surface-container-lowest dark:bg-surface-container-lowest border-t border-outline-variant w-full py-xl mt-auto">
+<div class="flex flex-col md:flex-row justify-between items-center px-margin-desktop max-w-7xl mx-auto gap-lg">
+<p class="font-body-base text-body-base font-bold text-on-surface">© 2024 AutoHostAI. Todos los derechos reservados.</p>
+<div class="flex gap-lg">
+<a class="font-label-caps text-label-caps text-text-muted hover:text-primary transition-colors" href="#">Privacidad</a>
+<a class="font-label-caps text-label-caps text-text-muted hover:text-primary transition-colors" href="#">Términos</a>
+<a class="font-label-caps text-label-caps text-text-muted hover:text-primary transition-colors" href="#">Soporte</a>
+</div>
+</div>
+</footer>
+</main>
+
+
+</body></html>

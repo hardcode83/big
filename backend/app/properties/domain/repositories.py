@@ -34,7 +34,7 @@ than aborting the batch.
 """
 
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from dataclasses import dataclass
 from typing import Any, Protocol
 
@@ -188,6 +188,75 @@ class PropertyRepository(Protocol):
         """
         ...
 
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> Sequence[Property]:
+        """The properties named in `property_ids`, within `tenant_id` (`reservation-property-identity` D2).
+
+        The narrow batch reader that lets a listing resolve N property rows in ONE statement
+        instead of one per row. Symmetric to `GuestRepository.list_for_ids`
+        (`backend/app/guests/domain/repositories.py:32`): both compose a list response with
+        `tenant_id` explicit on each call, the same tenant-scoping choice `dashboard-api` D2
+        fixes and `guest-portal-api` defended against cross-tenant joins.
+
+        **Empty input short-circuits without querying.** A `list` row with no derivable ids
+        must not emit `IN ()`, for the same reason `list_by_state` refuses an empty `states`
+        (its own docstring): an empty collection is a structural "no candidates here", not a
+        SQL construct.
+
+        **Absent keys, not `None` mappings.** A property that does not resolve in the tenant —
+        neither neighbour nor non-existent — is **absent** from the returned sequence. The
+        caller keys by `id`; the absent and the dangling `property_id` are indistinguishable
+        from here, exactly as in `states_for` and `list_by_state`.
+
+        **`None` and duplicates in the input are silently dropped.** A `list` endpoint that
+        walks rows producing `property_id` or `None` could otherwise hand the batch reader a
+        sequence with `None`s, and `id = ANY(ARRAY[NULL::uuid])` is its own surprise. Tested
+        one notch higher than here, so a caller does not need to filter first.
+
+        The shape is `Sequence[Property]` rather than `dict[UUID, Property]` because the
+        caller already has the ids — that is what it is indexing by — and turning the batch
+        into a map was the work this method exists to centralise (so does
+        `GuestRepository.list_for_ids`, returning `Sequence[GuestSummary]`).
+        """
+        ...
+
+    async def states_for(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, PropertyOperationalState]:
+        """The operational state of each of `property_ids`, within `tenant_id`
+        (`cleaning-assign-preconditions` R3.2).
+
+        The narrowest read that answers "can this page's tasks be assigned right now": one
+        `SELECT id, current_operational_state` for the properties a page of cleaning tasks
+        mentions, so the listing spends one extra query per request rather than one per row —
+        which R3.2 forbids in as many words.
+
+        **Not `list_by_state` and not `list_all`**, whose own docstrings say they feed a sweep
+        and not a screen, and which are both unpaginated over the whole portfolio. This one is
+        bounded by its argument.
+
+        An empty `property_ids` returns `{}` **without querying**, the same choice
+        `list_by_state` makes for an empty `states` and for the same reason: "an `IN ()` is not
+        the way to say so".
+
+        A key is **absent** when no property of this tenant has that id — a neighbour's
+        property and a nonexistent one are indistinguishable from here, exactly as everywhere
+        else in this port. The caller must treat a missing key as "unknown" and not as a state;
+        `cleaning`'s policy answers `None` there and fails open (design D4, R3.3).
+
+        Returns the state and nothing else, which is worth one line of precision because the
+        neighbouring methods do not. `list_by_state` and `list_all` select whole rows, so
+        `_to_property` fills in the three free-text notes of `properties` on every result; this
+        one selects two columns and its return type cannot carry them at all. That is a
+        narrowness argument, **not** rule 11 exception 6 of `steering/security.md`: that
+        exception's remedy is that the *published* listing stops carrying the notes
+        (`PropertyPageResponse.data`), and it says nothing about what an adapter may read into
+        memory — which is why the two sweeps above are free to. Citing it here would be the
+        misattribution that rule warns about, and that this file already got wrong four times.
+        """
+        ...
+
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         """Persist `current_operational_state`, and only that (`celery-jobs` R3.6).
 
@@ -331,6 +400,34 @@ class PropertyStateTransitionRepository(Protocol):
         anchored to a neighbour's flat. This table is the audit record of property state
         (rule 9 of `sdd/steering/security.md`), so a misanchored row is a corrupted audit
         trail, not just a bad read.
+        """
+        ...
+
+    async def applied_clock_triggers(
+        self, tenant_id: uuid.UUID, reservation_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, str]]:
+        """Which `(reservation_id, trigger)` pairs already have a transition recorded
+        (`cleaning-stall-blocks-next-stay` R1.1, design D1 as amended).
+
+        The evidence that separates "this flat never advanced" from "this flat advanced and is
+        now further along". Without it, stall detection reported every flat downstream of a
+        trigger: `is_due` for `CHECKIN_TIME_REACHED` holds for the whole stay and for
+        `CHECKOUT_TIME_REACHED` forever after checkout, so "the hour came and this flat is not
+        at the gate" is true of every flat that passed through the gate correctly.
+
+        **The trigger comes back as the stored text, not as `PropertyStateTrigger`.** Deliberate:
+        `metadata` is JSON written by `PropertyStateMachine.evaluate`, and rebuilding the enum
+        from it is the one read path that retiring a member could break — the thing
+        `test_no_read_path_rebuilds_a_trigger_from_stored_data` exists to forbid. Callers compare
+        against `trigger.value`.
+
+        Keyed on the reservation rather than the property because that is the question: a flat
+        with two stays has applied the check-in of one and not the other. `reservation_ids`
+        bounds the read to the stays the caller already loaded, so there is no unbounded scan —
+        an empty collection returns an empty set without querying.
+
+        A **reader**, and the port's docstring already settled that readers are allowed here:
+        what it refuses is `save`, `update` and `delete`.
         """
         ...
 

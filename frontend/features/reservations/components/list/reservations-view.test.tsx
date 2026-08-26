@@ -252,4 +252,24 @@ describe("ReservationsView (R2, R3.5, R4, R5.2, R5.4)", () => {
     expect(link).toBeInTheDocument();
     expect(link).toHaveAttribute("href", "/reservations/reservation-1");
   });
+
+  it("renders a row with grossAmount: null as an em-dash, with no stray currency code (R1.1)", () => {
+    useReservationsMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...SAMPLE,
+        data: [{ ...SAMPLE.data[0], grossAmount: null }],
+      },
+      refetch: vi.fn(),
+    });
+    renderView();
+    // At least one em-dash — the amount cell now paints "—" when the amount
+    // is null. The guestId null already contributes one, so `>= 1` is the
+    // minimum required to satisfy this assertion without coupling to that.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(1);
+    // No stray currency code: the previous `?? ""` pattern left " EUR" in
+    // the DOM. Asserting not.toContain on the body text is the strict gate.
+    expect(document.body.textContent ?? "").not.toContain("EUR");
+  });
 });

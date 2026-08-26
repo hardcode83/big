@@ -3,28 +3,19 @@
 import Link from "next/link";
 import { useTranslation } from "react-i18next";
 
-import { Badge } from "@/components/ui/badge";
+import { PropertyStateBadge } from "@/components/property-state-badge";
 import { cn } from "@/lib/utils";
 
 import type { PropertyDashboardCard } from "../data";
 import { formatDate, formatDateTime } from "../lib/format";
-import { stateColorGroup, type StateColorGroup } from "../lib/state-color";
 
 /**
  * Presentational property card (PRD §9.1). It renders exactly what the DTO
  * carries — no business logic, no state computation. The operational state's
- * color comes from `stateColorGroup`; its label and all chrome come from the
- * `dashboard` i18n namespace.
+ * color comes from the shared `PropertyStateBadge`, which owns the only copy of
+ * the PRD §9.1 color table since `properties-web` needed the same badge (design
+ * D2); its label and all chrome come from the `dashboard` i18n namespace.
  */
-const STATE_BADGE_CLASS: Record<StateColorGroup, string> = {
-  green:
-    "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-800",
-  blue: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800",
-  amber:
-    "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800",
-  red: "bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-200 dark:border-red-800",
-  gray: "bg-muted text-muted-foreground border-border",
-};
 
 function Field({
   label,
@@ -62,7 +53,7 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
   return (
     <article
       aria-labelledby={headingId}
-      className="flex h-full min-w-0 flex-col gap-4 rounded-lg border bg-card p-4 shadow-sm"
+      className="flex h-full min-w-0 flex-col gap-4 rounded-lg border bg-surface p-4 shadow-sm"
     >
       <header className="flex items-start justify-between gap-3">
         <h3
@@ -71,12 +62,10 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
         >
           {card.propertyCode}
         </h3>
-        <Badge
-          variant="outline"
-          className={cn(STATE_BADGE_CLASS[stateColorGroup(card.operationalState)])}
-        >
-          {t(`state.${card.operationalState}`)}
-        </Badge>
+        <PropertyStateBadge
+          state={card.operationalState}
+          label={t(`state.${card.operationalState}`)}
+        />
       </header>
 
       <div className="flex min-w-0 flex-col gap-3">

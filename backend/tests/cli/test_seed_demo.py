@@ -7,6 +7,7 @@ the seed belongs to no single domain, it crosses five. `test_bootstrap.py` lives
 """
 
 import ast
+import uuid
 from dataclasses import replace
 from datetime import UTC, date, datetime, time, timedelta
 from decimal import Decimal
@@ -55,7 +56,21 @@ from app.properties.infrastructure.models import (
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
 from app.reservations.infrastructure.models import ReservationModel
 
+from app.messaging.domain.enums import (
+    ConversationChannel,
+    ConversationEscalationStatus,
+    MessageIntent,
+    MessageSenderType,
+)
+from app.messaging.domain.escalation import contains_emergency_keyword
+from app.messaging.domain.language import detect_language
+from app.messaging.domain.templates import RESPONSE_TEMPLATES
+from app.messaging.domain.value_objects import ConversationContext
+from app.messaging.infrastructure.ai import MockAIAdapter
+from app.messaging.infrastructure.models import ConversationModel, MessageModel
+
 from app.cli import seed_demo
+from app.cli.seed_demo import SEED_CONVERSATION_LANGUAGE, SEED_CONVERSATION_MESSAGES
 from app.integrations.domain.storage import MAGIC_BYTES_LENGTH, detect_image_type
 from app.maintenance.domain.enums import (
     IncidentCategory,
@@ -68,6 +83,8 @@ from app.maintenance.domain.repositories import IncidentFilters
 from app.maintenance.infrastructure.models import IncidentModel
 from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentReader
 from app.notifications.infrastructure.models import NotificationLogModel
+from app.guests.domain.portal_token import hash_guest_token
+from app.guests.infrastructure.models import GuestAccessTokenModel
 from app.tenants.domain.enums import StorageType
 from app.tenants.infrastructure.models import TenantConfigModel
 from app.audit.domain import actions
@@ -82,7 +99,8 @@ from app.cli.seed_demo import (
 )
 from app.cli.seed_demo import apply_plan as _apply_plan
 from app.core.config import settings
-from app.core.db import TENANT_ID_SESSION_KEY
+from app.core.db import TENANT_ID_SESSION_KEY, bind_session_to_tenant
+from app.core.tenancy import TenantMarkedSessionError
 from tests.auth.conftest import insert_tenant, insert_user
 from tests.cli.conftest import BOOTSTRAPPED_TENANT_NAME
 
@@ -667,7 +685,11 @@ async def test_each_write_carries_the_actor_its_use_case_demands(
     three stays — so no `RESERVATION_*` action appears here. When that trail arrives, this
     equality fails and somebody adds it deliberately.
     """
-    await apply_plan(db_session, build_plan(), hasher)
+    # `portal_links` is passed so the portal token is actually minted: minting and emitting are
+    # one decision (a caller that does not ask gets no token), so without this the audit trail
+    # under test would be missing `GUEST_ACCESS_TOKEN_ISSUED` and the set below would be
+    # asserting a smaller contract than the command can produce.
+    await apply_plan(db_session, build_plan(), hasher, portal_links=[])
 
     owner = (
         await db_session.execute(
@@ -705,6 +727,17 @@ async def test_each_write_carries_the_actor_its_use_case_demands(
         actions.INCIDENT_CREATED,
         actions.INCIDENT_CLASSIFIED,
         actions.INCIDENT_ASSIGNED,
+        # Added by the change `demo-user` (its R4.3): the guest-portal link. It is the owner's
+        # write — `IssueGuestAccessTokenUseCase` takes a `GuestActor`, and here that actor is a
+        # person running a command, not a portal bearer — so it falls through to the general
+        # `actors == {owner.id}` assertion below with no exception of its own.
+        #
+        # Worth stating what is NOT here: the conversation and its messages leave **no** audit
+        # rows, and that is correct rather than missing. Rule 9's enumeration names Reservation,
+        # property states, guest documents, AccessRecord, pricing, OwnerApproval, User roles and
+        # Incident — conversations and messages are in none of them, and the message content
+        # itself is governed by rule 11's census instead.
+        actions.GUEST_ACCESS_TOKEN_ISSUED,
     }
 
     # `CLEANING_` and not `CLEANING_TASK_`: the photo upload writes its own action
@@ -868,6 +901,13 @@ _CONSOLE_COUNTS = {
     "cleaning_tasks": 1,
     "cleaning_photos": 6,
     "incidents": 3,
+    # The three the change `demo-user` adds (its R4): the surfaces the dataset had no content
+    # for. `guest_access_tokens` counts 1 and not 0 because the portal link is minted on a first
+    # run — and only on a first run: the use case revokes and re-mints, so re-issuing would
+    # invalidate a link somebody already holds, which is why the seed skips it when one is live.
+    "conversations": 1,
+    "messages": 2,
+    "guest_access_tokens": 1,
 }
 
 
@@ -2402,3 +2442,414 @@ async def test_a_second_run_adds_no_audit_rows(
     await apply_plan(db_session, build_plan(), hasher)
 
     assert await db_session.scalar(select(func.count()).select_from(AuditLogModel)) == before
+
+
+# --- D10bis of the change `demo-user`: the unscoped lookup, hoistable -------------------
+
+
+@pytest.mark.asyncio
+async def test_resolve_known_accounts_answers_for_the_whole_installation(
+    db_session: AsyncSession, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The lookup `apply_plan` used to do inline, now callable on its own (D10bis).
+
+    Unscoped on purpose: it answers for the whole installation, which is what lets
+    `_refuse_addresses_owned_by_another_tenant` tell "nobody has this address" from "a neighbour
+    does" — a distinction a tenant-scoped read cannot make.
+    """
+    neighbour = await insert_tenant(db_session, name="Otra Gestora")
+    await insert_user(
+        db_session, tenant=neighbour, role=UserRole.CLEANER, email="cleaner@example.com"
+    )
+    await db_session.flush()
+
+    known = await seed_demo.resolve_known_accounts(db_session, build_plan())
+
+    assert set(known) == {"cleaner@example.com", "tech@example.com"}
+    # The neighbour's row is visible, which is the whole point of the read being unscoped.
+    assert known["cleaner@example.com"] is not None
+    assert known["cleaner@example.com"].tenant_id == neighbour.id
+    assert known["tech@example.com"] is None
+
+
+@pytest.mark.asyncio
+async def test_resolve_known_accounts_refuses_a_marked_session(
+    db_session: AsyncSession, bootstrapped_tenant, complete_env
+) -> None:
+    """Which is exactly why it had to be hoistable (D10bis).
+
+    On a marked session these lookups raise, so a caller that needs the session marked for its
+    own reasons — `demo_reset`'s delete phase — cannot let `apply_plan` do this read itself. This
+    test is the one that makes that a fact rather than a claim in a design document.
+    """
+    bind_session_to_tenant(db_session, bootstrapped_tenant.id)
+
+    with pytest.raises(TenantMarkedSessionError):
+        await seed_demo.resolve_known_accounts(db_session, build_plan())
+
+
+@pytest.mark.asyncio
+async def test_apply_plan_accepts_a_session_already_marked_when_given_the_lookups(
+    db_session: AsyncSession, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The seam D10bis exists for, proven end to end.
+
+    `demo_reset` marks the session for its delete phase (its D4) and shares one transaction with
+    this seed (its D7). Both can hold only if `apply_plan` can run on an already-marked session,
+    which it can exactly when the unscoped lookup has been done beforehand. Note this calls the
+    module's `apply_plan` directly rather than this file's wrapper — the wrapper clears the
+    marker, which is the opposite of what is under test here.
+    """
+    plan = build_plan()
+    known = await seed_demo.resolve_known_accounts(db_session, plan)
+    bind_session_to_tenant(db_session, bootstrapped_tenant.id)
+
+    created = await _apply_plan(db_session, plan, hasher, known_accounts=known)
+
+    assert created["users"] == 2
+
+
+@pytest.mark.asyncio
+async def test_apply_plan_still_resolves_the_lookups_itself_when_nobody_hands_them_in(
+    db_session: AsyncSession, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """`make seed-demo` must behave exactly as before the seam existed.
+
+    The default is `None`, and on `None` the function does the read itself — so the only caller
+    that has to know about `known_accounts` is the one that cannot afford the read.
+    """
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert created["users"] == 2
+
+
+# --- The conversation and the portal link (change `demo-user`, R4) ---------------------
+
+
+@pytest.mark.parametrize(("content", "expected"), SEED_CONVERSATION_MESSAGES)
+@pytest.mark.asyncio
+async def test_each_seeded_message_classifies_as_the_intent_it_was_chosen_for(
+    content: str, expected
+) -> None:
+    """Pins every text to its intent, the way the incident titles are pinned to their category.
+
+    This is not a tautology check. `MockAIAdapter.generate_response` raises `KeyError` on purpose
+    for `REFUND_OR_COMPENSATION`, `EMERGENCY` and `UNKNOWN` — the three R2.7 forbids answering —
+    so a text edited into one of those **by accident** would not seed a wrong thread, it would
+    break the seed. And the keyword table is order-sensitive: `MAINTENANCE_ISSUE` sits above
+    `WIFI`, so the wifi message must avoid every maintenance noun to stay answerable. Pinning the
+    pair is what turns "these strings look fine" into something CI can check.
+    """
+    classification = await MockAIAdapter().classify_message(
+        content=content,
+        language=SEED_CONVERSATION_LANGUAGE,
+        context=ConversationContext(
+            conversation_id=uuid.uuid4(),
+            property_id=uuid.uuid4(),
+            reservation_id=None,
+            channel=ConversationChannel.WHATSAPP,
+            language=SEED_CONVERSATION_LANGUAGE,
+            ai_enabled=True,
+            guest_message_count=0,
+        ),
+    )
+
+    assert classification.intent is expected
+
+
+def test_the_seeded_texts_are_in_the_language_the_conversation_declares() -> None:
+    """D10: "constantes del módulo, **en el idioma del tenant**" — the two must agree.
+
+    They can disagree silently, which is the whole reason this test exists. Both keyword tables
+    the pipeline consults (`MockAIAdapter._KEYWORDS` and `EMERGENCY_KEYWORDS`) carry Spanish
+    **and** English entries, so translating the constants without moving
+    `SEED_CONVERSATION_LANGUAGE` would still classify correctly and still seed a thread — one
+    whose conversation declares `es` while its messages are English. Nothing else in the suite
+    would notice. Raised by the i18n reviewer of this section.
+    """
+    for content, _intent in SEED_CONVERSATION_MESSAGES:
+        assert detect_language(content) == SEED_CONVERSATION_LANGUAGE, content
+
+
+def test_the_answerable_message_has_a_template_and_the_escalating_one_does_not() -> None:
+    """The two branches R4.1 names, checked against the catalogue rather than the thread.
+
+    One message must be answerable from `RESPONSE_TEMPLATES` and the other must not — if both
+    were answerable the thread would show no escalation, and if neither were the seed would
+    crash. Asserting it here as well as on the seeded thread is deliberate: this one fails with a
+    readable reason the day somebody edits a constant, before the thread test fails obscurely.
+    """
+    answerable, escalating = SEED_CONVERSATION_MESSAGES
+
+    assert (answerable[1], SEED_CONVERSATION_LANGUAGE) in RESPONSE_TEMPLATES
+    assert (escalating[1], SEED_CONVERSATION_LANGUAGE) not in RESPONSE_TEMPLATES
+    # And the escalating one trips the policy by keyword, independently of the classifier.
+    assert contains_emergency_keyword(escalating[0])
+    assert not contains_emergency_keyword(answerable[0])
+
+
+@pytest.mark.asyncio
+async def test_the_seeded_thread_answers_the_first_message_and_escalates_the_second(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R4.1 of `demo-user`, and the ordering assertion section 5 deferred to a targeted read.
+
+    The R3.3 equivalence comparison is structurally blind to intra-day order — regenerated
+    primary keys leave no positional correspondence between runs, and its timestamp scrub
+    collapses to the date — so the design deferred the timeline to a read like this one.
+
+    **Grouped by instant rather than asserted as a flat sequence, and that is a fact about the
+    pipeline rather than a convenience.** `ProcessInboundGuestMessageUseCase` stamps the reply it
+    generates with the **same** `now` as the guest message it answers, so a message and its
+    answer are simultaneous in the data. Ordering by `created_at, id` would then break that tie
+    on a random UUID and the assertion would pass or fail by luck — the flakiness
+    `steering/testing.md` forbids. What is deterministic, and what a visitor actually sees, is
+    which exchange happened when: the first instant carries the wifi question **and** its
+    templated answer, the second carries the emergency and no answer at all.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    conversation_id = (
+        await db_session.execute(select(ConversationModel.id))
+    ).scalar_one()
+    rows = (
+        (
+            await db_session.execute(
+                select(
+                    MessageModel.created_at,
+                    MessageModel.sender_type,
+                    MessageModel.intent,
+                    MessageModel.ai_generated,
+                )
+                .where(MessageModel.conversation_id == conversation_id)
+                .order_by(MessageModel.created_at)
+            )
+        )
+        .tuples()
+        .all()
+    )
+
+    exchanges: dict = {}
+    for created_at, sender, intent, generated in rows:
+        exchanges.setdefault(created_at, []).append((sender, intent, generated))
+    instants = sorted(exchanges)
+
+    assert len(instants) == 2, "the two messages must be at distinct instants to be ordered"
+
+    # First exchange: the guest asks about the wifi and the AI answers from its catalogue.
+    first = exchanges[instants[0]]
+    assert {sender for sender, _, _ in first} == {
+        MessageSenderType.GUEST,
+        MessageSenderType.AI,
+    }
+    guest_first = next(row for row in first if row[0] is MessageSenderType.GUEST)
+    assert guest_first[1] == MessageIntent.WIFI.value
+    assert guest_first[2] is False
+    assert next(row for row in first if row[0] is MessageSenderType.AI)[2] is True
+
+    # Second exchange: the emergency, and nobody automated answers it.
+    second = exchanges[instants[1]]
+    assert [sender for sender, _, _ in second] == [MessageSenderType.GUEST]
+    assert second[0][1] == MessageIntent.EMERGENCY.value
+
+
+@pytest.mark.asyncio
+async def test_the_conversation_is_anchored_to_the_live_stay_and_its_guest(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """Task 6.1's "anclada a la estancia activa, su vivienda y su huésped" (R4.1, R4.4).
+
+    Asserted because nothing else did. `ConversationRepository.add` states as a precondition that
+    `property_id` and `reservation_id` "must already have been resolved *within* `tenant_id`",
+    since the foreign keys of `conversations` are global rather than composite with the tenant —
+    Postgres would happily anchor this conversation to any property in the installation. And every
+    `TimelineEvent` the conversation ever produces carries `property_id` forward, so anchoring it
+    to the wrong stay is not recoverable by a later read.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    live = (
+        await db_session.execute(
+            select(ReservationModel).where(
+                ReservationModel.external_pms_id == seed_demo.AIRBNB_PMS_ID
+            )
+        )
+    ).scalar_one()
+    conversation = (
+        await db_session.execute(
+            select(
+                ConversationModel.reservation_id,
+                ConversationModel.property_id,
+                ConversationModel.guest_id,
+            )
+        )
+    ).one()
+
+    assert conversation.reservation_id == live.id
+    assert conversation.property_id == live.property_id
+    assert conversation.guest_id == live.guest_id
+
+
+@pytest.mark.asyncio
+async def test_the_messages_went_through_the_pipeline_and_not_around_it(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R4.4's "por la vía canónica de su dominio, nunca por el modelo ORM", made falsifiable.
+
+    The QA panel of this section pointed out that every other assertion about this thread would
+    survive a direct ORM insert reproducing the same rows — which is precisely the failure mode
+    task 6.1 warns about ("Writing the rows directly would have produced a thread that looks right
+    and exercises nothing"), left un-foreclosed.
+
+    The timeline is what forecloses it. `ProcessInboundGuestMessageUseCase` writes a
+    `GUEST_MESSAGE_RECEIVED` event per guest message as step 5 of its pipeline; an ORM insert of
+    `messages` rows writes none. So these events existing, one per seeded message and carrying the
+    conversation's own property, is evidence the pipeline ran rather than that the rows look right.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    property_id = (
+        await db_session.execute(select(ConversationModel.property_id))
+    ).scalar_one()
+    received = (
+        (
+            await db_session.execute(
+                select(TimelineEventModel.property_id).where(
+                    TimelineEventModel.event_type == TimelineEventType.GUEST_MESSAGE_RECEIVED
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+
+    assert len(received) == len(SEED_CONVERSATION_MESSAGES)
+    assert set(received) == {property_id}
+
+
+@pytest.mark.asyncio
+async def test_the_escalating_message_leaves_the_conversation_with_a_person(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The other half of R4.1: the escalation is a state a screen can show, not just an absence.
+
+    A thread whose second branch merely lacked a reply would look identical to one the AI failed
+    on. What makes it demonstrable is the conversation's own escalation status.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    escalation = (
+        await db_session.execute(select(ConversationModel.escalation_status))
+    ).scalar_one()
+
+    assert escalation is not ConversationEscalationStatus.NONE
+
+
+@pytest.mark.asyncio
+async def test_no_seeded_message_content_comes_from_anywhere_but_the_module(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """The contract of rule 11's census row for `messages.content` (D11 of `demo-user`).
+
+    The row this change adds to the census says the writer is the seed and the shape is
+    "constants of the module" — a closed catalogue held by discipline. This is what makes that
+    claim checkable: every guest message in the database is one of the module's constants, and
+    every AI reply is one of the adapter's templates. Nothing composed, nothing interpolated,
+    nothing derived from a guest's words.
+    """
+    await apply_plan(db_session, build_plan(), hasher)
+
+    contents = (
+        (await db_session.execute(select(MessageModel.content, MessageModel.sender_type)))
+        .tuples()
+        .all()
+    )
+    seeded = {content for content, _ in SEED_CONVERSATION_MESSAGES}
+    templates = set(RESPONSE_TEMPLATES.values())
+
+    assert contents, "the seed wrote no messages at all"
+    for content, sender in contents:
+        if sender is MessageSenderType.GUEST:
+            assert content in seeded, content
+        else:
+            assert content in templates, content
+
+
+@pytest.mark.asyncio
+async def test_the_portal_link_is_emitted_once_and_verifies_against_its_digest(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R4.3: the link has to be published, and the cleartext exists exactly once.
+
+    Only the digest is persisted, so the caller's list is the only place the URL can come from —
+    which is why `apply_plan` takes it as an out-parameter rather than returning counts alone.
+    Losing it would mean R4.3 could not be satisfied at all.
+    """
+    links: list[str] = []
+
+    await apply_plan(db_session, build_plan(), hasher, portal_links=links)
+
+    assert len(links) == 1
+    url = links[0]
+    assert url.startswith(f"{settings.frontend_base_url}/guest/")
+    token = url.rsplit("/", 1)[1]
+
+    stored = (
+        await db_session.execute(select(GuestAccessTokenModel.token_hash))
+    ).scalar_one()
+    assert hash_guest_token(token) == stored
+
+
+@pytest.mark.asyncio
+async def test_a_caller_that_does_not_ask_for_the_link_gets_no_token_minted(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """R2.5's bound, put in the code instead of in which caller passes a parameter.
+
+    A token nobody kept the cleartext of is strictly worse than no token: only the digest is
+    stored, so the credential exists, can never be used or handed to anyone, and the idempotency
+    guard then stops a later run from replacing it. Permanently.
+
+    That is not hypothetical — it is what `make seed-demo` would have done on its first run after
+    this change shipped. It runs against whatever `BOOTSTRAP_TENANT_NAME` names, in practice the
+    team's own tenant, and `seed_demo.run()` passes no `portal_links`. R2.5 licenses emitting **the
+    demonstration tenant's** token and explicitly not "los de portal del tenant de trabajo", and
+    D19's three justifying facts all assume the demo — the token dies in the next reset, and the
+    working tenant has no next reset.
+
+    So minting and emitting are one decision. Found from two directions at once: the QA panel of
+    this section spotted the orphaned credential, the security panel spotted that the bound lived
+    in a parameter rather than in the code.
+    """
+    created = await apply_plan(db_session, build_plan(), hasher)
+
+    assert created["guest_access_tokens"] == 0
+    assert (
+        await db_session.execute(select(func.count()).select_from(GuestAccessTokenModel))
+    ).scalar_one() == 0
+
+
+@pytest.mark.asyncio
+async def test_a_second_run_does_not_replace_the_link_already_published(
+    db_session, bootstrapped_tenant, complete_env, hasher
+) -> None:
+    """Idempotency, and here it protects something concrete rather than a count.
+
+    `IssueGuestAccessTokenUseCase` revokes and re-mints, so a second `make seed-demo` would
+    invalidate a link somebody had already been given and emit a second
+    `GUEST_ACCESS_TOKEN_ISSUED` row. The demo reset is unaffected: its delete phase empties
+    `guest_access_tokens` first, so it always finds none and always mints a fresh one.
+    """
+    first: list[str] = []
+    await apply_plan(db_session, build_plan(), hasher, portal_links=first)
+    digest_before = (
+        await db_session.execute(select(GuestAccessTokenModel.token_hash))
+    ).scalar_one()
+
+    second: list[str] = []
+    await apply_plan(db_session, build_plan(), hasher, portal_links=second)
+
+    assert second == []
+    assert (
+        await db_session.execute(select(GuestAccessTokenModel.token_hash))
+    ).scalar_one() == digest_before

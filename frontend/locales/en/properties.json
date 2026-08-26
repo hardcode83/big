@@ -1,0 +1,55 @@
+{
+  "status": {
+    "ACTIVE": "Active",
+    "INACTIVE": "Inactive"
+  },
+  "columns": {
+    "name": "Property",
+    "internalCode": "Code",
+    "city": "City",
+    "capacity": "Capacity",
+    "operationalState": "State",
+    "status": "Status"
+  },
+  "filters": {
+    "status": "Status",
+    "operationalState": "Operational state",
+    "all": "All",
+    "allStates": "All states"
+  },
+  "capacity": {
+    "summary": "{{guests}} · {{bedrooms}} · {{bathrooms}}",
+    "guests_one": "{{count}} guest",
+    "guests_other": "{{count}} guests",
+    "bedrooms_one": "{{count}} bedroom",
+    "bedrooms_other": "{{count}} bedrooms",
+    "bathrooms_one": "{{count}} bathroom",
+    "bathrooms_other": "{{count}} bathrooms"
+  },
+  "row": {
+    "openDetail": "View details for {{name}}"
+  },
+  "pagination": {
+    "label": "List pagination",
+    "prev": "Previous page",
+    "next": "Next page",
+    "position": "Page {{page}} of {{totalPages}}"
+  },
+  "empty": {
+    "title": "No properties to show",
+    "description": "No property matches the selected filters."
+  },
+  "error": {
+    "title": "The list could not be loaded",
+    "description": "Please try again in a few seconds."
+  },
+  "forbidden": {
+    "title": "Not allowed",
+    "description": "You don't have permission to view the property list"
+  },
+  "validation": {
+    "title": "Invalid filters",
+    "description": "Check the selected filters and try again."
+  },
+  "cityEmpty": "No city"
+}

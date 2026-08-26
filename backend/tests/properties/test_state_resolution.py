@@ -129,6 +129,61 @@ def test_cleaning_completion_rejects_an_active_reservation():
         )
 
 
+def test_cleaning_cancellation_resolves_an_active_stay_instead_of_refusing():
+    """The asymmetry this change turns into an exit (design D7).
+
+    `after_cleaning_completion` refuses with a guest inside — correctly, nobody cleans an
+    occupied flat. Cancellation is the opposite act, so it delegates to the same resolver
+    `INCIDENT_RESOLVED` uses and answers the state the check-in never got to write.
+    """
+    p = prop()
+    active = reservation(p, date(2026, 1, 1), date(2026, 1, 5))
+
+    assert ContextualStateResolver.after_cleaning_cancellation(
+        p,
+        PropertyTransitionContext(reservations=(active,)),
+        datetime(2026, 1, 2, 16, tzinfo=timezone.utc),
+    ) is PropertyOperationalState.OCCUPIED_ESTIMATED
+
+
+def test_cleaning_cancellation_keeps_a_live_task_in_front_of_the_stay():
+    p = prop()
+    active = reservation(p, date(2026, 1, 1), date(2026, 1, 5))
+
+    assert ContextualStateResolver.after_cleaning_cancellation(
+        p,
+        PropertyTransitionContext(
+            reservations=(active,),
+            cleaning_tasks=(cleaning(p, CleaningTaskStatus.CREATED),),
+        ),
+        datetime(2026, 1, 2, 16, tzinfo=timezone.utc),
+    ) is PropertyOperationalState.AWAITING_CLEANING
+
+
+@pytest.mark.parametrize("foreign", ["tenant", "property"])
+def test_cleaning_cancellation_rejects_out_of_scope_context(foreign):
+    """Rule 1 of `steering/security.md`, proved for this resolver and not inherited.
+
+    The sibling test below covers `after_incident_resolution`; this path is new, so without
+    its own case a later edit that special-cased the cancellation branch could drop
+    `_validate_scope` and the suite would stay green. What it would cost is not a leak but
+    something worse: another tenant's stay deciding the state of this tenant's flat.
+    """
+    p = prop()
+    other = (
+        reservation(prop(tenant_id=uuid.uuid4()))
+        if foreign == "tenant"
+        else Reservation(
+            uuid.uuid4(), p.tenant_id, uuid.uuid4(), ReservationChannel.MANUAL,
+            date(2026, 1, 1), date(2026, 1, 3), 2, NOW, NOW,
+        )
+    )
+    with pytest.raises(TransitionScopeMismatchError):
+        ContextualStateResolver.after_cleaning_cancellation(
+            p, PropertyTransitionContext(reservations=(other,)), NOW
+        )
+
+
 def test_reservation_overrides_and_property_defaults_are_used():
     p = prop(check_in=time(14), check_out=time(10))
     r = reservation(p, date(2026, 1, 1), date(2026, 1, 2), in_time=time(16), out_time=time(9))

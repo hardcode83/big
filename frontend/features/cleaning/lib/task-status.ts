@@ -1,3 +1,5 @@
+import { TONE_BADGE_CLASS, type Tone } from "@/lib/ui/status-tone";
+
 import type { CleaningTaskStatus } from "../data";
 
 /**
@@ -16,7 +18,7 @@ import type { CleaningTaskStatus } from "../data";
  * to the task lifecycle: amber = waiting on someone, blue = under way, green =
  * done, red = went wrong, grey = called off.
  */
-export type StatusColorGroup = "green" | "blue" | "amber" | "red" | "gray";
+export type StatusColorGroup = Tone;
 
 /**
  * Declared in the canonical PRD order of R1.6, not grouped by colour: the key order
@@ -36,21 +38,25 @@ const STATUS_COLOR_GROUP: Record<CleaningTaskStatus, StatusColorGroup> = {
 };
 
 /**
- * Copied from `STATE_BADGE_CLASS` in
- * `features/dashboard/components/property-card.tsx` — its twin. Kept duplicated
- * on purpose (design D12): extracting it to a shared module would touch a
- * delivered feature without changing its behaviour, and the extraction is worth
- * paying for when a third consumer appears.
+ * Design D12 kept this duplicated «until a third consumer appears», and
+ * `features/pricing` is it: `pricing-web` (design D22) extracted the strings to
+ * `lib/ui/status-tone.ts`. The name stays so `cleaning-task-row.tsx` and
+ * `task-status.test.ts` compile untouched, which is how the move proves it
+ * changed no behaviour.
+ *
+ * Its twin was never in `features/dashboard/components/property-card.tsx`,
+ * where this comment used to point: `properties-web` (design D2) had already
+ * moved it to `components/property-state-badge.tsx`.
+ *
+ * `Readonly`, and that word is load-bearing: `TONE_BADGE_CLASS` is frozen, but
+ * TypeScript ignores `readonly` property modifiers when checking assignability,
+ * so annotating this alias as a plain `Record` silently widened the guarantee
+ * away — a write through THIS name compiled clean and only threw at runtime,
+ * while the same write through `TONE_BADGE_CLASS` was a compile error. Found by
+ * the section-7 security reviewer of `design-system-tokens`.
  */
-export const STATUS_BADGE_CLASS: Record<StatusColorGroup, string> = {
-  green:
-    "bg-emerald-100 text-emerald-800 border-emerald-200 dark:bg-emerald-950 dark:text-emerald-200 dark:border-emerald-800",
-  blue: "bg-blue-100 text-blue-800 border-blue-200 dark:bg-blue-950 dark:text-blue-200 dark:border-blue-800",
-  amber:
-    "bg-amber-100 text-amber-900 border-amber-200 dark:bg-amber-950 dark:text-amber-200 dark:border-amber-800",
-  red: "bg-red-100 text-red-800 border-red-200 dark:bg-red-950 dark:text-red-200 dark:border-red-800",
-  gray: "bg-muted text-muted-foreground border-border",
-};
+export const STATUS_BADGE_CLASS: Readonly<Record<StatusColorGroup, string>> =
+  TONE_BADGE_CLASS;
 
 /** Grey for a status the union does not know, so a new backend status never crashes a row. */
 export function statusColorGroup(status: CleaningTaskStatus): StatusColorGroup {

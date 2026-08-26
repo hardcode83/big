@@ -91,6 +91,45 @@ otro. Revocar y expirar un acceso **no** escriben evento: PRD §15 no declara ni
   todo trigger de incidencia: no existe fila de política desde esos dos estados, y esa negativa
   es deliberada — un piso retirado no cambia de estado porque alguien reporte una avería.
 
+- WHEN una limpieza viva se cancela, THE SYSTEM SHALL admitir `CLEANING_CANCELLED` desde
+  `AWAITING_CLEANING`, `CLEANING_SCHEDULED` y `CLEANING_IN_PROGRESS`, exigir que la tarea fuente
+  quede en `CANCELLED`, y resolver el destino **por contexto**, no por una fila fija. Es el trigger
+  que le faltaba a `CLEANING_IN_PROGRESS`, cuyas tres únicas salidas eran cerrar la limpieza o
+  declarar una incidencia `HIGH`/`CRITICAL` —es decir, un dato falso como mecanismo de desbloqueo—.
+- **`CLEANING_ASSIGNMENT_EXPIRED` se retiró el 2026-08-23**, y esto queda escrito para que el
+  siguiente lector no lo reintroduzca como si fuera un olvido. Estaba en el enum, tenía su fila
+  (`CLEANING_SCHEDULED → AWAITING_CLEANING`) y su guarda de estados esperados, y **nadie lo
+  emitía**: ni `CADENCES`, ni `DAILY_JOBS`, ni ningún caso de uso. Las cuatro razones de retirarlo
+  en vez de escribirle un emisor:
+  1. **La necesidad operativa ya está cubierta**: una asignación sin respuesta escala al manager
+     por el SLA de `check_sla_breaches` con `TenantConfig.sla_medium_minutes`. El trigger no
+     añadía un aviso, añadía una **desasignación automática**.
+  2. **Esa desasignación es política de producto nueva**, que `cleaning` dejó fuera de alcance a
+     propósito: quitarle la tarea a una limpiadora que aún podría aceptar no es la reparación de
+     un trigger huérfano.
+  3. **Su guarda ya contradecía su nombre**: aceptaba `{ASSIGNED, ACCEPTED}`, y una tarea
+     `ACCEPTED` es exactamente una asignación **respondida**.
+  4. **Existe una salida humana y auditada** que hace ese trabajo: la cancelación de
+     `MANAGE_CLEANING_TASKS`, con motivo, `AuditLog` y `TimelineEvent`
+     ([`cleaning.md`](cleaning.md)).
+  Retirarlo no costó migración —`PropertyStateTrigger` no es columna de ninguna tabla, viaja como
+  **texto** dentro del JSON de `metadata`— y THE SYSTEM SHALL NOT reconstruir un trigger desde
+  datos almacenados por ningún camino de lectura, afirmado por un test que recorre `app/` entero
+  buscando las cuatro formas de rehacer el enum. WHERE alguna vez gane su política, SHALL entrar
+  **con su emisor en el mismo commit**.
+- THE SYSTEM SHALL mantener el catálogo de triggers **cerrado y afirmado por un test**: es lo que
+  convierte retirar un miembro en un cambio que falla en vez de en una divergencia silenciosa.
+- THE SYSTEM SHALL derivar de `_POLICY` tanto los estados origen de un trigger
+  (`source_states_for`) como sus destinos (`destination_states_for`), sin una segunda copia de la
+  matriz en ninguna parte.
+- THE SYSTEM SHALL contestar «¿vence este trigger?» por separado de «¿es legal esta transición?»:
+  `is_due` valida la petición y sus precondiciones temporales **sin consultar `_POLICY`**, y
+  devuelve falso —no error— cuando la hora no ha llegado. Un fallo del llamante (petición
+  inválida, contexto de otro tenant) SHALL seguir escapando como error: `is_due` no es un
+  tragadero de excepciones. Existe porque preguntar «el calendario exigía esto y el estado no lo
+  admite» es imposible con `evaluate`, que responde a las dos cosas a la vez; su consumidor es la
+  detección de desajustes de [`celery-jobs.md`](celery-jobs.md).
+
 **La matriz es sensible al orden, y quien reproduce hechos tiene que fijarlo.** Se revisó al
 archivar `seed-data-demo-extension` (2026-08-17) y **no hizo falta cambiar `_POLICY`**; lo que sí
 quedó demostrado es una propiedad suya que conviene tener escrita. Aplicar los mismos disparadores
@@ -131,6 +170,14 @@ Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pas
   `READY_FOR_NEXT_GUEST`, `AWAITING_CHECKIN` o `VACANT_READY`; una reserva activa
   en ese punto SHALL ser contexto incompatible y no SHALL producir
   `OCCUPIED_ESTIMATED`.
+- WHEN una limpieza se **cancele**, THE SYSTEM SHALL resolver el destino por la misma precedencia
+  contextual pero **sin** los dos escalones de incidencia, y una estancia activa SHALL producir
+  `OCCUPIED_ESTIMATED` en vez de ser contexto incompatible. **La asimetría con la cláusula anterior
+  es deliberada y es la razón de ser del trigger**: cerrar una limpieza con el huésped dentro
+  afirmaría que el piso quedó listo y es correcto negarse, mientras cancelarla sólo afirma que ese
+  trabajo no se hará, y negarse ahí es lo que dejaba la vivienda congelada hasta que el calendario
+  la liberase. Los estados de incidencia se excluyen porque una avería no la resuelve —ni la
+  inventa— cancelar una limpieza; para eso está `INCIDENT_RESOLVED`.
 - WHEN un desbloqueo solicite `CLEANING_SCHEDULED`, THE SYSTEM SHALL exigir que la
   precedencia no requiera un estado de incidencia y que exista exactamente una
   tarea `ASSIGNED` o `ACCEPTED`.
@@ -180,7 +227,10 @@ Se deduce de ahí un requisito para cualquier llamante que reproduzca hechos pas
   generador, y **sólo cuando la fila se crea** —una regeneración que actualiza no pone nada en
   el timeline, así que en régimen estacionario es una fila por vivienda y día en vez de
   sesenta—, y `PRICE_UPDATED_EXTERNAL` lo emite la transición a `APPLIED_EXTERNAL`, que es el
-  registro de que una persona publicó ese precio fuera del sistema.
+  registro de que una persona publicó ese precio fuera del sistema. **`TECHNICIAN_EN_ROUTE` ganó el
+  suyo el 2026-08-22** con [`maintenance.md`](maintenance.md), al renombrarse la transición `start`
+  a `en_route`; el mismo ciclo añadió `TECHNICIAN_REJECTED` al vocabulario **ya con escritor**, de
+  modo que el total subió a 47 miembros mientras los declarados sin escritor bajaron a 18.
 - WHERE el evento apunta a una fila que un `ON CONFLICT DO UPDATE` pudo reescribir, THE SYSTEM
   SHALL tomar su identificador de lo que **devuelve la sentencia** y no de una lectura previa.
   En la rama de conflicto la fila guardada conserva su propio `id`, así que un evento construido

@@ -44,6 +44,7 @@ que los produciría el sistema en marcha**. Nada de esto se escribe a mano en un
 | hoy−7 | La limpiadora acepta, empieza, marca 18 ítems, sube 6 fotos y cierra | los casos de uso de `cleaning` |
 | hoy−2 | Entra John Smith, y su estancia pasa a `CHECKED_IN_ESTIMATED` | reloj + `UpdateReservationUseCase` |
 | hoy | Se crean las tres incidencias y **el clasificador** les pone categoría y severidad | `maintenance` |
+| hoy | Se abre una conversación de WhatsApp sobre la estancia activa y entran **dos mensajes del huésped** por la vía real de entrada: uno de wifi que la IA contesta desde el catálogo de plantillas, y uno de emergencia que **escala** por palabra clave | `ProcessInboundGuestMessageUseCase` + `MockAIAdapter` |
 
 **Los disparadores de reloj van por tenant, no por vivienda**, porque son los mismos que el
 scheduler ejecuta cada pocos minutos y ésa es su unidad. En un tenant recién bootstrapeado eso son
@@ -56,6 +57,25 @@ REDES11 en `MAINTENANCE_REQUIRED` desde el primer paso, y desde ahí la máquina
 la apertura de la ventana de check-in: el dataset acabaría en el mismo estado final con la mitad
 del recorrido perdido, sin que nada fallara. Hay un test que afirma la secuencia entera de
 transiciones por ese motivo.
+
+### La conversación, y por qué no depende de red
+
+Los dos textos del huésped son **constantes del módulo**, igual que los títulos de las incidencias,
+y cada uno está pineado por test contra el intent que debe producir. No es celo: el adaptador de IA
+del seed es `MockAIAdapter` —determinista, sin estado, sin I/O y sin credenciales, así que la
+siembra funciona en un portátil sin llaves de ningún proveedor—, y `generate_response` lanza
+`KeyError` **a propósito** para tres intents. Un texto que cayera en uno de ellos rompería el seed,
+así que los intents son parte del contrato y no del azar.
+
+El hilo queda por tanto con las **dos ramas** que la bandeja tiene que poder enseñar: una respuesta
+automática y una escalada. Cómo se opera eso, y las dos cosas que sorprenden (apagar la IA no apaga
+la alarma; una vez escalada la IA deja de contestar): [`messaging-ai.md`](messaging-ai.md).
+
+**El enlace de portal de huésped no lo emite este comando.** `make seed-demo` imprime
+`0 guest_access_tokens` a propósito: acuñar un token **revoca el vivo**, así que una segunda siembra
+invalidaría el enlace que alguien ya tuviera, y eso rompería la idempotencia que el resto de este
+módulo sostiene. El que sí lo acuña cada vez —porque su fase de borrado deja la tabla vacía antes— es
+el reset del tenant de demostración: [`demo-tenant.md`](demo-tenant.md).
 
 ## Tres cosas que la demo enseña y que no son defectos
 
@@ -94,8 +114,15 @@ Las cuatro cuentas quedan operativas al instante, sin cambio de contraseña forz
 exige rotar cuatro contraseñas antes del primer clic no es una demo.
 
 > **Dónde puedes rellenarlas.** No hay rechazo por entorno: el comando siembra allí donde lo
-> ejecutes. No cuelga de ningún workflow de CD, y ponerlo en uno sería publicar credenciales
-> conocidas en un entorno alcanzable.
+> ejecutes. **`make seed-demo` no cuelga de ningún workflow de CD**, y ponerlo en uno sería publicar
+> credenciales conocidas en un entorno alcanzable: sus seis variables sin valor por defecto son
+> justamente lo que lo impide.
+>
+> Lo que **sí** corre programado, desde el 2026-08-24, es el reset del **tenant de demostración**, que
+> reutiliza la misma función de siembra (`apply_plan`) desde otro comando. No es una excepción a lo
+> anterior sino otra cosa: ese comando no toma del entorno ni el tenant ni las cuentas —los lleva en
+> constantes—, su contraseña viene del OCI Vault y no de un `.env`, y refusa si le apuntan al tenant de
+> trabajo. Los detalles y sus límites aceptados: [`demo-tenant.md`](demo-tenant.md).
 
 ## Se puede correr dos veces (pero envejece)
 
@@ -108,6 +135,11 @@ la propiedad, el correo normalizado de la cuenta, y los identificadores `SEED-AI
 arregla.** Las fechas se calculan el día de la siembra. Un entorno sembrado hace dos semanas
 enseña una reserva «activa» que ya terminó, y volver a correr el comando **no** la re-ancla — eso
 sería modificar filas existentes, justo lo que la idempotencia prohíbe.
+
+Para el **tenant de demostración** eso ya está resuelto por otra vía: su reset borra y vuelve a
+sembrar, así que re-ancla las fechas al día de la ejecución sin romper ninguna idempotencia — porque
+no modifica filas, las sustituye. Ver [`demo-tenant.md`](demo-tenant.md). Para el tenant de trabajo
+sigue valiendo lo de abajo.
 
 Para refrescarlo se tira la base y se empieza de cero:
 

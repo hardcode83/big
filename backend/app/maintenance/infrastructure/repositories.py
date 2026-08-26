@@ -32,18 +32,25 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.cleaning.domain.entities import CleaningTask
 from app.cleaning.infrastructure.repositories import SqlAlchemyLiveCleaningTaskReader
+from app.core.db import require_unmarked_session
 from app.core.tenancy import CrossTenantWriteError
+from app.integrations.domain.storage import ObjectLocation
 from app.maintenance.domain.entities import (
     CLOSED_INCIDENT_STATUSES,
     OPEN_INCIDENT_STATUSES,
     Incident,
+    IncidentPhoto,
     OwnerApproval,
 )
 from app.maintenance.domain.enums import IncidentStatus, OwnerApprovalStatus
 from app.maintenance.domain.exceptions import MaintenanceValidationError
 from app.maintenance.domain.repositories import IncidentFilters, IncidentPage
 from app.maintenance.domain.value_objects import IncidentSummary, OwnerApprovalSummary
-from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
+from app.maintenance.infrastructure.models import (
+    IncidentModel,
+    IncidentPhotoModel,
+    OwnerApprovalModel,
+)
 
 # Sorted so the emitted `IN` is stable across runs, which keeps query logs and the
 # statement-count test of R1.7 comparable. Same device the cleaning adapter uses.
@@ -61,6 +68,9 @@ _MUTABLE_INCIDENT_COLUMNS = (
     "ai_summary",
     "ai_classification",
     "assigned_technician_id",
+    "assignment_note",
+    "eta_at",
+    "materials",
     "owner_approval_required",
     "estimated_cost",
     "approved_cost",
@@ -272,6 +282,7 @@ class SqlAlchemyIncidentRepository:
                 property_id=incident.property_id,
                 reservation_id=incident.reservation_id,
                 reported_by_user_id=incident.reported_by_user_id,
+                cleaning_task_id=incident.cleaning_task_id,
                 # The digest, never the token (R5.1). Nothing here can tell the difference —
                 # the column is a `VARCHAR(200)` that would hold either — so the guarantee
                 # lives where the value is produced: `GuestSession.token_hash` is what the
@@ -287,6 +298,9 @@ class SqlAlchemyIncidentRepository:
                 ai_summary=incident.ai_summary,
                 ai_classification=incident.ai_classification,
                 assigned_technician_id=incident.assigned_technician_id,
+                assignment_note=incident.assignment_note,
+                eta_at=incident.eta_at,
+                materials=incident.materials,
                 owner_approval_required=incident.owner_approval_required,
                 estimated_cost=incident.estimated_cost,
                 approved_cost=incident.approved_cost,
@@ -485,12 +499,16 @@ def _to_incident(model: IncidentModel) -> Incident:
         updated_at=model.updated_at,
         reservation_id=model.reservation_id,
         reported_by_user_id=model.reported_by_user_id,
+        cleaning_task_id=model.cleaning_task_id,
         category=model.category,
         severity=model.severity,
         status=model.status,
         ai_summary=model.ai_summary,
         ai_classification=model.ai_classification,
         assigned_technician_id=model.assigned_technician_id,
+        assignment_note=model.assignment_note,
+        eta_at=model.eta_at,
+        materials=model.materials,
         owner_approval_required=model.owner_approval_required,
         estimated_cost=model.estimated_cost,
         approved_cost=model.approved_cost,
@@ -514,3 +532,138 @@ def _to_approval(model: OwnerApprovalModel) -> OwnerApproval:
         responded_by=model.responded_by,
         response_notes=model.response_notes,
     )
+
+
+def _to_incident_photo(model: IncidentPhotoModel) -> IncidentPhoto:
+    return IncidentPhoto(
+        id=model.id,
+        tenant_id=model.tenant_id,
+        incident_id=model.incident_id,
+        uploaded_by=model.uploaded_by,
+        stage=model.stage,
+        storage_key=model.storage_key,
+        created_at=model.created_at,
+    )
+
+
+class SqlAlchemyIncidentPhotoRepository:
+    """`IncidentPhotoRepository` — the writer and reader of `incident_photos` (R1, R3).
+
+    **Unlike `SqlAlchemyCleaningPhotoRepository`, this one needs no join to be scoped.**
+    `incident_photos` carries its own `tenant_id` (design D2), so every statement here filters
+    the column directly. Its cleaning counterpart has to resolve the parent task first — or join
+    `cleaning_tasks` to read — because its table names no owner of its own; that difference is
+    the whole practical payoff of D2.
+
+    Never commits: the use case owns the transaction, so the object, the row and the audit entry
+    land together or not at all (design D7).
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def add(self, tenant_id: uuid.UUID, photo: IncidentPhoto) -> None:
+        """Insert one photo, refusing a row that belongs to another tenant.
+
+        The explicit check is the mechanism, not belt-and-braces: limit 3 of `app/core/db.py`
+        says the session's global filter does **not** cover INSERTs, so for a write this is the
+        only thing between a wiring mistake and a row of another tenant. Same guard, same
+        reason, as `SqlAlchemyIncidentRepository.add` above.
+
+        The composite foreign key of D2 is the second line of defence and catches a different
+        error: this check compares the photo's tenant against the *acting* tenant, while the
+        constraint compares it against the tenant of the *incident*. A row could pass this and
+        still be refused by Postgres — which is exactly the case
+        `test_a_photo_cannot_be_attached_to_an_incident_of_another_tenant` drives.
+        """
+        if photo.tenant_id != tenant_id:
+            raise CrossTenantWriteError(
+                entity="incident_photo",
+                entity_tenant_id=photo.tenant_id,
+                acting_tenant_id=tenant_id,
+            )
+        self._session.add(
+            IncidentPhotoModel(
+                id=photo.id,
+                tenant_id=photo.tenant_id,
+                incident_id=photo.incident_id,
+                uploaded_by=photo.uploaded_by,
+                stage=photo.stage,
+                storage_key=photo.storage_key,
+                # Written, never left to a default — the column has none, deliberately. See
+                # `IncidentPhotoModel`: Postgres `now()` is the transaction timestamp, so a
+                # burst of photos would share one instant and the ordering below would fall
+                # through to a random `uuid4`.
+                created_at=photo.created_at,
+            )
+        )
+        await self._session.flush()
+
+    async def list_for_incident(
+        self, tenant_id: uuid.UUID, incident_id: uuid.UUID
+    ) -> Sequence[IncidentPhoto]:
+        """That incident's photos, oldest first (R3.1).
+
+        `created_at` then `id`: the timestamp is what the requirement asks for, and `id` breaks
+        a tie deterministically so two photos sharing an instant do not swap places between
+        reads. `cleaning` orders the same way for the same reason.
+        """
+        rows = await self._session.execute(
+            select(IncidentPhotoModel)
+            .where(
+                IncidentPhotoModel.tenant_id == tenant_id,
+                IncidentPhotoModel.incident_id == incident_id,
+            )
+            .order_by(IncidentPhotoModel.created_at, IncidentPhotoModel.id)
+        )
+        return [_to_incident_photo(model) for model in rows.scalars()]
+
+
+class SqlAlchemyUnscopedIncidentPhotoLocationQuery:
+    """Implements `UnscopedObjectLocationQuery` for `incident_photos` — design D13.
+
+    **The one read in this module that does not take a tenant**, and a class of its own rather
+    than a method on the repository above, which is the mechanism: the repository every
+    authenticated use case holds cannot express this query, so none of them can reach for it
+    instead of a scoped read. Its only wiring is the anonymous serving route's builder.
+
+    **No `JOIN`, unlike its cleaning twin.** `incident_photos.tenant_id` is on the row (design
+    D2), so both facts the caller needs come from one table. The cleaning version has to join
+    `cleaning_tasks` because that is where its tenant lives.
+
+    **Contract of the session it is given: never marked with a tenant.** Nothing in the
+    anonymous route's dependency chain binds one — the route carries no `require(...)`, because
+    an `<img src>` sends no `Authorization` header. That is not something the route's shape
+    guarantees, though: limit 2 of `_scope_statement_to_tenant` (`app/core/db.py`) is explicit
+    that being anonymous is no guarantee of being unmarked, and names the cases. What keeps the
+    contract true is `require_unmarked_session` below, which fails the read instead of letting
+    it scope silently to one tenant and refuse every photo of any other — a wiring mistake that
+    would otherwise surface as a broken signature.
+
+    Declared in the census of `tests/test_unscoped_reads.py`, which is where R6.4 requires the
+    exception to be visible.
+    """
+
+    def __init__(self, session: AsyncSession) -> None:
+        self._session = session
+
+    async def locate_without_tenant_scoping(
+        self, object_id: uuid.UUID
+    ) -> ObjectLocation | None:
+        """Two columns, no entity: the key to rebuild the signature over, and its owner.
+
+        Returning `ObjectLocation` rather than `IncidentPhoto` keeps `uploaded_by`, `stage` and
+        `created_at` — data about a tenant nobody has authenticated against — out of a request
+        that returns bytes.
+        """
+        require_unmarked_session(self._session, read="locate_without_tenant_scoping")
+        row = (
+            await self._session.execute(
+                select(IncidentPhotoModel.storage_key, IncidentPhotoModel.tenant_id).where(
+                    IncidentPhotoModel.id == object_id
+                )
+            )
+        ).one_or_none()
+        if row is None:
+            return None
+        return ObjectLocation(storage_key=row.storage_key, tenant_id=row.tenant_id)

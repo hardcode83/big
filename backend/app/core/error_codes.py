@@ -37,6 +37,12 @@ class ErrorCode(StrEnum):
     # Request-shaped failures.
     VALIDATION_ERROR = "VALIDATION_ERROR"
     CONFLICT = "CONFLICT"
+    # The 409 that a property's operational state caused, split out of `CONFLICT` so a client
+    # can tell it from the one the task's own lifecycle caused
+    # (`cleaning-assign-preconditions` R1.1). It keeps the `CONFLICT` suffix because it keeps
+    # the 409: both are state conflicts, and only the blocking party differs. Every cleaning
+    # operation refused by `PropertyStateMachine` returns it, not just the assignment.
+    PROPERTY_STATE_CONFLICT = "PROPERTY_STATE_CONFLICT"
     PAYLOAD_TOO_LARGE = "PAYLOAD_TOO_LARGE"
     METHOD_NOT_ALLOWED = "METHOD_NOT_ALLOWED"
 

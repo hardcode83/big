@@ -248,4 +248,23 @@ describe("ReservationDetailView (R3, R4, R5.2, R5.4)", () => {
       expect(body, `English literal "${literal}" leaked into the DOM`).not.toMatch(token);
     }
   });
+
+  it("renders null grossAmount/netAmount/otaCommission as three em-dashes with no currency code (R1.2)", () => {
+    useReservationMock.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: {
+        ...FULL_DETAIL,
+        grossAmount: null,
+        netAmount: null,
+        otaCommission: null,
+      },
+      refetch: vi.fn(),
+    });
+    renderDetail();
+    // One em-dash per null amount in the financial block — three total.
+    expect(screen.getAllByText("—").length).toBeGreaterThanOrEqual(3);
+    // No stray currency code: the three nulls must NOT render " EUR".
+    expect(document.body.textContent ?? "").not.toContain("EUR");
+  });
 });

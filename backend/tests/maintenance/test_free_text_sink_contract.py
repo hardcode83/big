@@ -1,32 +1,66 @@
-"""`incidents.title`/`description` as a rule-11 sink, with the test the rule demands.
+"""The free-text sinks of `incidents`, with the test rule 11 demands of each.
 
 Rule 11 of `sdd/steering/security.md` censuses the free-text columns and says the contract
 "lo hereda el change que primero escribe en cada una, **con su propio test**". That table is
 where the census and its attribution live — no count and no owner is repeated here. What makes
-this file necessary is local: the writer at the other end is an anonymous stranger on the
-internet, so this is that test.
+this file necessary is local: for `title`/`description` the writer at the other end is an
+anonymous stranger on the internet, and for `assignment_note` the value is prose typed about a
+flat somebody has to get into. So this is that test.
 
-**What is being pinned is the *boundary* of the second named exception**, not the prose it
-allows. The exception concedes text a third party wrote; what it explicitly does not concede is
-that the value travels, or that any code of ours renders a rule-3 value into these columns. Both
-of those are structural today, and structural claims rot silently — a new writer, a new audit
-field, a richer timeline payload — which is exactly what these assertions are here to catch.
+**What is being pinned is the *boundary* of a named exception**, not the prose it allows. The
+exception concedes text somebody else wrote; what it explicitly does not concede is that the
+value travels, or that any code of ours renders a rule-3 value into these columns. Both of those
+are structural today, and structural claims rot silently — a new writer, a new audit field, a
+richer timeline payload — which is exactly what these assertions are here to catch.
+
+`assignment_note` joined the sink columns in `tech-incident-context` (R3.5, R3.6, design D8). It
+differs from the other two in **which** exception covers it and in nothing this file does: the
+mechanism that keeps it out of `audit_logs.changes` and out of `timeline_events` is the same
+allowlist and the same constant title, so it rides the same assertions rather than getting a
+file of its own.
+
+`materials` joined them in `tech-cycle-completion` (R4.6, design D7, D10) on exactly that
+precedent — a fourth column, the same two mechanisms, the same assertions. What is new about it
+is only who types it: a `TECHNICIAN` with `EXECUTE_INCIDENTS` closing an incident that is
+already theirs, which is the fifth writer of the census's **excepción 3**. It is also the first
+sink on this table whose value sits beside a number it explains, so the one thing worth stating
+separately is what it is not: `final_cost` is never derived from it nor validated against it
+(that change's R4.4), so nothing reads `materials` back as an amount.
 """
 
 import ast
 from pathlib import Path
 
+import pytest
+from sqlalchemy import select
+
 from app.audit.domain import actions as audit_actions
-from app.audit.domain.value_objects import AUDITABLE_FIELDS
+from app.audit.domain.exceptions import AuditContractError
+from app.audit.domain.value_objects import (
+    AUDITABLE_FIELDS,
+    REDACTED_FIELDS,
+    ChangeSet,
+)
+from app.auth.domain.enums import UserRole
 from app.guests.api.portal_schemas import (
     MAX_INCIDENT_DESCRIPTION,
     MAX_INCIDENT_TITLE,
     ReportIncidentRequest,
 )
+from app.maintenance.application.use_cases import IncidentActor
+from app.maintenance.domain.enums import IncidentStatus
 from app.maintenance.infrastructure.models import IncidentModel
+from app.timeline.domain.enums import TimelineEventType
+from app.timeline.infrastructure.models import TimelineEventModel
+from tests.maintenance.conftest import (  # noqa: F401
+    NOW,
+    flow,
+    make_incident,
+    world,
+)
 
 APP_ROOT = Path(__file__).resolve().parents[2] / "app"
-SINK_COLUMNS = ("title", "description")
+SINK_COLUMNS = ("title", "description", "assignment_note", "materials")
 
 
 def _writes_incidents_in_raw_sql(tree: ast.Module) -> bool:
@@ -47,17 +81,56 @@ def _writes_incidents_in_raw_sql(tree: ast.Module) -> bool:
     )
 
 
-def test_the_two_columns_are_free_text_which_is_why_they_need_this_file() -> None:
-    """The premise. `title` is bounded by the DDL, `description` is not bounded at all.
+def _imports_the_cleaning_incident_port(tree: ast.Module) -> bool:
+    """Whether the module imports `app.cleaning.domain.ports`, read from the **AST**.
+
+    The fifth clause of the census gate, added by `cleaner-incident-report`, and the one this
+    file's own docstring predicted: "what would still evade it is a caller typed only against a
+    protocol alias that mentions none of the four names; if that ever appears, the fifth clause
+    is the import graph rather than another substring."
+
+    That caller arrived. `cleaning/api/schemas.py` builds an `IncidentReport` with
+    `title=`/`description=` keywords and names none of `IncidentModel`,
+    `ReportIncidentUseCase` or `IncidentRepository` — so before this clause it was an
+    **ungated writer of both columns**, which is exactly the hole the docstring anticipated.
+
+    The import graph and not a sixth substring: gating on the port's own name would be the
+    erosion this file has spent three rounds documenting, and it would still miss anything that
+    receives the port injected. One hop and not the transitive closure — that would drag in
+    `main.py`, the CLI and nearly every router (any of them with a FastAPI `description=`) and
+    turn the allowlist into noise.
+    """
+    for node in ast.walk(tree):
+        if isinstance(node, ast.ImportFrom):
+            if (node.module or "").startswith("app.cleaning.domain.ports"):
+                return True
+        elif isinstance(node, ast.Import):
+            if any(alias.name.startswith("app.cleaning.domain.ports") for alias in node.names):
+                return True
+    return False
+
+
+def test_the_three_columns_are_free_text_which_is_why_they_need_this_file() -> None:
+    """The premise. `title` and `assignment_note` are bounded by the DDL, `description` is not.
 
     If a later change gave `description` a width, the field-level maximum below would stop being
     the only bound and this file's reasoning would need revisiting — so the premise is asserted
     rather than assumed.
+
+    `assignment_note`'s width is asserted in the model here and in the **real DDL** in
+    `tests/test_migrations.py`, which is the half this file cannot see: the suite's schema comes
+    from `Base.metadata.create_all`, so a model and a migration that disagree would both look
+    right from here (`tech-incident-context` D6).
     """
     columns = IncidentModel.__table__.columns
 
     assert columns["title"].type.length == 300
     assert columns["description"].type.length is None
+    assert columns["assignment_note"].type.length == 2000
+    # `tech-cycle-completion` R4.1 — the fourth sink, bounded like `assignment_note` and for
+    # the same reason: a value that does not fit dies at the driver and aborts the
+    # transaction. The real DDL is read back in `tests/test_migrations.py`.
+    assert columns["materials"].type.length == 2000
 
 
 def test_what_the_reporter_writes_cannot_reach_the_audit_sink() -> None:
@@ -77,6 +150,55 @@ def test_what_the_reporter_writes_cannot_reach_the_audit_sink() -> None:
         )
 
 
+def test_naming_a_sink_column_in_a_change_set_raises() -> None:
+    """"No se propaga", the same half proved from the other side: it **raises**.
+
+    The test above reads the allowlist; this one drives `ChangeSet` and shows that the absence is
+    a refusal rather than a gap somebody has to remember. R3.5 of `tech-incident-context` asks for
+    exactly this word — "nombrarla en un `ChangeSet` levanta error, no pasa desapercibida" — and
+    the mechanism is the one design D8 chose: absence from the allowlist, not presence in the
+    denylist.
+
+    Both forms are driven, because they are two different doors: `diff()` carries the value and
+    `redacted()` carries only the fact, and a column outside the allowlist must be refused by
+    both. That is what makes this different from `REDACTED_FIELDS`, where `redacted()` is the one
+    form that still works.
+    """
+    for column in SINK_COLUMNS:
+        with pytest.raises(AuditContractError):
+            ChangeSet(audit_actions.ENTITY_INCIDENT).diff(column, None, "whatever")
+        with pytest.raises(AuditContractError):
+            ChangeSet(audit_actions.ENTITY_INCIDENT).redacted(column)
+
+
+def test_the_note_is_excluded_by_absence_and_not_by_the_denylist() -> None:
+    """Design D8's choice, asserted so a later change cannot quietly convert it.
+
+    Putting `assignment_note` on `REDACTED_FIELDS` would look stricter and be strictly more
+    surface: `wifi_password_encrypted` and `secret_encrypted` demonstrate that denylisting forces
+    you to **add** the column to the allowlist as well, or `redacted()` fails too — and then
+    `{"changed": true}` starts being written for a field nobody audits.
+    """
+    assert "assignment_note" not in REDACTED_FIELDS
+    assert "assignment_note" not in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+    # `materials` enters by the same door and for the same reason (`tech-cycle-completion`
+    # R4.6): absence from the allowlist, never presence in the denylist.
+    assert "materials" not in REDACTED_FIELDS
+    # `maintenance` R9 said eleven; `cleaner-incident-report` (D10) made it twelve by adding
+    # `cleaning_task_id` — an identifier, not free text, which is why it lands in the allowlist
+    # while `assignment_note` stays out by absence. The count is asserted rather than left
+    # implicit so a *thirteenth* field is a deliberate act; R9's wording is rewritten at archive.
+    #
+    # The thirteenth arrived, deliberately: `tech-cycle-completion` R5.1 adds `eta_at`, a
+    # timestamp on the same footing as `resolved_at`. Its sibling `materials` did **not** enter,
+    # which is the whole point of that change's R4.6 — a 2000-character field a person types
+    # stays out by absence, exactly as `assignment_note` does.
+    assert len(AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]) == 13
+    assert "eta_at" in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+    assert "materials" not in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+    assert "cleaning_task_id" in AUDITABLE_FIELDS[audit_actions.ENTITY_INCIDENT]
+
+
 def test_the_timeline_entry_carries_neither_of_them() -> None:
     """"No se propaga", half two: `timeline_events`, which is append-only.
 
@@ -90,21 +212,30 @@ def test_the_timeline_entry_carries_neither_of_them() -> None:
     )
     tree = ast.parse(source)
 
-    timeline_title = next(
-        node.value
+    # **Every** timeline title in the module, not one name. Raised by the security panel of
+    # `cleaner-incident-report` section 7: this resolved `_TIMELINE_TITLE` alone, so the
+    # constant the cleaner's alta uses — `_REPORTED_TIMELINE_TITLE` — was never pinned, and an
+    # edit deriving it from the reported text (a truncation, say) would have kept this green.
+    # The behavioural net next door is `TITLE not in event.title`, which a truncation slips
+    # straight past.
+    titles = {
+        target.id: node.value
         for node in ast.walk(tree)
         if isinstance(node, ast.Assign)
-        and any(
-            isinstance(target, ast.Name) and target.id == "_TIMELINE_TITLE"
-            for target in node.targets
-        )
-    )
+        for target in node.targets
+        if isinstance(target, ast.Name) and target.id.endswith("_TIMELINE_TITLE")
+    }
 
-    assert isinstance(timeline_title, ast.Constant), (
-        "_TIMELINE_TITLE stopped being a literal: the timeline is immutable, so a value "
-        "assembled from the report cannot be redacted afterwards (design D12)"
+    assert len(titles) >= 2, (
+        "the module stopped declaring the timeline titles as module-level names, so this "
+        f"structural check no longer sees them: found {sorted(titles)}"
     )
-    assert isinstance(timeline_title.value, str) and timeline_title.value.strip()
+    for name, value in sorted(titles.items()):
+        assert isinstance(value, ast.Constant), (
+            f"{name} stopped being a literal: the timeline is immutable, so a value assembled "
+            "from the report cannot be redacted afterwards (design D12)"
+        )
+        assert isinstance(value.value, str) and value.value.strip()
 
 
 def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
@@ -178,6 +309,7 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
             or "IncidentModel" in source
             or "ReportIncidentUseCase" in source
             or "IncidentRepository" in source
+            or _imports_the_cleaning_incident_port(tree)
             or _writes_incidents_in_raw_sql(tree)
         ):
             continue
@@ -214,9 +346,45 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         if writes:
             offenders[relative] = writes
 
-    assert set(offenders) == {
-        "maintenance/application/use_cases.py",
-        "maintenance/infrastructure/repositories.py",
+    # **The whole mapping, not just its keys** — tightened in `tech-incident-context` (task 3.2).
+    # The key-set form this replaces treated an allowlist entry as a licence for every sink
+    # column at once, so admitting `maintenance/domain/entities.py` for `assignment_note` would
+    # have silently admitted a future `self.title = ...` in the one module that can mutate an
+    # incident's text. Comparing the mapping costs nothing and keeps each entry as narrow as the
+    # reason that earned it.
+    assert offenders == {
+        # `materials` joins three of the four entries below as a **genuine** writer of the
+        # column — `tech-cycle-completion` R4.3/R4.6, censused under excepción 3 — and two more
+        # as the same kind of pass-through the note already had. Each is narrowed to the column
+        # that earned it, which is what the mapping form is for.
+        "maintenance/application/use_cases.py": {
+            "title",
+            "description",
+            "assignment_note",
+            # `ResolveIncidentUseCase` forwards `materials=` to both branches of the close
+            # (R4.3). It composes nothing: the value is what the technician typed, arriving
+            # from the request schema and going straight to the entity.
+            "materials",
+        },
+        "maintenance/infrastructure/repositories.py": {
+            "title",
+            "description",
+            "assignment_note",
+            # The adapter persists it, like the other three. Still the only module in the tree
+            # with an `IncidentModel(...)` in it.
+            "materials",
+        },
+        # `tech-incident-context` (R3.5, D7): the entity is where the value is actually
+        # assigned — `self.assignment_note = assignment_note` inside `Incident.assign`, written
+        # unconditionally so the note belongs to the assignment in force. Same contract as the
+        # two modules above, so it is the same census row and not a new one.
+        #
+        # `materials` is assigned here too, by `resolve` and `require_owner_approval`
+        # (`tech-cycle-completion` R4.3) — and **conditionally**, which is the difference worth
+        # recording: the note replaces on every `assign`, while `materials` is written only when
+        # the body carries it, so the repeat close after an owner approval cannot erase it (D7).
+        # `Incident.reject` also sets both to `None`, which is a clear and not a write of text.
+        "maintenance/domain/entities.py": {"assignment_note", "materials"},
         # The three `maintenance` adds are the false positives this docstring predicts, and
         # each is named rather than waved through:
         #
@@ -224,17 +392,40 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         #   fills them in `IncidentResponse.from_domain` — a read of the columns, on the way
         #   out. It cannot write them: a Pydantic DTO has no session, and the only writer of
         #   the row is the adapter above, whose `_MUTABLE_INCIDENT_COLUMNS` excludes both.
-        # * The two routers match on FastAPI's own `description=` route metadata — the
+        # * The **three** routers match on FastAPI's own `description=` route metadata — the
         #   documented reason `properties/api/router.py` forced the raw-SQL clause of this
-        #   census to be quote-aware in the first place.
+        #   census to be quote-aware in the first place. `incidents_router.py` additionally
+        #   matches on `assignment_note=payload.assignment_note`, which is the router
+        #   forwarding the field to the use case — a pass-through, not a producer of text.
         #
         # What the entries cost is real and bounded: a genuine write appearing in one of
-        # these three would no longer be reported. It would still have to reach the database
+        # these four would no longer be reported. It would still have to reach the database
         # through the adapter, which is still gated, still allowlisted, and still the only
         # module with an `IncidentModel(...)` in it.
-        "maintenance/api/schemas.py",
-        "maintenance/api/incidents_router.py",
-        "maintenance/api/approvals_router.py",
+        # `api/schemas.py` gains `materials` for **two** reasons at once, and only one of them
+        # is a read: `IncidentResponse` declares and fills it on the way out (a read of the
+        # column, like `title`/`description` above), and `ResolveIncidentRequest` declares it on
+        # the way **in**. The inbound half is where the value is actually bounded — the strip,
+        # `min_length=1`, `max_length=MAX_MATERIALS` and the `storable_text` guard the census row
+        # names — so this entry is the schema being the boundary, not a producer of text. A DTO
+        # still has no session; the adapter above is the only writer of the row.
+        "maintenance/api/schemas.py": {"title", "description", "materials"},
+        # The router matches on FastAPI's own `description=` route metadata, plus two
+        # pass-throughs of a request field to a use case: `assignment_note=payload.assignment_note`
+        # and now `materials=payload.materials`. Forwarding a validated field is not producing
+        # text.
+        "maintenance/api/incidents_router.py": {
+            "description",
+            "assignment_note",
+            "materials",
+        },
+        "maintenance/api/approvals_router.py": {"description"},
+        # `incident-photos` section 8. The narrowest entry of the four and the easiest to
+        # verify: the module is 40 lines, it names `description` exactly **once**, as the
+        # `description=` argument handed to `build_signed_media_router`, and it contains no
+        # reference to `IncidentModel`, no `.description =` assignment and no session at all.
+        # It cannot write a column; it declares OpenAPI prose for one anonymous route.
+        "maintenance/api/photos_router.py": {"description"},
         # `seed-data-demo-extension`: the demo seed is the third writer of both columns and the
         # first one outside `maintenance/`. It is here rather than waved through because its
         # contract is declared in the census — **closed form by discipline**: the three PRD §27
@@ -242,12 +433,40 @@ def test_the_only_writer_of_the_two_columns_is_the_incident_adapter() -> None:
         # exception 2 is neither invoked nor needed. What the entry does not buy is enforcement:
         # `ReportIncidentUseCase` accepts any `str`, so a future caller that composes text there
         # is under the structured form by default and owes this table a row of its own.
-        "cli/seed_demo.py",
+        #
+        # It does not pass a note: `AssignIncidentUseCase.execute` is called without one, so the
+        # demo dataset leaves `assignment_note` at `NULL` (D7's assumed consequence).
+        "cli/seed_demo.py": {"title", "description"},
+        # `cleaner-incident-report`: the cleaner's request schema, and the module the fifth
+        # clause exists to catch. It builds `IncidentReport(title=…, description=…)` in
+        # `to_report()` and names none of the four gated strings, so until that clause it was an
+        # **ungated writer of both columns** — precisely the hole this docstring predicted.
+        #
+        # Its contract, written here as the allowlist demands: the value is what an authenticated
+        # cleaner typed about her own task, bounded by `min_length=1`, the two maxima of
+        # `maintenance/domain/entities.py`, a strip, and the storable-text guard of
+        # `app/core/storable_text.py`. It falls under **excepción 3** — a person authenticated
+        # with RBAC writing about their own scope — and not the 2nd, which is the anonymous
+        # portal reporter and says of itself that it does not authorise a writer of ours.
+        #
+        # The mapping lives in the schema rather than in the router, and that keeps **`title=`**
+        # out of `tasks_router.py` (design D9). What it does not do — measured, because D9 and
+        # an earlier version of this comment both claimed otherwise — is keep the router off
+        # this list: it carries **fifteen** `description=` keywords, every one of them FastAPI
+        # route metadata, and it is absent here only because no clause gates it (it names none
+        # of the four strings and imports no gated module). The day it acquires one, it will
+        # match on that metadata exactly as `maintenance`'s two routers already do, and it will
+        # need an entry saying so rather than a reviewer hunting for a writer that is not there.
+        "cleaning/api/schemas.py": {"title", "description"},
     }, (
-        "a module names incidents.title/description in a writing position: rule 11's second "
-        "exception is declared for the reporter's own prose and no other producer, so a new "
-        "writer needs its own trip through steering — or, if this is a false positive of a "
-        f"deliberately coarse census, its own allowlist entry here. Found {offenders}"
+        "a module names one of incidents.title/description/assignment_note/materials in a "
+        "writing "
+        "position: the census declares these columns writer by writer — the anonymous reporter "
+        "under excepción 2, the authenticated cleaner and the assigning manager under "
+        "excepción 3, and text our own code composes under the structured form by default — so "
+        "a new writer needs its own trip through steering with its own row, or, if this is a "
+        "false positive of a deliberately coarse census, its own allowlist entry here, narrowed "
+        f"to the column that earned it. Found {offenders}"
     )
 
 
@@ -306,6 +525,110 @@ def test_the_census_catches_the_escapes_it_claims_to() -> None:
                 if isinstance(target, ast.Attribute) and target.attr in SINK_COLUMNS
             )
         assert found, f"the census would not see {snippet!r}"
+
+
+def test_the_fifth_clause_reads_the_import_graph_and_not_another_substring() -> None:
+    """The mechanism of the clause `cleaner-incident-report` added, pinned like the rest.
+
+    Both import forms, and — the half that matters — that it does **not** fire on a module which
+    merely mentions the port's names in prose or imports something else from `cleaning`. A clause
+    that fired on the name would be the substring erosion this file keeps refusing.
+    """
+    assert _imports_the_cleaning_incident_port(
+        ast.parse("from app.cleaning.domain.ports import IncidentReport")
+    )
+    assert _imports_the_cleaning_incident_port(
+        ast.parse("import app.cleaning.domain.ports")
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('"""Builds a TaskIncidentReportingPort somewhere else."""')
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse("from app.cleaning.domain.entities import CleaningTask")
+    )
+    # **The case that separates the AST from a substring**, and the only one that does.
+    # Raised by the QA panel of section 7, which showed the four assertions above are all
+    # satisfied by `return "app.cleaning.domain.ports" in ast.dump(tree)` — the precise erosion
+    # D9 rejected — because none of them puts the dotted path itself into a module that does
+    # not import it. This one does.
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('"""See app.cleaning.domain.ports for the protocol this mirrors."""')
+    )
+    assert not _imports_the_cleaning_incident_port(
+        ast.parse('PORT_MODULE = "app.cleaning.domain.ports"')
+    )
+
+
+def test_the_fifth_clause_admits_three_modules_and_moves_no_offender() -> None:
+    """What the clause costs, measured rather than predicted.
+
+    The design guessed it would also admit `scheduler/tasks.py`; it does not — that module does
+    not import the port. What it actually admits beyond the writer it was added for is
+    `cleaning/application/evidence.py` and `properties/application/use_cases.py`, and **neither
+    writes either column**, so the offender set is unchanged and the gate is strictly stronger
+    for free. That is the same argument the port clause entered on, and it is asserted here so
+    that a future module joining this list has to be looked at rather than absorbed.
+    """
+    admitted = {
+        relative
+        for relative, tree in (
+            (str(path.relative_to(APP_ROOT)), ast.parse(path.read_text(encoding="utf-8")))
+            for path in sorted(APP_ROOT.glob("**/*.py"))
+        )
+        if _imports_the_cleaning_incident_port(tree)
+    }
+
+    assert admitted == {
+        # The writer the clause exists for, allowlisted above with its contract.
+        "cleaning/api/schemas.py",
+        # Already gated by the `maintenance/` prefix; the clause changes nothing for it.
+        "maintenance/application/use_cases.py",
+        # Admitted and clean — they hold the port, they do not write the columns.
+        "cleaning/application/use_cases.py",
+        "cleaning/application/evidence.py",
+        "properties/application/use_cases.py",
+    }
+
+@pytest.mark.asyncio
+async def test_the_assignment_timeline_event_carries_only_two_identifiers(
+    flow, world, db_session
+) -> None:
+    """R3.6 — the **exact** key set of the assignment event's `metadata`, on the built row.
+
+    Behavioural and not static, because this is the half no allowlist protects:
+    `TimelineEventFactory` only checks that `metadata` is a `dict`, and `timeline_events` is
+    append-only, so whatever lands there can never be redacted afterwards. The exact-set form is
+    what catches a `metadata=asdict(incident)` — the same shape `revenue-pricing` had to pin for
+    `price_recommendations.explanation`, and for the same reason.
+
+    Read this together with the warning it inherits: whoever reads "no se propaga" as a guarantee
+    of the framework and deletes this assertion reopens the route.
+    """
+    note = "El código del portal es 4821"
+    incident = await make_incident(db_session, world, status=IncidentStatus.CLASSIFIED)
+
+    await flow.assign.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        technician_id=world.technician.id,
+        actor=IncidentActor(user_id=world.manager.id, role=UserRole.PROPERTY_MANAGER),
+        now=NOW,
+        assignment_note=note,
+    )
+
+    events = (
+        (await db_session.execute(select(TimelineEventModel))).scalars().all()
+    )
+    assignment = [
+        event
+        for event in events
+        if event.event_type is TimelineEventType.TECHNICIAN_ASSIGNED
+    ]
+    assert len(assignment) == 1
+    assert set(assignment[0].metadata_) == {"incident_id", "technician_id"}
+    assert "assignment_note" not in assignment[0].metadata_
+    assert note not in str(assignment[0].metadata_)
+    assert note not in assignment[0].title
 
 
 def test_the_anonymous_boundary_bounds_what_can_land_there() -> None:

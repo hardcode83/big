@@ -50,6 +50,13 @@ ENTITY_CLEANING_TASK = "CLEANING_TASK"
 # task id would make "who uploaded THIS photo" a scan over `changes` instead of a lookup.
 # The link back to the task travels as an auditable field of the diff.
 ENTITY_CLEANING_PHOTO = "CLEANING_PHOTO"
+# A row of `incident_photos`. Added by `incident-photos` (R6.1, design D8). Its own entity type
+# rather than auditing the upload against the parent incident, for exactly the reason
+# `ENTITY_CLEANING_PHOTO` above gives: `entity_id` is what
+# `ix_audit_logs_tenant_id_entity_type_entity_id` indexes, so pointing several uploads at one
+# incident id would turn "who uploaded THIS photo" into a scan over `changes`. The link back to
+# the incident travels as an auditable field of the diff.
+ENTITY_INCIDENT_PHOTO = "INCIDENT_PHOTO"
 # A row of `access_records` (`access-notifications`). Rule 9 of `sdd/steering/security.md`
 # names `AccessRecord` in its enumeration explicitly — unlike `PROPERTY`, which had to be
 # argued for — so no reasoning is needed here beyond the citation.
@@ -164,12 +171,28 @@ CLEANING_TASK_STARTED = "CLEANING_TASK_STARTED"
 CLEANING_TASK_COMPLETED = "CLEANING_TASK_COMPLETED"
 CLEANING_TASK_VALIDATED = "CLEANING_TASK_VALIDATED"
 CLEANING_TASK_CREATED = "CLEANING_TASK_CREATED"
+# `cleaning-stall-blocks-next-stay` R3.3. Its own action for the reason above: rule 9 is only
+# auditable if the operation is findable by `action`, and "who retired this cleaning, and why"
+# is the question this one exists to answer. Always a person — `MANAGE_CLEANING_TASKS` — so
+# rule 9's `SYSTEM` exemption does not reach it, and the `reason` the entity demands travels
+# with the row.
+CLEANING_TASK_CANCELLED = "CLEANING_TASK_CANCELLED"
 
 # Cleaning photos (`cleaning-photos-storage`, R2.7). A person uploads it, so rule 9's actor
 # exemption — which covers only `SYSTEM` — does not reach it. There is no
 # `CLEANING_PHOTO_DELETED`: the proposal keeps deletion out of scope, and an action for an
 # operation the API does not offer is the speculative vocabulary this module argues against.
 CLEANING_PHOTO_UPLOADED = "CLEANING_PHOTO_UPLOADED"
+# Incident photos (`incident-photos`, R6.1, design D8). The technician or the manager uploads
+# it, so rule 9's actor exemption — which covers only `SYSTEM` — does not reach it, and this
+# action is deliberately **absent** from `_ACTOR_OPTIONAL_ACTIONS` in
+# `app/maintenance/application/use_cases.py`: this change asks for no new exception to rule 9.
+#
+# One action, not two: there is no `INCIDENT_PHOTO_DELETED`, because the proposal keeps every
+# deletion surface out of scope and an action for an operation the API does not offer is the
+# speculative vocabulary this module argues against. The compensating delete of design D7 is
+# not an audited operation — it undoes a transaction that never committed.
+INCIDENT_PHOTO_UPLOADED = "INCIDENT_PHOTO_UPLOADED"
 # Access records (`access-notifications`). One action per operation, same reasoning as the
 # cleaning ones: rule 9 is only auditable if the operation is findable by `action` rather than
 # by a JSONB query over `changes`.
@@ -236,6 +259,15 @@ INCIDENT_CLASSIFIED = "INCIDENT_CLASSIFIED"
 INCIDENT_TRIAGED = "INCIDENT_TRIAGED"
 INCIDENT_ASSIGNED = "INCIDENT_ASSIGNED"
 INCIDENT_ACCEPTED = "INCIDENT_ACCEPTED"
+# The technician refused the job (`tech-cycle-completion` R5.2). Its own action rather than a
+# reuse of `INCIDENT_ASSIGNED`: an auditor reading the trail has to be able to tell "the
+# manager handed this to somebody" from "the person it was handed to said no", and the two
+# rows carry the same field in opposite directions (`assigned_technician_id` set versus
+# cleared).
+INCIDENT_REJECTED = "INCIDENT_REJECTED"
+# Written by `en_route` as well as by `resume_work`: the operational fact is the same move
+# into `IN_PROGRESS`, and an append-only trail should not carry two verbs for one transition
+# (`tech-cycle-completion` D4).
 INCIDENT_STARTED = "INCIDENT_STARTED"
 INCIDENT_WAITING_PARTS = "INCIDENT_WAITING_PARTS"
 INCIDENT_RESOLVED = "INCIDENT_RESOLVED"
@@ -316,6 +348,7 @@ ENTITY_TYPES = frozenset(
 
         ENTITY_CLEANING_TASK,
         ENTITY_CLEANING_PHOTO,
+        ENTITY_INCIDENT_PHOTO,
         ENTITY_ACCESS_RECORD,
         ENTITY_GUEST,
         ENTITY_RESERVATION,
@@ -352,7 +385,9 @@ ACTIONS = frozenset(
         CLEANING_TASK_STARTED,
         CLEANING_TASK_COMPLETED,
         CLEANING_TASK_VALIDATED,
+        CLEANING_TASK_CANCELLED,
         CLEANING_PHOTO_UPLOADED,
+        INCIDENT_PHOTO_UPLOADED,
         ACCESS_RECORD_CREATED,
         ACCESS_CODE_REGISTERED,
         ACCESS_MARKED_EXTERNAL,
@@ -370,6 +405,7 @@ ACTIONS = frozenset(
         INCIDENT_TRIAGED,
         INCIDENT_ASSIGNED,
         INCIDENT_ACCEPTED,
+        INCIDENT_REJECTED,
         INCIDENT_STARTED,
         INCIDENT_WAITING_PARTS,
         INCIDENT_RESOLVED,

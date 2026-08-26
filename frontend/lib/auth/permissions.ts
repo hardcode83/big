@@ -26,12 +26,29 @@ import type { components } from "@/lib/api/generated/openapi";
  */
 type UserRole = components["schemas"]["UserRole"];
 
-export type Permission = "MANAGE_CLEANING_TASKS" | "MANAGE_CONVERSATIONS";
+export type Permission =
+  | "MANAGE_CLEANING_TASKS"
+  | "MANAGE_CONVERSATIONS"
+  | "MANAGE_PRICE_RECOMMENDATIONS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
-  TENANT_OWNER: [],
-  PROPERTY_MANAGER: ["MANAGE_CLEANING_TASKS", "MANAGE_CONVERSATIONS"],
+  // `MANAGE_PRICE_RECOMMENDATIONS` goes to the owner too, and that is not a
+  // copy-paste slip of the line above (R7.1, R7.2). `policy.py:128-142`
+  // documents it as a conscious divergence from «the owner sees, the manager
+  // operates»: `min_price`/`max_price` are the limits of the owner's own money,
+  // and PRD §19 Mode 1 says «Manager/owner aprueba manualmente». Giving this
+  // the shape of `MANAGE_CLEANING_TASKS` would leave the owner staring at a
+  // queue she cannot decide, with the buttons hidden by the frontend while the
+  // backend was granting them.
+  // `MANAGE_CONVERSATIONS` is the other side of that rule (messaging-ai D17):
+  // the owner reads but does not write, so she is intentionally absent here.
+  TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS"],
+  PROPERTY_MANAGER: [
+    "MANAGE_CLEANING_TASKS",
+    "MANAGE_CONVERSATIONS",
+    "MANAGE_PRICE_RECOMMENDATIONS",
+  ],
   CLEANER: [],
   TECHNICIAN: [],
 };
@@ -42,7 +59,7 @@ export function useHasPermission(permission: Permission): boolean {
   if (!user) {
     return false;
   }
-  // `?? []` for the same reason `features/dashboard/lib/state-color.ts` falls back
+  // `?? []` for the same reason `components/property-state-badge.tsx` falls back
   // to grey: `role` crosses the API boundary, and a role the generated union does
   // not know must hide the control, not crash the view.
   return (ROLE_UI_PERMISSIONS[user.role] ?? []).includes(permission);

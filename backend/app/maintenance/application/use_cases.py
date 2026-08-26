@@ -20,9 +20,11 @@ rather than dressed up as a feature.
 import logging
 import uuid
 from collections.abc import Awaitable, Callable
+from typing import Protocol
 from dataclasses import dataclass, replace
 from datetime import datetime
 from decimal import Decimal
+from typing import Any
 
 from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
@@ -31,13 +33,30 @@ from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
 from app.auth.domain.repositories import UserFilters
+# `maintenance` supplies the implementer of a port `cleaning` declares, so the import runs
+# that way round: `application/` here depends on another module's `domain/`, never on its use
+# cases. Same shape as `messaging/domain/ports.py`'s `IncidentReportingPort` (D2).
+from app.cleaning.domain.ports import (
+    IncidentReport,
+    IncidentReportedAcknowledgement,
+)
 from app.core.unit_of_work import UnitOfWork
+from app.integrations.domain.storage import (
+    MAGIC_BYTES_LENGTH,
+    FileStorageFactory,
+    FileStoragePort,
+    StorageWriteError,
+    detect_image_type,
+    storage_key_for_incident_photo,
+)
 from app.maintenance.domain.entities import (
+    IncidentPhoto,
     CONVERSATION_INCIDENT_TITLES,
     Incident,
     OwnerApproval,
 )
 from app.maintenance.domain.enums import (
+    IncidentPhotoStage,
     IncidentCategory,
     IncidentSeverity,
     IncidentSource,
@@ -46,6 +65,9 @@ from app.maintenance.domain.enums import (
     OwnerApprovalStatus,
 )
 from app.maintenance.domain.exceptions import (
+    IncidentPhotoStorageUnavailableError,
+    IncidentPhotoTooLargeError,
+    UnsupportedIncidentPhotoFormatError,
     IncidentNotFoundError,
     InvalidTechnicianError,
     MaintenanceValidationError,
@@ -53,12 +75,15 @@ from app.maintenance.domain.exceptions import (
 )
 from app.maintenance.domain.notifications import (
     RELATED_TYPE_INCIDENT,
+    incident_rejection_notification,
     owner_approval_notification,
     sla_minutes_for,
     technician_assignment_notification,
 )
 from app.maintenance.domain.ports import IncidentClassifier, LiveCleaningTaskQuery
+from app.maintenance.domain.read_models import IncidentContext
 from app.maintenance.domain.repositories import (
+    IncidentPhotoRepository,
     IncidentFilters,
     IncidentPage,
     IncidentQuery,
@@ -359,6 +384,8 @@ _TIMELINE_TITLES: dict[TimelineEventType, str] = {
     TimelineEventType.OWNER_REJECTED_EXPENSE: "Owner rejected the expense",
     TimelineEventType.TECHNICIAN_ASSIGNED: "Technician assigned",
     TimelineEventType.TECHNICIAN_ACCEPTED: "Technician accepted the incident",
+    TimelineEventType.TECHNICIAN_EN_ROUTE: "Technician is on the way",
+    TimelineEventType.TECHNICIAN_REJECTED: "Technician rejected the incident",
     TimelineEventType.TECHNICIAN_STARTED: "Technician started work",
     TimelineEventType.INCIDENT_RESOLVED: "Incident resolved",
     TimelineEventType.INCIDENT_CANCELLED: "Incident cancelled",
@@ -374,6 +401,33 @@ class IncidentActor:
     role: UserRole
     ip: str | None = None
 
+    def __post_init__(self) -> None:
+        """An actor without an identity is not an actor (rule 9 of `steering/security.md`).
+
+        `user_id` was already typed non-optional, and a type hint is not a check: Python
+        builds `IncidentActor(user_id=None, …)` happily, and from there `_AuditWriter.record`
+        waves it through — it refuses only `actor is None` — so an append-only
+        `INCIDENT_CREATED` row naming nobody would be committed, which is precisely the alta
+        rule 9's fourth exception does **not** cover. Raised by the security panel of
+        `cleaner-incident-report` sections 3-4, which found the guarantee was annotation-deep.
+
+        No caller in the tree passes `None` today; this is what keeps that true.
+
+        **What it does not close, measured rather than left implied** (security re-review of
+        sections 3-4): `__post_init__` guards *construction*, so it catches both reachable
+        paths — the constructor and `dataclasses.replace`, which re-enters it — but not
+        `object.__setattr__` on an existing instance nor `IncidentActor.__new__` with no
+        attribute set at all. Both of those need attacker-controlled Python running in this
+        process, at which point this is not the boundary being crossed; they are recorded so
+        that "refused by construction" is not read as more than it is.
+        """
+        if self.user_id is None:
+            raise MaintenanceValidationError(
+                "an incident actor must name the user acting: rule 9 exempts only the "
+                "automatic classification, and it passes no actor at all rather than an "
+                "anonymous one"
+            )
+
     @property
     def restrict_to_technician_id(self) -> uuid.UUID | None:
         """R5.3 — derived from the role **here**, never accepted from the request.
@@ -387,6 +441,45 @@ class IncidentActor:
         takes a single permission, so the assignee restriction has to ride the role.
         """
         return self.user_id if self.role is UserRole.TECHNICIAN else None
+
+
+async def _load_incident_in_scope(
+    incidents: IncidentRepository,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    actor: IncidentActor,
+) -> Incident:
+    """Load one incident inside the tenant **and** inside the caller's own rows.
+
+    The row-level rule of R5.3/R5.4, written once (`tech-incident-context` D3). It had been
+    written **twice** — in `_IncidentTransitionMixin._load_incident` and in
+    `GetIncidentUseCase.execute`, which does not inherit the mixin because it only takes
+    `incidents` — and the context projection would have made it three copies in one file. R4.4
+    of that change requires the `404` to be identical in four cases, and a rule replicated three
+    times is the one that will diverge.
+
+    **The `404` is deliberately indistinguishable across every failure**, and that is the whole
+    reason this is one function: an incident that does not exist, one belonging to another
+    tenant, and one assigned to a different technician all raise the same
+    `IncidentNotFoundError` with the same message. Answering `403` for the third would turn any
+    of these routes into a probe for which incidents exist and whose they are.
+
+    A module-level coroutine rather than a method: `GetIncidentUseCase` holds only the
+    repository, so a mixin would have forced it to grow collaborators it has no use for, and
+    making one use case call another to reuse three lines is not how `application/` composes in
+    this repo.
+
+    This does not close `tenant-scoping-enumeration-guard`, the roadmap candidate
+    `sdd/specs/maintenance.md` names in its §Estado — it lowers this module from three copies to
+    one, at the only moment when the diff is three lines per caller.
+    """
+    incident = await incidents.get(tenant_id, incident_id)
+    if incident is None:
+        raise IncidentNotFoundError()
+    restrict = actor.restrict_to_technician_id
+    if restrict is not None and incident.assigned_technician_id != restrict:
+        raise IncidentNotFoundError()
+    return incident
 
 
 class _AuditWriter:
@@ -460,6 +553,62 @@ class _AuditWriter:
 _REPORTED_TIMELINE_TITLE = "Incident reported"
 
 
+def _creation_change_set(
+    source: IncidentSource, cleaning_task_id: uuid.UUID | None
+) -> ChangeSet:
+    """The audited diff of an alta: `source`, `status`, and the anchor when there is one.
+
+    `cleaning_task_id` joins them because an incident's audit row records **what it was
+    anchored against** — which is why `reservation_id` is in the allowlist at all — and
+    "during which cleaning" is the equivalent anchor (`cleaner-incident-report` D10). It is an
+    identifier and never text, so rule 11's excepción 2 is untouched by it.
+
+    **Conditional, and the alternative was measured rather than assumed.** `ChangeSet.diff`
+    always inserts the key, so calling it unconditionally would stamp
+    `{"old": null, "new": null}` on the audit row of every incident the guest portal, the
+    messaging pipeline and the demo seed create — three sources that can never have a cleaning
+    behind them. `audit_logs` is append-only, so that null is permanent once written. Same
+    discipline the timeline metadata below follows, and for the same reason.
+    """
+    changes = (
+        ChangeSet(audit_actions.ENTITY_INCIDENT)
+        .diff("source", None, source)
+        .diff("status", None, IncidentStatus.OPEN)
+    )
+    if cleaning_task_id is not None:
+        changes = changes.diff("cleaning_task_id", None, cleaning_task_id)
+    return changes
+
+
+def _assignment_change_set(
+    *,
+    previous_technician: uuid.UUID | None,
+    technician_id: uuid.UUID,
+    previous_status: IncidentStatus,
+    status: IncidentStatus,
+    previous_eta: datetime | None,
+) -> ChangeSet:
+    """The audited diff of an assignment: the assignee, the status, and the ETA it cleared.
+
+    `eta_at` joins conditionally (`tech-cycle-completion` R3.5): `Incident.assign` sets it to
+    `NULL` every time, but only a reassignment that actually had one is a change worth a
+    permanent row. Unconditional would stamp `{"old": null, "new": null}` on every first
+    assignment, and `audit_logs` is append-only — the same reasoning `_creation_change_set`
+    records for `cleaning_task_id`.
+
+    `assignment_note` is **not** here and must not be: it is a rule-11 sink, so naming it would
+    raise `AuditContractError`, which is the contract `test_free_text_sink_contract.py` pins.
+    """
+    changes = (
+        ChangeSet(audit_actions.ENTITY_INCIDENT)
+        .diff("assigned_technician_id", previous_technician, technician_id)
+        .diff("status", previous_status, status)
+    )
+    if previous_eta is not None:
+        changes = changes.diff("eta_at", previous_eta, None)
+    return changes
+
+
 class ReportIncidentUseCase:
     """Open an incident from any source, audit it, and put it on the timeline (D5).
 
@@ -487,10 +636,24 @@ class ReportIncidentUseCase:
     it discharges the precondition itself. Same idiom `AssignIncidentUseCase` uses for the
     technician, and for the same stated reason.
 
-    **It takes no `reservation_id` and no `reported_by_user_id`** (amended D5, 2026-08-16,
-    agreed at the section-2 panel): both would carry the same undischarged precondition, and
-    no caller has one. Whoever brings the first — the lock alert of `messaging-ai`, most
-    likely — adds the parameter together with the lookup that makes it safe.
+    **It took no `reservation_id` and no `reported_by_user_id`** (amended D5, 2026-08-16,
+    agreed at the section-2 panel): both carried the same undischarged precondition, and no
+    caller had one. The rule it set was that whoever brought the first would add the parameter
+    **together with the lookup that makes it safe**.
+
+    **`cleaner-incident-report` is that caller, and it honours the rule rather than repealing
+    it** (its D4). Two keyword-only parameters arrive, both defaulting to `None` so every
+    existing call site is unchanged:
+
+    * `reported_by_user_id` — the precondition is discharged because the value comes from the
+      verified token, so `auth/api/dependencies.py` has already resolved the user inside the
+      tenant, re-reading the role from the row on every request.
+    * `cleaning_task_id` — discharged by composition: the id is that of a cleaning task the
+      calling use case loaded with an explicit `tenant_id` before calling here.
+
+    Neither is derived from the other, and that is deliberate: "who reported" and "who is
+    acting" are two concepts, and collapsing `reported_by_user_id` into `actor.user_id` would
+    silently change what `app/cli/seed_demo.py` writes.
 
     **`actor.user_id` stays the caller's obligation**, and it is the one id of the timeline
     port's precondition this class does not discharge: it is the identity of whoever is
@@ -532,6 +695,8 @@ class ReportIncidentUseCase:
         description: str,
         actor: IncidentActor,
         now: datetime,
+        reported_by_user_id: uuid.UUID | None = None,
+        cleaning_task_id: uuid.UUID | None = None,
     ) -> Incident:
         if await self._properties.get(tenant_id, property_id) is None:
             raise MaintenanceValidationError(
@@ -547,6 +712,8 @@ class ReportIncidentUseCase:
             description=description,
             created_at=now,
             updated_at=now,
+            reported_by_user_id=reported_by_user_id,
+            cleaning_task_id=cleaning_task_id,
         )
         # `category`, `severity`, `status` and `ai_classification` are not passed, exactly as
         # the guest path leaves them: the classifier is what writes them, and an incident born
@@ -559,11 +726,19 @@ class ReportIncidentUseCase:
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
-            .diff("source", None, source)
-            .diff("status", None, IncidentStatus.OPEN),
+            changes=_creation_change_set(source, cleaning_task_id),
             now=now,
         )
+
+        # Identifiers only, for the reason the title is a constant.
+        #
+        # The key is **absent** rather than present-and-null when the incident did not come
+        # from a cleaning: `timeline_events` is append-only, so every key written here is
+        # permanent, and a `"cleaning_task_id": null` on the three sources that can never have
+        # one would be a column of nulls nobody can remove later.
+        event_metadata = {"incident_id": str(incident.id), "source": source.value}
+        if cleaning_task_id is not None:
+            event_metadata["cleaning_task_id"] = str(cleaning_task_id)
 
         await self._timeline.add(
             tenant_id,
@@ -577,14 +752,75 @@ class ReportIncidentUseCase:
                     event_type=TimelineEventType.INCIDENT_CREATED,
                     title=_REPORTED_TIMELINE_TITLE,
                     created_at=now,
-                    # Identifiers only, for the reason the title is a constant.
-                    metadata={"incident_id": str(incident.id), "source": source.value},
+                    metadata=event_metadata,
                 )
             ),
         )
 
         await self._uow.commit()
         return incident
+
+
+class CleanerIncidentReporter:
+    """`TaskIncidentReportingPort` of `cleaning`, implemented by delegation (D2, D3).
+
+    **Not called `…UseCase`, on purpose.** It is not a new business operation: opening an
+    incident is `ReportIncidentUseCase`'s, and R3.7 says that alta "existe precisamente para
+    esto y SHALL extenderse, no duplicarse". This is the adapter that marries the port
+    `cleaning` declares to the writer `maintenance` already has, and it performs none of the
+    three writes itself — which is what keeps the transaction, the audit row and the timeline
+    entry in exactly one place.
+
+    `messaging` took the other road (`ReportIncidentFromConversationUseCase` with its own three
+    writes), and that was justified there because `reporter_token_hash` did not exist on the
+    generic path. Nothing equivalent is missing here, so duplicating would be the thing R3.7
+    forbids.
+
+    **Two values are sealed rather than accepted**, and the port's signature is what makes that
+    true by construction rather than by care:
+
+    * `source` — always `IncidentSource.CLEANER` (R3.1). The port takes no `source`, so
+      `cleaning` cannot ask for another one.
+    * the actor's `role` — always `UserRole.CLEANER`. The port carries `actor_user_id` and an
+      IP, not a role, because this adapter exists for exactly one surface. Nothing on the alta
+      path reads the role — `_AuditWriter` records the user and the IP — so sealing it states
+      the fact rather than deciding anything.
+    """
+
+    def __init__(self, report_incident: ReportIncidentUseCase) -> None:
+        self._report_incident = report_incident
+
+    async def report(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        property_id: uuid.UUID,
+        cleaning_task_id: uuid.UUID,
+        report: IncidentReport,
+        actor_user_id: uuid.UUID,
+        ip: str | None,
+        now: datetime,
+    ) -> IncidentReportedAcknowledgement:
+        incident = await self._report_incident.execute(
+            tenant_id=tenant_id,
+            property_id=property_id,
+            source=IncidentSource.CLEANER,
+            title=report.title,
+            description=report.description,
+            actor=IncidentActor(
+                user_id=actor_user_id, role=UserRole.CLEANER, ip=ip
+            ),
+            now=now,
+            # "Who reported" and "who is acting" are the same person here, and they are still
+            # passed separately: `ReportIncidentUseCase` deliberately does not derive one from
+            # the other, because a caller where they differ would otherwise have no way to say
+            # so (D4).
+            reported_by_user_id=actor_user_id,
+            cleaning_task_id=cleaning_task_id,
+        )
+        return IncidentReportedAcknowledgement(
+            id=incident.id, status=incident.status, created_at=incident.created_at
+        )
 
 
 class _IncidentTransitionMixin:
@@ -609,16 +845,12 @@ class _IncidentTransitionMixin:
     async def _load_incident(
         self, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
     ) -> Incident:
-        incident = await self._incidents.get(tenant_id, incident_id)
-        if incident is None:
-            raise IncidentNotFoundError()
-        restrict = actor.restrict_to_technician_id
-        if restrict is not None and incident.assigned_technician_id != restrict:
-            # R5.3/R5.4: for this technician the incident does not exist. Same error, same
-            # message — a distinguishable 404 would confirm that it exists and is somebody
-            # else's.
-            raise IncidentNotFoundError()
-        return incident
+        """R5.3/R5.4, delegated to `_load_incident_in_scope` so the rule has one home.
+
+        Kept as a method because ten call sites in this file read better for it; the rule
+        itself is not written here (`tech-incident-context` D3).
+        """
+        return await _load_incident_in_scope(self._incidents, tenant_id, incident_id, actor)
 
     async def _record_timeline(
         self,
@@ -1290,7 +1522,14 @@ class RespondOwnerApprovalUseCase(_IncidentFlowBase):
 
 
 class AssignIncidentUseCase(_IncidentFlowBase):
-    """R3.1, R3.4, R3.5 — hand the incident to a technician and open their SLA deadline."""
+    """R3.1, R3.4, R3.5 — hand the incident to a technician and open their SLA deadline.
+
+    `assignment_note` (`tech-incident-context` R3.2) is passed straight to the entity, which
+    is what decides that it replaces rather than accumulates. Nothing else about this
+    operation changes: the permission is still `MANAGE_INCIDENTS`, the assignee is still
+    resolved inside the tenant, the previous deadline is still cancelled, and the note
+    reaches neither the audit row nor the timeline (R3.5, R3.6).
+    """
 
     def __init__(
         self,
@@ -1313,6 +1552,7 @@ class AssignIncidentUseCase(_IncidentFlowBase):
         technician_id: uuid.UUID,
         actor: IncidentActor,
         now: datetime,
+        assignment_note: str | None = None,
     ) -> Incident:
         incident = await self._load_incident(tenant_id, incident_id, actor)
 
@@ -1333,7 +1573,14 @@ class AssignIncidentUseCase(_IncidentFlowBase):
 
         previous_technician = incident.assigned_technician_id
         previous_status = incident.status
-        incident.assign(technician_id=technician_id, now=now)
+        # R3.5: the entity clears the ETA unconditionally; what this use case owes is the audit
+        # row when that clearing actually changed something. Conditional for the reason
+        # `_creation_change_set` gives: `audit_logs` is append-only, so stamping
+        # `{"old": null, "new": null}` on every first assignment would be permanent noise.
+        previous_eta = incident.eta_at
+        incident.assign(
+            technician_id=technician_id, now=now, assignment_note=assignment_note
+        )
         await self._incidents.save(tenant_id, incident)
 
         if previous_technician is not None:
@@ -1367,9 +1614,13 @@ class AssignIncidentUseCase(_IncidentFlowBase):
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT)
-            .diff("assigned_technician_id", previous_technician, technician_id)
-            .diff("status", previous_status, incident.status),
+            changes=_assignment_change_set(
+                previous_technician=previous_technician,
+                technician_id=technician_id,
+                previous_status=previous_status,
+                status=incident.status,
+                previous_eta=previous_eta,
+            ),
             now=now,
         )
         await self._record_timeline(
@@ -1401,6 +1652,28 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
     #: The entity method to call, the audit action, and the timeline event — or `None`.
     _STEP: tuple[str, str, TimelineEventType | None]
 
+    #: The fields whose movement this mixin audits, photographed before the entity mutates
+    #: and diffed after (`tech-cycle-completion` D5).
+    #:
+    #: **Derived rather than written by hand**, because the steps stopped having one shape: a
+    #: refusal moves `assigned_technician_id`, `accept`/`en_route` may move `eta_at`, and the
+    #: other four move only `status`. Writing the diff in each subclass would be five copies
+    #: of the same allowlist, and the fifth is the one that forgets a field.
+    #:
+    #: All three are in `AUDITABLE_FIELDS["INCIDENT"]`, so the derivation cannot escape the
+    #: allowlist — `ChangeSet` would raise. `assignment_note` is **deliberately absent**: it is
+    #: a rule-11 sink, naming it raises `AuditContractError`, and that refusal is the contract
+    #: `test_free_text_sink_contract.py` pins. `materials` is absent for the same reason.
+    #:
+    #: For the four steps that carry no ETA the result is byte for byte what it was before this
+    #: change: `status` moves in every transition and neither of the other two does.
+    _STEP_AUDITED_FIELDS: tuple[str, ...] = ("status", "assigned_technician_id", "eta_at")
+
+    #: Whether this step's body may carry an `eta_at` to hand to the entity (R3.2). Only
+    #: `accept` and `en_route` set it; every other step ignores the parameter, which is what
+    #: makes "en ninguna otra ruta" true in the application layer as well as in the schema.
+    _TAKES_ETA: bool = False
+
     async def execute(
         self,
         *,
@@ -1408,13 +1681,25 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
         incident_id: uuid.UUID,
         actor: IncidentActor,
         now: datetime,
+        eta_at: datetime | None = None,
     ) -> Incident:
         method, action, event_type = self._STEP
         incident = await self._load_incident(tenant_id, incident_id, actor)
 
-        previous_status = incident.status
-        getattr(incident, method)(now=now)
+        before = {
+            field: getattr(incident, field) for field in self._STEP_AUDITED_FIELDS
+        }
+        if self._TAKES_ETA:
+            getattr(incident, method)(now=now, eta_at=eta_at)
+        else:
+            getattr(incident, method)(now=now)
         await self._incidents.save(tenant_id, incident)
+
+        changes = ChangeSet(audit_actions.ENTITY_INCIDENT)
+        for field, previous in before.items():
+            current = getattr(incident, field)
+            if current != previous:
+                changes = changes.diff(field, previous, current)
 
         await self._audit.record(
             tenant_id=tenant_id,
@@ -1422,9 +1707,7 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
             entity_type=audit_actions.ENTITY_INCIDENT,
             entity_id=incident.id,
             actor=actor,
-            changes=ChangeSet(audit_actions.ENTITY_INCIDENT).diff(
-                "status", previous_status, incident.status
-            ),
+            changes=changes,
             now=now,
         )
         if event_type is not None:
@@ -1434,22 +1717,38 @@ class _TechnicianStepUseCase(_IncidentFlowBase):
                 event_type=event_type,
                 actor=actor,
                 now=now,
+                extra=self._timeline_extra(before),
             )
 
         await self._after_step(tenant_id=tenant_id, incident=incident, now=now)
         await self._uow.commit()
         return incident
 
+    def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
+        """Extra `metadata` for this step's timeline event — identifiers only.
+
+        Takes the **pre-mutation** snapshot because the one step that needs it, the refusal,
+        has to name a technician the entity has already set to `NULL` by the time the event is
+        written (D11). Nothing here may return free text: `timeline_events` is append-only, so
+        a value that lands cannot be redacted afterwards.
+        """
+        return None
+
     async def _after_step(
         self, *, tenant_id: uuid.UUID, incident: Incident, now: datetime
     ) -> None:
-        """Nothing, for three of the four steps."""
+        """Nothing, for four of the six steps."""
 
 
 class AcceptIncidentUseCase(_TechnicianStepUseCase):
-    """R4.1 and R3.3 — taking the job closes the deadline it opened."""
+    """R4.1 and R3.3 — taking the job closes the deadline it opened.
+
+    One of the **two** steps that accept an `eta_at` (R3.2): the technician can say when they
+    will arrive at the moment they take the job.
+    """
 
     _STEP = ("accept", audit_actions.INCIDENT_ACCEPTED, TimelineEventType.TECHNICIAN_ACCEPTED)
+    _TAKES_ETA = True
 
     def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
         super().__init__(**kwargs)
@@ -1468,10 +1767,133 @@ class AcceptIncidentUseCase(_TechnicianStepUseCase):
         )
 
 
-class StartIncidentUseCase(_TechnicianStepUseCase):
-    """`ACCEPTED → IN_PROGRESS` (R4.1)."""
+class RejectIncidentUseCase(_TechnicianStepUseCase):
+    """The technician refuses the job and it goes back to the manager (R1.3-R1.5, R1.9; D1).
 
-    _STEP = ("start", audit_actions.INCIDENT_STARTED, TimelineEventType.TECHNICIAN_STARTED)
+    A step of the mixin rather than a use case written by hand, because the mixin already
+    gives away exactly what R1.6, R1.7 and R1.8 ask for: `_load_incident_in_scope` produces
+    the `404` that is indistinguishable from "does not exist" for a technician who is not the
+    assignee, and `_check_transition` produces the three different refusals without a field
+    having moved. What is left is what this step alone does — cancel the deadline and tell the
+    manager.
+
+    `AcceptIncidentUseCase` already showed a step can bring its own collaborators and cancel
+    the deadline from `_after_step`; this one does the same plus one notification.
+    """
+
+    _STEP = (
+        "reject",
+        audit_actions.INCIDENT_REJECTED,
+        TimelineEventType.TECHNICIAN_REJECTED,
+    )
+
+    def __init__(
+        self,
+        *,
+        users: UserRepository,
+        notifications: NotificationLogRepository,
+        **kwargs,
+    ) -> None:
+        super().__init__(**kwargs)
+        self._users = users
+        self._notifications = notifications
+
+    def _timeline_extra(self, before: dict[str, Any]) -> dict[str, str] | None:
+        """Name the technician who refused — read from the **pre-mutation** snapshot (D11).
+
+        It has to come from the snapshot: by the time this runs, `Incident.reject` has already
+        set `assigned_technician_id` to `NULL`, so reading the entity would put `None` in an
+        append-only row. Identifiers only, and the title is a constant, which is what keeps
+        `timeline_events` clear of anything that could never be redacted.
+
+        `None` rather than a half-filled dict when there is no assignee to name, because
+        inventing one would be a permanent claim — the table is append-only — that somebody
+        refused when nobody did.
+
+        **That state is reachable, and it is worth writing down how**, because two review
+        panels independently concluded it was not. The reasoning that says it cannot happen
+        goes: `reject` admits only `ASSIGNED` and `ACCEPTED`, and both are only reached
+        through `assign`, which always sets an assignee — so the field is never `NULL` here.
+        The step it misses is that `incidents.assigned_technician_id` carries
+        `ondelete="SET NULL"` (`maintenance/infrastructure/models.py`), so **deleting the
+        technician's user row leaves the incident in `ASSIGNED` with a `NULL` assignee**.
+        Measured against a live database, not argued. A `PROPERTY_MANAGER` then rejecting
+        that incident lands here with nothing to name, and without this branch the event
+        would carry the string `"None"` in a row nobody can ever redact.
+        `test_a_refusal_with_no_assignee_names_nobody` is what keeps that true.
+        """
+        technician_id = before.get("assigned_technician_id")
+        if technician_id is None:
+            return None
+        return {"technician_id": str(technician_id)}
+
+    async def _after_step(
+        self, *, tenant_id: uuid.UUID, incident: Incident, now: datetime
+    ) -> None:
+        """Cancel the SLA deadline (R1.3) and tell the manager (R1.4, R1.5).
+
+        The deadline goes for the reason R1.3 gives and `AcceptIncidentUseCase` gives for
+        `accept`: a refusal is a **response**, so nobody is late, and leaving the deadline
+        standing would have `check_sla_breaches` escalate a ticket that has already been
+        answered.
+        """
+        await self._notifications.cancel_sla_deadline(
+            tenant_id,
+            related_type=RELATED_TYPE_INCIDENT,
+            related_id=incident.id,
+            notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+        )
+
+        managers = await self._users.list(
+            tenant_id,
+            UserFilters(role=UserRole.PROPERTY_MANAGER, status=UserStatus.ACTIVE),
+            page=1,
+            per_page=1,
+        )
+        if not managers.items:
+            # R1.5: the refusal stands and the run is not failed over it — the incident is
+            # back in `CLASSIFIED` where any manager will find it, and the `AuditLog` and the
+            # timeline both record what happened. Logged rather than swallowed, because a
+            # tenant in this state has an unassigned incident nobody was told about. Same
+            # criterion `_notify_owner` applies to an approval with no owner.
+            logger.warning(
+                "maintenance.incident_rejection_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident.id),
+                },
+            )
+            return
+
+        manager = managers.items[0]
+        await self._notifications.add(
+            tenant_id,
+            incident_rejection_notification(
+                tenant_id=tenant_id,
+                incident_id=incident.id,
+                property_id=incident.property_id,
+                manager_id=manager.id,
+                recipient_contact=manager.email,
+                now=now,
+            ),
+        )
+
+
+class EnRouteIncidentUseCase(_TechnicianStepUseCase):
+    """The technician is on their way: `ACCEPTED → IN_PROGRESS` (R2.1, R2.2; D4).
+
+    `StartIncidentUseCase` until `tech-cycle-completion` renamed it. The audit action stays
+    `INCIDENT_STARTED` — the operational fact is the same and an append-only trail should not
+    have two verbs for one move — while the timeline event becomes `TECHNICIAN_EN_ROUTE`,
+    which had no writer at all. `ResumeWorkUseCase` keeps `TECHNICIAN_STARTED`, so no member
+    of the vocabulary is orphaned by the swap (R2.4) — which matters because PostgreSQL
+    cannot drop a label from an enum.
+    """
+
+    _STEP = ("en_route", audit_actions.INCIDENT_STARTED, TimelineEventType.TECHNICIAN_EN_ROUTE)
+    #: The other of the two steps that accept an `eta_at` (R3.2) — and the one where it is most
+    #: natural, since the technician is setting off.
+    _TAKES_ETA = True
 
 
 class WaitForPartsUseCase(_TechnicianStepUseCase):
@@ -1503,6 +1925,11 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
     This is D11's **second** gate, and the reason it exists is in the proposal's own
     `ASSUMPTION`: the PRD sets the threshold on the *estimated* cost, so without this,
     estimating 90 EUR and spending 500 walks straight past the approval rule.
+
+    `materials` (`tech-cycle-completion` R4.3, D7) travels down **both** branches — the one
+    that closes and the one that opens the second gate — and **never** reaches the audited
+    diff or the timeline `metadata` of the resolution: it is a rule-11 sink, so naming it in a
+    `ChangeSet` raises `AuditContractError`, and `timeline_events` is append-only (R4.6).
     """
 
     def __init__(
@@ -1528,6 +1955,7 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
         final_cost: Decimal,
         actor: IncidentActor,
         now: datetime,
+        materials: str | None = None,
     ) -> Incident:
         incident = await self._load_incident(tenant_id, incident_id, actor)
         config = await self._configs.get_or_create(tenant_id, now)
@@ -1539,7 +1967,12 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
         if needs_approval:
             # D11: the cost is written and the incident parks **without `resolved_at`** —
             # the technician said what it cost and the system did not accept the close.
-            incident.require_owner_approval(final_cost=final_cost, now=now)
+            # R4.3: `materials` goes down **this** branch too. The technician declared the
+            # spend; losing its description because the amount crossed the threshold would
+            # make them type it again when they repeat the close after the owner answers.
+            incident.require_owner_approval(
+                final_cost=final_cost, now=now, materials=materials
+            )
             await self._incidents.save(tenant_id, incident)
             await self._audit.record(
                 tenant_id=tenant_id,
@@ -1564,7 +1997,7 @@ class ResolveIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
             await self._uow.commit()
             return incident
 
-        incident.resolve(final_cost=final_cost, now=now)
+        incident.resolve(final_cost=final_cost, now=now, materials=materials)
         await self._incidents.save(tenant_id, incident)
         await self._audit.record(
             tenant_id=tenant_id,
@@ -1644,6 +2077,87 @@ class CancelIncidentUseCase(_IncidentFlowBase):
         return incident
 
 
+class GetIncidentContextUseCase:
+    """The context a technician needs to do the job: which flat, and how to get in (D1, D2).
+
+    **Composition, not a projection adapter.** Two repositories that already exist, each `get`
+    carrying its own explicit `tenant_id` — `dashboard-api` D2's rule, that a bespoke reader
+    would be "el segundo sitio donde se escribe el scope de tenant". Here the composition is
+    also *stricter* than a `JOIN` would be: `incidents.property_id` is a plain foreign key to
+    `properties.id`, not composite with `tenant_id`, so the database accepts an incident of
+    tenant A hanging off a property of tenant B. Composed, that row resolves to `None` and
+    becomes a `404`; joined, it would need a second `WHERE` somebody had to remember — which is
+    the exact row `guest-portal-api`'s security panel had to close by hand.
+
+    **The row-level rule is `_load_incident_in_scope`'s, unchanged** (D3): the incident is loaded
+    within the tenant and, for a `TECHNICIAN`, within their own assignments, with
+    `IncidentNotFoundError` for both failures. An unknown incident, another tenant's incident and
+    another technician's incident are one indistinguishable outcome (R4.4). Nothing here reads a
+    request field to decide scope: `restrict_to_technician_id` derives from the actor's role, and
+    that role is re-read from the user's row on every request
+    (`auth/api/dependencies.py` — "the effective role is the one stored now"), so the token
+    identifies the caller without carrying the authority.
+
+    **Two statements per call** (`incidents.get`, `properties.get`), fewer on the paths that end
+    in a `404`. No unit of work and no audit repository: this is a read.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        properties: PropertyRepository,
+    ) -> None:
+        self._incidents = incidents
+        self._properties = properties
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
+    ) -> IncidentContext:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+
+        property = await self._properties.get(tenant_id, incident.property_id)
+        if property is None:
+            # R1.5, design D9: **no partial answer.** The property feeds ten of the eleven
+            # fields, so without it there is no context to give — which is why this does not
+            # degrade the way `cleaner-task-context` degrades a dangling reservation, where the
+            # missing row fed one field of eleven.
+            #
+            # An incident whose property does not resolve **inside this tenant** is either a
+            # cross-tenant pointer or a deleted row, and neither may answer with data. Reusing
+            # the incident's own `404` keeps "you cannot have this" indistinguishable from "it
+            # does not exist" (R4.4) instead of inventing a second failure the contract would
+            # have to declare.
+            #
+            # Logged, because a crossed pointer is an anomaly a person has to see: the database
+            # accepts it and nothing else in the flow would ever mention it.
+            logger.warning(
+                "maintenance.incident_context_property_unresolved",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident_id),
+                    "property_id": str(incident.property_id),
+                },
+            )
+            raise IncidentNotFoundError()
+
+        return IncidentContext(
+            property_name=property.name,
+            property_internal_code=property.internal_code,
+            address_line1=property.address_line1,
+            address_line2=property.address_line2,
+            city=property.city,
+            province=property.province,
+            postal_code=property.postal_code,
+            country=property.country,
+            timezone=property.timezone,
+            access_notes=property.access_notes,
+            assignment_note=incident.assignment_note,
+        )
+
+
 class ListIncidentsUseCase:
     """`GET /incidents` (R5.1, R5.3).
 
@@ -1676,7 +2190,9 @@ class GetIncidentUseCase:
 
     A technician who is not the assignee gets `IncidentNotFoundError` — the same error, with
     the same message, as an id that does not exist. Answering 403 there would turn the
-    endpoint into a probe for which incidents exist.
+    endpoint into a probe for which incidents exist. The rule lives in
+    `_load_incident_in_scope` and used to be a second copy here
+    (`tech-incident-context` D3).
     """
 
     def __init__(self, incidents: IncidentRepository) -> None:
@@ -1685,10 +2201,331 @@ class GetIncidentUseCase:
     async def execute(
         self, *, tenant_id: uuid.UUID, incident_id: uuid.UUID, actor: IncidentActor
     ) -> Incident:
-        incident = await self._incidents.get(tenant_id, incident_id)
-        if incident is None:
-            raise IncidentNotFoundError()
-        restrict = actor.restrict_to_technician_id
-        if restrict is not None and incident.assigned_technician_id != restrict:
-            raise IncidentNotFoundError()
-        return incident
+        return await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+
+
+#: How much of an upload is read at a time. Small enough that the peak this holds is the
+#: ceiling plus one chunk, which is what makes "abort on exceeding" mean something rather than
+#: "abort after buffering everything". Same value `cleaning` uses.
+_UPLOAD_CHUNK_BYTES = 64 * 1024
+
+
+class IncidentPhotoUpload(Protocol):
+    """What `UploadIncidentPhotoUseCase` needs from an uploaded file: bytes, on demand.
+
+    Declared here rather than typed as Starlette's `UploadFile` because
+    `tests/test_layering.py` forbids `application/` from importing `fastapi` — and the reason
+    behind that rule bites here in particular: the use case must be able to consume a **stream**
+    it did not buffer, so what it depends on is the read contract, not the web framework's
+    object. `UploadFile` satisfies this Protocol as it is, and so does a four-line test fake.
+
+    **Declared in `maintenance` rather than shared with `cleaning`'s identical `ChunkedUpload`,
+    and that is a deliberate departure from how design D5 treated the serving route.** D5 shared
+    ~400 lines of security prose because two copies of that argument are two places it can
+    diverge. This is four lines of structural typing with no invariant inside it, so there is no
+    guarantee here that could drift apart.
+
+    What decides it is the **direction of the import**: sharing `cleaning`'s would make this
+    module's `application/` depend on another domain's `application/`, which is a sideways
+    dependency this file has no other instance of — distinct from, and worse than, the
+    established pattern of depending on a sibling domain's `domain/` ports (see the note above
+    about `app.cleaning.domain.ports`).
+
+    **The zero-duplication alternative, recorded because it is legitimate and a third consumer
+    should not have to rediscover it** (raised by the section 6 architecture panel): put the
+    Protocol in `app/integrations/domain/storage.py`, beside `FileStoragePort`. Both domains
+    already depend on that module by design (D4/D5), so it removes the duplication without
+    introducing any new dependency direction. It was not done here because two four-line copies
+    are cheaper than widening the shared storage module for a type it does not use itself — but
+    when `revenue` arrives as the third consumer, that is where this belongs.
+    """
+
+    async def read(self, size: int = -1) -> bytes:
+        """Up to `size` bytes, or `b""` once the file is exhausted."""
+        ...
+
+
+@dataclass(frozen=True)
+class UploadedIncidentPhoto:
+    """The stored photo and the signed URL that reads it back.
+
+    Two fields rather than one entity because the URL is not a property of the row: it is minted
+    per response, expires, and depends on the tenant's storage backend. The entity carries
+    `storage_key`, which R3.3 forbids as a **field** of any response — enumerating the response
+    fields at the schema, never dumping this, is what keeps that true.
+    """
+
+    photo: IncidentPhoto
+    url: str
+
+
+class UploadIncidentPhotoUseCase:
+    """R2 — the assigned technician uploads one photo of the incident (design D7, D10).
+
+    **Two guarantees live here and nowhere else:**
+
+    * Every `storage_key` is built by `storage_key_for_incident_photo` from the **session's**
+      `tenant_id`. No key, fragment or file name from the client reaches it, and none is ever
+      returned. `FileStoragePort.put` takes an arbitrary `key` on purpose — the port is shared
+      with `cleaning` — so the port cannot enforce this and this is the only place that can.
+    * `uploaded_by` is `actor.user_id`, from the verified token, never from the body.
+      `incident_photos.uploaded_by` is a plain FK to `users.id` with no tenant restriction and
+      the repository writes it verbatim, so an id taken from a request would record a
+      neighbour's user as the author. That precondition is documented on
+      `IncidentPhotoRepository.add`; this is the caller that keeps it.
+
+    **Order of operations is design D7 and it is not interchangeable: object first, row second**,
+    and a failed commit deletes the object. R2.7 forbids a row pointing at an object that is not
+    there — that is a broken `GET` for ever — while the opposite failure leaves an orphaned
+    object, which is recoverable rubbish.
+
+    The state gate is `Incident.ensure_accepts_photo()` and lives in the entity (design D6), so
+    the three distinguishable refusals of R2.4/R2.5/R2.6 are the entity's rule rather than this
+    use case's. Resolution goes through `_load_incident_in_scope`, which is what makes the `404`
+    of a technician who is not the assignee byte-identical to one for an incident that does not
+    exist (R2.3).
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        photos: IncidentPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+        audit: AuditLogRepository,
+        uow: UnitOfWork,
+        max_bytes: int,
+    ) -> None:
+        self._incidents = incidents
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+        self._audit = _AuditWriter(audit)
+        self._uow = uow
+        # Passed in rather than read from `app.core.config` here: `application/` receives its
+        # configuration the same way it receives its ports, which is what lets a test drive the
+        # 413 path with a two-byte ceiling instead of a 10 MB fixture.
+        self._max_bytes = max_bytes
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        stage: IncidentPhotoStage,
+        upload: IncidentPhotoUpload,
+        actor: IncidentActor,
+        now: datetime,
+    ) -> UploadedIncidentPhoto:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+        # R2.4/R2.5/R2.6 — three distinguishable `409`s, in the entity, before anything is read
+        # or written. `stage` is already an `IncidentPhotoStage` by the time it arrives (D11:
+        # FastAPI refuses an unknown value with a `422` before this use case exists), so there
+        # is no stage validation to do here and deliberately none written.
+        incident.ensure_accepts_photo()
+
+        content = await self._read_within_limit(upload)
+        # R2.9: the format comes from the BYTES. Whatever `Content-Type` the client declared is
+        # not consulted anywhere in this module.
+        image = detect_image_type(content[:MAGIC_BYTES_LENGTH])
+        if image is None:
+            raise UnsupportedIncidentPhotoFormatError(
+                "The uploaded file is not a JPEG, PNG or WebP image"
+            )
+
+        photo_id = uuid.uuid4()
+        storage_key = storage_key_for_incident_photo(
+            # The tenant of the verified token, never a value that travelled with the request.
+            # This call is the only producer of keys in the maintenance module.
+            tenant_id=tenant_id,
+            incident_id=incident.id,
+            photo_id=photo_id,
+            # From the detected MIME, so the client's file name never reaches the key.
+            extension=image.extension,
+        )
+
+        config = await self._configs.get_or_create(tenant_id, now)
+        # Which backend this is stays unknown here; the factory answers from the tenant's
+        # stored `storage_type`.
+        storage = self._storage.storage_for(config.storage_type)
+        try:
+            await storage.put(storage_key, content, content_type=image.mime)
+        except StorageWriteError as exc:
+            # Nothing has been inserted yet, so there is nothing to compensate: this is why the
+            # object goes first (D7). R2.8 turns this into a `502`.
+            raise IncidentPhotoStorageUnavailableError(
+                "The photo could not be stored; please try again"
+            ) from exc
+
+        photo = IncidentPhoto(
+            id=photo_id,
+            tenant_id=tenant_id,
+            incident_id=incident.id,
+            uploaded_by=actor.user_id,
+            stage=stage,
+            storage_key=storage_key,
+            created_at=now,
+        )
+        try:
+            await self._photos.add(tenant_id, photo)
+            await self._audit.record(
+                tenant_id=tenant_id,
+                action=audit_actions.INCIDENT_PHOTO_UPLOADED,
+                entity_type=audit_actions.ENTITY_INCIDENT_PHOTO,
+                # The photo, not the incident (R6.1): `entity_id` is what
+                # `ix_audit_logs_tenant_id_entity_type_entity_id` indexes.
+                entity_id=photo.id,
+                actor=actor,
+                changes=_incident_photo_change_set(photo),
+                now=now,
+            )
+            await self._uow.commit()
+        except Exception:
+            # The compensating delete of design D7, and the reason `FileStoragePort.delete` has
+            # a caller at all. Best effort by contract: it must not replace the real failure
+            # with one of its own on the way out.
+            await self._delete_quietly(storage, storage_key)
+            raise
+
+        return UploadedIncidentPhoto(
+            photo=photo, url=storage.signed_url(storage_key)
+        )
+
+    async def _read_within_limit(self, upload: IncidentPhotoUpload) -> bytes:
+        """Consume the upload in chunks, counting, and abort the moment it is too big.
+
+        **What this does NOT do: it does not protect against a lying `Content-Length` or a
+        chunked upload, and it does not satisfy "reject before reading the body".** By the time
+        this loop asks for its first chunk the upload has already been received in full and
+        spooled. Why that is mechanically the case is **rule 14 of `sdd/steering/security.md`**,
+        the single home of that contract — do not re-derive it here.
+
+        The check that genuinely stops an oversized or dishonest body is
+        `MaxBodySizeMiddleware`, and specifically its **accumulating counter**
+        (`app/core/http_limits.py`). **So do not "simplify" the middleware branch on the grounds
+        that the use case already counts.** Deleting the middleware's counter would leave an
+        anonymous caller able to make the backend spool an arbitrary volume to disk before
+        authentication ever runs.
+
+        What this loop does buy, and why it stays:
+
+        * It bounds the **in-process copy**. `content` ends up in memory, and the ceiling plus
+          one chunk is the peak this holds regardless of how large the spooled file is.
+        * It is the ceiling for any wiring that has no middleware in front — a direct call from
+          a test, a worker, or a future non-HTTP caller. The use case cannot assume an ASGI
+          stack it does not own.
+
+        R5.1 ("comprobado antes de leer el cuerpo entero") is satisfied by the middleware; this
+        is defence in depth behind it, not a second enforcement of the same guarantee.
+        """
+        chunks: list[bytes] = []
+        received = 0
+        while True:
+            chunk = await upload.read(_UPLOAD_CHUNK_BYTES)
+            if not chunk:
+                break
+            received += len(chunk)
+            if received > self._max_bytes:
+                # Raised before the chunk is kept, so the peak held is the ceiling plus one
+                # chunk — not the size of whatever the client decided to send.
+                raise IncidentPhotoTooLargeError(
+                    f"The photo exceeds the {self._max_bytes} byte limit"
+                )
+            chunks.append(chunk)
+        return b"".join(chunks)
+
+    @staticmethod
+    async def _delete_quietly(storage: FileStoragePort, storage_key: str) -> None:
+        """Delete, and swallow whatever that costs — the caller is already failing.
+
+        The key IS logged, and that is deliberate rather than an oversight of R3.3: that rule
+        governs API responses, and an orphaned object is only recoverable by someone who can
+        find it. This log line is the whole recovery procedure for design D7's accepted failure
+        mode, and `steering/security.md` rule 5 says in as many words that the prohibition on
+        publishing internal paths "no alcanza a los logs".
+        """
+        try:
+            await storage.delete(storage_key)
+        except Exception:
+            logger.warning(
+                "maintenance.orphaned_incident_photo_object",
+                extra={"storage_key": storage_key},
+            )
+
+
+def _incident_photo_change_set(photo: IncidentPhoto) -> ChangeSet:
+    """The audited diff of an upload: stage, incident, uploader — and never the key (R6.2).
+
+    The three names are exactly `AUDITABLE_FIELDS["INCIDENT_PHOTO"]`, and `ChangeSet` refuses
+    anything outside it, so this function cannot widen the row even by mistake.
+    """
+    return (
+        ChangeSet(audit_actions.ENTITY_INCIDENT_PHOTO)
+        .diff("stage", None, photo.stage)
+        .diff("incident_id", None, photo.incident_id)
+        .diff("uploaded_by", None, photo.uploaded_by)
+    )
+
+
+class ListIncidentPhotosUseCase:
+    """R3.1 — the photos of one incident, oldest first, each with a freshly minted signed URL.
+
+    Resolves the incident through `_load_incident_in_scope` first, exactly as the upload does
+    and for the same two rules: the incident is resolved **inside the tenant**, and a
+    `TECHNICIAN` only reaches the incidents assigned to them (R3.2). A manager or owner sees
+    every photo of every incident of their tenant, and neither role can name a technician
+    through any request field — `IncidentActor.restrict_to_technician_id` derives it from the
+    persisted role.
+
+    **Resolving the incident first is also what makes the listing's `404` the shared,
+    byte-identical `IncidentNotFoundError`** (R3.4): an incident of another tenant, one that
+    never existed, and one assigned to a different technician are one outcome. Reading
+    `list_for_incident` on its own would answer an empty list for all three, which leaks nothing
+    but says "this incident exists and has no photos" to a caller who owns neither.
+
+    **`storage_key` leaves this use case inside `UploadedIncidentPhoto.photo` and stops at the
+    schema.** It has to: `signed_url` is what turns it into the one thing a client may see, and
+    the port takes the key. R3.3 is enforced by `IncidentPhotoResponse` enumerating its fields
+    (never `model_validate`/`from_attributes` over the entity), asserted against the
+    **serialised body** rather than the field list.
+    """
+
+    def __init__(
+        self,
+        *,
+        incidents: IncidentRepository,
+        photos: IncidentPhotoRepository,
+        configs: TenantConfigRepository,
+        storage: FileStorageFactory,
+    ) -> None:
+        self._incidents = incidents
+        self._photos = photos
+        self._configs = configs
+        self._storage = storage
+
+    async def execute(
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        incident_id: uuid.UUID,
+        actor: IncidentActor,
+        now: datetime,
+    ) -> tuple[UploadedIncidentPhoto, ...]:
+        incident = await _load_incident_in_scope(
+            self._incidents, tenant_id, incident_id, actor
+        )
+        photos = await self._photos.list_for_incident(tenant_id, incident.id)
+        config = await self._configs.get_or_create(tenant_id, now)
+        # Which backend answers stays unknown here. `LOCAL` mints a URL of this API's own
+        # serving route, `S3` a presigned one straight at the provider — the caller gets a URL
+        # either way and cannot tell from this code which it is.
+        storage = self._storage.storage_for(config.storage_type)
+        return tuple(
+            UploadedIncidentPhoto(photo=photo, url=storage.signed_url(photo.storage_key))
+            for photo in photos
+        )

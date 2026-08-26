@@ -36,6 +36,7 @@ from app.maintenance.domain.enums import (
 )
 from app.maintenance.domain.exceptions import MaintenanceValidationError
 from app.maintenance.domain.repositories import IncidentFilters
+from tests.maintenance.conftest import make_incident
 from app.maintenance.domain.value_objects import (
     IncidentClassification,
     IncidentSummary,
@@ -595,6 +596,60 @@ async def test_an_incident_written_by_the_real_writer_is_a_classification_candid
 
 
 @pytest.mark.asyncio
+async def test_an_incident_born_outside_a_cleaning_keeps_the_link_null(db_session) -> None:
+    """R4.2: the column is optional, and the writer must not turn its absence into anything
+    but SQL `NULL` — the failure mode `ai_classification` already had on this same table."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        source=IncidentSource.GUEST,
+        title="Fuga de agua",
+        description="Sale agua por debajo del lavabo.",
+        created_at=NOW,
+        updated_at=NOW,
+    )
+    await SqlAlchemyIncidentRepository(db_session).add(tenant.id, incident)
+
+    stored_is_sql_null = await db_session.scalar(
+        text("SELECT cleaning_task_id IS NULL FROM incidents WHERE id = :id"),
+        {"id": incident.id},
+    )
+    assert stored_is_sql_null is True
+
+    found = await SqlAlchemyIncidentRepository(db_session).get(tenant.id, incident.id)
+    assert found is not None
+    assert found.cleaning_task_id is None
+
+
+@pytest.mark.asyncio
+async def test_an_incident_reported_from_a_cleaning_round_trips_the_link(db_session) -> None:
+    """R4.1/R4.3: the link survives write and re-read, which is what makes it usable when a
+    manager triages the incident against the photos of that same task."""
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    task = await _cleaning_task(db_session, tenant, prop, CleaningTaskStatus.IN_PROGRESS)
+    incident = Incident(
+        id=uuid.uuid4(),
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        source=IncidentSource.CLEANER,
+        title="Caldera rota",
+        description="No sale agua caliente en el baño.",
+        created_at=NOW,
+        updated_at=NOW,
+        cleaning_task_id=task.id,
+    )
+    await SqlAlchemyIncidentRepository(db_session).add(tenant.id, incident)
+
+    found = await SqlAlchemyIncidentRepository(db_session).get(tenant.id, incident.id)
+    assert found is not None
+    assert found.cleaning_task_id == task.id
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize(
     "closed", [IncidentStatus.CANCELLED, IncidentStatus.RESOLVED]
 )
@@ -674,6 +729,103 @@ async def test_save_persists_what_the_entity_changed(db_session) -> None:
     assert stored.category is IncidentCategory.HVAC
     assert stored.ai_classification is not None
     assert stored.ai_classification["adapter"] == "RuleBasedIncidentClassifier"
+
+
+@pytest.mark.asyncio
+async def test_the_assignment_note_survives_a_save_and_a_reassignment_clears_it(
+    db_session,
+) -> None:
+    """R3.1 — the column round-trips, and `None` reaches the row as SQL `NULL`.
+
+    The second half is the one worth writing: D7 makes `assign` write the note **every**
+    time, so an adapter that only persisted it when truthy would silently preserve what the
+    manager typed for the previous technician. Asserted through `text()` rather than through
+    the entity, because a hydrated `None` looks the same either way — and this is the same
+    trap `ai_classification` fell into on this very table.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop, status=IncidentStatus.CLASSIFIED)
+    repository = _incidents(db_session)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    incident.assignment_note = "Portal code 4821, key in the entrance box."
+    await repository.save(tenant.id, incident)
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.assignment_note == "Portal code 4821, key in the entrance box."
+
+    stored.assignment_note = None
+    await repository.save(tenant.id, stored)
+    db_session.expunge_all()
+
+    assert (
+        await db_session.scalar(
+            text("SELECT assignment_note IS NULL FROM incidents WHERE id = :id"),
+            {"id": row.id},
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_the_eta_and_the_materials_round_trip_and_a_later_save_updates_them(
+    db_session,
+) -> None:
+    """R3.1, R4.1 — the two new columns persist, rehydrate, and can be changed again.
+
+    The second `save` is the half worth writing: `_MUTABLE_INCIDENT_COLUMNS` is an allowlist,
+    so a column added to the model and forgotten there would round-trip on the **insert** and
+    then silently refuse every later change — which is exactly the shape of the bug that
+    allowlist exists to prevent in the other direction.
+
+    `eta_at` is read back through `text()` as well, because a hydrated `None` and a stored
+    JSON-ish null look the same from the entity — the trap `ai_classification` fell into on
+    this very table.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    prop = await _property(db_session, tenant, "REDES11")
+    row = await _incident(db_session, tenant, prop, status=IncidentStatus.ACCEPTED)
+    repository = _incidents(db_session)
+    eta = datetime(2026, 8, 22, 17, 30, tzinfo=UTC)
+
+    incident = await repository.get(tenant.id, row.id)
+    assert incident is not None
+    incident.eta_at = eta
+    incident.materials = "Dos codos de 22 mm y un metro de tubo"
+    await repository.save(tenant.id, incident)
+    db_session.expunge_all()
+
+    stored = await repository.get(tenant.id, row.id)
+    assert stored is not None
+    assert stored.eta_at == eta
+    assert stored.materials == "Dos codos de 22 mm y un metro de tubo"
+
+    later = eta + timedelta(hours=1)
+    stored.eta_at = later
+    stored.materials = "Y una junta"
+    await repository.save(tenant.id, stored)
+    db_session.expunge_all()
+
+    updated = await repository.get(tenant.id, row.id)
+    assert updated is not None
+    assert updated.eta_at == later
+    assert updated.materials == "Y una junta"
+
+    updated.eta_at = None
+    await repository.save(tenant.id, updated)
+    db_session.expunge_all()
+
+    assert (
+        await db_session.scalar(
+            text("SELECT eta_at IS NULL FROM incidents WHERE id = :id"),
+            {"id": row.id},
+        )
+        is True
+    )
 
 
 @pytest.mark.asyncio
@@ -1032,3 +1184,212 @@ async def test_the_live_cleaning_task_query_does_not_cross_a_tenant(db_session) 
     )
 
     assert found == []
+
+
+# --- incident photos: the adapters (`incident-photos` 4.5/4.6, R1, R3, R4, R6) ---------
+#
+# Two adapters with opposite contracts, in one place so the contrast is visible:
+# `SqlAlchemyIncidentPhotoRepository` demands a tenant on every call, and
+# `SqlAlchemyUnscopedIncidentPhotoLocationQuery` refuses to run on a session that has one.
+
+
+def _incident_photo(incident, uploader, *, stage=None, created_at=None):
+    from app.maintenance.domain.entities import IncidentPhoto
+    from app.maintenance.domain.enums import IncidentPhotoStage
+
+    photo_id = uuid.uuid4()
+    return IncidentPhoto(
+        id=photo_id,
+        tenant_id=incident.tenant_id,
+        incident_id=incident.id,
+        uploaded_by=uploader.id,
+        stage=stage or IncidentPhotoStage.BEFORE,
+        storage_key=(
+            f"tenants/{incident.tenant_id}/incidents/{incident.id}/{photo_id}.jpg"
+        ),
+        created_at=created_at or NOW,
+    )
+
+
+@pytest.mark.asyncio
+async def test_incident_photo_add_and_list_round_trip(db_session, world):
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentPhotoRepository(db_session)
+    photo = _incident_photo(incident, world.technician)
+
+    await repo.add(world.tenant.id, photo)
+    listed = await repo.list_for_incident(world.tenant.id, incident.id)
+
+    assert [p.id for p in listed] == [photo.id]
+    assert listed[0].storage_key == photo.storage_key
+    assert listed[0].tenant_id == world.tenant.id
+    assert listed[0].uploaded_by == world.technician.id
+
+
+@pytest.mark.asyncio
+async def test_incident_photos_come_back_oldest_first(db_session, world):
+    """R3.1 — the order is the contract, because `BEFORE` then `AFTER` is the story.
+
+    Inserted deliberately out of order so a repository that forgot its `ORDER BY` would have to
+    be lucky to pass: without it Postgres is free to return these in physical order, which for
+    a fresh page is insertion order — i.e. exactly wrong here.
+    """
+    from app.maintenance.domain.enums import IncidentPhotoStage
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentPhotoRepository(db_session)
+
+    later = _incident_photo(
+        incident,
+        world.technician,
+        stage=IncidentPhotoStage.AFTER,
+        created_at=NOW + timedelta(hours=2),
+    )
+    earlier = _incident_photo(
+        incident, world.technician, stage=IncidentPhotoStage.BEFORE, created_at=NOW
+    )
+    await repo.add(world.tenant.id, later)
+    await repo.add(world.tenant.id, earlier)
+
+    listed = await repo.list_for_incident(world.tenant.id, incident.id)
+
+    assert [p.id for p in listed] == [earlier.id, later.id]
+    assert [p.stage for p in listed] == [
+        IncidentPhotoStage.BEFORE,
+        IncidentPhotoStage.AFTER,
+    ]
+
+
+@pytest.mark.asyncio
+async def test_several_photos_of_the_same_stage_round_trip(db_session, world):
+    """R1.4 at the adapter level: two angles of one fault, both kept."""
+    from app.maintenance.domain.enums import IncidentPhotoStage
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentPhotoRepository(db_session)
+    for offset in (0, 1):
+        await repo.add(
+            world.tenant.id,
+            _incident_photo(
+                incident,
+                world.technician,
+                stage=IncidentPhotoStage.AFTER,
+                created_at=NOW + timedelta(minutes=offset),
+            ),
+        )
+
+    listed = await repo.list_for_incident(world.tenant.id, incident.id)
+
+    assert len(listed) == 2
+    assert {p.stage for p in listed} == {IncidentPhotoStage.AFTER}
+
+
+@pytest.mark.asyncio
+async def test_adding_a_photo_for_another_tenant_is_refused(db_session, world):
+    """Limit 3 of `app/core/db.py`: the global filter does not cover INSERTs, so the adapter's
+    own check is the only thing between a wiring mistake and a row of another tenant."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    photo = _incident_photo(incident, world.technician)
+
+    with pytest.raises(CrossTenantWriteError):
+        await SqlAlchemyIncidentPhotoRepository(db_session).add(uuid.uuid4(), photo)
+
+
+@pytest.mark.asyncio
+async def test_listing_photos_of_another_tenants_incident_is_empty(db_session, world):
+    """The scoping is on the column, with no join needed — design D2's practical payoff."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    repo = SqlAlchemyIncidentPhotoRepository(db_session)
+    await repo.add(world.tenant.id, _incident_photo(incident, world.technician))
+
+    assert await repo.list_for_incident(uuid.uuid4(), incident.id) == []
+
+
+@pytest.mark.asyncio
+async def test_the_unscoped_incident_photo_location_resolves_the_tenant_out_of_the_row(
+    db_session, world
+):
+    """R4.2 — no tenant in, the tenant comes out. One table, no join (design D2/D13)."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+        SqlAlchemyUnscopedIncidentPhotoLocationQuery,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    photo = _incident_photo(incident, world.technician)
+    await SqlAlchemyIncidentPhotoRepository(db_session).add(world.tenant.id, photo)
+    await db_session.flush()
+
+    located = await SqlAlchemyUnscopedIncidentPhotoLocationQuery(
+        db_session
+    ).locate_without_tenant_scoping(photo.id)
+
+    assert located is not None
+    assert located.tenant_id == world.tenant.id
+    assert located.storage_key == photo.storage_key
+
+
+@pytest.mark.asyncio
+async def test_the_unscoped_incident_photo_location_answers_none_for_an_unknown_id(
+    db_session, world
+):
+    """`None`, which the use case turns into the same constant `403` a bad signature gets."""
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyUnscopedIncidentPhotoLocationQuery,
+    )
+
+    located = await SqlAlchemyUnscopedIncidentPhotoLocationQuery(
+        db_session
+    ).locate_without_tenant_scoping(uuid.uuid4())
+
+    assert located is None
+
+
+@pytest.mark.asyncio
+async def test_the_unscoped_incident_photo_location_refuses_a_marked_session(
+    db_session, world
+):
+    """R6.4/D13: the session contract of this query, executable.
+
+    **Asserting the raise and not the absence of a row is the whole point.** On a marked session
+    the global filter of `app/core/db.py` scopes `incident_photos` — it carries `tenant_id`, so
+    unlike its cleaning twin it is covered directly — and the query would come back empty for
+    every photo of every *other* tenant. Empty is also what an unknown photo id returns, so
+    without the guard the wiring mistake would be reported to the browser as a broken signature
+    and to us as nothing at all.
+    """
+    from app.core.db import bind_session_to_tenant
+    from app.core.tenancy import TenantMarkedSessionError
+    from app.maintenance.infrastructure.repositories import (
+        SqlAlchemyIncidentPhotoRepository,
+        SqlAlchemyUnscopedIncidentPhotoLocationQuery,
+    )
+
+    incident = await make_incident(db_session, world, status=IncidentStatus.IN_PROGRESS)
+    photo = _incident_photo(incident, world.technician)
+    await SqlAlchemyIncidentPhotoRepository(db_session).add(world.tenant.id, photo)
+    await db_session.flush()
+    bind_session_to_tenant(db_session, world.tenant.id)
+
+    with pytest.raises(TenantMarkedSessionError, match="locate_without_tenant_scoping"):
+        await SqlAlchemyUnscopedIncidentPhotoLocationQuery(
+            db_session
+        ).locate_without_tenant_scoping(photo.id)

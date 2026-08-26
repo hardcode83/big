@@ -8,7 +8,7 @@ No method commits: the transactional boundary is the use case (design D4).
 """
 
 import uuid
-from collections.abc import Collection, Mapping
+from collections.abc import Collection, Mapping, Sequence
 from typing import Any
 
 from sqlalchemy import Select, func, select, update
@@ -134,6 +134,55 @@ class SqlAlchemyPropertyRepository:
             .order_by(PropertyModel.internal_code)
         )
         return [_to_property(model) for model in result.scalars().all()]
+
+    async def states_for(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> dict[uuid.UUID, PropertyOperationalState]:
+        if not property_ids:
+            return {}
+        result = await self._session.execute(
+            select(PropertyModel.id, PropertyModel.current_operational_state).where(
+                PropertyModel.tenant_id == tenant_id,
+                PropertyModel.id.in_(list(property_ids)),
+            )
+        )
+        # Two columns and no entity, unlike every other read here: the caller needs one enum
+        # per id, so there is nothing to gain from `_to_property` and the whole row it maps.
+        # The rationale is narrowness — see the port docstring, which also says which security
+        # rule this is NOT.
+        return {row.id: row.current_operational_state for row in result}
+
+    async def list_for_ids(
+        self, tenant_id: uuid.UUID, property_ids: Collection[uuid.UUID]
+    ) -> Sequence[Property]:
+        """One statement for N properties (`reservation-property-identity` D2).
+
+        Symmetric to `SqlAlchemyGuestRepository.list_for_ids`. Three rules from the port that
+        this is the place to keep, not paraphrase:
+
+        - Empty input returns `[]` without a SQL round-trip (no `IN ()`).
+        - A property not of this tenant is simply absent from the result; the caller keys by
+          `id`, so the neighbour's id and a nonexistent one look the same.
+        - `None`/duplicate ids in the input are filtered out before the SQL, so the sequence
+          cannot hold an `id = ANY(ARRAY[NULL::uuid])` surprise.
+
+        Selects whole rows: this is the readable batch the listing uses to populate
+        `property_name` and `property_internal_code`, not a narrow summary, so there is no
+        narrower projection to defend than `_to_property` already does for `list_by_state`.
+        """
+        # De-`None` and dedupe here, not in the SQL: an `id = ANY(ARRAY[...])` over a
+        # Python-level sequence with `None`s is exactly the surprise the port's docstring
+        # warns against, and deduping also costs nothing — Python sets in microseconds.
+        cleaned = {property_id for property_id in property_ids if property_id is not None}
+        if not cleaned:
+            return []
+        result = await self._session.execute(
+            select(PropertyModel).where(
+                PropertyModel.tenant_id == tenant_id,
+                PropertyModel.id.in_(list(cleaned)),
+            )
+        )
+        return [_to_property(model) for model in result.scalars()]
 
     async def save(self, tenant_id: uuid.UUID, property: Property) -> None:
         if property.tenant_id != tenant_id:
@@ -341,6 +390,36 @@ class SqlAlchemyPropertyStateTransitionRepository:
             )
         )
         await self._session.flush()
+
+    async def applied_clock_triggers(
+        self, tenant_id: uuid.UUID, reservation_ids: Collection[uuid.UUID]
+    ) -> set[tuple[uuid.UUID, str]]:
+        """The `(reservation_id, trigger)` pairs already recorded (design D1, as amended).
+
+        Reads the two values straight out of `metadata` as text. `metadata->>'trigger'` is
+        never turned back into `PropertyStateTrigger` — see the port's docstring; the caller
+        compares against `trigger.value`.
+
+        No index covers `metadata->>'reservation_id'` (declared as debt in the design's
+        *Risks*), so the `IN` on the reservation ids is what keeps this bounded: it asks only
+        about stays the caller already loaded.
+        """
+        ids = [str(reservation_id) for reservation_id in reservation_ids]
+        if not ids:
+            return set()
+        reservation_key = PropertyStateTransitionModel.metadata_["reservation_id"].astext
+        trigger_key = PropertyStateTransitionModel.metadata_["trigger"].astext
+        result = await self._session.execute(
+            select(reservation_key, trigger_key).where(
+                PropertyStateTransitionModel.tenant_id == tenant_id,
+                reservation_key.in_(ids),
+            )
+        )
+        return {
+            (uuid.UUID(reservation_id), trigger)
+            for reservation_id, trigger in result.all()
+            if reservation_id is not None and trigger is not None
+        }
 
     async def last_for_property(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID

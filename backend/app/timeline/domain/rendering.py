@@ -176,6 +176,10 @@ TIMELINE_TITLE_TEMPLATES: dict[TimelineEventType, dict[Locale, str]] = {
         Locale.ES: "El técnico ha aceptado",
         Locale.EN: "Technician accepted",
     },
+    TimelineEventType.TECHNICIAN_REJECTED: {
+        Locale.ES: "El técnico ha rechazado",
+        Locale.EN: "Technician rejected",
+    },
     TimelineEventType.TECHNICIAN_EN_ROUTE: {
         Locale.ES: "Técnico en camino",
         Locale.EN: "Technician en route",

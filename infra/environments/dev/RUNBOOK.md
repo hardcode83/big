@@ -643,30 +643,123 @@ El caso que **no tiene otra salida** es el único `TENANT_OWNER` activo de un te
 autenticarse para resetearse a sí mismo. El bootstrap tampoco vale: es idempotente y no modifica
 un usuario que ya existe.
 
+> **Desde la aplicación no se puede, y no es un fallo de configuración.** `/forgot-password` está
+> dada de alta en el registro de rutas del frontend, pero renderiza un `RoutePlaceholder`
+> (`frontend/app/(public)/forgot-password/page.tsx`); no hay página que consuma el token del
+> enlace, y ningún componente lee `must_change_password`. Los tres endpoints de
+> `auth-account-recovery` existen y funcionan: lo que no existe es pantalla. Por eso el rescate es
+> este procedimiento entero, y sus dos últimos pasos son llamadas a la API.
+
+### 8.1 Emitir la contraseña temporal (en la VM)
+
 ```bash
-# En la VM, desde el directorio del compose de deploy.
-docker compose exec backend python -m app.cli.reset_password --email <dirección>
+ssh -i ~/.ssh/autohostai_dev_vm ubuntu@<ip>
+cd /opt/actions-runner/_work/AutoHostAI/AutoHostAI
+
+docker compose -f docker-compose.deploy.yml exec backend \
+  python -m app.cli.reset_password --email <dirección>
 ```
 
 Imprime la contraseña temporal **una sola vez** por salida estándar. No queda en ningún log ni en
 la fila de auditoría — solo en tu terminal y en tu portapapeles, así que entrégala por un canal
 que te fíes y no la pegues en un ticket.
 
+El `-f docker-compose.deploy.yml` va explícito porque en el checkout del runner conviven los dos
+ficheros de compose: así el comando no depende de cuál sea el de por defecto. Si la dirección no
+existe en **ninguna** instalación, sale con código 1 sin escribir nada (la resuelve sin acotar por
+tenant, igual que el login: quien rescata conoce la dirección, no el tenant).
+
+**Si responde `No account exists for …`, es literal y casi siempre es la dirección.** La
+comparación es `strip().lower()` (`app/auth/domain/value_objects.py`) y no normaliza puntos, así
+que `jose.gascon+manager@gmail.com` y `josegascon+manager@gmail.com` son dos cuentas distintas
+para el sistema aunque Gmail las entregue al mismo buzón — y las de este entorno se dieron de alta
+en la forma **sin punto** (`RUNBOOK-seed-demo.md` §2). Antes de dar por perdida la cuenta, mira qué
+hay:
+
+```bash
+docker compose -f docker-compose.deploy.yml exec -T postgres \
+  sh -c 'psql -U "$POSTGRES_USER" -d "$POSTGRES_DB" -c "
+    SELECT u.email, u.role, u.status, u.must_change_password, t.name AS tenant
+    FROM users u JOIN tenants t ON t.id = u.tenant_id
+    ORDER BY u.created_at;"'
+```
+
+El `sh -c` no es adorno: `POSTGRES_USER`/`POSTGRES_DB` están en el entorno del contenedor, no en
+el shell de la VM, así que expandirlas fuera las deja vacías. Lo que enseña la salida:
+
+- **La dirección con otra forma** → relanza el rescate con la que imprime, tal cual.
+- **Ningún `PROPERTY_MANAGER`** → el bootstrap de esta VM no lo creó; la vía es §6.5, no el
+  rescate. Es idempotente pero **no renombra**: pasarle otra dirección crea un segundo usuario en
+  vez de corregir el primero.
+- **Dos filas en `tenants`** → alguna ejecución usó un `BOOTSTRAP_TENANT_NAME` distinto y las
+  cuentas están en el tenant equivocado.
+
 Lo que hace, y por lo que existe en lugar de un `UPDATE` a mano:
 
 1. Escribe la contraseña **por la entidad**, así que la cuenta queda obligada a cambiarla antes
    de poder operar (recibe `403 PASSWORD_CHANGE_REQUIRED` en todo salvo `GET /auth/me`,
-   `POST /auth/logout` y `POST /auth/change-password`).
+   `POST /auth/logout` y `POST /auth/change-password`). Salir de ahí es §8.2.
 2. **Revoca todas las sesiones** del usuario. Un rescate que las dejara vivas no habría
    recuperado la cuenta, le habría añadido una credencial.
 3. **Levanta el bloqueo por fallos de login**. Diez intentos fallidos son justo lo que precede a
-   una llamada de soporte, y sin esto el login inmediatamente posterior seguiría rechazado.
+   una llamada de soporte, y sin esto el login inmediatamente posterior seguiría rechazado. Es
+   también la razón de que el síntoma «mi usuario no funciona» no distinga contraseña olvidada de
+   cuenta bloqueada: cada fallo responde el mismo `401`, y este paso arregla las dos.
 4. Deja **fila de auditoría** (`USER_PASSWORD_RESET`, sin actor: una línea de comandos no tiene
    identidad que registrar).
 
 **Si avisa de que no pudo levantar el bloqueo** (Redis inalcanzable), la contraseña **sí se
 cambió**: el bloqueo caduca por su cuenta dentro de la ventana de lockout. Reintentar el comando
 es inocuo, pero genera otra contraseña.
+
+### 8.2 Salir de `must_change_password` (desde tu portátil)
+
+La cuenta ya puede hacer login, pero mientras arrastre la bandera **toda** petición autenticada
+responde `403 PASSWORD_CHANGE_REQUIRED` salvo las tres exentas. Como no hay pantalla para ninguna
+de las tres, entrar por el navegador en este punto deja la app dando 403 en todo, sin salida
+visible. El cambio se hace por API, y no hace falta el túnel SSH: el hostname público sirve
+`/api/v1` (ver §7.4.1 si prefieres ir por `127.0.0.1:8000`).
+
+```bash
+BASE=https://autohostai.digitalsec.work/api/v1/auth
+
+# 1. Login con la temporal. Limitado por IP: no lo pongas en un bucle de reintentos.
+ACCESS=$(curl -sS "$BASE/login" -H 'Content-Type: application/json' \
+  -d '{"email":"<dirección>","password":"<temporal>"}' | jq -r .access_token)
+
+# 2. Cambiarla. 204 sin cuerpo.
+curl -sS -o /dev/null -w '%{http_code}\n' -X POST "$BASE/change-password" \
+  -H "Authorization: Bearer $ACCESS" -H 'Content-Type: application/json' \
+  -d '{"current_password":"<temporal>","new_password":"<la nueva>"}'
+```
+
+- Política de contraseña: **12 caracteres** mínimo, **72 bytes** máximo en UTF-8, sin reglas de
+  composición. Un incumplimiento responde `422` nombrando la regla que rompió.
+- El cuerpo no puede nombrar a otro usuario (`extra="forbid"`): el sujeto es el del token.
+- El cambio **revoca todas las familias de refresh, incluida la que acabas de usar**. El `$ACCESS`
+  de arriba queda muerto en cuanto responde: hay que volver a entrar con la nueva.
+
+### 8.3 Comprobar que el gate se levantó
+
+```bash
+ACCESS=$(curl -sS "$BASE/login" -H 'Content-Type: application/json' \
+  -d '{"email":"<dirección>","password":"<la nueva>"}' | jq -r .access_token)
+
+curl -sS "$BASE/me" -H "Authorization: Bearer $ACCESS" | jq .must_change_password
+```
+
+`false` es la prueba: desde ahí la cuenta opera con normalidad y ya se puede entrar por
+`https://autohostai.digitalsec.work`. Un `true` significa que el paso 2 no llegó a aplicarse
+—mira el código que devolvió— y la app seguirá dando 403 en todo lo demás.
+
+Por el hostname público la llamada entra por el proxy `/api/[...path]` de Next antes de llegar al
+backend, así que la respuesta trae cabeceras `vary: rsc, next-router-*`. Son normales; el `204` sin
+cuerpo y el `false` los produce el backend.
+
+**Verificado de punta a punta contra `dev` el 2026-08-22** (rescate del `PROPERTY_MANAGER`), y los
+dos sitios donde se tropezó están recogidos arriba: la dirección sin punto (§8.1) y el `curl` con
+`-o /dev/null`, que oculta el cuerpo del `422` justo cuando hace falta —de ahí que §8.2 use `-i` y
+construya el JSON con `jq --arg` en lugar de interpolarlo en la shell.
 
 No hay objetivo de `make` para esto a propósito: es una operación de rescate, no parte del flujo
 normal. Detalle completo de los tres endpoints y de la política de contraseña en
@@ -721,3 +814,73 @@ están en disco y `GET /api/v1/cleaning-photos/{id}` devolvería `404` para ese 
 `apply_plan` **converge**: crea la configuración con ese `storage_type` y la **actualiza si difiere**
 en una re-ejecución. Volver atrás es el mismo comando con `BOOTSTRAP_STORAGE_TYPE=LOCAL`.
 
+
+## 10. La contraseña del tenant de demostración (change `demo-user`)
+
+El entorno tiene un **segundo tenant**, `AutoHostAI Demo`, con cuatro cuentas de credenciales
+publicables y un reset diario (`.github/workflows/demo-reset.yml`, 03:15 UTC). Quién es quién, qué
+es y qué no es demostrable, y el diagnóstico de un reset en rojo: **[`docs/demo-tenant.md`](../../../docs/demo-tenant.md)**.
+Aquí va sólo la parte que es de infra: la contraseña.
+
+Terraform declara el secreto (`oci_vault_secret.demo_account_password`, nombre
+`autohostai-<env>-demo-account-password`) y su OCID entra en el mismo `statement` de
+`oci_identity_policy.dev_runner_read_secrets` que el resto — el mismo apply que lo crea, que es la
+mitigación de siempre: olvidarlo hace fallar el paso de lectura del Vault nombrando la clave.
+
+**El contenido no lo gobierna Terraform.** Nace como un `random_password` de 24 caracteres
+deliberadamente inerte —para que un entorno recién aplicado tenga credenciales que nadie conoce en
+vez de credenciales conocidas— y lleva `lifecycle { ignore_changes = [secret_content] }`, que es lo
+que hace que el valor que ponga una persona sobreviva al `apply` siguiente. Es el mismo canal
+out-of-band que §2 usa para la clave SSH, y por la misma razón que `steering/security.md` §8 acepta:
+lo elige una persona, así que no encaja en el patrón `random_*` → Vault del resto.
+
+### 10.1 Fijar o rotar el valor
+
+Forma acordada: **una frase corta y dictable por teléfono, del orden de 15 caracteres con guiones**.
+Tiene que superar `PASSWORD_MIN_LENGTH` (12); por debajo de ese umbral el propio sistema rechazaría
+que un visitante volviera a fijarla desde `POST /auth/change-password`.
+
+```bash
+# Desde tu portátil con el perfil de OCI configurado. En la VM: añade --auth instance_principal.
+# COMPARTMENT_OCID es el `compartment_ocid` de dev.tfvars.
+SECRET_ID="$(oci vault secret list --compartment-id "$COMPARTMENT_OCID" \
+  --query "data[?\"secret-name\"=='autohostai-dev-demo-account-password'].id | [0]" --raw-output)"
+
+oci vault secret update-base64 --secret-id "$SECRET_ID" \
+  --secret-content-content "$(printf '%s' 'tu-frase-con-guiones' | base64)"
+```
+
+**`printf` y no `echo`**: `echo` añade un salto de línea que se codifica *dentro* de la contraseña y
+produce una credencial que no coincide con lo que escribiste. El mismo filo que la clave SSH de §2,
+donde `base64 -i` lee de fichero y no lo tiene.
+
+**Y la VM sigue con la anterior hasta el reset siguiente.** El Vault es de dónde lo lee el workflow,
+no dónde lo usan las cuentas: la contraseña se aplica a las cuatro en la fase `converge` del reset.
+Para no esperar a las 03:15 UTC:
+
+```bash
+gh workflow run demo-reset.yml --ref main
+```
+
+**El valor concreto no se escribe en ningún fichero del repositorio**, y eso incluye este runbook.
+Su único hogar es el Vault.
+
+### 10.2 Verificación pendiente: que `ignore_changes` aguante
+
+**Hay que hacerla con el valor definitivo ya puesto y antes de publicar las credenciales a nadie.**
+Todo el procedimiento de 10.1 depende de que el provider de OCI respete `ignore_changes` sobre
+`secret_content`. Si no lo respeta, cada `terraform apply` devuelve el secreto al valor de
+`random_password`, el reset siguiente lo propaga a las cuatro cuentas y las credenciales publicadas
+dejan de funcionar **en silencio**, sin que nada se ponga en rojo.
+
+Se comprueba con un `plan` (§0, `action=plan` desde `main`):
+
+- **No propone cambios en `demo_account_password`** → aguanta. 10.1 es el procedimiento.
+- **Propone reescribir `secret_content`** → **no aplicar**. La contraseña publicada pasa a ser la que
+  genera `random_password` (que se lee del Vault, no del `tfstate` en claro), y rotarla es
+  `terraform apply -replace=random_password.demo_account`. En ese caso hay que corregir 10.1 y la
+  sección equivalente de `docs/demo-tenant.md`, que hoy documentan el otro camino.
+
+Antes del primer `apply` esta comprobación **no significa nada**: el secreto todavía no existe, así
+que el `plan` muestra una creación y no dice nada sobre si `ignore_changes` aguanta sobre un recurso
+ya creado con su valor definitivo dentro.
