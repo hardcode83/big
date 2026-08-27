@@ -13,15 +13,21 @@ const mocks = vi.hoisted(() => ({
     | "loading"
     | "refreshing"
     | "expired",
+  user: null as null | {
+    id: string;
+    role: "SUPER_ADMIN" | "TENANT_OWNER" | "PROPERTY_MANAGER" | "CLEANER" | "TECHNICIAN";
+    tenant_id: string;
+  },
 }));
 
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ status: mocks.status }),
+  useAuth: () => ({ status: mocks.status, user: mocks.user }),
 }));
 
 vi.mock("next/navigation", () => ({
   usePathname: () => mocks.pathname,
   useRouter: () => ({ replace: mocks.replace }),
+  useSearchParams: () => new URLSearchParams(),
 }));
 
 function renderGuard() {
@@ -119,5 +125,73 @@ describe("AuthGuard", () => {
 
     await waitFor(() => expect(mocks.replace).toHaveBeenCalledOnce());
     expect(mocks.replace).toHaveBeenCalledWith("/login?returnTo=%2Fdashboard");
+  });
+
+  describe("allow prop (R1)", () => {
+    beforeEach(() => {
+      mocks.status = "authenticated";
+      mocks.user = {
+        id: "user-1",
+        role: "CLEANER",
+        tenant_id: "tenant-1",
+      };
+      window.history.replaceState({}, "", "/cleaner");
+      mocks.pathname = "/cleaner";
+      mocks.replace.mockReset();
+    });
+
+    function renderWithAllow(
+      allow: readonly ("CLEANER" | "TECHNICIAN" | "TENANT_OWNER" | "PROPERTY_MANAGER" | "SUPER_ADMIN")[],
+    ) {
+      return render(
+        <I18nProvider locale="es">
+          <AuthGuard allow={allow}>
+            <span>protected content</span>
+          </AuthGuard>
+        </I18nProvider>,
+      );
+    }
+
+    it("renders children when user.role is in allow", () => {
+      renderWithAllow(["CLEANER"]);
+
+      expect(screen.getByText("protected content")).toBeInTheDocument();
+      expect(mocks.replace).not.toHaveBeenCalled();
+    });
+
+    it("redirects to /login?denied=role when user.role is not in allow", async () => {
+      mocks.user = {
+        id: "user-2",
+        role: "TENANT_OWNER",
+        tenant_id: "tenant-1",
+      };
+
+      renderWithAllow(["CLEANER"]);
+
+      expect(screen.queryByText("protected content")).not.toBeInTheDocument();
+      await waitFor(() =>
+        expect(mocks.replace).toHaveBeenCalledWith(
+          "/login?returnTo=%2Fcleaner&denied=role",
+        ),
+      );
+      // The `redirecting` ref must de-duplicate: the same mount under
+      // React.StrictMode must not fire `router.replace` twice (QA finding 1).
+      expect(mocks.replace).toHaveBeenCalledTimes(1);
+    });
+
+    it("does not evaluate allow for anonymous users", async () => {
+      mocks.status = "anonymous";
+      mocks.user = null;
+
+      renderWithAllow(["CLEANER"]);
+
+      await waitFor(() =>
+        expect(mocks.replace).toHaveBeenCalledWith(
+          "/login?returnTo=%2Fcleaner",
+        ),
+      );
+      expect(mocks.replace).toHaveBeenCalledTimes(1);
+      expect(screen.queryByText("protected content")).not.toBeInTheDocument();
+    });
   });
 });

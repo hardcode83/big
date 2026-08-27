@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getA11yViolations, render, screen } from "@/test/render";
+import { QueryProvider } from "@/lib/query/query-provider";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { CleanerShell } from "@/features/shell/components/cleaner-shell";
 import { TechnicianShell } from "@/features/shell/components/technician-shell";
@@ -24,6 +25,12 @@ vi.mock("@/lib/auth", () => ({
     logout: vi.fn(),
   }),
 }));
+// UserMenu now consumes useLogoutMutation, which calls useRuntimeConfig for
+// the API base URL. The shell tests don't exercise the menu, so a stub
+// config keeps the import graph intact.
+vi.mock("@/lib/config/runtime-config-provider", () => ({
+  useRuntimeConfig: () => ({ apiBaseUrl: "" }),
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));
@@ -43,7 +50,11 @@ vi.mock("next/link", () => ({
 }));
 
 async function renderShell(node: React.ReactNode) {
-  return render(<I18nProvider locale="es">{node}</I18nProvider>);
+  return render(
+    <QueryProvider>
+      <I18nProvider locale="es">{node}</I18nProvider>
+    </QueryProvider>,
+  );
 }
 
 beforeEach(() => {

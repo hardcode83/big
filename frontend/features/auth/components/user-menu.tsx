@@ -23,6 +23,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { useAuth } from "@/lib/auth";
+import { useLogoutMutation } from "../hooks/use-logout-mutation";
 
 const EMAIL_MAX = 24;
 
@@ -38,22 +39,25 @@ const EMAIL_MAX = 24;
  * manager's laptop shared at the front desk) a stray tap closes the session
  * and forces a fresh login. One extra click costs nothing and saves that.
  *
- * **Sequence on confirm (design D5)**: `useAuth().logout()` first — that POSTs
- * `/auth/logout` (best-effort; the catch in `auth-provider.tsx:126-127` keeps
- * the local purge unconditional), purges tokens, the `autohostai.session.present`
+ * **Sequence on confirm (R3 #1, replaces the prior `useAuth().logout()` path)**:
+ * `useLogoutMutation().mutateAsync()` first — that POSTs `/auth/logout`
+ * (best-effort; the `try/finally` in `use-logout-mutation.ts` keeps the
+ * local purge unconditional), purges tokens, the `autohostai.session.present`
  * cookie, and the TanStack Query cache — then `router.replace("/")` so the
  * back button does not return to a now-unauthenticated route, and finally
  * `router.refresh()` so `app/page.tsx:35` re-evaluates the just-cleared
  * cookie and the landing renders.
  *
- * The dialog is closed BEFORE `await logout()` runs — `setOpen(false)` first,
- * then the network call — so the dialog does not block on the round-trip and
- * a slow network does not strand the user with the spinner visible.
+ * The dialog is closed BEFORE `await mutateAsync()` runs — `setOpen(false)`
+ * first, then the network call — so the dialog does not block on the
+ * round-trip and a slow network does not strand the user with the spinner
+ * visible.
  */
 export function UserMenu() {
   const { t } = useTranslation(["navigation", "auth"]);
-  const { user, logout } = useAuth();
+  const { user } = useAuth();
   const router = useRouter();
+  const logoutMutation = useLogoutMutation();
   const [open, setOpen] = useState(false);
 
   const email = user?.email;
@@ -66,13 +70,13 @@ export function UserMenu() {
   async function handleLogout() {
     setOpen(false);
     try {
-      await logout();
+      await logoutMutation.mutateAsync();
     } catch {
-      // Best-effort: `auth-provider.tsx:126-127` already swallows network
-      // errors and purges local state. We catch defensively too, in case a
-      // future implementation forgets — the redirect must still happen so
-      // the visitor lands on the public landing, not on a stale authenticated
-      // page.
+      // Best-effort: `use-logout-mutation.ts` already swallows network errors
+      // and purges local state in its `try/finally`. We catch defensively too,
+      // in case a future implementation forgets — the redirect must still
+      // happen so the visitor lands on the public landing, not on a stale
+      // authenticated page.
     } finally {
       router.replace("/");
       router.refresh();

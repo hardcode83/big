@@ -20,6 +20,64 @@ página describe el uso y los límites operativos.
    evita cierres accidentales en dispositivos compartidos. El portal guest no
    expone el menú porque su acceso es por token en la URL, sin sesión que cerrar.
 
+## Mini-landing post-login (CLEANER / TECHNICIAN)
+
+Después de un login sin `?returnTo=`, los roles `CLEANER` y `TECHNICIAN`
+aterrizan en `/welcome?role=<rol>` en lugar de directamente en su shell
+(`/cleaner`, `/tech`). El *qué hace* exacto está en la propuesta del
+change ([`R2`](../sdd/changes/frontend-auth-role-routing/proposal.md#r2--mini-landing-autenticada-post-login-para-field-users));
+esta página es el *cómo se opera* de la interstitial — qué ve el field
+user, cómo se enruta y cuándo se dispara.
+aterrizan en `/welcome?role=<rol>` en lugar de directamente en su shell
+(`/cleaner`, `/tech`). La mini-landing existe para un perfil muy concreto:
+**field user en dispositivo compartido, un solo destino útil**. La
+interstitial protege contra un toque a destiempo que mande a la persona al
+shell equivocado y le da un punto de retorno claro si se logueó con la cuenta
+de otra persona.
+
+### Qué ve
+
+- `Brand` + `UserMenu` (slot `end` del topbar, sin sidebar, sin
+  `bottomNavigation`, sin footer ni `ThemeSwitcher`/`LocaleSwitcher` —
+  viven en `frontend/app/(authenticated)/layout.tsx`).
+- Un único `StatePanel` con título `auth.welcome.title`, descripción
+  `auth.welcome.body` y un botón cuyo `href` sale de `roleHome(<rol>)` —
+  para `CLEANER` es `auth.welcome.cta.CLEANER` ("Ir a mis tareas") y para
+  `TECHNICIAN` es `auth.welcome.cta.TECHNICIAN` ("Ir a mis incidencias").
+  El `aria-label` está localizado en ambos locales.
+
+### Cómo se enruta
+
+- `LoginForm.handleSubmit` (R2 #1) lee el rol del valor resuelto de
+  `login()` — el render-closure `user` aún es `null` durante el await, y
+  rutear desde ahí bypassaba la mini-landing (ver el JSDoc de
+  `useAuth().login`).
+- La página `/welcome` está cubierta por `AuthGuard` **sin** `allow`:
+  cualquier usuario autenticado entra, y el `?role` decide el shell. Si
+  falta o no coincide con el rol del usuario autenticado, la página
+  redirige sin mostrar contenido — un `StatePanel aria-busy` con
+  `auth.redirecting` evita el flash en blanco durante el redirect
+  (defensa contra URL tampering).
+
+### Quién pasa por ella
+
+| Rol | Sin `?returnTo` | Con `?returnTo` segura | Tras un bounce de `AuthGuard` |
+|---|---|---|---|
+| `CLEANER` | `/welcome?role=CLEANER` → `/cleaner` | `?returnTo` (validada) | `?denied=role` → `/cleaner` |
+| `TECHNICIAN` | `/welcome?role=TECHNICIAN` → `/tech` | `?returnTo` (validada) | `?denied=role` → `/tech` |
+| `TENANT_OWNER` / `PROPERTY_MANAGER` | `/dashboard` (sin interstitial) | `?returnTo` (validada) | `?denied=role` → `/dashboard` |
+
+`SUPER_ADMIN` (cuando entre en MVP) no tendrá interstitial hasta que se
+defina en `saas-cross-tenant`.
+
+### Quién NO usa `/welcome`
+
+- El portal guest (`/guest/[token]`): es acceso por token, no por login.
+- El workspace (`/(workspace)`): va directo a `/dashboard` tras login.
+- `AuthGuard` con `allow` específico: si un `CLEANER` pega `/dashboard` en
+  la URL, el guard lo expulsa con `?denied=role` (UX-only, RBAC sigue en el
+  backend).
+
 ## Sesión efímera y refresh
 
 Los access y refresh JWT viven únicamente en memoria dentro del runtime del
