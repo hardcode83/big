@@ -24,6 +24,11 @@ página describe el uso y los límites operativos.
 
 Después de un login sin `?returnTo=`, los roles `CLEANER` y `TECHNICIAN`
 aterrizan en `/welcome?role=<rol>` en lugar de directamente en su shell
+(`/cleaner`, `/tech`). El *qué hace* exacto está en la propuesta del
+change ([`R2`](../sdd/changes/frontend-auth-role-routing/proposal.md#r2--mini-landing-autenticada-post-login-para-field-users));
+esta página es el *cómo se opera* de la interstitial — qué ve el field
+user, cómo se enruta y cuándo se dispara.
+aterrizan en `/welcome?role=<rol>` en lugar de directamente en su shell
 (`/cleaner`, `/tech`). La mini-landing existe para un perfil muy concreto:
 **field user en dispositivo compartido, un solo destino útil**. La
 interstitial protege contra un toque a destiempo que mande a la persona al
