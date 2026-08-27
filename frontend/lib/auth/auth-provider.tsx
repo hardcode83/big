@@ -25,6 +25,7 @@ import {
 } from "./session-store";
 import { clearSessionPresent, markSessionPresent } from "./session-presence-cookie";
 import { purgeSessionCache } from "./session-cache-purge";
+import { subscribeToLogout } from "./logout-event";
 
 type CurrentUser = components["schemas"]["CurrentUserResponse"];
 export type AuthStatus =
@@ -74,6 +75,18 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     });
   }, []);
 
+  useEffect(() => {
+    // `useLogoutMutation` (in `features/auth/hooks/`) cannot directly reset the
+    // React state owned here, so it emits a logout event after its `try/finally`
+    // finishes. We mirror the post-logout state to match the freshly-purged
+    // store — tokens, cookie and QueryClient are already gone by the time
+    // `notifyLogout()` fires.
+    return subscribeToLogout(() => {
+      setUser(null);
+      setStatus("anonymous");
+    });
+  }, []);
+
   const login = useCallback(
     async (email: string, password: string) => {
       setStatus("loading");
@@ -116,6 +129,16 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     }
   }, [clients.refreshTokens]);
 
+  /**
+   * Logout wrapper kept for backwards compatibility with consumers that
+   * already wired `useAuth().logout()` before the TanStack Query migration.
+   * New call sites MUST use `useLogoutMutation()` instead.
+   *
+   * @deprecated Use `useLogoutMutation()` — design D3/R3 migrated the call
+   * site in `UserMenu`. No live consumer reads this method in the current
+   * change (`UserMenu` is the only one, and it migrated). Removal is safe
+   * in a follow-up change.
+   */
   const logout = useCallback(async () => {
     try {
       if (getSessionTokens()) {

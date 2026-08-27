@@ -1,13 +1,12 @@
 "use client";
 
-import Link from "next/link";
-import { FormEvent, useState } from "react";
-import { useRouter } from "next/navigation";
+import { FormEvent, useEffect, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api/errors";
-import { useAuth } from "@/lib/auth";
+import { clearSessionPresent, useAuth } from "@/lib/auth";
 import { roleHome } from "../lib/role-home";
 
 function safeReturnTo(value: string | null): string {
@@ -31,26 +30,52 @@ function safeReturnTo(value: string | null): string {
   }
 }
 
+/**
+ * R5 — the «Volver a la landing» control is a `<button type="button">` and not
+ * an `<a>` because the order `clearSessionPresent() → router.replace("/") →
+ * router.refresh()` must run BEFORE the browser commits to the navigation; an
+ * `<a href="/">` would let the native click handler race the React onClick and
+ * the cookie would still be set when `RootPage` re-evaluates, sending the user
+ * right back into the `/login → / → /dashboard → /login` loop (R5 #2).
+ *
+ * R1 #5 — when the visitor was bounced out of an AuthGuard-protected segment
+ * (`AuthGuard` redirected here with `?denied=role`), they are still
+ * authenticated. The page surfaces `auth.deniedRole` for one render and then
+ * resolves the correct shell via `roleHome(user.role)` — the visitor does not
+ * need to log in again.
+ */
 export function LoginForm() {
   const { t } = useTranslation("auth");
   const { login, status, user } = useAuth();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
   const [error, setError] = useState<string | null>(null);
+
+  const returnTo = searchParams.get("returnTo");
+  const deniedRole = searchParams.get("denied") === "role";
+
+  useEffect(() => {
+    if (!deniedRole) {
+      return;
+    }
+    if (status !== "authenticated" || !user) {
+      return;
+    }
+    router.replace(roleHome(user.role));
+  }, [deniedRole, router, status, user]);
 
   async function handleSubmit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     setError(null);
     try {
       await login(email, password);
-      const returnTo = new URLSearchParams(window.location.search).get("returnTo");
-      // `?returnTo=` (when valid) wins — that is the visitor's intent. Without
-      // it, the role the backend just told us about decides (R4 + design D6):
-      // managers land on /dashboard, cleaners and technicians on their shells.
-      // `user` is set inside `auth-provider.login()` via the `/auth/me` call,
-      // so we do not pay an extra round-trip here.
-      const next = returnTo ? safeReturnTo(returnTo) : roleHome(user?.role);
+      const next = returnTo
+        ? safeReturnTo(returnTo)
+        : (user?.role === "CLEANER" || user?.role === "TECHNICIAN")
+          ? `/welcome?role=${user.role}`
+          : roleHome(user?.role);
       router.replace(next);
     } catch (cause) {
       setError(cause instanceof ApiError && cause.code === "INVALID_CREDENTIALS"
@@ -59,7 +84,15 @@ export function LoginForm() {
     }
   }
 
+  function handleBackToLanding() {
+    clearSessionPresent();
+    router.replace("/");
+    router.refresh();
+  }
+
   const submitting = status === "loading";
+  const showDeniedMessage =
+    deniedRole && status === "authenticated" && user !== null;
 
   return (
     <form
@@ -68,6 +101,14 @@ export function LoginForm() {
       noValidate
     >
       <h1 className="text-2xl font-semibold text-foreground">{t("title")}</h1>
+      {showDeniedMessage ? (
+        <p
+          role="alert"
+          className="rounded-md border border-state-warning-border bg-state-warning-bg p-3 text-sm text-state-warning-text"
+        >
+          {t("deniedRole")}
+        </p>
+      ) : null}
       {error ? (
         <p role="alert" className="text-sm text-state-error-text">
           {error}
@@ -102,12 +143,15 @@ export function LoginForm() {
       <Button type="submit" disabled={submitting}>
         {submitting ? t("loading") : t("submit")}
       </Button>
-      <Link
-        href="/"
-        className="tap-target self-start text-sm font-medium text-muted-foreground hover:text-foreground"
+      <button
+        type="button"
+        role="link"
+        aria-label={t("backToLanding")}
+        onClick={handleBackToLanding}
+        className="tap-target self-start text-left text-sm font-medium text-muted-foreground hover:text-foreground"
       >
         {t("backToLanding")}
-      </Link>
+      </button>
     </form>
   );
 }

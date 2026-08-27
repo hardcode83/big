@@ -10,14 +10,20 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import { UserMenu } from "./user-menu";
 
 const mocks = vi.hoisted(() => ({
-  logout: vi.fn(),
+  mutateAsync: vi.fn(),
   replace: vi.fn(),
   refresh: vi.fn(),
-  user: { email: "user@example.com" },
+  user: { email: "user@example.com" } as
+    | { email: string }
+    | undefined,
 }));
 
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ user: mocks.user, logout: mocks.logout }),
+  useAuth: () => ({ user: mocks.user }),
+}));
+
+vi.mock("@/features/auth/hooks/use-logout-mutation", () => ({
+  useLogoutMutation: () => ({ mutateAsync: mocks.mutateAsync }),
 }));
 
 vi.mock("next/navigation", () => ({
@@ -47,7 +53,7 @@ function selectMenuItem(item: HTMLElement) {
 
 describe("UserMenu", () => {
   afterEach(() => {
-    mocks.logout.mockReset();
+    mocks.mutateAsync.mockReset();
     mocks.replace.mockReset();
     mocks.refresh.mockReset();
     mocks.user = { email: "user@example.com" };
@@ -73,7 +79,7 @@ describe("UserMenu", () => {
   });
 
   it("falls back to 'Usuario' when there is no user yet", () => {
-    mocks.user = undefined as unknown as { email: string };
+    mocks.user = undefined;
     renderMenu();
     const button = screen.getByRole("button", { name: /Menú de usuario/ });
     expect(button).toHaveTextContent("Usuario");
@@ -106,8 +112,20 @@ describe("UserMenu", () => {
     ).toBeInTheDocument();
   });
 
-  it("confirms: logout, replace('/'), refresh()", async () => {
-    mocks.logout.mockResolvedValue(undefined);
+  it("confirms: mutateAsync, replace('/'), refresh() — in that order (R3 #1)", async () => {
+    mocks.mutateAsync.mockResolvedValue(undefined);
+    const callOrder: string[] = [];
+    mocks.mutateAsync.mockImplementation(async () => {
+      callOrder.push("mutateAsync");
+    });
+    mocks.replace.mockImplementation((value: string) => {
+      callOrder.push(`router.replace:${value}`);
+    });
+    mocks.refresh.mockImplementation(() => {
+      callOrder.push("router.refresh");
+      return undefined;
+    });
+
     renderMenu();
     openTrigger(screen.getByRole("button", { name: /Menú de usuario/ }));
     selectMenuItem(
@@ -117,16 +135,18 @@ describe("UserMenu", () => {
     const confirm = await screen.findByRole("button", { name: /Cerrar sesión/ });
     fireEvent.click(confirm);
 
-    await waitFor(() => expect(mocks.logout).toHaveBeenCalledTimes(1));
-    await waitFor(() => expect(mocks.replace).toHaveBeenCalledWith("/"));
-    await waitFor(() => expect(mocks.refresh).toHaveBeenCalledTimes(1));
+    await waitFor(() => expect(callOrder).toEqual([
+      "mutateAsync",
+      "router.replace:/",
+      "router.refresh",
+    ]));
   });
 
-  it("still replaces + refreshes when logout() rejects (best-effort server)", async () => {
-    // `auth-provider.tsx:126-127` already purges local state on a server
-    // failure; the redirect must still happen so the user lands on the landing
-    // instead of staring at a stale authenticated page.
-    mocks.logout.mockRejectedValue(new Error("network"));
+  it("still replaces + refreshes when mutateAsync() rejects (best-effort server)", async () => {
+    // `use-logout-mutation.ts`'s `try/finally` already purges local state on a
+    // server failure; the redirect must still happen so the user lands on the
+    // landing instead of staring at a stale authenticated page.
+    mocks.mutateAsync.mockRejectedValue(new Error("network"));
     renderMenu();
     openTrigger(screen.getByRole("button", { name: /Menú de usuario/ }));
     selectMenuItem(

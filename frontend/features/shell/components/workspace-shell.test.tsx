@@ -8,6 +8,7 @@ import {
   waitFor,
   within,
 } from "@/test/render";
+import { QueryProvider } from "@/lib/query/query-provider";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { WorkspaceShell } from "@/features/shell/components/workspace-shell";
 import { useShellUiStore } from "@/features/shell/state/use-shell-ui-store";
@@ -50,9 +51,11 @@ vi.mock("next/link", () => ({
 
 async function renderShell() {
   return render(
-    <I18nProvider locale="es">
-      {await WorkspaceShell({ children: <div>contenido</div> })}
-    </I18nProvider>,
+    <QueryProvider>
+      <I18nProvider locale="es">
+        {await WorkspaceShell({ children: <div>contenido</div> })}
+      </I18nProvider>
+    </QueryProvider>,
   );
 }
 
