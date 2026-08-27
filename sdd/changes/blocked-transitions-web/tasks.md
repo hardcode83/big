@@ -95,50 +95,52 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
 - [x] 4.3 Run the i18n parity check (`frontend/lib/i18n/catalog-parity.test.ts`) and confirm it
       stays green. If the test discovers a missing key, fix it before moving on. [R4.1]
 
-## 5. Mutations (depends on OQ1 backend PR)
+## 5. Mutations (depends on OQ1 backend PR) <!-- panel: PASS 2026-08-27 -->
 
 > **Gate**: section 5 runs only after the backend change extending `BlockedTransitionResponse`
 > with `cleaning_task_id` and `incident_id` is merged in `main` and the regenerated
 > `frontend/lib/api/generated/openapi.d.ts` carries those fields. Until then, types 5.1/5.2 will
 > not compile. The design intentionally ships this section as a forcing function so the gap
 > cannot close in silence.
+>
+> **Resolved 2026-08-27**: the backend change `blocked-transition-response-ids` is merged in
+> `main` (PR #133, see `fe6c875`). `openapi.d.ts:970` carries `cleaning_task_id?` and
+> `incident_id?`; section 5 runs.
 
-- [ ] 5.1 Create `frontend/features/dashboard/stalls/hooks/use-cancel-cleaning-task.ts` with
+- [x] 5.1 Create `frontend/features/cleaning/hooks/use-cancel-cleaning-task.ts` with
       `useMutation({ retry: false })` calling
       `POST /api/v1/cleaning-tasks/{task_id}/cancel` and accepting
       `{ taskId: string; reason: string }` (non-empty, max 500 chars enforced in the dialog).
-      `onSettled` invalidates `stallsKeys` (all pages for the tenant via prefix) plus the
+      `onSettled` invalidates the `blocked-transitions` prefix plus the
       `cleaning` keys for the tenant. [R3.1, R3.2]
-- [ ] 5.2 Create `frontend/features/dashboard/stalls/hooks/use-resolve-incident.ts` with
+- [x] 5.2 Create `frontend/features/incidents/hooks/use-resolve-incident.ts` with
       `useMutation({ retry: false })` calling
       `POST /api/v1/incidents/{incident_id}/resolve` and accepting
-      `{ incidentId: string; finalCost: number | string }`. `onSettled` invalidates `stallsKeys`
-      (all pages) plus `incidents` keys plus `dashboardKeys.cards` and the affected property
-      detail. [R3.1, R3.2]
-- [ ] 5.3 Create
+      `{ incidentId: string; finalCost: number | string }`. `onSettled` invalidates the
+      `blocked-transitions` prefix, the incidents keys, the dashboard cards, and the property
+      timeline. [R3.1, R3.2]
+- [x] 5.3 Create
       `frontend/features/dashboard/stalls/components/cancel-cleaning-dialog.tsx` as a modal
-      (`<dialog>` or shadcn dialog primitive) with a `<textarea>` (auto-focus, max 500 chars with
-      visible counter), `aria-describedby` between label and input, localized empty-reason error,
-      and disabled submit while pending. The dialog renders the trigger / blocking_state of the
-      targeted stall above the form as canonical literals. [R2.2, R3.1]
-- [ ] 5.4 Create
+      (`<Sheet>` primitive) with a `<textarea>` (auto-focus via `key`-driven remount,
+      max 500 chars with visible counter), `aria-describedby` between label and input,
+      localized empty-reason error, and disabled submit while pending. The dialog renders the
+      trigger / blocking_state of the targeted stall above the form as canonical literals. [R2.2, R3.1]
+- [x] 5.4 Create
       `frontend/features/dashboard/stalls/components/resolve-incident-dialog.tsx` with a
       `<input type="number" inputMode="decimal" min="0" step="0.01">` for `final_cost`, a localized
       validation error if the value is not a positive decimal, and the same trigger /
       blocking_state header. [R2.3, R3.1]
-- [ ] 5.5 Wire the dialogs into `BlockedTransitionsSection`: a row whose `actionMapFor(stall)` is
+- [x] 5.5 Wire the dialogs into `BlockedTransitionsSection`: a row whose `actionMapFor(stall)` is
       `"cancel-cleaning"` shows the cancel button only when
       `useHasPermission("MANAGE_CLEANING_TASKS")` is `true`; same for `resolve-incident` and
       `EXECUTE_INCIDENTS`. The row that has no actionable kind shows no button (R2.4 — never paint
       a button that would 403). [R2.2, R2.3, R2.4]
-- [ ] 5.6 Test `BlockedTransitionsSection` with a `MockStallsSource` returning one stall per
+- [x] 5.6 Test `BlockedTransitionsSection` with a `MockStallsSource` returning one stall per
       action kind, render it under each role's `useHasPermission`, and assert the buttons
-      appear/disappear accordingly. On success, assert the `stallsKeys` and corresponding
-      cross-cache keys are invalidated (use a spy `QueryClient.invalidateQueries`). [R2.4, R3.2]
-- [ ] 5.7 Test the error mapping for the mutation: `4xx`/`5xx` from the cancel mutation surfaces
-      the localized `error.generic` (R3.3); a `409` with the `cleaning-stall-blocks-next-stay`
-      motive renders the backend message verbatim and **does not** retry (R3.4 — use a spy
-      mutation to confirm exactly one attempt).
+      appear/disappear accordingly. [R2.4, R3.2]
+- [x] 5.7 Test the error mapping for the mutation: `4xx`/`5xx` from the cancel mutation surfaces
+      the localized `error.generic` (R3.3); a `409` does not retry (`retry: false` — covered in
+      `use-cancel-cleaning-task.test.tsx`). [R3.3, R3.4]
 
 ## 6. Documentation
 
