@@ -18,6 +18,15 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   SHALL exponer `user`, `role` y `tenant_id` devueltos por el backend.
 - IF el login o la carga de identidad falla, THEN THE SYSTEM SHALL limpiar la
   sesión local, mostrar un error localizado y mantener al usuario en `/login`.
+- WHEN el login tiene éxito y la URL no trae `?returnTo=` válido (mismo origen,
+  ruta que empieza por `/`), THE SYSTEM SHALL redirigir al usuario a la shell
+  correspondiente a su rol: `/dashboard` para `TENANT_OWNER` y
+  `PROPERTY_MANAGER`, `/cleaner` para `CLEANER`, `/tech` para `TECHNICIAN`. Un
+  rol desconocido cae a `/dashboard` por defecto. El cálculo usa el `user.role`
+  devuelto por `/auth/me` durante el login (no una petición extra) y SHALL
+  delegarse en un único helper `roleHome(role)` cuya tabla es la fuente de
+  verdad. WHEN el `?returnTo=` es válido, THE SYSTEM SHALL respetarlo sobre
+  la redirección por rol — la intención del visitante manda.
 
 ### Sesión efímera y refresh
 
@@ -55,7 +64,40 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   de navegación interna segura.
 - WHEN el usuario cierra sesión, THE SYSTEM SHALL intentar
   `POST /api/v1/auth/logout` si existe sesión, limpiar siempre el almacén en
-  memoria y devolver la UX a `/login`.
+  memoria, purgar la caché de consultas del `QueryClient` singleton, purgar la
+  cookie no sensible `autohostai.session.present` que marca la raíz como
+  autenticada y devolver la UX al landing público (`/`) — no a `/login`. La
+  raíz, al re-evaluar la cookie ausente en el siguiente Server Component
+  render, sirve el landing directamente.
+- WHERE el shell autenticado expone el control de cierre de sesión, THE SYSTEM
+  SHALL montar un `UserMenu` en el slot `end` del `Topbar` de
+  `WorkspaceShell`, `CleanerShell` y `TechnicianShell`; SHALL NOT montarlo en
+  `PublicShell` (el login no muestra un usuario autenticado) ni en `GuestShell`
+  (el guest accede por token, sin sesión que cerrar). El control dispara un
+  `AlertDialog` de confirmación antes de invocar el cierre, y SHALL ejecutar
+  tras la confirmación, en este orden: `useAuth().logout()` → `router.replace("/")`
+  → `router.refresh()`, para que el botón «atrás» no devuelva a una ruta sin
+  sesión y la raíz re-evalúe la cookie recién purgada.
+- IF el `POST /api/v1/auth/logout` falla o no existe sesión, THEN THE SYSTEM
+  SHALL purgar igualmente la caché de consultas del `QueryClient` singleton,
+  purgar la cookie `autohostai.session.present` y limpiar el almacén en
+  memoria — la limpieza local es incondicional; el `try/finally` del
+  `UserMenu` SHALL ejecutar `router.replace("/")` y `router.refresh()` aunque
+  el endpoint haya devuelto 5xx o error de red.
+- WHEN el `AuthProvider` reemplaza la identidad autenticada por un usuario
+  cuyo `id` o `tenant_id` difiere del anterior —incluido el paso a `null` por
+  expiración o por refresh fallido, y el paso `null → user` del primer login
+  del runtime—, THE SYSTEM SHALL purgar todas las entradas del `QueryClient`
+  singleton **antes** de que el nuevo estado sea visible para el resto de la
+  app.
+- THE SYSTEM SHALL purgar la caché con `QueryClient.clear()` (vacía
+  `queryCache`, `mutationCache` y el estado no reactivo), sin discriminar por
+  clave ni condicionar la purga al evento que disparó el cambio: el logout
+  explícito y cualquier otra transición de identidad son el mismo hecho desde
+  el punto de vista de la caché.
+- THE SYSTEM SHALL integrar la función de purga como dependencia en un único
+  sentido (`lib/auth → lib/query`), sin introducir un `useEffect` paralelo ni
+  mover el `QueryClient` ni su ciclo de vida fuera de `lib/query`.
 - THE SYSTEM SHALL proteger las superficies workspace, cleaner y technician
   con `AuthGuard`, y SHALL dejar sin guard JWT la shell pública y el portal guest.
 - THE SYSTEM SHALL tratar rol y tenant como datos de contexto para UI y SHALL
@@ -69,15 +111,39 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
 - IF falta una clave de `auth` en cualquiera de los locales, THEN THE SYSTEM
   SHALL fallar el test automatizado de paridad.
 - THE SYSTEM SHALL verificar login, identidad, errores, refresh, logout, ausencia
-  de persistencia y redirección client-side mediante tests.
+  de persistencia, redirección client-side y purga del `QueryClient` singleton
+  en cada transición de identidad del runtime (logout, swap de usuario, refresh
+  fallido y expiración notificada) mediante tests.
 
 ## Key files
 
 - `frontend/lib/auth/session-store.ts` — tokens efímeros.
 - `frontend/lib/auth/refresh-coordinator.ts` — refresh single-flight.
-- `frontend/lib/auth/auth-provider.tsx` — contexto y ciclo de sesión.
+- `frontend/lib/auth/auth-provider.tsx` — contexto y ciclo de sesión, incluido
+  `logout()` (best-effort al endpoint, purga local incondicional) y
+  `clearSessionPresent()` que borra la cookie `autohostai.session.present`.
+- `frontend/lib/auth/session-cache-purge.ts` — purga del `QueryClient`
+  singleton en cada transición de identidad del runtime.
+- `frontend/lib/auth/session-presence-cookie.ts` — la cookie no sensible
+  `autohostai.session.present` (`max-age=31536000`, `samesite=lax`) que
+  `markSessionPresent()` escribe tras login y `clearSessionPresent()` borra
+  tras logout; la raíz `/` la lee en Server Component para decidir landing
+  vs redirect.
+- `frontend/lib/query/query-client.ts` — `QueryClient` singleton y
+  `QueryClient.clear()` consumido por `session-cache-purge.ts`.
 - `frontend/lib/api/client.ts` — transporte tipado y hook de `401`.
-- `frontend/features/auth/components/login-form.tsx` — formulario y retorno seguro.
+- `frontend/features/auth/components/login-form.tsx` — formulario, redirección
+  por rol vía `roleHome(user.role)` y enlace visible de vuelta al landing.
+- `frontend/features/auth/components/user-menu.tsx` — control de cierre de
+  sesión en el `Topbar` de las tres shells autenticadas (workspace, cleaner,
+  technician); dispara `AlertDialog` de confirmación y ejecuta
+  `logout() → router.replace("/") → router.refresh()`.
+- `frontend/features/auth/lib/role-home.ts` — tabla `ROLE_HOME` (los cuatro
+  roles MVP) y `roleHome(role)` con default a `/dashboard`.
 - `frontend/features/auth/components/auth-guard.tsx` — guard client-side de UX.
 - `frontend/app/providers.tsx` — composición de providers.
-- `frontend/locales/{es,en}/auth.json` — estados localizados.
+- `frontend/locales/{es,en}/auth.json` — estados localizados, incluyendo
+  `backToLanding`, `logoutConfirmTitle`, `logoutConfirmBody`,
+  `logoutConfirmCancel` y `logoutConfirmAction`.
+- `frontend/locales/{es,en}/navigation.json` — `userMenu.triggerLabel`,
+  `userMenu.logout`, `userMenu.anonymous`.

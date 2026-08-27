@@ -13,7 +13,13 @@ import { WorkspaceShell } from "@/features/shell/components/workspace-shell";
 import { useShellUiStore } from "@/features/shell/state/use-shell-ui-store";
 
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  // `LocaleSwitcher` calls `router.refresh()` after writing the locale cookie
+  // (public-zone-hardening R1 + design D1). The shell tests never trigger the
+  // switcher, so a no-op spy is enough to keep the import graph intact.
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ status: "authenticated" }),
 }));

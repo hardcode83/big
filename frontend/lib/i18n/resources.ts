@@ -16,6 +16,8 @@ import esIncidents from "@/locales/es/incidents.json";
 import enIncidents from "@/locales/en/incidents.json";
 import esCleaning from "@/locales/es/cleaning.json";
 import enCleaning from "@/locales/en/cleaning.json";
+import esConversations from "@/locales/es/conversations.json";
+import enConversations from "@/locales/en/conversations.json";
 import esProperties from "@/locales/es/properties.json";
 import enProperties from "@/locales/en/properties.json";
 import esPricing from "@/locales/es/pricing.json";
@@ -34,6 +36,7 @@ export const NAMESPACES = [
   "reservations",
   "incidents",
   "cleaning",
+  "conversations",
   "properties",
   "pricing",
   "landing",
@@ -52,6 +55,7 @@ export const resources = {
     reservations: esReservations,
     incidents: esIncidents,
     cleaning: esCleaning,
+    conversations: esConversations,
     properties: esProperties,
     pricing: esPricing,
     landing: esLanding,
@@ -66,6 +70,7 @@ export const resources = {
     reservations: enReservations,
     incidents: enIncidents,
     cleaning: enCleaning,
+    conversations: enConversations,
     properties: enProperties,
     pricing: enPricing,
     landing: enLanding,

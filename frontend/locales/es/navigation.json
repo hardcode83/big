@@ -46,6 +46,10 @@
       "title": "Conversaciones",
       "description": "Bandeja de mensajes con huéspedes y equipo."
     },
+    "conversation-detail": {
+      "title": "Detalle de conversación",
+      "description": "Hilo de mensajes y respuesta manual."
+    },
     "approvals": {
       "title": "Aprobaciones",
       "description": "Acciones pendientes de aprobación."
@@ -121,5 +125,10 @@
     "light": "Claro",
     "dark": "Oscuro",
     "system": "Seguir al sistema"
+  },
+  "userMenu": {
+    "triggerLabel": "Menú de usuario",
+    "logout": "Cerrar sesión",
+    "anonymous": "Usuario"
   }
 }

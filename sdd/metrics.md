@@ -56,6 +56,7 @@
 | reservations-web | new, design, tasks, run, review, ship, archive | 6417003 | 730572 | 110301435 | 106.3682 | 2026-08-17 | 2026-08-20 |
 | incidents-web | new, design, tasks, run, review, ship, archive | 2581925 | 277525 | 109796724 | 74.7461 | 2026-08-20 | 2026-08-20 |
 | cleaning-manager-view | new, design, tasks, run, review, ship, archive | 229380 | 707380 | 111979116 | 93.8468 | 2026-08-19 | 2026-08-22 |
+| conversations-inbox | new, design, tasks, run, review, ship, archive | 6926822 | 959736 | 177776397 | 147.5157 | 2026-08-22 | 2026-08-26 |
 | tech-incident-context | new, design, tasks, run, review, ship, archive | 188433 | 752818 | 223090994 | 150.4538 | 2026-08-19 | 2026-08-22 |
 | cleaner-incident-report | new, design, tasks, run, review, ship, archive | 525155 | 1206846 | 310508716 | 226.6796 | 2026-08-19 | 2026-08-22 |
 | properties-web | new, design, tasks, run, review, archive | 134298 | 525324 | 134435093 | 87.1410 | 2026-08-22 | 2026-08-22 |
@@ -67,7 +68,10 @@
 | cleaning-stall-blocks-next-stay | design, tasks, run, review, ship, archive | 766276 | 1683373 | 401801053 | 230.5488 | 2026-08-23 | 2026-08-24 |
 | cleaner-photo-requirements | new, tasks, design, run, review, ship, archive | 294118 | 905142 | 145527899 | 100.3441 | 2026-08-23 | 2026-08-24 |
 | demo-user | new, design, tasks, run, review, ship, archive | 874656 | 2101808 | 447123139 | 283.8617 | 2026-08-23 | 2026-08-24 |
+| demo-tenant-audit-retention | new, design, tasks, run, review, ship, archive | 4699844 | 304786 | 70398737 | 66.3251 | 2026-08-24 | 2026-08-26 |
 | design-system-tokens | new, design, tasks, run, review, ship, archive | 3109813 | 2017252 | 343062928 | 249.3879 | 2026-08-23 | 2026-08-24 |
 | landing-public | new, design, tasks, run, review, ship, archive | 2164329 | 293924 | 98099071 | 67.2193 | 2026-08-24 | 2026-08-25 |
 | reservation-amount-empty-render | new, design, tasks, run, review, ship, archive | 1348948 | 185290 | 33771859 | 28.5487 | 2026-08-24 | 2026-08-25 |
 | blocked-transition-response-ids | new, tasks, run, review | 4159183 | 369804 | 78507753 | 69.2949 | 2026-08-26 | — |
+| photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
+| public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |

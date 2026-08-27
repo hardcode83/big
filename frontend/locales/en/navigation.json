@@ -46,6 +46,10 @@
       "title": "Conversations",
       "description": "Message inbox with guests and team."
     },
+    "conversation-detail": {
+      "title": "Conversation detail",
+      "description": "Message thread and manual reply."
+    },
     "approvals": {
       "title": "Approvals",
       "description": "Actions awaiting approval."
@@ -121,5 +125,10 @@
     "light": "Light",
     "dark": "Dark",
     "system": "Follow the system"
+  },
+  "userMenu": {
+    "triggerLabel": "User menu",
+    "logout": "Sign out",
+    "anonymous": "User"
   }
 }

@@ -1,0 +1,71 @@
+{
+  "status": {
+    "OPEN": "Abierta",
+    "RESOLVED": "Resuelta",
+    "ESCALATED": "Escalada",
+    "CLOSED": "Cerrada"
+  },
+  "escalationStatus": {
+    "NONE": "Sin escalación",
+    "PENDING_HUMAN": "Esperando a una persona",
+    "HUMAN_HANDLING": "En manos de una persona",
+    "RESOLVED": "Escalación resuelta"
+  },
+  "channel": {
+    "WHATSAPP": "WhatsApp",
+    "AIRBNB_MSG": "Mensaje de Airbnb",
+    "BOOKING_MSG": "Mensaje de Booking",
+    "EMAIL": "Email",
+    "PHONE_TRANSCRIPT": "Transcripción telefónica",
+    "MANUAL": "Manual"
+  },
+  "senderType": {
+    "GUEST": "Huésped",
+    "OWNER": "Propietaria",
+    "MANAGER": "Tú",
+    "AI": "IA",
+    "SYSTEM": "Sistema"
+  },
+  "fields": {
+    "channel": "Canal",
+    "status": "Estado",
+    "escalationStatus": "Escalación",
+    "lastMessageAt": "Último mensaje",
+    "createdAt": "Creada",
+    "id": "Identificador",
+    "property": "Propiedad",
+    "guest": "Huésped",
+    "reservation": "Reserva",
+    "language": "Idioma",
+    "aiEnabled": "IA activa",
+    "updatedAt": "Actualizada el",
+    "createdAtFull": "Creada el",
+    "intent": "Intención",
+    "senderUserIdSection": "Remitente",
+    "senderUserIdNote": "El identificador no se puede resolver a nombre dentro de esta vista",
+    "notFound": "Conversación no encontrada",
+    "backToList": "Volver a la bandeja",
+    "clearFilters": "Limpiar filtros",
+    "prevPage": "Página anterior",
+    "nextPage": "Página siguiente",
+    "forbidden": "No tienes permiso para ver esta conversación",
+    "validation": "Los datos enviados no son válidos",
+    "characterCount": "{{count}} / 4000 caracteres"
+  },
+  "thread": {
+    "title": "Conversación",
+    "messagesHeading": "Mensajes",
+    "noMessages": "Aún no hay mensajes en esta conversación.",
+    "replyHeading": "Responder",
+    "replyPlaceholder": "Escribe tu respuesta al huésped…",
+    "replySubmit": "Enviar",
+    "replyCancel": "Cancelar",
+    "replySending": "Enviando…",
+    "replySuccess": "Tu respuesta se ha enviado.",
+    "replyErrorGeneric": "No se pudo enviar la respuesta. Inténtalo de nuevo.",
+    "replyErrorValidation": "El mensaje supera los 4000 caracteres o no es válido.",
+    "replyErrorUnauthorized": "Tu sesión ha caducado. Vuelve a iniciar sesión.",
+    "replyErrorForbidden": "No tienes permiso para responder en esta conversación.",
+    "replyErrorNotFound": "La conversación ya no existe."
+  }
+}
