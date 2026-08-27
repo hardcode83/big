@@ -10,6 +10,8 @@
 
 export { useBlockedTransitions } from "./hooks/use-blocked-transitions";
 export { BlockedTransitionsSection } from "./components/blocked-transitions-section";
+export { CancelCleaningDialog } from "./components/cancel-cleaning-dialog";
+export { ResolveIncidentDialog } from "./components/resolve-incident-dialog";
 export { actionMapFor, type ActionKind, type ClockTrigger } from "./lib/action-map";
 export type {
   BlockedTransitionSummary,

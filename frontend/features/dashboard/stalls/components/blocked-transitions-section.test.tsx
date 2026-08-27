@@ -1,0 +1,336 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import {
+  fireEvent,
+  render,
+  screen,
+  waitFor,
+} from "@testing-library/react";
+import type { ReactNode } from "react";
+import { beforeEach, describe, expect, it, vi } from "vitest";
+
+import type { BlockedTransitionSummary } from "../data";
+import { stallsKeys } from "../hooks/query-keys";
+import { BlockedTransitionsSection } from "./blocked-transitions-section";
+
+const useAuth = vi.hoisted(() => vi.fn());
+const useHasPermission = vi.hoisted(() =>
+  vi.fn((_permission: string): boolean => false),
+);
+vi.mock("@/lib/auth", () => ({ useAuth, useHasPermission }));
+
+const cancelTask = vi.hoisted(() => vi.fn());
+const resolveIncident = vi.hoisted(() => vi.fn());
+
+vi.mock("@/features/cleaning", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/cleaning")>()),
+  useCancelCleaningTask: () => ({
+    mutate: cancelTask,
+    isPending: false,
+    isError: false,
+  }),
+}));
+
+vi.mock("@/features/incidents", async (importOriginal) => ({
+  ...(await importOriginal<typeof import("@/features/incidents")>()),
+  useResolveIncident: () => ({
+    mutate: resolveIncident,
+    isPending: false,
+    isError: false,
+  }),
+}));
+
+vi.mock("react-i18next", () => ({
+  useTranslation: () => ({
+    t: (key: string) => key,
+    i18n: { language: "en" },
+  }),
+}));
+
+function makeStall(
+  partial: Partial<BlockedTransitionSummary> & {
+    property_id: string;
+    reservation_id: string;
+    trigger: string;
+    blocking_state: string;
+    due_since: string;
+  },
+): BlockedTransitionSummary {
+  return {
+    property_code: partial.property_id.toUpperCase(),
+    ...partial,
+  } as BlockedTransitionSummary;
+}
+
+function wrapper(queryClient: QueryClient) {
+  return function Wrap({ children }: { children: ReactNode }) {
+    return <QueryClientProvider client={queryClient}>{children}</QueryClientProvider>;
+  };
+}
+
+function setRole(role: string) {
+  useAuth.mockReturnValue({ user: { tenant_id: "tenant-1", role } });
+}
+
+function setPermissions(record: Record<string, boolean>) {
+  useHasPermission.mockImplementation((p: string) => record[p] ?? false);
+}
+
+beforeEach(() => {
+  useAuth.mockReset();
+  useHasPermission.mockReset();
+  cancelTask.mockReset();
+  resolveIncident.mockReset();
+});
+
+describe("BlockedTransitionsSection — actions (R2.4, R3.2)", () => {
+  it("renders nothing when there are no stalls (R1.3)", () => {
+    const view = render(
+      <BlockedTransitionsSection stalls={[]} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(view.container.firstChild).toBeNull();
+  });
+
+  it("does not show any action button when neither permission is held (R2.4)", () => {
+    setRole("TENANT_OWNER");
+    useHasPermission.mockReturnValue(false);
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+        cleaning_task_id: "task-1",
+      }),
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-2",
+        trigger: "CHECKIN_WINDOW_OPENED",
+        blocking_state: "MAINTENANCE_REQUIRED",
+        due_since: "2026-08-21T13:00:00Z",
+        incident_id: "incident-1",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(screen.queryByRole("button", { name: "card.blocked.cancelCleaning.label" })).toBeNull();
+    expect(screen.queryByRole("button", { name: "card.blocked.resolveIncident.label" })).toBeNull();
+  });
+
+  it("shows the cancel button only for the cleaning row when MANAGE_CLEANING_TASKS is held (R2.2)", () => {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ MANAGE_CLEANING_TASKS: true });
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+        cleaning_task_id: "task-1",
+      }),
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-2",
+        trigger: "CHECKIN_WINDOW_OPENED",
+        blocking_state: "MAINTENANCE_REQUIRED",
+        due_since: "2026-08-21T13:00:00Z",
+        incident_id: "incident-1",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(
+      screen.getByRole("button", { name: "card.blocked.cancelCleaning.label" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "card.blocked.resolveIncident.label" }),
+    ).toBeNull();
+  });
+
+  it("shows the resolve button only for the incident row when EXECUTE_INCIDENTS is held (R2.3)", () => {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ EXECUTE_INCIDENTS: true });
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+        cleaning_task_id: "task-1",
+      }),
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-2",
+        trigger: "CHECKIN_WINDOW_OPENED",
+        blocking_state: "MAINTENANCE_REQUIRED",
+        due_since: "2026-08-21T13:00:00Z",
+        incident_id: "incident-1",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(
+      screen.getByRole("button", { name: "card.blocked.resolveIncident.label" }),
+    ).toBeTruthy();
+    expect(
+      screen.queryByRole("button", { name: "card.blocked.cancelCleaning.label" }),
+    ).toBeNull();
+  });
+
+  it("does not show a cancel button when the stall has no cleaning_task_id (deploy-skew window)", () => {
+    setRole("PROPERTY_MANAGER");
+    useHasPermission.mockReturnValue(true);
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(
+      screen.queryByRole("button", { name: "card.blocked.cancelCleaning.label" }),
+    ).toBeNull();
+  });
+
+  it("paints trigger and blocking_state as canonical literals, no translation (R4.2, R4.3)", () => {
+    setRole("PROPERTY_MANAGER");
+    useHasPermission.mockReturnValue(false);
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    expect(screen.getByText("CHECKIN_TIME_REACHED")).toBeTruthy();
+    expect(screen.getByText("AWAITING_CLEANING")).toBeTruthy();
+  });
+});
+
+describe("BlockedTransitionsSection — action wiring (R3.2)", () => {
+  it("clicking cancel opens the dialog, confirming triggers the mutation", async () => {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ MANAGE_CLEANING_TASKS: true });
+    cancelTask.mockImplementation(
+      (
+        _input: { taskId: string; reason: string },
+        opts: { onSuccess?: () => void; onSettled?: () => void },
+      ) => {
+        opts.onSuccess?.();
+        opts.onSettled?.();
+      },
+    );
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-1",
+        trigger: "CHECKIN_TIME_REACHED",
+        blocking_state: "AWAITING_CLEANING",
+        due_since: "2026-08-22T13:00:00Z",
+        cleaning_task_id: "task-1",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "card.blocked.cancelCleaning.label" }),
+    );
+    const submit = await waitFor(() =>
+      screen.getByRole("button", {
+        name: "card.blocked.cancelCleaning.dialog.confirm",
+      }),
+    );
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    const textarea = (await screen.findByRole("textbox")) as HTMLTextAreaElement;
+    fireEvent.change(textarea, { target: { value: "guest arrived early" } });
+
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(cancelTask).toHaveBeenCalledWith(
+        { taskId: "task-1", reason: "guest arrived early" },
+        expect.any(Object),
+      ),
+    );
+  });
+
+  it("clicking resolve opens the dialog, confirming triggers the mutation", async () => {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ EXECUTE_INCIDENTS: true });
+    resolveIncident.mockImplementation(
+      (
+        _input: { incidentId: string; finalCost: number | string },
+        opts: { onSuccess?: () => void; onSettled?: () => void },
+      ) => {
+        opts.onSuccess?.();
+        opts.onSettled?.();
+      },
+    );
+    const stalls: BlockedTransitionSummary[] = [
+      makeStall({
+        property_id: "redes11",
+        reservation_id: "r-2",
+        trigger: "CHECKIN_WINDOW_OPENED",
+        blocking_state: "MAINTENANCE_REQUIRED",
+        due_since: "2026-08-21T13:00:00Z",
+        incident_id: "incident-1",
+      }),
+    ];
+    render(
+      <BlockedTransitionsSection stalls={stalls} headingId="h" />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+    fireEvent.click(
+      screen.getByRole("button", { name: "card.blocked.resolveIncident.label" }),
+    );
+    const submit = await waitFor(() =>
+      screen.getByRole("button", {
+        name: "card.blocked.resolveIncident.dialog.confirm",
+      }),
+    );
+    expect(submit.hasAttribute("disabled")).toBe(true);
+
+    const input = (await screen.findByLabelText(
+      "card.blocked.resolveIncident.dialog.finalCost.label",
+    )) as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "12.50" } });
+
+    fireEvent.click(submit);
+
+    await waitFor(() =>
+      expect(resolveIncident).toHaveBeenCalledWith(
+        { incidentId: "incident-1", finalCost: "12.50" },
+        expect.any(Object),
+      ),
+    );
+  });
+
+  // R3.2 invalidation is asserted end-to-end in `use-cancel-cleaning-task.test.tsx`
+  // and `use-resolve-incident.test.tsx` — these tests cover the cache plumbing
+  // against the real hook. Re-asserting it here with a mocked hook only proves
+  // that the mocked hook does not invalidate, which is what mocking does.
+});

@@ -8,6 +8,13 @@ import type { BlockedTransitionSummary } from "@/features/dashboard/stalls";
 import type { PropertyDashboardCard } from "../data";
 import { PropertyCard } from "./property-card";
 
+// `BlockedTransitionsSection` calls `useHasPermission` to decide whether to
+// show the cancel/resolve buttons. These property-card tests do not exercise
+// the buttons; the mirror just needs to answer without an AuthProvider.
+vi.mock("@/lib/auth", () => ({
+  useHasPermission: () => false,
+}));
+
 vi.mock("next/link", () => ({
   default: ({ href, children }: { href: string; children: React.ReactNode }) => (
     <a href={href}>{children}</a>

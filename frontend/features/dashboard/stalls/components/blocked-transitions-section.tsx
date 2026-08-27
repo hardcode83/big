@@ -1,25 +1,51 @@
 "use client";
 
+import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { Button } from "@/components/ui/button";
+import { useHasPermission } from "@/lib/auth";
+
 import type { BlockedTransitionSummary } from "../data";
+import { actionMapFor } from "../lib/action-map";
 import { formatDateTime } from "../../lib/format";
+
+import { CancelCleaningDialog } from "./cancel-cleaning-dialog";
+import { ResolveIncidentDialog } from "./resolve-incident-dialog";
 
 /**
  * Read-path section that surfaces blocked transitions on the property card
  * (proposal `blocked-transitions-web` R1.2, R1.3, R4.2).
  *
- * The component is render-only — no business logic, no derivation, no
- * translation of the canonical literals. The two fields the backend
- * delivers as canonicals (`trigger`, `blocking_state`) are painted as
- * such in a monospaced `<code>`, and `due_since` is formatted with `Intl`
- * in the user's locale. Adding a "human label" mapping here would be the
+ * The component is render-only for the data — no business logic, no
+ * derivation, no translation of the canonical literals. The two fields the
+ * backend delivers as canonicals (`trigger`, `blocking_state`) are painted as
+ * such in a monospaced `<code>`, and `due_since` is formatted with `Intl` in
+ * the user's locale. Adding a "human label" mapping here would be the
  * parallel catalogue R4.3 explicitly forbids.
+ *
+ * The actions row is what 5.x wires up: the **matrix** (`action-map.ts`) is
+ * the source of truth for "what can a row offer"; the **permissions hook** is
+ * the source of truth for "what can the role do". The two are joined here
+ * (R2.4 — never paint a button that would `403`), and a row that resolves to
+ * `null` shows no button at all (D6).
  *
  * The section renders nothing when `stalls.length === 0`: the card stays
  * untouched. The heading id derives from the property so multiple cards on
  * the same `/dashboard` view keep distinct labelled regions.
  */
+
+interface CancelDialogState {
+  taskId: string;
+  trigger: string;
+  blockingState: string;
+}
+
+interface ResolveDialogState {
+  incidentId: string;
+  trigger: string;
+  blockingState: string;
+}
 
 export function BlockedTransitionsSection({
   stalls,
@@ -30,6 +56,11 @@ export function BlockedTransitionsSection({
 }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = i18n.language;
+  const canCancelCleaning = useHasPermission("MANAGE_CLEANING_TASKS");
+  const canResolveIncident = useHasPermission("EXECUTE_INCIDENTS");
+
+  const [cancelFor, setCancelFor] = useState<CancelDialogState | null>(null);
+  const [resolveFor, setResolveFor] = useState<ResolveDialogState | null>(null);
 
   if (stalls.length === 0) {
     return null;
@@ -41,24 +72,65 @@ export function BlockedTransitionsSection({
         {t("card.blocked.title")}
       </h4>
       <ul className="mt-2 flex min-w-0 flex-col gap-1.5 text-sm">
-        {stalls.map((stall) => (
-          <li
-            key={`${stall.property_id}-${stall.reservation_id}-${stall.trigger}`}
-            className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-muted-foreground"
-          >
-            <code className="font-mono text-xs text-foreground">
-              {stall.trigger}
-            </code>
-            <span aria-hidden="true">·</span>
-            <code className="font-mono text-xs text-foreground">
-              {stall.blocking_state}
-            </code>
-            <span aria-hidden="true">·</span>
-            <span className="text-xs">
-              {formatDateTime(stall.due_since, locale)}
-            </span>
-          </li>
-        ))}
+        {stalls.map((stall) => {
+          const kind = actionMapFor(stall.trigger, stall.blocking_state);
+          const showCancel =
+            kind === "cancel-cleaning" && canCancelCleaning && Boolean(stall.cleaning_task_id);
+          const showResolve =
+            kind === "resolve-incident" && canResolveIncident && Boolean(stall.incident_id);
+          return (
+            <li
+              key={`${stall.property_id}-${stall.reservation_id}-${stall.trigger}`}
+              className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-muted-foreground"
+            >
+              <code className="font-mono text-xs text-foreground">
+                {stall.trigger}
+              </code>
+              <span aria-hidden="true">·</span>
+              <code className="font-mono text-xs text-foreground">
+                {stall.blocking_state}
+              </code>
+              <span aria-hidden="true">·</span>
+              <span className="text-xs">
+                {formatDateTime(stall.due_since, locale)}
+              </span>
+              {showCancel ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() =>
+                    setCancelFor({
+                      taskId: stall.cleaning_task_id ?? "",
+                      trigger: stall.trigger,
+                      blockingState: stall.blocking_state,
+                    })
+                  }
+                >
+                  {t("card.blocked.cancelCleaning.label")}
+                </Button>
+              ) : null}
+              {showResolve ? (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  className="ml-auto"
+                  onClick={() =>
+                    setResolveFor({
+                      incidentId: stall.incident_id ?? "",
+                      trigger: stall.trigger,
+                      blockingState: stall.blocking_state,
+                    })
+                  }
+                >
+                  {t("card.blocked.resolveIncident.label")}
+                </Button>
+              ) : null}
+            </li>
+          );
+        })}
       </ul>
       {/*
         One row, body size, no new variants. Names the 30-day window the user is
@@ -67,6 +139,33 @@ export function BlockedTransitionsSection({
       <p className="mt-2 text-xs text-muted-foreground">
         {t("card.blocked.window")}
       </p>
+
+      {cancelFor ? (
+        <CancelCleaningDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setCancelFor(null);
+            }
+          }}
+          taskId={cancelFor.taskId}
+          trigger={cancelFor.trigger}
+          blockingState={cancelFor.blockingState}
+        />
+      ) : null}
+      {resolveFor ? (
+        <ResolveIncidentDialog
+          open
+          onOpenChange={(open) => {
+            if (!open) {
+              setResolveFor(null);
+            }
+          }}
+          incidentId={resolveFor.incidentId}
+          trigger={resolveFor.trigger}
+          blockingState={resolveFor.blockingState}
+        />
+      ) : null}
     </section>
   );
 }
