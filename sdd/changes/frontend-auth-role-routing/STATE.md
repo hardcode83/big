@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/frontend-auth-role-routing
 implementation_sha: 8175322da3639e087404afb75814d976e482e3c0
 pr_number: 
 pr_url: 
