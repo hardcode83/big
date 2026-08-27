@@ -187,6 +187,16 @@ Cada desajuste deja una línea `scheduler.blocked_transition` con `tenant_id`, `
 vivienda**: dos reservas solapadas sobre la misma vivienda cuentan **una** en `blocked` y dejan
 **dos** líneas, porque quien persigue una de las dos necesita saber de qué reserva habla.
 
+La misma colección se sirve por `GET /api/v1/blocked-transitions` (rol `READ_PROPERTIES`) y
+**desde el 2026-08-27** cada entrada lleva además `cleaning_task_id` (UUID, opcional — `null`
+cuando no aplica) e `incident_id` (UUID, opcional — `null` cuando no aplica). Los dos ids son la
+**vista de lectura** sobre `cleaning_tasks` e `incidents` que el dashboard usa para llamar a las
+mutaciones de la tarjeta sin pedir la fila otra vez: limpios son `null`, populated es un UUID
+perteneciente a la misma vivienda y al `tenant_id` del token (ver `sdd/specs/celery-jobs.md`
+§Desajustes para la regla completa). Operativo, no normativo: el cubo `blocked` del scheduler
+sigue emitiendo las mismas seis columnas de arriba y **no** ha ganado columnas nuevas — el cambio
+solo afecta al endpoint que la UI consume.
+
 **Se repite en cada tick mientras el atasco dure**, y eso es deliberado: nada lo resuelve
 automáticamente, así que la línea desaparece cuando el atasco se arregla y no antes. Con la
 tercera condición el volumen es proporcional a los atascos reales y no a la cartera; sin ella
