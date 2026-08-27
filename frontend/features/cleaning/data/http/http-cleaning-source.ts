@@ -165,4 +165,27 @@ export class HttpCleaningSource implements CleaningDataSource {
     );
     return mapTask(response);
   }
+
+  /**
+   * Cancels one cleaning task (proposal `blocked-transitions-web` R2.2, R3.1).
+   *
+   * The wire shape (`{ reason }`) and the response (`CleaningTaskResponse`)
+   * match `openapi.d.ts:4675` verbatim — the only synthesis is the snake_case
+   * to camelCase mapping the rest of the source already does for `assignTask`.
+   */
+  async cancelTask(
+    _tenantId: string,
+    taskId: string,
+    reason: string,
+  ): Promise<CleaningTask> {
+    const response: TaskResponse = await this.client.request(
+      "/api/v1/cleaning-tasks/{task_id}/cancel",
+      {
+        method: "POST",
+        pathParams: { task_id: taskId },
+        body: { reason },
+      },
+    );
+    return mapTask(response);
+  }
 }
