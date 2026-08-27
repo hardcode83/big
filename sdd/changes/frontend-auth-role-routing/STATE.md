@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/frontend-auth-role-routing
 implementation_sha: 8175322da3639e087404afb75814d976e482e3c0
-pr_number: 
-pr_url: 
-pr_state: 
+pr_number: 134
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/134
+pr_state: OPEN
 merge_evidence: 
 merge_sha: 
 ---
