@@ -1,16 +1,16 @@
 ---
 schema: 1
-state: ACTIVE
-local_review: PENDING
-repository:
-base_branch:
-head_branch:
-implementation_sha:
-pr_number:
-pr_url:
-pr_state:
-merge_evidence:
-merge_sha:
+state: LOCAL_VERIFIED
+local_review: APPROVED
+repository: 
+base_branch: 
+head_branch: 
+implementation_sha: d9bac2effb5ff6323f769cbf6808d9312f0c41b9
+pr_number: 
+pr_url: 
+pr_state: 
+merge_evidence: 
+merge_sha: 
 ---
 
 # Change lifecycle
