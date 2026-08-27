@@ -129,13 +129,28 @@ describe("LoginForm", () => {
     expect(mocks.replace).not.toHaveBeenCalled();
   });
 
-  // R2 #1 — CLEANER redirects to the welcome page (not directly to /cleaner);
-  // the welcome page itself routes to /cleaner via roleHome().
+  // R2 #1 — CLEANER/TECHNICIAN redirect to the welcome page (not directly to
+  // their shell); the welcome page itself routes to the shell via roleHome().
+  //
+  // The fixture is honest about the closure-staleness path D-R2-1 fixed:
+  // `mocks.user` stays `null` for the first render (the real anonymous state
+  // of a fresh login) and `mocks.login` resolves with the freshly-fetched
+  // `CurrentUser`. The previous incarnation pre-seeded `mocks.user = {role: …}`
+  // before `renderForm()`, which masked the bug: the closure of `handleSubmit`
+  // already held the post-login role, the code routed from there, and the test
+  // was green against a path that production never executed.
   it("redirects a CLEANER to /welcome?role=CLEANER when no returnTo is present", async () => {
     window.history.replaceState({}, "", "/login");
     mocks.url = "/login";
-    mocks.user = { role: "CLEANER" };
-    mocks.login.mockResolvedValue(undefined);
+    mocks.user = null;
+    mocks.login.mockResolvedValue({
+      id: "user-1",
+      email: "cleaner@example.com",
+      name: "Cleaner",
+      preferred_language: "es",
+      role: "CLEANER",
+      tenant_id: "tenant-1",
+    });
     renderForm();
 
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
@@ -147,8 +162,15 @@ describe("LoginForm", () => {
   it("redirects a TECHNICIAN to /welcome?role=TECHNICIAN when no returnTo is present", async () => {
     window.history.replaceState({}, "", "/login");
     mocks.url = "/login";
-    mocks.user = { role: "TECHNICIAN" };
-    mocks.login.mockResolvedValue(undefined);
+    mocks.user = null;
+    mocks.login.mockResolvedValue({
+      id: "user-1",
+      email: "tech@example.com",
+      name: "Tech",
+      preferred_language: "es",
+      role: "TECHNICIAN",
+      tenant_id: "tenant-1",
+    });
     renderForm();
 
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));
@@ -160,8 +182,15 @@ describe("LoginForm", () => {
   it("redirects a TENANT_OWNER directly to /dashboard (not via /welcome)", async () => {
     window.history.replaceState({}, "", "/login");
     mocks.url = "/login";
-    mocks.user = { role: "TENANT_OWNER" };
-    mocks.login.mockResolvedValue(undefined);
+    mocks.user = null;
+    mocks.login.mockResolvedValue({
+      id: "user-1",
+      email: "owner@example.com",
+      name: "Owner",
+      preferred_language: "es",
+      role: "TENANT_OWNER",
+      tenant_id: "tenant-1",
+    });
     renderForm();
 
     fireEvent.click(screen.getByRole("button", { name: "Entrar" }));

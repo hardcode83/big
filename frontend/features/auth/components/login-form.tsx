@@ -70,12 +70,18 @@ export function LoginForm() {
     event.preventDefault();
     setError(null);
     try {
-      await login(email, password);
+      // `login()` returns the freshly-fetched `CurrentUser`. Reading from the
+      // render-closure `user` here would route on the pre-login state (null),
+      // because React state updates happen on the next render, not within the
+      // in-flight handler. R2 #1 was silently bypassed for fresh CLEANER and
+      // TECHNICIAN logins before this return value existed.
+      const loggedInUser = await login(email, password);
+      const role = loggedInUser?.role;
       const next = returnTo
         ? safeReturnTo(returnTo)
-        : (user?.role === "CLEANER" || user?.role === "TECHNICIAN")
-          ? `/welcome?role=${user.role}`
-          : roleHome(user?.role);
+        : role === "CLEANER" || role === "TECHNICIAN"
+          ? `/welcome?role=${role}`
+          : roleHome(role);
       router.replace(next);
     } catch (cause) {
       setError(cause instanceof ApiError && cause.code === "INVALID_CREDENTIALS"

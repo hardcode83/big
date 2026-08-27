@@ -174,10 +174,20 @@ Acceptance criteria:
 6. THE SYSTEM SHALL abortar la llamada a `/auth/me` con `signal: AbortSignal.timeout(2000)`
    para que la raíz nunca tarde más de 2 s en responder cuando hay
    cookie presente.
-7. THE SYSTEM SHALL añadir el segmento `/auth/me` con `cookies: { forward: 'include' }`
-   en el cliente HTTP centralizado para que el bearer llegue al backend
-   desde Server Components — cambio mínimo de configuración, sin tocar
-   el contrato del endpoint.
+7. THE SYSTEM SHALL llamar a `/auth/me` desde el Server Component
+   `RootPage` reenviando las cookies de la petición entrante para que el
+   bearer JWT en memoria del navegador llegue al backend. *Mecanismo
+   implementado*: ver `design.md` D4 — la propuesta original nombraba el
+   cliente HTTP centralizado con `cookies: { forward: 'include' }`, pero D4
+   lo sustituyó por `serverFetch` (`frontend/lib/api/server-client.ts`),
+   server-only, que lee `BACKEND_INTERNAL_URL` directamente y reenvía el
+   header `Cookie` desde `next/headers`. La diferencia operativa es que
+   `serverFetch` evita el hop por el proxy `/api/[...path]` y los
+   headers que el proxy reescribe (R5 de `ingress-https-dev`) — pero el
+   contrato externo (forward de cookies para `/auth/me`, sin tocar el
+   endpoint) se mantiene, y la steering `frontend-foundation.md` que
+   limita los lectores de `BACKEND_INTERNAL_URL` a `app/` se respeta
+   porque el lector vive en `lib/`.
 
 ### R5 — Botón «Volver a la landing» sale del bucle con cookie huérfana
 

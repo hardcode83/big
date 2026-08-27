@@ -39,7 +39,24 @@ export type AuthStatus =
 export interface AuthContextValue {
   user: CurrentUser | null;
   status: AuthStatus;
-  login: (email: string, password: string) => Promise<void>;
+  /**
+   * Authenticate against `/auth/login` + `/auth/me` and resolve with the
+   * fetched `CurrentUser`. The promise REJECTS on any 4xx/5xx/network error
+   * after the local state has been reset to `error` (no tokens retained,
+   * presence cookie cleared).
+   *
+   * The return value is what `LoginForm` uses to route on first paint — the
+   * render-closure `user` is still `null` at the moment `handleSubmit` resumes
+   * after `await login(...)`, because React state updates happen on the next
+   * render, not within the in-flight handler. Reading from this resolved value
+   * is the only path that avoids the closure-staleness bug that R2 #1
+   * describes (`/welcome` was being bypassed for fresh CLEANER/TECHNICIAN
+   * logins because the closure held `user=null`). See the integration test
+   * `login-form.test.tsx` — the CLEANER/TECHNICIAN cases set `mocks.user=null`
+   * before render and resolve `mocks.login` with the role, exercising the
+   * production path.
+   */
+  login: (email: string, password: string) => Promise<CurrentUser | null>;
   logout: () => Promise<void>;
   refresh: () => Promise<boolean>;
 }
@@ -104,6 +121,10 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         const currentUser = await clients.apiClient.request("/api/v1/auth/me");
         setUser(currentUser);
         setStatus("authenticated");
+        // Return the resolved user so callers (notably `LoginForm`) can route
+        // on first paint without depending on the closure of `useAuth().user`,
+        // which is still `null` until React re-renders.
+        return currentUser;
       } catch (error) {
         clearSessionTokens();
         clearSessionPresent();
