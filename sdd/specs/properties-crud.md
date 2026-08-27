@@ -183,7 +183,13 @@ propiedad está dentro de su tenant.
   comportamiento se especifica donde se define el hecho que sirve, en
   [`celery-jobs.md`](celery-jobs.md) §Desajustes entre el calendario y el estado, para no
   duplicarlo. Se nombra aquí porque quien busque la superficie de lectura de `properties` la
-  encontraría incompleta sin ella.
+  encontraría incompleta sin ella. Cada entrada lleva los seis campos originales —
+  `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state`, `due_since` —
+  más los dos ids opcionales que el dashboard necesita para llamar a las mutaciones
+  (`cleaning_task_id: uuid | null` cuando `blocking_state ∈ {AWAITING_CLEANING, CLEANING_IN_PROGRESS,
+  CLEANING_SCHEDULED}`, `incident_id: uuid | null` en otro caso); los dos se resuelven en una sola
+  pasada batch por página y tenant-scoped, y `tenant_id` solo se lee del token verificado (el query
+  model `BlockedTransitionListQuery` rechaza `?tenant_id=…` con `422`).
 
 **Cómo se sostiene la garantía, que no es uniforme y conviene no describir como si lo fuera**:
 `update_details` y `set_wifi_password` nombran exactamente lo que escriben, de modo que sus

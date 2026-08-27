@@ -299,10 +299,34 @@
             "title": "Blocking State",
             "type": "string"
           },
+          "cleaning_task_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleaning Task Id"
+          },
           "due_since": {
             "format": "date-time",
             "title": "Due Since",
             "type": "string"
+          },
+          "incident_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Incident Id"
           },
           "property_code": {
             "title": "Property Code",
@@ -5020,6 +5044,17 @@
               }
             ]
           },
+          "guest_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Full Name"
+          },
           "guest_id": {
             "anyOf": [
               {
@@ -5086,6 +5121,28 @@
             "format": "uuid",
             "title": "Property Id",
             "type": "string"
+          },
+          "property_internal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Internal Code"
+          },
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
           },
           "special_requests": {
             "anyOf": [
@@ -5277,6 +5334,17 @@
             ],
             "title": "Gross Amount"
           },
+          "guest_full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Guest Full Name"
+          },
           "guest_id": {
             "anyOf": [
               {
@@ -5343,6 +5411,28 @@
             "format": "uuid",
             "title": "Property Id",
             "type": "string"
+          },
+          "property_internal_code": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Internal Code"
+          },
+          "property_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Property Name"
           },
           "special_requests": {
             "anyOf": [

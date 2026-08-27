@@ -15,8 +15,11 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.cleaning.infrastructure.repositories import SqlAlchemyCleaningTaskRepository
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
+from app.maintenance.infrastructure.repositories import SqlAlchemyIncidentReader
+from app.properties.application.action_id_resolver import ActionIdResolver
 from app.properties.application.property_admin import (
     CreatePropertyUseCase,
     GetPropertyStateUseCase,
@@ -59,12 +62,24 @@ def get_property_state_use_case(session: SessionDep) -> GetPropertyStateUseCase:
 
 
 def get_list_blocked_transitions_use_case(session: SessionDep) -> ListBlockedTransitionsUseCase:
-    """No unit of work: the collection is derived on read and writes nothing (design D5)."""
+    """No unit of work: the collection is derived on read and writes nothing (design D5).
+
+    The two extra dependencies (`action_ids` and its two ports) come from
+    `blocked-transition-response-ids` (R3): they turn the bare stall into a row whose
+    `cleaning_task_id` / `incident_id` point at the resource the dashboard's action button
+    would call. Tenant scope is the verified token's `tenant_id`, propagated by FastAPI
+    `Depends(get_authenticated_request)` to the listener of `app/core/db.py`, and the two
+    ports receive it as an explicit argument here.
+    """
     return ListBlockedTransitionsUseCase(
         properties=SqlAlchemyPropertyRepository(session),
         reservations=SqlAlchemyReservationRepository(session),
         transitions=SqlAlchemyPropertyStateTransitionRepository(session),
         configs=SqlAlchemyTenantConfigRepository(session),
+        action_ids=ActionIdResolver(
+            cleaning_tasks=SqlAlchemyCleaningTaskRepository(session),
+            incidents=SqlAlchemyIncidentReader(session),
+        ),
     )
 
 

@@ -4,17 +4,13 @@ import Link from "next/link";
 import { useState } from "react";
 import { useTranslation } from "react-i18next";
 
+import { TONE_BADGE_CLASS } from "@/lib/ui/status-tone";
+
 import type { IncidentFilters } from "../../data";
 import { mapIncidentsError } from "../../lib/error-mapping";
+import { severityColorGroup } from "../../lib/severity-tone";
 import { useIncidents } from "../../hooks/use-incidents";
 import { IncidentsFilters } from "./incidents-filters";
-
-const SEVERITY_COLOR: Record<string, string> = {
-  LOW: "bg-gray-100 text-gray-700",
-  MEDIUM: "bg-blue-100 text-blue-700",
-  HIGH: "bg-amber-100 text-amber-800",
-  CRITICAL: "bg-red-100 text-red-700",
-};
 
 function truncate(value: string, max: number): string {
   return value.length > max ? `${value.slice(0, max)}…` : value;
@@ -117,9 +113,7 @@ export function IncidentsView() {
               <tr key={row.id}>
                 <td>
                   <span
-                    className={
-                      SEVERITY_COLOR[row.severity] ?? "bg-gray-100 text-gray-700"
-                    }
+                    className={TONE_BADGE_CLASS[severityColorGroup(row.severity)]}
                   >
                     {t(`incidents:severity.${row.severity}`)}
                   </span>

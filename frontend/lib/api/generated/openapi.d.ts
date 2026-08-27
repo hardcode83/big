@@ -970,11 +970,15 @@ export interface components {
     BlockedTransitionResponse: {
       /** Blocking State */
       blocking_state: string;
+      /** Cleaning Task Id */
+      cleaning_task_id?: string | null;
       /**
        * Due Since
        * Format: date-time
        */
       due_since: string;
+      /** Incident Id */
+      incident_id?: string | null;
       /** Property Code */
       property_code: string;
       /**
@@ -3082,6 +3086,8 @@ export interface components {
       /** Gross Amount */
       gross_amount: string | null;
       guest?: components["schemas"]["GuestSummaryResponse"] | null;
+      /** Guest Full Name */
+      guest_full_name?: string | null;
       /** Guest Id */
       guest_id: string | null;
       /**
@@ -3104,6 +3110,10 @@ export interface components {
        * Format: uuid
        */
       property_id: string;
+      /** Property Internal Code */
+      property_internal_code?: string | null;
+      /** Property Name */
+      property_name?: string | null;
       /** Special Requests */
       special_requests: string | null;
       status: components["schemas"]["ReservationStatus"];
@@ -3168,6 +3178,8 @@ export interface components {
       external_pms_id: string | null;
       /** Gross Amount */
       gross_amount: string | null;
+      /** Guest Full Name */
+      guest_full_name?: string | null;
       /** Guest Id */
       guest_id: string | null;
       /**
@@ -3190,6 +3202,10 @@ export interface components {
        * Format: uuid
        */
       property_id: string;
+      /** Property Internal Code */
+      property_internal_code?: string | null;
+      /** Property Name */
+      property_name?: string | null;
       /** Special Requests */
       special_requests: string | null;
       status: components["schemas"]["ReservationStatus"];

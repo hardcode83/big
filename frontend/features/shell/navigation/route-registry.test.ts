@@ -6,8 +6,11 @@ import {
   type ShellRouteDescriptor,
 } from "@/features/shell/navigation/route-registry";
 
-/** The exact surfaces defined by PRD §24 (independent list for coverage). */
+/** The exact surfaces defined by PRD §24, plus the public landing added by
+ * `landing-public` (R3). The landing is its own PRD entry, not a re-use of
+ * `/login`, so this list grows by exactly one when that change lands. */
 const PRD_24_SURFACES = [
+  "/",
   "/login",
   "/forgot-password",
   "/dashboard",
@@ -20,6 +23,7 @@ const PRD_24_SURFACES = [
   "/incidents",
   "/incidents/[id]",
   "/conversations",
+  "/conversations/[id]",
   "/pricing",
   "/statements",
   "/reviews",

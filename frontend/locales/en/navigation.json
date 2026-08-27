@@ -46,6 +46,10 @@
       "title": "Conversations",
       "description": "Message inbox with guests and team."
     },
+    "conversation-detail": {
+      "title": "Conversation detail",
+      "description": "Message thread and manual reply."
+    },
     "approvals": {
       "title": "Approvals",
       "description": "Actions awaiting approval."
@@ -97,6 +101,10 @@
     "guest": {
       "title": "Guest portal",
       "description": "Instructions and support for your stay."
+    },
+    "landing": {
+      "title": "AutoHostAI",
+      "description": "Public product page, on one operational console."
     }
   },
   "more": "More",
@@ -108,8 +116,19 @@
   "expandSidebar": "Expand sidebar",
   "collapseSidebar": "Collapse sidebar",
   "localeSwitcher": {
-    "label": "Language",
     "es": "Español",
-    "en": "English"
+    "en": "English",
+    "switchTo": "Switch language to {{language}}"
+  },
+  "themeSwitcher": {
+    "label": "Theme",
+    "light": "Light",
+    "dark": "Dark",
+    "system": "Follow the system"
+  },
+  "userMenu": {
+    "triggerLabel": "User menu",
+    "logout": "Sign out",
+    "anonymous": "User"
   }
 }

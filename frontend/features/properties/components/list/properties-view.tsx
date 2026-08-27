@@ -122,7 +122,7 @@ function PropertyCardRow({ property }: { property: PropertySummaryDto }) {
   ];
 
   return (
-    <article className="flex flex-col gap-2 rounded-lg border bg-card p-3 shadow-sm">
+    <article className="flex flex-col gap-2 rounded-lg border bg-surface p-3 shadow-sm">
       <h3 className="text-base font-semibold">
         <NameLink property={property} />
       </h3>

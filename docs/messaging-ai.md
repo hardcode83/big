@@ -224,4 +224,10 @@ frases que un cambio bienintencionado usaría.
   parámetro `since`, y los trae quien los necesite.
 - **La bandeja no tiene índice** para su orden (`last_message_at DESC`). A la escala del MVP
   es irrelevante; se revisa cuando un tenant pase de unos pocos miles de conversaciones.
-- **No hay frontend todavía**: la bandeja de `/conversations` es de `conversations-inbox`.
+- **El seed de demo no siembra conversaciones**: `backend/app/cli/seed_demo.py` no crea
+  `Conversation` ni `Message` (no existe `_seed_conversations` ni equivalente; las conversaciones
+  las crean el pipeline de `messaging-ai` R4, el portal del huésped o una transcripción manual).
+  `make seed-demo` deja la bandeja legítimamente vacía — es el estado vacío localizado del
+  inbox, no un fallo. La bandeja en `/conversations` y `/conversations/[id]` (**change
+  `conversations-inbox`**) sigue siendo funcional y se demuestra creando una conversación por
+  la API o transcribiendo un mensaje desde el panel antes de abrir el listado.

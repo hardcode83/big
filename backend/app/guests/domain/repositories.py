@@ -17,7 +17,7 @@ repository instance cannot disagree with its caller about which tenant it serves
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 from typing import Protocol
 
 from app.guests.domain.entities import Guest
@@ -30,7 +30,7 @@ class GuestRepository(Protocol):
         ...
 
     async def list_for_ids(
-        self, tenant_id: uuid.UUID, guest_ids: Sequence[uuid.UUID]
+        self, tenant_id: uuid.UUID, guest_ids: Collection[uuid.UUID]
     ) -> Sequence[GuestSummary]:
         """The guests of a batch of reservations, in ONE query (`dashboard-api` R1.7).
 
@@ -44,6 +44,11 @@ class GuestRepository(Protocol):
 
         An empty `guest_ids` returns an empty sequence without querying. Ids that do not
         resolve within the tenant are simply absent; the caller keys by `id`.
+
+        `Collection`, not `Sequence`, so a caller that deduplicated the input first is free
+        to pass a `set` — the symmetry with `PropertyRepository.list_for_ids`
+        (`backend/app/properties/domain/repositories.py`, `reservation-property-identity` D2)
+        that arrived by the same change.
         """
         ...
 

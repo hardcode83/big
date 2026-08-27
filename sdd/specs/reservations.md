@@ -84,6 +84,90 @@ no las dispara; aporta el dato del que cuelgan.
   `Reservation` no se serializa nunca en esa proyección.
 - THE SYSTEM SHALL tratar una reserva de otro tenant y una inexistente como el mismo `None` en esa
   proyección, de modo que su rama de degradación no sea un oráculo de existencia.
+- WHEN `GET /api/v1/reservations` o `GET /api/v1/reservations/{id}` responden `200`, THE
+  SYSTEM SHALL incluir, además del `property_id` y `guest_id` ya en contrato, los campos
+  derivados `property_name` (string o `null`), `property_internal_code` (string o `null`)
+  y `guest_full_name` (string o `null`) por cada elemento. El conjunto de campos derivados
+  lo fija un test de pin (`backend/tests/reservations/test_response_identity_fields.py`,
+  decisión D6) y SHALL NOT crecer sin que ese mismo test lo declare.
+- IF el `property_id` (o el `guest_id`) de un elemento no resuelve dentro del tenant del
+  token, THEN THE SYSTEM SHALL devolver los campos derivados correspondientes como `null`
+  con su clave, y SHALL NOT responder `404` por ese motivo — la entidad principal es la
+  reserva, no su FK. El resto de la reserva (`check_in_date`, `gross_amount`, `channel`,
+  etc.) SHALL seguir devolviéndose como hasta ahora. Ni `property_id` ni `guest_id` SHALL
+  dejar de aparecer en la respuesta: la nueva capa se añade, no se sustituye.
+  La rama de degradación parcial es la misma forma que
+  [`cleaner-task-context`](cleaner-task-context.md) usa para su reserva colgante de
+  propiedad, y la diferencia de comportamiento con [`tech-incident-context`](tech-incident-context.md)
+  —donde la propiedad es el cuerpo de la proyección y la degradación SÍ es `404`— está
+  fechada, justificada en la decisión D5 del design, y atribuida a la asimetría "la
+  entidad principal es la reserva, no la propiedad".
+- THE SYSTEM SHALL poblar los tres campos derivados en el **servidor**, leyendo la
+  `Property` y el `Guest` referenciados en la misma composición con la consulta del
+  listado (no en `JOIN` conjunto) y un `tenant_id` explícito por consulta (decisión D2
+  de [`dashboard-api`](dashboard-api.md)). El cliente SHALL NOT necesitar pedir
+  `/properties` ni `/guests` para resolver estas etiquetas, y SHALL NOT ampliar el
+  conjunto de filas visibles al hacerlo. La composición por lotes usa una `Property` y
+  un `Guest` por fila, pero un único `list_for_ids` por repositorio, sin N+1 sobre la
+  página (decisión D3); el techo constante lo demuestra
+  `backend/tests/reservations/test_list_identity_queries.py`.
+### Identidad legible de la vivienda y del huésped
+
+- WHEN `GET /api/v1/reservations` responde `200`, THE SYSTEM SHALL incluir en cada
+  elemento, además del actual `property_id`, los campos `property_name` (string o
+  `null`) y `property_internal_code` (string o `null`).
+- WHEN `GET /api/v1/reservations/{id}` responde `200`, THE SYSTEM SHALL devolver los
+  mismos `property_name` y `property_internal_code` que fija el bullet anterior para la
+  lista — el detalle no queda en peor situación que la lista.
+- WHEN `GET /api/v1/reservations` responde `200`, THE SYSTEM SHALL incluir en cada
+  elemento, además del actual `guest_id`, el campo `guest_full_name` (string o `null`).
+- WHEN `GET /api/v1/reservations/{id}` responde `200`, THE SYSTEM SHALL devolver el
+  mismo `guest_full_name` que el bullet anterior para la lista.
+- IF el `property_id` (o el `guest_id`) de una fila no resuelve dentro del tenant del
+  token, THEN THE SYSTEM SHALL devolver los campos derivados correspondientes como
+  `null` con su clave, y SHALL NOT responder `404` por ese motivo — la entidad principal
+  es la reserva, no su FK. El resto de la respuesta SHALL seguir devolviéndose, sin
+  `5xx` ni `404`. El test que pina este comportamiento es
+  `backend/tests/reservations/test_identity_isolation.py` (decisiones D5 y D7 del
+  design).
+- IF `guest_id` es `null` (reserva manual sin huésped), THEN THE SYSTEM SHALL devolver
+  `guest_full_name` como `null` con su clave.
+- THE SYSTEM SHALL mantener `property_id` y `guest_id` en la respuesta: los campos
+  derivados se añaden, no se sustituyen. La maqueta del 2026-08-23
+  (`docs/design/2026-08-23-stitch-export/README.md`) y
+  `frontend/features/reservations/data/dto.ts:76` siguen dependiendo del identificador.
+- THE SYSTEM SHALL poblar los tres campos derivados leyendo la `Property` y el `Guest`
+  referenciados en la **misma transacción** que carga la reserva, y SHALL NOT exigir al
+  cliente una segunda petición para resolver esas etiquetas. Mismo principio que
+  [`cleaner-task-context`](cleaner-task-context.md) y
+  [`tech-incident-context`](tech-incident-context.md) (decisión R5.1).
+- THE SYSTEM SHALL componer la lectura con un `tenant_id` explícito por consulta, en
+  lugar de un `JOIN` conjunto propio — eso convertiría al `sqlalchemy` de `application/`
+  en un segundo escritor del scope de tenant, y un `WHERE` adicional dentro de un `JOIN`
+  es la grieta que [`guest-portal-api`](guest-portal-api.md) tuvo que cerrar a mano
+  (panel de seguridad de su sección 6).
+- THE SYSTEM SHALL demostrar el cruce de tenant con tests propios (R5.3, D7): una
+  `reservation` cuya `property_id` apunta a una `property` de otro tenant SHALL devolver
+  los campos derivados como `null` con su clave, no los valores cruzados, y SHALL NOT
+  degradar a `5xx`. El cruce de tenant por `guest_id` está estructuralmente prohibido por
+  la constraint `fk_reservations_guest_within_tenant` que `guest-portal-api` añadió a
+  `backend/alembic/versions/e7a3c419d82b_guest_portal_api.py:98`, así que el
+  comportamiento equivalente se reduce a `guest_id IS NULL` o `guest_id` que no
+  resuelve dentro del tenant — sin tests propios para el caso imposible, porque no se
+  puede ejercitar sin violar la constraint; ver
+  `sdd/changes/reservation-property-identity/BLOCKED.md` para la resolución de esa
+  asimetría.
+- THE SYSTEM SHALL fijar el conjunto de campos derivados con un test de pin
+  (`backend/tests/reservations/test_response_identity_fields.py`, decisión D6), de modo
+  que añadir uno (dirección de la propiedad, email del huésped, etc.) sea un acto
+  deliberado y no una deriva. Misma forma que
+  [`cleaner-task-context`](cleaner-task-context.md) §"La proyección nunca lleva" y
+  [`tech-incident-context`](tech-incident-context.md) §"Lo que la proyección nunca lleva".
+- THE SYSTEM SHALL componer la proyección con un batch reader por repositorio (un
+  único `SELECT ... WHERE tenant_id = :tenant_id AND id = ANY(:ids)` en
+  `properties.list_for_ids` y análogamente en `guests.list_for_ids`), no con una llamada
+  por fila. El techo constante lo demuestra
+  `backend/tests/reservations/test_list_identity_queries.py` (decisión D3).
 
 ### Edición y cancelación
 

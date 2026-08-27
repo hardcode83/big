@@ -20,13 +20,19 @@ import type { components } from "@/lib/api/generated/openapi";
  * The card never paints a button that would `403`: a row whose `ActionKind`
  * resolves to `resolve-incident` shows the button only when this mirror says
  * `true`.
+ *
+ * `messaging-ai` D17 mirrors `MANAGE_CONVERSATIONS` here too: the manager
+ * operates the inbox while the owner reads it, and granting the owner the
+ * composer that the backend would then 403 is exactly the failure mode the
+ * partial mirror exists to prevent.
  */
 type UserRole = components["schemas"]["UserRole"];
 
 export type Permission =
   | "MANAGE_CLEANING_TASKS"
   | "MANAGE_PRICE_RECOMMENDATIONS"
-  | "EXECUTE_INCIDENTS";
+  | "EXECUTE_INCIDENTS"
+  | "MANAGE_CONVERSATIONS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -38,11 +44,14 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   // the shape of `MANAGE_CLEANING_TASKS` would leave the owner staring at a
   // queue she cannot decide, with the buttons hidden by the frontend while the
   // backend was granting them.
+  // `MANAGE_CONVERSATIONS` is the other side of that rule (messaging-ai D17):
+  // the owner reads but does not write, so she is intentionally absent here.
   TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS"],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
     "MANAGE_PRICE_RECOMMENDATIONS",
     "EXECUTE_INCIDENTS",
+    "MANAGE_CONVERSATIONS",
   ],
   CLEANER: [],
   TECHNICIAN: [],

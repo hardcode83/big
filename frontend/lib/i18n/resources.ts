@@ -16,10 +16,14 @@ import esIncidents from "@/locales/es/incidents.json";
 import enIncidents from "@/locales/en/incidents.json";
 import esCleaning from "@/locales/es/cleaning.json";
 import enCleaning from "@/locales/en/cleaning.json";
+import esConversations from "@/locales/es/conversations.json";
+import enConversations from "@/locales/en/conversations.json";
 import esProperties from "@/locales/es/properties.json";
 import enProperties from "@/locales/en/properties.json";
 import esPricing from "@/locales/es/pricing.json";
 import enPricing from "@/locales/en/pricing.json";
+import esLanding from "@/locales/es/landing.json";
+import enLanding from "@/locales/en/landing.json";
 
 /** i18next namespaces (design D13). */
 export const NAMESPACES = [
@@ -32,8 +36,10 @@ export const NAMESPACES = [
   "reservations",
   "incidents",
   "cleaning",
+  "conversations",
   "properties",
   "pricing",
+  "landing",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -49,8 +55,10 @@ export const resources = {
     reservations: esReservations,
     incidents: esIncidents,
     cleaning: esCleaning,
+    conversations: esConversations,
     properties: esProperties,
     pricing: esPricing,
+    landing: esLanding,
   },
   en: {
     common: enCommon,
@@ -62,7 +70,9 @@ export const resources = {
     reservations: enReservations,
     incidents: enIncidents,
     cleaning: enCleaning,
+    conversations: enConversations,
     properties: enProperties,
     pricing: enPricing,
+    landing: enLanding,
   },
 } as const;

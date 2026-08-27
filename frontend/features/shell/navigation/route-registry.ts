@@ -188,6 +188,15 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     order: 4,
   },
   {
+    id: "conversation-detail",
+    pattern: "/conversations/[id]",
+    ...keysFor("conversation-detail"),
+    breadcrumbKeys: crumbs("conversations", "conversation-detail"),
+    icon: "MessagesSquare",
+    profile: "workspace",
+    match: "exact",
+  },
+  {
     id: "approvals",
     pattern: "/approvals",
     href: "/approvals",
@@ -260,6 +269,21 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     match: "exact",
   },
   // ---- Public ----
+  {
+    id: "landing",
+    pattern: "/",
+    href: "/",
+    titleKey: "landing:meta.title",
+    descriptionKey: "landing:meta.description",
+    // The shell metadata uses the same landing copy as the page body so the
+    // SERP card and the page agree on what the visitor is about to read.
+    metadataTitleKey: "landing:meta.title",
+    metadataDescriptionKey: "landing:meta.description",
+    breadcrumbKeys: crumbs("landing"),
+    icon: "LogIn",
+    profile: "public",
+    match: "exact",
+  },
   {
     id: "login",
     pattern: "/login",

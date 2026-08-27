@@ -98,6 +98,13 @@ ENTITY_PRICING_RULE = "PRICING_RULE"
 # scan over `changes` instead of a lookup on
 # `ix_audit_logs_tenant_id_entity_type_entity_id`.
 ENTITY_PRICE_RECOMMENDATION = "PRICE_RECOMMENDATION"
+# `demo-tenant-audit-retention`. The purge is not a mutation of any other table — its rows
+# vanish — so it does not borrow the entity it acted on (`ENTITY_TENANT`, the obvious
+# candidate): `entity_id` is the resource modified, not the scope of the command, and the
+# `ChangeSet` for `TENANT` would have no field for `deleted_count` or `cutoff`. Its own
+# entity type and its own allowlist entry, exactly like the other writer-less resources the
+# vocabulary already enumerates.
+ENTITY_AUDIT_LOG = "AUDIT_LOG"
 
 # action — the operation that produced the row.
 USER_CREATED = "USER_CREATED"
@@ -337,6 +344,11 @@ PRICE_RECOMMENDATION_DECIDED = "PRICE_RECOMMENDATION_DECIDED"
 PRICE_RECOMMENDATION_APPLIED_EXTERNAL = "PRICE_RECOMMENDATION_APPLIED_EXTERNAL"
 PRICE_RECOMMENDATIONS_GENERATED = "PRICE_RECOMMENDATIONS_GENERATED"
 
+# `demo-tenant-audit-retention`. One action for the purge, and no other: the demo reset's
+# `purge-audit` phase is the only operation that mints it, and an action for an operation
+# nothing else performs is the speculative vocabulary this module's docstring argues against.
+AUDIT_LOG_PURGED = "AUDIT_LOG_PURGED"
+
 ENTITY_TYPES = frozenset(
     {
         ENTITY_USER,
@@ -357,6 +369,7 @@ ENTITY_TYPES = frozenset(
         ENTITY_OWNER_APPROVAL,
         ENTITY_PRICING_RULE,
         ENTITY_PRICE_RECOMMENDATION,
+        ENTITY_AUDIT_LOG,
     }
 )
 
@@ -419,5 +432,6 @@ ACTIONS = frozenset(
         PRICE_RECOMMENDATION_DECIDED,
         PRICE_RECOMMENDATION_APPLIED_EXTERNAL,
         PRICE_RECOMMENDATIONS_GENERATED,
+        AUDIT_LOG_PURGED,
     }
 )

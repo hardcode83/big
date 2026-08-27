@@ -39,6 +39,14 @@ export interface PublicRuntimeConfig {
    * (app-version-visibility public identity contract).
    */
   buildCommitShort: string;
+  /**
+   * Absolute URL of the deployed app, or `""` when no public URL is configured (dev,
+   * local images without a public origin). Used by the indexable landing metadata to
+   * build `metadataBase`, `alternates.canonical` and the OG `url` — `landing-public`
+   * design D5. Vetted here so anything off-shape degrades to `""` and the landing
+   * falls back to the no-public-URL posture.
+   */
+  appUrl: string;
 }
 
 /**
@@ -136,6 +144,20 @@ function allowlistedShape(raw: string | undefined, shape: RegExp): string {
   return shape.test(value) ? value : "";
 }
 
+const ABSOLUTE_URL_PATTERN = /^https?:\/\/[^\s/?#]+(?:\/[^\s?#]*)?$/;
+
+function allowlistedAppUrl(raw: string | undefined): string {
+  const value = (raw ?? "").trim();
+  if (!ABSOLUTE_URL_PATTERN.test(value)) return "";
+  try {
+    const parsed = new URL(value);
+    if (parsed.protocol !== "http:" && parsed.protocol !== "https:") return "";
+    return parsed.toString();
+  } catch {
+    return "";
+  }
+}
+
 export function buildPublicRuntimeConfig(): PublicRuntimeConfig {
   return {
     apiBaseUrl: process.env.NEXT_PUBLIC_API_BASE_URL ?? "",
@@ -151,5 +173,6 @@ export function buildPublicRuntimeConfig(): PublicRuntimeConfig {
       process.env.NEXT_PUBLIC_BUILD_COMMIT_SHORT,
       BAKED_COMMIT_SHORT,
     ),
+    appUrl: allowlistedAppUrl(process.env.NEXT_PUBLIC_APP_URL),
   };
 }

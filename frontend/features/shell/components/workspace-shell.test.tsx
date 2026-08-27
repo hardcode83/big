@@ -13,7 +13,13 @@ import { WorkspaceShell } from "@/features/shell/components/workspace-shell";
 import { useShellUiStore } from "@/features/shell/state/use-shell-ui-store";
 
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  // `LocaleSwitcher` calls `router.refresh()` after writing the locale cookie
+  // (public-zone-hardening R1 + design D1). The shell tests never trigger the
+  // switcher, so a no-op spy is enough to keep the import graph intact.
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ status: "authenticated" }),
 }));
@@ -138,7 +144,15 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
 
   it("renders the locale switcher in the topbar", async () => {
     await renderShell();
-    expect(screen.getByRole("group", { name: "Idioma" })).toBeInTheDocument();
+    // The locale control became a single action button on 2026-08-24, so there
+    // is no longer a `role="group"` named «Idioma» — its accessible name now
+    // states what pressing it does.
+    expect(
+      screen.getByRole("button", { name: "Cambiar idioma a English" }),
+    ).toBeInTheDocument();
+    // And the theme control sits beside it, which is what this assertion is
+    // really guarding: that the topbar's default `end` slot is mounted.
+    expect(screen.getByRole("group", { name: "Tema" })).toBeInTheDocument();
   });
 
   it("opens the More sheet, closes on Escape and returns focus to the trigger", async () => {

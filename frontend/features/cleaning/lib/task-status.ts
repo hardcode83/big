@@ -47,8 +47,15 @@ const STATUS_COLOR_GROUP: Record<CleaningTaskStatus, StatusColorGroup> = {
  * Its twin was never in `features/dashboard/components/property-card.tsx`,
  * where this comment used to point: `properties-web` (design D2) had already
  * moved it to `components/property-state-badge.tsx`.
+ *
+ * `Readonly`, and that word is load-bearing: `TONE_BADGE_CLASS` is frozen, but
+ * TypeScript ignores `readonly` property modifiers when checking assignability,
+ * so annotating this alias as a plain `Record` silently widened the guarantee
+ * away — a write through THIS name compiled clean and only threw at runtime,
+ * while the same write through `TONE_BADGE_CLASS` was a compile error. Found by
+ * the section-7 security reviewer of `design-system-tokens`.
  */
-export const STATUS_BADGE_CLASS: Record<StatusColorGroup, string> =
+export const STATUS_BADGE_CLASS: Readonly<Record<StatusColorGroup, string>> =
   TONE_BADGE_CLASS;
 
 /** Grey for a status the union does not know, so a new backend status never crashes a row. */

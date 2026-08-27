@@ -1,63 +1,294 @@
 @import "tailwindcss";
 
 /*
- * Base design tokens for the Application Shell and shared states (design D2/D14).
- * Neutral placeholder palette only — no definitive branding or full design
- * system. Foreground/background pairs are chosen to meet WCAG AA contrast.
- * Dark mode follows the OS preference; a future theme change may override it.
+ * Design tokens — «Midnight Technical», from
+ * `docs/design/2026-08-23-stitch-export/DESIGN.md` (design D1/D2/D3/D9).
+ *
+ * Twenty-five colour tokens (15 core + 10 state) in three token-bearing blocks:
+ * light on `:root`, dark twice. The duplication is deliberate and the order of
+ * this file is what makes it work — `:root:not([data-theme="light"])` and
+ * `:root[data-theme="dark"]` tie at specificity (0,2,0), so the attribute block
+ * has to come after the media query to win. That is what lets the runtime theme
+ * beat `prefers-color-scheme` in BOTH directions without `!important`.
+ *
+ * `:root[data-theme="light"]` carries only `color-scheme`: it does not need to
+ * restate the light values, because excluding the media query via `:not()`
+ * already leaves `:root` as the winner.
+ *
+ * The duplication is guarded, not trusted: `globals.tokens.test.ts` asserts the
+ * three blocks declare the same set of names and that the two dark blocks
+ * declare identical values.
  */
 :root {
-  --background: oklch(1 0 0);
-  --foreground: oklch(0.205 0 0);
-  --muted: oklch(0.97 0 0);
-  --muted-foreground: oklch(0.44 0 0);
-  --primary: oklch(0.205 0 0);
-  --primary-foreground: oklch(0.985 0 0);
-  --secondary: oklch(0.97 0 0);
-  --secondary-foreground: oklch(0.205 0 0);
-  --accent: oklch(0.97 0 0);
-  --accent-foreground: oklch(0.205 0 0);
-  --border: oklch(0.922 0 0);
-  --input: oklch(0.922 0 0);
-  --ring: oklch(0.556 0 0);
-  --radius: 0.5rem;
+  color-scheme: light;
+
+  /* Core (15) */
+  --background: #eef1f7;
+  --foreground: #2c303a;
+  --surface: #f8fafd;
+  --surface-high: #ffffff;
+  --muted: #e2e7f1;
+  --muted-foreground: #525b6b;
+  --accent: #e2e7f1;
+  --accent-foreground: #2c303a;
+  --primary: #006b5f;
+  --primary-foreground: #ffffff;
+  --secondary: #dfe2ef;
+  --secondary-foreground: #2c303a;
+  --border: #d5dbe8;
+  --input: #6b7688;
+  --ring: #006b5f;
+
+  /* State (10) — the five PRD §9.1 families; graphic anchors at 3:1, text at 4.5:1 */
+  --state-success: #0f7a58;
+  --state-warning: #a4600a;
+  --state-error: #c92a2a;
+  --state-info: #0a72ad;
+  --state-neutral: #64748B;
+  --state-success-text: #065f46;
+  --state-warning-text: #7c4a04;
+  --state-error-text: #991b1b;
+  --state-info-text: #0b5177;
+  --state-neutral-text: #3f4a5a;
 }
 
 @media (prefers-color-scheme: dark) {
-  :root {
-    --background: oklch(0.145 0 0);
-    --foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
-    --muted-foreground: oklch(0.708 0 0);
-    --primary: oklch(0.985 0 0);
-    --primary-foreground: oklch(0.205 0 0);
-    --secondary: oklch(0.269 0 0);
-    --secondary-foreground: oklch(0.985 0 0);
-    --accent: oklch(0.269 0 0);
-    --accent-foreground: oklch(0.985 0 0);
-    --border: oklch(0.32 0 0);
-    --input: oklch(0.32 0 0);
-    --ring: oklch(0.556 0 0);
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+
+    /* Core (15) */
+    --background: #0f131c;
+    --foreground: #F8FAFC;
+    --surface: #181b25;
+    --surface-high: #1c2029;
+    --muted: #262a34;
+    --muted-foreground: #94A3B8;
+    --accent: #262a34;
+    --accent-foreground: #F8FAFC;
+    --primary: #70d8c8;
+    --primary-foreground: #003731;
+    --secondary: #3e495d;
+    --secondary-foreground: #aeb9d0;
+    --border: #262a34;
+    --input: #879390;
+    --ring: #70d8c8;
+
+    /* State (10) */
+    --state-success: #10B981;
+    --state-warning: #F59E0B;
+    --state-error: #EF4444;
+    --state-info: #38BDF8;
+    --state-neutral: #94A3B8;
+    --state-success-text: #6EE7B7;
+    --state-warning-text: #FCD34D;
+    --state-error-text: #FCA5A5;
+    --state-info-text: #7DD3FC;
+    --state-neutral-text: #CBD5E1;
   }
+}
+
+/* The runtime override. Must stay after the media query: same specificity, so
+ * file order decides (design D1). */
+:root[data-theme="light"] {
+  color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+  color-scheme: dark;
+
+  /* Core (15) */
+  --background: #0f131c;
+  --foreground: #F8FAFC;
+  --surface: #181b25;
+  --surface-high: #1c2029;
+  --muted: #262a34;
+  --muted-foreground: #94A3B8;
+  --accent: #262a34;
+  --accent-foreground: #F8FAFC;
+  --primary: #70d8c8;
+  --primary-foreground: #003731;
+  --secondary: #3e495d;
+  --secondary-foreground: #aeb9d0;
+  --border: #262a34;
+  --input: #879390;
+  --ring: #70d8c8;
+
+  /* State (10) */
+  --state-success: #10B981;
+  --state-warning: #F59E0B;
+  --state-error: #EF4444;
+  --state-info: #38BDF8;
+  --state-neutral: #94A3B8;
+  --state-success-text: #6EE7B7;
+  --state-warning-text: #FCD34D;
+  --state-error-text: #FCA5A5;
+  --state-info-text: #7DD3FC;
+  --state-neutral-text: #CBD5E1;
 }
 
 @theme inline {
   --color-background: var(--background);
   --color-foreground: var(--foreground);
+  --color-surface: var(--surface);
+  --color-surface-high: var(--surface-high);
   --color-muted: var(--muted);
   --color-muted-foreground: var(--muted-foreground);
+  --color-accent: var(--accent);
+  --color-accent-foreground: var(--accent-foreground);
   --color-primary: var(--primary);
   --color-primary-foreground: var(--primary-foreground);
   --color-secondary: var(--secondary);
   --color-secondary-foreground: var(--secondary-foreground);
-  --color-accent: var(--accent);
-  --color-accent-foreground: var(--accent-foreground);
   --color-border: var(--border);
   --color-input: var(--input);
   --color-ring: var(--ring);
-  --radius-lg: var(--radius);
-  --radius-md: calc(var(--radius) - 2px);
-  --radius-sm: calc(var(--radius) - 4px);
+
+  --color-state-success: var(--state-success);
+  --color-state-warning: var(--state-warning);
+  --color-state-error: var(--state-error);
+  --color-state-info: var(--state-info);
+  --color-state-neutral: var(--state-neutral);
+  --color-state-success-text: var(--state-success-text);
+  --color-state-warning-text: var(--state-warning-text);
+  --color-state-error-text: var(--state-error-text);
+  --color-state-info-text: var(--state-info-text);
+  --color-state-neutral-text: var(--state-neutral-text);
+
+  /* shadcn-style semantic aliases for destructive actions (logout, delete).
+   * Mapped onto the existing `state-error` palette so we keep one colour story. */
+  --color-destructive: var(--state-error);
+  --color-destructive-foreground: var(--surface-high);
+
+  /* The two families of the export, self-hosted by `next/font` in
+   * `app/layout.tsx` (design D8). Each carries a system fallback stack, so text
+   * is readable before the face arrives and if it never does (R4.2). */
+  --font-sans:
+    var(--font-inter), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-mono:
+    var(--font-jetbrains-mono), ui-monospace, SFMono-Regular, Menlo, Monaco,
+    Consolas, "Liberation Mono", "Courier New", monospace;
+}
+
+/*
+ * Typography, ritmo and radii (design D10). Literal values, so a plain `@theme`
+ * rather than `@theme inline`: these do not vary by theme and must not live in
+ * `:root`, which holds only the 25 theme-dependent colour tokens.
+ *
+ * The export states sizes in px; they are converted to `rem` so text follows the
+ * browser's base size. Tracking stays in `em` because it is already relative.
+ */
+@theme {
+  /* The ten typographic roles of DESIGN.md, each with its three modifiers, which
+   * is the `@theme` API in Tailwind v4: one utility (`text-display-2xl`) sets
+   * size, line-height, tracking and weight together (R4.3).
+   *
+   * Tailwind's own numeric scale (`text-xs`, `text-sm`, `text-lg`…) is KEPT:
+   * `Badge`, `Button` and half a dozen components use it, and these roles are
+   * additive, not a replacement. */
+  --text-display-2xl: 3.5rem; /* 56px */
+  --text-display-2xl--line-height: 4rem; /* 64px */
+  --text-display-2xl--letter-spacing: -0.03em;
+  --text-display-2xl--font-weight: 800;
+
+  --text-display-xl: 2.75rem; /* 44px */
+  --text-display-xl--line-height: 3.25rem; /* 52px */
+  --text-display-xl--letter-spacing: -0.025em;
+  --text-display-xl--font-weight: 800;
+
+  --text-display-lg-mobile: 2.25rem; /* 36px */
+  --text-display-lg-mobile--line-height: 2.75rem; /* 44px */
+  --text-display-lg-mobile--letter-spacing: -0.02em;
+  --text-display-lg-mobile--font-weight: 800;
+
+  --text-headline-lg: 2rem; /* 32px */
+  --text-headline-lg--line-height: 2.5rem; /* 40px */
+  --text-headline-lg--letter-spacing: -0.02em;
+  --text-headline-lg--font-weight: 700;
+
+  --text-headline-md: 1.5rem; /* 24px */
+  --text-headline-md--line-height: 2rem; /* 32px */
+  --text-headline-md--letter-spacing: -0.015em;
+  --text-headline-md--font-weight: 600;
+
+  --text-body-lg: 1rem; /* 16px */
+  --text-body-lg--line-height: 1.5rem; /* 24px */
+  --text-body-lg--letter-spacing: -0.005em;
+  --text-body-lg--font-weight: 400;
+
+  --text-body-medium: 0.875rem; /* 14px */
+  --text-body-medium--line-height: 1.25rem; /* 20px */
+  --text-body-medium--letter-spacing: 0em;
+  --text-body-medium--font-weight: 500;
+
+  --text-body-base: 0.875rem; /* 14px */
+  --text-body-base--line-height: 1.25rem; /* 20px */
+  --text-body-base--letter-spacing: 0em;
+  --text-body-base--font-weight: 400;
+
+  /* The monospaced data role (R4.4). Declared as a token; this change applies it
+   * to no screen — that is `visual-restyle-workspace`. */
+  --text-data-mono: 0.8125rem; /* 13px */
+  --text-data-mono--line-height: 1.125rem; /* 18px */
+  --text-data-mono--letter-spacing: -0.01em;
+  --text-data-mono--font-weight: 500;
+
+  --text-label-caps: 0.6875rem; /* 11px */
+  --text-label-caps--line-height: 0.875rem; /* 14px */
+  --text-label-caps--letter-spacing: 0.06em;
+  --text-label-caps--font-weight: 700;
+
+  /*
+   * Ritmo on the export's 4px baseline unit (R5.1, as amended 2026-08-24).
+   *
+   * `--spacing` is the base Tailwind multiplies for `p-4`; it is restated, not
+   * changed. The export's eight named steps are NOT declared, and that is a
+   * correction rather than an omission — naming them `--spacing-{sm,md,lg,xl,…}`
+   * collided with Tailwind v4's t-shirt-size namespace: `max-w-*` resolves
+   * against `--spacing-*` when those keys exist, so `max-w-md` compiled to
+   * `max-width: var(--spacing-md)` — 0.75rem instead of 28rem — and collapsed
+   * every container that used it. Found by loading the app in a browser; no unit
+   * test saw it, because they assert declarations and this is resolution.
+   *
+   * Nothing is lost by dropping them: Tailwind's numeric scale on a 0.25rem base
+   * IS the export's ritmo, exactly, in all eight steps —
+   *   xs  4px = p-1     xl  24px = p-6
+   *   sm  8px = p-2     2xl 32px = p-8
+   *   md 12px = p-3     3xl 48px = p-12
+   *   lg 16px = p-4     4xl 64px = p-16
+   * The named aliases were a second vocabulary for identical values, and that
+   * second vocabulary is what broke.
+   *
+   * `gutter` and the two margins DO stay: they collide with nothing (there is no
+   * `max-w-gutter`), and their names carry meaning no number conveys.
+   */
+  --spacing: 0.25rem; /* 4px — the baseline unit */
+  --spacing-gutter: 1rem; /* 16px */
+  --spacing-margin-mobile: 1rem; /* 16px */
+  --spacing-margin-desktop: 2rem; /* 32px */
+
+  /* Radii as literals, replacing the single `--radius` and its three `calc()`
+   * derivations (R5.1).
+   *
+   * Verified by compiling Tailwind rather than assumed (task 3.5): bare
+   * `rounded` emits `border-radius: 0.25rem` as a HARDCODED literal, not
+   * `var(--radius-DEFAULT)` — so the export's `DEFAULT: 0.25rem` already holds
+   * and needs no declaration. `rounded-sm/md/lg/xl` DO read these vars.
+   *
+   * Accepted consequence, also from D10: `rounded-sm` goes from `0.25rem` to
+   * `0.125rem`, which is the close button of `Sheet`.
+   *
+   * FOUR steps, not the export's six: neither `DEFAULT` nor `full` is declared,
+   * for one reason applied twice — Tailwind already delivers the export's value,
+   * so a token would have no consumer (design D2, and R5.1 as amended
+   * 2026-08-24). `rounded` hardcodes `0.25rem`, which is the export's `DEFAULT`;
+   * `rounded-full` compiles to `calc(infinity * 1px)`, which rounds a corner
+   * fully exactly as the export's `9999px` intends, and it cannot read a token
+   * even if one existed. Both verified by compiling Tailwind, not assumed. */
+  --radius-sm: 0.125rem;
+  --radius-md: 0.375rem;
+  --radius-lg: 0.5rem;
+  --radius-xl: 0.75rem;
 }
 
 @layer base {
@@ -89,6 +320,13 @@
     transition-duration: 0.01ms !important;
     scroll-behavior: auto !important;
   }
+}
+
+/* Smooth scroll for the `#features` anchor in the landing marketing nav
+ * (change `landing-public`, design D10). The browser's native
+ * jump-to-anchor behaviour does the rest; no client island needed. */
+html {
+  scroll-behavior: smooth;
 }
 
 /* Minimum 44×44px touch targets for primary tap surfaces (design D14). */

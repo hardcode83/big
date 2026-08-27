@@ -13,7 +13,12 @@ página describe el uso y los límites operativos.
 3. Las superficies de workspace, cleaner y technician redirigen a `/login`
    cuando no hay sesión. La ruta interna de origen se conserva de forma segura.
 4. Cerrar sesión llama a `/auth/logout` cuando es posible, elimina la sesión
-   local y vuelve a `/login`.
+   local y vuelve a `/` (la raíz re-evalúa la cookie
+   `autohostai.session.present`, recién purgada, y renderiza la landing pública).
+   El botón vive en el `UserMenu` del topbar de las tres shells autenticadas
+   (workspace, cleaner, technician); pedir confirmación con un `AlertDialog`
+   evita cierres accidentales en dispositivos compartidos. El portal guest no
+   expone el menú porque su acceso es por token en la URL, sin sesión que cerrar.
 
 ## Sesión efímera y refresh
 
