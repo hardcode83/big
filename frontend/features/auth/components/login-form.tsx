@@ -104,7 +104,7 @@ export function LoginForm() {
       {showDeniedMessage ? (
         <p
           role="alert"
-          className="rounded-md border border-state-warning-border bg-state-warning-bg p-3 text-sm text-state-warning-text"
+          className="rounded-md border border-state-warning/40 bg-state-warning/15 p-3 text-sm text-state-warning-text"
         >
           {t("deniedRole")}
         </p>

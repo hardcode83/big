@@ -138,8 +138,13 @@ describe("producer/consumer provenance contract", () => {
     expect(frontend).not.toContain("org.opencontainers.image.revision=${{ github.sha }}");
     expect(frontend).not.toContain("${{ needs.provenance.outputs.repository_url }}");
     expect(frontend).not.toContain("${{ needs.provenance.outputs.commit_sha }}");
+    // `AuthGuard` may carry props (e.g. `allow={["TENANT_OWNER", ...]}` from
+    // `frontend-auth-role-routing` R1 #4); the structural guarantee is that
+    // `<AuthGuard>` wraps `<WorkspaceShell>` with no other element in between,
+    // not that the tag is unadorned or that there is no whitespace/newline
+    // between the closing `>` of one and the opening `<` of the other.
     expect(readFileSync(resolve(root, "app/(workspace)/layout.tsx"), "utf8"))
-      .toMatch(/<AuthGuard><WorkspaceShell>/);
+      .toMatch(/<AuthGuard[^>]*>\s*<WorkspaceShell>/);
   });
 
   it("protects the frontend image boundary in the build-frontend job itself", () => {

@@ -73,8 +73,19 @@ export default function WelcomePage() {
   }
 
   if (!isWelcomeRole || !matches) {
-    // `useEffect` will dispatch the redirect; render nothing in the meantime.
-    return null;
+    // `useEffect` will dispatch the redirect; render a busy panel instead of
+    // `null` so a tampered URL doesn't leave the visitor staring at a blank
+    // page for the duration of the redirect (R2 #3 / review F4).
+    return (
+      <div className="mx-auto flex min-h-[60vh] w-full max-w-md items-center px-6 py-10">
+        <StatePanel
+          role="status"
+          aria-busy
+          title={t("redirecting")}
+          description={t("authRequired")}
+        />
+      </div>
+    );
   }
 
   const href = roleHome(roleParam as "CLEANER" | "TECHNICIAN");

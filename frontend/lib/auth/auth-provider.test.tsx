@@ -9,6 +9,7 @@ import {
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
+import { markSessionPresent } from "@/lib/auth/session-presence-cookie";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
 import { makeQueryClient } from "@/lib/query/query-client";
@@ -258,14 +259,12 @@ describe("AuthProvider", () => {
   });
 
   it("logs out locally even when the backend logout is unavailable", async () => {
+    // `useAuth().logout()` runs the local-state purge only (F5 / review);
+    // the server round-trip is owned by `useLogoutMutation`. The "backend
+    // unavailable" path that was previously asserted on this test now
+    // belongs to `useLogoutMutation`'s own tests.
     setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "expired" } }),
-        { status: 401 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchImpl);
+    markSessionPresent();
 
     function LogoutProbe() {
       const { logout } = useAuth();
@@ -296,7 +295,6 @@ describe("AuthProvider", () => {
     expect(await screen.findByTestId("status")).toHaveTextContent("anonymous");
     expect(getSessionTokens()).toBeNull();
     expect(readPresenceCookie()).toBeNull();
-    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("invalidates an in-flight refresh when logout clears the session", async () => {

@@ -134,28 +134,28 @@ export function AuthProvider({ children }: { children: ReactNode }) {
    * already wired `useAuth().logout()` before the TanStack Query migration.
    * New call sites MUST use `useLogoutMutation()` instead.
    *
+   * **What this does vs `useLogoutMutation()`**: this method runs the
+   * local-state purge only — no server round-trip. The full flow
+   * (server POST `/auth/logout` + local purge + cache invalidation +
+   * redirect) lives in `useLogoutMutation` and is called by `UserMenu`.
+   * Removing the parallel `clients.apiClient.request("/auth/logout")`
+   * here closes F5 without making `AuthProvider` depend on a
+   * `QueryClient` (which would break the auth-session integration test
+   * and any other render tree that mounts `AuthProvider` outside a
+   * `QueryProvider`).
+   *
    * @deprecated Use `useLogoutMutation()` — design D3/R3 migrated the call
    * site in `UserMenu`. No live consumer reads this method in the current
    * change (`UserMenu` is the only one, and it migrated). Removal is safe
    * in a follow-up change.
    */
   const logout = useCallback(async () => {
-    try {
-      if (getSessionTokens()) {
-        await clients.apiClient.request("/api/v1/auth/logout", {
-          method: "POST",
-        });
-      }
-    } catch {
-      // Logout is best-effort; local credentials are always discarded below.
-    } finally {
-      purgeSessionCache();
-      clearSessionTokens();
-      clearSessionPresent();
-      setUser(null);
-      setStatus("anonymous");
-    }
-  }, [clients.apiClient]);
+    purgeSessionCache();
+    clearSessionTokens();
+    clearSessionPresent();
+    setUser(null);
+    setStatus("anonymous");
+  }, []);
 
   const value = useMemo(
     () => ({ user, status, login, logout, refresh }),
