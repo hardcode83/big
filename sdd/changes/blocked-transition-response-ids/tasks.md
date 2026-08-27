@@ -198,11 +198,32 @@ anota de nuevo lo que vuelva a pasar bajo panel fresco.
 
 ## 8. Out of scope del review-fix
 
-- **Endurecer `FakeIncidentReader.list_open_for_properties`** para que filtre por
-  `tenant_id` (F3 del tenancy reviewer). Es un hueco de **hygiene** en un test double
-  que sólo se ejercita en escenarios single-tenant; el path real sigue sellado por el
-  filtro SQL. Aplazado: registrado en `BLOCKED.md` Entry 3.
-- **Test del rechazo de UUID inválido** en `BlockedTransitionResponse`
-  (`F3 del qa reviewer`, no el F3 de arriba). Pydantic v2 ya lo rechaza correctamente
-  (verificado por prueba directa), pero ningún test del suite lo afirma. Aplazado:
-  `BLOCKED.md` Entry 4.
+Estos dos items se difirieron del review de `blocked-transition-response-ids` por hygiene
+/ cobertura, **no** por defectos. Viven aquí (no en `BLOCKED.md`) para que el gate de
+ship no rechace el cambio: el lifecycle script exige `BLOCKED.md` vacío. Cada uno es
+candidato a un follow-up change cuando haga falta la cobertura que pide.
+
+### 8.1 Endurecer `FakeIncidentReader.list_open_for_properties` (tenant_id filter)
+
+- **Por qué**: `backend/tests/dashboard/doubles.py:181-197` acepta `tenant_id` pero no
+  filtra por él; el loop itera `open_by_property` por `property_id` solamente. Los unit
+  tests en `test_action_id_resolver.py` siembran un único tenant, así que el filtro
+  faltante es benigno hoy.
+- **Severidad**: hygiene, no seguridad. El camino real sigue sellado por
+  `IncidentModel.tenant_id == tenant_id` en `maintenance/infrastructure/repositories.py:169`
+  y la suite de integración cubre el aislamiento con BD real vía el endpoint HTTP.
+- **Trigger para follow-up**: el día que aparezca un test unitario multi-tenant sobre el
+  resolver, este doble mezclará datos silenciosamente. Abrir un change que endurezca el
+  filtro (o que reemplace el doble por uno que ya filtre).
+
+### 8.2 Test del rechazo de UUID inválido en `BlockedTransitionResponse`
+
+- **Por qué**: `BlockedTransitionResponse(cleaning_task_id="not-a-uuid")` lo rechaza
+  correctamente Pydantic v2 (verificado por prueba directa en este review), pero ningún
+  test del suite lo afirma. La propuesta R1.1 especifica `uuid.UUID | None` así que el
+  tipo **está** enforced; la cobertura es silenciosa en el caso bad-input.
+- **Severidad**: baja. Comportamiento en producción correcto; el gap es de cobertura.
+- **Trigger para follow-up**: añadir un test paramétrico junto a
+  `test_each_of_the_six_original_fields_is_required` en
+  `backend/tests/properties/test_blocked_transition_response.py`. Un follow-up change
+  cubre esto.
