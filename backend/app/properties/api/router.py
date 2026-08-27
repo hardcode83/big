@@ -47,6 +47,7 @@ from app.properties.api.dependencies import (
 from app.properties.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    BlockedTransitionListQuery,
     BlockedTransitionPageResponse,
     CreatePropertyRequest,
     PropertyPageResponse,
@@ -271,15 +272,18 @@ async def list_blocked_transitions(
         ListBlockedTransitionsUseCase, Depends(get_list_blocked_transitions_use_case)
     ],
     now: Annotated[datetime, Depends(now_utc)],
-    page: Annotated[int, Query(ge=1, le=MAX_PAGE)] = 1,
-    per_page: Annotated[int, Query(ge=1, le=MAX_PER_PAGE)] = 20,
+    # `extra="forbid"` on `BlockedTransitionListQuery` rejects `?tenant_id=…` with 422 (R3.3,
+    # R4.4 of `blocked-transition-response-ids`); the per-parameter `Query(ge=…, le=…)` would
+    # silently drop unknown keys and rely on FastAPI's default — see the schema docstring for
+    # why a model is required.
+    query: Annotated[BlockedTransitionListQuery, Query()],
 ) -> BlockedTransitionPageResponse:
     result = await use_case.execute(
         tenant_id=authenticated.context.tenant_id,
         now=now,
-        page=page,
-        per_page=per_page,
+        page=query.page,
+        per_page=query.per_page,
     )
     return BlockedTransitionPageResponse.build(
-        result.items, total=result.total, page=page, per_page=per_page
+        result.items, total=result.total, page=query.page, per_page=query.per_page
     )

@@ -15,6 +15,7 @@ from zoneinfo import ZoneInfo
 
 import pytest
 
+from app.properties.application.action_id_resolver import ActionIdResolver
 from app.properties.application.use_cases import (
     AdvancePropertyStatesUseCase,
     ListBlockedTransitionsUseCase,
@@ -41,6 +42,7 @@ from tests.properties.doubles import (
     FakeTimelineEventRepository,
     FakeUnitOfWork,
 )
+from tests.dashboard.doubles import FakeCleaningRepository, FakeIncidentReader
 
 MADRID = ZoneInfo("Europe/Madrid")
 TENANT = uuid.uuid4()
@@ -916,6 +918,13 @@ class TestTheJobAndTheCollectionAgree:
             reservations=harness.reservations,
             transitions=harness.transitions,
             configs=harness.configs,
+            # These tests assert the **bucket counts** (`blocked`), not the action ids;
+            # empty fakes keep the new dependency satisfied without changing what is under
+            # test. The action-id tests live in `test_blocked_transitions_api.py` §3 and §4.
+            action_ids=ActionIdResolver(
+                cleaning_tasks=FakeCleaningRepository(),
+                incidents=FakeIncidentReader(),
+            ),
         )
 
     @pytest.mark.asyncio

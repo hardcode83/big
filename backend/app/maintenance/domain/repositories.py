@@ -106,6 +106,32 @@ class IncidentReader(Protocol):
         Unpaginated on purpose: it feeds a detail panel, and a property with enough open
         incidents to need paging is an operational emergency rather than a UI problem.
         """
+
+    async def list_open_for_properties(
+        self, tenant_id: uuid.UUID, property_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """The **newest** open incident id per property, in ONE query (`blocked-transition-response-ids` R3.4).
+
+        Returns `dict[property_id, incident_id]` — **only the id, not a summary** —
+        because the only consumer today is `ActionIdResolver`, which needs the id to
+        populate the `BlockedTransitionResponse.cleaning_task_id` / `incident_id` fields
+        (R1.3: the wire format is a UUID string or `null`, never `category`/`severity`/
+        `opened_at`). This is the "puertos pequeños y por rol" rule of
+        `steering/backend-architecture.md` in action: the sibling `count_open_for_properties`
+        returns `dict[property_id, int]` for the same reason.
+
+        Sibling of `count_open_for_properties` — same sparse-mapping convention: a property
+        with no open incident is **absent** from the dict, not mapped to `None`. The caller
+        already defaults to "no incident" for a property it did not ask about, and a dense
+        mapping would make the two cases indistinguishable from a bug that dropped rows.
+
+        Newest first per property (`created_at DESC, id DESC` tiebreak); the caller picks
+        the one that surfaces in the dashboard's action button. Subsequent open incidents on
+        the same property are not exposed: the dashboard only has one button per stall, and
+        "the first one" is a deterministic choice that matches how the collection orders.
+
+        Empty `property_ids` returns an empty mapping without querying.
+        """
         ...
 
 
