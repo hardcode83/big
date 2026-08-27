@@ -3,6 +3,11 @@
 The two that matter most: a `CLEANER` cannot read it, and a neighbour tenant's stall is invisible
 rather than merely unlisted. The third is R2.4 — the entry disappears on its own once the stall is
 resolved, with nothing written to make that happen.
+
+Section 3.2 of `sdd/changes/blocked-transition-response-ids/tasks.md` lives at the bottom of
+this file: the `cleaning_task_id` and `incident_id` fields populated by the action-id
+resolver. The cross-tenant tests for the same fields live in `test_action_id_isolation.py`
+(section 4).
 """
 
 import uuid
@@ -13,6 +18,20 @@ from sqlalchemy import func, select
 
 from app.auth.domain.enums import UserRole
 from app.auth.domain.policy import ROLE_PERMISSIONS, Permission
+from app.cleaning.domain.enums import CleaningTaskStatus
+from app.cleaning.domain.entities import LIVE_STATUSES
+from app.cleaning.infrastructure.models import (
+    CleaningChecklistTemplateModel,
+    CleaningTaskModel,
+)
+from app.maintenance.domain.enums import (
+    IncidentCategory,
+    IncidentSeverity,
+    IncidentSource,
+    IncidentStatus,
+)
+from app.maintenance.domain.entities import OPEN_INCIDENT_STATUSES
+from app.maintenance.infrastructure.models import IncidentModel
 from app.properties.domain.enums import PropertyOperationalState
 from app.properties.infrastructure.models import PropertyModel, PropertyStateTransitionModel
 from app.reservations.domain.enums import ReservationChannel, ReservationStatus
@@ -414,3 +433,180 @@ async def test_per_page_is_bounded(api, users_by_role_a) -> None:
     )
 
     assert response.status_code == 422
+
+
+# --- R2.1, R2.2, R2.3, R2.4 — action ids populated end-to-end (blocked-transition-response-ids) ---
+
+
+async def _open_cleaning_task(db_session, prop, *, status=CleaningTaskStatus.IN_PROGRESS):
+    """A live cleaning task for the property, with a fresh checklist template.
+
+    The minimum to satisfy the FK and `LIVE_STATUSES` filter (R2.1): the task's `status`
+    must be one of `CREATED, ASSIGNED, ACCEPTED, IN_PROGRESS`. Default `IN_PROGRESS` to
+    mirror the realistic scenario — the flat is `CLEANING_IN_PROGRESS`, the task is
+    underway, and the dashboard's "Cancel cleaning" button should be wired to it.
+    """
+    template = CleaningChecklistTemplateModel(
+        tenant_id=prop.tenant_id,
+        property_id=prop.id,
+        name="Test template",
+        items=[],
+        required_photos=[],
+        active=True,
+    )
+    db_session.add(template)
+    await db_session.flush()
+
+    task = CleaningTaskModel(
+        tenant_id=prop.tenant_id,
+        property_id=prop.id,
+        checklist_template_id=template.id,
+        reservation_id=None,
+        assigned_cleaner_id=None,
+        status=status,
+    )
+    db_session.add(task)
+    await db_session.flush()
+    return task
+
+
+async def _open_incident(db_session, prop, *, status=IncidentStatus.OPEN):
+    """An open incident for the property.
+
+    `OPEN` is the default (server default of the column). The dashboard's "Resolve
+    incident" button should be wired to this id. Other open statuses (TRIAGED,
+    IN_PROGRESS, WAITING_EXTERNAL_PARTS, etc.) are also in `OPEN_INCIDENT_STATUSES`
+    (R2.2); the integration test parametrizes over the full set to fix the SQL filter.
+    """
+    incident = IncidentModel(
+        tenant_id=prop.tenant_id,
+        property_id=prop.id,
+        reservation_id=None,
+        reported_by_user_id=None,
+        source=IncidentSource.GUEST,  # any source — the dashboard cares about the id, not origin
+        category=IncidentCategory.OTHER,
+        severity=IncidentSeverity.MEDIUM,
+        status=status,
+        title="Test incident",
+        description="",
+    )
+    db_session.add(incident)
+    await db_session.flush()
+    return incident
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("task_status", sorted(LIVE_STATUSES, key=lambda s: s.value))
+async def test_cleaning_task_id_is_populated_when_a_live_task_exists(
+    api, db_session, tenant_a, users_by_role_a, task_status
+) -> None:
+    """R2.1 — every status in `LIVE_STATUSES` populates `cleaning_task_id`.
+
+    Parametrising over the closed literal set exercises the SQL `WHERE status IN
+    (LIVE_STATUSES)` filter end-to-end through the resolver and the endpoint — a
+    future status added to `LIVE_STATUSES` will be picked up automatically. Closed list
+    of literals satisfies `steering/testing.md`'s ban on random values inside
+    `@pytest.mark.parametrize`.
+    """
+    prop = await _stalled_property(db_session, tenant_a)
+    await _stay(db_session, prop)
+    task = await _open_cleaning_task(db_session, prop, status=task_status)
+
+    response = await api.get(
+        ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["data"]
+    assert entry["cleaning_task_id"] == str(task.id)
+    assert entry["incident_id"] is None  # R2.5: never both for the same row
+
+
+@pytest.mark.asyncio
+async def test_cleaning_task_id_is_null_when_no_live_task_exists(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """R2.3 — the absence of a live task is `null`, not `""` / `"null"` / `0`."""
+    prop = await _stalled_property(db_session, tenant_a)
+    await _stay(db_session, prop)
+    # No cleaning task seeded — the SQL returns no row, the resolver maps to `None`.
+
+    response = await api.get(
+        ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["data"]
+    assert entry["cleaning_task_id"] is None
+    assert entry["incident_id"] is None
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("incident_status", sorted(OPEN_INCIDENT_STATUSES, key=lambda s: s.value))
+async def test_incident_id_is_populated_when_an_open_incident_exists(
+    api, db_session, tenant_a, users_by_role_a, incident_status
+) -> None:
+    """R2.2 — every status in `OPEN_INCIDENT_STATUSES` populates `incident_id`.
+
+    Same rationale as `test_cleaning_task_id_is_populated_when_a_live_task_exists`: the
+    parametrisation pins the SQL filter `WHERE status IN (OPEN_INCIDENT_STATUSES)`.
+    A future open-status added to the enum will be picked up automatically.
+    """
+    prop = await _stalled_property(
+        db_session, tenant_a, internal_code="MAINT1"
+    )
+    prop.current_operational_state = PropertyOperationalState.MAINTENANCE_REQUIRED
+    await _stay(db_session, prop)
+    incident = await _open_incident(db_session, prop, status=incident_status)
+
+    response = await api.get(
+        ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["data"]
+    assert entry["incident_id"] == str(incident.id)
+    assert entry["cleaning_task_id"] is None  # R2.5: never both for the same row
+
+
+@pytest.mark.asyncio
+async def test_incident_id_is_null_when_no_open_incident_exists(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """R2.4 — the absence of an open incident is `null`, not `""` / `"null"` / `0`."""
+    prop = await _stalled_property(
+        db_session, tenant_a, internal_code="MAINT2"
+    )
+    prop.current_operational_state = PropertyOperationalState.MAINTENANCE_REQUIRED
+    await _stay(db_session, prop)
+
+    response = await api.get(
+        ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    assert response.status_code == 200, response.text
+    [entry] = response.json()["data"]
+    assert entry["incident_id"] is None
+    assert entry["cleaning_task_id"] is None
+
+
+@pytest.mark.asyncio
+async def test_response_carries_both_action_id_keys_even_when_null(
+    api, db_session, tenant_a, users_by_role_a
+) -> None:
+    """R1.3 (wire format): the keys `cleaning_task_id` and `incident_id` appear on every
+    entry, never `null`-omitted, so the dashboard can render both buttons (or a disabled
+    variant) without a `dict.get(...)` dance.
+    """
+    prop = await _stalled_property(db_session, tenant_a)
+    await _stay(db_session, prop)
+
+    response = await api.get(
+        ENDPOINT, headers=_at(api, users_by_role_a[UserRole.PROPERTY_MANAGER])
+    )
+
+    [entry] = response.json()["data"]
+    assert "cleaning_task_id" in entry
+    assert "incident_id" in entry
+    assert entry["cleaning_task_id"] is None
+    assert entry["incident_id"] is None

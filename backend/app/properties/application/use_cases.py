@@ -58,6 +58,7 @@ from app.reservations.domain.entities import Reservation
 from app.reservations.domain.repositories import ReservationRepository
 from app.tenants.domain.repositories import TenantConfigRepository
 from app.timeline.domain.repositories import TimelineEventRepository
+from app.properties.application.action_id_resolver import ActionIdResolver
 
 logger = logging.getLogger(__name__)
 
@@ -446,10 +447,19 @@ class BlockedTransitionRow:
     `BlockedTransition` deliberately carries ids only — it is a domain value object and knows
     nothing about presentation — while a person reading the collection needs "REDES11", not a
     UUID. Paired here, in `application/`, rather than by widening the value object.
+
+    The two action ids (`cleaning_task_id`, `incident_id`) are **populated by the action id
+    resolver** (R2.1, R2.2 of `blocked-transition-response-ids`), never derived from
+    `BlockedTransition` itself — the latter is a pure domain value object that the proposal
+    keeps that way (§Out of scope: "Persistencia de los ids en `BlockedTransition`").
+    They start as `None` and are filled in batch before the response is built, so the
+    `from_row` factory on the response schema can read them without a separate query path.
     """
 
     mismatch: BlockedTransition
     property_code: str
+    cleaning_task_id: uuid.UUID | None = None
+    incident_id: uuid.UUID | None = None
 
 
 @dataclass(frozen=True)
@@ -483,11 +493,13 @@ class ListBlockedTransitionsUseCase:
         reservations: ReservationRepository,
         transitions: PropertyStateTransitionRepository,
         configs: TenantConfigRepository,
+        action_ids: ActionIdResolver,
     ) -> None:
         self._properties = properties
         self._reservations = reservations
         self._transitions = transitions
         self._configs = configs
+        self._action_ids = action_ids
 
     async def execute(
         self, *, tenant_id: uuid.UUID, now: datetime, page: int, per_page: int
@@ -531,9 +543,38 @@ class ListBlockedTransitionsUseCase:
                     BlockedTransitionRow(mismatch=mismatch, property_code=property.internal_code)
                 )
 
-        # Oldest stall first, which is the order an operator triages in, with the ids as
-        # tiebreakers so a page boundary cannot repeat or skip a row when two stalls share an
-        # instant — the same reason `PropertyRepository.list` promises a stable sort.
+        # Resolve the action ids (`cleaning_task_id`, `incident_id`) for the whole page in
+        # ONE batch call per port (R3.4) and rebuild the rows with the ids populated.
+        # The resolver returns a `{property_id: (cleaning_id, incident_id)}` mapping; the
+        # page here is at most ~100 rows, so this is one dictionary lookup per row, not a
+        # second query. `BlockedTransitionRow` is `frozen`, so we replace rather than
+        # mutate.
+        if rows:
+            action_id_by_property = await self._action_ids.resolve(
+                [(row.mismatch.property_id, row.mismatch.blocking_state) for row in rows],
+                tenant_id,
+            )
+            no_action_ids = (None, None)
+            rows = [
+                BlockedTransitionRow(
+                    mismatch=row.mismatch,
+                    property_code=row.property_code,
+                    cleaning_task_id=action_id_by_property.get(
+                        row.mismatch.property_id, no_action_ids
+                    )[0],
+                    incident_id=action_id_by_property.get(
+                        row.mismatch.property_id, no_action_ids
+                    )[1],
+                )
+                for row in rows
+            ]
+
+        # Oldest stall first, which is the order an operator triages in. The four-component
+        # key (due_since, property_id, reservation_id, trigger) is already total because the
+        # last component is an enum literal — so a page boundary cannot repeat or skip a row
+        # when two stalls share an instant, the same reason `PropertyRepository.list` promises
+        # a stable sort. The two action ids (`cleaning_task_id`, `incident_id`) are NOT part
+        # of the key: the dashboar reads them after ordering, not before.
         rows.sort(
             key=lambda row: (
                 row.mismatch.due_since,

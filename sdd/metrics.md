@@ -72,5 +72,6 @@
 | design-system-tokens | new, design, tasks, run, review, ship, archive | 3109813 | 2017252 | 343062928 | 249.3879 | 2026-08-23 | 2026-08-24 |
 | landing-public | new, design, tasks, run, review, ship, archive | 2164329 | 293924 | 98099071 | 67.2193 | 2026-08-24 | 2026-08-25 |
 | reservation-amount-empty-render | new, design, tasks, run, review, ship, archive | 1348948 | 185290 | 33771859 | 28.5487 | 2026-08-24 | 2026-08-25 |
+| blocked-transition-response-ids | new, tasks, run, review, ship, archive | 6367916 | 567328 | 131512414 | 111.7790 | 2026-08-26 | 2026-08-27 |
 | photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
 | public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |

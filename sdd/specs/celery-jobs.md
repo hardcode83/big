@@ -171,9 +171,24 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   está mal no lo decide un barrido.
 - THE SYSTEM SHALL servir esos mismos desajustes por `GET /api/v1/blocked-transitions` a todo rol
   con `READ_PROPERTIES` —incluida la propietaria—, con el envelope paginado de PRD §23 y cada
-  entrada llevando `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state` y
-  `due_since`. `trigger` y `blocking_state` viajan como los literales canónicos, sin prosa: la
-  traducción es del cliente, el mismo trato que `dashboard-api` da a `operational_state`.
+  entrada llevando `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state`,
+  `due_since`, `cleaning_task_id` e `incident_id`. `trigger` y `blocking_state` viajan como los
+  literales canónicos, sin prosa: la traducción es del cliente, el mismo trato que `dashboard-api`
+  da a `operational_state`.
+- WHEN el `blocking_state` está en `{AWAITING_CLEANING, CLEANING_IN_PROGRESS, CLEANING_SCHEDULED}`,
+  THE SYSTEM SHALL poblar `cleaning_task_id` con el id de la tarea de limpieza **abierta** de esa
+  vivienda dentro del `tenant_id` del token verificado, y SHALL dejar `incident_id = null`; si la
+  vivienda no tiene tarea de limpieza abierta, SHALL dejar ambos ids en `null`. La ausencia de la
+  tarea es un dato, no un error, así que la fila sigue listándose aunque no haya acción posible.
+- WHEN el `blocking_state` no es de limpieza, THE SYSTEM SHALL poblar `incident_id` con el id de
+  la incidencia **abierta** de esa vivienda dentro del mismo `tenant_id`, y SHALL dejar
+  `cleaning_task_id = null`; sin incidencia abierta, SHALL dejar ambos ids en `null`.
+- THE SYSTEM SHALL no poblar ambos ids para una misma fila: una vivienda no se queda con tarea de
+  limpieza **y** incidencia abierta bajo el mismo `blocking_state`, y si las reglas se solapanan
+  en el futuro la prioridad la da el `blocking_state` actual, no «la primera que se encuentre».
+- THE SYSTEM SHALL resolver cada id como **una sola** llamada batch por tabla y página: nunca N+1
+  sobre el listado paginado, y el camino SQL filtra por `tenant_id` antes de tocar la fila, igual
+  que el resto del módulo (`steering/security.md` regla 1).
 - THE SYSTEM SHALL derivar esa colección de la misma función que el job (`stalls.detect`) y de la
   misma ventana, de modo que el cubo y la colección no puedan discrepar; la diferencia es que el
   job pregunta por un trigger por ejecución y la colección por los tres.
