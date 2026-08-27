@@ -108,4 +108,31 @@ export class HttpIncidentsSource {
     );
     return mapIncidentDetail(response as IncidentResponse);
   }
+
+  /**
+   * Resolves one incident from the dashboard card (proposal
+   * `blocked-transitions-web` R2.3, R3.1). The wire body is `{ final_cost }`,
+   * matching `openapi.d.ts:6383`; `materials` is omitted on purpose from the
+   * dashboard's call site (D7) — it is the manager's, but on `/incidents/{id}`,
+   * not here.
+   *
+   * The response is the same `IncidentResponse` `getIncident` returns, mapped
+   * to `IncidentDetailDto` for the same reason the rest of the source maps
+   * once at the boundary.
+   */
+  async resolveIncident(
+    _tenantId: string,
+    incidentId: string,
+    finalCost: number | string,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/resolve",
+      {
+        method: "POST",
+        pathParams: { incident_id: incidentId },
+        body: { final_cost: finalCost },
+      },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
+  }
 }

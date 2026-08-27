@@ -6,6 +6,8 @@ export { IncidentsView } from "./components/list/incidents-view";
 export { IncidentsFilters } from "./components/list/incidents-filters";
 export { IncidentDetailView } from "./components/detail/incident-detail-view";
 export { useIncidents, useIncident } from "./hooks/use-incidents";
+export { useResolveIncident } from "./hooks/use-resolve-incident";
+export type { ResolveIncidentInput } from "./hooks/use-resolve-incident";
 export { incidentsKeys } from "./hooks/query-keys";
 export { mapIncidentsError } from "./lib/error-mapping";
 export { getIncidentsDataSource } from "./data";
