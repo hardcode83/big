@@ -103,19 +103,36 @@ export function BlockedTransitionsSection({
           return (
             <li
               key={`${stall.property_id}-${stall.reservation_id}-${stall.trigger}`}
-              className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1 text-muted-foreground"
+              className="flex min-w-0 flex-col gap-1 text-muted-foreground"
             >
-              <code className="font-mono text-xs text-foreground">
-                {stall.trigger}
-              </code>
-              <span aria-hidden="true">·</span>
-              <code className="font-mono text-xs text-foreground">
-                {stall.blocking_state}
-              </code>
-              <span aria-hidden="true">·</span>
-              <span className="text-xs">
-                {formatDateTime(stall.due_since, locale)}
-              </span>
+              {/*
+                Two rows rather than one wrapping row. A single `flex-wrap` row
+                left the separator stranded at the end of a line whenever the
+                date wrapped away from the literals — «CHECKIN_TIME_REACHED ·
+                MAINTENANCE_REQUIRED ·» with nothing after it. Splitting the
+                literals from the date means a wrap can only ever happen
+                *between* the rows, where no separator lives.
+              */}
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                <code className="font-mono text-xs text-foreground">
+                  {stall.trigger}
+                </code>
+                {/*
+                  The separator travels with the literal it precedes, in a
+                  non-wrapping box, so it leads a wrapped line instead of
+                  trailing one.
+                */}
+                <span className="inline-flex items-baseline gap-x-2">
+                  <span aria-hidden="true">·</span>
+                  <code className="font-mono text-xs text-foreground">
+                    {stall.blocking_state}
+                  </code>
+                </span>
+              </div>
+              <div className="flex min-w-0 flex-wrap items-baseline gap-x-2 gap-y-1">
+                <span className="text-xs">
+                  {formatDateTime(stall.due_since, locale)}
+                </span>
               {showCancel ? (
                 <Button
                   type="button"
@@ -150,6 +167,7 @@ export function BlockedTransitionsSection({
                   {t("card.blocked.resolveIncident.label")}
                 </Button>
               ) : null}
+              </div>
             </li>
           );
         })}

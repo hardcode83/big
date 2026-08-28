@@ -396,3 +396,61 @@ describe("BlockedTransitionsSection — failed stalls query (R5.3)", () => {
     expect(screen.queryByText("CHECKIN_TIME_REACHED")).toBeNull();
   });
 });
+
+
+/**
+ * Caught by the manual visual pass of task 7.4, not by any test: a single
+ * wrapping row left the separator stranded at the end of a line whenever the
+ * date wrapped away from the literals.
+ */
+describe("BlockedTransitionsSection — separators never trail a line", () => {
+  function renderOne() {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ MANAGE_CLEANING_TASKS: true, EXECUTE_INCIDENTS: true });
+    return render(
+      <BlockedTransitionsSection
+        headingId="h"
+        stalls={[
+          makeStall({
+            property_id: "redes11",
+            reservation_id: "r1",
+            trigger: "CHECKIN_TIME_REACHED",
+            blocking_state: "MAINTENANCE_REQUIRED",
+            due_since: "2026-08-27T15:00:00Z",
+            incident_id: "incident-1",
+          }),
+        ]}
+      />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+  }
+
+  it("keeps every separator glued to the literal that follows it", () => {
+    const { container } = renderOne();
+    const separators = [...container.querySelectorAll('[aria-hidden="true"]')]
+      .filter((el) => el.textContent?.trim() === "·");
+    expect(separators.length).toBeGreaterThan(0);
+    for (const sep of separators) {
+      // The separator's own box must also contain the <code> it introduces,
+      // so a line break can never strand it.
+      expect(sep.parentElement?.querySelector("code")).toBeTruthy();
+    }
+  });
+
+  it("puts the date in a different row from the literals", () => {
+    const { container } = renderOne();
+    const codeRow = container.querySelector("code")?.closest("div");
+    const dateEl = [...container.querySelectorAll("span")].find((el) =>
+      /2026/.test(el.textContent ?? ""),
+    );
+    expect(dateEl).toBeTruthy();
+    expect(dateEl?.closest("div")).not.toBe(codeRow);
+  });
+
+  it("still renders both literals and the date", () => {
+    renderOne();
+    expect(screen.getByText("CHECKIN_TIME_REACHED")).toBeTruthy();
+    expect(screen.getByText("MAINTENANCE_REQUIRED")).toBeTruthy();
+    expect(screen.getByRole("button", { name: /resolveIncident/ })).toBeTruthy();
+  });
+});

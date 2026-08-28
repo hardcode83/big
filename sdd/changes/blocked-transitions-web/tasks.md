@@ -172,11 +172,34 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
       workaround documented in project.md if running from a linked worktree) agrees with the
       regenerated `frontend/lib/api/generated/openapi.d.ts`. [R1.2, R4.2]
 - [x] 7.3 Lint passes: `docker compose exec frontend npm run lint`. [R1–R5]
-- [ ] 7.4 Manual visual check in `dev` (or in the principal worktree, where the page hydrates —
-      see project.md §Worktree bootstrap): open `/dashboard` as a `PROPERTY_MANAGER` and as a
-      `TENANT_OWNER`; confirm stalls render with canonical literals and locale-formatted dates;
-      cancel a cleaning (success and `409` paths) and resolve an incident; confirm the section
-      disappears without a page reload. [R1, R2, R3, R5]
+- [x] 7.4 Manual visual check, done by the change owner on 2026-08-29 against this worktree's own
+      stack (`make up PORT_OFFSET=41`, seeded tenant, both stall kinds crafted so each card offered
+      a different action). Verified with screenshots at every step:
+      - **R1.2 / R4.2**: `CHECKIN_TIME_REACHED · AWAITING_CLEANING` and
+        `CHECKIN_TIME_REACHED · MAINTENANCE_REQUIRED` render as untranslated monospaced literals in
+        both locales, while `due_since` localises (`Aug 27, 2026, 3:00 PM` / `27 ago 2026, 15:00`).
+      - **R2.1 / R2.4**: the `TENANT_OWNER` sees both sections in full and **zero** buttons, in ES
+        and EN. The `PROPERTY_MANAGER` sees exactly one action per card — cancel on the cleaning
+        stall, resolve on the incident stall — never both.
+      - **R5.1 / R5.2**: the one-line window copy renders and is **not** a link (per the amendment),
+        and promises no exhaustiveness.
+      - **R3.1**: resolving sent the required `final_cost`; the backend moved the incident to
+        `AWAITING_OWNER_APPROVAL` rather than `RESOLVED` because the amount crossed the approval
+        threshold — exactly the outcome D5 cites when rejecting an optimistic cache patch.
+      - **R3.4 / R3.3**: a second attempt returned `409` and the dialog showed the *conflict* copy,
+        localized, with the form still mounted and the typed amount intact. No backend English
+        leaked to the screen.
+      - **R3.2**: confirming the cancellation removed the stall row **without a page reload**, and
+        the rest of the card refreshed with it — badge `Awaiting cleaning` → `Occupied (estimated)`,
+        cleaning status, and last event. That second half only works because of task 8.8; before it,
+        the row would have vanished under a stale badge. The other property's stall was untouched.
+      - Submit stays disabled until the reason is non-empty (confirmed visually: the button lights
+        up on the first character).
+      Two observations logged and **not** attributed to this change: `dashboard-api` composes
+      `next_action.label` / `cleaning_status` in the user's `preferred_language`, so half a card
+      stays in Spanish under an English UI (documented in `docs/dashboard.md`); and the session is
+      deliberately not persisted across reloads (`lib/auth/session-store.ts`, guarded by a test that
+      forbids writing tokens to any browser store). [R1, R2, R3, R5]
 
 ## 8. Review fixes (round 2, 2026-08-28)
 
@@ -268,3 +291,11 @@ partial exhaustiveness guard of D3, deferred.
       why the raw value is returned instead of an empty string, and the accepted styling limit.
       Verified afterwards that every `frontend/…` path `design.md` names exists on disk and that
       no superseded path or key claim survives anywhere in the document.
+- [x] 8.18 Fix the defect the visual pass found, which no test could see: the row was a single
+      `flex-wrap` line holding two standalone separators, so whenever the date wrapped away from the
+      literals the second `·` was stranded at the end of the line
+      («CHECKIN_TIME_REACHED · MAINTENANCE_REQUIRED ·» with nothing after it). The row is now two
+      rows — literals, then date plus action — so a wrap can only happen where no separator lives,
+      and the remaining separator sits in a non-wrapping box with the literal it introduces, so it
+      can lead a wrapped line but never trail one. Three regression tests, including one asserting
+      every separator shares its box with a `<code>`. [R1.2]
