@@ -13,6 +13,7 @@ const listTasks = vi.hoisted(() => vi.fn());
 const listCleaners = vi.hoisted(() => vi.fn());
 const listProperties = vi.hoisted(() => vi.fn());
 const assignTask = vi.hoisted(() => vi.fn());
+const cancelTask = vi.hoisted(() => vi.fn());
 
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: "tenant-1" } }),
@@ -25,6 +26,7 @@ vi.mock("../data", async (importOriginal) => ({
     listCleaners,
     listProperties,
     assignTask,
+    cancelTask,
   }),
 }));
 

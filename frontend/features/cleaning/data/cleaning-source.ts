@@ -48,4 +48,19 @@ export interface CleaningDataSource {
     taskId: string,
     cleanerId: string,
   ): Promise<CleaningTask>;
+
+  /**
+   * Cancels one cleaning task (proposal `blocked-transitions-web` R2.2, R3.1).
+   *
+   * `reason` is required by the backend contract (`cleaning-stall-blocks-next-stay`
+   * R3.1) and bounded to 500 characters; the dialog enforces both. The backend
+   * resolves the property's next state through `PropertyStateMachine`, never
+   * directly, so the response is the same `CleaningTask` shape the assignment
+   * PATCH returns.
+   */
+  cancelTask(
+    tenantId: string,
+    taskId: string,
+    reason: string,
+  ): Promise<CleaningTask>;
 }
