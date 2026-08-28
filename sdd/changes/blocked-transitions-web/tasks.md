@@ -88,8 +88,9 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
       description, `due_since` format, action labels and dialog strings
       (`cancel.cleaning.{label, dialog.title, reason.label, reason.placeholder, reason.help, confirm,
       sending, error.empty, error.generic}`, `resolve.incident.{…}`, plus
-      `error.{fetch, forbidden, conflict, generic}`), and the one-line "this list is bounded by
-      the same 30-day window the celery job uses" copy that links to `docs/properties.md`. [R4.1, R5.1]
+      `error.{fetch, forbidden, conflict}`), and the one-line "this list is bounded by
+      the same 30-day window the celery job uses" copy that names the window documented in
+      `docs/properties.md`. [R4.1, R5.1]
 - [x] 4.2 Add the same `card.blocked` block to `frontend/locales/en/dashboard.json` with the
       identical key set. [R4.1]
 - [x] 4.3 Run the i18n parity check (`frontend/lib/i18n/catalog-parity.test.ts`) and confirm it
@@ -151,8 +152,12 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
       see, `MANAGE_CLEANING_TASKS` / `EXECUTE_INCIDENTS` are manager-only); and what to do when
       a cancellation hits `409` because a guest is active (R5.1, R5.2).
 - [x] 6.2 Add a one-line note in the card's stalls section copy (i18n keys from 4.1/4.2) that
-      links to the section added in 6.1 (R5.1). Confirm the line is one row at the design-system
-      body size and does not introduce new variants.
+      names the 30-day window documented in 6.1 (R5.1). Confirm the line is one row at the
+      design-system body size and does not introduce new variants.
+      **Amended 2026-08-28**: this task said "links to the section added in 6.1". R5.1 was
+      amended in the proposal because the app serves no `/docs` route, so there is no in-app
+      target to link to; the line names the window instead. Reasoning and the two rejected
+      alternatives are in `proposal.md` R5.1 and `design.md` D8.
 
 ## 7. Verification
 
@@ -172,3 +177,94 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
       `TENANT_OWNER`; confirm stalls render with canonical literals and locale-formatted dates;
       cancel a cleaning (success and `409` paths) and resolve an incident; confirm the section
       disappears without a page reload. [R1, R2, R3, R5]
+
+## 8. Review fixes (round 2, 2026-08-28)
+
+Findings raised by the `/sdd:review` panel of 2026-08-28. The panel's own report and the
+resolution of each entry live in the git history of `BLOCKED.md`; what is left open is the
+partial exhaustiveness guard of D3, deferred.
+
+- [x] 8.1 Add `frontend/features/dashboard/stalls/lib/stalls-error.ts`: maps a failed mutation to a
+      locale key **by HTTP status**, following `features/cleaning/lib/assign-error.ts` and
+      `features/pricing/lib/pricing-error.ts`. `403 → card.blocked.error.forbidden`,
+      `409 → card.blocked.error.conflict`, everything else → the per-action generic the caller
+      passes. No `401` branch — the client's one-shot refresh owns that path, as both precedents
+      document. Covered by `stalls-error.test.ts` (12 tests). [R3.3, R3.4]
+- [x] 8.2 Branch both dialogs through `stallsErrorKey` so a `409` shows the conflict copy instead
+      of the generic one, and a `403` says the permission is gone rather than "try again". [R3.4]
+- [x] 8.3 Guard both dialogs against a double submit dispatched inside one React frame with a
+      `submittingRef`, cleared in `onSettled`. `mutation.isPending` only flips on the next commit,
+      so it cannot close that window on its own. Verified by removing the guard and watching the
+      new test go red. [D7]
+- [x] 8.4 Test the dialog error-render path in both dialogs: `isError` with a 500, a 409 and a 403,
+      asserting the visible `role="alert"` copy, that the form stays mounted, and that the
+      backend's technical message never reaches the DOM. [R3.3, R3.4]
+- [x] 8.5 Render the localized `card.blocked.error.fetch` inside the stalls section when the
+      dashboard's stalls query fails, instead of substituting an empty map. The flag travels
+      `dashboard-view.tsx` → `PropertyCard` → `BlockedTransitionsSection`; a stalls outage never
+      escalates to the page-level error state, so the cards stay on screen. [R5.3]
+- [x] 8.6 Test R5.3 at both levels: the view passes the flag and keeps the cards
+      (`dashboard-view.test.tsx`), and the real section renders the error, keeps its heading, paints
+      no action buttons, and prefers the error over stale rows
+      (`blocked-transitions-section.test.tsx`). [R5.3]
+- [x] 8.7 Guard `formatDateTime`/`formatDate` against a malformed `due_since`: an unparseable value
+      returns the raw string instead of throwing `RangeError` inside the render loop, and a
+      null-ish value no longer renders the Unix epoch as if it were a real date. Covered by
+      `features/dashboard/lib/format.test.ts` (9 tests). [R1.2]
+- [x] 8.8 Add the two invalidations design D5 named and the cancel hook omitted —
+      `dashboard-cards` (the property's operational state and cleaning cube) and
+      `property-timeline` (the cancellation event) — and assert them in the hook test. [R3.2]
+- [x] 8.9 Delete the one locale key with no consumer, `card.blocked.error.generic`, from both
+      catalogs; the per-dialog generics are the real fallback because they name the action. Every
+      remaining `card.blocked.*` key is now reachable from code (audited leaf by leaf). [R4.1]
+- [x] 8.10 Amend `design.md` D4: `EXECUTE_INCIDENTS` is granted by the backend to `PROPERTY_MANAGER`
+      **and** `TECHNICIAN`, so the old "es del manager" wording was wrong. The mirror's
+      `TECHNICIAN: []` stays correct for this screen because `_SELF_SERVICE` does not include
+      `READ_PROPERTIES`, which is what guards `GET /api/v1/blocked-transitions` — a technician
+      cannot read the endpoint and never sees the section. The amendment names the trigger that
+      would make the entry wrong. [R2.4]
+- [x] 8.11 Amend `design.md` D5: record that the hooks live in the feature that owns the mutated
+      resource (not under `stalls/`, which the text claimed and the code never did), and replace
+      the "tres claves" sentence with the per-hook table — the two hooks invalidate four and five
+      keys respectively, and the asymmetry is real. [D5]
+- [x] 8.12 Amend `design.md` D9: enumerate what the barrel actually exports and why the dialogs sit
+      under `features/dashboard/stalls/components/` while their hooks sit in `features/cleaning`
+      and `features/incidents` — hook belongs to the resource's domain, dialog belongs to the
+      screen that opens it. [D9]
+- [x] 8.13 Correct the read-only claims this change invalidated: `README.md` and `docs/dashboard.md`
+      (both the "Estado" blockquote and the `/dashboard` route bullet) now say which two write
+      actions the card offers, to whom, and against which other domain's endpoints — while keeping
+      true the statement that the four `dashboard-api` endpoints are themselves read-only.
+- [x] 8.14 Re-verify: `npx tsc --noEmit` clean, `npm run lint` clean, `npm test` **162 files /
+      1622 tests, 0 failures**. The five suites that failed on `@radix-ui/react-alert-dialog` in the
+      2026-08-27 run now pass — the dependency materialized in the container volume, so that entry
+      closed on its own rather than by any edit here.
+- [x] 8.15 Amend R5.1 in `proposal.md` and D8 in `design.md`: the requirement asked the card to
+      **link** to `docs/properties.md`, and the app serves no `/docs` route, so the href had no
+      destination. The half that was already delivered stands — the section in `docs/properties.md`
+      and the one-line `card.blocked.window` copy that names the 30-day window — and the link
+      requirement is withdrawn. Both rejected alternatives (serving the docs; linking to the
+      private GitHub repo, which would 404 for the PRD §1 owner the requirement was written for)
+      are recorded in the proposal. Superseded wording grepped tree-wide: tasks 4.1 and 6.2 said
+      "links to" and now say "names"; no code or locale referenced the anchor. [R5.1]
+- [x] 8.16 Close the three findings the fix re-review raised against the fix itself:
+      - `docs/properties.md` still told the reader the card **enlaza** to that section, and had a
+        heading «Cuándo abrir esta sección desde la card» implying a navigable link. Both reworded.
+        My first sweep missed them because its needles were Spanish-with-«la» and the file says
+        «esta»; the second sweep matched on the stem `enlaz\w*` instead.
+      - The same file claimed a `409` shows «el motivo que el backend devuelve … tal cual». That
+        was never true and is now emphatically not: the dialog paints its own translated copy, and
+        `stalls-error.ts` never dereferences `ApiError.message`. Corrected.
+      - `design.md` §Changes by area still described the pre-fix world — hooks under
+        `stalls/hooks/`, a 4-name barrel, `dashboardKeys.*` invalidation, a deleted locale key, and
+        «enlace desde la card» — contradicting the D5/D8/D9 prose amended three sections above.
+        Rows rewritten to point at the decisions instead of restating them, which is what let the
+        two copies drift apart in the first place.
+- [x] 8.17 Add design **D10**: the `format.ts` guard changes the contract of a module shared with
+      three pre-existing consumers (`property-card.tsx`, `detail/property-detail-sections.tsx`,
+      `detail/property-timeline.tsx`), and no decision covered that. D10 records why the fix
+      belongs in the shared module rather than in a stalls-local helper (the other three had the
+      same `RangeError`, and a private formatter is how one screen ends up with two date formats),
+      why the raw value is returned instead of an empty string, and the accepted styling limit.
+      Verified afterwards that every `frontend/…` path `design.md` names exists on disk and that
+      no superseded path or key claim survives anywhere in the document.

@@ -90,8 +90,20 @@ que vive del lado del cliente.
 
 **Chosen:** `Permission` union gana `EXECUTE_INCIDENTS`; `ROLE_UI_PERMISSIONS` declara
 `PROPERTY_MANAGER: [..., "EXECUTE_INCIDENTS"]` y deja el resto sin cambios. `TENANT_OWNER` no lo
-lleva — `backend/app/auth/domain/policy.py:286` lo confirma: la propietaria está en `_INCIDENT_READ`
+lleva — `backend/app/auth/domain/policy.py` lo confirma: la propietaria está en `_INCIDENT_READ`
 sólo, no en `_INCIDENT_EXECUTE`. Esto cumple R2.4 (nunca pintar un botón que responderá 403).
+
+**Precisión sobre quién más tiene `EXECUTE_INCIDENTS` en el backend** (corregido en la revisión
+del 2026-08-28, porque la redacción anterior —«es del manager»— se leía como exclusividad y no lo
+es): el backend lo da a **dos** roles, `PROPERTY_MANAGER` y `TECHNICIAN`
+(`UserRole.TECHNICIAN: _SELF_SERVICE | _INCIDENT_EXECUTE`). El espejo del frontend deja
+`TECHNICIAN: []` y **eso es correcto para esta pantalla**, no un olvido: `_SELF_SERVICE` son
+exactamente `READ_OWN_PROFILE`, `MANAGE_OWN_SESSION` y `READ_OWN_NOTIFICATIONS` — **no incluye
+`READ_PROPERTIES`**, que es el permiso que protege `GET /api/v1/blocked-transitions` (R2.1). Un
+técnico no puede leer el endpoint, así que nunca ve la card ni la sección: no hay botón que
+esconder. Si algún día el técnico gana `READ_PROPERTIES`, esta entrada del espejo pasa a estar
+mal y hay que añadirle `EXECUTE_INCIDENTS` — el disparador es ese, no la presencia del permiso en
+`policy.py`.
 
 Rejected: añadir un `useHasPermission("MANAGE_INCIDENTS")` paralelo. `MANAGE_INCIDENTS` cubre
 asignar y clasificar (`policy.py:208`), que son del manager pero no son la acción del card; el
@@ -102,12 +114,38 @@ pilla».
 
 ### D5 — Mutaciones vía hooks dedicados con invalidación cruzada
 
-**Chosen:** Dos hooks `useCancelCleaningTask()` y `useResolveIncident()` en
-`frontend/features/dashboard/stalls/hooks/`, ambos `retry: false` (una escritura rechazada no se
-reintenta — mismo razonamiento que `useAssignCleaningTask`), y `onSettled` invalida **tres**
-claves: `dashboardKeys.blockedTransitions(tenantId)` (R3.2), la lista de tasks/incidents del
-tenant y el detalle de la propiedad afectada. La invalidación es por prefijo, así que `cleaning`
-e `incidents` invalidan sus listas paginadas sin enumerar páginas.
+**Chosen:** Dos hooks `useCancelCleaningTask()` y `useResolveIncident()`, ambos `retry: false`
+(una escritura rechazada no se reintenta — mismo razonamiento que `useAssignCleaningTask`), y
+`onSettled` invalida, como mínimo, `blocked-transitions` (R3.2), la lista de tasks/incidents del
+tenant y el cubo de la card de la propiedad afectada. La invalidación es por prefijo, así que
+`cleaning` e `incidents` invalidan sus listas paginadas sin enumerar páginas.
+
+**Dónde viven** (corregido en la revisión del 2026-08-28; la redacción original decía
+`frontend/features/dashboard/stalls/hooks/` y el código nunca estuvo ahí): cada hook vive **en la
+feature dueña del recurso que muta**, no en la que lo pinta —
+`frontend/features/cleaning/hooks/use-cancel-cleaning-task.ts` y
+`frontend/features/incidents/hooks/use-resolve-incident.ts`. La razón es la que la segunda frase
+de esta decisión ya daba: quien invalida `cleaningKeys` es quien los declara, y un hook de
+mutación de limpiezas colgado del dashboard obligaría a `features/dashboard` a importar las
+claves de `features/cleaning` — exactamente la dependencia cruzada que D2 evita. El precio
+aceptado es que los hooks no pueden importar la factoría de claves del dashboard, así que
+reproducen la forma documentada `['tenant', tenantId, '<bucket>']` publicada por
+`tenantScopedKey`; está anotado en el JSDoc de los dos ficheros.
+
+**Cuántas claves invalida cada uno**, que no son las mismas y por eso no se declara un número
+único (la revisión del 2026-08-28 encontró que el texto decía «tres» para los dos y ninguno
+invalidaba tres):
+
+| hook | claves invalidadas |
+|---|---|
+| `useCancelCleaningTask` | `blocked-transitions`, `cleaningKeys.tasksPrefix`, `dashboard-cards`, `property-timeline` |
+| `useResolveIncident` | `blocked-transitions`, `incidents-list`, `incidents-detail`, `dashboard-cards`, `property-timeline` |
+
+`dashboard-cards` es el «detalle de la propiedad afectada» de la frase original: cancelar mueve el
+`operational_state` y el `cleaningStatus` de la card, resolver mueve el `openIncidentsCount`
+(riesgo R6). `property-timeline` entra porque las dos acciones escriben un evento de cronología.
+La asimetría entre las dos filas es real y no un descuido: resolver toca además el recurso
+`incidents`, que tiene lista y detalle propios en el cliente.
 
 Rejected: invalidar sólo `blockedTransitions`. La acción cambia la task/incidencia de la que sale
 el desajuste, pero también el `cleaningStatus` y `openIncidentsCount` de la card; sin refrescar
@@ -153,28 +191,104 @@ label y el input — el patrón es el mismo que la pantalla de `/cleaning` ya im
 `docs/properties.md`, debajo del bloque actual de limpieza. Copia: explica que la ventana es la
 misma `candidate_window` del job (30 días atrás, 2 adelante), que un atasco de más de 30 días
 **deja de aparecer** sin ser culpa de la pantalla, y que el color y el literal no prometen
-exhaustividad. La card enlaza a la sección con un texto de una línea (R5.1) que sale del
+exhaustividad. La card **nombra** la ventana con un texto de una línea (R5.1) que sale del
 namespace `dashboard` y no del `docs/`.
+
+**Corregido el 2026-08-28, en la segunda revisión.** Este párrafo decía «La card **enlaza** a la
+sección», y eso no era implementable: la aplicación no sirve ninguna ruta `/docs`, así que el
+`href` no tenía destino. R5.1 quedó enmendado en el proposal —el razonamiento completo y las dos
+alternativas descartadas viven ahí, que es su casa— y esta decisión se limita a lo que sí se
+entrega: la sección en `docs/properties.md`, y en la card la línea
+`card.blocked.window` que nombra la ventana de 30 días. Sin esa línea el operador leería el
+silencio como un olvido del sistema, que es el daño que R5 existía para evitar; el enlace era el
+vehículo, no el objetivo.
 
 Rejected: documentarlo en `docs/celery-jobs.md` (donde vive la ventana original). R5.1 lo prohíbe
 al nombrar «docs/properties.md» como la casa del aviso del lado de la propietaria/manager.
 
+Rejected: enlazar al repositorio en GitHub para salvar la redacción original. El repositorio es
+privado y la destinataria de R5 —la propietaria de PRD §1— no tiene cuenta en la organización:
+sería un enlace que cumple el texto y entrega un `404` a quien lo pulse. Ver el proposal.
+
 ### D9 — Feature separada `features/dashboard/stalls/`, barrel por la feature padre
 
 **Chosen:** La lógica nueva vive bajo `frontend/features/dashboard/stalls/` con un barrel
-`index.ts` que exporta sólo lo que `dashboard-view.tsx` y `property-card.tsx` consumen (`useBlockedTransitions`,
-`BlockedTransitionsSection`, `actionMapFor`). El resto del tree (otros features, el shell) sólo
-ve la exportación de `features/dashboard` ya existente — `dashboard-view.tsx` la re-exporta.
+`index.ts`. El resto del tree (otros features, el shell) sólo ve la exportación de
+`features/dashboard` ya existente — `dashboard-view.tsx` la re-exporta.
+
+**Qué exporta el barrel** (ampliado en la revisión del 2026-08-28; la lista original nombraba
+sólo `useBlockedTransitions`, `BlockedTransitionsSection` y `actionMapFor`, y el código exporta
+más):
+
+- `useBlockedTransitions`, `BlockedTransitionsSection` — lo que `dashboard-view.tsx` y
+  `property-card.tsx` consumen. Éstos son el contrato de verdad.
+- `actionMapFor`, `ActionKind`, `ClockTrigger` — la matriz y sus tipos, que los tests de la tabla
+  y el propio `BlockedTransitionsSection` usan.
+- `BlockedTransitionSummary`, `BlockedTransitionPage` — los tipos del DTO. `property-card.tsx`
+  necesita el primero para tipar su prop `stalls`, así que sale del barrel por necesidad.
+- `stallsKeys` — la factoría de claves, consumida por los tests de aislamiento por tenant.
+- `CancelCleaningDialog`, `ResolveIncidentDialog` — **hoy no los consume nadie desde fuera**:
+  `blocked-transitions-section.tsx` los importa por ruta relativa. Se dejan exportados
+  deliberadamente porque son el único sitio del producto donde se cancela una limpieza o se
+  resuelve una incidencia desde un modal, y la entrada de roadmap que pinte los desajustes en
+  `/cleaning` o en una página propia (la que este change dejó fuera de alcance) los va a querer
+  sin moverlos de sitio. Si esa entrada no llega, la limpieza es borrar estas dos líneas.
+
+**Dónde viven los diálogos**, que es lo que la revisión del 2026-08-28 marcó como asimétrico:
+bajo `features/dashboard/stalls/components/`, mientras sus hooks viven en `features/cleaning` y
+`features/incidents` (D5). Es deliberado y no una inconsistencia: el **hook** pertenece al dominio
+del recurso que muta (quien declara las claves las invalida), y el **diálogo** pertenece a la
+pantalla que lo abre — su copia sale del namespace `dashboard`, su cabecera pinta el `trigger` y
+el `blocking_state` del desajuste, y fuera de esta card no significa nada. La importación cruzada
+que queda (`@/features/cleaning` desde un componente de dashboard) es la de un hook público, que
+es exactamente lo que un barrel de feature existe para permitir.
 
 Rejected: ensanchar `features/dashboard/components/property-card.tsx` directamente. La card ya
 tiene cinco regiones y dos regiones más (stalls, action confirm) la hinchan y rompen el test de
 orden de regiones de `property-card.test.tsx:74`. Un sub-componente mantiene la card bajo control.
 
+### D10 — El guard de `format.ts` se aplica al módulo compartido, no sólo a la fila de stalls
+
+**Añadido el 2026-08-28, en la segunda revisión**, porque el arreglo tocó un módulo que este
+change no había declarado y ninguna decisión lo cubría.
+
+**Contexto.** `formatDateTime`/`formatDate` (`frontend/features/dashboard/lib/format.ts`) llamaban
+a `Intl.DateTimeFormat(...).format(new Date(iso))` sin red. Ante un `iso` ilegible eso lanza
+`RangeError: Invalid time value` **dentro del render**, y ante `null` devuelve el epoch de Unix —
+una fecha verosímil y falsa. La revisión lo encontró por la fila de desajustes, pero el defecto
+era del módulo: sus cuatro consumidores son
+`blocked-transitions-section.tsx` (este change),
+`property-card.tsx`, `detail/property-detail-sections.tsx` y `detail/property-timeline.tsx`.
+
+**Chosen:** arreglar el módulo, no rodearlo desde la fila de stalls. Un valor no parseable se
+devuelve **tal cual** y un valor nulo devuelve `""`; ninguno de los dos lanza. El cambio de
+contrato alcanza a los tres consumidores preexistentes a propósito:
+
+- Ninguno de ellos tenía comportamiento definido ante ese dato — tenían una excepción que se
+  llevaba por delante la card, el detalle o la fila de cronología entera. Pasar de «revienta la
+  región» a «pinta el valor crudo» no le quita a nadie nada que tuviera.
+- La alternativa —un `formatStallDate` sólo para esta feature— deja a los otros tres con el
+  `RangeError` y duplica el formateo, que es exactamente cómo se llega a dos formatos de fecha
+  distintos en la misma pantalla.
+
+**Por qué el crudo y no una cadena vacía o un guion:** un valor vacío se lee como «el backend no
+mandó este campo», que es una afirmación distinta y también falsa. Devolver lo que llegó le dice
+al operador que el dato está mal, y a quien lea el bug le da el valor exacto sin abrir la consola.
+El único caso en el que sí se devuelve vacío es el nulo, donde no hay nada crudo que enseñar.
+
+**Límite conocido, aceptado:** el crudo se pinta sin `truncate`, así que un valor larguísimo
+desbordaría la card. No es alcanzable por el contrato tipado (`due_since` es `datetime` en el
+esquema Pydantic) y es una decisión de estilo, no de seguridad; se deja anotado en vez de
+resolverlo aquí.
+
+Rejected: envolver la fila en un error boundary. Convierte un dato malo en una región rota, que
+es el síntoma que se quería quitar.
+
 ## Changes by area
 
 | Area | Files | Change |
 |---|---|---|
-| Feature — stalls (nuevo) | `frontend/features/dashboard/stalls/index.ts` | Barrel: re-exporta `useBlockedTransitions`, `BlockedTransitionsSection`, `actionMapFor`, `ActionKind`. |
+| Feature — stalls (nuevo) | `frontend/features/dashboard/stalls/index.ts` | Barrel. Lo que exporta y por qué está enumerado en D9 — no se repite aquí para que no vuelva a divergir. |
 | Feature — stalls | `frontend/features/dashboard/stalls/lib/action-map.ts` | Tabla exhaustiva `trigger × blocking_state → ActionKind \| null` + tipos `ClockTrigger`, `ActionKind`, guardia `Exclude<…, never>`. |
 | Feature — stalls | `frontend/features/dashboard/stalls/lib/action-map.test.ts` | Tests de la tabla: una entrada por combinación del producto cartesiano, sin `if`s solapados en el componente. |
 | Feature — stalls | `frontend/features/dashboard/stalls/data/dto.ts` | `BlockedTransitionSummary` re-exportado del OpenAPI. |
@@ -184,18 +298,20 @@ orden de regiones de `property-card.test.tsx:74`. Un sub-componente mantiene la 
 | Feature — stalls | `frontend/features/dashboard/stalls/data/mock/mock-stalls-source.ts` | Solo para tests (R3.2 cobertura). |
 | Feature — stalls | `frontend/features/dashboard/stalls/hooks/query-keys.ts` | `stallsKeys.list(tenantId, page)` siguiendo `tenantScopedKey`. |
 | Feature — stalls | `frontend/features/dashboard/stalls/hooks/use-blocked-transitions.ts` | Hook que entrega `{ data, byBy,` y `Map<propertyId, BlockedTransitionSummary[]>` ordenado por `due_since` ascendente. |
-| Feature — stalls | `frontend/features/dashboard/stalls/hooks/use-cancel-cleaning-task.ts` | `useMutation` `retry: false`; invalida `dashboardKeys.blockedTransitions(tenantId, *)` + `cleaningKeys.tasksPrefix(tenantId)`. |
-| Feature — stalls | `frontend/features/dashboard/stalls/hooks/use-resolve-incident.ts` | `useMutation` `retry: false`; invalida `dashboardKeys.blockedTransitions(tenantId, *)` + la query de incidents + `dashboardKeys.propertyDetail` y `dashboardKeys.cards`. |
-| Feature — stalls | `frontend/features/dashboard/stalls/components/blocked-transitions-section.tsx` | Renderiza la lista de stalls en una `<section>` con `aria-labelledby`; por stall, `trigger`, `blocking_state`, `due_since` formateado, y un botón si el rol lo permite. |
+| Feature — cleaning | `frontend/features/cleaning/hooks/use-cancel-cleaning-task.ts` | `useMutation` `retry: false`. Vive en `cleaning` y no en `stalls` (D5); las claves que invalida están en la tabla de D5. |
+| Feature — incidents | `frontend/features/incidents/hooks/use-resolve-incident.ts` | `useMutation` `retry: false`. Vive en `incidents` y no en `stalls` (D5); las claves que invalida están en la tabla de D5. |
+| Feature — stalls | `frontend/features/dashboard/stalls/components/blocked-transitions-section.tsx` | Renderiza la lista en una `<section>` con `aria-labelledby`; por stall, `trigger`, `blocking_state`, `due_since` formateado y el botón si el rol lo permite. Con la query en error pinta `card.blocked.error.fetch` en vez de desaparecer (R5.3). |
 | Feature — stalls | `frontend/features/dashboard/stalls/components/cancel-cleaning-dialog.tsx` | Modal con `reason` obligatorio (max 500 chars, contador visible). |
 | Feature — stalls | `frontend/features/dashboard/stalls/components/resolve-incident-dialog.tsx` | Modal con `final_cost` obligatorio (decimal positivo). |
-| Dashboard cards | `frontend/features/dashboard/components/property-card.tsx` | Acepta `stalls: BlockedTransitionSummary[]` opcional; renderiza `<BlockedTransitionsSection>` si la lista no está vacía. Mantiene el orden de regiones (R5.4 de `dashboard-web-frontend.md`). |
-| Dashboard cards | `frontend/features/dashboard/components/dashboard-view.tsx` | Llama `useBlockedTransitions()`, indexa por `propertyId` y pasa el slice a cada `PropertyCard`. |
+| Dashboard cards | `frontend/features/dashboard/components/property-card.tsx` | Acepta `stalls` y `stallsHaveError` opcionales; renderiza `<BlockedTransitionsSection>` manteniendo el orden de regiones (R5.4 de `dashboard-web-frontend.md`). |
+| Dashboard cards | `frontend/features/dashboard/components/dashboard-view.tsx` | Llama `useBlockedTransitions()`, indexa por `propertyId`, pasa el slice y el flag `stallsHaveError` a cada `PropertyCard` (R5.3). |
 | Permisos | `frontend/lib/auth/permissions.ts` | `Permission` union añade `"EXECUTE_INCIDENTS"`; `PROPERTY_MANAGER: [..., "EXECUTE_INCIDENTS"]` (R2.4). |
 | Permisos | `frontend/lib/auth/permissions.test.tsx` | Test que `PROPERTY_MANAGER` con `EXECUTE_INCIDENTS` y `MANAGE_CLEANING_TASKS`, `TENANT_OWNER` sin ninguno, `CLEANER`/`TECHNICIAN`/`SUPER_ADMIN` sin ninguno (R2.4). |
-| i18n | `frontend/locales/es/dashboard.json` | Bloque `card.blocked` con título, descripción, formato `due_since`, `cancel.cleaning.{label, reason.label, reason.placeholder, confirm, sending, error.empty, error.generic}`, `resolve.incident.{…}`, `error.{fetch, forbidden, conflict, generic}`. |
+| i18n | `frontend/locales/es/dashboard.json` | Bloque `card.blocked`: título, la línea de la ventana, `cancelCleaning.*` y `resolveIncident.*` con sus diálogos, y `error.{fetch, forbidden, conflict}`. El catálogo exacto es el fichero; no se duplica aquí. |
 | i18n | `frontend/locales/en/dashboard.json` | Mismo bloque en EN. |
-| Docs | `docs/properties.md` | Sección «Aviso de desajustes en la card del dashboard»: ventana de 30 días, sin promesa de exhaustividad, enlace desde la card (R5.1-R5.3). |
+| Docs | `docs/properties.md` | Sección «Aviso de desajustes en la card del dashboard»: ventana de 30 días, sin promesa de exhaustividad, y la línea de la card que **nombra** esa ventana — no la enlaza, ver D8 y la enmienda de R5.1 (R5.1-R5.3). |
+| Feature — stalls | `frontend/features/dashboard/stalls/lib/stalls-error.ts` | Mapea el fallo de una mutación a clave de traducción **por status** (403, 409; el resto al genérico del llamante), como `assign-error.ts` y `pricing-error.ts`. Añadido en la revisión del 2026-08-28. |
+| Dashboard (compartido) | `frontend/features/dashboard/lib/format.ts` | `formatDateTime`/`formatDate` dejan de lanzar `RangeError` ante un timestamp ilegible. Cambio de contrato de un módulo compartido: ver D10. |
 | Tests | `frontend/features/dashboard/stalls/**/*.test.{ts,tsx}` | Cobertura de hooks, sección, dialogs, mapeo de errores. |
 
 ## Data & interfaces

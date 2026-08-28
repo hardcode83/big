@@ -128,8 +128,36 @@ Acceptance criteria:
 
 1. THE SYSTEM SHALL documentar en `docs/properties.md` que un atasco de más de 30 días deja de
    aparecer —el mismo límite de `candidate_window` que
-   `sdd/specs/celery-jobs.md` declara para el job—, y SHALL enlazarlo desde la pantalla con un
-   texto breve que no ocupe más de una línea.
+   `sdd/specs/celery-jobs.md` declara para el job—, y SHALL nombrar esa ventana en la pantalla
+   con un texto breve que no ocupe más de una línea.
+
+   > **Enmendado el 2026-08-28, en la segunda revisión.** La redacción original decía «y SHALL
+   > **enlazarlo** desde la pantalla», y el diseño D8 la desarrolló como un enlace de la card a
+   > `docs/properties.md#aviso-de-desajustes-en-la-card-del-dashboard`. Ese enlace no tiene
+   > destino: la aplicación **no sirve ninguna ruta `/docs`** —`frontend/app/` tiene `(field)`,
+   > `(guest)`, `(public)`, `(workspace)` y `api/[...path]`, y nada más—, así que el `href` que
+   > el diseño nombraba daría `404`. El requisito nació suponiendo una capacidad que el producto
+   > no tiene.
+   >
+   > Se descartaron las dos alternativas que sí permitían enlazar:
+   >
+   > - **Servir la documentación** con una ruta `/docs/[slug]`. Es una capacidad nueva, muy por
+   >   encima del alcance de este change, y publicaría documentación interna de operación dentro
+   >   de la aplicación — una decisión de producto que no le toca tomar a la card del dashboard.
+   > - **Enlazar al repositorio en GitHub**, como hace `provenance-panel.tsx` con
+   >   `repository_url`. Funciona hoy, pero el repositorio es **privado**: la propietaria de
+   >   PRD §1 —que es exactamente la persona para la que R5 está escrito, la que mira el móvil y
+   >   no tiene cuenta en la organización— recibiría un `404` de GitHub. Cumpliría la letra del
+   >   requisito rompiendo su intención justo para el rol que lo motivó. `provenance-panel.tsx`
+   >   no es precedente aplicable: ese panel es para quien opera el despliegue, no para la
+   >   propietaria.
+   >
+   > Lo que **no** cambia: la ventana de 30 días se sigue documentando en `docs/properties.md`
+   > (esa mitad del requisito estaba entregada) y se sigue nombrando en la card en una línea, que
+   > es lo que impide que el operador lea el silencio como un olvido del sistema. Lo que se
+   > retira es la exigencia de que esa línea sea un enlace. Si algún día el producto gana una
+   > ruta de documentación, este requisito vuelve a estar al alcance y la card es un cliente
+   > obvio.
 2. THE SYSTEM SHALL no prometer exhaustividad en la copia de la pantalla: ni «todas las
    viviendas», ni «en tiempo real», ni «completo».
 3. WHERE la query falle con `5xx`, THEN THE SYSTEM SHALL mostrar el estado de error localizado
