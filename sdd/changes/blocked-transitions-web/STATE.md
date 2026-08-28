@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/blocked-transitions-web
 implementation_sha: d74caa31d6a2c5217b0cdf1372fc5d91e950b2a0
 pr_number: 
 pr_url: 
