@@ -7,8 +7,11 @@ import {
 } from "@/features/shell/navigation/route-registry";
 
 /** The exact surfaces defined by PRD §24, plus the public landing added by
- * `landing-public` (R3). The landing is its own PRD entry, not a re-use of
- * `/login`, so this list grows by exactly one when that change lands. */
+ * `landing-public` (R3) and the authenticated-intermediate `/welcome` added
+ * by `frontend-auth-role-routing` (R2 #1). `/welcome` is reached by role-
+ * based redirect from the login form for `CLEANER` / `TECHNICIAN`; it is NOT
+ * a PRD §24 surface and has no navigable menu entry — it shows up here so
+ * the registry stays the single source of truth for routes. */
 const PRD_24_SURFACES = [
   "/",
   "/login",
@@ -35,6 +38,7 @@ const PRD_24_SURFACES = [
   "/tech",
   "/tech/incidents/[id]",
   "/guest/[token]",
+  "/welcome",
 ].sort();
 
 const ALLOWED_KEYS = new Set<keyof ShellRouteDescriptor>([
@@ -59,6 +63,7 @@ const VALID_PROFILES = new Set([
   "technician",
   "public",
   "guest",
+  "authenticated",
 ]);
 
 describe("route registry (D4 / PRD §24)", () => {

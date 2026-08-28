@@ -43,6 +43,7 @@ const REAL_PAGE_ROUTE_IDS: Record<string, string> = {
   "(workspace)/pricing/page.tsx": "pricing",
   "(public)/login/page.tsx": "login",
   "(guest)/guest/[token]/page.tsx": "guest",
+  "(authenticated)/welcome/page.tsx": "welcome",
   "page.tsx": "landing",
 };
 
