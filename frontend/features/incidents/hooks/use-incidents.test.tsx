@@ -6,7 +6,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { ApiError } from "@/lib/api";
 
 import * as dataModule from "../data";
-import { useIncident, useIncidents } from "./use-incidents";
+import {
+  useIncident,
+  useIncidentContext,
+  useIncidentPhotos,
+  useIncidents,
+} from "./use-incidents";
 import { incidentsKeys } from "./query-keys";
 
 vi.mock("@/lib/auth", () => ({
@@ -15,6 +20,8 @@ vi.mock("@/lib/auth", () => ({
 
 const listMock = vi.fn();
 const detailMock = vi.fn();
+const contextMock = vi.fn();
+const photosMock = vi.fn();
 const getIncidentsDataSource = vi.spyOn(dataModule, "getIncidentsDataSource");
 
 getIncidentsDataSource.mockImplementation(
@@ -22,6 +29,8 @@ getIncidentsDataSource.mockImplementation(
     ({
       listIncidents: listMock,
       getIncident: detailMock,
+      getIncidentContext: contextMock,
+      listPhotos: photosMock,
     }) as unknown as ReturnType<typeof dataModule.getIncidentsDataSource>,
 );
 
@@ -70,20 +79,51 @@ const DETAIL = {
   aiSummary: null,
   assignedTechnicianId: null,
   ownerApprovalRequired: false,
+  etaAt: null,
   estimatedCost: null,
   approvedCost: null,
   finalCost: null,
+  materials: null,
   resolvedAt: null,
   createdAt: "2026-08-12T08:00:00Z",
   updatedAt: "2026-08-12T08:00:00Z",
 } as const;
 
+const CONTEXT = {
+  propertyName: "Piso Sol",
+  propertyInternalCode: "MAD-01",
+  addressLine1: "Calle Mayor 1",
+  addressLine2: null,
+  city: "Madrid",
+  province: "Madrid",
+  postalCode: "28013",
+  country: "ES",
+  timezone: "Europe/Madrid",
+  accessNotes: null,
+  assignmentNote: null,
+} as const;
+
+const PHOTOS = [
+  {
+    id: "ph1",
+    incidentId: "i1",
+    stage: "BEFORE",
+    uploadedBy: "u1",
+    createdAt: "2026-08-12T09:00:00Z",
+    url: "/api/v1/incident-photos/ph1?exp=1&sig=a",
+  },
+] as const;
+
 describe("useIncidents / useIncident", () => {
   beforeEach(() => {
     listMock.mockReset();
     detailMock.mockReset();
+    contextMock.mockReset();
+    photosMock.mockReset();
     listMock.mockResolvedValue(LIST_PAGE);
     detailMock.mockResolvedValue(DETAIL);
+    contextMock.mockResolvedValue(CONTEXT);
+    photosMock.mockResolvedValue(PHOTOS);
   });
 
   it("useIncidents calls the source with the supplied filters", async () => {
@@ -130,5 +170,43 @@ describe("useIncidents / useIncident", () => {
     });
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(detailMock).toHaveBeenCalledTimes(1);
+  });
+  it("useIncidentContext stores under the tenant-scoped context key (R1.3)", async () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useIncidentContext("i1"), { wrapper });
+    await waitFor(() => {
+      expect(
+        client.getQueryData(incidentsKeys.context("tenant-from-session", "i1")),
+      ).toEqual(CONTEXT);
+    });
+    expect(contextMock).toHaveBeenCalledWith("tenant-from-session", "i1");
+  });
+
+  it("useIncidentPhotos stores under the tenant-scoped photos key", async () => {
+    const client = new QueryClient();
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    renderHook(() => useIncidentPhotos("i1"), { wrapper });
+    await waitFor(() => {
+      expect(
+        client.getQueryData(incidentsKeys.photos("tenant-from-session", "i1")),
+      ).toEqual(PHOTOS);
+    });
+    expect(photosMock).toHaveBeenCalledWith("tenant-from-session", "i1");
+  });
+
+  it("useIncidentContext does NOT retry 4xx (retryPolicy wiring)", async () => {
+    contextMock.mockRejectedValueOnce(
+      new ApiError({ status: 404, code: "not_found", message: "x" }),
+    );
+    const { result } = renderHook(() => useIncidentContext("i1"), {
+      wrapper: freshWrapper(),
+    });
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(contextMock).toHaveBeenCalledTimes(1);
   });
 });

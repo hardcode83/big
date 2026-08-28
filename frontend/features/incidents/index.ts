@@ -5,8 +5,24 @@
 export { IncidentsView } from "./components/list/incidents-view";
 export { IncidentsFilters } from "./components/list/incidents-filters";
 export { IncidentDetailView } from "./components/detail/incident-detail-view";
-export { useIncidents, useIncident } from "./hooks/use-incidents";
+export {
+  useIncidents,
+  useIncident,
+  useIncidentContext,
+  useIncidentPhotos,
+} from "./hooks/use-incidents";
+export {
+  useIncidentCycleAction,
+  useResolveIncident,
+  useUploadIncidentPhoto,
+  type IncidentCycleAction,
+  type IncidentCycleInput,
+  type ResolveIncidentVariables,
+  type UploadIncidentPhotoVariables,
+} from "./hooks/use-incident-cycle";
 export { incidentsKeys } from "./hooks/query-keys";
 export { mapIncidentsError } from "./lib/error-mapping";
+export { conflictReason, type ConflictReason } from "./lib/conflict-reason";
+export { severityColorGroup } from "./lib/severity-tone";
 export { getIncidentsDataSource } from "./data";
 export type * from "./data";

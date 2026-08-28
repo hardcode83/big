@@ -48,7 +48,6 @@ como placeholder**, y una demo que las anuncie decepciona. Lo que hay hoy:
 | `/conversations` | placeholder | `conversations-inbox` |
 | `/pricing` | placeholder | `pricing-web` |
 | `/cleaner`, `/cleaner/tasks/[id]` | placeholder | `cleaner-app` |
-| `/tech`, `/tech/incidents/[id]` | placeholder | `tech-app` |
 | `/reviews` | placeholder, y **tampoco hay backend**: `app/reviews/` tiene entidades y modelos, ni capa de aplicación ni router | `revenue-reviews` |
 | `/statements`, `/approvals` | placeholder | `revenue-statements` |
 | `/settings`, `/settings/integrations` | placeholder | pendiente |
@@ -56,17 +55,20 @@ como placeholder**, y una demo que las anuncie decepciona. Lo que hay hoy:
 
 Dos consecuencias que conviene decir en voz alta antes de una demo:
 
-- **Las cuentas `CLEANER` y `TECHNICIAN` no son un recorrido demostrable.** Se crean porque el
-  dataset las necesita —la limpieza cerrada es *de* la limpiadora, la incidencia asignada es *del*
-  técnico—, pero sus dos pantallas son placeholders. Su trabajo se ve **desde la cuenta del
-  manager**, en `/cleaning` y en `/incidents`, que sí están construidas.
+- **La cuenta `CLEANER` no es un recorrido demostrable.** Se crea porque el dataset la necesita
+  —la limpieza cerrada es *de* la limpiadora—, pero sus dos pantallas son placeholders. Su trabajo
+  se ve **desde la cuenta del manager**, en `/cleaning`, que sí está construida. La cuenta
+  `TECHNICIAN` **sí lo es** desde `tech-app`: entra en `/tech`, ve su incidencia asignada con la
+  vivienda, la abre y recorre el ciclo. Lo que se enseñe la mueve de verdad, así que conviene
+  hacerlo al final de la demo o resetear después.
 - **`AuthGuard` no distingue rol**: comprueba que hay sesión y nada más. Así que cualquiera de las
   cuatro cuentas puede abrir cualquier ruta del workspace, y lo que la frene será el `403` del
   backend, no la navegación. No es un defecto de la demo, es el estado de la ruta.
 
 **Lo que sí se recorre entero**, y es lo que hay que enseñar: `/dashboard`, `/timeline`,
 `/properties` y el detalle de una vivienda, `/reservations` y el detalle de una estancia,
-`/cleaning`, `/incidents` y el detalle de una incidencia, y el **portal de huésped**
+`/cleaning`, `/incidents` y el detalle de una incidencia, la **app del técnico** (`/tech` y el
+detalle de una incidencia desde la cuenta `TECHNICIAN`), y el **portal de huésped**
 (`/guest/[token]`), que es la única superficie que se ve sin cuenta.
 
 Qué contiene el dataset, con sus tres rarezas que no son defectos:

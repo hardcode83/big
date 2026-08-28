@@ -7,9 +7,11 @@ import { retryPolicy } from "@/lib/api/retry-policy";
 
 import {
   getIncidentsDataSource,
+  type IncidentContextDto,
   type IncidentDetailDto,
   type IncidentFilters,
   type IncidentList,
+  type IncidentPhotoDto,
 } from "../data";
 import { incidentsKeys } from "./query-keys";
 
@@ -55,6 +57,38 @@ export function useIncident(
     queryKey: incidentsKeys.detail(tenantId, incidentId),
     queryFn: () =>
       getIncidentsDataSource().getIncident(tenantId, incidentId),
+    retry: retryPolicy,
+  });
+}
+
+/**
+ * The property context of one incident (R2.3). Its key is `incidentsKeys.context`,
+ * the same one the list mounts per row — see the JSDoc there for why that
+ * identity is R1.3.
+ */
+export function useIncidentContext(
+  incidentId: string,
+): UseQueryResult<IncidentContextDto> {
+  const tenantId = useTenantId();
+  return useQuery({
+    queryKey: incidentsKeys.context(tenantId, incidentId),
+    queryFn: () =>
+      getIncidentsDataSource().getIncidentContext(tenantId, incidentId),
+    retry: retryPolicy,
+  });
+}
+
+/**
+ * The photos of one incident (R5.1). No `staleTime` of its own: TanStack's
+ * default of 0 revalidates on mount, far below the signature's 3600 s (D10).
+ */
+export function useIncidentPhotos(
+  incidentId: string,
+): UseQueryResult<IncidentPhotoDto[]> {
+  const tenantId = useTenantId();
+  return useQuery({
+    queryKey: incidentsKeys.photos(tenantId, incidentId),
+    queryFn: () => getIncidentsDataSource().listPhotos(tenantId, incidentId),
     retry: retryPolicy,
   });
 }
