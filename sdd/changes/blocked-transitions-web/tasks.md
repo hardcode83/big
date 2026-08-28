@@ -204,8 +204,10 @@ stop; resume with section 5 only once the OQ1 backend PR is on `main`.
 ## 8. Review fixes (round 2, 2026-08-28)
 
 Findings raised by the `/sdd:review` panel of 2026-08-28. The panel's own report and the
-resolution of each entry live in the git history of `BLOCKED.md`; what is left open is the
-partial exhaustiveness guard of D3, deferred.
+resolution of each entry live in the git history of `BLOCKED.md`. Nothing is left open: the last
+item — D3's guard covering only the trigger axis — was relocated to its real home, the D3 decision
+itself, as declared debt with the trigger that would make it worth paying. Keeping it in
+`BLOCKED.md` would have parked a design limitation in a queue meant for pending work.
 
 - [x] 8.1 Add `frontend/features/dashboard/stalls/lib/stalls-error.ts`: maps a failed mutation to a
       locale key **by HTTP status**, following `features/cleaning/lib/assign-error.ts` and

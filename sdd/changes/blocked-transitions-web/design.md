@@ -80,6 +80,17 @@ Rejected: `if (state === 'AWAITING_CLEANING' || state === 'CLEANING_IN_PROGRESS'
 por el componente. R1.5 lo prohíbe expresamente y es además el modo de divergencia que la guarda
 de exhaustividad de D3 cierra.
 
+**Deuda declarada, aceptada el 2026-08-29 al cerrar la revisión.** La guarda de exhaustividad
+cubre **sólo el eje de los triggers**: `Exclude<ClockTrigger, keyof typeof ACTION_MATRIX>` obliga a
+que un cuarto trigger rompa la compilación, pero **un estado operacional nuevo no rompe nada** —
+cae al `null` por defecto y la fila queda informativa sin acción, en silencio. No es simetría
+olvidada: `null` es una respuesta legítima para un estado que no admite acción, así que el eje de
+los estados no se puede cerrar del mismo modo sin enumerar las once celdas muertas de cada
+trigger. Hoy no es un defecto —el test del producto cartesiano en `action-map.test.ts` cubre todos
+los estados que existen— pero sí es riesgo de deriva a largo plazo: el día que el backend añada un
+estado bloqueante, esta tabla lo ignorará sin avisar. El disparador para pagarlo es ese, y el sitio
+es el próximo change que toque la matriz. Queda anotado también en el JSDoc de `action-map.ts`.
+
 Rejected: importar la matriz desde el backend y derivar el mapping. La matriz
 `PropertyStateMachine.source_states_for` describe qué transiciones son legales; **no** describe
 qué botón pintamos. La primera es del motor de estados; el segundo es del catálogo de
