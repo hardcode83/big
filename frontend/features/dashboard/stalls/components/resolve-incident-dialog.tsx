@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/sheet";
 
 import { useResolveIncident } from "@/features/incidents";
+
+import { stallsErrorKey } from "../lib/stalls-error";
 
 /**
  * Two decimals with an optional leading digit; accepts both `0.50` and
@@ -101,6 +103,7 @@ function ResolveIncidentDialogBody({
   const inputId = useId();
   const inputHelpId = useId();
   const inputErrorId = useId();
+  const submittingRef = useRef(false);
 
   const parsed = POSITIVE_DECIMAL.test(value.trim());
   const canSubmit = !mutation.isPending && parsed;
@@ -116,12 +119,21 @@ function ResolveIncidentDialogBody({
       setValidationError(true);
       return;
     }
+    // See the twin guard in `cancel-cleaning-dialog.tsx`: `isPending` lags one
+    // commit behind, so the ref is what makes a double click one request.
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     mutation.mutate(
       { incidentId, finalCost: value.trim() },
       {
         onSuccess: () => onClose(),
         onError: () => {
           // R3.3: localized error renders beneath the input; do not close.
+        },
+        onSettled: () => {
+          submittingRef.current = false;
         },
       },
     );
@@ -186,7 +198,12 @@ function ResolveIncidentDialogBody({
         ) : null}
         {mutation.isError ? (
           <p role="alert" className="text-xs text-destructive">
-            {t("card.blocked.resolveIncident.dialog.error.generic")}
+            {t(
+              stallsErrorKey(
+                mutation.error,
+                "card.blocked.resolveIncident.dialog.error.generic",
+              ),
+            )}
           </p>
         ) : null}
       </div>

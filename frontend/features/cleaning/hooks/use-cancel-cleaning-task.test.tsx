@@ -83,6 +83,11 @@ describe("useCancelCleaningTask (R2.2, R3.1, R3.2, design D5)", () => {
       expect.arrayContaining([
         ["tenant", "tenant-1", "blocked-transitions"],
         cleaningKeys.tasksPrefix("tenant-1"),
+        // D5's "detalle de la propiedad afectada": a cancellation moves the
+        // property's operational state and its cleaning cube, so the card
+        // behind the dialog would otherwise stay stale.
+        ["tenant", "tenant-1", "dashboard-cards"],
+        ["tenant", "tenant-1", "property-timeline"],
       ]),
     );
   });

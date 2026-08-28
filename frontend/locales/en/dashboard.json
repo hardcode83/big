@@ -66,8 +66,7 @@
       "error": {
         "fetch": "We couldn't load this property's blockers.",
         "forbidden": "You don't have permission to act on this blocker.",
-        "conflict": "Someone else already resolved this blocker; the panel is being refreshed.",
-        "generic": "We couldn't complete the action on this blocker."
+        "conflict": "Someone else already resolved this blocker; the panel is being refreshed."
       }
     }
   },

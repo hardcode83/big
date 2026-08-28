@@ -66,8 +66,7 @@
       "error": {
         "fetch": "No se pudieron cargar los bloqueos de esta vivienda.",
         "forbidden": "No tienes permiso para actuar sobre este bloqueo.",
-        "conflict": "Otra persona ya resolvió este bloqueo; recargando el panel.",
-        "generic": "No se pudo completar la acción sobre este bloqueo."
+        "conflict": "Otra persona ya resolvió este bloqueo; recargando el panel."
       }
     }
   },

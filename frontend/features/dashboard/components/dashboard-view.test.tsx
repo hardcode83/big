@@ -18,12 +18,28 @@ const useBlockedTransitions = vi.hoisted(() => vi.fn());
 vi.mock("../hooks/use-dashboard-data", () => ({ useDashboardCards }));
 vi.mock("@/features/dashboard/stalls", () => ({
   useBlockedTransitions,
-  BlockedTransitionsSection: ({ stalls }: { stalls: unknown[] }) =>
-    stalls.length > 0 ? (
+  // Mirrors the real component's contract: an errored query renders the
+  // section with its localized error instead of collapsing to `null` (R5.3).
+  BlockedTransitionsSection: ({
+    stalls,
+    hasError,
+  }: {
+    stalls: unknown[];
+    hasError?: boolean;
+  }) => {
+    if (hasError) {
+      return (
+        <section>
+          <p role="alert">stalls-error</p>
+        </section>
+      );
+    }
+    return stalls.length > 0 ? (
       <section>
         <h4>Stalls ({stalls.length})</h4>
       </section>
-    ) : null,
+    ) : null;
+  },
 }));
 
 function page(
@@ -170,5 +186,71 @@ describe("DashboardView (R1)", () => {
     });
     renderView();
     expect(screen.getByText("Stalls (1)")).toBeInTheDocument();
+  });
+});
+
+
+/**
+ * R5.3. Before this, `dashboard-view` folded `isError` into the same empty
+ * `Map()` it used for `isPending`, so a 5xx on `GET /blocked-transitions`
+ * rendered a card identical to «this property has nothing blocked» — the
+ * silent failure the whole change exists to end.
+ */
+describe("DashboardView — a failed stalls query is visible (R5.3)", () => {
+  it("renders the stalls error inside each card without hiding the cards", async () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: page([sampleCard]),
+    });
+    useBlockedTransitions.mockReturnValue({
+      isSuccess: false,
+      isError: true,
+      byPropertyId: new Map(),
+    });
+
+    renderView();
+
+    // The card itself is still on screen — no global error state.
+    expect(await screen.findByText("REDES11")).toBeTruthy();
+    // And the stalls section carries the failure.
+    expect(screen.getByRole("alert").textContent).toBe("stalls-error");
+  });
+
+  it("stays silent while the stalls query is merely pending", async () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: page([sampleCard]),
+    });
+    useBlockedTransitions.mockReturnValue({
+      isSuccess: false,
+      isError: false,
+      byPropertyId: new Map(),
+    });
+
+    renderView();
+
+    expect(await screen.findByText("REDES11")).toBeTruthy();
+    expect(screen.queryByRole("alert")).toBeNull();
+  });
+
+  it("does not escalate a stalls failure to the page-level error state", async () => {
+    useDashboardCards.mockReturnValue({
+      isPending: false,
+      isError: false,
+      data: page([sampleCard]),
+    });
+    useBlockedTransitions.mockReturnValue({
+      isSuccess: false,
+      isError: true,
+      byPropertyId: new Map(),
+    });
+
+    renderView();
+
+    // The cards-query error copy must not appear: only the stalls one.
+    expect(await screen.findByText("REDES11")).toBeTruthy();
+    expect(screen.queryByText(/No se pudo cargar el panel/)).toBeNull();
   });
 });

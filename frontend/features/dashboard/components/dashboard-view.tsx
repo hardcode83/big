@@ -20,6 +20,12 @@ import { PropertyCard } from "./property-card";
  * N+1 the design rejects. If the stalls query is still pending, the cards
  * render with no stalls slice (R1.4) — the section is omitted, the rest of
  * the card renders unchanged.
+ *
+ * A **failed** stalls query is not the same thing as an empty one, and R5.3
+ * forbids conflating them: the flag travels to every card so each one paints
+ * the localized error inside its own stalls section. The cards query owns the
+ * page-level error state; the stalls query never escalates to it, because a
+ * blocked-transitions outage must not hide the properties themselves.
  */
 export function DashboardView() {
   const { t } = useTranslation("dashboard");
@@ -55,6 +61,7 @@ export function DashboardView() {
   const stallsByPropertyId = stallsQuery.isSuccess
     ? stallsQuery.byPropertyId
     : new Map();
+  const stallsHaveError = stallsQuery.isError;
 
   return (
     <div className="grid grid-cols-1 items-stretch gap-4 p-4 sm:grid-cols-2 xl:grid-cols-3">
@@ -63,6 +70,7 @@ export function DashboardView() {
           key={card.propertyId}
           card={card}
           stalls={stallsByPropertyId.get(card.propertyId) ?? []}
+          stallsHaveError={stallsHaveError}
         />
       ))}
     </div>

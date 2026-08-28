@@ -35,7 +35,8 @@ export interface CancelCleaningTaskInput {
  * The invalidation runs in `onSettled`, so **on failure as well as on success**
  * (R3.3): a `409` re-reads the stalls bucket (the row may have been resolved
  * by another person) and the cleaning prefix (the underlying task may have
- * moved out of the active filter). It targets two prefixes:
+ * moved out of the active filter). It targets four prefixes — the three
+ * design D5 names, plus the property timeline that records the cancellation:
  *
  *   - the dashboard card's `blocked-transitions` bucket — every page of the
  *     blocked transitions, so the resolved stall disappears without
@@ -47,6 +48,16 @@ export interface CancelCleaningTaskInput {
  *
  *   - `cleaningKeys.tasksPrefix(tenantId)` — every cleaning-task key under
  *     the tenant (assign-cleaner and other consumers share the prefix).
+ *
+ *   - the dashboard cards (`['tenant', tenantId, 'dashboard-cards']`) — a
+ *     cancellation moves the property's `operational_state` and its
+ *     `cleaningStatus` cube, so the card behind the dialog is stale the
+ *     instant the mutation lands. This is the "detalle de la propiedad
+ *     afectada" of design D5, which the first cut of this hook omitted.
+ *
+ *   - the dashboard property timeline
+ *     (`['tenant', tenantId, 'property-timeline']`) — the cancellation writes
+ *     a timeline event, mirroring what `useResolveIncident` already does.
  */
 export function useCancelCleaningTask(): UseMutationResult<
   CleaningTask,
@@ -80,6 +91,12 @@ export function useCancelCleaningTask(): UseMutationResult<
       });
       void queryClient.invalidateQueries({
         queryKey: cleaningKeys.tasksPrefix(tenantId),
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["tenant", tenantId, "dashboard-cards"],
+      });
+      void queryClient.invalidateQueries({
+        queryKey: ["tenant", tenantId, "property-timeline"],
       });
     },
   });

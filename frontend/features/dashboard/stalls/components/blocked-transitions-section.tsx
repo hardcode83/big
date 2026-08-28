@@ -30,9 +30,15 @@ import { ResolveIncidentDialog } from "./resolve-incident-dialog";
  * (R2.4 — never paint a button that would `403`), and a row that resolves to
  * `null` shows no button at all (D6).
  *
- * The section renders nothing when `stalls.length === 0`: the card stays
- * untouched. The heading id derives from the property so multiple cards on
- * the same `/dashboard` view keep distinct labelled regions.
+ * The section renders nothing when `stalls.length === 0` **and** the stalls
+ * query succeeded: the card stays untouched. When the query failed, the
+ * section renders its localized error instead of disappearing — R5.3 forbids
+ * hiding the card behind a global error, and an empty card is
+ * indistinguishable from «this property has no blockers», which is the exact
+ * silence this whole change exists to end.
+ *
+ * The heading id derives from the property so multiple cards on the same
+ * `/dashboard` view keep distinct labelled regions.
  */
 
 interface CancelDialogState {
@@ -50,9 +56,12 @@ interface ResolveDialogState {
 export function BlockedTransitionsSection({
   stalls,
   headingId,
+  hasError = false,
 }: {
   stalls: BlockedTransitionSummary[];
   headingId: string;
+  /** `true` when the dashboard's stalls query failed (R5.3). */
+  hasError?: boolean;
 }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = i18n.language;
@@ -62,8 +71,21 @@ export function BlockedTransitionsSection({
   const [cancelFor, setCancelFor] = useState<CancelDialogState | null>(null);
   const [resolveFor, setResolveFor] = useState<ResolveDialogState | null>(null);
 
-  if (stalls.length === 0) {
+  if (stalls.length === 0 && !hasError) {
     return null;
+  }
+
+  if (hasError) {
+    return (
+      <section aria-labelledby={headingId} className="min-w-0">
+        <h4 id={headingId} className="text-sm font-semibold text-foreground">
+          {t("card.blocked.title")}
+        </h4>
+        <p role="alert" className="mt-2 text-xs text-destructive">
+          {t("card.blocked.error.fetch")}
+        </p>
+      </section>
+    );
   }
 
   return (

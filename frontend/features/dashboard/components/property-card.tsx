@@ -54,9 +54,16 @@ function Field({
 export function PropertyCard({
   card,
   stalls,
+  stallsHaveError = false,
 }: {
   card: PropertyDashboardCard;
   stalls?: BlockedTransitionSummary[];
+  /**
+   * `true` when the dashboard's stalls query failed. The card keeps rendering
+   * every other region and the stalls section carries the error (R5.3), so a
+   * backend failure never hides the property itself.
+   */
+  stallsHaveError?: boolean;
 }) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = i18n.language;
@@ -98,10 +105,11 @@ export function PropertyCard({
           </span>
         </section>
 
-        {stalls && stalls.length > 0 ? (
+        {stallsHaveError || (stalls && stalls.length > 0) ? (
           <BlockedTransitionsSection
-            stalls={stalls}
+            stalls={stalls ?? []}
             headingId={stallsHeadingId}
+            hasError={stallsHaveError}
           />
         ) : null}
 

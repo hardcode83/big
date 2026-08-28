@@ -1,6 +1,6 @@
 "use client";
 
-import { useId, useState } from "react";
+import { useId, useRef, useState } from "react";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -13,6 +13,8 @@ import {
 } from "@/components/ui/sheet";
 
 import { useCancelCleaningTask } from "@/features/cleaning";
+
+import { stallsErrorKey } from "../lib/stalls-error";
 
 const REASON_MAX = 500;
 
@@ -98,6 +100,7 @@ function CancelCleaningDialogBody({
   const reasonHintId = useId();
   const reasonErrorId = useId();
   const textareaId = useId();
+  const submittingRef = useRef(false);
 
   const trimmedReason = reason.trim();
   const canSubmit =
@@ -117,6 +120,13 @@ function CancelCleaningDialogBody({
       setEmptyReasonError(trimmedReason.length === 0);
       return;
     }
+    // `mutation.isPending` only flips on the next React commit, so two clicks
+    // dispatched in the same frame would both reach `mutate`. This ref closes
+    // that window synchronously; `onSettled` reopens it.
+    if (submittingRef.current) {
+      return;
+    }
+    submittingRef.current = true;
     mutation.mutate(
       { taskId, reason: trimmedReason },
       {
@@ -124,6 +134,9 @@ function CancelCleaningDialogBody({
         onError: () => {
           // R3.3: the localized error renders beneath the form; do NOT close
           // the dialog, the user has to see why and try again or dismiss.
+        },
+        onSettled: () => {
+          submittingRef.current = false;
         },
       },
     );
@@ -184,7 +197,12 @@ function CancelCleaningDialogBody({
         ) : null}
         {mutation.isError ? (
           <p role="alert" className="text-xs text-destructive">
-            {t("card.blocked.cancelCleaning.dialog.error.generic")}
+            {t(
+              stallsErrorKey(
+                mutation.error,
+                "card.blocked.cancelCleaning.dialog.error.generic",
+              ),
+            )}
           </p>
         ) : null}
       </div>

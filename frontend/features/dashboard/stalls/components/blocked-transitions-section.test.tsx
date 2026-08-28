@@ -334,3 +334,65 @@ describe("BlockedTransitionsSection — action wiring (R3.2)", () => {
   // against the real hook. Re-asserting it here with a mocked hook only proves
   // that the mocked hook does not invalidate, which is what mocking does.
 });
+
+/**
+ * R5.3 at the component level: the stub in `dashboard-view.test.tsx` asserts
+ * the flag travels; this asserts the real component honours it.
+ */
+describe("BlockedTransitionsSection — failed stalls query (R5.3)", () => {
+  function renderSection(props: {
+    stalls?: BlockedTransitionSummary[];
+    hasError?: boolean;
+  }) {
+    setRole("PROPERTY_MANAGER");
+    setPermissions({ MANAGE_CLEANING_TASKS: true, EXECUTE_INCIDENTS: true });
+    return render(
+      <BlockedTransitionsSection
+        stalls={props.stalls ?? []}
+        headingId="stalls-heading"
+        hasError={props.hasError}
+      />,
+      { wrapper: wrapper(new QueryClient()) },
+    );
+  }
+
+  it("renders the localized fetch error when hasError is true, even with no stalls", () => {
+    renderSection({ hasError: true });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "card.blocked.error.fetch",
+    );
+    // The section keeps its heading, so the card still names the region.
+    expect(screen.getByText("card.blocked.title")).toBeTruthy();
+  });
+
+  it("renders nothing when there are no stalls and no error", () => {
+    const { container } = renderSection({});
+    expect(container.querySelector("section")).toBeNull();
+  });
+
+  it("does not paint action buttons in the error state", () => {
+    renderSection({ hasError: true });
+    expect(screen.queryByRole("button")).toBeNull();
+  });
+
+  it("prefers the error over the rows when both are present", () => {
+    // A refetch that fails while stale rows are still cached: the operator
+    // must learn the list is not current rather than trust stale rows.
+    renderSection({
+      hasError: true,
+      stalls: [
+        makeStall({
+          property_id: "redes11",
+          reservation_id: "r1",
+          trigger: "CHECKIN_TIME_REACHED",
+          blocking_state: "AWAITING_CLEANING",
+          due_since: "2026-08-20T09:30:00Z",
+        }),
+      ],
+    });
+    expect(screen.getByRole("alert").textContent).toBe(
+      "card.blocked.error.fetch",
+    );
+    expect(screen.queryByText("CHECKIN_TIME_REACHED")).toBeNull();
+  });
+});
