@@ -75,9 +75,15 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   `PublicShell` (el login no muestra un usuario autenticado) ni en `GuestShell`
   (el guest accede por token, sin sesión que cerrar). El control dispara un
   `AlertDialog` de confirmación antes de invocar el cierre, y SHALL ejecutar
-  tras la confirmación, en este orden: `useAuth().logout()` → `router.replace("/")`
-  → `router.refresh()`, para que el botón «atrás» no devuelva a una ruta sin
-  sesión y la raíz re-evalúe la cookie recién purgada.
+  tras la confirmación, en este orden:
+  `useLogoutMutation().mutateAsync()` → `router.replace("/")` →
+  `router.refresh()`, para que el botón «atrás» no devuelva a una ruta sin
+  sesión y la raíz re-evalúe la cookie recién purgada. `useAuth().logout()` se
+  conserva como envoltorio `@deprecated` para consumidores previos; ejecuta
+  exclusivamente la limpieza local (purga de caché, borrado de tokens y de la
+  cookie de presencia, reset a `anonymous`) sin viaje al servidor, y SHALL NOT
+  ser usado por código nuevo — los call sites nuevos SHALL invocar
+  `useLogoutMutation().mutateAsync()` directamente.
 - IF el `POST /api/v1/auth/logout` falla o no existe sesión, THEN THE SYSTEM
   SHALL purgar igualmente la caché de consultas del `QueryClient` singleton,
   purgar la cookie `autohostai.session.present` y limpiar el almacén en
@@ -133,7 +139,13 @@ para UX; el backend conserva la autoridad sobre autorización, RBAC y tenant.
   `QueryClient.clear()` consumido por `session-cache-purge.ts`.
 - `frontend/lib/api/client.ts` — transporte tipado y hook de `401`.
 - `frontend/features/auth/components/login-form.tsx` — formulario, redirección
-  por rol vía `roleHome(user.role)` y enlace visible de vuelta al landing.
+  por rol vía `roleHome(user.role)` (con la interstitial `/welcome?role=<rol>`
+  para `CLEANER` y `TECHNICIAN` cuando no hay `?returnTo=` válida; ver
+  `frontend-auth-role-routing`) y control «Volver a la landing»
+  implementado como `<button type="button">` con `role="link"` cuyo handler
+  ejecuta `clearSessionPresent()` → `router.replace("/")` → `router.refresh()`
+  en ese orden, para que la raíz re-evalúe la cookie ya purgada y sirva la
+  landing sin red.
 - `frontend/features/auth/components/user-menu.tsx` — control de cierre de
   sesión en el `Topbar` de las tres shells autenticadas (workspace, cleaner,
   technician); dispara `AlertDialog` de confirmación y ejecuta
