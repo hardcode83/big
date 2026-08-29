@@ -202,8 +202,13 @@ export function useIncidentContext(
 }
 
 /**
- * The photos of one incident (R5.1). No `staleTime` of its own: TanStack's
- * default of 0 revalidates on mount, far below the signature's 3600 s (D10).
+ * The photos of one incident (R5.1). No `staleTime` of its own, so it inherits
+ * the shell's **60 s** (`lib/query/query-client.ts`) — not TanStack's default of
+ * 0, which this comment used to claim. The conclusion D10 needs is unchanged and
+ * the margin is still wide: a mount more than 60 s later revalidates, and 60 s is
+ * far below the signature's 3600 s, so a URL cannot expire in the cache before it
+ * is refreshed. Within that minute the photos are served from cache without a
+ * request, which is correct — the signature is still valid.
  */
 export function useIncidentPhotos(
   incidentId: string,

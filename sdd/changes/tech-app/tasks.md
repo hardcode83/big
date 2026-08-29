@@ -305,19 +305,30 @@
 >   fecha de resolución (R4.2).
 > - **R1.1 confirmada en red**: la lista se pidió como `GET /api/v1/incidents?page=1&per_page=20`,
 >   sin ningún parámetro que identifique al técnico.
-> - **R1.3 confirmada en red**: volver a la lista y reabrir la fila añadió **0** peticiones de
->   `/context`. Ésa es la evidencia que discrimina: si las dos pantallas usaran claves distintas,
->   abrir la fila costaría una petición **siempre**, no sólo la primera vez. La entrada de caché es
->   compartida, que es lo que R1.3 exige normativamente («bajo la **misma clave**»).
+> - **R1.3 se cumple, y la prueba es el código, no la red.** La cláusula normativa es la identidad
+>   de clave («bajo la **misma clave**»), y eso se demuestra leyendo: hay **un** solo
+>   `incidentsKeys.context(tenantId, incidentId)` en `features/incidents/hooks/query-keys.ts`, y lo
+>   llaman los dos consumidores —`useIncidentContexts` para la fila y `useIncidentContext` para el
+>   detalle— en `features/incidents/hooks/use-incidents.ts`. Dos tests lo fijan
+>   (`tech-incidents-view.test.tsx` y `use-incidents.test.tsx`, ambos leyendo la entrada con
+>   `client.getQueryData(incidentsKeys.context(...))`).
+>
+>   La medida de red —volver a la lista y reabrir la fila añadió **0** peticiones de `/context`— es
+>   **compatible** con eso, pero **no lo discrimina**, y la primera redacción de esta nota afirmó
+>   que sí. No lo hace: con claves distintas, la entrada propia del detalle se puebla en la primera
+>   apertura y vive en el mismo `QueryClient`, así que reabrir dentro de los 60 s de `staleTime`
+>   también costaría 0. Es más: el propio 0 obliga a que la reapertura cayera dentro de esa
+>   ventana, porque fuera de ella `refetchOnMount` habría disparado también sobre la clave
+>   compartida. Las dos hipótesis predicen lo mismo.
 >
 >   En el primer montaje sí se vio **una** petición extra, y **no se aisló su causa**. La
 >   atribución inicial a StrictMode era errónea y se corrige aquí: con el `staleTime: 60_000` de
 >   `frontend/lib/query/query-client.ts`, un remontaje de StrictMode sobre una entrada *fresca* no
->   emite ninguna petición, así que StrictMode queda descartado salvo que la entrada estuviera
->   fría. La explicación que encaja con lo medido es que entre cargar la lista y abrir la fila
->   pasó más de un minuto, la entrada venció y `refetchOnMount` la revalidó una vez — comportamiento
->   correcto **que también ocurre en producción**. Queda dicho para que nadie lea aquí una garantía
->   de «cero peticiones al abrir» que el diseño no da.
+>   emite ninguna petición. La explicación que encaja con lo medido es que entre cargar la lista y
+>   abrir la fila pasó más de un minuto, la entrada venció y `refetchOnMount` la revalidó una vez —
+>   comportamiento correcto **que también ocurre en producción**. Queda dicho para que nadie lea
+>   aquí una garantía de «cero peticiones al abrir»: el `de modo que` de R1.3 es el motivo de la
+>   regla, no una promesa absoluta, y más allá de los 60 s el diseño revalida a propósito (D11).
 > - **R6.3**: a 360 px reales, **ninguna de las dos pantallas** produce desplazamiento horizontal —
 >   cero elementos desbordados dentro de `main` en la lista y en el detalle—, y los objetivos
 >   táctiles miden 44 px. La página sí desborda (`scrollWidth` 433), pero el desbordamiento está en
@@ -329,4 +340,6 @@
 >   Con todo, conviene leer «R6.3 cumplida» con precisión: se cumple **para el contenido que estas
 >   dos pantallas gobiernan**. Un técnico a 360 px sí tiene desplazamiento horizontal, porque las
 >   dos pantallas viven dentro de ese shell. La parte del criterio que no se cumple no es
->   alcanzable sin salirse del alcance que la tarea 9.4 fija.
+>   alcanzable sin salirse del alcance que declara el propio proposal: este change son **las dos
+>   pantallas de `(field)/tech`**, y su §Out of scope deja fuera todo lo demás. (`features/shell` no
+>   aparece en ninguna de sus listas de ficheros afectados.)

@@ -251,9 +251,9 @@ Criterios de aceptación:
 
 ### Trabajo pendiente para `/sdd:archive`
 
-Levantado en el gate de `/sdd:review` (2026-08-29) por la lente de documentación. Ninguno de los
-tres es editable ahora: dos viven en ficheros que sólo archive escribe (regla 1) y el tercero
-depende de un fichero que archive todavía no ha creado.
+Levantado en el gate de `/sdd:review` (2026-08-29). Ninguno de los cinco es editable desde esta
+fase: los puntos 2, 3, 4 y 5 viven en ficheros que sólo `/sdd:archive` escribe —`sdd/roadmap*` y
+`sdd/specs/`, por la regla 1— y el punto 1 depende de un fichero que archive todavía no ha creado.
 
 1. `docs/maintenance.md` §«La app del técnico» **no enlaza a ninguna spec**, mientras que su
    sección hermana sí lo hace (línea 145 → `sdd/specs/incident-photos.md`). La norma de
@@ -272,11 +272,19 @@ depende de un fichero que archive todavía no ha creado.
    de 360) y el desbordamiento está **entero** en la cabecera del `TechnicianShell` —su botón de
    menú de usuario y el contenedor `flex` que lo envuelve—, no en el contenido de las pantallas,
    que no desborda ni un elemento. Se reproduce idéntico en `/dashboard`, así que es del shell
-   compartido de `features/shell` y afecta a todas las superficies, no sólo a las del técnico.
-   `tech-app` no lo toca ni puede tocarlo sin salirse de su alcance (tarea 9.4). **Consecuencia
-   para R6.3**: se cumple para lo que estas dos pantallas gobiernan, pero un usuario a 360 px sí
-   tiene desplazamiento horizontal. Archive debe abrir la entrada `[FE]` que lo arregle en el
-   shell.
+   compartido y afecta a todas las superficies, no sólo a las del técnico.
+
+   **Dónde está**, para que archive no tenga que buscarlo: el contenedor es el slot `end` de
+   `frontend/features/shell/components/topbar.tsx` —un `<div className="flex items-center gap-2">`
+   que, a diferencia de los otros dos slots, no lleva `min-w-0`—, y lo que lo empuja es el botón de
+   menú de usuario de `frontend/features/auth/components/user-menu.tsx`. El mismo `Topbar` lo monta
+   el shell del workspace, que es por lo que `/dashboard` se comporta igual.
+
+   `tech-app` no lo toca ni puede tocarlo sin salirse de su alcance: este change son las dos
+   pantallas de `(field)/tech`, y `features/shell` no está en sus ficheros afectados ni en su
+   §Out of scope como algo a modificar. **Consecuencia para R6.3**: se cumple para lo que estas dos
+   pantallas gobiernan, pero un usuario a 360 px sí tiene desplazamiento horizontal. Archive debe
+   abrir la entrada `[FE]` que lo arregle en el shell.
 5. **`sdd/specs/cleaning-manager-view.md` contradice ahora a `sdd/project.md`.** Esa spec aplaza su
    pasada visual «porque `next dev` con `PORT_OFFSET` sirve la página sin hidratarla», y ese
    disparador («el primer despliegue en `dev`») se apoya en una premisa que este change ha medido
