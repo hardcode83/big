@@ -267,6 +267,36 @@ topbar junto a los otros cuatro controles, y que el panel `Sheet` sea usable en 
 móvil real. Se verificará en `dev` tras el despliegue; si algo falla ahí es ajuste visual, no
 comportamiento.
 
+### Corrección: «sólo visual» era falso, y CI lo demostró
+
+Escrito arriba antes de abrir el PR, y **desmentido por el propio PR #136**: el job
+`provenance-contract` falló en su paso `npm run build`. El párrafo anterior daba por hecho que lo
+único fuera del alcance de los tests era la apariencia. No lo era: faltaba **una clase entera de
+verificación**, la de fronteras Server/Client de React, que sólo `next build` ejecuta.
+
+`notification-inbox-sheet.tsx` importaba `useNotificationsPanel` desde el barrel
+`@/features/shell`, y ese barrel reexportaba las cinco shells y `routeMetadata`, que alcanzan
+`server-only` (las shells por `lib/theme/server`, `routeMetadata` por
+`lib/metadata/create-route-metadata` → `lib/i18n/server`). Resultado: un Client Component
+arrastraba `server-only` al bundle del navegador. **Ni `tsc` ni las 1749 pruebas del frontend
+pueden ver eso** — todas pasaban, y siguen pasando; la frontera sólo existe en tiempo de build.
+
+**Arreglado invirtiendo el barrel**: `@/features/shell` es ahora la API client-safe
+(`PageHeader`, `ShellProfile`, `useNotificationsPanel`) y `@/features/shell/server` la de
+composición de servidor (las cinco shells y `routeMetadata`); los 29 ficheros de `app/` que las
+consumían apuntan allí, que es gratis porque la frontera ESLint restringe `@/features/*/**` sólo
+a ficheros bajo `features/` y `app/` compone libremente por diseño. La client-safety del barrel
+pasa de ser suerte a ser contrato, escrito en la cabecera de los dos ficheros.
+
+Descartadas: pasar el estado por props (las tres shells son Server Components asíncronas y no
+pueden leer un store de cliente) y el import profundo (lo prohíbe la frontera ESLint).
+
+**La lección para el siguiente**: `npm run build` no corre en local en ningún sitio de este
+proyecto —vive únicamente en el job `provenance-contract` de `frontend-tests.yml`—, así que una
+sección de Verification que no lo invoque deja abierta esta clase entera. Verificado ahora en
+local con las mismas variables que usa CI: build correcto, `lint` limpio, `typecheck` limpio,
+1749/1749 pruebas y el gate de artefactos públicos sobre 2178 artefactos.
+
 ## ASSUMPTIONS
 
 - **A1** — La forma exacta de la ruta de acuse (`POST /api/v1/notifications/{id}/read` frente a un
