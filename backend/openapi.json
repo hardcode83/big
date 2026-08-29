@@ -6342,7 +6342,8 @@
           "NOTIFICATION_SENT",
           "NOTIFICATION_FAILED",
           "WEBHOOK_RECEIVED",
-          "GUEST_CHECKIN_COMPLETED"
+          "GUEST_CHECKIN_COMPLETED",
+          "OWNER_STATEMENT_GENERATED"
         ],
         "title": "TimelineEventType",
         "type": "string"

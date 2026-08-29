@@ -78,7 +78,7 @@ def test_the_catalogue_covers_the_whole_enum_and_nothing_else() -> None:
     # technician's refusal had no member, and reusing `INCIDENT_CANCELLED` would have
     # asserted for ever — the timeline is append-only — that the incident was closed when it
     # went back to the manager for reassignment.
-    assert len(TimelineEventType) == 47, "counts every value; update it deliberately"
+    assert len(TimelineEventType) == 48, "counts every value; update it deliberately"
 
 
 # --- one case per type, in both languages ---------------------------------------------

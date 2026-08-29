@@ -237,6 +237,14 @@ TIMELINE_TITLE_TEMPLATES: dict[TimelineEventType, dict[Locale, str]] = {
         Locale.ES: "El huésped ha completado el check-in",
         Locale.EN: "Guest completed check-in",
     },
+    # `revenue-statements` (tasks 4.6, design D5/D12). Static title with no placeholder:
+    # the period is in the row's `metadata` and the title just says what happened, exactly
+    # like `PRICE_RECOMMENDATION_CREATED` — the trail for the clock path the audit log
+    # does not carry (seventh exception of regla 9).
+    TimelineEventType.OWNER_STATEMENT_GENERATED: {
+        Locale.ES: "Liquidación generada",
+        Locale.EN: "Owner statement generated",
+    },
     TimelineEventType.REVIEW_IMPORTED: {
         Locale.ES: "Reseña importada",
         Locale.EN: "Review imported",
