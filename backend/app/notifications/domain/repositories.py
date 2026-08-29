@@ -96,7 +96,13 @@ class NotificationLogRepository(Protocol):
         ...
 
     async def list_for_recipient(
-        self, tenant_id: uuid.UUID, recipient_user_id: uuid.UUID, *, page: int, per_page: int
+        self,
+        tenant_id: uuid.UUID,
+        recipient_user_id: uuid.UUID,
+        *,
+        page: int,
+        per_page: int,
+        unread: bool | None = None,
     ) -> NotificationLogPage:
         """One page of the notifications addressed to **one user** (design D6).
 
@@ -108,6 +114,56 @@ class NotificationLogRepository(Protocol):
 
         Newest first — the opposite of `list_pending`, and on purpose: a queue is drained
         oldest-first, an inbox is read newest-first.
+
+        `unread=True` narrows the page to `read_at IS NULL` (`notifications-inbox-web` D5).
+        Default `None` means "all of them", which is what every caller before that change
+        asked for; the envelope, the order and the page ceilings are untouched by the
+        filter, because a filtered inbox is still the inbox of PRD §23.
+        """
+        ...
+
+    async def mark_read(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, log_id: uuid.UUID
+    ) -> bool:
+        """Acknowledge one notification of this user, and say whether there was one.
+
+        Narrow like `mark_breached` and `record_attempt`, and for the reason this port has
+        repeated since `celery-jobs`: a reader has no business rewriting a notification's
+        body, recipient or status, and a port that allowed it would be the open door for the
+        change that comes next. `notifications-inbox-web` D2 rejected a `PATCH` on the whole
+        resource for exactly that.
+
+        **Idempotent, and it returns a fact rather than raising** (D3). The write keeps the
+        FIRST read (`COALESCE`), because `read_at` records when the user read it, not the
+        last time they looked at the inbox — so a second acknowledgement is a success that
+        moves nothing (R1.3). `False` means one single thing: **no row with that id is
+        visible to this user of this tenant**. It deliberately does not distinguish
+        "missing" from "somebody else's" from "another tenant's" — R1.4 answers all three
+        with the same `404`, and a repository that could tell them apart is a repository a
+        careless caller could leak them from.
+        """
+        ...
+
+    async def count_unread(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """How many of this user's notifications are unread (R2.2, design D4).
+
+        Its own query rather than a field of the page envelope: this is the one question
+        every connected client asks every 60 s, so it must not carry a page of rows it will
+        not read. `ix_notification_logs_unread` — partial on `read_at IS NULL` — is the
+        index that keeps its cost bounded as read rows accumulate.
+        """
+        ...
+
+    async def mark_all_read(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """Acknowledge every unread notification of this user; returns how many moved.
+
+        **Zero is the normal case, not an error** — same criterion as `cancel_sla_deadline`
+        and the opposite of `mark_breached`: an inbox already up to date has nothing to move,
+        and nothing has happened that a missing row would contradict (D6).
+
+        Scope is fixed at **all** of the user's unread rows (R5.2), never the page or filter
+        the client happens to be looking at: a button that says "all" and marks twenty is
+        worse than no button.
         """
         ...
 

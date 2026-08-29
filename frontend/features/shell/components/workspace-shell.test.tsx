@@ -21,8 +21,14 @@ vi.mock("next/navigation", () => ({
   // switcher, so a no-op spy is enough to keep the import graph intact.
   useRouter: () => ({ refresh: vi.fn() }),
 }));
+// `NotificationBell` (`notifications-inbox-web` R3.1) reads `status` AND `user`, and returns
+// null without both (design D16), so the stub carries a user for the bell to mount on.
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ status: "authenticated" }),
+  useAuth: () => ({
+    status: "authenticated",
+    user: { tenant_id: "t1", id: "u1", email: "manager@example.com" },
+  }),
+  getSessionGeneration: () => 1,
 }));
 vi.mock("@/lib/auth/session-store", () => ({
   getSessionTokens: () => ({ accessToken: "test" }),
@@ -66,6 +72,7 @@ beforeEach(() => {
     sidebarCollapsedByProfile: {},
     tabletNavOpen: false,
     mobileMoreOpen: false,
+    notificationsOpen: false,
   });
 });
 
@@ -187,5 +194,27 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
   it("keeps the locale out of the UI store (D7)", async () => {
     await renderShell();
     expect(Object.keys(useShellUiStore.getState())).not.toContain("locale");
+  });
+});
+
+describe("WorkspaceShell notification bell (`notifications-inbox-web` R3.1)", () => {
+  it("mounts the bell in the topbar's end slot", async () => {
+    await renderShell();
+
+    const banner = screen.getByRole("banner");
+    expect(
+      within(banner).getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps it beside the user menu rather than replacing anything", async () => {
+    // D10: the slot goes from four elements to five. The switchers and the user menu are
+    // what a regression here would silently drop.
+    const banner = (await renderShell()) && screen.getByRole("banner");
+
+    expect(
+      within(banner).getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+    expect(within(banner).getByRole("button", { name: /Idioma|Language/i })).toBeInTheDocument();
   });
 });

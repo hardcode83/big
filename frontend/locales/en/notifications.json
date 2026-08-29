@@ -1,0 +1,52 @@
+{
+  "types": {
+    "CLEANING_TASK_ASSIGNED": "A cleaning has been assigned to you",
+    "CLEANING_NO_RESPONSE": "An assigned cleaning is still unanswered",
+    "CLEANING_COMPLETED": "Cleaning finished",
+    "CLEANING_FAILED": "A cleaning could not be completed",
+    "INCIDENT_CREATED_CRITICAL": "Critical incident opened",
+    "INCIDENT_CREATED_HIGH": "High-priority incident opened",
+    "OWNER_APPROVAL_REQUIRED": "An expense is waiting for your approval",
+    "TECHNICIAN_ASSIGNED": "An incident has been assigned to you",
+    "TECHNICIAN_NO_RESPONSE": "An assigned incident is still unanswered",
+    "GUEST_ESCALATION": "A guest needs a human",
+    "LOCK_ALERT": "Lock alert",
+    "CHECKIN_REMINDER_24H": "Check-in tomorrow",
+    "CHECKIN_REMINDER_2H": "Check-in in a few hours",
+    "CHECKOUT_REMINDER": "Check-out coming up",
+    "PRICE_RECOMMENDATION": "New price recommendation",
+    "SLA_BREACH": "A notice has passed its deadline",
+    "PASSWORD_RESET_REQUESTED": "A password reset was requested",
+    "unknown": "System notice"
+  },
+  "bell": {
+    "label": "Notifications",
+    "unreadCount_one": "{{count}} unread",
+    "unreadCount_other": "{{count}} unread",
+    "noUnread": "No new notifications",
+    "overflowCount": "{{max}}+"
+  },
+  "panel": {
+    "title": "Notifications",
+    "close": "Close notifications",
+    "markAllRead": "Mark all as read",
+    "unreadBadge": "Unread",
+    "previousPage": "Previous",
+    "nextPage": "Next",
+    "pageStatus": "Page {{page}} of {{totalPages}}"
+  },
+  "states": {
+    "loading": "Loading notifications…",
+    "errorTitle": "We could not load your notifications",
+    "errorDescription": "Please try again in a moment.",
+    "retry": "Retry",
+    "emptyTitle": "You have no notifications",
+    "emptyDescription": "Notices about cleanings, incidents and reservations will appear here."
+  },
+  "errors": {
+    "notFound": "That notification is no longer available.",
+    "forbidden": "You do not have permission to do that.",
+    "session": "Your session has expired.",
+    "generic": "We could not complete the action. Please try again."
+  }
+}

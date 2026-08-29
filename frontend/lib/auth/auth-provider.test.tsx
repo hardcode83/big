@@ -6,6 +6,7 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { notifySessionExpired } from "@/lib/api/authenticated-client";
 import {
   clearSessionTokens,
+  getSessionGeneration,
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
@@ -689,5 +690,32 @@ describe("AuthProvider — query cache purge on identity transitions", () => {
     act(() => notifySessionExpired());
 
     expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("drops the in-memory tokens too, so an expired session keeps no credentials", () => {
+    // Two paths reach this listener without `refreshSession` having cleared them: the
+    // `SessionInvalidatedError` branch, which skips `clearSessionTokens` when the generation
+    // moved underneath it, and the "No refresh token available" early reject, which never had
+    // one. Both used to leave the store holding credentials for a session just declared over.
+    setSessionTokens({ accessToken: "a", refreshToken: "r" });
+    renderAuthWithCache(freshCache());
+
+    act(() => notifySessionExpired());
+
+    expect(getSessionTokens()).toBeNull();
+  });
+
+  it("moves the session generation on every purge, which is what invalidates in-flight optimistic snapshots", () => {
+    // `notifications-inbox-web` R3.4 depends on this: an optimistic mutation compares the
+    // generation in `onError` to decide whether its snapshot still belongs to this session.
+    // If a purge left the number where it was, the departing user's cached rows would be
+    // written back into the cache that was just emptied to keep them from the next person.
+    setSessionTokens({ accessToken: "a", refreshToken: "r" });
+    renderAuthWithCache(freshCache());
+    const before = getSessionGeneration();
+
+    act(() => notifySessionExpired());
+
+    expect(getSessionGeneration()).not.toBe(before);
   });
 });

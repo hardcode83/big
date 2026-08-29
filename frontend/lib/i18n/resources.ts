@@ -22,6 +22,8 @@ import esProperties from "@/locales/es/properties.json";
 import enProperties from "@/locales/en/properties.json";
 import esPricing from "@/locales/es/pricing.json";
 import enPricing from "@/locales/en/pricing.json";
+import esNotifications from "@/locales/es/notifications.json";
+import enNotifications from "@/locales/en/notifications.json";
 import esLanding from "@/locales/es/landing.json";
 import enLanding from "@/locales/en/landing.json";
 
@@ -40,6 +42,7 @@ export const NAMESPACES = [
   "properties",
   "pricing",
   "landing",
+  "notifications",
 ] as const;
 export const DEFAULT_NS = "common";
 
@@ -59,6 +62,7 @@ export const resources = {
     properties: esProperties,
     pricing: esPricing,
     landing: esLanding,
+    notifications: esNotifications,
   },
   en: {
     common: enCommon,
@@ -74,5 +78,6 @@ export const resources = {
     properties: enProperties,
     pricing: enPricing,
     landing: enLanding,
+    notifications: enNotifications,
   },
 } as const;

@@ -29,22 +29,67 @@ consecuencias que conviene tener presentes al desplegar:
 |---|---|---|
 | `EMAIL` / `CONSOLE` | `ConsoleEmailAdapter` | Registra la entrega en el log. SMTP real llega con `hardening-release` |
 | `WHATSAPP` | `MockWhatsAppAdapter` | Mock (PRD §14) |
-| `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y `GET /api/v1/notifications` es lo que la hace legible |
+| `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y la bandeja web es lo que la hace legible — y desde `notifications-inbox-web`, acusable |
 | `PUSH` | — | Sin adapter a propósito: una fila `PUSH` pasa a `SKIPPED` |
 
-### Leer la bandeja
+### Leer la bandeja, y acusarla
+
+El ciclo in-app se cierra con cuatro rutas. **Todas derivan el destinatario del JWT** y ninguna
+acepta un parámetro que ensanche ese alcance.
 
 ```
-GET /api/v1/notifications?page=1&per_page=20
+GET  /api/v1/notifications?page=1&per_page=20[&unread=true]
+GET  /api/v1/notifications/unread-count          -> {"unread": 3}
+POST /api/v1/notifications/{id}/read             -> 204
+POST /api/v1/notifications/read-all              -> {"updated": 7}
 ```
 
-Devuelve **solo las del usuario del token** — la restricción se deriva del JWT y no hay
-parámetro que la ensanche. Ordenadas de más nueva a más vieja. No hay «marcar como leída»:
-haría falta una columna `read_at` que PRD §7.24 no declara.
+Ordenadas de más nueva a más vieja. `?unread=true` acota a las no leídas sin tocar el envelope
+de PRD §23; ausente y `false` significan lo mismo.
 
-La respuesta lleva `subject`, `body`, `status` y los identificadores. **No** lleva
+**El acuse es idempotente y guarda la PRIMERA lectura**, no la última visita: la escritura es
+`SET read_at = COALESCE(read_at, now)`, así que acusar dos veces responde `204` las dos y no
+mueve el valor. Una notificación que no existe, que es de otro usuario o que es de otro tenant
+responde el **mismo `404` con el mismo cuerpo** — un `403` confirmaría que existe una fila
+ajena, y el mensaje del error es constante para que dos ids distintos no den dos cuerpos
+distintos.
+
+`read-all` nunca da `404`: cero filas es el caso normal de una bandeja al día.
+
+El contador es ruta propia y no un campo del envelope, para que la campana pueda refrescarse
+cada 60 s sin arrastrar una página de filas. Lo sostiene un índice **parcial**
+(`ix_notification_logs_unread`, `WHERE read_at IS NULL`), que es la única forma de que su coste
+no crezca con las ya leídas.
+
+**Acusar no toca el SLA.** `read_at` queda fuera de `check_sla_breaches`, de
+`list_sla_breach_candidates` y de `escalation_for`: leer un aviso no es responder a él, y el
+plazo lo cierra la acción de dominio.
+
+La respuesta lleva `subject`, `body`, `status`, `read_at` y los identificadores. **No** lleva
 `recipient_contact` ni `last_error`: el primero convertiría la bandeja en un directorio, el
 segundo es diagnóstico de operación.
+
+`notification_type` viaja como `NotificationType | str` — unión, no enum a secas: la columna es
+`String(100)` libre y admite valores anteriores al enum, y estrecharla convertiría ese caso en
+un `500`. Publicar la unión es además lo que pone los diecisiete nombres en el contrato
+generado, y con ellos el catálogo tipado del frontend.
+
+### La bandeja en la web
+
+Campana con contador en el `Topbar` de las tres shells autenticadas —`WorkspaceShell`,
+`CleanerShell` y `TechnicianShell`—, nunca en `PublicShell` ni en `GuestShell`, que no llevan
+JWT. Abre un panel `Sheet` mobile-first: listado paginado, los tres estados explícitos, acuse
+al abrir una fila y «marcar todas como leídas». **No es una ruta**, y por eso la campana cuesta
+un componente y no tres — cada grupo de rutas admite un juego de roles distinto.
+
+Las filas se pintan desde `notification_type` traducido a ES/EN, **nunca desde
+`subject`/`body`**, que están escritos en inglés, para un operador, y llevan UUID en crudo. Un
+tipo que la interfaz no conozca cae en un texto genérico traducido.
+
+Una fila enlaza sólo donde hay página viva: en `workspace`, `incident`, `conversation` y
+`reservation`. `cleaning_task` no enlaza —no hay detalle de manager— y en las shells de campo
+no enlaza nada hasta que `cleaner-app` y `tech-app` entreguen sus detalles. Sin destino, la fila
+se pinta sin enlace y **sin enseñar el identificador**.
 
 ### Cuando algo no llega
 

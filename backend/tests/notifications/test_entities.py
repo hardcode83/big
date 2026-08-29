@@ -23,6 +23,8 @@ def test_notification_log_instantiates_with_defaults() -> None:
     assert log.sla_breached is False
     assert log.recipient_user_id is None
     assert log.sla_deadline_at is None
+    # R1.1: a notification is born unread — nobody has seen it yet.
+    assert log.read_at is None
 
 
 def test_notification_channel_is_not_the_conversation_channel() -> None:

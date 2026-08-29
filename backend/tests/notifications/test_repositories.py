@@ -10,6 +10,7 @@ from datetime import UTC, datetime, timedelta
 import pytest
 from sqlalchemy import select
 
+from app.auth.infrastructure.models import UserModel
 from app.core.tenancy import CrossTenantWriteError
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
@@ -497,3 +498,345 @@ async def test_add_refuses_a_log_of_another_tenant(db_session) -> None:
 
     with pytest.raises(CrossTenantWriteError):
         await SqlAlchemyNotificationLogRepository(db_session).add(tenant_a.id, log)
+
+
+# --- The inbox: `notifications-inbox-web` section 2 (D3, D4, D5, D6) ----------------------
+#
+# The helpers above build logs with no recipient, which is all the SLA job ever needed. Every
+# query below is scoped by recipient as well as by tenant, so they need real users.
+
+
+async def _user(db_session, tenant: TenantModel, email: str) -> UserModel:
+    user = UserModel(
+        tenant_id=tenant.id,
+        name=email.split("@")[0],
+        email=email,
+        password_hash="hash",
+        role="PROPERTY_MANAGER",
+    )
+    db_session.add(user)
+    await db_session.flush()
+    return user
+
+
+async def _inbox_log(
+    db_session,
+    tenant: TenantModel,
+    recipient: UserModel,
+    *,
+    read_at: datetime | None = None,
+    created_at: datetime | None = None,
+) -> NotificationLogModel:
+    model = NotificationLogModel(
+        tenant_id=tenant.id,
+        recipient_user_id=recipient.id,
+        recipient_contact=recipient.email,
+        channel=NotificationChannel.IN_APP,
+        notification_type="CLEANING_TASK_ASSIGNED",
+        status=NotificationStatus.SENT,
+        read_at=read_at,
+    )
+    if created_at is not None:
+        model.created_at = created_at
+    db_session.add(model)
+    await db_session.flush()
+    return model
+
+
+@pytest.mark.asyncio
+async def test_mark_read_stamps_the_first_read(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    log = await _inbox_log(db_session, tenant, manager)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    acknowledged = await repository.mark_read(tenant.id, manager.id, log.id)
+
+    assert acknowledged is True
+    await db_session.refresh(log)
+    assert log.read_at is not None
+
+
+@pytest.mark.asyncio
+async def test_mark_read_twice_succeeds_and_keeps_the_first_instant(db_session) -> None:
+    """R1.3: `read_at` is the first read, not the last visit.
+
+    The instant comes from Python, not from Postgres `now()` — with the transaction
+    timestamp the two calls would agree whatever `COALESCE` did, and this test would be
+    vacuous.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    log = await _inbox_log(db_session, tenant, manager)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    assert await repository.mark_read(tenant.id, manager.id, log.id) is True
+    await db_session.refresh(log)
+    first = log.read_at
+
+    assert await repository.mark_read(tenant.id, manager.id, log.id) is True
+    await db_session.refresh(log)
+
+    assert log.read_at == first
+
+
+@pytest.mark.asyncio
+async def test_mark_read_of_an_unknown_id_reports_false(db_session) -> None:
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+
+    acknowledged = await SqlAlchemyNotificationLogRepository(db_session).mark_read(
+        tenant.id, manager.id, uuid.uuid4()
+    )
+
+    assert acknowledged is False
+
+
+@pytest.mark.asyncio
+async def test_mark_read_of_a_colleagues_row_reports_false_and_moves_nothing(
+    db_session,
+) -> None:
+    """R1.4, first of its three cases: same tenant, another recipient."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    cleaner = await _user(db_session, tenant, "cleaner@example.com")
+    theirs = await _inbox_log(db_session, tenant, manager)
+
+    acknowledged = await SqlAlchemyNotificationLogRepository(db_session).mark_read(
+        tenant.id, cleaner.id, theirs.id
+    )
+
+    assert acknowledged is False
+    await db_session.refresh(theirs)
+    assert theirs.read_at is None
+
+
+@pytest.mark.asyncio
+async def test_mark_read_never_crosses_tenants(db_session) -> None:
+    """R1.4/R1.5, rule 1 of `steering/security.md`."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    theirs_user = await _user(db_session, tenant_b, "theirs@example.com")
+    theirs = await _inbox_log(db_session, tenant_b, theirs_user)
+
+    acknowledged = await SqlAlchemyNotificationLogRepository(db_session).mark_read(
+        tenant_a.id, theirs_user.id, theirs.id
+    )
+
+    assert acknowledged is False
+    await db_session.refresh(theirs)
+    assert theirs.read_at is None
+
+
+@pytest.mark.asyncio
+async def test_count_unread_ignores_read_rows_colleagues_and_other_tenants(
+    db_session,
+) -> None:
+    """R2.2. Three ways of not counting, in one test, because they are one query."""
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    manager = await _user(db_session, tenant_a, "manager@example.com")
+    cleaner = await _user(db_session, tenant_a, "cleaner@example.com")
+    theirs = await _user(db_session, tenant_b, "theirs@example.com")
+
+    await _inbox_log(db_session, tenant_a, manager)
+    await _inbox_log(db_session, tenant_a, manager)
+    await _inbox_log(db_session, tenant_a, manager, read_at=NOW)
+    await _inbox_log(db_session, tenant_a, cleaner)
+    await _inbox_log(db_session, tenant_b, theirs)
+
+    unread = await SqlAlchemyNotificationLogRepository(db_session).count_unread(
+        tenant_a.id, manager.id
+    )
+
+    assert unread == 2
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_moves_only_this_users_unread_rows(db_session) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    manager = await _user(db_session, tenant_a, "manager@example.com")
+    cleaner = await _user(db_session, tenant_a, "cleaner@example.com")
+    theirs = await _user(db_session, tenant_b, "theirs@example.com")
+    already_read = await _inbox_log(db_session, tenant_a, manager, read_at=NOW)
+    await _inbox_log(db_session, tenant_a, manager)
+    await _inbox_log(db_session, tenant_a, manager)
+    colleagues = await _inbox_log(db_session, tenant_a, cleaner)
+    neighbours = await _inbox_log(db_session, tenant_b, theirs)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    updated = await repository.mark_all_read(tenant_a.id, manager.id)
+
+    assert updated == 2
+    await db_session.refresh(already_read)
+    assert already_read.read_at == NOW
+    await db_session.refresh(colleagues)
+    assert colleagues.read_at is None
+    await db_session.refresh(neighbours)
+    assert neighbours.read_at is None
+    assert await repository.count_unread(tenant_a.id, manager.id) == 0
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_on_an_inbox_already_up_to_date_returns_zero(db_session) -> None:
+    """D6: zero rows is the normal case, not an error."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    await _inbox_log(db_session, tenant, manager, read_at=NOW)
+
+    updated = await SqlAlchemyNotificationLogRepository(db_session).mark_all_read(
+        tenant.id, manager.id
+    )
+
+    assert updated == 0
+
+
+@pytest.mark.asyncio
+async def test_the_unread_filter_keeps_the_envelope_the_order_and_the_page(
+    db_session,
+) -> None:
+    """R2.3/D5: the same query with one more condition — nothing else moves."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    oldest = await _inbox_log(
+        db_session, tenant, manager, created_at=NOW - timedelta(hours=2)
+    )
+    middle = await _inbox_log(
+        db_session, tenant, manager, created_at=NOW - timedelta(hours=1), read_at=NOW
+    )
+    newest = await _inbox_log(db_session, tenant, manager, created_at=NOW)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    everything = await repository.list_for_recipient(
+        tenant.id, manager.id, page=1, per_page=20
+    )
+    only_unread = await repository.list_for_recipient(
+        tenant.id, manager.id, page=1, per_page=20, unread=True
+    )
+
+    assert everything.total == 3
+    assert [item.id for item in everything.items] == [newest.id, middle.id, oldest.id]
+    assert only_unread.total == 2
+    assert [item.id for item in only_unread.items] == [newest.id, oldest.id]
+
+
+@pytest.mark.asyncio
+async def test_the_unread_filter_paginates_over_the_filtered_set(db_session) -> None:
+    """`total` counts what the filter admits, so `total_pages` upstream stays truthful."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    for offset in range(3):
+        await _inbox_log(
+            db_session, tenant, manager, created_at=NOW - timedelta(hours=offset)
+        )
+    await _inbox_log(db_session, tenant, manager, created_at=NOW, read_at=NOW)
+
+    page_two = await SqlAlchemyNotificationLogRepository(db_session).list_for_recipient(
+        tenant.id, manager.id, page=2, per_page=2, unread=True
+    )
+
+    assert page_two.total == 3
+    assert len(page_two.items) == 1
+
+
+@pytest.mark.asyncio
+async def test_unread_false_is_the_same_as_not_asking(db_session) -> None:
+    """The default is "all of them", and `False` is not a third meaning."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    await _inbox_log(db_session, tenant, manager)
+    await _inbox_log(db_session, tenant, manager, read_at=NOW)
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    default = await repository.list_for_recipient(tenant.id, manager.id, page=1, per_page=20)
+    explicit = await repository.list_for_recipient(
+        tenant.id, manager.id, page=1, per_page=20, unread=False
+    )
+
+    assert default.total == explicit.total == 2
+
+
+@pytest.mark.asyncio
+async def test_list_for_recipient_never_crosses_tenants_with_the_filter_on(
+    db_session,
+) -> None:
+    tenant_a = await _tenant(db_session, "TenantA")
+    tenant_b = await _tenant(db_session, "TenantB")
+    manager = await _user(db_session, tenant_a, "manager@example.com")
+    theirs = await _user(db_session, tenant_b, "theirs@example.com")
+    await _inbox_log(db_session, tenant_b, theirs)
+
+    found = await SqlAlchemyNotificationLogRepository(db_session).list_for_recipient(
+        tenant_a.id, manager.id, page=1, per_page=20, unread=True
+    )
+
+    assert found.total == 0
+    assert found.items == ()
+
+
+@pytest.mark.asyncio
+async def test_acknowledging_moves_nothing_the_sla_looks_at(db_session) -> None:
+    """R1.6 / design D17: reading a notice is not answering it.
+
+    Written here rather than against the in-memory fakes of `test_escalate_slas.py` on
+    purpose — `mark_read` and `list_sla_breach_candidates` are both real statements against
+    the real table, and the claim is about what one does to the other. A fake would only
+    prove that the fake agrees with itself.
+    """
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    log = NotificationLogModel(
+        tenant_id=tenant.id,
+        recipient_user_id=manager.id,
+        recipient_contact=manager.email,
+        channel=NotificationChannel.IN_APP,
+        notification_type="CLEANING_TASK_ASSIGNED",
+        status=NotificationStatus.SENT,
+        sla_deadline_at=NOW - timedelta(minutes=1),
+        sla_breached=False,
+    )
+    db_session.add(log)
+    await db_session.flush()
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+    assert [row.id for row in await repository.list_sla_breach_candidates(tenant.id, NOW)] == [
+        log.id
+    ]
+
+    assert await repository.mark_read(tenant.id, manager.id, log.id) is True
+
+    await db_session.refresh(log)
+    assert log.read_at is not None
+    assert log.sla_deadline_at == NOW - timedelta(minutes=1)
+    assert log.sla_breached is False
+    still_a_candidate = await repository.list_sla_breach_candidates(tenant.id, NOW)
+    assert [row.id for row in still_a_candidate] == [log.id]
+
+
+@pytest.mark.asyncio
+async def test_mark_all_read_moves_nothing_the_sla_looks_at_either(db_session) -> None:
+    """The same claim for the bulk path (R1.6): "mark all" is still only reading."""
+    tenant = await _tenant(db_session, "TenantA")
+    manager = await _user(db_session, tenant, "manager@example.com")
+    log = NotificationLogModel(
+        tenant_id=tenant.id,
+        recipient_user_id=manager.id,
+        recipient_contact=manager.email,
+        channel=NotificationChannel.IN_APP,
+        notification_type="CLEANING_TASK_ASSIGNED",
+        status=NotificationStatus.SENT,
+        sla_deadline_at=NOW - timedelta(minutes=1),
+        sla_breached=False,
+    )
+    db_session.add(log)
+    await db_session.flush()
+    repository = SqlAlchemyNotificationLogRepository(db_session)
+
+    assert await repository.mark_all_read(tenant.id, manager.id) == 1
+
+    await db_session.refresh(log)
+    assert log.sla_deadline_at == NOW - timedelta(minutes=1)
+    assert log.sla_breached is False
+    assert [row.id for row in await repository.list_sla_breach_candidates(tenant.id, NOW)] == [
+        log.id
+    ]
