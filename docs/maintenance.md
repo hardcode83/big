@@ -284,13 +284,13 @@ reserva — ni importe, ni canal, ni huésped. PRD §12 no pide la reserva en es
 
 Desde `tech-app`, el rol `TECHNICIAN` tiene sus dos pantallas y deja de ver «En preparación».
 Ambas están construidas **mobile-first**: una sola columna, tarjetas en vez de tabla y objetivos
-táctiles de 44 px, porque se operan de pie y con una mano en el portal de un edificio. Un aviso
-sobre el estado de la verificación, porque cambia cómo hay que leer todo lo que sigue: **ninguna de
-las dos pantallas se ha recorrido todavía en un navegador contra un backend vivo**. Lo que las
-respalda hoy es la suite de componentes —que cubre criterio por criterio— más el typecheck y el
-lint; el recorrido de punta a punta con un usuario `TECHNICIAN` (tarea 9.5) y la medida a 360 px
-(tarea 9.6) siguen pendientes, por lo que explica `sdd/changes/tech-app/BLOCKED.md`. Un test de
-componente no es una pasada visual.
+táctiles de 44 px, porque se operan de pie y con una mano en el portal de un edificio. Ambas se
+recorrieron en un navegador real contra un backend vivo el 2026-08-29, a 360×780: el ciclo entero
+de una incidencia, las dos subidas de foto y el cierre con coste y materiales. A ese ancho
+**ninguna de las dos pantallas produce desplazamiento horizontal** —cero elementos desbordados
+dentro de su contenido— y los objetivos táctiles miden 44 px. La página sí desborda, pero por la
+**cabecera del shell compartido**, que estas pantallas no controlan y que se comporta igual en
+`/dashboard`.
 
 **`/tech` — mis incidencias.** Lista `GET /api/v1/incidents` **sin enviar ningún parámetro que
 identifique al técnico**: el acotamiento por fila lo deriva el backend del token, y no existe

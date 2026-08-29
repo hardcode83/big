@@ -277,20 +277,41 @@
   `frontend/lib/api/generated/openapi.d.ts` ni `.env.example` (`git diff --name-only` contra la
   base). Si alguno aparece, el change se ha salido de su alcance: parar y abrir una entrada `[BE]`
   como se hizo el 2026-08-19. [alcance]
-- [ ] 9.5 Comprobación manual del flujo de punta a punta con un usuario `TECHNICIAN`: `/tech`
+- [x] 9.5 Comprobación manual del flujo de punta a punta con un usuario `TECHNICIAN`: `/tech`
   lista con vivienda por fila, chips que filtran y se apagan, «cargar más»; abrir una fila **no**
   vuelve a pedir su contexto (verificable en la pestaña de red); recorrer
-  `ASSIGNED → ACCEPTED → IN_PROGRESS → RESOLVED` con ETA en una de las dos transiciones, subir una
-  foto `BEFORE` y otra `AFTER`, y cerrar con coste y materiales. Hacerlo en el **worktree
-  principal** o en `dev`: con `PORT_OFFSET` la página se sirve pero **no hidrata**
-  (`sdd/project.md`). Si no es posible, decirlo explícitamente en lugar de darlo por hecho.
-  [verificación]
-- [ ] 9.6 Revisar a 360 px de ancho que ninguna de las dos pantallas produce desplazamiento
+  `ASSIGNED → ACCEPTED → IN_PROGRESS → RESOLVED`, subir una foto `BEFORE` y otra `AFTER`, y cerrar
+  con coste y materiales. [verificación]
+- [x] 9.6 Revisar a 360 px de ancho que ninguna de las dos pantallas produce desplazamiento
   horizontal y que los objetivos táctiles son cómodos. [R6.3]
 
-> **9.5 y 9.6 NO se han hecho, y no se dan por hechas.** Este worktree está enlazado y no publica
-> puertos, así que no hay UI alcanzable desde el host; con `PORT_OFFSET` la página se sirve pero
-> **no hidrata** (`sdd/project.md`, medido en `cleaning-assign-preconditions` el 2026-08-23), de
-> modo que ni el formulario ni los botones responderían — que es justo lo que estas dos tareas
-> tienen que probar. La salida documentada es el worktree principal o `dev`, y el principal lo
-> están usando otras sesiones vivas. Quedan en `BLOCKED.md` con su comando de reanudación.
+> **9.5 y 9.6 hechas el 2026-08-29**, en este mismo worktree y contra un backend vivo, con
+> `make up PORT_OFFSET=10` (frontend en `:3010`, backend en `:8010`), `make bootstrap` +
+> `make seed-demo`, y un navegador real a 360×780 conducido con Playwright. Lo que se midió:
+>
+> - **La premisa de que un worktree con `PORT_OFFSET` no hidrata es falsa.** `sdd/project.md` lo
+>   afirmaba desde `cleaning-assign-preconditions` (2026-08-23) y es lo que mantuvo estas dos
+>   tareas aparcadas. La app hidrata y es completamente interactiva: se hizo login, se navegó y se
+>   ejecutó el ciclo entero. La afirmación caduca se ha corregido en `sdd/project.md`.
+> - **Ciclo completo**: `ASSIGNED → ACCEPTED → IN_PROGRESS → RESOLVED`. La barra de acciones ofreció
+>   en cada estado exactamente lo que manda R3.1 (Aceptar/Rechazar → En ruta/Rechazar → Esperando
+>   piezas/Cerrar), y al quedar `RESOLVED` no ofreció ninguna (R3.2).
+> - **Fotos**: una `BEFORE` y una `AFTER` subidas por el camino `multipart` nuevo de
+>   `createApiClient` (R5.4) contra el backend real —la primera vez que ese código se ejerce fuera
+>   de los tests—, agrupadas por etapa («Antes», «Después») y pintadas con la URL firmada tal cual
+>   (R5.1). Al pasar a `RESOLVED` el formulario de subida se retiró (R5.3).
+> - **Cierre**: enviar con el coste vacío mostró «Indica el coste final.» y **no emitió petición**
+>   (R4.5); con `87.50` y materiales, la incidencia quedó cerrada mostrando coste, materiales y
+>   fecha de resolución (R4.2).
+> - **R1.1 confirmada en red**: la lista se pidió como `GET /api/v1/incidents?page=1&per_page=20`,
+>   sin ningún parámetro que identifique al técnico.
+> - **R1.3 confirmada en red**: volver a la lista y reabrir la fila añadió **0** peticiones de
+>   `/context` — la entrada de caché es compartida de verdad. En el primer montaje sí se ve una
+>   petición extra, que es el doble montaje de React StrictMode en desarrollo (Next.js lo activa
+>   por defecto) y no ocurre en producción.
+> - **R6.3**: a 360 px reales, **ninguna de las dos pantallas** produce desplazamiento horizontal —
+>   cero elementos desbordados dentro de `main` en la lista y en el detalle—, y los objetivos
+>   táctiles miden 44 px. La página sí desborda (`scrollWidth` 433), pero el desbordamiento está en
+>   la cabecera del `TechnicianShell`, que este change no toca; se reproduce idéntico en
+>   `/dashboard`, que tampoco toca. Es un defecto **preexistente del shell compartido** y se
+>   reporta como entrada propia, no como deuda de `tech-app`.
