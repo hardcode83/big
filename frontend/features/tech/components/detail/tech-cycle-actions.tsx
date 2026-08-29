@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslation } from "react-i18next";
 
 import { Button } from "@/components/ui/button";
@@ -13,7 +14,7 @@ import {
   type IncidentDetailDto,
 } from "@/features/incidents";
 
-import { techActions } from "../../lib/tech-actions";
+import { techActions, techNoActionReason } from "../../lib/tech-actions";
 import { TechEtaField, etaToInstant } from "./tech-eta-field";
 import { TechResolveForm } from "./tech-resolve-form";
 
@@ -31,8 +32,13 @@ const ETA_ACTIONS: readonly IncidentCycleAction[] = ["accept", "en-route"];
  */
 export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) {
   const { t } = useTranslation("tech");
+  const router = useRouter();
   const [eta, setEta] = useState("");
-  const cycle = useIncidentCycleAction();
+  // Where a successful `reject` goes is this screen's business, not the shared
+  // data layer's (R3.5, design D1).
+  const cycle = useIncidentCycleAction({
+    onRejected: () => router.replace("/tech"),
+  });
   const resolve = useResolveIncident();
 
   const actions = techActions(incident.status);
@@ -47,20 +53,33 @@ export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) 
    * mutation invalidates in `onSettled`, so by the time this renders the
    * `incident` prop is the one the server just confirmed.
    */
-  const messageFor = (error: Error | null): string | undefined => {
+  const messageFor = (
+    error: Error | null,
+    carriedEta = false,
+  ): string | undefined => {
     if (!error) return undefined;
     if (error instanceof ApiError && error.status === 409) {
       return t(`actions.conflict.${conflictReason(incident.status)}`);
     }
-    if (error instanceof ApiError && error.status === 422) {
+    // A 422 is only *about the ETA* when an ETA was actually sent. `wait-parts`
+    // and `resume` carry no body at all, so answering one of those with "the
+    // server did not accept that time" names a field the technician never
+    // filled in (R3.4 governs the ETA case, not every 422).
+    if (error instanceof ApiError && error.status === 422 && carriedEta) {
       return t("eta.invalid");
     }
     return t("actions.error");
   };
 
-  const cycleError = messageFor(cycle.error);
+  // `cycle.variables` is the input of the mutation the error belongs to, so
+  // this asks whether *that* request carried an ETA, not whether the field
+  // happens to hold text now.
+  const cycleCarriedEta = cycle.variables?.etaAt !== undefined;
+  const cycleError = messageFor(cycle.error, cycleCarriedEta);
   const etaWas422 =
-    cycle.error instanceof ApiError && cycle.error.status === 422;
+    cycle.error instanceof ApiError &&
+    cycle.error.status === 422 &&
+    cycleCarriedEta;
   const resolveIs422 =
     resolve.error instanceof ApiError && resolve.error.status === 422;
 
@@ -76,9 +95,7 @@ export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) 
           </p>
         ) : null}
         <p className="text-sm text-muted-foreground">
-          {incident.status === "AWAITING_OWNER_APPROVAL"
-            ? t("actions.none.awaitingOwner")
-            : t("actions.none.closed")}
+          {t(`actions.none.${techNoActionReason(incident.status)}`)}
         </p>
       </section>
     );

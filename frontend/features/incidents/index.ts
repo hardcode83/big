@@ -7,9 +7,12 @@ export { IncidentsFilters } from "./components/list/incidents-filters";
 export { IncidentDetailView } from "./components/detail/incident-detail-view";
 export {
   useIncidents,
+  useIncidentsPages,
   useIncident,
   useIncidentContext,
+  useIncidentContexts,
   useIncidentPhotos,
+  type IncidentsPagesResult,
 } from "./hooks/use-incidents";
 export {
   useIncidentCycleAction,
@@ -17,6 +20,7 @@ export {
   useUploadIncidentPhoto,
   type IncidentCycleAction,
   type IncidentCycleInput,
+  type IncidentCycleOptions,
   type ResolveIncidentVariables,
   type UploadIncidentPhotoVariables,
 } from "./hooks/use-incident-cycle";

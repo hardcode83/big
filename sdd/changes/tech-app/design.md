@@ -84,11 +84,41 @@ resultar irrealizable sin tocar backend.
 
 ### D4 — El contexto por fila con `useQueries`, bajo la clave del detalle
 
-**Chosen:** la lista pide `GET /api/v1/incidents` con `useIncidents` y, sobre las filas que
-devuelva, monta un `useQueries` (TanStack v5) con una entrada por fila cuya `queryKey` es
-`incidentsKeys.context(tenantId, row.id)` — **la misma** que usa `useIncidentContext` en el
-detalle. Abrir una fila no vuelve a pedir su contexto (R1.3) porque es literalmente la misma
-entrada de caché.
+**Chosen:** la lista pide `GET /api/v1/incidents` con **`useIncidentsPages`** y, sobre las filas
+que devuelva, monta `useIncidentContexts`, que es un `useQueries` (TanStack v5) con una entrada por
+fila cuya `queryKey` es `incidentsKeys.context(tenantId, row.id)` — **la misma** que usa
+`useIncidentContext` en el detalle. Abrir una fila no vuelve a pedir su contexto (R1.3) porque es
+literalmente la misma entrada de caché.
+
+> **Enmienda (2026-08-29, gate de `/sdd:review`).** La redacción original decía «con
+> `useIncidents`», y eso **no es compatible con D5**: `useIncidents` devuelve *una* página y D5
+> manda acumularlas con «cargar más». Los dos hooks nuevos —`useIncidentsPages(filters, pageCount,
+> perPage)` y `useIncidentContexts(incidentIds)`— viven en
+> `frontend/features/incidents/hooks/use-incidents.ts` y se exportan por el barril, que es lo que
+> D1 exige: la capa de datos crece en `features/incidents` y la pantalla la consume, en vez de
+> reimplementar el `queryFn`, la política de `retry` y el acotamiento por tenant dentro de la
+> vista. `useIncidents` se mantiene para el consumidor de una sola página.
+>
+> Ambos resuelven el tenant con el `useTenantId()` del módulo, que **lanza** si no hay sesión, en
+> lugar del `tenantId ?? ""` que la primera implementación puso en la vista: `tenantScopedKey`
+> revienta con la cadena vacía antes de que `enabled` llegue a consultarse, así que aquel valor por
+> defecto no degradaba nada, sólo escondía el fallo.
+>
+> **El contrato de fallo de `IncidentsPagesResult`**, añadido en el segundo turno de arreglos del
+> mismo gate porque la primera versión no lo describía y se comía los fallos: hay **dos** estados
+> de error y no son el mismo.
+>
+> - `isError` — falla la **primera** página: la lista no está disponible. Es lo que alimenta a
+>   `mapIncidentsError` y produce el `ErrorState` de pantalla completa de R1.6.
+> - `hasPageError` — falla una página **posterior**: la lista está, incompleta. Las filas ya
+>   traídas se conservan, el fallo se anuncia en un `ErrorState` en línea y se ofrece `retryPage`.
+>   `hasMore` pasa a `false` mientras haya un hueco: contar filas para decidir si hay más pediría
+>   la página *siguiente* al hueco y dejaría las que faltan fuera de la lista para siempre, que es
+>   exactamente lo que hacía antes, en silencio.
+> - `isFetchingMore` deshabilita «cargar más» mientras haya una petición en vuelo, para que un
+>   segundo toque no salte una página.
+>
+> Las dos ramas de error son excluyentes en pantalla: la de la primera página retorna antes.
 
 Un contexto de fila que falle degrada esa fila a `—` en vivienda y código, sin tumbar la lista:
 R1.6 gobierna el fallo de **la petición de la lista**, no el de una proyección accesoria.
@@ -113,8 +143,8 @@ La lista pagina con un botón **«cargar más»** que acumula páginas sobre los
 «la página» en singular y R1 no pide paginar, pero una lista truncada en veinte **sin ninguna
 señal** contradice el «saber qué tengo pendiente» de R1. Se descartó subir `per_page` a 50 con una
 línea «mostrando X de Y» (mueve el corte, no lo elimina) y dejar una sola página de 20 (deja la
-truncación invisible). El `useQueries` de D4 se monta sobre la lista acumulada, así que las filas
-ya traídas conservan su contexto en caché.
+truncación invisible). El `useIncidentContexts` de D4 se monta sobre la lista acumulada, así que las
+filas ya traídas conservan su contexto en caché.
 
 Los seis chips son los del `ASSUMPTION` de R1: `ASSIGNED`, `ACCEPTED`, `IN_PROGRESS`,
 `WAITING_EXTERNAL_PARTS`, `AWAITING_OWNER_APPROVAL`, `RESOLVED`. Sin filtro, la lista se presenta
@@ -178,12 +208,35 @@ Qué invalida cada una:
 
 - ciclo (`accept`/`en-route`/`wait-parts`/`resume`/`resolve`): `incidentsKeys.detail(t, id)`,
   `incidentsKeys.context(t, id)` y el prefijo `incidentsKeys.listPrefix(t)`.
-- subida de foto: `incidentsKeys.photos(t, id)` (R5.5) y nada más — subir una foto no mueve el
-  estado ni la lista.
+- subida de foto: `incidentsKeys.photos(t, id)` (R5.5) en el `200` **y nada más** — subir una foto
+  no mueve el estado ni la lista. En el `409`, además, `incidentsKeys.detail(t, id)`.
+
+  > **Enmienda (2026-08-29, gate de `/sdd:review`).** El «y nada más» se escribió pensando en el
+  > camino de éxito y nunca se acotó al fallo. Un `409` significa que el estado que este cliente
+  > cree ya no es el real —el manager canceló la incidencia mientras el técnico elegía el
+  > fichero—, y sin refrescar el detalle la pantalla seguía ofreciendo una subida que el estado ya
+  > no admite. El `409` es el único código que invalida el detalle: `413`, `422` y `502` no mueven
+  > el estado, y un test fija esa distinción.
+  >
+  > **Y con eso, la subida deja de nombrar la razón del `409`.** La idea inicial era reutilizar
+  > `conflictReason` como en el ciclo (D7), pero es inalcanzable por construcción: R5.3 sólo ofrece
+  > el formulario en `IN_PROGRESS` y `WAITING_EXTERNAL_PARTS` y el backend refuta la foto en
+  > **todos** los demás estados, así que cualquier `409` refrescado retira el formulario y con él
+  > el componente que mostraría el motivo — los tres motivos, no sólo los dos terminales. Las tres cadenas
+  > `upload.errors.conflict.*` se colapsan en una que no promete un motivo; quien explica en qué se
+  > convirtió la incidencia es la barra de acciones, con el estado ya refrescado. R5.6 pide un
+  > mensaje distinto **por código** (`409`/`413`/`422`/`502`), no por motivo, así que se sigue
+  > cumpliendo.
 - `reject` (R3.5): es el caso aparte. Tras el `200`, `GET /incidents/{id}` responde `404` a quien
   rechazó, así que **invalidar el detalle sería pedir un `404`**: se hace `removeQueries` de
-  `detail` y `context` de esa incidencia, se invalida el prefijo de la lista y se navega a `/tech`
-  con `router.replace`.
+  `detail` y `context` de esa incidencia, se invalida el prefijo de la lista y se abandona el
+  detalle.
+
+  > **Enmienda (2026-08-29, gate de `/sdd:review`).** La navegación **no** la hace el hook. Decir
+  > «se navega a `/tech` con `router.replace`» metía una ruta de la app del técnico en
+  > `features/incidents`, que es capa de datos compartida y la consumen también las pantallas del
+  > manager (D1). El hook expone `onRejected` y quien lo llama decide a dónde ir; el comportamiento
+  > que exige R3.5 —desmontar y salir— no cambia.
 
 Rejected: parcheo optimista — habría un instante mostrando una transición que el backend no
 confirmó, que es justo el caso que el `409` de R3.7 hace visible.
@@ -289,6 +342,13 @@ elige `mapIncidentsError` de `features/incidents/lib/error-mapping.ts`, reutiliz
 se queda en `loading` (lo lleva el flujo de expiración de sesión), `404` es `not-found` — que es
 como R2.6 exige tratar los tres casos indistinguibles —, y ningún detalle de error se renderiza.
 `retry: retryPolicy` en las consultas (sin reintento en 4xx), `retry: false` en las mutaciones.
+
+> **Enmienda (2026-08-29, gate de `/sdd:review`).** `mapIncidentsError` elige la rama de
+> **pantalla completa**, y sólo ésa. El `ErrorState` en línea de «ha fallado una página posterior»
+> lo elige `hasPageError` de `IncidentsPagesResult` (ver la enmienda de D4), porque no es un
+> estado de la petición sino de una lista parcial: hay filas que mostrar y un reintento acotado a
+> la página que falló. Sigue siendo el primitivo compartido y sigue sin renderizar el detalle del
+> error, que es lo que R6.2 exige.
 
 ### D15 — Mobile-first: una columna, tarjetas, y la barra de acciones abajo
 

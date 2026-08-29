@@ -10,13 +10,12 @@ import {
   useIncidentContext,
 } from "@/features/incidents";
 
+import { techAcceptsPhotoUpload } from "../../lib/tech-actions";
 import { TechContextBlock } from "./tech-context-block";
 import { TechCycleActions } from "./tech-cycle-actions";
 import { TechIncidentFields } from "./tech-incident-fields";
 import { TechPhotoGallery } from "./tech-photo-gallery";
 import { TechPhotoUpload } from "./tech-photo-upload";
-
-const PHOTO_UPLOAD_STATUSES = ["IN_PROGRESS", "WAITING_EXTERNAL_PARTS"];
 
 /**
  * `/tech/incidents/[id]` (proposal R2). One column, no horizontal scroll at
@@ -89,7 +88,7 @@ export function TechIncidentDetailView({
   }
 
   const incident = incidentState.data;
-  const offersUpload = PHOTO_UPLOAD_STATUSES.includes(incident.status);
+  const offersUpload = techAcceptsPhotoUpload(incident.status);
 
   return shell(
     <>
@@ -98,9 +97,10 @@ export function TechIncidentDetailView({
       {contextState.kind === "ok" ? (
         <TechContextBlock context={contextState.data} />
       ) : (
-        <p className="text-sm text-muted-foreground">
-          {t("context.unavailable")}
-        </p>
+        <EmptyState
+          title={t("context.unavailable.title")}
+          description={t("context.unavailable.description")}
+        />
       )}
 
       {incident.status === "AWAITING_OWNER_APPROVAL" ? (
@@ -128,7 +128,7 @@ export function TechIncidentDetailView({
       <TechPhotoGallery incidentId={incident.id} />
 
       {offersUpload ? (
-        <TechPhotoUpload incidentId={incident.id} status={incident.status} />
+        <TechPhotoUpload incidentId={incident.id} />
       ) : null}
 
       <TechCycleActions incident={incident} />

@@ -48,3 +48,59 @@ export const TECH_ACTIONS: Readonly<Record<IncidentStatus, readonly CycleAction[
 export function techActions(status: IncidentStatus): readonly CycleAction[] {
   return Object.hasOwn(ACTIONS, status) ? ACTIONS[status] : [];
 }
+
+/**
+ * Why no cycle action is on offer (R3.2). A `Record` over `IncidentStatus` for
+ * the same reason `ACTIONS` is one (D6): a tenth backend status breaks the
+ * build instead of silently inheriting somebody else's copy.
+ *
+ * `OPEN` and `CLASSIFIED` are unreachable here — with no assignee they never
+ * reach this screen — but they are **not** "closed", and the previous
+ * `else`-branch told the technician they were. An unreachable branch that lies
+ * is still a lie the day it becomes reachable.
+ */
+export type NoActionReason = "awaiting-owner" | "closed" | "not-actionable";
+
+const NO_ACTION_REASON: Record<IncidentStatus, NoActionReason> = {
+  AWAITING_OWNER_APPROVAL: "awaiting-owner",
+  RESOLVED: "closed",
+  CANCELLED: "closed",
+  OPEN: "not-actionable",
+  CLASSIFIED: "not-actionable",
+  // States that do offer actions; `techActions` is what decides, and these are
+  // read only if it returned an empty list, which for these five it never does.
+  ASSIGNED: "not-actionable",
+  ACCEPTED: "not-actionable",
+  IN_PROGRESS: "not-actionable",
+  WAITING_EXTERNAL_PARTS: "not-actionable",
+};
+
+export function techNoActionReason(status: IncidentStatus): NoActionReason {
+  return Object.hasOwn(NO_ACTION_REASON, status)
+    ? NO_ACTION_REASON[status]
+    : "not-actionable";
+}
+
+/**
+ * Whether the status admits a photo upload (R5.3, D11). Lives here, in the same
+ * compile-time-exhaustive shape as the action table, rather than as a loose
+ * `string[]` in the view: what a status offers is one decision with one home
+ * (D6), and an untyped array is invisible to the compiler.
+ */
+const ACCEPTS_PHOTO_UPLOAD: Record<IncidentStatus, boolean> = {
+  IN_PROGRESS: true,
+  WAITING_EXTERNAL_PARTS: true,
+  ASSIGNED: false,
+  ACCEPTED: false,
+  AWAITING_OWNER_APPROVAL: false,
+  RESOLVED: false,
+  CANCELLED: false,
+  OPEN: false,
+  CLASSIFIED: false,
+};
+
+export function techAcceptsPhotoUpload(status: IncidentStatus): boolean {
+  return Object.hasOwn(ACCEPTS_PHOTO_UPLOAD, status)
+    ? ACCEPTS_PHOTO_UPLOAD[status]
+    : false;
+}

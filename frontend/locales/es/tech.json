@@ -3,6 +3,11 @@
     "title": "Mis incidencias",
     "includesClosed": "La lista incluye también incidencias ya cerradas.",
     "loadMore": "Cargar más",
+    "moreError": {
+      "title": "No hemos podido cargar más incidencias",
+      "description": "Las que ya ves siguen aquí. Vuelve a intentarlo.",
+      "retry": "Reintentar"
+    },
     "empty": {
       "title": "No tienes incidencias",
       "description": "Cuando te asignen una avería, aparecerá aquí."
@@ -15,11 +20,9 @@
     "loading": "Cargando tus incidencias…"
   },
   "filters": {
-    "label": "Filtrar por estado",
-    "clear": "Quitar el filtro"
+    "label": "Filtrar por estado"
   },
   "detail": {
-    "title": "Incidencia",
     "back": "Volver a mis incidencias",
     "loading": "Cargando la incidencia…",
     "unavailable": {
@@ -33,11 +36,7 @@
     }
   },
   "fields": {
-    "title": "Título",
-    "description": "Descripción",
-    "severity": "Severidad",
     "category": "Categoría",
-    "status": "Estado",
     "source": "Origen",
     "etaAt": "Hora prevista de llegada",
     "estimatedCost": "Coste estimado",
@@ -58,7 +57,10 @@
     "timezone": "Zona horaria de la vivienda",
     "accessNotes": "Instrucciones de acceso",
     "assignmentNote": "Nota del manager",
-    "unavailable": "No hemos podido cargar el contexto de la vivienda."
+    "unavailable": {
+      "title": "No hemos podido cargar el contexto",
+      "description": "La dirección y las instrucciones de acceso no están disponibles ahora mismo."
+    }
   },
   "actions": {
     "title": "Qué puedes hacer",
@@ -69,8 +71,9 @@
     "resume": "Reanudar",
     "resolve": "Cerrar la incidencia",
     "none": {
-      "awaitingOwner": "No hay nada que hacer ahora: el cierre está a la espera de que la propietaria lo apruebe.",
-      "closed": "Esta incidencia está cerrada."
+      "awaiting-owner": "No hay nada que hacer ahora: el cierre está a la espera de que la propietaria lo apruebe.",
+      "closed": "Esta incidencia está cerrada.",
+      "not-actionable": "Esta incidencia todavía no está asignada, así que no hay nada que hacer desde aquí."
     },
     "conflict": {
       "closed": "La incidencia ya está cerrada, así que esta acción no se puede hacer.",
@@ -94,6 +97,7 @@
       "negative": "El coste no puede ser negativo.",
       "tooLarge": "El coste no puede pasar de 99.999.999,99.",
       "decimals": "Como mucho dos decimales.",
+      "format": "Escribe el coste con cifras y, como mucho, dos decimales. Por ejemplo: 42.50",
       "server": "El servidor no ha aceptado el cierre. Revisa lo que has escrito."
     },
     "resolved": {
@@ -108,8 +112,15 @@
   "photos": {
     "title": "Fotos",
     "loading": "Cargando las fotos…",
-    "empty": "Todavía no hay fotos.",
-    "error": "No hemos podido cargar las fotos.",
+    "empty": {
+      "title": "Todavía no hay fotos",
+      "description": "Las fotos que subas aparecerán aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar las fotos",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    },
     "stage": {
       "BEFORE": "Antes",
       "AFTER": "Después"
@@ -124,11 +135,7 @@
     "uploading": "Subiendo…",
     "optional": "Subir fotos es opcional: no hace falta ninguna para cerrar.",
     "errors": {
-      "conflict": {
-        "closed": "La incidencia ya está cerrada y no admite fotos.",
-        "awaiting-owner": "La incidencia está a la espera de la propietaria y no admite fotos.",
-        "out-of-order": "En el estado actual la incidencia no admite fotos."
-      },
+      "conflict": "La incidencia ha cambiado de estado y ya no admite fotos. Arriba tienes el estado actual.",
       "tooLarge": "La foto pesa demasiado. Haz una más ligera o reduce la calidad.",
       "unsupportedFormat": "Ese archivo no es una foto en un formato admitido. Se admiten JPEG, PNG y WebP.",
       "storage": "No hemos podido guardar la foto. Vuelve a intentarlo en unos segundos.",

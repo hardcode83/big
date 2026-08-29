@@ -60,7 +60,10 @@ Dos consecuencias que conviene decir en voz alta antes de una demo:
   se ve **desde la cuenta del manager**, en `/cleaning`, que sí está construida. La cuenta
   `TECHNICIAN` **sí lo es** desde `tech-app`: entra en `/tech`, ve su incidencia asignada con la
   vivienda, la abre y recorre el ciclo. Lo que se enseñe la mueve de verdad, así que conviene
-  hacerlo al final de la demo o resetear después.
+  hacerlo al final de la demo o resetear después. **Ensáyalo antes de enseñarlo**: el recorrido del
+  técnico está respaldado por su suite de componentes, pero todavía no se ha hecho de punta a punta
+  en un navegador contra un backend vivo (tareas 9.5 y 9.6 de `tech-app`, pendientes en su
+  `BLOCKED.md`); es el único de esta lista en esa situación.
 - **`AuthGuard` no distingue rol**: comprueba que hay sesión y nada más. Así que cualquiera de las
   cuatro cuentas puede abrir cualquier ruta del workspace, y lo que la frene será el `403` del
   backend, no la navegación. No es un defecto de la demo, es el estado de la ruta.

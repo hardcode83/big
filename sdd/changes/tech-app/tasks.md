@@ -110,10 +110,10 @@
   `Intl.DateTimeFormat`, tomando el locale activo **como parámetro** (no el `undefined` del
   runtime). Test `format.test.ts` fijando que dos locales distintos producen salidas distintas
   para el mismo instante. [R6.1]
-- [x] 5.2 Crear `frontend/features/tech/components/list/tech-incidents-view.tsx`: `useIncidents`
-  sin ningún parámetro que identifique al técnico; sobre las filas devueltas, un `useQueries`
-  (TanStack v5) con una entrada por fila bajo `incidentsKeys.context(tenantId, row.id)` —la misma
-  clave del detalle—; un contexto de fila que falle degrada esa fila a `—` en vivienda y código sin
+- [x] 5.2 Crear `frontend/features/tech/components/list/tech-incidents-view.tsx`:
+  `useIncidentsPages` sin ningún parámetro que identifique al técnico; sobre las filas devueltas,
+  `useIncidentContexts`, con una entrada por fila bajo `incidentsKeys.context(tenantId, row.id)`
+  —la misma clave del detalle—; un contexto de fila que falle degrada esa fila a `—` en vivienda y código sin
   tumbar la lista. Estados de la **lista** con `mapIncidentsError` + `LoadingState`
   (`aria-busy`) / `EmptyState` / `ErrorState` (`role="alert"`) de `@/components/states`, sin
   renderizar el detalle del error, y `retryPolicy` en la consulta. [R1.1, R1.2, R1.3, R1.6, R6.2]
@@ -239,9 +239,18 @@
   ciclo desde el móvil, la galería y la subida antes/después, y la puerta de aprobación de la
   propietaria tal como se **muestra** (no como se calcula). Orientada a cómo se usa/opera; enlaza
   a las specs en vez de duplicarlas. [documentación]
-- [x] 8.2 Revisar el `README.md` de la raíz y actualizarlo **sólo si** el recuento o la
-  descripción de las carpetas de `frontend/features/` queda desfasado al añadir `tech/`. Si el
-  README no enumera esas carpetas, este paso es no-op y se anota como tal. [documentación]
+- [x] 8.2 Revisar el `README.md` de la raíz y actualizarlo. **Enmendada en el gate de
+  `/sdd:review` (2026-08-29)**: la redacción original acotaba la revisión a «el recuento o la
+  descripción de las carpetas de `frontend/features/`», y ese recorte es lo que dejó pasar tres
+  afirmaciones falsas. La norma de `sdd/steering/documentation.md` no habla de carpetas, sino de
+  que «el README describe el sistema *actual*».
+  - §Estructura (`README.md:304`) **no enumera** las carpetas de `frontend/features/`: no-op,
+    anotado aquí como el propio paso exigía.
+  - §Arrancar (`README.md:21`) sí enumera las superficies funcionales, y ahí hubo tres arreglos:
+    añadir `/tech` (+detalle) al inventario, acotar «quedan fuera de alcance desde la web» a las
+    cuatro mutaciones del manager —seis de las once se emiten ya desde esta pantalla— y sustituir
+    la ruta `start`, que no existe en el contrato publicado desde que `tech-cycle-completion` la
+    renombró a `en-route`. [documentación]
 
 ## 9. Verification
 

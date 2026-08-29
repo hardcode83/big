@@ -1,21 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { useQueries } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
 import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { Button } from "@/components/ui/button";
-import { useAuth } from "@/lib/auth";
-import { retryPolicy } from "@/lib/api/retry-policy";
 import {
-  getIncidentsDataSource,
-  incidentsKeys,
   mapIncidentsError,
-  useIncidents,
-  type IncidentContextDto,
+  useIncidentContexts,
+  useIncidentsPages,
   type IncidentFilters,
-  type IncidentSummaryDto,
 } from "@/features/incidents";
 
 import { TechIncidentRow } from "./tech-incident-row";
@@ -30,59 +24,23 @@ const PER_PAGE = 20;
  * backend narrows the rows from the token (`IncidentActor.restrict_to_technician_id`)
  * and there is no query parameter for it (R1.1).
  *
- * The property of each row comes from a `useQueries` over the accumulated rows,
- * one entry per row under `incidentsKeys.context(tenantId, row.id)` — **the same
- * key** the detail uses, which is what makes opening a row skip a second request
- * for its context (R1.3, design D4). A context that fails degrades that row to
- * `—` without taking the list down: R1.6 governs the failure of the *list*
- * request, not of an accessory projection.
+ * Both reads come from the incidents data layer through the barrel (design D1):
+ * `useIncidentsPages` accumulates the pages D5 asks for, and
+ * `useIncidentContexts` mounts one entry per row under
+ * `incidentsKeys.context(tenantId, row.id)` — **the same** key the detail uses,
+ * which is what makes opening a row skip a second request for its context
+ * (R1.3, D4). A context that fails degrades that row to `—` without taking the
+ * list down: R1.6 governs the failure of the *list* request, not of an
+ * accessory projection.
  */
 export function TechIncidentsView() {
   const { t } = useTranslation(["tech", "incidents"]);
-  const { user } = useAuth();
-  const tenantId = user?.tenant_id;
   const [filters, setFilters] = useState<IncidentFilters>({});
   const [pageCount, setPageCount] = useState(1);
 
-  const pages = useQueries({
-    queries: Array.from({ length: pageCount }, (_, index) => {
-      const pageFilters: IncidentFilters = {
-        ...(filters.status !== undefined ? { status: filters.status } : {}),
-        page: index + 1,
-        perPage: PER_PAGE,
-      };
-      return {
-        queryKey: incidentsKeys.list(tenantId ?? "", pageFilters),
-        queryFn: () =>
-          getIncidentsDataSource().listIncidents(tenantId ?? "", pageFilters),
-        retry: retryPolicy,
-        enabled: Boolean(tenantId),
-      };
-    }),
-  });
-
-  const firstPage = pages[0];
-  const state = mapIncidentsError({
-    isPending: firstPage?.isPending ?? true,
-    isError: firstPage?.isError ?? false,
-    error: firstPage?.error ?? null,
-    data: firstPage?.data,
-  });
-
-  const rows: IncidentSummaryDto[] = pages.flatMap(
-    (page) => page.data?.items ?? [],
-  );
-  const total = firstPage?.data?.total ?? 0;
-
-  const contexts = useQueries({
-    queries: rows.map((row) => ({
-      queryKey: incidentsKeys.context(tenantId ?? "", row.id),
-      queryFn: () =>
-        getIncidentsDataSource().getIncidentContext(tenantId ?? "", row.id),
-      retry: retryPolicy,
-      enabled: Boolean(tenantId),
-    })),
-  });
+  const list = useIncidentsPages(filters, pageCount, PER_PAGE);
+  const state = mapIncidentsError(list);
+  const contexts = useIncidentContexts(list.rows.map((row) => row.id));
 
   const onFiltersChange = (next: IncidentFilters) => {
     setFilters(next);
@@ -115,24 +73,27 @@ export function TechIncidentsView() {
           title={t("tech:list.error.title")}
           description={t("tech:list.error.description")}
           retryLabel={t("tech:list.error.retry")}
-          onRetry={() => {
-            void firstPage?.refetch();
-          }}
+          onRetry={list.refetch}
         />
       </section>
     );
   }
 
-  const hasMore = rows.length < total;
-
   return (
     <section className="mx-auto flex w-full max-w-md flex-col gap-4 p-4">
       {heading}
-      <p className="text-sm text-muted-foreground">
-        {t("tech:list.includesClosed")}
-      </p>
+      {/*
+        R1.4 scopes this notice to the unfiltered list. With a chip active the
+        statement is simply false — a list filtered to `IN_PROGRESS` carries no
+        closed incident — so it is rendered only where the requirement puts it.
+      */}
+      {filters.status === undefined ? (
+        <p className="text-sm text-muted-foreground">
+          {t("tech:list.includesClosed")}
+        </p>
+      ) : null}
 
-      {rows.length === 0 ? (
+      {list.rows.length === 0 ? (
         <EmptyState
           title={t("tech:list.empty.title")}
           description={t("tech:list.empty.description")}
@@ -140,10 +101,8 @@ export function TechIncidentsView() {
       ) : (
         <>
           <ul className="flex flex-col gap-3">
-            {rows.map((row, index) => {
-              const context = contexts[index]?.data as
-                | IncidentContextDto
-                | undefined;
+            {list.rows.map((row, index) => {
+              const context = contexts[index];
               return (
                 <TechIncidentRow
                   key={row.id}
@@ -154,11 +113,28 @@ export function TechIncidentsView() {
               );
             })}
           </ul>
-          {hasMore ? (
+          {/*
+            A page after the first failed. The rows already fetched stay on
+            screen — R1.6's whole-screen `ErrorState` is for the list being
+            unavailable, which is not this — but the failure is reported and
+            «load more» is withdrawn, because paging past a hole would strand
+            the missing incidents silently.
+          */}
+          {list.hasPageError ? (
+            <ErrorState
+              title={t("tech:list.moreError.title")}
+              description={t("tech:list.moreError.description")}
+              retryLabel={t("tech:list.moreError.retry")}
+              onRetry={list.retryPage}
+            />
+          ) : null}
+
+          {list.hasMore ? (
             <Button
               type="button"
               variant="outline"
               className="min-h-11"
+              disabled={list.isFetchingMore}
               onClick={() => setPageCount((count) => count + 1)}
             >
               {t("tech:list.loadMore")}

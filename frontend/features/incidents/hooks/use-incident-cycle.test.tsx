@@ -19,10 +19,10 @@ vi.mock("@/lib/auth", () => ({
   useAuth: () => ({ user: { tenant_id: TENANT } }),
 }));
 
-const replace = vi.fn();
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ replace }),
-}));
+// No `next/navigation` mock any more: the hook does not navigate. Where a
+// successful `reject` goes is the caller's decision, passed in as `onRejected`
+// (design D1) — this suite asserts the callback fires, not a route.
+const onRejected = vi.fn();
 
 const acceptMock = vi.fn();
 const rejectMock = vi.fn();
@@ -79,7 +79,7 @@ const PHOTOS_KEY = [...incidentsKeys.photos(TENANT, "i1")];
 
 describe("useIncidentCycleAction (D8)", () => {
   beforeEach(() => {
-    replace.mockReset();
+    onRejected.mockReset();
     for (const mock of [
       acceptMock,
       rejectMock,
@@ -104,7 +104,7 @@ describe("useIncidentCycleAction (D8)", () => {
     "%s invalidates detail, context and the list prefix, and nothing else",
     async (action, mock) => {
       const { wrapper, invalidated, removed } = trackedClient();
-      const { result } = renderHook(() => useIncidentCycleAction(), { wrapper });
+      const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
 
       result.current.mutate({ incidentId: "i1", action });
 
@@ -112,13 +112,13 @@ describe("useIncidentCycleAction (D8)", () => {
       expect(mock).toHaveBeenCalledOnce();
       expect(invalidated).toEqual([DETAIL_KEY, CONTEXT_KEY, LIST_PREFIX]);
       expect(removed).toEqual([]);
-      expect(replace).not.toHaveBeenCalled();
+      expect(onRejected).not.toHaveBeenCalled();
     },
   );
 
   it("passes the ETA through for accept and omits it when absent", async () => {
     const { wrapper } = trackedClient();
-    const { result } = renderHook(() => useIncidentCycleAction(), { wrapper });
+    const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
 
     result.current.mutate({
       incidentId: "i1",
@@ -139,7 +139,7 @@ describe("useIncidentCycleAction (D8)", () => {
       new ApiError({ status: 409, code: "CONFLICT", message: "nope" }),
     );
     const { wrapper, invalidated } = trackedClient();
-    const { result } = renderHook(() => useIncidentCycleAction(), { wrapper });
+    const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
 
     result.current.mutate({ incidentId: "i1", action: "accept" });
 
@@ -148,16 +148,16 @@ describe("useIncidentCycleAction (D8)", () => {
     expect(invalidated).toEqual([DETAIL_KEY, CONTEXT_KEY, LIST_PREFIX]);
   });
 
-  it("reject removes detail and context, invalidates the list and returns to /tech (R3.5)", async () => {
+  it("reject removes detail and context, invalidates the list and calls onRejected (R3.5)", async () => {
     const { wrapper, invalidated, removed } = trackedClient();
-    const { result } = renderHook(() => useIncidentCycleAction(), { wrapper });
+    const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
 
     result.current.mutate({ incidentId: "i1", action: "reject" });
 
     await waitFor(() => expect(result.current.isSuccess).toBe(true));
     expect(removed).toEqual([DETAIL_KEY, CONTEXT_KEY]);
     expect(invalidated).toEqual([LIST_PREFIX]);
-    expect(replace).toHaveBeenCalledWith("/tech");
+    expect(onRejected).toHaveBeenCalledOnce();
   });
 
   it("a reject that fails leaves the incident in place and refreshes it", async () => {
@@ -165,14 +165,14 @@ describe("useIncidentCycleAction (D8)", () => {
       new ApiError({ status: 409, code: "CONFLICT", message: "nope" }),
     );
     const { wrapper, invalidated, removed } = trackedClient();
-    const { result } = renderHook(() => useIncidentCycleAction(), { wrapper });
+    const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
 
     result.current.mutate({ incidentId: "i1", action: "reject" });
 
     await waitFor(() => expect(result.current.isError).toBe(true));
     expect(removed).toEqual([]);
     expect(invalidated).toEqual([DETAIL_KEY, CONTEXT_KEY, LIST_PREFIX]);
-    expect(replace).not.toHaveBeenCalled();
+    expect(onRejected).not.toHaveBeenCalled();
   });
 });
 
@@ -227,6 +227,48 @@ describe("useUploadIncidentPhoto (R5.5)", () => {
     expect(uploadPhotoMock).toHaveBeenCalledWith(TENANT, "i1", file, "BEFORE");
     expect(invalidated).toEqual([PHOTOS_KEY]);
     expect(removed).toEqual([]);
+  });
+
+  /**
+   * A 409 means the status this client believes is stale — the incident was
+   * closed or sent to the owner while the technician was choosing a file. The
+   * message R5.6 requires is derived from the **refreshed** status (D7), so the
+   * detail has to be invalidated too; without this the only reachable reason is
+   * `out-of-order` and the other two messages are dead strings.
+   */
+  it("a 409 also refreshes the incident, so the reason can be read (R5.6, D7)", async () => {
+    uploadPhotoMock.mockRejectedValue(
+      new ApiError({ status: 409, code: "CONFLICT", message: "x" }),
+    );
+    const { wrapper, invalidated } = trackedClient();
+    const { result } = renderHook(() => useUploadIncidentPhoto(), { wrapper });
+
+    result.current.mutate({
+      incidentId: "i1",
+      file: new File(["b"], "a.jpg"),
+      stage: "AFTER",
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(invalidated).toEqual([PHOTOS_KEY, DETAIL_KEY]);
+    expect(uploadPhotoMock).toHaveBeenCalledTimes(1);
+  });
+
+  it("a 413 leaves the incident alone — only the photo list is touched", async () => {
+    uploadPhotoMock.mockRejectedValue(
+      new ApiError({ status: 413, code: "PAYLOAD_TOO_LARGE", message: "x" }),
+    );
+    const { wrapper, invalidated } = trackedClient();
+    const { result } = renderHook(() => useUploadIncidentPhoto(), { wrapper });
+
+    result.current.mutate({
+      incidentId: "i1",
+      file: new File(["b"], "a.jpg"),
+      stage: "AFTER",
+    });
+
+    await waitFor(() => expect(result.current.isError).toBe(true));
+    expect(invalidated).toEqual([PHOTOS_KEY]);
   });
 
   it("does not retry a 502", async () => {

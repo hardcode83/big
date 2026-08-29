@@ -3,6 +3,11 @@
     "title": "My incidents",
     "includesClosed": "This list also includes incidents that are already closed.",
     "loadMore": "Load more",
+    "moreError": {
+      "title": "We could not load more incidents",
+      "description": "The ones already listed are still here. Try again.",
+      "retry": "Retry"
+    },
     "empty": {
       "title": "You have no incidents",
       "description": "When a job is assigned to you, it will show up here."
@@ -15,11 +20,9 @@
     "loading": "Loading your incidents…"
   },
   "filters": {
-    "label": "Filter by status",
-    "clear": "Clear the filter"
+    "label": "Filter by status"
   },
   "detail": {
-    "title": "Incident",
     "back": "Back to my incidents",
     "loading": "Loading the incident…",
     "unavailable": {
@@ -33,11 +36,7 @@
     }
   },
   "fields": {
-    "title": "Title",
-    "description": "Description",
-    "severity": "Severity",
     "category": "Category",
-    "status": "Status",
     "source": "Source",
     "etaAt": "Expected arrival time",
     "estimatedCost": "Estimated cost",
@@ -58,7 +57,10 @@
     "timezone": "Property time zone",
     "accessNotes": "Access instructions",
     "assignmentNote": "Note from the manager",
-    "unavailable": "We couldn't load the property context."
+    "unavailable": {
+      "title": "We could not load the context",
+      "description": "The address and the access instructions are not available right now."
+    }
   },
   "actions": {
     "title": "What you can do",
@@ -69,8 +71,9 @@
     "resume": "Resume",
     "resolve": "Close the incident",
     "none": {
-      "awaitingOwner": "There is nothing to do right now: the close is waiting for the owner to approve it.",
-      "closed": "This incident is closed."
+      "awaiting-owner": "There is nothing to do right now: the close is waiting for the owner to approve it.",
+      "closed": "This incident is closed.",
+      "not-actionable": "This incident is not assigned yet, so there is nothing to do from here."
     },
     "conflict": {
       "closed": "The incident is already closed, so this action can't be done.",
@@ -94,6 +97,7 @@
       "negative": "The cost can't be negative.",
       "tooLarge": "The cost can't be more than 99,999,999.99.",
       "decimals": "Two decimals at most.",
+      "format": "Write the cost in digits, with at most two decimals. For example: 42.50",
       "server": "The server didn't accept the close. Check what you entered."
     },
     "resolved": {
@@ -108,8 +112,15 @@
   "photos": {
     "title": "Photos",
     "loading": "Loading the photos…",
-    "empty": "No photos yet.",
-    "error": "We couldn't load the photos.",
+    "empty": {
+      "title": "No photos yet",
+      "description": "The photos you upload will appear here."
+    },
+    "error": {
+      "title": "We could not load the photos",
+      "description": "Try again in a few seconds.",
+      "retry": "Retry"
+    },
     "stage": {
       "BEFORE": "Before",
       "AFTER": "After"
@@ -124,11 +135,7 @@
     "uploading": "Uploading…",
     "optional": "Uploading photos is optional: none is required to close.",
     "errors": {
-      "conflict": {
-        "closed": "The incident is already closed and takes no photos.",
-        "awaiting-owner": "The incident is waiting for the owner and takes no photos.",
-        "out-of-order": "In its current status the incident takes no photos."
-      },
+      "conflict": "The incident changed state and no longer accepts photos. Its current state is shown above.",
       "tooLarge": "The photo is too large. Take a lighter one or lower the quality.",
       "unsupportedFormat": "That file isn't a photo in a supported format. JPEG, PNG and WebP are accepted.",
       "storage": "We couldn't store the photo. Please try again in a few seconds.",

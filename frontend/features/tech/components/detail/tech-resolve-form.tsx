@@ -14,14 +14,22 @@ const MAX_MATERIALS = 2000;
  */
 export function validateFinalCost(
   raw: string,
-): "required" | "negative" | "tooLarge" | "decimals" | null {
+): "required" | "negative" | "tooLarge" | "decimals" | "format" | null {
   const trimmed = raw.trim();
   if (!trimmed) return "required";
   const value = Number(trimmed);
   if (!Number.isFinite(value)) return "required";
   if (value < 0) return "negative";
   if (value > MAX_FINAL_COST) return "tooLarge";
-  if (!/^\d*\.?\d{0,2}$/.test(trimmed)) return "decimals";
+  // Two separate refusals, because they are two different mistakes and the
+  // message is the technician's only explanation. `"5."` and `".5"` are the
+  // wrong *shape* — the old `\d*\.?\d{0,2}` accepted them, and the string went
+  // out verbatim for the backend's two-decimal pattern to reject with a 422,
+  // the round-trip R4.5 asks local validation to prevent. Telling someone who
+  // typed `"5."` that they used too many decimals names a rule they did not
+  // break, so the shape gets its own message.
+  if (!/^\d+(\.\d+)?$/.test(trimmed)) return "format";
+  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return "decimals";
   return null;
 }
 

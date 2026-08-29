@@ -55,3 +55,35 @@
   el pulgar.
 
 - **exact resume command**: `/sdd:review tech-app` (desde el worktree principal, o contra `dev`)
+
+## 3. Dos residuos de baja severidad tras dos rondas de arreglos en review
+
+- **phase**: review
+- **type**: deferred
+- **what & why**: `/sdd:review tech-app` (2026-08-29) dio FAIL con 19 hallazgos en cuatro lentes.
+  Se arreglaron en dos rondas y **las cuatro lentes vuelven PASS** (`architect`, `qa`, `i18n`,
+  `documentation`; `security`, `tenancy` y `cicd` ya pasaban en la primera). Suite completa
+  **164 ficheros / 1705 tests** en verde (163/1653 de partida), `tsc --noEmit` y lint limpios,
+  paridad de catálogos exacta 94/94 sin huérfanas. QA verificó por **mutación** que los arreglos
+  de la paginación, la navegación del `reject` y los estados de la galería matan a sus mutantes.
+
+  Quedan dos cosas que **no** se arreglaron, por el tope de dos rondas de la propia fase:
+
+  1. **F1 (bajo, R6.2)** — el test del estado vacío de la galería
+     (`tech-incident-detail-view.test.tsx`, «an empty photo list renders the shared EmptyState»)
+     comprueba sólo que aparece la cadena `photos.empty.title`, no la estructura del primitivo.
+     Demostrado por mutación: sustituir `<EmptyState/>` por un `<p>` con la misma clave deja la
+     suite en verde. Sus dos hermanos (el `aria-busy` de la carga y el `role="alert"` del error)
+     sí matan a su mutante. Arreglo: afirmar lo que sólo `EmptyState` aporta (su descripción o el
+     rol del contenedor), como hacen los otros dos.
+  2. **F2 (bajo, R4.1/R4.5)** — `validateFinalCost("5,00")` devuelve `required` («Indica el coste
+     final.»), no un mensaje de formato, porque el `!Number.isFinite` de la línea 21 se adelanta a
+     la comprobación de forma. Es la misma clase de defecto que la rama `format` arregló para
+     `"5."`: un mensaje que nombra una regla que el técnico no ha roto, y en una UI en español el
+     teclado numérico ofrece coma. **Matiz**: el input es `type="number"`, así que el navegador
+     real puede saneárselo antes de que la cadena llegue al estado; QA verificó la función pura,
+     no el recorrido de teclado. Severidad incierta, por eso no es bloqueante.
+
+- **exact resume command**: `/sdd:review tech-app` tras arreglarlos (ambos son de una línea), o
+  dejarlos conscientemente y que los recoja quien toque `tech-resolve-form.tsx` la próxima vez.
+  Certificar sigue exigiendo que el gate del panel pueda pasar — bloqueo 1.

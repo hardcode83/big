@@ -6,10 +6,8 @@ import { useTranslation } from "react-i18next";
 import { Button } from "@/components/ui/button";
 import { ApiError } from "@/lib/api";
 import {
-  conflictReason,
   useUploadIncidentPhoto,
   type IncidentPhotoStage,
-  type IncidentStatus,
 } from "@/features/incidents";
 
 const STAGES: readonly IncidentPhotoStage[] = ["BEFORE", "AFTER"];
@@ -29,14 +27,16 @@ const STAGES: readonly IncidentPhotoStage[] = ["BEFORE", "AFTER"];
  * Four distinct messages and no automatic retry (R5.6). The `422` names the
  * accepted formats because its frequent cause on a phone is an iPhone HEIC, and
  * what fixes that is changing the format, not trying again.
+ *
+ * The `409` message deliberately names **no** reason. The upload invalidates
+ * the incident on a 409 (design D8), so the refreshed status arrives and this
+ * form withdraws — R5.3 only offers it in `IN_PROGRESS` and
+ * `WAITING_EXTERNAL_PARTS` — while the action bar explains what the incident
+ * became. A reason rendered here could only ever be `out-of-order`: by the time
+ * the status is `RESOLVED`, `CANCELLED` or `AWAITING_OWNER_APPROVAL` this
+ * component no longer exists to say so.
  */
-export function TechPhotoUpload({
-  incidentId,
-  status,
-}: {
-  incidentId: string;
-  status: IncidentStatus;
-}) {
+export function TechPhotoUpload({ incidentId }: { incidentId: string }) {
   const { t } = useTranslation("tech");
   const [stage, setStage] = useState<IncidentPhotoStage>("BEFORE");
   const fileInput = useRef<HTMLInputElement>(null);
@@ -55,7 +55,7 @@ export function TechPhotoUpload({
     if (!(error instanceof ApiError)) return t("upload.errors.generic");
     switch (error.status) {
       case 409:
-        return t(`upload.errors.conflict.${conflictReason(status)}`);
+        return t("upload.errors.conflict");
       case 413:
         return t("upload.errors.tooLarge");
       case 422:

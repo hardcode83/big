@@ -4,6 +4,7 @@ import { useRef } from "react";
 import { useQueryClient } from "@tanstack/react-query";
 import { useTranslation } from "react-i18next";
 
+import { EmptyState, ErrorState, LoadingState } from "@/components/states";
 import { useAuth } from "@/lib/auth";
 import {
   incidentsKeys,
@@ -29,6 +30,10 @@ const STAGES: readonly IncidentPhotoStage[] = ["BEFORE", "AFTER"];
  * that is genuinely unreadable does not spin in a refetch loop.
  *
  * No deletion is offered — the API exposes none (R5.7).
+ *
+ * Loading, empty and error are the shared primitives (R6.2, D14) rather than
+ * bare paragraphs: they are what carry `aria-busy` on the load and `role=alert`
+ * on the failure, which a `<p>` does not.
  */
 export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
   const { t } = useTranslation("tech");
@@ -56,13 +61,21 @@ export function TechPhotoGallery({ incidentId }: { incidentId: string }) {
       </h2>
 
       {query.isPending ? (
-        <p className="text-sm text-muted-foreground">{t("photos.loading")}</p>
+        <LoadingState label={t("photos.loading")} />
       ) : query.isError ? (
-        <p role="alert" className="text-sm text-state-error-text">
-          {t("photos.error")}
-        </p>
+        <ErrorState
+          title={t("photos.error.title")}
+          description={t("photos.error.description")}
+          retryLabel={t("photos.error.retry")}
+          onRetry={() => {
+            void query.refetch();
+          }}
+        />
       ) : photos.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("photos.empty")}</p>
+        <EmptyState
+          title={t("photos.empty.title")}
+          description={t("photos.empty.description")}
+        />
       ) : (
         STAGES.map((stage) => {
           const ofStage = photos.filter((photo) => photo.stage === stage);

@@ -196,7 +196,7 @@ describe("TechIncidentDetailView (R2–R5)", () => {
   );
 
   it.each<[IncidentStatus, string]>([
-    ["AWAITING_OWNER_APPROVAL", esTech.actions.none.awaitingOwner],
+    ["AWAITING_OWNER_APPROVAL", esTech.actions.none["awaiting-owner"]],
     ["RESOLVED", esTech.actions.none.closed],
     ["CANCELLED", esTech.actions.none.closed],
   ])("(b) %s offers no cycle action and says why (R3.2)", async (status, copy) => {
@@ -249,6 +249,26 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     expect(screen.getByLabelText(esTech.eta.label)).toHaveValue(
       "2020-01-01T10:00",
     );
+  });
+
+  /**
+   * `wait-parts` carries no body at all, so a 422 on it cannot be about the
+   * ETA. Telling the technician "the server did not accept that time" names a
+   * field they never filled in — R3.4 governs the ETA case, not every 422.
+   */
+  it("(c) a 422 on an action that sent no ETA does not blame the ETA (R3.4)", async () => {
+    getIncident.mockResolvedValue(incident({ status: "IN_PROGRESS" }));
+    waitParts.mockRejectedValue(
+      new ApiError({ status: 422, code: "VALIDATION_ERROR", message: "nope" }),
+    );
+    renderDetail();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: esTech.actions["wait-parts"] }),
+    );
+
+    expect(await screen.findByText(esTech.actions.error)).toBeInTheDocument();
+    expect(screen.queryByText(esTech.eta.invalid)).toBeNull();
   });
 
   it.each<[IncidentStatus, string]>([
@@ -442,7 +462,7 @@ describe("TechIncidentDetailView (R2–R5)", () => {
   });
 
   it.each<[number, string]>([
-    [409, esTech.upload.errors.conflict["out-of-order"]],
+    [409, esTech.upload.errors.conflict],
     [413, esTech.upload.errors.tooLarge],
     [422, esTech.upload.errors.unsupportedFormat],
     [502, esTech.upload.errors.storage],
@@ -470,6 +490,100 @@ describe("TechIncidentDetailView (R2–R5)", () => {
       expect(uploadPhoto).toHaveBeenCalledTimes(1);
     },
   );
+
+  /**
+   * The 409 refresh (design D8) is what makes the screen honest: the manager
+   * cancels the incident while the technician is picking a file, the upload is
+   * refused, the incident is re-read — and the form **withdraws** (R5.3 offers
+   * it only in `IN_PROGRESS`/`WAITING_EXTERNAL_PARTS`) while the action bar
+   * says what the incident became. This is why the upload's own 409 copy names
+   * no reason: by the time a reason existed, this component is gone.
+   */
+  it.each<[string, string]>([
+    ["CANCELLED", esTech.actions.none.closed],
+    ["AWAITING_OWNER_APPROVAL", esTech.actions.none["awaiting-owner"]],
+  ])(
+    "(h) a 409 refreshed to %s withdraws the upload and the screen explains (R5.3, R5.6, D8)",
+    async (refreshedStatus, copy) => {
+      getIncident
+        .mockResolvedValueOnce(incident({ status: "IN_PROGRESS" }))
+        .mockResolvedValue(
+          incident({ status: refreshedStatus as IncidentStatus }),
+        );
+      uploadPhoto.mockRejectedValue(
+        new ApiError({ status: 409, code: "CONFLICT", message: "english" }),
+      );
+      renderDetail();
+
+      const input = (await screen.findByLabelText(
+        esTech.upload.file,
+      )) as HTMLInputElement;
+      fireEvent.change(input, {
+        target: {
+          files: [new File(["bytes"], "photo.jpg", { type: "image/jpeg" })],
+        },
+      });
+      fireEvent.click(screen.getByRole("button", { name: esTech.upload.submit }));
+
+      // The screen now says what happened...
+      expect(await screen.findByText(copy)).toBeInTheDocument();
+      // ...and stops offering an upload the state no longer admits.
+      await waitFor(() =>
+        expect(screen.queryByLabelText(esTech.upload.file)).toBeNull(),
+      );
+      expect(screen.queryByText("english")).toBeNull();
+    },
+  );
+
+  it("(h) the photo gallery uses the shared states, so load is aria-busy (R6.2)", async () => {
+    listPhotos.mockReturnValue(new Promise(() => {}));
+    renderDetail();
+
+    await screen.findByText("Fuga en el baño");
+    const busy = screen
+      .getAllByRole("status")
+      .filter((node) => node.getAttribute("aria-busy") === "true");
+    expect(busy.length).toBeGreaterThan(0);
+  });
+
+  it("(h) a failed photo list is an alert, not a bare paragraph (R6.2)", async () => {
+    listPhotos.mockRejectedValue(
+      new ApiError({ status: 400, code: "BOOM", message: "english detail" }),
+    );
+    renderDetail();
+
+    expect(
+      await screen.findByText(esTech.photos.error.title),
+    ).toBeInTheDocument();
+    expect(screen.getByRole("alert")).toBeInTheDocument();
+    expect(screen.queryByText("english detail")).toBeNull();
+  });
+
+  it("(h) an empty photo list renders the shared EmptyState (R6.2)", async () => {
+    listPhotos.mockResolvedValue([]);
+    renderDetail();
+
+    expect(
+      await screen.findByText(esTech.photos.empty.title),
+    ).toBeInTheDocument();
+  });
+
+  /**
+   * R3.5's navigation half. The hook stopped owning the route in this cycle
+   * (it now calls `onRejected`), so without this the only assertion that the
+   * technician actually leaves `/tech/incidents/[id]` would have disappeared
+   * with the hook test that used to make it.
+   */
+  it("(d) a successful reject returns the technician to /tech (R3.5)", async () => {
+    reject.mockResolvedValue(incident({ status: "OPEN" }));
+    renderDetail();
+
+    fireEvent.click(
+      await screen.findByRole("button", { name: esTech.actions.reject }),
+    );
+
+    await waitFor(() => expect(replace).toHaveBeenCalledWith("/tech"));
+  });
 
   it("(h) the 422 message names JPEG, PNG and WebP (R5.6)", () => {
     expect(esTech.upload.errors.unsupportedFormat).toMatch(/JPEG/);

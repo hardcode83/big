@@ -283,8 +283,14 @@ reserva — ni importe, ni canal, ni huésped. PRD §12 no pide la reserva en es
 ## La app del técnico
 
 Desde `tech-app`, el rol `TECHNICIAN` tiene sus dos pantallas y deja de ver «En preparación».
-Ambas son **mobile-first**: una sola columna, tarjetas en vez de tabla y sin desplazamiento
-lateral a 360 px, porque se operan de pie y con una mano en el portal de un edificio.
+Ambas están construidas **mobile-first**: una sola columna, tarjetas en vez de tabla y objetivos
+táctiles de 44 px, porque se operan de pie y con una mano en el portal de un edificio. Un aviso
+sobre el estado de la verificación, porque cambia cómo hay que leer todo lo que sigue: **ninguna de
+las dos pantallas se ha recorrido todavía en un navegador contra un backend vivo**. Lo que las
+respalda hoy es la suite de componentes —que cubre criterio por criterio— más el typecheck y el
+lint; el recorrido de punta a punta con un usuario `TECHNICIAN` (tarea 9.5) y la medida a 360 px
+(tarea 9.6) siguen pendientes, por lo que explica `sdd/changes/tech-app/BLOCKED.md`. Un test de
+componente no es una pasada visual.
 
 **`/tech` — mis incidencias.** Lista `GET /api/v1/incidents` **sin enviar ningún parámetro que
 identifique al técnico**: el acotamiento por fila lo deriva el backend del token, y no existe
@@ -324,7 +330,10 @@ no se guarda, ni se reescribe, ni se reconstruye, y cuando una firma caduca lo q
 volver a listar —una vez por foto, no en bucle—. Subir se ofrece **sólo** en `IN_PROGRESS` y
 `WAITING_EXTERNAL_PARTS`, con `stage` de dos valores y sin campo de texto libre. No hay
 comprobación de tamaño ni de formato en el móvil: el backend decide leyendo los bytes, así que la
-frontera son sus respuestas, y cada una tiene su mensaje —`409` por el estado, `413` por tamaño,
+frontera son sus respuestas, y cada una tiene su mensaje —`409` por el estado, que además vuelve a
+leer la incidencia: si el refresco la trae cerrada o a la espera de la propietaria, el formulario
+de subida **se retira** y quien explica en qué se ha convertido es la barra de acciones;
+`413` por tamaño,
 `422` diciendo que se admiten JPEG, PNG y WebP (la causa frecuente es un HEIC de iPhone, y lo que
 lo arregla es cambiar el formato, no reintentar) y `502` por el almacenamiento—. **No se puede
 borrar una foto**, porque la API no lo expone, y **ninguna foto es requisito del cierre**.

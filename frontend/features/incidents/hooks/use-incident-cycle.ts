@@ -1,11 +1,12 @@
 "use client";
 
-import { useRouter } from "next/navigation";
 import {
   useMutation,
   useQueryClient,
   type UseMutationResult,
 } from "@tanstack/react-query";
+
+import { ApiError } from "@/lib/api";
 
 import { useAuth } from "@/lib/auth";
 
@@ -50,19 +51,33 @@ export interface IncidentCycleInput {
   etaAt?: string;
 }
 
+export interface IncidentCycleOptions {
+  /**
+   * Called once a `reject` has succeeded and its cache entries are gone.
+   *
+   * The **navigation itself is the caller's**: this hook is part of the shared
+   * incidents data layer, which the manager's `/incidents` screens consume too,
+   * so a `/tech` route hardcoded here would bake one surface's vocabulary into
+   * a module that belongs to all of them (design D1). D8 mandates the
+   * behaviour — remove the entries, then leave — not where the URL lives.
+   */
+  onRejected?: () => void;
+}
+
 function useTenantId(): string | undefined {
   const { user } = useAuth();
   return user?.tenant_id;
 }
 
-export function useIncidentCycleAction(): UseMutationResult<
+export function useIncidentCycleAction({
+  onRejected,
+}: IncidentCycleOptions = {}): UseMutationResult<
   IncidentDetailDto,
   Error,
   IncidentCycleInput
 > {
   const tenantId = useTenantId();
   const queryClient = useQueryClient();
-  const router = useRouter();
 
   return useMutation({
     mutationFn: ({ incidentId, action, etaAt }: IncidentCycleInput) => {
@@ -111,7 +126,7 @@ export function useIncidentCycleAction(): UseMutationResult<
         queryKey: incidentsKeys.listPrefix(tenantId),
       });
       if (refused) {
-        router.replace("/tech");
+        onRejected?.();
       }
     },
   });
@@ -159,8 +174,15 @@ export interface UploadIncidentPhotoVariables {
 }
 
 /**
- * Uploading a photo invalidates **only** the photo list of that incident
- * (R5.5): it moves neither the status nor the list.
+ * Uploading a photo invalidates the photo list of that incident (R5.5): a
+ * successful upload moves neither the status nor the list.
+ *
+ * A `409` is the exception, and it is D7 that makes it one. The refusal means
+ * the status this client believes is stale — the incident was closed or sent to
+ * the owner while the technician was choosing a file — and the message R5.6
+ * requires is derived from the **refreshed** status, so the detail is
+ * invalidated too. Without this, the only reachable reason is `out-of-order`
+ * and the two other messages are dead strings that say the wrong thing.
  */
 export function useUploadIncidentPhoto(): UseMutationResult<
   IncidentPhotoDto,
@@ -183,11 +205,16 @@ export function useUploadIncidentPhoto(): UseMutationResult<
       );
     },
     retry: false,
-    onSettled: (_data, _error, variables) => {
+    onSettled: (_data, error, variables) => {
       if (!tenantId) return;
       void queryClient.invalidateQueries({
         queryKey: incidentsKeys.photos(tenantId, variables.incidentId),
       });
+      if (error instanceof ApiError && error.status === 409) {
+        void queryClient.invalidateQueries({
+          queryKey: incidentsKeys.detail(tenantId, variables.incidentId),
+        });
+      }
     },
   });
 }

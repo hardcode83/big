@@ -7,7 +7,11 @@ import { I18nProvider } from "@/lib/i18n/client-provider";
 import { ApiError } from "@/lib/api";
 import esTech from "@/locales/es/tech.json";
 import esIncidents from "@/locales/es/incidents.json";
-import * as incidentsModule from "@/features/incidents";
+// Spied on the **data module**, not the barrel: `useIncidentsPages` and
+// `useIncidentContexts` live in `features/incidents/hooks` and import the source
+// from `../data`, so a spy on the barrel would no longer intercept them.
+import * as incidentsData from "@/features/incidents/data";
+import { incidentsKeys } from "@/features/incidents";
 
 const TENANT = "tenant-1";
 
@@ -18,10 +22,10 @@ vi.mock("@/lib/auth", () => ({
 const listIncidents = vi.fn();
 const getIncidentContext = vi.fn();
 
-vi.spyOn(incidentsModule, "getIncidentsDataSource").mockImplementation(
+vi.spyOn(incidentsData, "getIncidentsDataSource").mockImplementation(
   () =>
     ({ listIncidents, getIncidentContext }) as unknown as ReturnType<
-      typeof incidentsModule.getIncidentsDataSource
+      typeof incidentsData.getIncidentsDataSource
     >,
 );
 
@@ -105,7 +109,7 @@ describe("TechIncidentsView (R1)", () => {
 
     await waitFor(() =>
       expect(
-        client.getQueryData(incidentsModule.incidentsKeys.context(TENANT, "i1")),
+        client.getQueryData(incidentsKeys.context(TENANT, "i1")),
       ).toBeDefined(),
     );
   });
@@ -150,6 +154,24 @@ describe("TechIncidentsView (R1)", () => {
     expect(
       await screen.findByText(esTech.list.includesClosed),
     ).toBeInTheDocument();
+  });
+
+  /**
+   * R1.4 scopes the notice to the unfiltered list ("WHERE no hay ningún filtro
+   * seleccionado"). With a chip active the sentence is simply false: a list
+   * filtered to `ACCEPTED` carries no closed incident.
+   */
+  it("hides that notice once a status filter is active (R1.4)", async () => {
+    renderView();
+    await screen.findByText(esTech.list.includesClosed);
+
+    fireEvent.click(
+      screen.getByRole("button", { name: esIncidents.status.ACCEPTED }),
+    );
+
+    await waitFor(() =>
+      expect(screen.queryByText(esTech.list.includesClosed)).toBeNull(),
+    );
   });
 
   it("filters by a single status and clears it on a second tap (R1.5)", async () => {
@@ -232,6 +254,118 @@ describe("TechIncidentsView (R1)", () => {
     expect(
       getIncidentContext.mock.calls.filter(([, id]) => id === "p1"),
     ).toHaveLength(1);
+  });
+
+  /**
+   * A page after the first fails. Before this was handled, the tap did nothing
+   * visible and `hasMore` still counted rows, so the *next* tap requested page
+   * 3 and the twenty incidents of page 2 were gone from the list for good.
+   *
+   * **The 4xx is deliberate — do not "modernise" it to a 500.** `retryPolicy`
+   * retries 5xx twice, which with react-query's backoff puts the error ~3.4 s
+   * away, well past `findByText`'s 1 s window, and the test would fail looking
+   * like a regression. The code path is status-agnostic: a 5xx behaves
+   * identically, just later, and «load more» stays disabled throughout the
+   * retry budget because `isFetchingMore` is true.
+   */
+  it("reports a failed page instead of skipping it, and withdraws `load more` (R1.6)", async () => {
+    listIncidents.mockImplementation(
+      (_tenant: string, filters: { page: number }) =>
+        filters.page === 2
+          ? Promise.reject(
+              new ApiError({ status: 400, code: "BOOM", message: "x" }),
+            )
+          : Promise.resolve({
+              items: [row(`p${filters.page}`)],
+              total: 3,
+              page: filters.page,
+              perPage: 20,
+            }),
+    );
+    renderView();
+
+    await screen.findByText("Avería p1");
+    fireEvent.click(screen.getByRole("button", { name: esTech.list.loadMore }));
+
+    // The failure is announced...
+    expect(
+      await screen.findByText(esTech.list.moreError.title),
+    ).toBeInTheDocument();
+    // ...the rows already fetched survive...
+    expect(screen.getByText("Avería p1")).toBeInTheDocument();
+    // ...and paging past the hole is no longer on offer.
+    await waitFor(() =>
+      expect(
+        screen.queryByRole("button", { name: esTech.list.loadMore }),
+      ).toBeNull(),
+    );
+    expect(
+      listIncidents.mock.calls.some(([, f]) => (f as { page: number }).page === 3),
+    ).toBe(false);
+  });
+
+  it("retries only the failed page and restores `load more` (R1.6)", async () => {
+    let failPage2 = true;
+    listIncidents.mockImplementation(
+      (_tenant: string, filters: { page: number }) =>
+        filters.page === 2 && failPage2
+          ? Promise.reject(
+              new ApiError({ status: 400, code: "BOOM", message: "x" }),
+            )
+          : Promise.resolve({
+              items: [row(`p${filters.page}`)],
+              total: 3,
+              page: filters.page,
+              perPage: 20,
+            }),
+    );
+    renderView();
+
+    await screen.findByText("Avería p1");
+    fireEvent.click(screen.getByRole("button", { name: esTech.list.loadMore }));
+    await screen.findByText(esTech.list.moreError.title);
+
+    failPage2 = false;
+    fireEvent.click(
+      screen.getByRole("button", { name: esTech.list.moreError.retry }),
+    );
+
+    expect(await screen.findByText("Avería p2")).toBeInTheDocument();
+    expect(screen.queryByText(esTech.list.moreError.title)).toBeNull();
+  });
+
+  it("disables `load more` while a page is in flight, so a double tap cannot skip one", async () => {
+    let releasePage2: ((value: unknown) => void) | undefined;
+    listIncidents.mockImplementation(
+      (_tenant: string, filters: { page: number }) =>
+        filters.page === 2
+          ? new Promise((resolve) => {
+              releasePage2 = resolve;
+            })
+          : Promise.resolve({
+              items: [row(`p${filters.page}`)],
+              total: 3,
+              page: filters.page,
+              perPage: 20,
+            }),
+    );
+    renderView();
+
+    await screen.findByText("Avería p1");
+    fireEvent.click(screen.getByRole("button", { name: esTech.list.loadMore }));
+
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: esTech.list.loadMore }),
+      ).toBeDisabled(),
+    );
+    fireEvent.click(screen.getByRole("button", { name: esTech.list.loadMore }));
+    expect(
+      listIncidents.mock.calls.some(([, f]) => (f as { page: number }).page === 3),
+    ).toBe(false);
+
+    releasePage2?.({ items: [row("p2")], total: 3, page: 2, perPage: 20 });
+    expect(await screen.findByText("Avería p2")).toBeInTheDocument();
   });
 
   it("shows a loading region marked aria-busy while the list is pending", () => {

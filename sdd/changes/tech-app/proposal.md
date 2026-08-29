@@ -249,6 +249,25 @@ Criterios de aceptación:
   **no se modifican**. Son los contratos que esta pantalla consume; se citan como fuente, no se
   tocan.
 
+### Trabajo pendiente para `/sdd:archive`
+
+Levantado en el gate de `/sdd:review` (2026-08-29) por la lente de documentación. Ninguno de los
+tres es editable ahora: dos viven en ficheros que sólo archive escribe (regla 1) y el tercero
+depende de un fichero que archive todavía no ha creado.
+
+1. `docs/maintenance.md` §«La app del técnico» **no enlaza a ninguna spec**, mientras que su
+   sección hermana sí lo hace (línea 145 → `sdd/specs/incident-photos.md`). La norma de
+   `sdd/steering/documentation.md` es «no duplicar, enlazar»: cuando archive cree
+   `sdd/specs/tech-app.md`, hay que añadir el enlace desde esa sección, o la página operativa se
+   convierte en la única descripción del ciclo y empieza a derivar.
+2. `sdd/roadmap/demo-user.md:25` y `:31` siguen contando `/tech` (+detalle) entre las superficies
+   **placeholder** y afirmando que «limpiadora y técnico entran, pero no tienen a dónde ir». La
+   mitad del técnico deja de ser cierta con este change. `demo-user` es una entrada ya entregada,
+   así que decidir entre corregir las dos líneas o datarlas como registro histórico es de archive.
+   La página operativa viva del mismo asunto, `docs/demo-tenant.md`, sí se actualizó aquí.
+3. `sdd/specs/frontend-foundation.md:25` y `:99` — el recuento de superficies (placeholder 11→9,
+   funcionales 15→17) y la mención caduca de `start`, ya descritas arriba.
+
 ## Coordinación
 
 `blocked-transitions-web` está en vuelo en otro worktree y es también `[FE]` sobre el dominio de

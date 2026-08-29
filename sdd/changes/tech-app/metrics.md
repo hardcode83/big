@@ -2,7 +2,8 @@
 
 | date | phase | models | tokens in | tokens out | tokens cache | cost USD (est) | notes |
 |---|---|---|---|---|---|---|---|
-| 2026-08-28 | new | claude-haiku-4-5-20251001 claude-opus-5 | 3280 | 91373 | 14068867 | 13.1631 |  |
-| 2026-08-28 | design | claude-opus-5 | 162 | 81621 | 11189004 | 9.3333 |  |
-| 2026-08-29 | tasks | claude-opus-5 | 44 | 16793 | 2214699 | 2.2808 |  |
-| 2026-08-29 | run | claude-opus-5 | 372 | 119905 | 41742125 | 26.6225 |  |
+| 2026-08-19 | new | claude-haiku-4-5-20251001 claude-opus-5 | 3804 | 97163 | 15310045 | 14.3733 |  |
+| 2026-08-28 | design | claude-opus-5 | 290 | 94632 | 14653452 | 11.9675 |  |
+| 2026-08-29 | tasks | claude-opus-5 | 142 | 25602 | 2627420 | 2.7962 |  |
+| 2026-08-29 | run | claude-opus-5 | 494 | 127151 | 47070600 | 29.5665 |  |
+| 2026-08-29 | review | claude-opus-5 | 144439 | 167021 | 18381953 | 19.2741 | incl. subagents |
