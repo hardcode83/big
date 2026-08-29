@@ -247,6 +247,11 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   desatascar; es la única diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
 - THE SYSTEM NEVER SHALL permitir conducirlas a un técnico que no sea el asignado, y esa negativa
   SHALL ser indistinguible de «no existe» (ver R8).
+- **Quién llama a `resolve` desde la web**: la sección de desajustes de la card del dashboard lo
+  ofrece al `PROPERTY_MANAGER` cuando la incidencia es lo que bloquea el check-in; esa pantalla no
+  asume que la incidencia acabe en `RESOLVED`, porque la segunda puerta de R4 puede llevarla a
+  `AWAITING_OWNER_APPROVAL`. Su comportamiento vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### R7 — Recomposición del estado de la propiedad
 
