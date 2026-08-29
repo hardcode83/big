@@ -86,6 +86,42 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   useEffect(() => {
     return subscribeToSessionExpired(() => {
       purgeSessionCache();
+      // A session declared expired must not keep its tokens in memory. Two paths reach this
+      // listener WITHOUT `refreshSession` having cleared them: the `SessionInvalidatedError`
+      // branch, which deliberately skips `clearSessionTokens` when the generation moved
+      // underneath it, and the "No refresh token available" early reject, which never had a
+      // token to clear. Both used to leave the store holding credentials for a session the app
+      // had just declared over.
+      //
+      // The consequence that made it visible is `sessionGeneration`, which only moves inside
+      // the two token writers: an optimistic mutation in flight compares it in `onError` to
+      // decide whether its snapshot still belongs to this session, and on those two paths the
+      // number had not moved — so the departing user's cached rows were written back into the
+      // `QueryClient` the line above had just emptied, which is exactly what
+      // `notifications-inbox-web` R3.4 forbids. Clearing here moves the generation on every purge
+      // that goes through THIS listener, which is every 401 of every authenticated client.
+      //
+      // It is **not** true of every purge in this file: `refresh()` below calls
+      // `purgeSessionCache()` on its own, without clearing tokens and without notifying, so
+      // that one still leaves the counter where it was. No `useAuth()` call site destructures
+      // `refresh`, so it is latent rather than live — measured across the tree during
+      // `notifications-inbox-web`'s implementation and confirmed again by its review panel on
+      // 2026-08-29. Left unfixed here because moving the bump into `purgeSessionCache()` is a
+      // decision about shared auth semantics and not about one feature; it is carried as the
+      // roadmap candidate `auth-session-generation-semantics`. Do not read this comment as a
+      // licence to purge from anywhere.
+      //
+      // **This clear deliberately overrides the guard at `refresh-coordinator.ts:57`**, which
+      // skips clearing when the generation moved underneath a stale refresh, precisely so a
+      // refresh cannot destroy credentials installed after it started. The trade-off, and it is
+      // a trade-off rather than an oversight: a stale refresh resolving during a fresh `login()`
+      // now drops the NEW session's tokens, leaving a UI that believes it is authenticated with
+      // an empty store until the next 401 forces a re-login. Before this change that same race
+      // already ended in `expired`, so what is lost is a recovery nothing used — and the
+      // alternative, an expired session that keeps its credentials, is worse.
+      //
+      // All of this was found by `notifications-inbox-web`'s section-5 security panel.
+      clearSessionTokens();
       setUser(null);
       clearSessionPresent();
       setStatus("expired");

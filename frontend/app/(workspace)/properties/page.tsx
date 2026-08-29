@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { PropertiesView } from "@/features/properties";
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("properties");

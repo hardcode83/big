@@ -1,7 +1,7 @@
 import uuid
 from datetime import datetime
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Uuid
+from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Index, Integer, String, Uuid, text
 from sqlalchemy.orm import Mapped, mapped_column
 
 from app.core.db import Base, TenantScopedMixin, TimestampMixin, UUIDPrimaryKeyMixin
@@ -36,6 +36,21 @@ class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, Timesta
             "sla_deadline_at",
         ),
         Index("ix_notification_logs_related_type_related_id", "related_type", "related_id"),
+        Index(
+            "ix_notification_logs_tenant_id_recipient_user_id_created_at",
+            "tenant_id",
+            "recipient_user_id",
+            text("created_at DESC"),
+        ),
+        # Partial on purpose (`notifications-inbox-web` design D1): the unread counter is the
+        # one query every connected user issues every 60 s, and the only one whose cost grows
+        # without bound as read rows pile up. A partial index holds only what is unread.
+        Index(
+            "ix_notification_logs_unread",
+            "tenant_id",
+            "recipient_user_id",
+            postgresql_where=text("read_at IS NULL"),
+        ),
     )
 
     recipient_user_id: Mapped[uuid.UUID | None] = mapped_column(
@@ -64,3 +79,7 @@ class NotificationLogModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, Timesta
         DateTime(timezone=True), default=None
     )
     sla_breached: Mapped[bool] = mapped_column(Boolean, default=False, server_default="false")
+    # Nullable with no server default (`notifications-inbox-web` design D1): every row written
+    # before this column existed has been read by nobody, and a default of `now()` would have
+    # declared them all read.
+    read_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
