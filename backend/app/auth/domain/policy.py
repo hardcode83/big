@@ -145,6 +145,18 @@ class Permission(str, enum.Enum):
     READ_PRICE_RECOMMENDATIONS = "READ_PRICE_RECOMMENDATIONS"
     MANAGE_PRICE_RECOMMENDATIONS = "MANAGE_PRICE_RECOMMENDATIONS"
 
+    # Added by `revenue-statements` (design D8). The split is the same as
+    # `READ_ACCESS_RECORDS`/`MANAGE_ACCESS_RECORDS` two entries above: PRD §6 gives
+    # `TENANT_OWNER` visibility ("ver sus propiedades y reservas") and `PROPERTY_MANAGER`
+    # the operation ("acceder a todos los datos operativos"). Both read the statement
+    # because the owner is the one who actually receives the document; the manager
+    # operates it (generation, status transitions, notes, exports). `CLEANER`,
+    # `TECHNICIAN`, `SUPER_ADMIN` get neither — `SUPER_ADMIN` for the same cross-tenant
+    # reason it holds no operational permission today, and the field roles because a
+    # cleaning or a ticket is not a financial review.
+    READ_OWNER_STATEMENTS = "READ_OWNER_STATEMENTS"
+    MANAGE_OWNER_STATEMENTS = "MANAGE_OWNER_STATEMENTS"
+
 
 _SELF_SERVICE = frozenset(
     {
@@ -233,6 +245,12 @@ _PRICING_RULE_MANAGE = frozenset(
 _PRICE_RECOMMENDATION_MANAGE = frozenset(
     {Permission.READ_PRICE_RECOMMENDATIONS, Permission.MANAGE_PRICE_RECOMMENDATIONS}
 )
+# `revenue-statements` D8. Owner reads, manager operates — same shape as
+# `_ACCESS_READ`/`_ACCESS_MANAGE` above.
+_STATEMENTS_READ = frozenset({Permission.READ_OWNER_STATEMENTS})
+_STATEMENTS_MANAGE = frozenset(
+    {Permission.READ_OWNER_STATEMENTS, Permission.MANAGE_OWNER_STATEMENTS}
+)
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -292,6 +310,9 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # Mode 1 and from whose money the guardrails bound.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Reads the statement that closes her month (D8); does not operate it — same
+        # split as `_INCIDENT_READ`/`_ACCESS_READ` above.
+        | _STATEMENTS_READ
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -323,6 +344,10 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # changing one. Same bundles as the owner, which is the divergence D11 records.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Operates the statement end-to-end: generates, mutates, exports, deletes expenses
+        # pending consolidation. Owner approves the threshold-driven approvals via
+        # `RESPOND_OWNER_APPROVALS`, which is unchanged.
+        | _STATEMENTS_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     # Until `maintenance` this role held `_SELF_SERVICE` and nothing else: it existed and
