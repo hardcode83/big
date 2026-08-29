@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/notifications-inbox-web
 implementation_sha: dea4c7fb472b72bf6fe392363f41361e63af7e4b
 pr_number: 
 pr_url: 
