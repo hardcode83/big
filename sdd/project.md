@@ -103,7 +103,15 @@ El número solo hay que pasarlo a `up`: `down`, `logs`, `ps` y `sh` direccionan 
 
 **No se reproduce.** Medido el 2026-08-29 en el worktree de `tech-app` con `PORT_OFFSET=10`: la app hidrata y es completamente interactiva. Login real, navegación cliente, el ciclo entero de una incidencia (`ASSIGNED → ACCEPTED → IN_PROGRESS → RESOLVED`), dos subidas `multipart` de foto y el cierre con coste y materiales, todo desde un navegador a 360×780 conducido con Playwright. Los únicos errores de consola son el handshake del WebSocket de HMR y un `favicon.ico` 404 — ruido del servidor de desarrollo, no de la app.
 
-Qué hacer con esto: **`PORT_OFFSET` sí sirve para una pasada visual.** Si alguna vez vuelve a aparecer el síntoma de 2026-08-23, la causa candidata sigue siendo la misma —`next dev` sin `allowedDevOrigins`, que en Next 15+ bloquea peticiones de desarrollo de origen cruzado— y el arreglo sería declararlo en `next.config`. Pero no se ha vuelto a ver, así que no se documenta como límite. Dos cosas que sí conviene saber, porque cuestan tiempo:
+**Y sí se ha vuelto a ver, así que no se documenta como resuelto.** `design-system-tokens` lo encontró el 2026-08-24, un día después del original, y lo acotó mejor que nadie: el fallo es real **sólo para `next dev`** —Next 15+ bloquea las peticiones de desarrollo de origen cruzado y el desplazamiento hace que la página venga de `:<n>` mientras Next tiene por suyo el `:3000` del contenedor—, y la salida que sí funciona es servir el **build de producción** en un contenedor aparte con su propio puerto:
+
+```bash
+docker compose run --rm --no-deps -p 3042:3000 frontend sh -c 'npx next start -p 3000 -H 0.0.0.0'
+```
+
+Con eso la app hidrata y se puede conducir con Playwright. El arreglo de fondo sigue siendo declarar `allowedDevOrigins` en `next.config`, y sigue sin hacerse.
+
+Qué hacer con esto, entonces: **prueba `next dev` con `PORT_OFFSET` primero** —el 2026-08-29 funcionó— y si la página se sirve pero no responde, no des la pasada visual por imposible: cae al `next start` de arriba. Lo que no vale es citar el aviso de 2026-08-23 para no mirar, que es lo que pasó dos veces. Dos cosas más que cuestan tiempo:
 
 - **La sesión vive en memoria.** Un `page.goto` a una ruta protegida cae a `/login`: el token de acceso no sobrevive a una recarga dura. Hay que entrar y navegar **por clic**, como un usuario, no recargando cada pantalla.
 - **El overlay de desarrollo de Next intercepta los clics de Playwright.** `page.click` falla con «`<nextjs-portal>` intercepts pointer events»; hacer el clic en el DOM (`el.click()`) lo esquiva.

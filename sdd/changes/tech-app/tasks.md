@@ -306,12 +306,27 @@
 > - **R1.1 confirmada en red**: la lista se pidió como `GET /api/v1/incidents?page=1&per_page=20`,
 >   sin ningún parámetro que identifique al técnico.
 > - **R1.3 confirmada en red**: volver a la lista y reabrir la fila añadió **0** peticiones de
->   `/context` — la entrada de caché es compartida de verdad. En el primer montaje sí se ve una
->   petición extra, que es el doble montaje de React StrictMode en desarrollo (Next.js lo activa
->   por defecto) y no ocurre en producción.
+>   `/context`. Ésa es la evidencia que discrimina: si las dos pantallas usaran claves distintas,
+>   abrir la fila costaría una petición **siempre**, no sólo la primera vez. La entrada de caché es
+>   compartida, que es lo que R1.3 exige normativamente («bajo la **misma clave**»).
+>
+>   En el primer montaje sí se vio **una** petición extra, y **no se aisló su causa**. La
+>   atribución inicial a StrictMode era errónea y se corrige aquí: con el `staleTime: 60_000` de
+>   `frontend/lib/query/query-client.ts`, un remontaje de StrictMode sobre una entrada *fresca* no
+>   emite ninguna petición, así que StrictMode queda descartado salvo que la entrada estuviera
+>   fría. La explicación que encaja con lo medido es que entre cargar la lista y abrir la fila
+>   pasó más de un minuto, la entrada venció y `refetchOnMount` la revalidó una vez — comportamiento
+>   correcto **que también ocurre en producción**. Queda dicho para que nadie lea aquí una garantía
+>   de «cero peticiones al abrir» que el diseño no da.
 > - **R6.3**: a 360 px reales, **ninguna de las dos pantallas** produce desplazamiento horizontal —
 >   cero elementos desbordados dentro de `main` en la lista y en el detalle—, y los objetivos
 >   táctiles miden 44 px. La página sí desborda (`scrollWidth` 433), pero el desbordamiento está en
 >   la cabecera del `TechnicianShell`, que este change no toca; se reproduce idéntico en
->   `/dashboard`, que tampoco toca. Es un defecto **preexistente del shell compartido** y se
->   reporta como entrada propia, no como deuda de `tech-app`.
+>   `/dashboard`, que tampoco toca. Es un defecto **preexistente del shell compartido**, no deuda
+>   de `tech-app`, y queda anotado como candidato de roadmap en el §«Trabajo pendiente para
+>   `/sdd:archive`» de `proposal.md` (punto 4), que es quien puede escribir el roadmap.
+>
+>   Con todo, conviene leer «R6.3 cumplida» con precisión: se cumple **para el contenido que estas
+>   dos pantallas gobiernan**. Un técnico a 360 px sí tiene desplazamiento horizontal, porque las
+>   dos pantallas viven dentro de ese shell. La parte del criterio que no se cumple no es
+>   alcanzable sin salirse del alcance que la tarea 9.4 fija.

@@ -267,6 +267,23 @@ depende de un fichero que archive todavía no ha creado.
    La página operativa viva del mismo asunto, `docs/demo-tenant.md`, sí se actualizó aquí.
 3. `sdd/specs/frontend-foundation.md:25` y `:99` — el recuento de superficies (placeholder 11→9,
    funcionales 15→17) y la mención caduca de `start`, ya descritas arriba.
+4. **Candidato de roadmap: la cabecera del shell desborda a 360 px.** Medido el 2026-08-29 al hacer
+   la tarea 9.6: la página produce desplazamiento horizontal (`scrollWidth` 433 sobre un viewport
+   de 360) y el desbordamiento está **entero** en la cabecera del `TechnicianShell` —su botón de
+   menú de usuario y el contenedor `flex` que lo envuelve—, no en el contenido de las pantallas,
+   que no desborda ni un elemento. Se reproduce idéntico en `/dashboard`, así que es del shell
+   compartido de `features/shell` y afecta a todas las superficies, no sólo a las del técnico.
+   `tech-app` no lo toca ni puede tocarlo sin salirse de su alcance (tarea 9.4). **Consecuencia
+   para R6.3**: se cumple para lo que estas dos pantallas gobiernan, pero un usuario a 360 px sí
+   tiene desplazamiento horizontal. Archive debe abrir la entrada `[FE]` que lo arregle en el
+   shell.
+5. **`sdd/specs/cleaning-manager-view.md` contradice ahora a `sdd/project.md`.** Esa spec aplaza su
+   pasada visual «porque `next dev` con `PORT_OFFSET` sirve la página sin hidratarla», y ese
+   disparador («el primer despliegue en `dev`») se apoya en una premisa que este change ha medido
+   falsa para su propio caso. Hay que reconciliar las dos: o la spec se anota con el matiz de
+   `design-system-tokens` —el fallo es real **sólo para `next dev`**, y con `next start` en un
+   contenedor aparte la app hidrata—, o se revisa su deuda, porque un worktree enlazado puede ser
+   ahora un sitio válido para hacer esa comprobación. Es de archive porque `sdd/specs/` es suyo.
 
 ## Coordinación
 
