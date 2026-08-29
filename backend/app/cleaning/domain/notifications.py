@@ -106,3 +106,91 @@ def no_cleaner_available_notification(
         related_type=RELATED_TYPE_CLEANING_TASK,
         related_id=task_id,
     )
+
+
+def completion_notification(
+    *,
+    tenant_id: uuid.UUID,
+    task_id: uuid.UUID,
+    property_id: uuid.UUID,
+    recipient_id: uuid.UUID,
+    recipient_contact: str,
+    now: datetime,
+) -> NotificationLog:
+    """What the manager is told when a cleaning is finished (R2.1).
+
+    Closes half of the loop PRD §11 asks for: the validation step existed, but nothing told
+    the manager there was anything to validate, so it depended on somebody opening the list.
+
+    **No `sla_deadline_at`, and no parameter to give it one** (R5.5, design D10). Completion
+    is not an assignment: nobody's silence can breach it. A deadline here would produce a
+    breach candidate against a type `escalation_for` returns `None` for — a row marked
+    breached that escalates to nobody.
+
+    Subject and body are a constant plus identifiers, never the content of another row — the
+    contract rule 11 of `sdd/steering/security.md` fixes for `notification_logs.subject`/`body`.
+    Nothing here reads the checklist, the completion note, or any text the cleaner typed.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=recipient_id,
+        recipient_contact=recipient_contact,
+        channel=NotificationChannel.IN_APP,
+        notification_type=NotificationType.CLEANING_COMPLETED.value,
+        created_at=now,
+        updated_at=now,
+        subject="Cleaning completed",
+        body=(
+            f"A cleaning task has been completed and is awaiting validation. "
+            f"Task {task_id}, property {property_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_CLEANING_TASK,
+        related_id=task_id,
+    )
+
+
+def validation_failed_notification(
+    *,
+    tenant_id: uuid.UUID,
+    task_id: uuid.UUID,
+    property_id: uuid.UUID,
+    recipient_id: uuid.UUID,
+    recipient_contact: str,
+    now: datetime,
+) -> NotificationLog:
+    """What the **cleaner** is told when their cleaning does not pass validation (R2.2).
+
+    The other half of the loop, and it deliberately goes to the cleaner rather than the
+    manager: the manager is the one who just issued the verdict, and telling them what they
+    themselves decided is noise. `CLEANER` already holds `READ_OWN_NOTIFICATIONS`, so the
+    role can read it.
+
+    **No `sla_deadline_at`** (R5.5, D10), for the same reason as its sibling — and here the
+    absence matters twice over, because a deadline on a row addressed to the cleaner would
+    escalate the cleaner's silence about a verdict they cannot change.
+
+    Subject and body are a constant plus identifiers. In particular this does **not** carry
+    the manager's reason for failing the validation, which is free text a human typed and
+    exactly what rule 11 keeps out of this column — the cleaner reads the verdict in the app,
+    where the task's own fields live behind the task's own authorisation.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=recipient_id,
+        recipient_contact=recipient_contact,
+        channel=NotificationChannel.IN_APP,
+        notification_type=NotificationType.CLEANING_FAILED.value,
+        created_at=now,
+        updated_at=now,
+        subject="Cleaning validation failed",
+        body=(
+            f"A cleaning you completed did not pass validation. "
+            f"Task {task_id}, property {property_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_CLEANING_TASK,
+        related_id=task_id,
+    )

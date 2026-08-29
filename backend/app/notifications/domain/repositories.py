@@ -140,6 +140,54 @@ class NotificationLogRepository(Protocol):
         """
         ...
 
+    async def exists_for(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> bool:
+        """Whether this tenant already has a row of this type about this entity (R1.3).
+
+        The deduplication behind "escribir el aviso una sola vez por incidencia y severidad".
+        A classification that raises an incident to `CRITICAL` and a triage that afterwards
+        *confirms* that same severity are two legitimate calls about one fact, and
+        `TriageIncidentUseCase` admits being called repeatedly — so without this the manager
+        is told twice.
+
+        **A read, deliberately, and not a partial unique index** (design D2). An index would
+        need a migration, which this change does not have, and it would turn a second
+        classification from a no-op into a `500`. The cost of that choice is stated rather
+        than hidden: this is check-then-write, not a constraint, so two concurrent writers
+        could both pass it. The window is narrow by construction — the classification job
+        runs under `_locked` (one execution per tenant) and triage is a human action on a row
+        that job is not touching — and closing it for real is the migration this change
+        declined.
+
+        Same argument shape as `cancel_sla_deadline`. `ix_notification_logs_related_type_related_id`
+        covers the polymorphic pair and the remaining two predicates filter what it returns —
+        the same index-then-filter shape `cancel_sla_deadline` already relies on, not a
+        covering index.
+
+        **A row written earlier in the same transaction is already visible here**, so
+        deduplication works within one transaction exactly as it does between two. Two
+        mechanisms give that, and it is worth naming both rather than the wrong one: the
+        session runs with `autoflush` on, so any ORM `select` flushes what is pending before
+        it reads — and `add` additionally flushes explicitly. The guarantee therefore does
+        **not** rest on `add`'s flush alone; deleting that line would not break this. Said
+        precisely because the QA panel of section 2 measured it: a test that claims to pin
+        the explicit flush passes without it, and an earlier version of this paragraph
+        credited the explicit flush as the reason.
+
+        `related_type` and `related_id` must not be `None`. The method rejects them rather
+        than letting SQLAlchemy compile `== None` into `IS NULL`, which would silently widen
+        a **suppression** predicate from one entity to every row of that type with no related
+        entity — and a widened suppression is a notification nobody is told about. Raised by
+        the security panel of section 2, while this method still had no callers.
+        """
+        ...
+
     async def cancel_sla_deadline(
         self,
         tenant_id: uuid.UUID,

@@ -8,12 +8,18 @@ from app.maintenance.domain.notifications import (
     NOTIFICATION_TYPE_INCIDENT_REJECTED,
     RELATED_TYPE_INCIDENT,
     _SLA_FIELD_BY_SEVERITY,
+    incident_critical_notification,
+    incident_high_notification,
     incident_rejection_notification,
     owner_approval_notification,
     sla_minutes_for,
     technician_assignment_notification,
 )
-from app.notifications.domain.enums import NotificationStatus, NotificationType
+from app.notifications.domain.enums import (
+    NotificationChannel,
+    NotificationStatus,
+    NotificationType,
+)
 from app.tenants.domain.entities import TenantConfig
 
 NOW = datetime(2026, 8, 15, 10, 0, tzinfo=timezone.utc)
@@ -206,3 +212,167 @@ def test_the_rejection_notification_names_only_identifiers() -> None:
     assert str(incident_id) in row.body
     assert str(property_id) in row.body
     assert row.subject == "Incident rejected by the technician"
+
+
+# --- The severity alerts (`notification-writers-gap` R1, design D4/D10) -----------------
+
+
+@pytest.mark.parametrize(
+    ("builder", "expected_type"),
+    [
+        (incident_critical_notification, NotificationType.INCIDENT_CREATED_CRITICAL),
+        (incident_high_notification, NotificationType.INCIDENT_CREATED_HIGH),
+    ],
+)
+def test_a_severity_alert_is_queued_in_app_and_points_at_the_incident(
+    builder, expected_type
+) -> None:
+    """R5.3 — `PENDING` and `IN_APP`: queued work for `dispatch_notifications`, not a delivery.
+
+    The polymorphic pair points at the **incident**, like every other builder in this module,
+    so everything notified about one incident is reachable by one query — and so that R1.3's
+    `exists_for` check has a stable pair to deduplicate on.
+    """
+    incident_id = uuid.uuid4()
+    property_id = uuid.uuid4()
+    manager_id = uuid.uuid4()
+
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=incident_id,
+        property_id=property_id,
+        manager_id=manager_id,
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    assert log.notification_type == expected_type.value
+    assert log.status is NotificationStatus.PENDING
+    assert log.channel is NotificationChannel.IN_APP
+    assert log.related_type == RELATED_TYPE_INCIDENT
+    assert log.related_id == incident_id
+    assert log.recipient_user_id == manager_id
+
+
+@pytest.mark.parametrize(
+    "builder", [incident_critical_notification, incident_high_notification]
+)
+def test_a_severity_alert_has_no_sla_deadline(builder) -> None:
+    """R5.5, and it is unreachable rather than merely absent (design D10).
+
+    Measured reason: `dispatch_notifications` moves `PENDING → SENT` every minute and
+    `list_sla_breach_candidates` requires `SENT`, so a deadline here would produce a real
+    breach candidate against a type `escalation_for` returns `None` for — the row would be
+    marked breached and escalate to nobody.
+    """
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        manager_id=uuid.uuid4(),
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    assert log.sla_deadline_at is None
+
+
+@pytest.mark.parametrize(
+    "builder", [incident_critical_notification, incident_high_notification]
+)
+def test_a_severity_alert_accepts_exactly_the_identifiers_and_nothing_else(builder) -> None:
+    """R5.4 as a property of the signature, which is the only form that actually holds.
+
+    The free-text test below can only fail if a builder interpolates prose it was **given**.
+    That would catch a new *required* prose parameter — the call would raise `TypeError` —
+    but not an optional `title: str | None = None` that a caller then feeds `incident.title`
+    into. Raised by the section-4 security panel, whose own words for why the weaker form is
+    not enough: the contract "se sostiene por disciplina del llamante, no hay punto único de
+    paso". Pinning the exact parameter set turns that discipline into a shape the suite
+    enforces, the same way the deadline test does for R5.5.
+    """
+    import inspect
+
+    assert set(inspect.signature(builder).parameters) == {
+        "tenant_id",
+        "incident_id",
+        "property_id",
+        "manager_id",
+        "recipient_contact",
+        "now",
+    }
+
+
+@pytest.mark.parametrize(
+    "builder", [incident_critical_notification, incident_high_notification]
+)
+def test_a_severity_alert_takes_no_deadline_parameter(builder) -> None:
+    """D10 again, but as a property of the signature rather than of one call.
+
+    The test above would pass against a builder that merely defaults its deadline to `None`;
+    this one fails unless there is **no way** to pass one. That is the difference between
+    R5.5 holding and R5.5 being remembered.
+    """
+    import inspect
+
+    parameters = set(inspect.signature(builder).parameters)
+
+    assert not {p for p in parameters if "sla" in p or "deadline" in p or "minutes" in p}
+
+
+@pytest.mark.parametrize(
+    "builder", [incident_critical_notification, incident_high_notification]
+)
+def test_a_severity_alert_carries_no_incident_free_text(builder) -> None:
+    """R5.4 / rule 11 of `steering/security.md`: a constant plus identifiers, nothing else.
+
+    The three columns this must never read are named explicitly, because the incident is the
+    one entity in this module that carries guest-typed prose: `title` and `description` come
+    from the guest portal, and `ai_summary` is generated from them.
+    """
+    incident_id = uuid.uuid4()
+    property_id = uuid.uuid4()
+    leaked = {
+        "title": "BOILER LEAKING ONTO THE NEIGHBOUR",
+        "description": "the guest wrote their document number here",
+        "ai_summary": "a summary that quotes the guest back",
+    }
+
+    log = builder(
+        tenant_id=uuid.uuid4(),
+        incident_id=incident_id,
+        property_id=property_id,
+        manager_id=uuid.uuid4(),
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    for value in leaked.values():
+        assert value not in log.body
+        assert value not in log.subject
+    # Everything variable in the body is an identifier this module was handed.
+    for token in log.body.replace(",", " ").replace(".", " ").split():
+        if len(token) == 36 and "-" in token:
+            assert uuid.UUID(token) in {incident_id, property_id}
+
+
+def test_the_two_severity_alerts_are_distinguishable_to_a_reader() -> None:
+    """They are two different facts (R1.4), so the row a manager reads must say which.
+
+    R1.4 lets both exist for one incident when it is raised from HIGH to CRITICAL, so a
+    subject shared between them would leave the inbox showing the same line twice.
+    """
+    kwargs = dict(
+        tenant_id=uuid.uuid4(),
+        incident_id=uuid.uuid4(),
+        property_id=uuid.uuid4(),
+        manager_id=uuid.uuid4(),
+        recipient_contact="manager@example.com",
+        now=NOW,
+    )
+
+    critical = incident_critical_notification(**kwargs)
+    high = incident_high_notification(**kwargs)
+
+    assert critical.notification_type != high.notification_type
+    assert critical.subject != high.subject

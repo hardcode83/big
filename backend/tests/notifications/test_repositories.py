@@ -497,3 +497,177 @@ async def test_add_refuses_a_log_of_another_tenant(db_session) -> None:
 
     with pytest.raises(CrossTenantWriteError):
         await SqlAlchemyNotificationLogRepository(db_session).add(tenant_a.id, log)
+
+
+# -- `exists_for`: the deduplication behind R1.3 (design D2) --------------------------
+
+
+@pytest.mark.asyncio
+async def test_exists_for_is_false_when_no_row_points_at_the_entity(db_session) -> None:
+    tenant = await _tenant(db_session, "ExistsNone")
+    repo = SqlAlchemyNotificationLogRepository(db_session)
+
+    assert (
+        await repo.exists_for(
+            tenant.id,
+            related_type="incident",
+            related_id=uuid.uuid4(),
+            notification_type="INCIDENT_CREATED_CRITICAL",
+        )
+        is False
+    )
+
+
+@pytest.mark.asyncio
+async def test_exists_for_sees_a_row_written_in_the_same_transaction(db_session) -> None:
+    """The property the whole of R1.3 rests on (design D2): visible without a commit.
+
+    If it were not, a classification and a triage inside one transaction would each see
+    "nothing yet" and both write — exactly the double notification R1.3 forbids.
+
+    **What this does and does not pin**, because the section-2 QA panel measured it: the
+    session runs with `autoflush` on, so the `select` inside `exists_for` flushes pending
+    work by itself. This test therefore pins the *property* — same-transaction visibility —
+    and NOT the explicit `flush()` inside `add`, which it would pass without. That is the
+    honest reading: the property is what R1.3 needs, and it has two independent causes.
+    """
+    tenant = await _tenant(db_session, "ExistsSameTx")
+    repo = SqlAlchemyNotificationLogRepository(db_session)
+    incident_id = uuid.uuid4()
+
+    await repo.add(
+        tenant.id,
+        NotificationLog(
+            id=uuid.uuid4(),
+            tenant_id=tenant.id,
+            recipient_contact="manager@example.com",
+            channel=NotificationChannel.IN_APP,
+            notification_type="INCIDENT_CREATED_CRITICAL",
+            created_at=NOW,
+            updated_at=NOW,
+            subject="Incident is critical",
+            body=f"Incident {incident_id}.",
+            status=NotificationStatus.PENDING,
+            related_type="incident",
+            related_id=incident_id,
+        ),
+    )
+
+    assert (
+        await repo.exists_for(
+            tenant.id,
+            related_type="incident",
+            related_id=incident_id,
+            notification_type="INCIDENT_CREATED_CRITICAL",
+        )
+        is True
+    )
+
+
+@pytest.mark.asyncio
+async def test_exists_for_discriminates_on_each_leg_of_the_triple(db_session) -> None:
+    """All three legs, because a query that ignored one would still pass a happy-path test.
+
+    R1.4 depends on the `notification_type` leg in particular: an incident raised from HIGH
+    to CRITICAL must be announced again, and it only is if the existing `INCIDENT_CREATED_HIGH`
+    row does not answer for `INCIDENT_CREATED_CRITICAL`.
+    """
+    tenant = await _tenant(db_session, "ExistsTriple")
+    repo = SqlAlchemyNotificationLogRepository(db_session)
+    incident_id = uuid.uuid4()
+    await _log(
+        db_session,
+        tenant,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_HIGH",
+    )
+
+    assert await repo.exists_for(
+        tenant.id,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_HIGH",
+    )
+    # A different severity is a different fact (R1.4).
+    assert not await repo.exists_for(
+        tenant.id,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_CRITICAL",
+    )
+    # A different entity.
+    assert not await repo.exists_for(
+        tenant.id,
+        related_type="incident",
+        related_id=uuid.uuid4(),
+        notification_type="INCIDENT_CREATED_HIGH",
+    )
+    # A different kind of entity carrying the same id.
+    assert not await repo.exists_for(
+        tenant.id,
+        related_type="cleaning_task",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_HIGH",
+    )
+
+
+@pytest.mark.asyncio
+async def test_exists_for_never_sees_another_tenants_row(db_session) -> None:
+    """Rule 1 of `steering/security.md`, and here it is not a read leak but a write one.
+
+    A row of tenant B answering for tenant A would *suppress* A's notification: the manager
+    is never told, and nothing anywhere records that a neighbour's row is why.
+    """
+    mine = await _tenant(db_session, "ExistsMine")
+    theirs = await _tenant(db_session, "ExistsTheirs")
+    repo = SqlAlchemyNotificationLogRepository(db_session)
+    incident_id = uuid.uuid4()
+    await _log(
+        db_session,
+        theirs,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_CRITICAL",
+    )
+
+    assert not await repo.exists_for(
+        mine.id,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_CRITICAL",
+    )
+    assert await repo.exists_for(
+        theirs.id,
+        related_type="incident",
+        related_id=incident_id,
+        notification_type="INCIDENT_CREATED_CRITICAL",
+    )
+
+
+@pytest.mark.asyncio
+async def test_exists_for_refuses_a_null_related_entity(db_session) -> None:
+    """A null would widen a **suppression** check, so it is rejected, not tolerated.
+
+    `column == None` compiles to `IS NULL`, which would match every row of the type that
+    points at nothing — and since a `True` here means the caller writes no notification,
+    that widening silences alerts. Raised by the section-2 security panel while the method
+    still had no callers, which is why it costs nothing to close.
+    """
+    tenant = await _tenant(db_session, "ExistsNullGuard")
+    repo = SqlAlchemyNotificationLogRepository(db_session)
+
+    with pytest.raises(ValueError):
+        await repo.exists_for(
+            tenant.id,
+            related_type="incident",
+            related_id=None,  # type: ignore[arg-type]
+            notification_type="INCIDENT_CREATED_CRITICAL",
+        )
+    with pytest.raises(ValueError):
+        await repo.exists_for(
+            tenant.id,
+            related_type=None,  # type: ignore[arg-type]
+            related_id=uuid.uuid4(),
+            notification_type="INCIDENT_CREATED_CRITICAL",
+        )

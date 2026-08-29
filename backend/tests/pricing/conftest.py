@@ -19,6 +19,10 @@ import pytest_asyncio
 
 from app.auth.domain.enums import UserRole
 from app.auth.infrastructure.models import UserModel
+from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.notifications.infrastructure.repositories import (
+    SqlAlchemyNotificationLogRepository,
+)
 from app.pricing.domain.entities import PriceRecommendation, PricingRule
 from app.pricing.infrastructure.repositories import (
     SqlAlchemyPriceRecommendationRepository,
@@ -227,6 +231,8 @@ class Flow:
         )
         self.get_rule = GetPricingRuleUseCase(self.rules)
         self.list_rules = ListPricingRulesUseCase(self.rules)
+        self.notifications = SqlAlchemyNotificationLogRepository(session)
+        self.users = SqlAlchemyUserRepository(session)
         self.generate = GeneratePriceRecommendationsUseCase(
             rules=self.rules,
             recommendations=self.recommendations,
@@ -234,6 +240,10 @@ class Flow:
             reservations=SqlAlchemyReservationRepository(session),
             timeline=self.timeline,
             audit=self.audit,
+            # R4 since `notification-writers-gap`: a run that creates recommendations tells
+            # whoever approves them.
+            users=self.users,
+            notifications=self.notifications,
             uow=uow,
         )
         self.list_recommendations = ListPriceRecommendationsUseCase(self.recommendations)

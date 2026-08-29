@@ -168,6 +168,10 @@ async def _classify_incidents(session: AsyncSession, tenant_id, now: datetime):
         classify=ClassifyIncidentUseCase(
             classifier=RuleBasedIncidentClassifier(),
             configs=SqlAlchemyTenantConfigRepository(session),
+            # R1: the nightly classification is the path that most needs to notify — there
+            # is no human watching it, which is the whole reason the gap was worth closing.
+            users=SqlAlchemyUserRepository(session),
+            notifications=SqlAlchemyNotificationLogRepository(session),
             incidents=SqlAlchemyIncidentRepository(session),
             reader=SqlAlchemyIncidentReader(session),
             properties=SqlAlchemyPropertyRepository(session),
@@ -198,6 +202,10 @@ async def _generate_price_recommendations(session: AsyncSession, tenant_id, now:
         reservations=SqlAlchemyReservationRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         audit=SqlAlchemyAuditLogRepository(session),
+        # R4.5 — the nightly sweep writes the same row the HTTP route does; it is the path
+        # with no human watching, which is why the notification matters most here.
+        users=SqlAlchemyUserRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
     return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)

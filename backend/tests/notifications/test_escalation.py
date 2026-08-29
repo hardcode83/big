@@ -87,22 +87,54 @@ def test_a_breached_cleaning_assignment_escalates_to_the_manager() -> None:
 
 def test_a_breached_technician_assignment_escalates_to_the_manager() -> None:
     """PRD §14 asks for `PhoneAdapter.call`; no such port exists, so it goes to the
-    manager and the reason records why instead of pretending a call happened."""
+    manager and the reason records why instead of pretending a call happened.
+
+    Since `notification-writers-gap` R3.1 the **type** is `TECHNICIAN_NO_RESPONSE` rather
+    than `SLA_BREACH`: the manager can tell an unanswered technician assignment from any
+    other missed deadline without opening the row it points at. Recipient and reason are
+    unchanged, which is the whole of design D8.
+    """
     escalation = escalation_for("TECHNICIAN_ASSIGNED")
 
     # Exact equality, like the cleaning case above: a substring assertion would survive an
     # edit that interpolated a value into `reason`, and `reason` is rendered into `body`
     # downstream, where rule 11 of `steering/security.md` applies.
     assert escalation == Escalation(
-        notification_type=NotificationType.SLA_BREACH,
+        notification_type=NotificationType.TECHNICIAN_NO_RESPONSE,
         recipient_role=UserRole.PROPERTY_MANAGER,
         reason="technician_assignment_unanswered_no_phone_adapter",
     )
 
 
+def test_the_cleaning_branch_still_escalates_as_sla_breach() -> None:
+    """R3.2 — this change moved the technician branch and **only** that one.
+
+    `sdd/specs/cleaning.md` fixes the cleaning escalation as `SLA_BREACH`, so renaming both
+    would have rewritten a live `SHALL` nobody asked to change. Asserted separately from the
+    cleaning test above so that the reason this one exists survives in the name.
+    """
+    assert escalation_for("CLEANING_TASK_ASSIGNED").notification_type is (
+        NotificationType.SLA_BREACH
+    )
+
+
+def test_the_technician_escalation_does_not_itself_escalate() -> None:
+    """R3.4 — an escalation that escalates is a loop.
+
+    Holds by construction: `_POLICY` has no entry for `TECHNICIAN_NO_RESPONSE`, so the type
+    the technician branch now produces returns `None`. Pinned explicitly because "there is
+    no entry" is exactly the kind of guarantee a later change closes by accident while
+    filling in PRD §14's "etc.".
+    """
+    assert escalation_for("TECHNICIAN_NO_RESPONSE") is None
+
+
 def test_every_type_without_a_defined_escalation_returns_none() -> None:
     """Exhaustive over the enum: adding a member forces a decision here, and the default
     decision (R5.6: mark it breached, record it, invent no recipient) is explicit."""
+    # Unchanged by R3: the change moved what the technician branch *produces*, not which
+    # types have an escalation. `SLA_BREACH` and `TECHNICIAN_NO_RESPONSE` are both produced
+    # by this map and neither appears in it, which is what keeps R3.4 true for both.
     with_escalation = {
         NotificationType.CLEANING_TASK_ASSIGNED,
         NotificationType.TECHNICIAN_ASSIGNED,

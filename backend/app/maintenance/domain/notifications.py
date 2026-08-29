@@ -9,8 +9,9 @@ incident's `title`, `description` or `ai_summary`.
 
 **No second SLA machinery** (R3.2): the deadline is a `sla_deadline_at` on the row, which is
 what `list_sla_breach_candidates` / `mark_breached` / `cancel_sla_deadline` already read, and
-the escalation `TECHNICIAN_ASSIGNED → SLA_BREACH → PROPERTY_MANAGER` is already declared in
-`app/notifications/domain/escalation.py`. Unlike when `cleaning` wrote its own, the deadline
+the escalation `TECHNICIAN_ASSIGNED → TECHNICIAN_NO_RESPONSE → PROPERTY_MANAGER` is already
+declared in `app/notifications/domain/escalation.py` — it said `SLA_BREACH` until
+`notification-writers-gap` R3.1 gave the technician branch its own name. Unlike when `cleaning` wrote its own, the deadline
 now works end to end: `access-notifications` left a `dispatch_notifications` that moves
 `PENDING → SENT`, and `SENT` is what the breach query requires.
 """
@@ -187,6 +188,96 @@ def owner_approval_notification(
         body=(
             f"An incident needs your approval. Incident {incident_id}, "
             f"property {property_id}, approval {approval_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_INCIDENT,
+        related_id=incident_id,
+    )
+
+
+def incident_critical_notification(
+    *,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    property_id: uuid.UUID,
+    manager_id: uuid.UUID,
+    recipient_contact: str,
+    now: datetime,
+) -> NotificationLog:
+    """What the manager is told when an incident turns out to be CRITICAL (R1.1).
+
+    **No `sla_deadline_at`, and no parameter to give it one** (R5.5, design D10). The reason
+    is measured rather than stylistic: `dispatch_notifications` moves `PENDING → SENT` every
+    minute and `list_sla_breach_candidates` requires `SENT`, so a deadline here would produce
+    a real breach candidate against a type `escalation_for` has no rule for — the row would be
+    marked breached and escalate to nobody. Leaving the parameter out of the signature is what
+    makes that unreachable instead of merely remembered.
+
+    Subject and body are a constant plus identifiers, never the content of another row — the
+    contract rule 11 of `sdd/steering/security.md` fixes for `notification_logs.subject`/`body`.
+    Nothing here reads the incident's `title`, `description` or `ai_summary`, and on this
+    entity that matters more than on its siblings: `title` and `description` are typed by the
+    guest in the portal, and `ai_summary` is generated from them.
+
+    **A separate constructor from its HIGH twin on purpose** (design D4). A single builder
+    parameterised by severity would leave `R6`'s census with no literal to read, and both
+    types would go on counting as orphans in the very change that gives them writers.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=manager_id,
+        recipient_contact=recipient_contact,
+        channel=NotificationChannel.IN_APP,
+        notification_type=NotificationType.INCIDENT_CREATED_CRITICAL.value,
+        created_at=now,
+        updated_at=now,
+        subject="Critical incident",
+        body=(
+            f"An incident has been classified as critical. Incident {incident_id}, "
+            f"property {property_id}."
+        ),
+        status=NotificationStatus.PENDING,
+        related_type=RELATED_TYPE_INCIDENT,
+        related_id=incident_id,
+    )
+
+
+def incident_high_notification(
+    *,
+    tenant_id: uuid.UUID,
+    incident_id: uuid.UUID,
+    property_id: uuid.UUID,
+    manager_id: uuid.UUID,
+    recipient_contact: str,
+    now: datetime,
+) -> NotificationLog:
+    """What the manager is told when an incident turns out to be HIGH (R1.2).
+
+    The twin of `incident_critical_notification`, and deliberately a copy rather than a shared
+    constructor with a severity argument — see that docstring and design D4 for why the census
+    of R6 depends on the literal being written out here.
+
+    Same contract: no deadline and no way to pass one (R5.5, D10), and a subject and body of a
+    constant plus identifiers, never the incident's own text (R5.4, rule 11).
+
+    Its subject differs from the CRITICAL one because R1.4 lets both rows exist for the same
+    incident when a triage raises it from HIGH to CRITICAL, and an inbox showing the same line
+    twice would hide exactly the escalation the manager needs to see.
+    """
+    return NotificationLog(
+        id=uuid.uuid4(),
+        tenant_id=tenant_id,
+        recipient_user_id=manager_id,
+        recipient_contact=recipient_contact,
+        channel=NotificationChannel.IN_APP,
+        notification_type=NotificationType.INCIDENT_CREATED_HIGH.value,
+        created_at=now,
+        updated_at=now,
+        subject="High severity incident",
+        body=(
+            f"An incident has been classified as high severity. Incident {incident_id}, "
+            f"property {property_id}."
         ),
         status=NotificationStatus.PENDING,
         related_type=RELATED_TYPE_INCIDENT,
