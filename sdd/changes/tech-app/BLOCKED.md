@@ -1,36 +1,5 @@
 # BLOCKED: tech-app
 
-## 1. El panel de review no puede dar PASS: los cuatro reviewers de proyecto son `unavailable`
-
-- **phase**: run
-- **type**: decision
-- **what & why**: `sdd-toolkit` 0.40.0 estrena el gate ejecutable del panel
-  (`skills/reviewer-panel/reviewer_plan.py`, que no existe en 0.38.0 ni en 0.39.0). Su parser de
-  reviewers de proyecto (`_parse_project`) admite **exactamente tres** claves de frontmatter —
-  `name`, `phases`, `applies_to` — y lanza `unsupported or duplicate frontmatter field` ante
-  cualquier otra. Los cuatro ficheros de `.claude/agents/sdd-review-*.md` de este repo llevan
-  `description`, `model` y `tools`, que es lo que Claude Code necesita para poder lanzarlos como
-  agentes. Verificado uno a uno: los cuatro fallan el parseo.
-
-  Consecuencia: `build_reviewer_plan` los marca `lens: unavailable` y `dispatch_status:
-  unavailable`; `evaluate_panel_gate` añade incondicionalmente el error `"unavailable reviewer in
-  plan"`. **Ninguna sección de este repo puede recibir `panel: PASS` bajo 0.40.0**, con
-  independencia de lo que digan los reviewers.
-
-  No hay frontmatter que satisfaga a los dos lados: Claude Code exige `description` y el parser del
-  toolkit lo prohíbe. Es un fallo del toolkit (debería tolerar claves de más), no una
-  desconfiguración del repo, así que **no se toca `.claude/agents/`**: son ficheros compartidos y
-  hay tres sesiones vivas en paralelo.
-
-  Lo que se hizo en su lugar: implementar las secciones verificando cada una con la suite, el
-  typecheck y el lint, y **no anotar `panel: PASS` en ninguna** — el gate es fail-closed y una
-  anotación sin gate sería exactamente la evidencia falsa que la regla 8 prohíbe.
-
-- **exact resume command**: `/sdd:review tech-app`
-  (cubre el panel a escala de feature; requiere antes que el gate del panel sea capaz de pasar —
-  esto es, un toolkit que tolere el frontmatter de Claude Code, o una decisión explícita sobre qué
-  hacer con `.claude/agents/sdd-review-*.md`).
-
 ## 2. La comprobación visual del flujo (9.5) y la de 360 px (9.6) siguen pendientes
 
 - **phase**: run
@@ -56,7 +25,7 @@
 
 - **exact resume command**: `/sdd:review tech-app` (desde el worktree principal, o contra `dev`)
 
-## 3. Dos residuos de baja severidad tras dos rondas de arreglos en review
+## 3. Tres residuos de baja severidad tras dos rondas de arreglos en review
 
 - **phase**: review
 - **type**: deferred
@@ -67,7 +36,7 @@
   paridad de catálogos exacta 94/94 sin huérfanas. QA verificó por **mutación** que los arreglos
   de la paginación, la navegación del `reject` y los estados de la galería matan a sus mutantes.
 
-  Quedan dos cosas que **no** se arreglaron, por el tope de dos rondas de la propia fase:
+  Quedan tres cosas que **no** se arreglaron, por el tope de dos rondas de la propia fase:
 
   1. **F1 (bajo, R6.2)** — el test del estado vacío de la galería
      (`tech-incident-detail-view.test.tsx`, «an empty photo list renders the shared EmptyState»)
@@ -76,14 +45,26 @@
      suite en verde. Sus dos hermanos (el `aria-busy` de la carga y el `role="alert"` del error)
      sí matan a su mutante. Arreglo: afirmar lo que sólo `EmptyState` aporta (su descripción o el
      rol del contenedor), como hacen los otros dos.
-  2. **F2 (bajo, R4.1/R4.5)** — `validateFinalCost("5,00")` devuelve `required` («Indica el coste
+  2. **Comentario caduco (informativo)** — el JSDoc de `useUploadIncidentPhoto` en
+     `frontend/features/incidents/hooks/use-incident-cycle.ts` todavía dice que «el único motivo
+     alcanzable es `out-of-order` y los otros dos mensajes son cadenas muertas», que describe el
+     diseño de tres cadenas *anterior* a la enmienda de D8. El comportamiento que documenta es
+     correcto; la frase no. El JSDoc del propio componente sí cuenta el contrato colapsado.
+     Levantado por la lente de arquitectura, que lo marcó explícitamente como no bloqueante.
+  3. **F2 (bajo, R4.1/R4.5)** — `validateFinalCost("5,00")` devuelve `required` («Indica el coste
      final.»), no un mensaje de formato, porque el `!Number.isFinite` de la línea 21 se adelanta a
      la comprobación de forma. Es la misma clase de defecto que la rama `format` arregló para
      `"5."`: un mensaje que nombra una regla que el técnico no ha roto, y en una UI en español el
      teclado numérico ofrece coma. **Matiz**: el input es `type="number"`, así que el navegador
      real puede saneárselo antes de que la cadena llegue al estado; QA verificó la función pura,
-     no el recorrido de teclado. Severidad incierta, por eso no es bloqueante.
+     no el recorrido de teclado. **En la pasada de certificación QA lo rebajó todavía más**: el
+     input es `type="number" step="0.01"`, y el algoritmo de saneado de HTML entrega `""` para una
+     cadena que no es un número válido, así que por el teclado real llega `""` y `required` es el
+     mensaje **correcto**. Sólo es alcanzable por un camino que se salte el saneado.
 
-- **exact resume command**: `/sdd:review tech-app` tras arreglarlos (ambos son de una línea), o
-  dejarlos conscientemente y que los recoja quien toque `tech-resolve-form.tsx` la próxima vez.
-  Certificar sigue exigiendo que el gate del panel pueda pasar — bloqueo 1.
+  Ninguno de los tres se arregló: la fase tiene un tope de dos rondas de arreglos y se alcanzó.
+  Las siete lentes los conocen y aun así certificaron.
+
+- **exact resume command**: los tres son de una o dos líneas; que los recoja quien toque
+  `tech-resolve-form.tsx`, `tech-incident-detail-view.test.tsx` o `use-incident-cycle.ts` la
+  próxima vez, o `/sdd:review tech-app` si se prefiere cerrarlos antes de mergear.
