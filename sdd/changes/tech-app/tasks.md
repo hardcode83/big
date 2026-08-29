@@ -328,7 +328,11 @@
 >   abrir la fila pasó más de un minuto, la entrada venció y `refetchOnMount` la revalidó una vez —
 >   comportamiento correcto **que también ocurre en producción**. Queda dicho para que nadie lea
 >   aquí una garantía de «cero peticiones al abrir»: el `de modo que` de R1.3 es el motivo de la
->   regla, no una promesa absoluta, y más allá de los 60 s el diseño revalida a propósito (D11).
+>   regla, no una promesa absoluta, y más allá de los 60 s se revalida a propósito. Ese
+>   `staleTime` no es de este change: lo fija `frontend/lib/query/query-client.ts`, que cita la
+>   decisión de `frontend-foundation` (su D11, «Estrategia TanStack Query»). Los números D son por
+>   change, así que un «(D11)» a secas aquí apuntaría a la D11 de `tech-app`, que es otra cosa
+>   —la subida que no pre-valida—.
 > - **R6.3**: a 360 px reales, **ninguna de las dos pantallas** produce desplazamiento horizontal —
 >   cero elementos desbordados dentro de `main` en la lista y en el detalle—, y los objetivos
 >   táctiles miden 44 px. La página sí desborda (`scrollWidth` 433), pero el desbordamiento está en

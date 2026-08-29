@@ -270,8 +270,13 @@ recuperación ante una firma caducada es **volver a listar**: el `onError` de la
 `incidentsKeys.photos(t, id)` **como mucho una vez por id de foto montado** (un `useRef<Set<string>>`
 guarda los ya reintentados), para que una foto realmente ilegible no entre en bucle de refetch.
 
-Sin `staleTime` propio: el defecto de TanStack (0) revalida al montar, muy por debajo de los 3600 s
-de la firma.
+Sin `staleTime` propio, así que hereda los **60 s** que fija el shell en
+`frontend/lib/query/query-client.ts`. *(Corregido en el gate de `/sdd:review` del 2026-08-29: aquí
+decía «el defecto de TanStack (0)», y es falso — el shell lo sobreescribe.)* Al montar se revalida
+lo que pase de 60 s, muy por debajo de los 3600 s de la firma; para la pantalla que se queda
+abierta no hay revalidación por tiempo —`refetchOnWindowFocus` está en `false` y no hay
+`refetchInterval`—, y ése es justo el caso que cubre el `onError` de arriba y que *Risks* acepta
+como residual.
 
 Rejected: `next/image` — exigiría declarar `remotePatterns` para un host de S3 que depende del
 tenant, y no hay loader para URLs firmadas externas.
