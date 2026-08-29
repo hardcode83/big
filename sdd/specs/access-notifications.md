@@ -299,20 +299,74 @@ status = 'PENDING' AND sla_deadline_at < now()`.
 - THE SYSTEM SHALL exponer `GET /api/v1/notifications` con el envelope paginado de PRD §23,
   devolviendo **solo** las filas dirigidas al usuario del token, de más nueva a más vieja —es una
   bandeja, no una cola. El identificador de usuario sale del JWT y no hay parámetro de ruta ni de
-  consulta que ensanche el alcance.
+  consulta que ensanche el alcance. `page` acota en `100.000` y `per_page` en `100`, por la misma
+  razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL y un número de
+  veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
+- THE SYSTEM SHALL aceptar `unread` como parámetro de consulta opcional que estrecha la página a
+  `read_at IS NULL`, sin romper el envelope (`data`, `total`, `page`, `per_page`, `total_pages`) ni
+  el orden. Ausente, la bandeja devuelve leídas y no leídas.
 - THE SYSTEM SHALL publicar en cada fila `id`, `notification_type`, `channel`, `status`, `subject`,
-  `body`, `related_type`, `related_id`, `sent_at` y `created_at`, y SHALL retener
+  `body`, `related_type`, `related_id`, `sent_at`, `created_at` y `read_at`, y SHALL retener
   `recipient_contact`, `last_error`, `sla_deadline_at` y `sla_breached`: el primero convertiría la
   bandeja en un directorio y los otros son diagnóstico de operación.
-- THE SYSTEM SHALL **no** ofrecer «marcar como leída» ni añadir una columna `read_at`: PRD §7.24 no
-  la declara y este change no inventa esquema para cerrar el ciclo. El frontend lleva su propio
-  estado hasta que una entrada de roadmap decida lo contrario.
+- THE SYSTEM SHALL persistir el acuse de lectura en la columna `notification_logs.read_at`
+  (`TIMESTAMPTZ`, nullable, sin default, migración `e5c9b1f47a28`), dejando en `NULL` toda fila
+  preexistente: una notificación escrita antes de esta entrega no la ha leído nadie. «Leída» es un
+  hecho del sistema y no una preferencia de un navegador, así que el móvil y el escritorio ven la
+  misma bandeja.
+- THE SYSTEM SHALL exponer `POST /api/v1/notifications/{notification_id}/read` (`204 No Content`),
+  `POST /api/v1/notifications/read-all` (que responde **cuántas** movió) y
+  `GET /api/v1/notifications/unread-count` (que responde `{"unread": <int>}`). Las cuatro rutas
+  exigen `READ_OWN_NOTIFICATIONS` y **todas** derivan el destinatario del JWT, sin ningún parámetro
+  que ensanche el alcance.
+- THE SYSTEM SHALL hacer el acuse **idempotente**: el `UPDATE` fija
+  `read_at = COALESCE(read_at, <ahora>)`, así que un segundo acuse casa con la fila, reporta éxito y
+  **no mueve** el instante — `read_at` registra la primera lectura, no la última visita.
+- IF la notificación no existe, pertenece a otro usuario o pertenece a otro tenant, THEN THE SYSTEM
+  SHALL responder `404` con cuerpo constante y SHALL NOT distinguir los tres casos: un `403`
+  confirmaría la existencia de una fila ajena. La indistinguibilidad es **estructural**, no una
+  intención: las tres condiciones son términos del mismo `WHERE`, así que `rowcount == 0` es todo lo
+  que el código llega a saber. `UPDATE ... WHERE read_at IS NULL` se rechazó por lo contrario —
+  volvería «cero filas» ambiguo entre «ya leída» (un éxito) y «no es tuya» (un `404`).
+- THE SYSTEM SHALL contar las no leídas con un `count(*)` sobre el índice parcial
+  `ix_notification_logs_unread` (`tenant_id`, `recipient_user_id`, `WHERE read_at IS NULL`), nunca
+  paginando la bandeja: es la única consulta que **todo** usuario conectado emite cada 60 s y la
+  única cuyo coste crecería sin tope según se acumulan filas leídas.
+- THE SYSTEM SHALL hacer que «marcar todas» abarque **todas** las no leídas del usuario del token, y
+  deliberadamente no la página ni el filtro que el cliente esté mostrando. Cero es la respuesta
+  normal de una bandeja al día, nunca un error, y el término `read_at IS NULL` la hace idempotente:
+  una segunda llamada no encuentra nada y no puede pisar los instantes que escribió la primera.
+- THE SYSTEM SHALL NOT escribir `AuditLog` por un acuse: la regla 9 de `steering/security.md`
+  enumera Reservation, estados de propiedad, documentos de Guest, `AccessRecord`,
+  `PricingRule`/`PriceRecommendation`, `OwnerApproval`, roles de User e Incident. Leer el aviso
+  propio no es ninguno de ésos, no opera sobre datos ajenos y no concede permiso alguno.
+- THE SYSTEM SHALL dejar `read_at` **fuera** de todo criterio de `check_sla_breaches` y del emisor:
+  leer un aviso no es responder a él, y el plazo de SLA lo cierra la acción de dominio. La columna
+  solo aparece en `list_for_recipient`, `mark_read`, `count_unread`, `mark_all_read` y el mapeo de
+  la entidad.
+- THE SYSTEM SHALL cubrir el acuse con test de aislamiento de tenant (regla 1 de
+  `steering/security.md`), demostrando que un usuario de otro tenant no puede acusar una fila de
+  éste.
 
 `subject` y `body` sí viajan: la máscara `****XX` es la excepción que la regla 11 concede
-precisamente para que el destinatario pueda leer su aviso. El ciclo in-app queda a medias **a
-propósito** —se listan, no se acusan—, y se deja dicho aquí para que el siguiente no lo lea como
-olvido. Polling y no SSE: SSE es infraestructura de tiempo real que ninguna pantalla consume
-todavía y que complica el despliegue detrás del ingress.
+precisamente para que el destinatario pueda leer su aviso. **El ciclo in-app está cerrado desde
+`notifications-inbox-web`**: se listan, se cuentan y se acusan, y con ello
+`InAppNotificationAdapter` —que declara por escrito que «la fila *es* la entrega»— es cierto también
+en el producto y no solo en el contrato. La OQ2 que `access-notifications` design D6 aparcó por no
+declarar PRD §7.24 la columna quedó decidida por esa entrada de roadmap; el criterio anterior de
+esta spec («no ofrecer marcar como leída, el frontend lleva su propio estado hasta que una entrada
+de roadmap decida lo contrario») queda **sustituido**, no matizado.
+
+Polling y no SSE, heredado explícitamente y no vuelto a decidir: PRD §14 ofrece ambos, SSE es una
+conexión larga a través del ingress con su propia forma operativa, y ninguna pantalla la consume.
+La cadencia mínima del cliente es de 60 s porque `dispatch_notifications` corre cada minuto
+(`scheduler/schedule.py`), así que pedir más a menudo no puede descubrir nada nuevo.
+
+**El `404` del acuse es comportamiento real y el documento publicado no lo enumera**: el contrato de
+`POST /notifications/{id}/read` declara `204`, `401`, `403` y `422`. No es una deuda de esta entrega
+sino el estado general del artefacto —13 de 104 operaciones declaran `404`—; se deja dicho aquí para
+que un consumidor del contrato no lea la ausencia como que la ruta no puede fallar así.
+
 
 ### La capa operativa de SES.Hospedajes
 

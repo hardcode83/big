@@ -2,6 +2,12 @@
 
 [BE+FE] **la bandeja in-app, que es la única entrega real que el producto tiene hoy y no la lee nadie**.
 
+> **Entregada el 2026-08-29** (PR #136, archivo en
+> `sdd/changes/archive/2026-08-29-notifications-inbox-web/`). Todo lo que esta nota mide en presente
+> describe el estado **anterior** a esa entrega y se conserva como el argumento que la motivó. El
+> comportamiento vigente vive en `sdd/specs/notifications-inbox-web.md` (la superficie web) y en
+> `sdd/specs/access-notifications.md` §«La bandeja in-app» (las cuatro rutas y `read_at`).
+
 **El hecho medido (2026-08-28)**: `GET /api/v1/notifications` existe desde `access-notifications`
 (`backend/app/notifications/api/router.py`, una sola ruta) y **cero ficheros del frontend la llaman** —
 un barrido de `frontend/**/*.{ts,tsx}` por `notification` devuelve tres coincidencias y ninguna es una
