@@ -17,26 +17,26 @@ export function validateFinalCost(
 ): "required" | "negative" | "tooLarge" | "decimals" | "format" | null {
   const trimmed = raw.trim();
 
-  // Each refusal names one mistake, because the message is the technician's only
-  // explanation. `required` means **nothing was typed** and nothing else: a
-  // comma decimal (`"5,00"`, which is what a Spanish numeric keypad offers)
-  // used to land here through `Number()` returning `NaN`, and answering "indica
-  // el coste final" to someone who did type it names a rule they did not break.
+  // `required` means nothing was typed, and nothing else. A comma decimal
+  // (`"5,00"` — what a Spanish numeric keypad offers) used to land here via
+  // `Number()` returning `NaN`, naming a rule the technician had not broken.
   if (!trimmed) return "required";
 
-  // A sign is a *value* problem, so it keeps its own message rather than
-  // collapsing into the shape branch below.
+  // A sign is a value problem, so it keeps its own message.
   if (/^-\d/.test(trimmed)) return "negative";
 
-  // Whatever gets here malformed is `format`. The shape check runs before
-  // `Number()` so the parse can no longer decide the message: `"5."` used to
-  // pass the old `\d*\.?\d{0,2}` and went out verbatim for the backend's
-  // two-decimal pattern to reject with a 422 — the round-trip R4.5 asks local
-  // validation to prevent.
-  if (!/^\d+(\.\d+)?$/.test(trimmed)) return "format";
+  // The shape the published contract accepts, minus the sign: see the
+  // `final_cost` pattern of `ResolveIncidentRequest` in `backend/openapi.json`.
+  // Mirrored rather than tightened. An earlier revision of this function
+  // rejected `"5."` and `".5"`, which that pattern accepts and R4.1 permits —
+  // refusing locally what the server would take is the one thing D12 says local
+  // validation must not do.
+  if (!/^(?!\.?$)\d*\.?\d*$/.test(trimmed)) return "format";
 
   if (Number(trimmed) > MAX_FINAL_COST) return "tooLarge";
-  if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return "decimals";
+
+  // Precision gets its own message rather than collapsing into the shape one.
+  if (!/^(?!\.?$)\d*\.?\d{0,2}$/.test(trimmed)) return "decimals";
   return null;
 }
 

@@ -50,20 +50,19 @@ describe("validateFinalCost (R4.1)", () => {
   );
 
   /**
-   * A trailing or leading bare point used to pass: `Number("5.")` is `5`, and
-   * the old `^\d*\.?\d{0,2}$` accepted the shape. The string was then sent
-   * verbatim and the backend's two-decimal pattern answered 422 — exactly the
-   * round-trip R4.5 asks local validation to prevent.
-   *
-   * It is `format`, not `decimals`: `"5."` carries no decimals at all, so
-   * "at most two decimals" would name a rule the technician did not break.
+   * `"5."` and `".5"` are **accepted**, because the published contract accepts
+   * them: the `final_cost` pattern of `ResolveIncidentRequest` in
+   * `backend/openapi.json` matches both, and R4.1 asks only for a number ≥ 0
+   * with at most two decimals. An earlier revision of this review rejected them
+   * on the belief that the backend answered 422 — it does not, and refusing
+   * locally what the server would take is what D12 forbids.
    */
-  it.each(["5.", ".5"])("rejects the bare point in %j as a shape", (raw) => {
-    expect(validateFinalCost(raw)).toBe("format");
+  it.each(["5.", ".5"])("accepts %j, which the contract accepts", (raw) => {
+    expect(validateFinalCost(raw)).toBeNull();
   });
 
-  it("keeps the two refusals apart — shape is not the same mistake as precision", () => {
-    expect(validateFinalCost("5.")).toBe("format");
+  it("keeps precision apart from shape", () => {
+    expect(validateFinalCost("5,00")).toBe("format");
     expect(validateFinalCost("5.123")).toBe("decimals");
   });
 
