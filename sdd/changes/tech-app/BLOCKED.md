@@ -65,7 +65,9 @@
 
   Contexto para quien la lance: el código lleva limpio desde `7fd3ba7` —las siete lentes lo han
   certificado en varias rondas— y todo lo que ha fallado después han sido **afirmaciones mías en
-  prosa que iban por delante de la evidencia**: seis hallazgos de esa misma clase en cuatro
-  rondas. Merece la pena leer `e975a56` con esa sospecha concreta y no como un diff cualquiera.
+  prosa que iban por delante de la evidencia**: **diez** hallazgos de esa misma clase, repartidos
+  3 + 4 + 3 entre `dc110ef`, `29f2ac4` y `e975a56`. (La primera versión de esta nota decía «seis»,
+  que era otra cuenta por debajo en el sitio cuyo único trabajo es calibrar la sospecha del
+  siguiente revisor.) Merece la pena leer `e975a56` con esa sospecha concreta y no como un diff cualquiera.
 
 - **exact resume command**: `/sdd:review tech-app` sobre `e975a56`.

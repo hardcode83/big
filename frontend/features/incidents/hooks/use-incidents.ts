@@ -202,18 +202,16 @@ export function useIncidentContext(
 }
 
 /**
- * The photos of one incident (R5.1). No `staleTime` of its own, so it inherits
- * the shell's **60 s** (`lib/query/query-client.ts`) — not TanStack's default of
- * 0, which this comment used to claim.
+ * The photos of one incident (R5.1). Declares no `staleTime`, so the shell's
+ * query defaults apply; they live in `lib/query/query-client.ts`. What that
+ * means for a signed URL that ages in the cache is D10's, and D10 owns the
+ * recovery too — the image's `onError` re-listing.
  *
- * What that buys is bounded, and worth stating exactly: on **mount**, data older
- * than 60 s is revalidated, so a screen opened afresh never paints a URL more
- * than a minute stale — comfortably inside the signature's 3600 s. It buys
- * nothing for a screen left mounted, because `staleTime` only gates refetches at
- * query events and the shell sets `refetchOnWindowFocus: false` with no
- * `refetchInterval`. A gallery open for over an hour *will* hold expired URLs;
- * that case is D10's, recovered by the image's `onError` re-listing, and the
- * design records it as an accepted residual.
+ * Deliberately says no more than that. Three attempts to restate the caching
+ * contract in this block were each wrong in a different way, because the answer
+ * depends on `staleTime`, `gcTime`, `refetchOnMount`, `refetchOnReconnect` and
+ * the photo-key invalidation together. It already has two homes; a third
+ * paraphrase only adds somewhere new to be wrong.
  */
 export function useIncidentPhotos(
   incidentId: string,
