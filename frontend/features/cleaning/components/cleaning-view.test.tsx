@@ -20,6 +20,7 @@ const listTasks = vi.hoisted(() => vi.fn());
 const listCleaners = vi.hoisted(() => vi.fn());
 const listProperties = vi.hoisted(() => vi.fn());
 const assignTask = vi.hoisted(() => vi.fn());
+const cancelTask = vi.hoisted(() => vi.fn());
 
 const role = vi.hoisted(() => ({ current: "PROPERTY_MANAGER" }));
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
@@ -43,6 +44,7 @@ vi.mock("../data", async (importOriginal) => ({
     listCleaners,
     listProperties,
     assignTask,
+    cancelTask,
   }),
 }));
 

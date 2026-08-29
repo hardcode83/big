@@ -75,5 +75,6 @@
 | blocked-transition-response-ids | new, tasks, run, review, ship, archive | 6367916 | 567328 | 131512414 | 111.7790 | 2026-08-26 | 2026-08-27 |
 | photo-cache-control-assertion-bound | new, design, tasks, run, review, ship, archive | 3375198 | 257671 | 35441337 | 43.6621 | 2026-08-24 | 2026-08-26 |
 | public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |
+| blocked-transitions-web | new, design, tasks, run, review, ship, archive | 5840872 | 1000619 | 216249227 | 170.9211 | 2026-08-24 | 2026-08-29 |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
 | notifications-inbox-web | new, design, tasks, run, review | 406218 | 1184909 | 247605968 | 150.7800 | 2026-08-28 | — |

@@ -25,7 +25,50 @@
     "nextAction": "Next action",
     "responsible": "Responsible",
     "lastEvent": "Last event",
-    "openDetail": "View detail"
+    "openDetail": "View detail",
+    "blocked": {
+      "title": "Blockers",
+      "window": "This list follows the same 30-day window as the job that produces it.",
+      "cancelCleaning": {
+        "label": "Cancel cleaning",
+        "dialog": {
+          "title": "Cancel cleaning",
+          "reason": {
+            "label": "Reason",
+            "placeholder": "Briefly explain why this cleaning will not be completed",
+            "help": "Up to 500 characters"
+          },
+          "confirm": "Cancel cleaning",
+          "sending": "Cancelling…",
+          "error": {
+            "empty": "A reason is required to cancel the cleaning.",
+            "generic": "We couldn't cancel the cleaning. Please try again in a few seconds."
+          }
+        }
+      },
+      "resolveIncident": {
+        "label": "Resolve incident",
+        "dialog": {
+          "title": "Resolve incident",
+          "finalCost": {
+            "label": "Final cost",
+            "placeholder": "0.00",
+            "help": "Positive amount with two decimals"
+          },
+          "confirm": "Resolve incident",
+          "sending": "Resolving…",
+          "error": {
+            "positive": "Enter a positive amount with two decimals.",
+            "generic": "We couldn't resolve the incident. Please try again in a few seconds."
+          }
+        }
+      },
+      "error": {
+        "fetch": "We couldn't load this property's blockers.",
+        "forbidden": "You don't have permission to act on this blocker.",
+        "conflict": "Someone else already resolved this blocker; the panel is being refreshed."
+      }
+    }
   },
   "cards": {
     "empty": {

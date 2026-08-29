@@ -117,6 +117,64 @@ it("denies MANAGE_CONVERSATIONS to TENANT_OWNER — owner reads but does not ope
     expect(result.current).toBe(false);
   });
 
+  it("grants EXECUTE_INCIDENTS to PROPERTY_MANAGER (R2.4, blocked-transitions-web)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("EXECUTE_INCIDENTS"),
+    );
+    expect(result.current).toBe(true);
+  });
+
+  it("denies EXECUTE_INCIDENTS to TENANT_OWNER (R2.4)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const { result } = renderHook(() =>
+      useHasPermission("EXECUTE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("denies EXECUTE_INCIDENTS to CLEANER, TECHNICIAN, SUPER_ADMIN (R2.1)", () => {
+    for (const role of ["CLEANER", "TECHNICIAN", "SUPER_ADMIN"]) {
+      useAuth.mockReturnValue({ user: { role } });
+      const { result } = renderHook(() =>
+        useHasPermission("EXECUTE_INCIDENTS"),
+      );
+      expect(result.current, `${role} should not have it`).toBe(false);
+    }
+  });
+
+  it("denies EXECUTE_INCIDENTS without an authenticated user (R2.1)", () => {
+    useAuth.mockReturnValue({ user: null });
+    const { result } = renderHook(() =>
+      useHasPermission("EXECUTE_INCIDENTS"),
+    );
+    expect(result.current).toBe(false);
+  });
+
+  it("PROPERTY_MANAGER has both MANAGE_CLEANING_TASKS and EXECUTE_INCIDENTS (R2.1)", () => {
+    useAuth.mockReturnValue({ user: { role: "PROPERTY_MANAGER" } });
+    const cleaning = renderHook(() =>
+      useHasPermission("MANAGE_CLEANING_TASKS"),
+    );
+    const incidents = renderHook(() =>
+      useHasPermission("EXECUTE_INCIDENTS"),
+    );
+    expect(cleaning.result.current).toBe(true);
+    expect(incidents.result.current).toBe(true);
+  });
+
+  it("TENANT_OWNER has neither MANAGE_CLEANING_TASKS nor EXECUTE_INCIDENTS (R2.1)", () => {
+    useAuth.mockReturnValue({ user: { role: "TENANT_OWNER" } });
+    const cleaning = renderHook(() =>
+      useHasPermission("MANAGE_CLEANING_TASKS"),
+    );
+    const incidents = renderHook(() =>
+      useHasPermission("EXECUTE_INCIDENTS"),
+    );
+    expect(cleaning.result.current).toBe(false);
+    expect(incidents.result.current).toBe(false);
+  });
+
   it("declares every UserRole of the generated contract", () => {
     expect(Object.keys(ROLE_UI_PERMISSIONS).sort()).toEqual([
       "CLEANER",

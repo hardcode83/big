@@ -118,6 +118,43 @@ filtrar en la consulta por el **complemento** de los estados origen de cada trig
 exactamente lo que ya hace el job (`AdvancePropertyStatesUseCase._count_blocked`). Se escribe aquí
 para que se encuentre cuando haga falta, en vez de descubrirse midiendo.
 
+## Aviso de desajustes en la card del dashboard
+
+La card de cada vivienda en `/dashboard` muestra una sección propia con los desajustes de esa
+propiedad, ordenados por `due_since` ascendente y con desempate estable. Es el mismo dato que
+devuelve `GET /api/v1/blocked-transitions`, pero donde la propietaria y el manager ya miran
+primero: la sección vive en el `dashboard` i18n namespace bajo `card.blocked`.
+
+Lo que **sí** hay que saber al verla:
+
+- **La lista no es exhaustiva, y la pantalla no lo promete.** El aviso es un subconjunto acotado
+  por la **misma `candidate_window` que el job que lo origina** — 30 días atrás, 2 adelante
+  ([`celery-jobs.md`](celery-jobs.md) §«Viviendas atascadas»)—: un atasco de más de 30 días deja de
+  aparecer sin que sea culpa de la pantalla. Una vivienda cuya limpieza lleva 45 días sin moverse
+  ya no avisa por aquí. La card lo dice en una sola línea que **nombra** esa ventana de 30 días;
+  no vuelve a explicarlo, y **no enlaza aquí**: la aplicación no sirve la documentación por HTTP,
+  así que este fichero se lee en el repositorio. El razonamiento está en la enmienda de R5.1 del
+  change `blocked-transitions-web`.
+- **Quién ve y quién opera son permisos distintos.** La sección se pinta con `READ_PROPERTIES`, así
+  que la propietaria y el manager la ven igual. El botón de acción, cuando exista, sale del permiso
+  que corresponda: `MANAGE_CLEANING_TASKS` para cancelar limpieza, `EXECUTE_INCIDENTS` para
+  resolver incidencia — y son permisos de manager, no de propietaria. La pantalla nunca pinta un
+  botón que devolvería `403`.
+- **`trigger` y `blocking_state` son literales canónicos.** La card los pinta como el backend los
+  emite (`CHECKIN_TIME_REACHED`, `AWAITING_CLEANING`, …), sin traducir ni colorear por valor. El
+  `due_since` sí se localiza con `Intl.DateTimeFormat` en el idioma del usuario.
+- **Una cancelación puede devolver `409` si la limpieza tiene un huésped activo** (ver
+  `cleaning.md` §«La salida de excepción»). El diálogo muestra entonces una copia **propia y
+  traducida** —«otra persona ya resolvió este bloqueo»—, no el mensaje del backend: ese mensaje es
+  técnico y está en inglés, así que no se pinta nunca. La acción rechazada deja el aviso en su
+  sitio y no se reintenta sola.
+
+**Cuándo un desajuste merece que abras esto**: cuando sigue ahí más de un día, el
+operador sabe que el aviso ya cargó con su refresco y que merece una intervención manual
+(reasignar la limpieza, cerrar la incidencia con el motivo correcto, etc.). Cuando la vivienda
+tiene varios desajustes, lo primero que la card enseña es lo que **lleva más tiempo parado**, no
+lo más reciente.
+
 ## La contraseña del wifi entra y no vuelve a salir
 
 Se puede enviar en el alta y en la edición, y se guarda cifrada. **No se puede leer de vuelta por
