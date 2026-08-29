@@ -28,11 +28,11 @@ export function validateFinalCost(
   // collapsing into the shape branch below.
   if (/^-\d/.test(trimmed)) return "negative";
 
-  // Everything malformed is `format`: `"5,00"`, `"abc"`, `"5."`, `".5"`, `"1e3"`.
-  // The shape check runs before `Number()` so the parse can no longer decide the
-  // message. `"5."` used to pass the old `\d*\.?\d{0,2}` and went out verbatim
-  // for the backend's two-decimal pattern to reject with a 422 — the round-trip
-  // R4.5 asks local validation to prevent.
+  // Whatever gets here malformed is `format`. The shape check runs before
+  // `Number()` so the parse can no longer decide the message: `"5."` used to
+  // pass the old `\d*\.?\d{0,2}` and went out verbatim for the backend's
+  // two-decimal pattern to reject with a 422 — the round-trip R4.5 asks local
+  // validation to prevent.
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return "format";
 
   if (Number(trimmed) > MAX_FINAL_COST) return "tooLarge";
