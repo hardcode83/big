@@ -14,6 +14,13 @@ it concerns, so it takes the lock through `_locked` without going through `_guar
 (`revenue-pricing` R4.1). It is the ordinary per-tenant shape, with one difference that
 matters — its lock TTL comes from `DAILY_JOBS`, not from `lock_ttl_for`, because cadence x 3
 on a daily job is three days of wedge after a dead worker (D8).
+
+**And one that runs monthly**: `generate_owner_statements` (`revenue-statements` R1.1, D11).
+Same per-tenant shape as the daily job, but its lock TTL comes from `MONTHLY_JOBS` for the
+same reason — `lock_ttl_for` would not even know what cadence to derive from. The
+`actor=None` it passes the generator is what makes the path exempt from `AuditLog` under
+the sixth named exception to rule 9 of `steering/security.md` (D5/D12); the
+`TimelineEvent OWNER_STATEMENT_GENERATED` the generator emits is the trail.
 """
 
 import logging
@@ -75,7 +82,20 @@ from app.scheduler.runner import (
     worker_redis,
     worker_session_factory,
 )
-from app.scheduler.schedule import CADENCES, DAILY_JOBS
+from app.scheduler.schedule import CADENCES, DAILY_JOBS, MONTHLY_JOBS
+from app.statements.application.use_cases import GenerateOwnerStatementUseCase
+from app.statements.application.reconciliation import (
+    ReconcileOwnerApprovalsForExpensesUseCase,
+)
+from app.statements.infrastructure.repositories import (
+    SqlAlchemyExpenseRepository,
+    SqlAlchemyOwnerStatementRepository,
+)
+from app.statements.infrastructure.reconciliation import (
+    SqlAlchemyReconciliationStore,
+)
+from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
+from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 from app.maintenance.application.use_cases import (
     ClassifyIncidentUseCase,
     ClassifyPendingIncidentsUseCase,
@@ -86,8 +106,6 @@ from app.maintenance.infrastructure.repositories import (
     SqlAlchemyIncidentRepository,
     SqlAlchemyLiveCleaningTaskQuery,
 )
-from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
-from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
 from app.worker import celery_app
 
 logger = logging.getLogger(__name__)
@@ -203,6 +221,52 @@ async def _generate_price_recommendations(session: AsyncSession, tenant_id, now:
     return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)
 
 
+async def _generate_owner_statements(session: AsyncSession, tenant_id, now: datetime):
+    """`revenue-statements` R1.1, D5, D11: every property's monthly liquidation.
+
+    No `property_id` — the sweep is the point — and `actor=None`, which is what makes the
+    run anonymous and therefore exempt from `AuditLog` under the **sixth** named exception
+    to rule 9 of `steering/security.md` (D5/D12). The endpoint `POST /owner-statements/generate`
+    of the same use case passes an actor and is not exempt. The `TimelineEvent
+    OWNER_STATEMENT_GENERATED` the generator emits per property is the trail for the clock path.
+
+    `period_end` is left to the use case's default — `Period.previous_month(today=now.date())` —
+    so a run on 1 August at 02:00 UTC always targets the closed July period, deterministically.
+    """
+    use_case = GenerateOwnerStatementUseCase(
+        statements=SqlAlchemyOwnerStatementRepository(session),
+        expenses=SqlAlchemyExpenseRepository(session),
+        properties=SqlAlchemyPropertyRepository(session),
+        reservations=SqlAlchemyReservationRepository(session),
+        timeline=SqlAlchemyTimelineEventRepository(session),
+        configs=SqlAlchemyTenantConfigRepository(session),
+        audit=SqlAlchemyAuditLogRepository(session),
+        uow=SqlAlchemyUnitOfWork(session),
+    )
+    return await use_case.execute(tenant_id=tenant_id, now=now, property_id=None, actor=None)
+
+
+async def _reconcile_owner_approvals_for_expenses(
+    session: AsyncSession, tenant_id, now: datetime
+):
+    """`revenue-statements` R5.7, design D4: materialise owner answers on `expenses`.
+
+    The use case runs every five minutes; the SQL is idempotent on row state, so a faster
+    cadence would buy nothing but a tighter feedback loop on the manager screen. `now` is
+    accepted to keep the signature parallel with the other per-tenant use cases; the
+    reconciliation does not filter on it (D4: there is no cursor and no temporal window —
+    the JOIN on `responded_at IS NOT NULL` plus the row-state guards is the contract).
+    """
+
+    async def _commit() -> None:
+        await session.commit()
+
+    return await ReconcileOwnerApprovalsForExpensesUseCase(
+        store=SqlAlchemyReconciliationStore(session),
+        commit=_commit,
+    ).execute(now=now)
+
+
 async def _locked(name: str, ttl: timedelta, run, *, skipped) -> dict:
     """Take the lock, run `run()`, and always return a serialisable report.
 
@@ -249,6 +313,22 @@ async def _guarded_daily(name: str, work) -> dict:
     return await _locked(
         name,
         DAILY_JOBS[name].lock_ttl,
+        lambda: run_for_every_tenant(name, work),
+        skipped=TenantRunReport(task=name, skipped_locked=True),
+    )
+
+
+async def _guarded_monthly(name: str, work) -> dict:
+    """`_guarded` for a job on `MONTHLY_JOBS`, whose TTL is written down instead of derived.
+
+    A separate entry point, parallel to `_guarded_daily` (`revenue-statements` design D11):
+    a monthly job has no cadence to derive from, and `lock_ttl_for` would either fail or
+    give a number that has nothing to do with the run. The TTL comes from the entry in
+    `MONTHLY_JOBS`, just like the daily job's comes from `DAILY_JOBS`.
+    """
+    return await _locked(
+        name,
+        MONTHLY_JOBS[name].lock_ttl,
         lambda: run_for_every_tenant(name, work),
         skipped=TenantRunReport(task=name, skipped_locked=True),
     )
@@ -464,3 +544,52 @@ def generate_price_recommendations() -> dict:
     leaves the decided ones exactly as the manager left them.
     """
     return run_sync(_guarded_daily(PRICING_TASK, _generate_price_recommendations))
+
+
+# --- `revenue-statements`: monthly liquidation + owner-approval reconciliation ----------
+
+
+STATEMENTS_MONTHLY_TASK = "generate_owner_statements"
+
+
+@celery_app.task(name=STATEMENTS_MONTHLY_TASK)
+def generate_owner_statements() -> dict:
+    """`revenue-statements` R1.1, D11: every property's monthly liquidation, day 1 at 02:00 UTC.
+
+    The only monthly job on the calendar, so it is the only one whose lock TTL does not
+    come from a cadence or from `lock_ttl_for`: `MONTHLY_JOBS` carries six hours explicitly,
+    because deriving a TTL from a non-existent cadence would either fail or give a number
+    unrelated to the run, and the next monthly window would have to wait that long after a
+    dead worker (`revenue-statements` D11).
+
+    Idempotent by construction (R1.3, R2.3): `find_by_unique_key` short-circuits when the
+    `(tenant, property, period_start, period_end)` already has a row, and the manual path
+    through `POST /owner-statements/generate` does the same lookup before it inserts. So a
+    late beat firing, a manual re-run by an operator, or the clock firing twice for any
+    reason all leave the existing statement exactly as it was and count the candidate in
+    `skipped`, not `failed`.
+    """
+    return run_sync(
+        _guarded_monthly(STATEMENTS_MONTHLY_TASK, _generate_owner_statements)
+    )
+
+
+STATEMENTS_RECONCILE_TASK = "reconcile_owner_approvals_for_expenses"
+
+
+@celery_app.task(name=STATEMENTS_RECONCILE_TASK)
+def reconcile_owner_approvals_for_expenses() -> dict:
+    """`revenue-statements` R5.7, design D4: every 5 minutes, materialise owner answers.
+
+    Idempotent by SQL row-state guard, not by external state — D4 deliberately rejected a
+    Redis cursor so a slow approval landing while a tick is running is caught by the next
+    tick's JOIN. The lock TTL comes from `CADENCES` (cadence x 3), because the cadence
+    exists and the derivation is right for this job (the converse of the daily/monthly jobs).
+    """
+    return run_sync(
+        _guarded(
+            STATEMENTS_RECONCILE_TASK,
+            CADENCES[STATEMENTS_RECONCILE_TASK],
+            _reconcile_owner_approvals_for_expenses,
+        )
+    )
