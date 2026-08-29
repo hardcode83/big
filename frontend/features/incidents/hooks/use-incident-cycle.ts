@@ -177,12 +177,12 @@ export interface UploadIncidentPhotoVariables {
  * Uploading a photo invalidates the photo list of that incident (R5.5): a
  * successful upload moves neither the status nor the list.
  *
- * A `409` is the exception, and it is D7 that makes it one. The refusal means
- * the status this client believes is stale — the incident was closed or sent to
- * the owner while the technician was choosing a file — and the message R5.6
- * requires is derived from the **refreshed** status, so the detail is
- * invalidated too. Without this, the only reachable reason is `out-of-order`
- * and the two other messages are dead strings that say the wrong thing.
+ * A `409` also invalidates the detail: the refusal means the status this client
+ * believes is stale — the incident was closed or sent to the owner while the
+ * technician was choosing a file — so the screen has to re-read it. Why that is
+ * the right response, and what the upload shows the technician afterwards, is
+ * D8's; the trailing sentence that used to live here described the three-reason
+ * message design that D8's amendment replaced.
  */
 export function useUploadIncidentPhoto(): UseMutationResult<
   IncidentPhotoDto,

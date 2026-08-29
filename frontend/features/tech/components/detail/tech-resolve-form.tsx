@@ -16,19 +16,26 @@ export function validateFinalCost(
   raw: string,
 ): "required" | "negative" | "tooLarge" | "decimals" | "format" | null {
   const trimmed = raw.trim();
+
+  // Each refusal names one mistake, because the message is the technician's only
+  // explanation. `required` means **nothing was typed** and nothing else: a
+  // comma decimal (`"5,00"`, which is what a Spanish numeric keypad offers)
+  // used to land here through `Number()` returning `NaN`, and answering "indica
+  // el coste final" to someone who did type it names a rule they did not break.
   if (!trimmed) return "required";
-  const value = Number(trimmed);
-  if (!Number.isFinite(value)) return "required";
-  if (value < 0) return "negative";
-  if (value > MAX_FINAL_COST) return "tooLarge";
-  // Two separate refusals, because they are two different mistakes and the
-  // message is the technician's only explanation. `"5."` and `".5"` are the
-  // wrong *shape* — the old `\d*\.?\d{0,2}` accepted them, and the string went
-  // out verbatim for the backend's two-decimal pattern to reject with a 422,
-  // the round-trip R4.5 asks local validation to prevent. Telling someone who
-  // typed `"5."` that they used too many decimals names a rule they did not
-  // break, so the shape gets its own message.
+
+  // A sign is a *value* problem, so it keeps its own message rather than
+  // collapsing into the shape branch below.
+  if (/^-\d/.test(trimmed)) return "negative";
+
+  // Everything malformed is `format`: `"5,00"`, `"abc"`, `"5."`, `".5"`, `"1e3"`.
+  // The shape check runs before `Number()` so the parse can no longer decide the
+  // message. `"5."` used to pass the old `\d*\.?\d{0,2}` and went out verbatim
+  // for the backend's two-decimal pattern to reject with a 422 — the round-trip
+  // R4.5 asks local validation to prevent.
   if (!/^\d+(\.\d+)?$/.test(trimmed)) return "format";
+
+  if (Number(trimmed) > MAX_FINAL_COST) return "tooLarge";
   if (!/^\d+(\.\d{1,2})?$/.test(trimmed)) return "decimals";
   return null;
 }

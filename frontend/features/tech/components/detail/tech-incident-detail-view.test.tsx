@@ -563,9 +563,18 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     listPhotos.mockResolvedValue([]);
     renderDetail();
 
+    // Asserts the structure `EmptyState` uniquely provides, not just its copy:
+    // a `<p>` carrying the same key satisfied the old assertion and survived a
+    // mutation. `StatePanel` renders the title as a **heading** and the
+    // description as its own node, and D8 makes the empty state neutral — no
+    // alert, no busy semantics, which is what separates it from Error/Loading.
     expect(
-      await screen.findByText(esTech.photos.empty.title),
+      await screen.findByRole("heading", { name: esTech.photos.empty.title }),
     ).toBeInTheDocument();
+    expect(
+      screen.getByText(esTech.photos.empty.description),
+    ).toBeInTheDocument();
+    expect(screen.queryByRole("alert")).toBeNull();
   });
 
   /**

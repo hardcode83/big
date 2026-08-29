@@ -12,13 +12,22 @@ import { validateFinalCost } from "./tech-resolve-form";
  * technician has to interpret.
  */
 describe("validateFinalCost (R4.1)", () => {
-  it.each([
-    ["", "required"],
-    ["   ", "required"],
-    ["abc", "required"],
-  ] as const)("rejects %j as %s", (raw, expected) => {
-    expect(validateFinalCost(raw)).toBe(expected);
+  // `required` means nothing was typed, and nothing else.
+  it.each(["", "   ", "\t"])("asks for a value when %j is empty", (raw) => {
+    expect(validateFinalCost(raw)).toBe("required");
   });
+
+  /**
+   * Anything typed but malformed is a *shape* problem. `"5,00"` is the one that
+   * matters: a Spanish numeric keypad offers a comma, `Number("5,00")` is `NaN`,
+   * and the old order answered "indica el coste final" to someone who had.
+   */
+  it.each(["5,00", "abc", ".", "5.0.0", "1 000", "1e3", "+5", "0x10"])(
+    "rejects the malformed %j as a shape, not as a missing value",
+    (raw) => {
+      expect(validateFinalCost(raw)).toBe("format");
+    },
+  );
 
   it.each(["-0.01", "-1", "-99"])("rejects the negative %j", (raw) => {
     expect(validateFinalCost(raw)).toBe("negative");
@@ -58,8 +67,9 @@ describe("validateFinalCost (R4.1)", () => {
     expect(validateFinalCost("5.123")).toBe("decimals");
   });
 
-  it('rejects the lone point as unparseable', () => {
-    expect(validateFinalCost(".")).toBe("required");
+  it("keeps a sign as a value problem, not a shape one", () => {
+    expect(validateFinalCost("-1")).toBe("negative");
+    expect(validateFinalCost("-0.01")).toBe("negative");
   });
 
   it.each(["0", "5", "0.00", "12.30", "00.10", "99.9"])(
