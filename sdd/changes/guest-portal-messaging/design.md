@@ -586,6 +586,33 @@ a `sdd/roadmap.md`; aquí sólo quedan enunciados.
   referente, y por el de arquitectura, i18n y documentación como el hallazgo de `roadmap.md`: son
   el mismo defecto visto desde los dos lados.
 
+- **El gate ejecutable del panel de revisión no tiene canal de resultados para el runtime de
+  Claude.** `skills/reviewer-panel/reviewer_plan.py` (sdd-toolkit 0.40.0) valida un envelope JSON
+  de resultados **que le entrega quien despacha el panel**, y entre un subagente de Claude y el
+  gate no hay transporte automático: el transporte es el propio modelo. Así que «satisfacer el
+  gate» significa transcribir a mano los veredictos y pedirle que valide la transcripción — un
+  PASS que certifica la transcripción, no la revisión.
+
+  Por eso las secciones de este change se anotan `core-reviewers: … CLEAN` y **no**
+  `panel: PASS`, y por eso el review de feature del 2026-08-30 se cerró con la misma anotación:
+  el panel corrió de verdad —siete revisores en paralelo, con sus referentes en el prompt, con
+  cifras de suite reales— pero el gate ejecutable no participó. `STATE.md` no puede distinguir un
+  gate satisfecho de uno no ejecutado, y quien lo lea después merece saber cuál fue. Mismo
+  criterio que `notifications-inbox-web` (2026-08-29).
+
+  Un matiz que conviene no perder: el otro defecto que esta entrada arrastraba **ya está
+  resuelto**. `_parse_project` admitía sólo tres claves de frontmatter y tumbaba a los cuatro
+  reviewers de proyecto a `lens: unavailable`; el parche local
+  (`~/.claude/local/sdd-toolkit-patches/apply_reviewer_plan_frontmatter.py`) lo corrige y con él
+  los **siete** revisores resuelven con lente real. Se revierte en silencio con cada upgrade del
+  toolkit, porque el caché de plugins está fijado por versión: hay que re-aplicarlo después de
+  actualizar.
+
+  La salida real es un toolkit con un protocolo de resultados que la ruta Claude pueda producir,
+  y es deuda del toolkit, no de este producto. Se anota aquí porque es el único home durable que
+  hay en este árbol. **No se arregla tocando `.claude/agents/`**: son ficheros compartidos con
+  otras sesiones vivas y quitarles `description` rompe cómo los lanza Claude Code.
+
 ## Open questions
 
 Ninguna abierta. Las dos que este diseño levantó se resolvieron con el usuario el **2026-08-29** y las dos
