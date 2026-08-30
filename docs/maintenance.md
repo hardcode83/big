@@ -280,6 +280,77 @@ reserva — ni importe, ni canal, ni huésped. PRD §12 no pide la reserva en es
   Es a propósito — enseñarle al técnico B lo que el manager escribió para el técnico A es peor
   que no enseñarle nada—, pero hay que saberlo antes de reasignar.
 
+## La app del técnico
+
+Desde `tech-app`, el rol `TECHNICIAN` tiene sus dos pantallas y deja de ver «En preparación».
+Ambas están construidas **mobile-first**: una sola columna, tarjetas en vez de tabla y objetivos
+táctiles de 44 px, porque se operan de pie y con una mano en el portal de un edificio. Ambas se
+recorrieron en un navegador real contra un backend vivo el 2026-08-29, a 360×780: el ciclo entero
+de una incidencia, las dos subidas de foto y el cierre con coste y materiales. A ese ancho
+**ninguna de las dos pantallas produce desplazamiento horizontal** —cero elementos desbordados
+dentro de su contenido— y los objetivos táctiles miden 44 px. La página sí desborda, pero por la
+**cabecera del shell compartido**, que estas pantallas no controlan y que se comporta igual en
+`/dashboard`.
+
+**`/tech` — mis incidencias.** Lista `GET /api/v1/incidents` **sin enviar ningún parámetro que
+identifique al técnico**: el acotamiento por fila lo deriva el backend del token, y no existe
+parámetro de consulta para él. Cada fila lleva título, severidad, estado, categoría, fecha y la
+**vivienda** — el nombre y el código interno salen del contexto de esa incidencia, no de las rutas
+de propiedades, que a este rol le contestan `403`. Seis chips filtran por estado, de uno en uno
+(el contrato no admite varios), y volver a pulsar el chip activo quita el filtro. Sin filtro la
+lista sale en el orden que sirve el backend y **incluye incidencias ya cerradas**, cosa que la
+propia pantalla avisa. Un botón «cargar más» acumula páginas de veinte.
+
+El contexto de cada fila se pide bajo **la misma clave** que usará el detalle, así que abrir una
+fila no vuelve a pedirlo. Si el contexto de una fila falla, esa fila enseña `—` en vivienda y
+código y la lista sigue en pie.
+
+**`/tech/incidents/[id]` — el detalle.** Reúne la avería, el bloque de «dónde y cómo entrar», la
+galería de fotos y las acciones. Un `404` de la incidencia **o** de su contexto se presenta como
+«incidencia no disponible», sin distinguir si no existe, es de otro tenant o es de otro técnico:
+el backend los hace indistinguibles a propósito.
+
+**El ciclo desde el móvil.** La pantalla ofrece exactamente lo que el estado admite —`ASSIGNED`:
+aceptar o rechazar; `ACCEPTED`: en ruta o rechazar; `IN_PROGRESS`: esperar piezas o cerrar;
+`WAITING_EXTERNAL_PARTS`: reanudar— y en `AWAITING_OWNER_APPROVAL`, `RESOLVED` y `CANCELLED` no
+ofrece ninguna y explica por qué. Al aceptar y al ir en ruta se puede adjuntar una **ETA
+opcional**, que se lee en la zona horaria del dispositivo; en blanco no se manda nada. La zona
+horaria de la vivienda se **muestra** junto a la dirección pero no reinterpreta lo que el técnico
+teclea. Nada de esto es autorización: el backend refuta con `409` de todas formas, y cuando lo
+hace la pantalla vuelve a leer la incidencia y explica la razón —cerrada, a la espera de la
+propietaria, o fuera de secuencia— desde el estado **refrescado**, nunca desde el mensaje del
+error, que viene en inglés.
+
+**Rechazar es el caso aparte**: tras el `200` la asignación se ha borrado y la incidencia le
+contesta `404` a quien la rechazó, así que la app lo devuelve a `/tech` en vez de recargar un
+detalle que ya no puede leer.
+
+**Las fotos antes/después.** La galería pinta cada URL firmada **tal cual**, agrupada por etapa;
+no se guarda, ni se reescribe, ni se reconstruye, y cuando una firma caduca lo que se hace es
+volver a listar —una vez por foto, no en bucle—. Subir se ofrece **sólo** en `IN_PROGRESS` y
+`WAITING_EXTERNAL_PARTS`, con `stage` de dos valores y sin campo de texto libre. No hay
+comprobación de tamaño ni de formato en el móvil: el backend decide leyendo los bytes, así que la
+frontera son sus respuestas, y cada una tiene su mensaje —`409` por el estado, que además vuelve a
+leer la incidencia: si el refresco la trae cerrada o a la espera de la propietaria, el formulario
+de subida **se retira** y quien explica en qué se ha convertido es la barra de acciones;
+`413` por tamaño,
+`422` diciendo que se admiten JPEG, PNG y WebP (la causa frecuente es un HEIC de iPhone, y lo que
+lo arregla es cambiar el formato, no reintentar) y `502` por el almacenamiento—. **No se puede
+borrar una foto**, porque la API no lo expone, y **ninguna foto es requisito del cierre**.
+
+**El cierre y la puerta de la propietaria, tal como se muestran.** En `IN_PROGRESS` el técnico
+cierra declarando un **coste final obligatorio** y unos materiales opcionales. La app comprueba en
+local lo justo para no emitir una petición inválida (obligatorio, ≥ 0, ≤ 99 999 999,99, dos
+decimales) y un `422` del servidor se enseña **sin vaciar el formulario**.
+
+Lo que pasa después lo decide el backend y la app se limita a enseñarlo. Si la respuesta vuelve
+`RESOLVED`, la incidencia se presenta cerrada con su coste, sus materiales y su fecha. Si vuelve
+`AWAITING_OWNER_APPROVAL`, la app dice explícitamente que **el cierre no se ha aceptado** y queda
+a la espera de la propietaria, conserva visible el coste que devolvió la respuesta y **no inventa**
+una fecha de resolución que llega a `null`. El umbral `owner_approval_threshold_eur` **no se
+calcula, no se muestra y no se anticipa**: el rol no puede leer la configuración del tenant, y la
+puerta la resuelve el backend al recibir el cierre. La app lo muestra; no lo predice ni lo evita.
+
 ## Rastro
 
 Cada transición deja su fila en `audit_logs` y su hito en el timeline de la propiedad, en la
@@ -295,9 +366,9 @@ Cada transición deja su fila en `audit_logs` y su hito en el timeline de la pro
 
 ## Lo que este change no trae
 
-El `Expense` al resolver (es de `revenue`), la expiración automática de una aprobación, la UI del
-técnico (`tech-app`), la detección del intent desde la mensajería (`messaging-ai`) y la alerta de
-cerradura como fuente. Cada uno tiene dueño declarado en el proposal del change. **Las fotos de la
+El `Expense` al resolver (es de `revenue`), la expiración automática de una aprobación, la
+detección del intent desde la mensajería (`messaging-ai`) y la alerta de cerradura como fuente.
+**La UI del técnico sí llegó**, con `tech-app`, y está descrita arriba. Cada uno tiene dueño declarado en el proposal del change. **Las fotos de la
 incidencia sí llegaron**, con `incident-photos` (2026-08-23), y están descritas arriba: el patrón
 fue el de `cleaning-photos-storage`, como estaba previsto, y la capa de servido firmado se extrajo
 a `app/integrations/` para que los dos dominios la compartan en vez de duplicarla. Lo que **no**
@@ -326,14 +397,16 @@ campos de `IncidentResponse` — incluido `description` como **texto plano** (re
 
 Quedan fuera de esa pantalla, hasta que lleguen sus entradas propias:
 
-- Las **diez operaciones de mutación** de la incidencia (`classify`, `triage` vía `PATCH`,
-  `assign`, `accept`, `reject`, `en-route`, `wait-parts`, `resume`, `resolve`, `cancel`): cada una lleva
-  su permiso (`MANAGE_INCIDENTS` o `EXECUTE_INCIDENTS`), su validación de transición
-  (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
-  `IncidentBlockedByPendingApprovalError`), su UX de confirmación y su auditoría.
+- Las **cuatro operaciones del manager** (`classify`, `triage` vía `PATCH`, `assign`, `cancel`),
+  que llevan `MANAGE_INCIDENTS`. Las **seis de `EXECUTE_INCIDENTS`** —`accept`, `reject`,
+  `en-route`, `wait-parts`, `resume` y `resolve`— ya no están fuera de la web: viven en la app del
+  técnico descrita arriba, y de esta pantalla del workspace siguen ausentes. Cada una lleva su
+  validación de transición (`IncidentAlreadyClosedError`, `InvalidIncidentTransitionError`,
+  `IncidentBlockedByPendingApprovalError`) y su auditoría.
 - **Responder una aprobación** (`POST /owner-approvals/{id}/respond`): la ruta `/approvals`
   sigue como `RoutePlaceholder` y la regla 11 ata esa pantalla a una decisión de UX sobre
   el flujo de la propietaria.
 - **Selector de propiedad** y **resolución nombre↔id de `assigned_technician_id`**: ambos
-  son `M` por derecho propio y dependen de capacidades (`tech-app`,
-  `tech-incident-context` `[BE]`) que viven en otras ramas del roadmap.
+  son `M` por derecho propio. No los desbloquea `tech-app`: la app del técnico resuelve **su**
+  vivienda con `tech-incident-context`, que proyecta el contexto de una incidencia y no ofrece
+  ningún catálogo con el que poblar un selector ni ninguna forma de resolver un UUID de usuario.

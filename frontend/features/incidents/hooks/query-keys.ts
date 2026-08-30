@@ -19,4 +19,17 @@ export const incidentsKeys = {
     tenantScopedKey(tenantId, "incidents-list", filters),
   detail: (tenantId: string, incidentId: string): QueryKey =>
     tenantScopedKey(tenantId, "incidents-detail", incidentId),
+  /**
+   * The property context of one incident. This is **the same** key the list
+   * and the detail consume, and that identity is what makes opening a row skip
+   * a second request for its context (R1.3): the row and the detail read the
+   * same cache entry, not two equivalent ones.
+   */
+  context: (tenantId: string, incidentId: string): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-context", incidentId),
+  photos: (tenantId: string, incidentId: string): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-photos", incidentId),
+  /** Prefix of `list`, so one invalidation reaches every filter/page combination. */
+  listPrefix: (tenantId: string): QueryKey =>
+    tenantScopedKey(tenantId, "incidents-list"),
 } as const;

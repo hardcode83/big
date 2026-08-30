@@ -255,4 +255,89 @@ describe("createApiClient (D12)", () => {
     expect(onUnauthorized).toHaveBeenCalledOnce();
     expect(fetchImpl).toHaveBeenCalledTimes(2);
   });
+  it("sends a FormData body without a Content-Type of its own (D2)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+    const formData = new FormData();
+    formData.append("stage", "BEFORE");
+    formData.append("file", new Blob(["bytes"], { type: "image/jpeg" }), "a.jpg");
+
+    await client.request("/api/v1/incidents/{incident_id}/photos", {
+      method: "POST",
+      pathParams: { incident_id: "inc-1" },
+      formData,
+    });
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(formData);
+    expect(new Headers(init.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("does not JSON.stringify a multipart request and still sends Authorization", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 201 }));
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+    });
+    const formData = new FormData();
+    formData.append("stage", "AFTER");
+
+    await client.request("/api/v1/incidents/{incident_id}/photos", {
+      method: "POST",
+      pathParams: { incident_id: "inc-1" },
+      formData,
+    });
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(typeof init.body).not.toBe("string");
+    expect(new Headers(init.headers).get("Authorization")).toBe("Bearer access");
+  });
+
+  it("replays the same FormData instance on the retry after a recovered 401", async () => {
+    const onUnauthorized = vi.fn().mockResolvedValue(true);
+    const fetchImpl = vi
+      .fn()
+      .mockResolvedValueOnce(
+        jsonResponse(
+          { error: { code: "UNAUTHENTICATED", message: "expired" } },
+          { status: 401 },
+        ),
+      )
+      .mockResolvedValueOnce(jsonResponse({ id: "photo-1" }, { status: 201 }));
+    const client = createApiClient({
+      baseUrl: "https://api",
+      fetchImpl,
+      getHeaders: () => ({ Authorization: "Bearer access" }),
+      onUnauthorized,
+    });
+    const formData = new FormData();
+    formData.append("stage", "BEFORE");
+
+    await client.request("/api/v1/incidents/{incident_id}/photos", {
+      method: "POST",
+      pathParams: { incident_id: "inc-1" },
+      formData,
+    });
+
+    expect(fetchImpl).toHaveBeenCalledTimes(2);
+    const retryInit = fetchImpl.mock.calls[1][1] as RequestInit;
+    expect(retryInit.body).toBe(formData);
+    expect(new Headers(retryInit.headers).has("Content-Type")).toBe(false);
+  });
+
+  it("leaves an existing JSON request untouched (no regression from D2)", async () => {
+    const fetchImpl = vi.fn().mockResolvedValue(jsonResponse({}, { status: 200 }));
+    const client = createApiClient({ baseUrl: "https://api", fetchImpl });
+
+    await client.request("/api/v1/incidents/{incident_id}/resolve", {
+      method: "POST",
+      pathParams: { incident_id: "inc-1" },
+      body: { final_cost: "120.50" },
+    });
+
+    const init = fetchImpl.mock.calls[0][1] as RequestInit;
+    expect(init.body).toBe(JSON.stringify({ final_cost: "120.50" }));
+    expect(new Headers(init.headers).get("Content-Type")).toBe("application/json");
+  });
 });
