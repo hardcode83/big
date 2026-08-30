@@ -208,10 +208,20 @@ la única autoridad. Un `TENANT_OWNER` ve la misma lista sin el control de asign
   de componente con aserciones de DOM reales, y ningún criterio de aceptación depende de mirarlo —
   es acabado, no cobertura. Lo que falta es verlo: la fila bloqueada con el botón deshabilitado y el
   `<select>` vivo, el `409` de la carrera anunciándose con el mensaje de la vivienda, los dos
-  idiomas, 320 px sin scroll horizontal y la consola limpia. No se hizo en el worktree porque
-  `next dev` con `PORT_OFFSET` sirve la página sin hidratarla, y porque `AWAITING_CLEANING` no es
-  alcanzable por el camino real en un mismo día. **Disparador**: el primer despliegue de este
-  change en `dev`, que es además donde se midió el fallo original el 2026-08-22.
+  idiomas, 320 px sin scroll horizontal y la consola limpia.
+
+  **La razón que se dio para no hacerlo en el worktree ya no vale.** Esta deuda se apoyaba en que
+  «`next dev` con `PORT_OFFSET` sirve la página sin hidratarla», y `tech-app` midió esa premisa
+  falsa para su propio caso el 2026-08-29: con `PORT_OFFSET=10` la app hidrata y es completamente
+  interactiva. `sdd/project.md` recoge la reconciliación completa — el fallo es real **sólo para
+  `next dev`** cuando Next 15+ bloquea el origen cruzado del puerto desplazado, y aun entonces hay
+  salida (servir el build de producción en un contenedor aparte, con su `npm run build` delante).
+  Un worktree enlazado es, por tanto, un sitio válido para dar esta pasada.
+
+  Lo que **sigue** en pie del bloqueo original es lo otro: `AWAITING_CLEANING` no es alcanzable por
+  el camino real en un mismo día. **Disparador**: el primer despliegue de este change en `dev` —que
+  es además donde se midió el fallo original el 2026-08-22— o cualquier worktree en el que se pueda
+  llevar una tarea hasta ese estado.
 
 ## Key files
 
