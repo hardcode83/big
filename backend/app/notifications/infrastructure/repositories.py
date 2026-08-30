@@ -215,6 +215,39 @@ class SqlAlchemyNotificationLogRepository:
         if result.rowcount == 0:
             raise NotificationLogNotFoundError(log_id)
 
+    async def exists_for(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> bool:
+        if related_type is None or related_id is None:
+            # `== None` compiles to `IS NULL`, which would match every row of this type that
+            # points at nothing — and because the caller writes no notification when this
+            # returns True, that widening silences alerts rather than surfacing them. The
+            # annotations do not stop it: this backend runs neither mypy nor ruff, in the
+            # tree or in CI. Section 2's security panel raised it before the first caller
+            # existed, which is the only cheap moment to close it.
+            raise ValueError(
+                "exists_for needs a related_type and a related_id: a null would widen the "
+                "check from one entity to every row of that type without one."
+            )
+        result = await self._session.execute(
+            select(NotificationLogModel.id)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.related_type == related_type,
+                NotificationLogModel.related_id == related_id,
+                NotificationLogModel.notification_type == notification_type,
+            )
+            # Existence, not a count: the caller only asks whether to write, and a `COUNT`
+            # over a duplicated pair would scan rows to answer a question `LIMIT 1` settles.
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
+
     async def cancel_sla_deadline(
         self,
         tenant_id: uuid.UUID,

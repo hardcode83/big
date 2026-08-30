@@ -36,9 +36,9 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.auth.domain.entities import User
-from app.auth.domain.enums import UserRole, UserStatus
+from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
-from app.auth.domain.repositories import UserFilters
+from app.auth.domain.recipients import RoleRecipients
 from app.core.unit_of_work import UnitOfWork
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
@@ -50,12 +50,10 @@ from app.notifications.domain.results import NotificationErrorCode, Notification
 
 logger = logging.getLogger(__name__)
 
-#: A tenant's roster is small (PRD §1: two flats, a handful of people) and the roles that
-#: receive escalations are the two administrative ones, so one page is the whole answer.
-#: Should a tenant ever exceed this, `EscalationReport.recipients_truncated` says so — a
-#: silent partial notification is the failure mode worth surfacing in the return value and
-#: not only in a log nobody reads.
-_MAX_RECIPIENTS = 100
+#: The page bound and the reason for it now live on `RoleRecipients` (design D1), which is
+#: the one place the roster question is answered since this change absorbed the second copy
+#: of it. What stays here is what is local: the *counter* this job folds truncation into
+#: (`EscalationReport.recipients_truncated`) and the log key that names this site.
 
 
 @dataclass
@@ -87,7 +85,13 @@ class EscalateBreachedSlasUseCase:
         uow: UnitOfWork,
     ) -> None:
         self._notifications = notifications
-        self._users = users
+        # The port is kept only to build the roster service, and is deliberately not held as
+        # a second attribute: nothing in this class queries users directly any more, so a
+        # spare handle would be an open door back to the inline query this change removed.
+        # Built here rather than injected because it is a pure domain service over a port the
+        # constructor already receives — widening the signature would make every wiring site
+        # name a collaborator that carries no state and no configuration.
+        self._recipients = RoleRecipients(users=users)
         self._uow = uow
 
     async def execute(self, *, tenant_id: uuid.UUID, now: datetime) -> EscalationReport:
@@ -191,26 +195,26 @@ class EscalateBreachedSlasUseCase:
         one page of owners and no manager would have notified a subset with
         `recipients_truncated` still at zero — the silent partial notification that counter
         exists to prevent. Caught by the section-4 QA re-review.
+
+        **The query itself now belongs to `RoleRecipients`** (design D1): this was one of the
+        two places that had written the roster question out by hand, and leaving it here
+        while five new writers asked the same question elsewhere is what R5.1 forbids. What
+        does not move is the pair of things that are this job's own — the counter it folds
+        the truncation into, and the log key that names *this* site rather than the helper.
         """
-        page = await self._users.list(
-            tenant_id,
-            UserFilters(role=role, status=UserStatus.ACTIVE),
-            page=1,
-            per_page=_MAX_RECIPIENTS,
-        )
-        dropped = page.total - len(page.items)
-        if dropped > 0:
-            report.recipients_truncated += dropped
+        resolved = await self._recipients.active_holders(tenant_id, role)
+        if resolved.dropped > 0:
+            report.recipients_truncated += resolved.dropped
             logger.warning(
                 "scheduler.escalation_recipients_truncated",
                 extra={
                     "tenant_id": str(tenant_id),
                     "role": role.value,
-                    "total": page.total,
-                    "notified": len(page.items),
+                    "total": len(resolved.users) + resolved.dropped,
+                    "notified": len(resolved.users),
                 },
             )
-        return list(page.items)
+        return list(resolved.users)
 
 
 def _escalation_row(

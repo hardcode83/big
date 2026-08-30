@@ -22,6 +22,10 @@ from fastapi import Depends
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
+from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
+from app.notifications.infrastructure.repositories import (
+    SqlAlchemyNotificationLogRepository,
+)
 from app.core.db import get_db_session
 from app.core.unit_of_work import SqlAlchemyUnitOfWork
 from app.pricing.application.use_cases import (
@@ -93,6 +97,10 @@ def get_generate_price_recommendations_use_case(
         reservations=SqlAlchemyReservationRepository(session),
         timeline=SqlAlchemyTimelineEventRepository(session),
         audit=SqlAlchemyAuditLogRepository(session),
+        # R4.5 — the same row on the human path as on the nightly one: the difference is who
+        # asked, not what happens.
+        users=SqlAlchemyUserRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
 
