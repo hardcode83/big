@@ -78,17 +78,31 @@ ANONYMOUS_ENDPOINTS = {
     # asserts that a token which does not exist, is malformed, has been revoked, is past its
     # window, or belongs to a cancelled stay are all indistinguishable.
     #
-    # Four entries, over three paths: `/checkin/{token}` answers both `GET` (what is still
-    # missing) and `POST` (the submission). That is the whole of PRD §23's guest surface, and
-    # the count is the point of the census — a fifth route under `/api/v1/guest/` would have to
-    # be added here, in a diff a reviewer sees.
+    # **Six entries, over four paths** — recounted against the list below rather than bumped:
+    # `/checkin/{token}` answers both `GET` (what is still missing) and `POST` (the submission),
+    # and `/messages/{token}` answers both `GET` (the guest's thread) and `POST` (writing to it).
+    # This comment said "four entries, over three paths … the whole of PRD §23's guest surface"
+    # and spoke of "a fifth route under `/api/v1/guest/`"; `guest-portal-messaging` added the
+    # fifth and the sixth at once, so the sentence was wrong in the count and in the singular.
+    #
+    # The census is not a tally for its own sake: adding a route here is the diff a reviewer
+    # sees, which is the whole mechanism. Anything new under `/api/v1/guest/` has to appear in
+    # this list or the check below goes red.
     ("GET", "/api/v1/guest/info/{token}"),
     ("GET", "/api/v1/guest/checkin/{token}"),
     ("POST", "/api/v1/guest/checkin/{token}"),
-    # The only one of the four that creates a row from a stranger's free text. It authorises
-    # through the same `GuestPortalAuthenticator`, and R5.3 is structural: no route here reads
-    # an incident back, so there is nothing to restrict.
+    # This one creates a row from a stranger's free text. It authorises through the same
+    # `GuestPortalAuthenticator`, and R5.3 is structural: no route here reads an incident back,
+    # so there is nothing to restrict.
     ("POST", "/api/v1/guest/incident/{token}"),
+    # `guest-portal-messaging`: the guest writes to their stay's thread and reads it back. The
+    # `POST` is the second route on this surface that lands a stranger's free text in a column
+    # — `messages.content`, whose contract is rule 11's — and it runs the whole `messaging-ai`
+    # pipeline over it rather than storing it, which is why no new use case appears alongside
+    # it. The `GET` publishes a frozen projection: the fields it does not declare cannot be
+    # serialised, so there is nothing here to restrict either.
+    ("POST", "/api/v1/guest/messages/{token}"),
+    ("GET", "/api/v1/guest/messages/{token}"),
     ("GET", "/openapi.json"),
     ("GET", "/docs"),
     ("GET", "/docs/oauth2-redirect"),
@@ -343,10 +357,11 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
     `ANONYMOUS_ENDPOINTS` above, which is the visible diff this module exists to force.
 
     And by `guest-portal-api` with the guest-access-token path (`POST` and `DELETE`, both
-    `MANAGE_GUEST_ACCESS_TOKENS`), asserted per role in `tests/guests/test_api.py`. Its four
+    `MANAGE_GUEST_ACCESS_TOKENS`), asserted per role in `tests/guests/test_api.py`. Its
     **anonymous** portal routes are the same case as the webhook receiver and join
     `ANONYMOUS_ENDPOINTS` instead — the token in the path is the credential, so there is no
-    permission to declare.
+    permission to declare. Not counted here: the allowlist above is the authority on how many
+    there are, and this sentence said "four" until `guest-portal-messaging` made it six.
 
     And by `cleaner-task-context` with the task context path (`GET`, `READ_CLEANING_TASKS`),
     asserted per role in `tests/cleaning/test_task_context_api.py`. It declares no new permission

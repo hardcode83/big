@@ -22,6 +22,7 @@ from app.core.unit_of_work import CallerOwnedUnitOfWork, SqlAlchemyUnitOfWork
 from app.messaging.application.use_cases import ProcessInboundGuestMessageUseCase
 from app.messaging.domain.enums import ConversationChannel, ConversationStatus
 from app.messaging.domain.exceptions import PMSChannelUnavailableError
+from app.messaging.domain.value_objects import InboundMessageActor
 from app.messaging.infrastructure.ai import MockAIAdapter
 from app.messaging.infrastructure.channels import outbound_registry
 from app.messaging.infrastructure.models import ConversationModel, MessageModel
@@ -29,7 +30,10 @@ from app.messaging.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
     SqlAlchemyMessageRepository,
 )
+from app.audit.infrastructure.models import AuditLogModel
+from app.maintenance.infrastructure.models import IncidentModel
 from app.notifications.infrastructure.models import NotificationLogModel
+from app.timeline.domain.enums import TimelineActorType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.messaging.conftest import (
     NOW,
@@ -132,8 +136,7 @@ async def test_the_whole_pipeline_lands_together(db_session, test_engine) -> Non
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         content="El wifi no funciona",
-        actor_user_id=actor_id,
-        ip=None,
+        actor=InboundMessageActor(user_id=actor_id, ip=None),
         now=NOW,
     )
 
@@ -171,8 +174,7 @@ async def test_a_failure_part_way_through_leaves_nothing_behind(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             content="El wifi no funciona",
-            actor_user_id=actor_id,
-            ip=None,
+            actor=InboundMessageActor(user_id=actor_id, ip=None),
             now=NOW,
         )
     await db_session.rollback()
@@ -214,8 +216,7 @@ async def test_an_escalation_is_not_left_half_written_by_a_later_failure(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             content=ESCALATES_AND_OPENS_AN_INCIDENT,
-            actor_user_id=actor_id,
-            ip=None,
+            actor=InboundMessageActor(user_id=actor_id, ip=None),
             now=NOW,
         )
     await db_session.rollback()
@@ -254,8 +255,7 @@ async def test_the_escalation_path_really_does_write_all_three_rows(
         tenant_id=tenant_id,
         conversation_id=conversation_id,
         content=ESCALATES_AND_OPENS_AN_INCIDENT,
-        actor_user_id=actor_id,
-        ip=None,
+        actor=InboundMessageActor(user_id=actor_id, ip=None),
         now=NOW,
     )
 
@@ -289,8 +289,7 @@ async def test_the_conversation_is_not_left_half_moved_by_a_failure(
             tenant_id=tenant_id,
             conversation_id=conversation_id,
             content="El wifi no funciona",
-            actor_user_id=actor_id,
-            ip=None,
+            actor=InboundMessageActor(user_id=actor_id, ip=None),
             now=NOW,
         )
     await db_session.rollback()
@@ -309,3 +308,79 @@ async def test_the_conversation_is_not_left_half_moved_by_a_failure(
 
     assert row.last_message_at is None
     assert row.status is ConversationStatus.OPEN
+
+
+# --- The second actor, against real persistence (`guest-portal-messaging` R4.1, D8) --------
+
+
+async def read_one(engine, model):
+    """The single row of `model`, read through a second session like `count_rows` above."""
+    async with AsyncSession(engine) as observer:
+        return (await observer.execute(select(model))).scalars().one()
+
+
+async def test_a_token_bearer_drives_the_whole_pipeline_and_is_named_in_every_row(
+    db_session, test_engine
+) -> None:
+    """R4.1 against the real adapters, not against fakes.
+
+    `tests/maintenance/test_report_incident_from_conversation.py` covers both branches of the
+    derivation, but over in-memory repositories — so it cannot speak to what the database
+    accepts. The column this branch fills, `audit_logs.actor_guest_token_hash`, carries a
+    CHECK constraint (`ck_audit_logs_actor_guest_token_hash_is_a_digest`) that only a real
+    INSERT can exercise, and `actor_user_id` goes NULL on a table where the other branch
+    always fills it. This is the same argument the module docstring above makes for R4.7: an
+    assertion over fakes is a proxy for the claim and not the claim.
+
+    The QA panel of section 2 found that every call site in this file passed a user actor, so
+    the token-bearer half of R4.1 was proven nowhere against real persistence.
+    """
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    await seed_user(db_session, tenant, "manager@example.com")
+    conversation = await seed_conversation(
+        db_session, tenant, prop, channel=ConversationChannel.MANUAL
+    )
+    tenant_id, conversation_id = tenant.id, conversation.id
+    await db_session.commit()
+
+    digest = "c" * 64
+    pipeline = build_pipeline(db_session, channels=outbound_registry())
+    await pipeline.execute(
+        tenant_id=tenant_id,
+        conversation_id=conversation_id,
+        content=ESCALATES_AND_OPENS_AN_INCIDENT,
+        actor=InboundMessageActor(token_hash=digest, ip="203.0.113.7"),
+        now=NOW,
+    )
+
+    # The pipeline ran whole: the guest's message, the escalation and the derived incident.
+    assert await count_rows(test_engine, MessageModel) == 1
+    assert await count_rows(test_engine, TimelineEventModel) == 3
+    assert await count_rows(test_engine, IncidentModel) == 1
+
+    entry = await read_one(test_engine, AuditLogModel)
+    assert entry.actor_guest_token_hash == digest
+    assert entry.actor_user_id is None
+    assert entry.actor_ip == "203.0.113.7"
+
+    incident = await read_one(test_engine, IncidentModel)
+    assert incident.reported_by_guest_token == digest
+    assert incident.reported_by_user_id is None
+
+    # The third derivation. `TimelineEventFactory` admits `actor_user_id` only alongside
+    # `USER`, so a branch that picked `USER` here would have to claim a user that does not
+    # exist — asserted rather than left to that factory, because "it would have raised" is
+    # not the same as "it chose correctly".
+    async with AsyncSession(test_engine) as observer:
+        actors = set(
+            (await observer.execute(select(TimelineEventModel.actor_type))).scalars().all()
+        )
+    # `USER not in actors` is the load-bearing half and the reason this reads the whole set.
+    # `GUEST in actors` would hold anyway — `GUEST_MESSAGE_RECEIVED` hardcodes `GUEST` for
+    # every actor — so it is kept only as a positive control that the events were written at
+    # all. What it cannot catch, and this can: a branch naming some *other* user, which is
+    # internally consistent and so passes `TimelineEventFactory` untouched. The QA panel of
+    # section 2 drew that distinction.
+    assert TimelineActorType.GUEST in actors
+    assert TimelineActorType.USER not in actors

@@ -1,7 +1,11 @@
 """The guest portal's use cases (R1.1, R1.4, R1.5, R6.1; design D14).
 
 This module starts with the **operator** side — minting and revoking the credential — and
-grows the anonymous side (the authoriser and the four portal use cases) in later sections.
+grows the anonymous side (the authoriser, and the use cases behind the stay and check-in
+routes) in later sections. Named rather than counted: this sentence said "the four portal use
+cases" until `guest-portal-messaging` put two more of them in
+`messaging/application/portal.py`, where the behaviour they need lives (D2), leaving the
+number describing neither this module nor the portal.
 The order is deliberate: D14 resolves R1.6's open question by giving the token a way to be
 issued at all, so the capability is reachable before any of it is exposed anonymously.
 

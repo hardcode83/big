@@ -138,6 +138,7 @@ from app.messaging.application.use_cases import (
     ProcessInboundGuestMessageUseCase,
 )
 from app.messaging.domain.enums import ConversationChannel, MessageIntent
+from app.messaging.domain.value_objects import InboundMessageActor
 from app.messaging.infrastructure.ai import MockAIAdapter
 from app.messaging.infrastructure.channels import outbound_registry
 from app.messaging.infrastructure.models import ConversationModel
@@ -1121,8 +1122,11 @@ async def _seed_conversation(
             tenant_id=tenant_id,
             conversation_id=conversation.id,
             content=content,
-            actor_user_id=actor_user_id,
-            ip=None,
+            # The seed transcribes as the owner, so the actor is a user
+            # (`guest-portal-messaging` D8). No `ip`: there is no request behind a CLI, which
+            # is the same reason the fourth exception to rule 9 of `steering/security.md`
+            # gives for this command's classification writing none.
+            actor=InboundMessageActor(user_id=actor_user_id, ip=None),
             now=now + timedelta(minutes=offset),
         )
         created["messages"] = created.get("messages", 0) + 1

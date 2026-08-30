@@ -3,6 +3,7 @@
 | `ConversationChannel` | Adapter | What it does |
 |---|---|---|
 | `MANUAL` | `PanelOutboundAdapter` | no-op: the row **is** the delivery |
+| `PORTAL` | `PortalOutboundAdapter` | no-op: the row **is** the delivery, read by the guest |
 | `WHATSAPP` | delegates to `MockWhatsAppAdapter` | the mock `access-notifications` governs |
 | `EMAIL` | delegates to `ConsoleEmailAdapter` | ditto |
 | `PHONE_TRANSCRIPT` | `InboundOnlyAdapter` | returns `CHANNEL_INBOUND_ONLY` |
@@ -87,6 +88,31 @@ class PanelOutboundAdapter:
         return ChannelSendResult.ok()
 
 
+class PortalOutboundAdapter:
+    """`PORTAL`: the row **is** the delivery, and the reader is the guest.
+
+    A class of its own rather than a second key pointing at `PanelOutboundAdapter`, because
+    each of the two names the endpoint that makes its promise true and they are different
+    endpoints. What makes this reply reach anybody is the `messages` row existing and
+    `GET /api/v1/guest/messages/{token}` returning it. If that endpoint ever goes away, this
+    adapter is a lie and must go with it.
+
+    It has no entry in `contact_kind_for`: the portal addresses nobody, the guest comes back
+    to the page on their own.
+    """
+
+    async def send(
+        self,
+        *,
+        channel: ConversationChannel,
+        conversation_id: uuid.UUID,
+        recipient_contact: str | None,
+        content: str,
+        language: str,
+    ) -> ChannelSendResult:
+        return ChannelSendResult.ok()
+
+
 class InboundOnlyAdapter:
     """`PHONE_TRANSCRIPT`: messages come in, nothing goes out (R6.2, D14).
 
@@ -157,6 +183,7 @@ def outbound_registry() -> dict[ConversationChannel, OutboundMessagePort]:
     """
     return {
         ConversationChannel.MANUAL: PanelOutboundAdapter(),
+        ConversationChannel.PORTAL: PortalOutboundAdapter(),
         ConversationChannel.WHATSAPP: DelegatingOutboundAdapter(
             MockWhatsAppAdapter(), NotificationChannel.WHATSAPP
         ),

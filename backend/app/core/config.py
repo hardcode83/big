@@ -213,9 +213,12 @@ class Settings(BaseSettings):
     guest_portal_token_grace_days: int = 2
     # Two limits, asymmetric on purpose, and the reasoning is NOT the webhook one above even
     # though the shape is (D6). The per-token limit is generous and charged **after** a
-    # successful authorisation. It bounds the four routes of PRD §23 — and for
-    # `POST /guest/incident`, which is deliberately not idempotent (D13), it is the only thing
-    # bounding how many `incidents` rows one stay can produce.
+    # successful authorisation. It is **one budget shared by every portal route** — six of them
+    # since `guest-portal-messaging` added `GET`/`POST /guest/messages/{token}`, recounted
+    # against `portal_router.py` rather than incremented — which is what makes the polling of
+    # that change's thread a cost the other routes feel. And for `POST /guest/incident`, which
+    # is deliberately not idempotent (D13), it is the only thing bounding how many `incidents`
+    # rows one stay can produce.
     guest_portal_rate_limit_per_minute: int = 60
     # The per-IP limit is strict and counted **only over failed authorisations**, asked
     # before any lookup — that is what makes guessing a token cost something (R2.4). Keyed by

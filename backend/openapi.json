@@ -1271,7 +1271,8 @@
           "BOOKING_MSG",
           "EMAIL",
           "PHONE_TRANSCRIPT",
-          "MANUAL"
+          "MANUAL",
+          "PORTAL"
         ],
         "title": "ConversationChannel",
         "type": "string"
@@ -2610,6 +2611,36 @@
         "title": "GuestDocumentType",
         "type": "string"
       },
+      "GuestMessageResponse": {
+        "description": "One message of the thread: who sent it, what it says, and when.",
+        "properties": {
+          "content": {
+            "title": "Content",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "sender": {
+            "$ref": "#/components/schemas/PortalMessageSender"
+          }
+        },
+        "required": [
+          "id",
+          "sender",
+          "content",
+          "created_at"
+        ],
+        "title": "GuestMessageResponse",
+        "type": "object"
+      },
       "GuestResponse": {
         "description": "A name. Rule 4 of `steering/security.md` — nothing about the document, ever.",
         "properties": {
@@ -2686,6 +2717,42 @@
           "legal_registration_status"
         ],
         "title": "GuestSummaryResponse",
+        "type": "object"
+      },
+      "GuestThreadResponse": {
+        "description": "One page of the conversation, oldest first, with the window it came from.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/GuestMessageResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "state": {
+            "$ref": "#/components/schemas/PortalThreadState"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page",
+          "state"
+        ],
+        "title": "GuestThreadResponse",
         "type": "object"
       },
       "ImportReportResponse": {
@@ -3762,6 +3829,41 @@
           "data"
         ],
         "title": "PhotoRequirementsResponse",
+        "type": "object"
+      },
+      "PortalMessageSender": {
+        "description": "Who wrote a message, **grouped into two** (`guest-portal-messaging` R2.2, D4).\n\nDerived in the backend from `MessageSenderType`, whose five members collapse to these two.\nThe collapse is the requirement, not an implementation detail: R2.2 forbids **publishing**\nwhether a reply was written by the AI or by a person, and a vocabulary of two is what makes\nthe distinction absent from the response rather than merely omitted by a serialiser.\n\n**It does not make the distinction unguessable, and this docstring used to claim it did.**\nA guest can still infer it from outside the payload — the automatic reply carries the same\n`created_at` as the message that triggered it, it arrives in the same poll, and its text\ncomes from a closed catalogue. The residual is written down in `design.md` under R2.2\nrather than left as an overstatement next to the type. Raised by the security panel of\nsections 5-6.\n\n`PROPERTY` and not `HOST`/`MANAGER`: the guest is told *the accommodation* answered, which\nis true of an automatic reply and of a manager's, and names no role.",
+        "enum": [
+          "GUEST",
+          "PROPERTY"
+        ],
+        "title": "PortalMessageSender",
+        "type": "string"
+      },
+      "PortalThreadState": {
+        "description": "Whether a person has the conversation (R2.3, D4).\n\nAn enum of two members and **not a boolean**, for two reasons D4 records: the front end\nswitches on a name to pick its localised copy (R5.6), and a boolean called\n`awaiting_human` invites somebody to hang the *why* beside it — which is the escalation\nreason, and R2.3 says that is internal.\n\n`AWAITING_HUMAN` covers `PENDING_HUMAN` and `HUMAN_HANDLING` alike. The guest is told a\nperson will reply; that a manager has already taken it over is our business, not theirs.",
+        "enum": [
+          "AUTOMATIC",
+          "AWAITING_HUMAN"
+        ],
+        "title": "PortalThreadState",
+        "type": "string"
+      },
+      "PostGuestMessageRequest": {
+        "additionalProperties": false,
+        "description": "What `POST /guest/messages/{token}` accepts: the guest's own words, and nothing else.\n\nSurrounding whitespace is stripped first, so the bounds count characters after stripping and\na whitespace-only message is a `422`.",
+        "properties": {
+          "content": {
+            "maxLength": 4000,
+            "minLength": 1,
+            "title": "Content",
+            "type": "string"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "PostGuestMessageRequest",
         "type": "object"
       },
       "PriceRecommendationPageResponse": {
@@ -10956,6 +11058,190 @@
           }
         },
         "summary": "The guest's stay information",
+        "tags": [
+          "guest-portal"
+        ]
+      }
+    },
+    "/api/v1/guest/messages/{token}": {
+      "get": {
+        "description": "One page of the stay's conversation, oldest first within the page. Every message is attributed to the guest or to the accommodation and to nothing finer: which member of staff wrote a reply, and whether it was written automatically, are not fields of this response. Neither is the reason a conversation is waiting for a person — only that it is. A stay whose guest has not written yet answers with an empty thread: reading never opens a conversation. **Without `page` the most recent window is returned**, since a thread is read from its end; `total`, `page` and `per_page` say which window it is, and an explicit `page` still reaches the earlier ones.",
+        "operationId": "read_guest_thread_api_v1_guest_messages__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maximum": 100000,
+                  "minimum": 1,
+                  "type": "integer"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Page"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 50,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestThreadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "The guest's own thread",
+        "tags": [
+          "guest-portal"
+        ]
+      },
+      "post": {
+        "description": "Sends one message from the guest and runs the whole messaging pipeline over it: the language is detected, the intent classified, and either an automatic answer is written or a person is asked to take over. The stay's thread is created by this first message and by nothing else. The body carries the text and nothing else — a sender, a reservation or a conversation id in it is a `422`, never something quietly ignored — and the acknowledgement is the message as it will appear in the thread. Retrying sends a second message: the request is not deduplicated, so treat a `429` as 'wait', never as 'it did not arrive'.",
+        "operationId": "post_guest_message_api_v1_guest_messages__token__post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/PostGuestMessageRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/GuestMessageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "404": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "This link does not authorise the request. One answer for every cause, with no list of them: the endpoint never reveals which, so it cannot be used to discover whether a reservation exists. Treat it as 'ask the host for a new link', never as a hint about the request body."
+          },
+          "413": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "The request body exceeded the ceiling applied to all of /api/v1/."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          },
+          "429": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Rate limited. Retry in a minute."
+          }
+        },
+        "summary": "Write a message to the accommodation",
         "tags": [
           "guest-portal"
         ]

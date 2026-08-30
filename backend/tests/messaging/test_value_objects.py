@@ -16,6 +16,7 @@ from app.messaging.domain.enums import (
     EscalationReason,
     MessageIntent,
 )
+from app.guests.domain.portal_token import generate_guest_token, hash_guest_token
 from app.messaging.domain.exceptions import MessagingValidationError
 from app.messaging.domain.value_objects import (
     DELIVERY_STATUS_FAILED,
@@ -24,6 +25,7 @@ from app.messaging.domain.value_objects import (
     ChannelSendResult,
     ConversationContext,
     GeneratedResponse,
+    InboundMessageActor,
     MessageClassification,
     MessageMetadata,
 )
@@ -357,3 +359,129 @@ def test_channel_error_codes_are_the_three_of_the_design() -> None:
         "CHANNEL_INBOUND_ONLY",
         "ADAPTER_UNAVAILABLE",
     )
+
+
+# --- `InboundMessageActor` (`guest-portal-messaging` R4.1, D8) ----------------------------
+
+DIGEST = "a" * 64
+
+
+def test_an_actor_can_be_a_user() -> None:
+    actor = InboundMessageActor(user_id=uuid.uuid4(), ip="203.0.113.7")
+
+    assert actor.token_hash is None
+
+
+def test_an_actor_can_be_a_portal_token_bearer() -> None:
+    """The second door R4.1 opens: no `User` exists behind `POST /guest/messages/{token}`."""
+    actor = InboundMessageActor(token_hash=DIGEST, ip="203.0.113.7")
+
+    assert actor.user_id is None
+
+
+def test_an_actor_refuses_to_be_both() -> None:
+    """A row claiming a logged-in manager **and** a portal bearer describes something that
+    cannot have happened, and `audit_logs` is append-only."""
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(user_id=uuid.uuid4(), token_hash=DIGEST)
+
+
+def test_an_actor_refuses_to_be_neither() -> None:
+    """Never constructible before either, but only by accident of `user_id` being required.
+    Widening to a choice is what makes it worth asserting."""
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor()
+
+
+def test_an_actor_is_frozen() -> None:
+    actor = InboundMessageActor(token_hash=DIGEST)
+
+    with pytest.raises(Exception):
+        actor.user_id = uuid.uuid4()  # type: ignore[misc]
+
+
+def test_the_refusal_quotes_neither_value() -> None:
+    """The module docstring's standing rule, which is unconditional: "**No refusal message
+    ever quotes the value it refused.**" `str(exc)` is rendered into a 422 body and into every
+    log line. An earlier version of this refusal quoted the `user_id` half while masking the
+    digest — the security panel of section 2 pointed out that the rule names no sensitivity
+    threshold, so the asymmetry was an undeclared exception to it."""
+    user_id = uuid.uuid4()
+
+    with pytest.raises(MessagingValidationError) as raised:
+        InboundMessageActor(user_id=user_id, token_hash=DIGEST)
+
+    rendered = str(raised.value)
+    assert DIGEST not in rendered
+    assert str(user_id) not in rendered
+
+
+#: `is_guest_token_digest` is `len(value) == 64 and set(value) <= _HEX_DIGITS`, and `and`
+#: short-circuits — so a wrong-length value never reaches the character check. The two groups
+#: below hit **one branch each**, deliberately: the QA panel of section 2 found that three
+#: earlier tests here all tripped the length branch, so deleting the character check outright
+#: would have left two of the three green.
+
+#: Right length, wrong alphabet — these reach the character-set branch and nothing else.
+NOT_HEX_BUT_SIXTY_FOUR = [
+    "A" * 64,          # upper case: `hexdigest()` never emits it, so accepting it would only
+                       # widen what a mistake can look like
+    "z" + "a" * 63,    # a letter outside `0-9a-f`
+    "-" + "a" * 63,    # a base64url character, which is what a real token is made of
+]
+
+#: Valid hex, wrong length — these reach the length branch and nothing else.
+HEX_BUT_WRONG_LENGTH = ["a" * 63, "a" * 65, "", "abc"]
+
+
+@pytest.mark.parametrize("value", NOT_HEX_BUT_SIXTY_FOUR)
+def test_a_sixty_four_character_value_that_is_not_hex_is_refused(value: str) -> None:
+    """The character-set half. Were `set(value) <= _HEX_DIGITS` deleted from the predicate,
+    only these would go red."""
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(token_hash=value)
+
+
+@pytest.mark.parametrize("value", HEX_BUT_WRONG_LENGTH)
+def test_a_hex_value_of_the_wrong_length_is_refused(value: str) -> None:
+    """The length half, with the alphabet deliberately valid so nothing else can be doing the
+    refusing."""
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(token_hash=value)
+
+
+def test_a_real_portal_token_is_refused_in_place_of_its_digest() -> None:
+    """The mistake this predicate exists to stop: a caller passing the token itself.
+
+    Built with the real generator rather than a hand-typed lookalike — `secrets.token_urlsafe(
+    TOKEN_ENTROPY_BYTES)`, 43 base64url characters — because the value that matters is the one
+    the system actually mints. An earlier version of this test used `"Zk3" * 20`, which is 60
+    characters and shaped like nothing; it refused on length and proved nothing about tokens.
+    """
+    token = generate_guest_token()
+
+    with pytest.raises(MessagingValidationError):
+        InboundMessageActor(token_hash=token)
+
+    # And the digest of that same token is accepted, so the test is about the *shape* rather
+    # than about this particular string being unlucky.
+    assert InboundMessageActor(token_hash=hash_guest_token(token)).user_id is None
+
+
+def test_the_digest_refusal_quotes_neither_the_token_nor_the_value() -> None:
+    """The module's standing rule applies to this branch too, and it was unpinned: the sibling
+    refusal had exactly this bug and was fixed this round, so a future edit re-introducing
+    `{self.token_hash!r}` here would have left the suite green while pushing a portal token
+    into a 422 body and every log line."""
+    token = generate_guest_token()
+
+    with pytest.raises(MessagingValidationError) as raised:
+        InboundMessageActor(token_hash=token)
+
+    assert token not in str(raised.value)
+
+
+def test_the_actor_carries_exactly_three_fields() -> None:
+    """R4.1 names the actor and where it acted from, and nothing else. A fourth field here is
+    a fourth thing that could reach `audit_logs` without passing `AuditLogFactory`."""
+    assert set(InboundMessageActor.__dataclass_fields__) == {"user_id", "token_hash", "ip"}

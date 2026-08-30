@@ -42,6 +42,7 @@ from tests.messaging.conftest import (
     seed_conversation,
     seed_message,
     seed_property,
+    seed_reservation,
     seed_tenant,
 )
 from tests.messaging.test_repositories import build_message
@@ -299,3 +300,97 @@ async def test_escalating_never_touches_another_tenants_conversation(db_session)
     untouched = await repository.get(b.id, b_conversation.id)
     assert untouched.status is ConversationStatus.OPEN
     assert untouched.escalation_status is ConversationEscalationStatus.NONE
+
+
+# --- The portal thread, both ways (`guest-portal-messaging` R3.4, R3.5, R4.5) -------------
+# R4.5 asks for isolation "en **cada** vía nueva: lectura del hilo y envío". Section 3 added
+# two, and the section 3-4 security panel found only the read half covered — the write half
+# was named by a test that did not exercise it. Both are here now, on the unmarked
+# `db_session` for the reason this module's header gives.
+
+
+async def portal_two_tenants(db_session):
+    """Two tenants, each with its own stay, and a portal thread for A only."""
+    a = await seed_tenant(db_session, "TenantA")
+    b = await seed_tenant(db_session, "TenantB")
+    a_property = await seed_property(db_session, a, "REDES11")
+    b_property = await seed_property(db_session, b, "PAJARITOS8")
+    a_stay = await seed_reservation(db_session, a, a_property)
+    b_stay = await seed_reservation(db_session, b, b_property)
+    a_thread = await SqlAlchemyConversationRepository(db_session).ensure_portal(
+        a.id, reservation_id=a_stay.id, property_id=a_property.id,
+        guest_id=None, language="es", now=NOW,
+    )
+    return a, b, a_stay, b_stay, a_property, b_property, a_thread
+
+
+@pytest.mark.asyncio
+async def test_find_portal_never_returns_another_tenants_thread(db_session) -> None:
+    """The read half. B asks for A's stay by id — the only way it could reach A's thread —
+    and gets nothing."""
+    a, b, a_stay, _, _, _, a_thread = await portal_two_tenants(db_session)
+
+    assert await SqlAlchemyConversationRepository(db_session).find_portal(
+        b.id, a_stay.id
+    ) is None
+    # And A still sees its own, so the filter is on the tenant rather than on everything.
+    assert (
+        await SqlAlchemyConversationRepository(db_session).find_portal(a.id, a_stay.id)
+    ).id == a_thread.id
+
+
+@pytest.mark.asyncio
+async def test_ensure_portal_never_writes_into_another_tenants_thread(db_session) -> None:
+    """The write half, which is the one R4.5 names first and the one that was missing.
+
+    B calls `ensure_portal` naming A's stay. Whatever else happens, the one thing that must
+    not is B writing into — or taking over — the row that belongs to A: A's thread keeps its
+    id, its tenant and its language.
+    """
+    a, b, a_stay, _, b_property, _, a_thread = await portal_two_tenants(db_session)
+
+    result = await SqlAlchemyConversationRepository(db_session).ensure_portal(
+        b.id, reservation_id=a_stay.id, property_id=b_property.id,
+        guest_id=None, language="en", now=NOW,
+    )
+
+    assert result.id != a_thread.id
+    assert result.tenant_id == b.id
+
+    unchanged = await SqlAlchemyConversationRepository(db_session).find_portal(a.id, a_stay.id)
+    assert unchanged is not None
+    assert unchanged.id == a_thread.id
+    assert unchanged.tenant_id == a.id
+    assert unchanged.language == "es"
+
+
+@pytest.mark.asyncio
+async def test_ensure_portal_does_not_verify_the_stay_belongs_to_the_tenant(
+    db_session,
+) -> None:
+    """**A characterisation test: this pins a known gap, not a guarantee.**
+
+    `conversations`' foreign keys are global rather than composite with `tenant_id`, so the
+    row B just wrote names A's reservation. `ensure_portal` does not check the anchors — its
+    docstring states that as a precondition on the caller, and on the portal path it holds
+    because every id comes from the `GuestSession` the authoriser resolved. Nothing enforces
+    it for any *other* caller, and `CreateConversationUseCase` spends three lookups on exactly
+    this hazard.
+
+    It is written down here rather than left in a docstring so the gap is visible in the
+    suite. **If someone adds enforcement, this test goes red and should be deleted** — that
+    is the intended outcome, not a regression. The structural fix is a composite foreign key
+    `(tenant_id, reservation_id) -> reservations(tenant_id, id)`, whose target index
+    `uq_reservations_tenant_id_id` already exists for `guest_access_tokens`; it is out of this
+    change's declared scope ("ninguna columna nueva… ningún backfill") and is recorded as a
+    roadmap candidate. Raised by the security panel of sections 3-4.
+    """
+    a, b, a_stay, _, b_property, _, _ = await portal_two_tenants(db_session)
+
+    written = await SqlAlchemyConversationRepository(db_session).ensure_portal(
+        b.id, reservation_id=a_stay.id, property_id=b_property.id,
+        guest_id=None, language="en", now=NOW,
+    )
+
+    assert written.tenant_id == b.id
+    assert written.reservation_id == a_stay.id  # A's stay: the anchor nobody checked

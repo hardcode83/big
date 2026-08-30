@@ -54,6 +54,7 @@ from app.messaging.domain.value_objects import (
     DELIVERY_STATUS_SENT,
     ChannelErrorCode,
     ChannelSendResult,
+    InboundMessageActor,
 )
 from app.notifications.domain.enums import NotificationType
 from app.timeline.domain.enums import TimelineActorType, TimelineEventType
@@ -157,8 +158,7 @@ class Harness:
             tenant_id=TENANT,
             conversation_id=self.conversation.id,
             content=content,
-            actor_user_id=ACTOR,
-            ip=IP,
+            actor=InboundMessageActor(user_id=ACTOR, ip=IP),
             now=now,
         )
 
@@ -175,8 +175,7 @@ async def test_an_unknown_conversation_is_a_not_found_error() -> None:
             tenant_id=TENANT,
             conversation_id=uuid.uuid4(),
             content=GUEST_MESSAGE,
-            actor_user_id=ACTOR,
-            ip=IP,
+            actor=InboundMessageActor(user_id=ACTOR, ip=IP),
             now=NOW,
         )
 
@@ -691,8 +690,7 @@ async def test_the_two_incident_intents_open_one(intent: MessageIntent) -> None:
     report = harness.incidents.reports[0]
     assert report["title"] == INCIDENT_TITLES[intent]
     assert report["description"] == GUEST_MESSAGE
-    assert report["actor_user_id"] == ACTOR
-    assert report["ip"] == IP
+    assert report["actor"] == InboundMessageActor(user_id=ACTOR, ip=IP)
 
 
 @pytest.mark.asyncio
@@ -1110,3 +1108,82 @@ async def test_resolving_closes_the_escalation_with_it() -> None:
 
     assert conversation.status is ConversationStatus.RESOLVED
     assert conversation.escalation_status is ConversationEscalationStatus.RESOLVED
+
+
+# --- `PORTAL` cannot be opened from the inbox (`guest-portal-messaging` R3.7, D14) ---------
+
+
+@pytest.mark.asyncio
+async def test_the_inbox_cannot_open_a_portal_conversation() -> None:
+    """R3.7. Section 1 made `PORTAL` a valid member of `ConversationChannel`, which is what
+    made this route able to open one **without anybody editing it** — and the guest would then
+    find a thread on their own page that they never started."""
+    use_case, conversations, uow = create_conversation_use_case(
+        properties=(StubProperty(PROPERTY),)
+    )
+
+    with pytest.raises(MessagingValidationError):
+        await use_case.execute(
+            tenant_id=TENANT,
+            property_id=PROPERTY,
+            channel=ConversationChannel.PORTAL,
+            reservation_id=None,
+            guest_id=None,
+            language="es",
+            now=NOW,
+        )
+
+    assert conversations.rows == {}
+    assert uow.commits == 0
+
+
+@pytest.mark.asyncio
+async def test_the_portal_refusal_happens_before_any_anchor_is_resolved() -> None:
+    """The guard is first, so a caller cannot learn whether a property exists by asking for a
+    portal thread on it — and so the refusal does not depend on the anchors being valid.
+
+    Asserted with a repository that holds nothing: were the guard placed after the property
+    lookup, this would fail with "Property does not exist" instead.
+    """
+    use_case, _, _ = create_conversation_use_case(properties=())
+
+    with pytest.raises(MessagingValidationError) as raised:
+        await use_case.execute(
+            tenant_id=TENANT,
+            property_id=PROPERTY,
+            channel=ConversationChannel.PORTAL,
+            reservation_id=None,
+            guest_id=None,
+            language="es",
+            now=NOW,
+        )
+
+    assert "PORTAL" in str(raised.value)
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "channel",
+    [c for c in ConversationChannel if c is not ConversationChannel.PORTAL],
+)
+async def test_every_other_channel_may_still_be_opened(
+    channel: ConversationChannel,
+) -> None:
+    """The guard names exactly one channel. Parametrized over the enum rather than over a
+    hand-written list, so a channel added later is opened here by default and whoever adds it
+    has to decide deliberately if that is wrong."""
+    use_case, conversations, _ = create_conversation_use_case(
+        properties=(StubProperty(PROPERTY),)
+    )
+
+    conversation = await use_case.execute(
+        tenant_id=TENANT,
+        property_id=PROPERTY,
+        channel=channel,
+        reservation_id=None,
+        guest_id=None,
+        language="es",
+        now=NOW,
+    )
+
+    assert conversation.channel is channel

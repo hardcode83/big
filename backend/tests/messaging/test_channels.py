@@ -14,11 +14,16 @@ import uuid
 import pytest
 
 from app.messaging.domain.enums import ConversationChannel
-from app.messaging.domain.value_objects import ChannelErrorCode, ChannelSendResult
+from app.messaging.domain.value_objects import (
+    ChannelErrorCode,
+    ChannelSendResult,
+    contact_kind_for,
+)
 from app.messaging.infrastructure.channels import (
     DelegatingOutboundAdapter,
     InboundOnlyAdapter,
     PanelOutboundAdapter,
+    PortalOutboundAdapter,
     outbound_registry,
 )
 from app.notifications.domain.enums import NotificationChannel
@@ -44,13 +49,15 @@ async def send(adapter, *, channel: ConversationChannel, recipient: str | None =
 # --- What the registry contains (R6.2) ---------------------------------------------------
 
 
-def test_the_registry_serves_the_four_channels_this_change_supports() -> None:
-    """R6.2 names them: `MANUAL`, `WHATSAPP`, `EMAIL` and `PHONE_TRANSCRIPT`."""
+def test_the_registry_serves_the_five_channels_this_deployment_supports() -> None:
+    """R6.2 named four — `MANUAL`, `WHATSAPP`, `EMAIL` and `PHONE_TRANSCRIPT`; `PORTAL`
+    is the fifth, added by `guest-portal-messaging` R3.2."""
     assert set(outbound_registry()) == {
         ConversationChannel.MANUAL,
         ConversationChannel.WHATSAPP,
         ConversationChannel.EMAIL,
         ConversationChannel.PHONE_TRANSCRIPT,
+        ConversationChannel.PORTAL,
     }
 
 
@@ -179,3 +186,29 @@ async def test_a_delegated_failure_translates_into_this_modules_vocabulary() -> 
     result = await send(adapter, channel=ConversationChannel.EMAIL, recipient="")
 
     assert result.error_code in set(ChannelErrorCode)
+
+
+# --- `PORTAL` (`guest-portal-messaging` R3.1, R3.2) ---------------------------------------
+
+
+def test_the_portal_entry_is_a_literal_key_of_its_own_class() -> None:
+    """R3.2: registered literally, never dispatched dynamically. And a class distinct from
+    `PanelOutboundAdapter` — D1: two promises, two endpoints, two classes."""
+    adapter = outbound_registry()[ConversationChannel.PORTAL]
+
+    assert isinstance(adapter, PortalOutboundAdapter)
+    assert not isinstance(adapter, PanelOutboundAdapter)
+    assert PortalOutboundAdapter is not PanelOutboundAdapter
+
+
+@pytest.mark.asyncio
+async def test_the_portal_adapter_reports_delivery_because_the_guest_reads_the_row() -> None:
+    """Its truth condition is `GET /api/v1/guest/messages/{token}`, not the panel's."""
+    result = await send(PortalOutboundAdapter(), channel=ConversationChannel.PORTAL, recipient=None)
+
+    assert result == ChannelSendResult.ok()
+
+
+def test_the_portal_channel_addresses_nobody() -> None:
+    """D1: no entry in `contact_kind_for`. The guest comes back to the page on their own."""
+    assert contact_kind_for(ConversationChannel.PORTAL) is None

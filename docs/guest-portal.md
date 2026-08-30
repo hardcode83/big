@@ -1,16 +1,18 @@
 # Portal del huésped
 
-Cómo se opera lo que trajo el change `guest-portal-api`: el enlace que se le da al huésped
-para que consulte su estancia, complete el check-in legal de PRD §17 y abra una incidencia,
-**sin cuenta y sin JWT** (PRD §§6, 7.6, 7.7, 17, 22, 23). El *qué hace* está en
+Cómo se opera lo que trajeron los changes `guest-portal-api` y `guest-portal-messaging`: el
+enlace que se le da al huésped para que consulte su estancia, complete el check-in legal de
+PRD §17, abra una incidencia y escriba al alojamiento, **sin cuenta y sin JWT** (PRD §§6, 7.6,
+7.7, 17, 22, 23). El *qué hace* está en
 [`sdd/specs/guest-portal-api.md`](../sdd/specs/guest-portal-api.md); esta página es el *cómo se
 usa, se opera y se diagnostica*.
 
 **La página la trae `guest-portal-web`.** La ruta `frontend/app/(guest)/guest/[token]/` ya
-renderiza la interfaz real —carga de la estancia, formularios de check-in e incidencia,
-estados accesibles de carga/error/validación/rate-limit/éxito e i18n ES/EN—, consumiendo las
-cuatro rutas anónimas de abajo por el proxy same-origin. Los ejemplos con `curl` de esta
-página siguen sirviendo para operar y diagnosticar la API por debajo.
+renderiza la interfaz real —carga de la estancia, formularios de check-in e incidencia, la
+conversación con el alojamiento, estados accesibles de carga/error/validación/rate-limit/éxito
+e i18n ES/EN—, consumiendo las seis rutas anónimas de abajo por el proxy same-origin. Los
+ejemplos con `curl` de esta página siguen sirviendo para operar y diagnosticar la API por
+debajo.
 
 ## El token es el enlace, y el enlace es la credencial
 
@@ -59,7 +61,7 @@ automática llega con el change que traiga un adapter real — la costura ya est
 
 ## Qué ve el huésped
 
-Cuatro rutas, todas con el token en la ruta y ninguna con `Authorization`:
+Todas con el token en la ruta y ninguna con `Authorization`:
 
 | Ruta | Qué devuelve |
 |---|---|
@@ -67,6 +69,8 @@ Cuatro rutas, todas con el token en la ruta y ninguna con `Authorization`:
 | `GET /api/v1/guest/checkin/{token}` | **Qué falta** de los ocho campos de PRD §17, y los dos estados |
 | `POST /api/v1/guest/checkin/{token}` | Guarda los seis campos que aporta el huésped; cifra el documento en la misma llamada |
 | `POST /api/v1/guest/incident/{token}` | Crea la incidencia en `OPEN` y devuelve `id`, `status` y `created_at` |
+| `POST /api/v1/guest/messages/{token}` | Envía un mensaje al alojamiento y devuelve el mensaje registrado |
+| `GET /api/v1/guest/messages/{token}` | Una página del hilo de la estancia, del más antiguo al más nuevo dentro de la ventana |
 
 Lo que **nunca** sale por aquí: notas internas de la reserva, importes, identificadores de
 PMS o canal, datos de otros huéspedes, credenciales, ni el número de documento — ni siquiera
@@ -90,11 +94,61 @@ curl -X POST http://localhost:8000/api/v1/guest/checkin/$TOKEN \
 curl -X POST http://localhost:8000/api/v1/guest/incident/$TOKEN \
   -H 'content-type: application/json' \
   -d '{"title":"La caldera hace un ruido muy fuerte","description":"Empezó anoche."}'
+
+curl -X POST http://localhost:8000/api/v1/guest/messages/$TOKEN \
+  -H 'content-type: application/json' \
+  -d '{"content":"Hola, ¿a qué hora puedo entrar?"}'
+
+curl http://localhost:8000/api/v1/guest/messages/$TOKEN
 ```
 
 Reenviar el formulario de check-in es seguro: converge en el mismo estado y no añade un
 segundo evento a la timeline. Reenviar una **incidencia** sí crea una segunda: no está
-deduplicada a propósito, y lo que la acota es el límite de tasa.
+deduplicada a propósito, y lo que la acota es el límite de tasa. Reenviar un **mensaje**, lo
+mismo: cada petición es un mensaje más.
+
+### La conversación
+
+El huésped escribe desde su propia página y el mensaje entra en el pipeline de
+[`messaging-ai`](messaging-ai.md) **entero**: se detecta el idioma, se clasifica la intención y,
+según el caso, le contesta la IA con una respuesta de catálogo, se escala a una persona, o se
+abre una incidencia. Todo en la misma transacción, así que o pasa todo o no pasa nada.
+
+**El hilo lo abre su primer mensaje**, y hay como mucho uno por estancia. Leer no lo crea: una
+estancia en la que el huésped no ha escrito responde `200` con un hilo vacío, nunca `404`.
+
+Qué ve el huésped de cada mensaje, y qué no:
+
+| Ve | No ve |
+|---|---|
+| Si lo escribió él o «el alojamiento» | **Si contestó la IA o una persona** |
+| El texto y la hora | El identificador de quien contestó, la confianza, el intent, el `metadata` |
+| Si el hilo está esperando a una persona | **Por qué** se escaló |
+
+La agrupación en dos valores no es cosmética: los campos que no debe ver **no existen** en el
+tipo que se publica, así que no hay serializador que pueda filtrarlos por descuido.
+
+Un matiz honesto sobre «no ve si contestó la IA»: eso es una garantía sobre **lo que viaja en la
+respuesta**, no sobre lo que se puede deducir desde fuera. La respuesta automática llega en el
+mismo sondeo y con el mismo instante que el mensaje que la provocó, y su texto sale de un
+catálogo cerrado, así que alguien observador lo nota. Cerrarlo de verdad es otro change, y
+empieza por decidir si el producto quiere disimular una respuesta instantánea — que para el
+huésped es buena.
+
+**Sin `page` se devuelve la ventana más reciente**, que es por donde se lee un chat; `total`,
+`page` y `per_page` viajan en la respuesta para poder retroceder.
+
+**En la web** (`/guest/[token]`) la conversación es una sección más, bajo el mismo gate que el
+resto: con un enlace muerto no se muestra. Se refresca por sondeo cada 15 segundos **mientras la
+pestaña está visible**, y deja de hacerlo al ocultarla. No hay WebSocket ni SSE.
+
+Los 15 segundos son aritmética contra el límite de tasa, no gusto: el presupuesto son 60
+peticiones por minuto **por token y compartidas entre las seis rutas**, y abrir la página ya
+gasta dos. A 15 s el hilo cuesta 4/min y tres pestañas abiertas siguen cabiendo.
+
+**El manager contesta desde su bandeja**, con el flujo que ya existía; no hay ruta nueva. Y el
+huésped no tiene ninguna forma de escalar, resolver, cerrar ni reabrir su conversación, ni de
+ver ninguna que no sea la suya.
 
 ## Dos advertencias que van juntas, y son la misma en los dos sentidos
 
@@ -131,7 +185,11 @@ Dos límites, asimétricos a propósito:
   un enlace legítimo puede hacer, incluidas las incidencias que una estancia puede abrir.
 
 El tope de cuerpo es el general de `/api/v1/` (1 MiB), aplicado antes del routing. El título de
-una incidencia está topado en 300 caracteres y la descripción en 5.000.
+una incidencia está topado en 300 caracteres y la descripción en 5.000; un mensaje, en 4.000.
+
+**El presupuesto por token es uno solo para las seis rutas**, y desde que la conversación sondea
+eso tiene consecuencia visible: un `429` no deja sin datos solo al hilo, sino a la página
+entera. Por eso el sondeo va a 15 segundos y no más rápido.
 
 ## Diagnóstico
 

@@ -9,12 +9,32 @@ import { GuestField } from "./fields/guest-fields";
 import { useStayInfo } from "../hooks/use-stay-info";
 import { useCheckinStatus, useSubmitCheckin } from "../hooks/use-checkin";
 import { useReportIncident } from "../hooks/use-report-incident";
+import { useConversation, usePostMessage } from "../hooks/use-conversation";
 import type { GuestPortalDTOs } from "../data";
 
 type Translate = (key: string) => string;
 
 function isNotFound(error: unknown) {
   return error instanceof ApiError && error.status === 404;
+}
+
+/**
+ * The same mapping as `errorText`, minus the one clause that only makes sense after a *send*.
+ *
+ * `guest:errors.rateLimit` says "we do not know whether what you sent was received", which is the
+ * right thing to tell someone whose submission may or may not have landed — and the wrong thing
+ * entirely to show for a `429` on a plain `GET`, where the guest has typed nothing. The portal's
+ * six routes share one 60/min budget, so a first load can be rate limited on its own; the i18n
+ * panel of sections 9-10 found this surviving in the read path after the same defect had been
+ * fixed for a failed refresh.
+ *
+ * Only the `429` differs: `413`, `422` and the generic copy say nothing about sending.
+ */
+function readErrorText(error: unknown, t: Translate) {
+  if (error instanceof ApiError && error.status === 429) {
+    return t("guest:conversation.rateLimited");
+  }
+  return errorText(error, t);
 }
 
 function errorText(error: unknown, t: Translate) {
@@ -241,6 +261,115 @@ function IncidentSection({ token }: { token: string }) {
   );
 }
 
+/**
+ * The guest's thread (R5.1-R5.8, design D10).
+ *
+ * Its own `useQuery`/`useMutation` and its own states, like its three siblings: R5.1 requires
+ * that a failure here does not take the stay, check-in or incident sections down with it, and
+ * separate hooks are what make that structural rather than careful. R5.2 comes free from where
+ * it is mounted — `GuestPortalView` returns before rendering any section while `info` has not
+ * authorised, so a dead link never shows this form.
+ *
+ * Every message is labelled from the **grouped** sender the API publishes and nothing finer:
+ * R5.5 forbids deriving the AI/person distinction here, and there is nothing to derive it from,
+ * since `sender` only ever holds `GUEST` or `PROPERTY`.
+ */
+function ConversationSection({ token }: { token: string }) {
+  const { t } = useTranslation();
+  const thread = useConversation(token);
+  const mutation = usePostMessage(token);
+  const [draft, setDraft] = useState("");
+  const [invalid, setInvalid] = useState(false);
+  const submit = (event: React.FormEvent) => {
+    event.preventDefault();
+    const bad = !draft.trim();
+    setInvalid(bad);
+    if (bad) return;
+    mutation.mutate(
+      { content: draft.trim() },
+      // Cleared only once the send succeeded: on a `429` or a network error the guest keeps
+      // what they typed, because R5.8 forbids presenting a retry as proof it was not received —
+      // and emptying the box would be exactly that, in the most misleading form.
+      { onSuccess: () => setDraft("") },
+    );
+  };
+  return (
+    <section aria-labelledby="conversation-title" className="space-y-4">
+      <h2 id="conversation-title" className="text-xl font-semibold">
+        {t("guest:conversation.title")}
+      </h2>
+
+      {thread.isPending ? (
+        <LoadingState label={t("guest:conversation.loading")} />
+      ) : thread.isError && !thread.data ? (
+        // Only when there is nothing to show. A poll that fails **after** the thread loaded must
+        // not replace it: TanStack Query flips `status` to `error` on any failed fetch, including
+        // a background `refetchInterval` tick, so branching on `isError` alone made a single
+        // `429` — plausible precisely because six routes share one budget — blank a conversation
+        // the guest was reading, and replace it with copy about a message they never sent. Found
+        // and reproduced by the QA panel of sections 9-10.
+        <ErrorState
+          title={t("guest:conversation.errorTitle")}
+          description={readErrorText(thread.error, t)}
+          onRetry={() => void thread.refetch()}
+          retryLabel={t("guest:retry")}
+        />
+      ) : (
+        <>
+          {/* A refresh failed while we still hold a thread: say so, keep the history, and do not
+              reuse the send-oriented copy — nothing was sent. */}
+          {thread.isError ? (
+            <p role="status">{t("guest:conversation.staleNotice")}</p>
+          ) : null}
+          {thread.data.items.length === 0 ? (
+            <p>{t("guest:conversation.empty")}</p>
+          ) : (
+            <ol className="space-y-3">
+              {thread.data.items.map((item) => (
+                <li key={item.id} className="space-y-1">
+                  <span className="block text-sm font-medium">
+                    {item.sender === "GUEST"
+                      ? t("guest:conversation.you")
+                      : t("guest:conversation.property")}
+                  </span>
+                  <p className="whitespace-pre-wrap break-words">{item.content}</p>
+                </li>
+              ))}
+            </ol>
+          )}
+          {/* R5.6: the closed state the API publishes, and never the reason behind it. */}
+          {thread.data.state === "AWAITING_HUMAN" ? (
+            <p>{t("guest:conversation.awaitingHuman")}</p>
+          ) : null}
+        </>
+      )}
+
+      <form noValidate onSubmit={submit} className="space-y-4">
+        <GuestField
+          id="content"
+          label={t("guest:conversation.field")}
+          value={draft}
+          error={invalid && !draft.trim() ? t("guest:errors.required") : undefined}
+          onChange={(e) => setDraft(e.target.value)}
+          as="textarea"
+        />
+        <div role="alert" aria-live="polite">
+          {mutation.isPending
+            ? t("guest:conversation.sending")
+            : mutation.isError
+              ? errorText(mutation.error, t)
+              : mutation.isSuccess
+                ? t("guest:conversation.sent")
+                : null}
+        </div>
+        <Button type="submit" disabled={mutation.isPending}>
+          {t("guest:conversation.send")}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
 export function GuestPortalView({ token }: { token: string }) {
   const stay = useStayInfo(token);
   const { t } = useTranslation();
@@ -272,6 +401,7 @@ export function GuestPortalView({ token }: { token: string }) {
       <StayInfoSection token={token} />
       <CheckinSection token={token} />
       <IncidentSection token={token} />
+      <ConversationSection token={token} />
     </main>
   );
 }

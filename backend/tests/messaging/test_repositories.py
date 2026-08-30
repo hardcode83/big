@@ -8,10 +8,16 @@ so a fake repository could not test them at all.
 Tenant isolation has its own file (`test_tenant_isolation.py`, R1.3).
 """
 
+import asyncio
+import contextlib
+import time
 import uuid
 from datetime import timedelta
 
+from sqlalchemy import func, select, text
+
 import pytest
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
 from app.messaging.domain.entities import Conversation, Message
@@ -33,7 +39,7 @@ from app.messaging.domain.value_objects import (
     ChannelErrorCode,
     MessageMetadata,
 )
-from app.messaging.infrastructure.models import MessageModel
+from app.messaging.infrastructure.models import ConversationModel, MessageModel
 from app.messaging.infrastructure.repositories import (
     SqlAlchemyConversationRepository,
     SqlAlchemyMessageRepository,
@@ -43,6 +49,7 @@ from tests.messaging.conftest import (
     seed_conversation,
     seed_message,
     seed_property,
+    seed_reservation,
     seed_tenant,
 )
 
@@ -509,3 +516,300 @@ async def test_an_escalated_conversation_still_counts(db_session) -> None:
     )
 
     assert count == 1
+
+
+# --- The portal thread: one per stay (`guest-portal-messaging` R2.5, R3.4, R3.5, D6) -------
+
+
+async def portal_fixture(db_session):
+    """A tenant with a property and a stay — the anchors `ensure_portal` needs."""
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    reservation = await seed_reservation(db_session, tenant, prop)
+    return tenant, prop, reservation
+
+
+@pytest.mark.asyncio
+async def test_ensure_portal_creates_the_thread_the_first_time(db_session) -> None:
+    tenant, prop, reservation = await portal_fixture(db_session)
+
+    conversation = await conversations(db_session).ensure_portal(
+        tenant.id,
+        reservation_id=reservation.id,
+        property_id=prop.id,
+        guest_id=None,
+        language="es",
+        now=NOW,
+    )
+
+    assert conversation.channel is ConversationChannel.PORTAL
+    assert conversation.reservation_id == reservation.id
+    assert conversation.property_id == prop.id
+    assert conversation.language == "es"
+    assert conversation.status is ConversationStatus.OPEN
+
+
+@pytest.mark.asyncio
+async def test_ensure_portal_returns_the_same_thread_the_second_time(db_session) -> None:
+    """R3.4. The second call must not create a second row — and must return the first one,
+    not merely decline to insert."""
+    tenant, prop, reservation = await portal_fixture(db_session)
+    repo = conversations(db_session)
+
+    first = await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="es", now=NOW,
+    )
+    second = await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="en", now=NOW + timedelta(hours=1),
+    )
+
+    assert second.id == first.id
+    total = await db_session.scalar(
+        select(func.count())
+        .select_from(ConversationModel)
+        .where(
+            ConversationModel.reservation_id == reservation.id,
+            ConversationModel.channel == ConversationChannel.PORTAL,
+        )
+    )
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_the_language_of_the_second_call_does_not_overwrite_the_first(
+    db_session,
+) -> None:
+    """R3.3: the language is decided by the message that opened the thread. `DO NOTHING` and
+    not `DO UPDATE` is what makes that true, so it is worth asserting rather than assuming."""
+    tenant, prop, reservation = await portal_fixture(db_session)
+    repo = conversations(db_session)
+
+    await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="es", now=NOW,
+    )
+    second = await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="en", now=NOW,
+    )
+
+    assert second.language == "es"
+
+
+@pytest.mark.asyncio
+async def test_find_portal_returns_none_and_creates_nothing(db_session) -> None:
+    """R2.5: "leer no abre conversación". Both halves asserted — the answer *and* the absence
+    of a row, because a method that created one and returned it would satisfy the first."""
+    tenant, prop, reservation = await portal_fixture(db_session)
+
+    found = await conversations(db_session).find_portal(tenant.id, reservation.id)
+
+    assert found is None
+    total = await db_session.scalar(
+        select(func.count()).select_from(ConversationModel).where(
+            ConversationModel.reservation_id == reservation.id
+        )
+    )
+    assert total == 0
+
+
+@pytest.mark.asyncio
+async def test_find_portal_returns_the_thread_once_it_exists(db_session) -> None:
+    tenant, prop, reservation = await portal_fixture(db_session)
+    repo = conversations(db_session)
+    created = await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="es", now=NOW,
+    )
+
+    found = await repo.find_portal(tenant.id, reservation.id)
+
+    assert found is not None
+    assert found.id == created.id
+
+
+@pytest.mark.asyncio
+async def test_neither_method_sees_the_stays_other_channels(db_session) -> None:
+    """R3.5: a stay's `WHATSAPP`/`MANUAL` threads stay intact and out of reach of the portal.
+
+    `seed_conversation` does not set `reservation_id`, so it is set here explicitly — the
+    point of the test is precisely a conversation of **the same stay** on another channel.
+    """
+    tenant, prop, reservation = await portal_fixture(db_session)
+    for channel in (ConversationChannel.WHATSAPP, ConversationChannel.MANUAL):
+        other = await seed_conversation(db_session, tenant, prop, channel=channel)
+        other.reservation_id = reservation.id
+    await db_session.flush()
+    repo = conversations(db_session)
+
+    assert await repo.find_portal(tenant.id, reservation.id) is None
+
+    created = await repo.ensure_portal(
+        tenant.id, reservation_id=reservation.id, property_id=prop.id,
+        guest_id=None, language="es", now=NOW,
+    )
+
+    # The portal thread is a fourth row, and the other three are untouched.
+    assert created.channel is ConversationChannel.PORTAL
+    rows = (await db_session.execute(
+        select(ConversationModel.channel).where(
+            ConversationModel.reservation_id == reservation.id
+        )
+    )).scalars().all()
+    assert sorted(c.value for c in rows) == ["MANUAL", "PORTAL", "WHATSAPP"]
+
+
+async def _wait_until_a_backend_blocks_on_a_lock(engine, *, timeout: float = 10.0) -> bool:
+    """Poll until PostgreSQL itself reports a backend waiting on a lock.
+
+    Replaces a fixed `asyncio.sleep`, and the difference is the whole point. A sleep followed
+    by `assert not task.done()` proves only "the loser has not finished", which is **necessary
+    and not sufficient**: with `NullPool` every `AsyncSession` opens a fresh asyncpg
+    connection, so on a loaded host the loser might simply not have reached its INSERT yet —
+    and the test would silently degrade back into the serialised case it was written to
+    replace, passing for the wrong reason with nothing to say so. Both panels of sections 3-4
+    reached that independently.
+
+    This observes the wait instead of inferring it. Scoped to `current_database()` because the
+    cluster also carries the dev database, and to `transactionid` because that is the lock an
+    INSERT takes while it waits on a conflicting uncommitted row — a different `wait_event`
+    would be a different story and should not satisfy this.
+    """
+    deadline = time.monotonic() + timeout
+    async with AsyncSession(engine) as observer:
+        while time.monotonic() < deadline:
+            waiting = await observer.scalar(
+                text(
+                    "SELECT count(*) FROM pg_stat_activity "
+                    "WHERE datname = current_database() "
+                    "AND state = 'active' "
+                    "AND wait_event_type = 'Lock' "
+                    "AND wait_event = 'transactionid'"
+                )
+            )
+            if waiting:
+                return True
+            await asyncio.sleep(0.02)
+    return False
+
+
+@pytest.mark.asyncio
+async def test_two_concurrent_callers_end_with_one_thread_and_both_see_it(
+    db_session, test_engine
+) -> None:
+    """R3.4 in the interleaving that can actually fail, and the reason D6 is not a
+    `SELECT`-then-`add`.
+
+    **The earlier version of this test was serialised** — the winner committed before the
+    loser's INSERT ran — and both the security and QA panels of sections 3-4 pointed out that
+    it therefore proved nothing: a naive check-then-insert would have passed it identically,
+    because the loser's `SELECT` would simply have found the already-committed row. The branch
+    that distinguishes the two implementations only exists while **both** transactions are
+    open, so that is what this drives.
+
+    The sequence, and every step is load-bearing:
+
+    1. the winner inserts and **does not commit**, so its row exists but is invisible;
+    2. the loser calls `ensure_portal` in a task of its own. Its INSERT meets the winner's
+       uncommitted row and blocks on the speculative-insertion lock;
+    3. `assert not loser.done()` — **the discriminating assertion**. It is what proves the
+       contention happened rather than being assumed;
+    4. the winner commits. The loser wakes, `ON CONFLICT DO NOTHING` takes the do-nothing
+       branch **without raising**, and its `SELECT` — a fresh statement snapshot under
+       `READ COMMITTED` — reads the winner's row.
+
+    A check-then-insert implementation fails at step 4 rather than step 3: it would also
+    block, but on waking it gets `UniqueViolationError`, which aborts its transaction and, in
+    production, would take the guest's own message down with it (R1.4's single transaction).
+    So this test now discriminates the two, which the serialised one did not.
+    """
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    reservation = await seed_reservation(db_session, tenant, prop)
+    tenant_id, property_id, reservation_id = tenant.id, prop.id, reservation.id
+    await db_session.commit()
+
+    def call(session):
+        return SqlAlchemyConversationRepository(session).ensure_portal(
+            tenant_id,
+            reservation_id=reservation_id,
+            property_id=property_id,
+            guest_id=None,
+            language="es",
+            now=NOW,
+        )
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as winner, AsyncSession(
+        test_engine, expire_on_commit=False
+    ) as loser:
+        first = await call(winner)          # (1) inserted, uncommitted, invisible
+
+        pending = asyncio.create_task(call(loser))   # (2) blocks on the winner's row
+        try:
+            # (3) The assertion the serialised version could not make — and it **observes** the
+            # contention rather than inferring it from a sleep. See the helper for why that
+            # distinction is the difference between this test and the one it replaced.
+            assert await _wait_until_a_backend_blocks_on_a_lock(
+                test_engine
+            ), "the loser never blocked on the winner's row: the two did not race"
+            assert not pending.done()
+
+            await winner.commit()           # (4) the loser wakes on the DO NOTHING branch
+
+            second = await pending
+            assert second.id == first.id
+            assert second.language == "es"
+            await loser.commit()
+        finally:
+            # **A failure here must not leave a blocked transaction behind.** Without this, an
+            # assertion that fires while the loser is still waiting on the winner's row leaves
+            # that task alive and its session mid-statement: the winner is never committed, the
+            # lock is never released, and the next test's row-truncation blocks on it until
+            # `lock_timeout` — so one red test becomes a cascade of unrelated errors
+            # (`another operation is in progress`), which is exactly what
+            # `steering/testing.md` warns about: "un test que deje una transacción abierta
+            # bloquea el vaciado del siguiente". Seen for real by the QA panel of sections 5-6.
+            if not pending.done():
+                pending.cancel()
+                with contextlib.suppress(asyncio.CancelledError, Exception):
+                    await pending
+
+    async with AsyncSession(test_engine) as observer:
+        total = await observer.scalar(
+            select(func.count()).select_from(ConversationModel).where(
+                ConversationModel.reservation_id == reservation_id,
+                ConversationModel.channel == ConversationChannel.PORTAL,
+            )
+        )
+    assert total == 1
+
+
+@pytest.mark.asyncio
+async def test_the_already_committed_caller_also_gets_the_existing_thread(
+    db_session, test_engine
+) -> None:
+    """The other interleaving, kept alongside the racing one: the second message arrives long
+    after the first and simply finds the thread. Cheap, and it is the common case."""
+    tenant = await seed_tenant(db_session, "TenantA")
+    prop = await seed_property(db_session, tenant, "REDES11")
+    reservation = await seed_reservation(db_session, tenant, prop)
+    tenant_id, property_id, reservation_id = tenant.id, prop.id, reservation.id
+    await db_session.commit()
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as first_session:
+        first = await SqlAlchemyConversationRepository(first_session).ensure_portal(
+            tenant_id, reservation_id=reservation_id, property_id=property_id,
+            guest_id=None, language="es", now=NOW,
+        )
+        await first_session.commit()
+
+    async with AsyncSession(test_engine, expire_on_commit=False) as second_session:
+        second = await SqlAlchemyConversationRepository(second_session).ensure_portal(
+            tenant_id, reservation_id=reservation_id, property_id=property_id,
+            guest_id=None, language="en", now=NOW,
+        )
+        await second_session.commit()
+
+    assert second.id == first.id
