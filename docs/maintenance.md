@@ -295,7 +295,11 @@ de una incidencia, las dos subidas de foto y el cierre con coste y materiales. A
 **ninguna de las dos pantallas produce desplazamiento horizontal** —cero elementos desbordados
 dentro de su contenido— y los objetivos táctiles miden 44 px. La página sí desborda, pero por la
 **cabecera del shell compartido**, que estas pantallas no controlan y que se comporta igual en
-`/dashboard`.
+`/dashboard` (entrada de roadmap `shell-topbar-overflow-360`).
+
+El *qué hace* —las dos superficies, el ciclo, la galería y la puerta de aprobación como requisitos
+EARS— está en [`sdd/specs/tech-app.md`](../sdd/specs/tech-app.md). Esta página cuenta *cómo se
+opera*; no duplica esa spec.
 
 **`/tech` — mis incidencias.** Lista `GET /api/v1/incidents` **sin enviar ningún parámetro que
 identifique al técnico**: el acotamiento por fila lo deriva el backend del token, y no existe
