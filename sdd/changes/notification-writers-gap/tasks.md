@@ -170,8 +170,8 @@ existen y su lista literal puede declarar los cuatro huérfanos de R6.2 sin ment
   exactamente esos cuatro (R6.2), y que el conjunto medido coincide con `WITH_WRITER` **en las
   dos direcciones**. [R6.1, R6.2, R6.4]
 - [x] 7.3 Verificar a mano que el guardián discrimina de verdad: comprobar que las cuatro
-  llamadas a `cancel_sla_deadline` (`cleaning/application/use_cases.py:692`,
-  `maintenance/application/use_cases.py:1590`, `:1762`, `:1840`) **no** cuentan como escritor, y
+  llamadas a `cancel_sla_deadline` (`cleaning/application/use_cases.py:730`,
+  `maintenance/application/use_cases.py:1729`, `:1901`, `:1979`) **no** cuentan como escritor, y
   que `SLA_BREACH` y `TECHNICIAN_NO_RESPONSE` sí cuentan por la vía (b). [R6.3]
 
 ## 8. Verification

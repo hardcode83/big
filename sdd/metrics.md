@@ -77,3 +77,4 @@
 | public-zone-hardening | new, design, tasks, run, review, ship, archive | 1351799 | 241955 | 54634461 | 40.1250 | 2026-08-26 | 2026-08-26 |
 | blocked-transitions-web | new, design, tasks, run, review, ship | 5840102 | 934466 | 186803428 | 144.0417 | 2026-08-24 | — |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
+| notification-writers-gap | new, design, tasks, run, review | 341403 | 1182999 | 259642265 | 163.3506 | 2026-08-29 | — |

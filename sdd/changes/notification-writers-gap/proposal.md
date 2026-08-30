@@ -136,7 +136,14 @@ Acceptance criteria:
 1. WHERE un criterio de arriba dice «destinatarios de R5.1», THE SYSTEM SHALL resolverlos como **cada
    `PROPERTY_MANAGER` activo del tenant y, WHERE no haya ninguno, cada `TENANT_OWNER` activo** — el patrón que
    `celery-jobs` fijó y que `guests/application/use_cases.py::_managers` ya implementa. THE SYSTEM SHALL
-   reusar ese patrón y no derivar un tercero.
+   reusar ese patrón y no derivar **uno nuevo**.
+
+   **Enmendado en `/sdd:review` (panel de arquitectura, 2026-08-29).** Este criterio decía «no derivar un
+   **tercero**», un ordinal que se escribió contando dos implementadores del patrón y que el panel midió
+   en tres: el que faltaba es `cleaning/application/use_cases.py::_notify_manager_unassigned`, anterior a
+   este change y fuera de su alcance. Lo que el criterio exige no cambia —reusar el resolvedor común en
+   vez de escribir el bucle otra vez—, pero enunciarlo con un ordinal lo ataba a un censo que ya estaba
+   mal; sin la enmienda, la spec viva heredaría un `SHALL` que se lee como incumplido de partida.
 2. IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL no escribir filas y SHALL registrarlo, sin
    fallar la operación que las habría producido.
 3. THE SYSTEM SHALL escribir toda fila nueva con `status = PENDING` y `channel = IN_APP`, y SHALL no intentar
@@ -174,8 +181,8 @@ Acceptance criteria:
 
    **Enmendado en `/sdd:design` (D9), tras medir el AST del árbol el 2026-08-29.** Este criterio decía
    antes «`notification_type=NotificationType.<X>.value` en un builder o caso de uso», y esa forma sobra y
-   falta a la vez: casa con **cuatro** llamadas a `cancel_sla_deadline` —`cleaning/application/use_cases.py:692`,
-   `maintenance/application/use_cases.py:1590`, `:1762` y `:1840`— que borran un plazo y no escriben nada, de
+   falta a la vez: casa con **cuatro** llamadas a `cancel_sla_deadline` —`cleaning/application/use_cases.py:730`,
+   `maintenance/application/use_cases.py:1729`, `:1901` y `:1979`— que borran un plazo y no escriben nada, de
    modo que `CLEANING_TASK_ASSIGNED` y `TECHNICIAN_ASSIGNED` contarían como escritos aunque desapareciesen sus
    builders; y no casa con `SLA_BREACH`, cuya fila compone `_escalation_row` desde el `_POLICY` de
    `escalation.py` (`notification_type=escalation.notification_type.value`, sin literal). Con la forma

@@ -13,17 +13,27 @@ inmediato; `dispatch_notifications` drena `PENDING → SENT` cada minuto
 escalado vive aparte, sin reloj ni sesión, en `notifications/domain/escalation.py`.
 
 Los cinco casos de uso que este change toca ya commitean una transacción cada uno:
-`ClassifyIncidentUseCase` (`maintenance/application/use_cases.py:1050`) y
-`TriageIncidentUseCase` (`:1332`), `CompleteCleaningTaskUseCase`
-(`cleaning/application/use_cases.py:1075`) y `ValidateCleaningTaskUseCase` (`:1132`), y
-`GeneratePriceRecommendationsUseCase` (`pricing/application/use_cases.py:391`), que commitea
+`ClassifyIncidentUseCase` (`maintenance/application/use_cases.py:1155`) y
+`TriageIncidentUseCase` (`:1464`), `CompleteCleaningTaskUseCase`
+(`cleaning/application/use_cases.py:1110`) y `ValidateCleaningTaskUseCase` (`:1214`), y
+`GeneratePriceRecommendationsUseCase` (`pricing/application/use_cases.py:396`), que commitea
 **una vez por propiedad** dentro de `_price_one_property`. De los cinco, sólo `Triage` tiene ya
 los puertos `users` + `notifications` (se los dio `_ApprovalGateMixin`); los otros cuatro no.
 
-Y el patrón de destinatarios está escrito **dos veces**: `guests/application/use_cases.py::_managers`
-(managers activos, con caída al owner) y `notifications/application/use_cases.py::_active_holders`
-(lo mismo, parametrizado por rol y contando la página truncada en su informe). R5.1 prohíbe
-derivar un tercero.
+Y el patrón de destinatarios está escrito **tres veces**: `guests/application/use_cases.py::_managers`
+(managers activos, con caída al owner), `notifications/application/use_cases.py::_active_holders`
+(lo mismo, parametrizado por rol y contando la página truncada en su informe) y
+`cleaning/application/use_cases.py::_notify_manager_unassigned` (el mismo bucle
+`PROPERTY_MANAGER`→`TENANT_OWNER` sobre `UserFilters`, escrito a mano). R5.1 prohíbe
+derivar uno nuevo.
+
+**Corregido en `/sdd:review` (panel de arquitectura, 2026-08-29), medido y no recordado**: este
+párrafo decía «escrito **dos veces**» y son tres. El tercero,
+`_notify_manager_unassigned`, es anterior a este change y queda **fuera** de su alcance de
+migración —se comprobó que es idéntico byte a byte en el merge-base—, así que el patrón no
+queda escrito una sola vez al cerrar, sino **dos**: `RoleRecipients` y ese sitio. Migrarlo es
+trabajo de quien toque la auto-asignación de limpieza. La decisión de D1 no cambia; lo que se
+corrige es un recuento que, sin esto, se citaría después como si hubiera contado bien.
 
 ## Decisions
 
@@ -49,9 +59,14 @@ nombre del log es del sitio que lo emite.
 implementadores que ya existen —`guests::_managers` y
 `EscalateBreachedSlasUseCase._active_holders`—, además de estrenarlo en los seis escritores
 nuevos. Los dos son de comportamiento idéntico al helper (por eso `Recipients` lleva `dropped`),
-así que la migración es una refactorización sin cambio observable, y el patrón queda escrito una
-sola vez en todo el repo. Coste asumido: toca un caso de uso ya entregado
-(`notifications/application/use_cases.py`) y sus tests.
+así que la migración es una refactorización sin cambio observable. Coste asumido: toca un caso
+de uso ya entregado (`notifications/application/use_cases.py`) y sus tests.
+
+Lo que **no** cubre este alcance, y hay que decirlo para que nadie lea D1 como «ya está todo en
+un sitio»: `cleaning/application/use_cases.py::_notify_manager_unassigned` repite el mismo
+patrón y no se migra aquí. Es código anterior a este change, en una ruta —la auto-asignación
+que no encuentra limpiadora— que este change no toca; abrirla para refactorizarla sería alcance
+que nadie pidió. Al cerrar, el patrón vive en **dos** sitios: `RoleRecipients` y ése.
 
 Rejected: `app/notifications/application/recipients.py` — sería el primer import
 `application/` → `application/` entre dominios del repo (medido: hoy hay **cero**), y el panel
@@ -215,8 +230,8 @@ Los dos ejes hacen falta y se midió por qué, corriendo el barrido contra el á
 
 - **La forma que la proposal enunciaba sobra por un lado**: `notification_type=NotificationType.<X>.value`
   aparece también en **cuatro** llamadas a `cancel_sla_deadline`
-  (`cleaning/application/use_cases.py:692`, `maintenance/application/use_cases.py:1590`, `:1762`,
-  `:1840`), que **borran un plazo** y no escriben nada. Sin fijar el callee, `CLEANING_TASK_ASSIGNED`
+  (`cleaning/application/use_cases.py:730`, `maintenance/application/use_cases.py:1729`, `:1901`,
+  `:1979`), que **borran un plazo** y no escriben nada. Sin fijar el callee, `CLEANING_TASK_ASSIGNED`
   y `TECHNICIAN_ASSIGNED` seguirían contando como escritos aunque desapareciesen sus builders.
 - **Y falta por el otro**: `SLA_BREACH` no tiene ningún literal en un `NotificationLog(...)`. Su
   fila la escribe `_escalation_row` con `notification_type=escalation.notification_type.value`,
@@ -302,7 +317,7 @@ que `notifications-inbox-web` va a construir tendrá algo que enseñar en la dem
 | tests | `backend/tests/notifications/test_escalation.py` | El escalado del técnico ahora es `TECHNICIAN_NO_RESPONSE`; el conjunto «sin escalado» cambia (D8) |
 | tests | `tests/maintenance/conftest.py`, `tests/cleaning/*`, `tests/pricing/conftest.py`, `tests/scheduler/*` | Fakes y fixtures que construyen los cinco casos de uso ganan los puertos nuevos |
 | steering | `sdd/steering/security.md` | La fila del contrato vivo de `notification_logs.subject`/`body` enumera también `pricing/domain/notifications.py` (D11) |
-| archive | `sdd/roadmap.md`, `sdd/roadmap/notification-writers-gap.md` | Encargo a `/sdd:archive`: la entrada y su nota dicen «nueve sin escritor» y son diez; la proposal ya lo corrigió con la medición |
+| archive | `sdd/roadmap.md`, `sdd/roadmap/notification-writers-gap.md` | Encargo a `/sdd:archive`: (a) la entrada y su nota dicen «nueve sin escritor» y son diez; la proposal ya lo corrigió con la medición. (b) la nota (`:38`) dice «conviene reusarlo y no derivar un tercero» con el mismo ordinal que R5.1 enmendó en `/sdd:review`: son tres los implementadores del patrón, no dos, así que la nota debe decir «uno nuevo» |
 
 ## Data & interfaces
 
