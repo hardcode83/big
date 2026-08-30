@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 
 import { UserMenu } from "@/features/auth";
+import { NotificationBell } from "@/features/notifications";
 import { Separator } from "@/components/ui/separator";
 import { getServerT } from "@/lib/i18n/server";
 import { getServerTheme } from "@/lib/theme/server";
@@ -33,6 +34,7 @@ export async function CleanerShell({ children }: { children: ReactNode }) {
       <ThemeSwitcher initial={theme} />
       <Separator orientation="vertical" className="mx-1 h-6" />
       <LocaleSwitcher />
+      <NotificationBell profile={"cleaner"} />
       <UserMenu />
     </>
   );

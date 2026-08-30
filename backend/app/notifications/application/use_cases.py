@@ -43,6 +43,7 @@ from app.core.unit_of_work import UnitOfWork
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
 from app.notifications.domain.escalation import Escalation, escalation_for
+from app.notifications.domain.exceptions import NotificationNotFoundError
 from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.notifications.domain.results import NotificationErrorCode, NotificationResult
@@ -501,11 +502,77 @@ class ListOwnNotificationsUseCase:
         self._notifications = notifications
 
     async def execute(
-        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, page: int, per_page: int
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        page: int,
+        per_page: int,
+        unread: bool | None = None,
     ) -> NotificationPage:
         found = await self._notifications.list_for_recipient(
-            tenant_id, user_id, page=page, per_page=per_page
+            tenant_id, user_id, page=page, per_page=per_page, unread=unread
         )
         return NotificationPage(
             items=list(found.items), total=found.total, page=page, per_page=per_page
         )
+
+
+class MarkNotificationReadUseCase:
+    """The acknowledgement of R1.2, and the place the `404` of R1.4 is decided.
+
+    One call to `mark_read`, whose `False` means "no row with that id is visible to this
+    user of this tenant" and nothing more precise (design D3). Turning that into
+    `NotificationNotFoundError` here — rather than letting the repository raise — is what
+    keeps the three cases of R1.4 indistinguishable: this use case never learns which one it
+    was, so it cannot leak it.
+
+    **It writes no `AuditLog`** (design D8, confirming the proposal's A2): rule 9 of
+    `steering/security.md` enumerates Reservation, property states, Guest documents,
+    AccessRecord, PricingRule/PriceRecommendation, OwnerApproval, User roles and Incident.
+    Reading one's own notice is none of those, is not an operation on somebody else's data
+    and grants no permission.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, uow: UnitOfWork) -> None:
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, notification_id: uuid.UUID
+    ) -> None:
+        acknowledged = await self._notifications.mark_read(
+            tenant_id, user_id, notification_id
+        )
+        if not acknowledged:
+            raise NotificationNotFoundError()
+        await self._uow.commit()
+
+
+class CountUnreadNotificationsUseCase:
+    """The bell's counter (R2.2, design D4). One `count(*)`, no page of rows."""
+
+    def __init__(self, *, notifications: NotificationLogRepository) -> None:
+        self._notifications = notifications
+
+    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        return await self._notifications.count_unread(tenant_id, user_id)
+
+
+class MarkAllNotificationsReadUseCase:
+    """"Mark all as read" (R5.2, design D6); returns how many rows it moved.
+
+    Zero is the normal case of an inbox already up to date, so it raises nothing — the
+    opposite of `MarkNotificationReadUseCase`, where zero means the caller named a row it
+    cannot see. Scope is every unread row of the token's user, never the page or filter the
+    client is looking at.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, uow: UnitOfWork) -> None:
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        updated = await self._notifications.mark_all_read(tenant_id, user_id)
+        await self._uow.commit()
+        return updated

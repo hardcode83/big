@@ -19,11 +19,16 @@ vi.mock("next/navigation", () => ({
 // Cleaner/technician tops now include the UserMenu (public-zone-hardening
 // R3/D2), which calls `useAuth()` to render the email trigger. The shell
 // tests do not exercise the menu itself, so a stub user is enough.
+// `NotificationBell` (`notifications-inbox-web` R3.1) needs `status` and `user` both resolved
+// (design D16), so the stub gained them. `PublicShell` and `GuestShell` do not mount the bell
+// at all, which is what the tests below pin — not that the stub happens to be empty.
 vi.mock("@/lib/auth", () => ({
   useAuth: () => ({
-    user: { email: "field@example.com" },
+    status: "authenticated",
+    user: { tenant_id: "t1", id: "u1", email: "field@example.com" },
     logout: vi.fn(),
   }),
+  getSessionGeneration: () => 1,
 }));
 // UserMenu now consumes useLogoutMutation, which calls useRuntimeConfig for
 // the API base URL. The shell tests don't exercise the menu, so a stub
@@ -164,5 +169,39 @@ describe("GuestShell (D3/D9, task 6.7)", () => {
       await GuestShell({ children: <div>portal</div> }),
     );
     expect(await getA11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("the bell is in the authenticated shells and nowhere else (`notifications-inbox-web` R3.1)", () => {
+  it("mounts it in CleanerShell", async () => {
+    await renderShell(await CleanerShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("mounts it in TechnicianShell", async () => {
+    await renderShell(await TechnicianShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("never mounts it in PublicShell, which carries no JWT (R3.1)", async () => {
+    await renderShell(await PublicShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.queryByRole("button", { name: /Notificaciones/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never mounts it in GuestShell, whose credential is a path token (R3.1)", async () => {
+    await renderShell(await GuestShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.queryByRole("button", { name: /Notificaciones/ }),
+    ).not.toBeInTheDocument();
   });
 });

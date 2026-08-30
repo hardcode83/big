@@ -3,6 +3,7 @@ export type { AuthContextValue, AuthStatus } from "./auth-provider";
 export { purgeSessionCache } from "./session-cache-purge";
 export {
   clearSessionTokens,
+  getSessionGeneration,
   getSessionTokens,
   setSessionTokens,
 } from "./session-store";

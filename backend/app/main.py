@@ -17,6 +17,7 @@ from app.maintenance.api.approvals_router import router as owner_approvals_route
 from app.maintenance.api.errors import register_maintenance_error_handlers
 from app.maintenance.api.incidents_router import router as incidents_router
 from app.messaging.api.errors import register_messaging_error_handlers
+from app.notifications.api.errors import register_notification_error_handlers
 from app.messaging.api.router import router as conversations_router
 from app.cleaning.api.photos_router import router as cleaning_photos_router
 from app.maintenance.api.photos_router import router as incident_photos_router
@@ -91,6 +92,7 @@ def create_app() -> FastAPI:
     register_guest_error_handlers(app)
     register_timeline_error_handlers(app)
     register_pricing_error_handlers(app)
+    register_notification_error_handlers(app)
     app.include_router(auth_router, prefix=API_V1_PREFIX)
     # `user-management`: a second router of the same module. `auth` owns the `User`
     # aggregate, so its writers live there too (its design D1), but the endpoints of PRD §23

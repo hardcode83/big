@@ -2,7 +2,7 @@
 
 ## Purpose
 
-The read-only presentation layer of the owner/manager dashboard (PRD §9): the
+The presentation layer of the owner/manager dashboard (PRD §9): the
 property-cards overview (`/dashboard`, §9.1), the property detail page
 (`/properties/[id]`, §9.2) with its per-property timeline (§10), and the
 standalone timeline screen (`/timeline`), which mounts that same timeline over a
@@ -14,6 +14,13 @@ against **now exists** — `dashboard-api` shipped the four read endpoints (see
 composition point. It maps the three responses consumed by the UI from their
 generated `snake_case` contract to the feature's `camelCase` DTOs without
 changing the UI, hooks or query keys.
+
+The screen is a read surface **except** for one region: the property card's
+blocked-transitions section, which since `blocked-transitions-web` lets a
+`PROPERTY_MANAGER` cancel the cleaning or resolve the incident that is holding up
+the next check-in. Those two writes go to the `cleaning` and `maintenance`
+endpoints; the four `dashboard-api` routes this feature reads remain read-only,
+and `/properties/[id]` and `/timeline` still mutate nothing.
 
 ## Requirements
 
@@ -35,8 +42,8 @@ changing the UI, hooks or query keys.
   the component: those are rendered as provided by the data source (the backend
   is the source of truth).
 - WHEN a property card is rendered, THE SYSTEM SHALL present its visual and DOM
-  regions in this priority order: operational state, open incidents, next
-  action, reservation and guest, cleaning, and last event.
+  regions in this priority order: operational state, open incidents, blocked
+  transitions, next action, reservation and guest, cleaning, and last event.
 - WHEN cards with different amounts of content are shown in the same grid, THE
   SYSTEM SHALL keep their headers, primary regions, and detail links visually
   aligned without hiding required values or introducing horizontal overflow.
@@ -46,6 +53,112 @@ changing the UI, hooks or query keys.
 - WHEN a user navigates the card with a keyboard, THE SYSTEM SHALL preserve
   native semantics, a visible focus indicator, and the localized accessible
   name of the property-detail link.
+
+#### Blocked transitions on the card
+
+The clock-vs-state mismatches `celery-jobs.md` §Desajustes serves over
+`GET /api/v1/blocked-transitions` are painted where the owner and the manager
+already look. Until this section existed the endpoint had no consumer, and a
+stalled property stayed stalled until a guest wrote.
+
+- WHEN a property of the tenant has one or more current blocked transitions, THE
+  SYSTEM SHALL render them inside that property's card as a labelled
+  `<section>`, ordered by `due_since` ascending with a deterministic tie-break on
+  `reservation_id` and then `trigger`, so two stalls emitted in the same hour do
+  not swap places between renders.
+- THE SYSTEM SHALL mount `useBlockedTransitions()` **once** per `/dashboard` view
+  and slice its `Map<propertyId, stalls>` per card, and SHALL NOT call it inside
+  `PropertyCard`: N cards issue one request, not N.
+- THE SYSTEM SHALL take `tenantId` from the authenticated session inside the hook
+  and SHALL NOT accept it as a parameter — a parameter is an override of the
+  isolation in the wrong direction — keeping the key tenant-scoped as
+  `['tenant', tenantId, 'blocked-transitions', page]`.
+- THE SYSTEM SHALL render `trigger` and `blocking_state` as the canonical literals
+  the backend emits, in a monospaced `<code>`, without translating them, without a
+  parallel label catalog, and without a colour derived from their value; any colour
+  on the card still comes from the single `PropertyOperationalState` map in
+  `components/property-state-badge.tsx`.
+- THE SYSTEM SHALL format `due_since` with `Intl.DateTimeFormat` in the active
+  locale (date + time), and IF the value is not a parseable timestamp THEN SHALL
+  render the raw string — never throwing `RangeError` inside the render loop and
+  never printing the Unix epoch for a null-ish value. The guard lives in the
+  feature's shared `lib/format.ts`, so the property detail sections and the
+  property timeline inherit it rather than keeping a private formatter.
+- THE SYSTEM SHALL lay the row out so a wrap can never strand a separator at the
+  end of a line: the canonical literals occupy one row, the date and the action
+  another, and the remaining separator shares a non-wrapping box with the literal
+  it introduces.
+- WHILE the property has no current blocked transition and the query succeeded, THE
+  SYSTEM SHALL render no section, no badge and no empty state: the card is exactly
+  as it was before this feature.
+- WHILE the stalls query is pending, THE SYSTEM SHALL omit the section and keep the
+  rest of the card rendering.
+- IF the stalls query fails, THEN THE SYSTEM SHALL render the localized error
+  inside the card's own stalls section — keeping its heading, painting no action
+  button, and preferring the error over stale rows — and SHALL NOT escalate to the
+  page-level error state: an outage of this section never hides the cards, and an
+  empty card would be indistinguishable from "this property has no blockers".
+- THE SYSTEM SHALL name, in one line of body copy under the list, the 30-day
+  `candidate_window` the backend applies, and SHALL NOT promise exhaustiveness
+  ("all properties", "real time", "complete"). That line is **not** a link: the
+  application serves no `/docs` route, so the operational detail lives in
+  `docs/properties.md` and is reached outside the app.
+
+##### What action a row offers
+
+- THE SYSTEM SHALL decide the action of a row from a single declared matrix
+  `trigger × blocking_state → ActionKind | null` (`stalls/lib/action-map.ts`) and
+  SHALL NOT distribute `if (state === …)` checks across components. A cell absent
+  from the matrix resolves to `null`: informative, without action.
+- THE SYSTEM SHALL keep the `ClockTrigger` union closed and guarded at compile time
+  (`Exclude<ClockTrigger, keyof typeof ACTION_MATRIX>` having to resolve to
+  `never`), so a fourth trigger in the contract fails type-check instead of quietly
+  resolving to `null`. Operational states are deliberately **not** exhaustive there:
+  `null` is the right answer for a state that admits no action.
+- WHEN a row resolves to `cancel-cleaning`, THE SYSTEM SHALL offer the cancel
+  button only WHERE the session holds `MANAGE_CLEANING_TASKS` **and** the row
+  carries a `cleaning_task_id`; WHEN it resolves to `resolve-incident`, only WHERE
+  the session holds `EXECUTE_INCIDENTS` **and** the row carries an `incident_id`.
+- THE SYSTEM SHALL NEVER paint a button whose call would answer `403`. The
+  permission is read from the partial UI mirror (`lib/auth/permissions.ts`), so a
+  `TENANT_OWNER` — who sees the whole section with her `READ_PROPERTIES` — is
+  offered no button at all.
+- THE SYSTEM SHALL take both ids from the row the backend served and SHALL NOT
+  derive them: a row whose id the backend could not resolve offers no action rather
+  than a wrong one.
+
+##### Confirming an action
+
+- WHEN a cancellation is confirmed, THE SYSTEM SHALL call
+  `POST /api/v1/cleaning-tasks/{task_id}/cancel` with the mandatory non-empty
+  `reason` (bounded at 500 characters with a visible counter, submit disabled while
+  empty); WHEN a resolution is confirmed, THE SYSTEM SHALL call
+  `POST /api/v1/incidents/{incident_id}/resolve` with the required `final_cost`,
+  validated as a positive decimal. Neither SHALL synthesize a field the API already
+  knows from the URL or the session.
+- THE SYSTEM SHALL run both mutations with `retry: false` and, `onSettled`, SHALL
+  invalidate the tenant's `blocked-transitions` prefix **plus** every bucket the
+  write could have moved: cleaning tasks, dashboard cards and property timeline for
+  the cancellation; incidents list, incidents detail, dashboard cards and property
+  timeline for the resolution. Invalidating the stalls alone makes the row vanish
+  under a stale operational badge.
+- THE SYSTEM SHALL NOT patch the cache optimistically: a `resolve` whose amount
+  crosses the approval threshold lands in `AWAITING_OWNER_APPROVAL` rather than
+  `RESOLVED` (`maintenance.md` R4), so the server's answer is the only truth about
+  where the incident went.
+- WHEN a mutation fails, THE SYSTEM SHALL choose the localized message by HTTP
+  **status** — `403` says the permission is gone (retrying grants nothing), `409`
+  says the state moved on (a guest is already in, or somebody resolved it first),
+  and any other status falls back to the per-action generic that names the action —
+  and SHALL NEVER render `ApiError.message`, which is technical and English-only.
+  There is no `401` branch: the HTTP client's one-shot refresh owns that path.
+- WHILE a mutation is in flight, THE SYSTEM SHALL keep the dialog mounted with the
+  typed value intact, disable the submit, and reject a second submit dispatched
+  inside the same React frame through a ref cleared in `onSettled` —
+  `mutation.isPending` only flips on the next commit and cannot close that window.
+- THE SYSTEM SHALL keep each mutation hook in the feature that owns the mutated
+  resource (`features/cleaning`, `features/incidents`) and each dialog in the
+  screen that opens it (`features/dashboard/stalls/components/`).
 
 ### Property detail (`/properties/[id]`)
 
@@ -215,6 +328,10 @@ changing the UI, hooks or query keys.
   `dashboard` namespace); backend-localized dynamic values (reservation reference,
   guest name, timeline text, next-action label, cleaning status) are rendered as
   data.
+- THE SYSTEM SHALL NOT extend that rule to the canonical literals of the
+  blocked-transitions section (`trigger`, `blocking_state`): the backend emits them
+  without prose on purpose, and a translation catalog for them would be a second
+  vocabulary to keep in sync with the contract.
 - THE SYSTEM SHALL map each canonical `PropertyOperationalState` to its exact PRD
   §9.1 color group (green/blue/amber/red/gray), exhaustively over the state union,
   falling back to gray for an unrecognized value.
@@ -253,9 +370,6 @@ para el de la tarea.
   runtime uses the shared authenticated HTTP source; it does not synthesize data,
   calculate operational state or colors, translate backend data, or call the
   separate property-state endpoint.
-- `tenantId` comes from a single centralized dev constant (`DEV_TENANT_ID`) until
-  session-derived tenancy exists (roadmap `auth-tenancy`); it is a non-sensitive
-  placeholder, not a credential.
 - Real-time streaming is still absent on both sides: `dashboard-api` delivers the
   timeline as a filtered, paginated **read**, and explicitly leaves push
   (WebSocket/SSE) out of scope, so PRD §9.2's "tiempo real" is not met yet.
@@ -283,7 +397,19 @@ para el de la tarea.
   `dashboard-view.tsx`, `detail/{property-detail-view,property-detail-sections,
   property-timeline}.tsx`, `timeline/timeline-view.tsx` (the `/timeline` screen:
   selector + the shared timeline).
-- `frontend/features/dashboard/lib/` — `format.ts` (localized dates),
+- `frontend/features/dashboard/stalls/` — the blocked-transitions section:
+  `data/` (`dto.ts` aliasing `BlockedTransitionResponse`, `stalls-source.ts`,
+  `http/http-stalls-source.ts`, `mock/mock-stalls-source.ts`, and `index.ts` as the
+  composition point), `hooks/` (`query-keys.ts`, `use-blocked-transitions.ts`),
+  `lib/` (`action-map.ts` — the `trigger × blocking_state` matrix and its
+  compile-time trigger guard; `stalls-error.ts` — HTTP status → locale key),
+  `components/` (`blocked-transitions-section.tsx`, `cancel-cleaning-dialog.tsx`,
+  `resolve-incident-dialog.tsx`) and `index.ts`, the barrel the card consumes.
+- `frontend/features/cleaning/hooks/use-cancel-cleaning-task.ts` and
+  `frontend/features/incidents/hooks/use-resolve-incident.ts` — the two mutations
+  the card's dialogs run, each living with the resource it writes.
+- `frontend/features/dashboard/lib/` — `format.ts` (localized dates, guarded
+  against an unparseable timestamp),
   `timeline-event-types.ts` (the closed 47-value vocabulary and its compile-time
   exhaustiveness guard), `timeline-range.ts` (`startOfDayIso`, `endOfDayIso`,
   `isInverseRange` — the only arithmetic on this screen and where the 422 trap is);
@@ -299,5 +425,4 @@ para el de la tarea.
   `frontend/app/(workspace)/properties/[id]/page.tsx`,
   `frontend/app/(workspace)/timeline/page.tsx` — compose the feature.
 - `frontend/locales/{es,en}/dashboard.json`, registered in
-  `frontend/lib/i18n/resources.ts`; `frontend/lib/config/constants.ts`
-  (`DEV_TENANT_ID`).
+  `frontend/lib/i18n/resources.ts`; `frontend/lib/config/constants.ts`.
