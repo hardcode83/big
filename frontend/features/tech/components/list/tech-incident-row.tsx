@@ -9,7 +9,7 @@ import {
   type IncidentSummaryDto,
 } from "@/features/incidents";
 
-import { EMPTY_FIELD, formatDateTime } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
 
 /**
  * One incident as a tappable card, not a table row (design D15): a six-column
@@ -31,7 +31,7 @@ export function TechIncidentRow({
 }) {
   const { t, i18n } = useTranslation(["tech", "incidents"]);
   // Literal glyph, never an i18n key — see `frontend-foundation.md`.
-  const dash = EMPTY_FIELD;
+  const dash = "—";
 
   return (
     <li className="rounded-lg border bg-surface">

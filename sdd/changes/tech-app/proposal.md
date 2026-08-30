@@ -201,6 +201,14 @@ Criterios de aceptación:
 
 1. THE SYSTEM SHALL pasar toda cadena visible por `frontend/locales/es/` y `frontend/locales/en/`,
    sin ninguna literal en los componentes.
+
+   > **Enmienda (2026-08-30, gate de `/sdd:review`).** Con una excepción, que no es una grieta sino
+   > una regla más específica: el em-dash de R2.4. `sdd/specs/frontend-foundation.md` lo dice
+   > literalmente —«The em-dash is a literal character in JSX, never a new i18n key (it is not
+   > language text and is the same glyph in `es` and `en`)»—, así que el glifo va inline en el
+   > componente y **no** existe clave de catálogo para él. Una primera versión de este change sí la
+   > creó (`tech:common.empty`) y el panel la rechazó. R6.1 gobierna el *texto*; un signo
+   > tipográfico que es el mismo en los dos idiomas no lo es.
 2. THE SYSTEM SHALL construir los estados de carga, vacío y error sobre los primitivos compartidos
    (`StatePanel`, `LoadingState`, `EmptyState`, `ErrorState`), con `aria-busy` en la carga y
    `role="alert"` en el error, y SHALL NOT renderizar el detalle crudo de ningún error.

@@ -50,26 +50,23 @@ describe("validateFinalCost (R4.1)", () => {
   );
 
   /**
-   * `"5."` and `".5"` are **accepted**, and this is the case that pins R4.5:
-   * local validation only prevents emitting, so it may not refuse a value the
-   * server would take. `Decimal("5.")` is `5` and `Decimal(".5")` is `0.5`,
-   * both inside `ge=0` with two decimals, so an earlier revision that rejected
-   * them as malformed was inventing a mistake the technician had not made.
+   * `"5."` and `".5"` are **accepted**. The rule they answer to is D12's, which
+   * is where the local rule lives: "obligatorio, >= 0, <= 99 999 999,99, dos
+   * decimales". `Decimal("5.")` is `5` and `Decimal(".5")` is `0.5`, both
+   * inside it, so an earlier revision that rejected them as malformed was
+   * inventing a mistake the technician had not made.
    */
   it.each(["5.", ".5"])("accepts %j, which the server accepts", (raw) => {
     expect(validateFinalCost(raw)).toBeNull();
   });
 
   /**
-   * The one place the local rule is knowingly stricter than the *published
-   * pattern* — recorded so it stays a decision instead of drifting into a
-   * contradiction. `^(?!^[-+.]*$)[+-]?0*\d*\.?\d{0,2}0*$` admits a leading `+`
-   * and the server's `Decimal("+5")` passes `ge=0`, so `"+5"` would round-trip
-   * fine. It is refused here because the control is an `<input type="number">`,
-   * which never produces one: accepting it would widen the contract of this
-   * form for a value no technician can type. The inverse case is the reason the
-   * pattern is not the referent at all — it also admits `"5.100"`, which the
-   * schema's `decimal_places=2` rejects.
+   * Two cases where the local rule and the *published pattern* disagree. The
+   * pattern is not the referent — D12 is — and these pin why.
+   *
+   * `"+5"`: the narrowing is recorded as an amendment to D12, not argued here.
+   * `"5.100"`: the pattern admits it, the schema's `decimal_places=2` does not,
+   * so mirroring the pattern would have let a value through to a certain 422.
    */
   it("refuses a leading + although the published pattern admits it", () => {
     expect(validateFinalCost("+5")).toBe("format");

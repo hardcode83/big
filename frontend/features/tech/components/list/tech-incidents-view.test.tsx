@@ -30,7 +30,6 @@ vi.spyOn(incidentsData, "getIncidentsDataSource").mockImplementation(
 );
 
 import { TechIncidentsView } from "./tech-incidents-view";
-import { EMPTY_FIELD } from "../../lib/format";
 
 function renderView() {
   const client = new QueryClient({
@@ -125,7 +124,7 @@ describe("TechIncidentsView (R1)", () => {
 
     expect(await screen.findByText("Piso i2")).toBeInTheDocument();
     await waitFor(() =>
-      expect(screen.getAllByText(EMPTY_FIELD).length).toBeGreaterThan(0),
+      expect(screen.getAllByText("—").length).toBeGreaterThan(0),
     );
     expect(screen.getByText("Avería i1")).toBeInTheDocument();
   });

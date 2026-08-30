@@ -9,7 +9,7 @@ import {
   type IncidentDetailDto,
 } from "@/features/incidents";
 
-import { EMPTY_FIELD, formatDateTime } from "../../lib/format";
+import { formatDateTime } from "../../lib/format";
 
 /**
  * One labelled field. A null value in a populated row is painted with the
@@ -31,9 +31,11 @@ export function TechIncidentFields({
   incident: IncidentDetailDto;
 }) {
   const { t, i18n } = useTranslation(["tech", "incidents"]);
-  // `frontend-foundation.md`: the em-dash is a literal character in JSX, never
-  // an i18n key — it is not language text and is the same glyph in `es` and `en`.
-  const dash = EMPTY_FIELD;
+  // The em-dash is a literal character here, never an i18n key: it is not
+  // language text and is the same glyph in `es` and `en`
+  // (`sdd/specs/frontend-foundation.md`). The sibling features render it
+  // inline the same way.
+  const dash = "—";
 
   const cost = (value: string | null) => {
     if (value === null) return dash;

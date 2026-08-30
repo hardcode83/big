@@ -343,6 +343,19 @@ Dos precisiones que salen de leer `ResolveIncidentRequest` y que no son cosméti
 La validación local sólo impide emitir (R4.5) — obligatorio, ≥ 0, ≤ 99 999 999,99, dos decimales —
 y un `422` del servidor se muestra sin vaciar el formulario.
 
+> **Enmienda (2026-08-30, gate de `/sdd:review`).** Dos precisiones sobre *qué* espeja esa regla,
+> porque la prosa del formulario se equivocó tres rondas seguidas al decirlo.
+>
+> 1. El referente es **esta decisión** y R4.1, no el patrón de cadena de `final_cost` publicado en
+>    `backend/openapi.json`. Ese patrón es más laxo que el esquema que describe en las dos
+>    direcciones: admite `"5.100"`, que `decimal_places=2` rechaza, y admite un signo inicial.
+>    Espejarlo habría dejado pasar un valor a un 422 seguro.
+> 2. **Estrechamiento deliberado:** un `+` inicial se rechaza en local aunque el servidor lo
+>    aceptaría (`Decimal("+5")` cumple `ge=0`). El control es un `<input type="number">`, que nunca
+>    produce uno, así que aceptarlo ensancharía el contrato del formulario para un valor que ningún
+>    técnico puede teclear. Queda dicho aquí, que es donde vive la regla, y no en un comentario de
+>    test.
+
 La puerta de la propietaria se lee de la **respuesta** (R4.2/R4.3): `status = RESOLVED` presenta la
 incidencia cerrada con `final_cost`, `materials` y `resolved_at`; `status = AWAITING_OWNER_APPROVAL`
 dice explícitamente que **el cierre no se ha aceptado**, conserva el `final_cost` que devuelve la
@@ -513,6 +526,19 @@ Claves de consulta nuevas, sobre `tenantScopedKey`:
   mitigarse desde aquí: la salida real es que `GET /api/v1/incidents` proyecte el nombre y el
   código de la vivienda en cada fila, y eso es una entrada `[BE]` propia. Se propone anotarla como
   candidato de roadmap al archivar (`incident-list-property-projection`).
+
+  **Encargos para `/sdd:archive`, dichos aquí para que viajen por el canal que archive lee** y no
+  sólo en la prosa de la enmienda de D4:
+  1. `incident-list-property-projection` — la entrada `[BE]` de arriba.
+  2. **Corregir la fila de la excepción 6** en el censo de la regla 11 de `sdd/steering/security.md`.
+     Hoy presenta «fuera del listado paginado» como el precio intacto de la excepción, y tras este
+     merge un `/tech` mantiene hasta `per_page` bloques de notas de acceso en la caché del cliente.
+     La fila no es falsa —su remedio está acotado a `PropertyPageResponse.data`— pero se lee como
+     una garantía que el árbol ya no honra, y el riesgo es que el siguiente autor ensanche una
+     proyección sobre esa premisa. La edición concreta de `security.md` es decisión del usuario;
+     lo que este change no puede hacer es dejarla sin canal.
+  3. `incident-status-tone` — el candidato que sale de la enmienda de R6.4 (no existe tabla
+     estado-de-incidencia→`Tone` en el árbol, así que la mitad «y estado» era insatisfacible).
 - **Firma caducada en una pantalla abierta mucho rato.** Mitigado por el `onError` de D10, acotado
   a un reintento por foto. Residual aceptado: una foto que falle por otro motivo se ve rota tras
   ese único reintento, que es preferible a un bucle de listados.
