@@ -39,3 +39,34 @@ está en `guests/application/use_cases.py` y en `celery-jobs`, y conviene reusar
 si alguna abre plazo de SLA. Cuidado con lo último: `list_sla_breach_candidates` exige `status = SENT` y
 `dispatch_notifications` es quien lo marca, así que un `sla_deadline_at` nuevo produce escalaciones reales
 desde el primer minuto — a diferencia de cuando `cleaning` escribió el suyo.
+
+---
+
+**Entregada el 2026-08-30 (PR #138). Dos correcciones al censo de arriba, medidas y no recordadas
+— el texto anterior se conserva porque es lo que motivó la entrada, no lo que resultó ser cierto:**
+
+1. **Eran diez sin escritor, no nueve.** El que esta nota omitió es `PRICE_RECOMMENDATION`:
+   `revenue-pricing` está archivado y su `GeneratePriceRecommendationsUseCase` escribía
+   `TimelineEvent` y `AuditLog` y ninguna notificación, y ninguna otra entrada lo reclamaba. Entró
+   en el alcance por decisión de Jose (2026-08-29).
+2. **El censo de arriba mezcla los miembros del enum con los dos tipos de texto libre.**
+   `INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED` no son miembros de `NotificationType` —viven
+   sobre la columna `String(100)`—, así que no cuentan ni entre los diecisiete ni entre los
+   huérfanos. Con ellos fuera, el censo de partida era **siete** con escritor y **diez** sin él.
+
+**Lo que quedó al cerrar**: trece tipos con escritor y cuatro sin él —`LOCK_ALERT` y los tres
+recordatorios al huésped, ambos grupos fuera de alcance por los motivos que esta nota ya daba—. El
+sexto tipo que ganó escritor fue `TECHNICIAN_NO_RESPONSE`, que no se escribió de cero: el escalado
+del técnico dejó de emitir `SLA_BREACH` y pasó a emitirlo.
+
+**Y el censo dejó de hacerse a mano**, que es lo que produjo los dos errores de arriba:
+`backend/tests/notifications/test_writer_census.py` lo mide sobre el AST de `backend/app/` y falla
+si el conjunto difiere de sus listas literales en cualquier dirección, incluido un miembro nuevo
+del enum que no aparezca en ninguna. Lo que decidía el último párrafo quedó así: el patrón de
+destinatarios se reusó en un servicio de dominio único (`app/auth/domain/recipients.py`) en vez de
+derivar otro —eran **tres** copias y no dos, y una de ellas,
+`cleaning::_notify_manager_unassigned`, queda fuera de alcance y sigue en pie—, y ninguna de las
+seis filas nuevas abre plazo de SLA, exactamente por el riesgo que este párrafo advertía.
+
+Estado vivo en [`sdd/specs/access-notifications.md`](../specs/access-notifications.md) §El censo de
+escritores; cómo se opera, en [`docs/access-notifications.md`](../../docs/access-notifications.md).

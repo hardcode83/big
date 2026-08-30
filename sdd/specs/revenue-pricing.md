@@ -238,6 +238,44 @@ Cómo se opera: [`docs/pricing.md`](../../docs/pricing.md).
   SYSTEM SHALL rechazarla con `422` nombrando la clave duplicada, en vez de dejar que Postgres
   la conteste con un `IntegrityError` que nadie traduce y llegaría como `500`.
 
+**La cola deja de depender de que alguien entre a mirar.** Hasta `notification-writers-gap` una
+ejecución escribía su `TimelineEvent` y su `AuditLog` y ninguna notificación, así que las
+recomendaciones de PRD §19 modo 1 esperaban a que la propietaria abriese `/pricing`.
+
+- WHEN una ejecución **crea** al menos una recomendación para una vivienda, THE SYSTEM SHALL
+  escribir **una sola** fila `NotificationLog` de tipo `PRICE_RECOMMENDATION` por vivienda y
+  ejecución, con `related_type = "property"` y `related_id` la vivienda.
+- THE SYSTEM SHALL contar como creaciones únicamente las que la **sentencia** declara insertadas
+  —el mismo conjunto del que sale el `TimelineEvent`—, nunca las actualizadas. La cifra es el
+  motivo: en régimen la ejecución diaria crea una fecha por vivienda y actualiza 59, y la primera
+  pasada crea 60; una fila por recomendación serían sesenta notificaciones el primer día.
+- IF una ejecución no crea ninguna recomendación para una vivienda, THEN THE SYSTEM SHALL no
+  escribir nada para ella.
+- THE SYSTEM SHALL dirigirla a **la unión** de cada `PROPERTY_MANAGER` activo y cada
+  `TENANT_OWNER` activo del tenant, y **no** al patrón de caída manager→owner que usa el resto de
+  avisos operativos: los dos roles tienen `MANAGE_PRICE_RECOMMENDATIONS`, y aquí la propietaria es
+  quien aprueba un precio, así que no puede quedar fuera por el hecho de que exista un manager. No
+  hace falta deduplicar la unión: `User.role` es un valor único, así que nadie está en los dos
+  grupos.
+- THE SYSTEM SHALL resolver esos destinatarios **una vez por ejecución y de forma perezosa** —dos
+  consultas la primera vez que alguna vivienda crea algo, memorizadas para el resto del barrido—.
+  Resolverlos por vivienda serían 2N consultas para una respuesta que no cambia; resolverlos al
+  entrar gastaría dos en cada tick de cada tenant, incluidos los que no crean nada. Retenerlos
+  entre transacciones es seguro porque el puerto devuelve entidades de dominio y no modelos ORM,
+  así que el `rollback()` de una vivienda fallida no las invalida.
+- THE SYSTEM SHALL escribirla tanto en la ejecución del reloj (sin actor) como en
+  `POST /api/v1/price-recommendations/generate` (con actor): la diferencia es quién lo pidió, no
+  qué ocurre.
+- THE SYSTEM SHALL escribirla dentro de la transacción por vivienda que el generador ya comitea, y
+  SHALL darle `status = PENDING`, `channel = IN_APP` y **ningún** `sla_deadline_at`: nadie ha
+  definido en cuánto tiempo hay que decidir un precio, y `PRICE_RECOMMENDATION` no tiene política
+  de escalado.
+- IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL no escribir filas y SHALL
+  registrarlo a nivel de error —un tenant así genera precios que nadie aprobará jamás—, sin fallar
+  el barrido.
+- THE SYSTEM SHALL no cambiar por ello el contrato de la ruta: `created`, `updated`, `preserved` y
+  `skipped` siguen siendo los mismos cuatro contadores.
+
 ### Decisión sobre las recomendaciones
 
 - WHEN un usuario con `READ_PRICE_RECOMMENDATIONS` emite `GET /api/v1/price-recommendations`,
@@ -588,6 +626,8 @@ sólo eran alcanzables por `curl`.
 - `backend/app/pricing/domain/rule_resolution.py` — `resolve_rule`, propia sobre la del tenant.
 - `backend/app/pricing/domain/constants.py` — `HORIZON_DAYS`, `OCCUPANCY_WINDOW_DAYS`.
 - `backend/app/pricing/domain/{enums,exceptions,repositories}.py` — estados, errores, puertos.
+- `backend/app/pricing/domain/notifications.py` — `RELATED_TYPE_PROPERTY` y
+  `price_recommendation_notification`, el builder puro del aviso a quien aprueba.
 - `backend/app/pricing/application/use_cases.py` — los siete casos de uso, incluido el
   generador compartido por el job y por el endpoint.
 - `backend/app/pricing/infrastructure/{models,repositories}.py` — las dos tablas y el
@@ -599,8 +639,9 @@ sólo eran alcanzables por `curl`.
 - `backend/app/auth/domain/policy.py` — los cuatro permisos y sus dos roles.
 - `backend/app/audit/domain/{actions,value_objects}.py` — las cinco acciones, los campos
   auditables de `PRICING_RULE` y las cinco columnas `REDACT_ONLY`.
-- `backend/tests/pricing/` — 16 ficheros de test; `test_calculator.py`, `test_entities.py` y
-  `test_use_cases.py` son los que fijan la fórmula, los validadores y el horizonte.
+- `backend/tests/pricing/` — 17 ficheros de test; `test_calculator.py`, `test_entities.py` y
+  `test_use_cases.py` son los que fijan la fórmula, los validadores y el horizonte, y
+  `test_notifications.py` el builder del aviso.
 - `backend/tests/scheduler/test_generate_price_recommendations.py` — el job, su lock y su
   exención de auditoría.
 - `frontend/app/(workspace)/pricing/page.tsx` — la página: `generateMetadata` desde

@@ -78,5 +78,5 @@
 | blocked-transitions-web | new, design, tasks, run, review, ship, archive | 5840872 | 1000619 | 216249227 | 170.9211 | 2026-08-24 | 2026-08-29 |
 | frontend-auth-role-routing | new, design, tasks, run, review, ship, archive | 2901957 | 533239 | 111194635 | 83.4381 | 2026-08-27 | 2026-08-27 |
 | tech-app | new, design, tasks, run, review | 860929 | 1989323 | 374239334 | 292.6831 | 2026-08-19 | — |
-| notification-writers-gap | new, design, tasks, run, review | 341403 | 1182999 | 259642265 | 163.3506 | 2026-08-29 | — |
+| notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
