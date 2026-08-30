@@ -328,8 +328,38 @@
   (`guest-portal-view.test.tsx`, `http-guest-portal-source.test.ts`, `query-keys.test.ts`).
   Ningún fichero preexistente quedó en rojo en ninguna pasada.
 - [x] 12.5 Typecheck del frontend: `npm run typecheck` (o `tsc --noEmit`) en verde.
-- [ ] 12.6 Comprobación manual del flujo extremo a extremo, desde el worktree principal o `dev`
-  (con `PORT_OFFSET` la página no hidrata): abrir `/guest/[token]`, escribir un mensaje, ver la
-  respuesta automática aparecer en el hilo, forzar una escalación y comprobar la copia de espera,
-  y verificar que el hilo llega a la bandeja del manager con el canal traducido y que su
-  respuesta se lee desde el portal.
+- [x] 12.6 Comprobación manual del flujo extremo a extremo: abrir `/guest/[token]`, escribir un
+  mensaje, ver la respuesta automática aparecer en el hilo, forzar una escalación y comprobar la
+  copia de espera, y verificar que el hilo llega a la bandeja del manager con el canal traducido y
+  que su respuesta se lee desde el portal.
+
+  **Hecha el 2026-08-30 en este worktree**, en Chromium real contra el stack levantado con
+  `make up PORT_OFFSET=41`, sobre datos de `bootstrap` + `seed-demo` y un token acuñado por la
+  ruta de operador. La premisa que decía que esto no se podía hacer aquí —«con `PORT_OFFSET` la
+  página no hidrata»— **resultó falsa al medirla**: `sdd/project.md` §«Worktree bootstrap» queda
+  corregido en este mismo commit, con la constancia de que `next.config.ts` sigue **sin**
+  `allowedDevOrigins` y aun así hidrata, así que la causa que aquella nota apuntaba era la
+  equivocada.
+
+  Las seis cláusulas, una por una:
+  1. `/guest/[token]` carga las cuatro secciones en una página real —«Tu estancia», «Check-in»,
+     «Comunicar una incidencia» y «Conversación»— y el hilo vacío dice «Todavía no has escrito
+     nada», no `404` (R2.5, R5.1, R5.2).
+  2. Mensaje enviado desde el textarea; aparece etiquetado «Tú» y el `aria-live` anuncia «Mensaje
+     enviado.» (R5.4).
+  3. La respuesta automática aparece en el mismo sondeo, etiquetada «El alojamiento» y **sin
+     ninguna marca de IA** (R5.5).
+  4. Escalación forzada con una queja: el hilo pasa a mostrar «Te responderá una persona.» y
+     **no** explica el motivo (R2.3, R5.6).
+  5. En `/conversations` la fila sale como **«Portal del huésped»** —traducida, el literal
+     `PORTAL` no aparece en la página— con «Escalada / Esperando a una persona» (R3.6, D11).
+  6. Respuesta del manager desde `/conversations/[id]`, leída de vuelta en el portal como «El
+     alojamiento», **indistinguible de la de la IA**. Ésta es la comprobación más fuerte de R5.5:
+     en la misma pantalla del manager ese mismo hilo muestra «IA» y el intent
+     `CHECKIN_INSTRUCTIONS`, y en el portal no se ve ninguna de las dos cosas.
+
+  **Observación de UX, no hallazgo**: tras contestar la persona, el portal sigue diciendo «Te
+  responderá una persona.». Es conforme al spec —`is_handed_over()` cubre `PENDING_HUMAN` y
+  `HUMAN_HANDLING` por D9, el estado real era `HUMAN_HANDLING`, y R2.3 sólo define dos valores—,
+  pero quien lea la copia después de que le hayan contestado puede leerla como que aún no lo han
+  hecho. Si se quiere afinar, es una copia más y un tercer valor en el vocabulario de R2.3.

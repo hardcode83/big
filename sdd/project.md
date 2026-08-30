@@ -99,9 +99,28 @@ La postura de red **se conserva**: `postgres` y `redis` siguen acotados a `127.0
 
 El número solo hay que pasarlo a `up`: `down`, `logs`, `ps` y `sh` direccionan el proyecto por su nombre, no por sus puertos, así que dan con el mismo stack sin repetirlo. El filo único es que `up` es el que **crea** los mapeos, así que un **`make up SERVICE=<x>` parcial sin repetir `PORT_OFFSET`** recrearía ese servicio sin puertos.
 
-**Y el aviso que hace falta antes de contar con esto para mirar la UI: con `PORT_OFFSET` la página se sirve pero NO hidrata.** Medido el 2026-08-23 en `cleaning-assign-preconditions` con `PORT_OFFSET=37`: el HTML del servidor llega y se ve, pero el formulario de login hace un submit nativo —las credenciales acaban en la query string—, el conmutador de idioma no responde y no aparecen props de React en el `<form>` tras 15 s. El único error de consola de la app es el handshake del WebSocket de HMR contra `ws://127.0.0.1:<puerto desplazado>/_next/webpack-hmr` (`ERR_INVALID_HTTP_RESPONSE`).
+**Con `PORT_OFFSET` la página hidrata y sirve para una pasada visual completa.** Re-medido el
+2026-08-30 desde el worktree `guest-portal-messaging` con `PORT_OFFSET=41`, en Chromium real y
+contra el stack de ese worktree: el `<form>` de login tiene `__reactProps` con `onSubmit`
+cableado, el login redirige por React a `/dashboard` **sin** credenciales en la query string, y la
+consola sale limpia —ni un error, y ningún fallo de handshake de HMR—. Sobre esa base se corrió
+entera la comprobación manual extremo a extremo de `guest-portal-messaging` (tarea 12.6): portal
+del huésped, envío de mensaje, respuesta automática, escalación, bandeja del manager con el canal
+traducido y respuesta humana leída de vuelta desde el portal.
 
-La causa que encaja —no confirmada al cien por cien— es que `frontend` corre `next dev` con Next `^16.2.11` y sin `allowedDevOrigins`: Next 15+ bloquea las peticiones de desarrollo de origen cruzado, y el desplazamiento hace que la página venga de `:<n>` mientras Next tiene por suyo el `:3000` del contenedor. Consecuencia práctica: **`PORT_OFFSET` sirve para alcanzar la API desde el host, no para una pasada visual**. Para eso, el worktree principal —donde no hay desplazamiento— o `dev`. Arreglarlo de verdad es declarar `allowedDevOrigins` en `next.config`, y no se hizo desde un change que sólo lo necesitaba para verificar: cambiar la configuración de la app para poder mirarla no es mirarla.
+**Lo que decía antes esta sección, y por qué ya no.** Hasta el 2026-08-30 aquí ponía que la página
+«se sirve pero NO hidrata», medido el 2026-08-23 en `cleaning-assign-preconditions` con
+`PORT_OFFSET=37` —submit nativo del login, conmutador de idioma mudo, sin props de React en el
+`<form>`, y un `ERR_INVALID_HTTP_RESPONSE` en el WebSocket de HMR—, y atribuía la causa, **sin
+confirmarla**, a `next dev` sin `allowedDevOrigins`. Ninguno de esos síntomas se reproduce hoy, y
+`frontend/next.config.ts` **sigue sin declarar `allowedDevOrigins`**: así que la causa que se
+apuntaba era la equivocada, o el síntoma dependía de algo del entorno de aquella sesión. No se ha
+diagnosticado por qué desapareció, y esa es la parte honesta de esta nota: lo que está medido es
+que **hoy funciona**, no que no pueda volver.
+
+La consecuencia práctica se invierte: para una pasada visual **no** hace falta el worktree
+principal ni `dev`. Si vuelve a aparecer, el síntoma que lo delata en dos segundos es el `<form>`
+sin `__reactProps`, y el arreglo candidato sigue siendo declarar `allowedDevOrigins`.
 
 **Nada que copiar a mano**: `make up` crea `.env` desde `.env.example`, genera `JWT_SECRET_KEY` y ajusta permisos; las dependencias viven en volúmenes de Docker (`backend_venv`, `frontend_node_modules`), no en el árbol de ficheros. Requiere Docker Compose ≥ 2.35.0 y git ≥ 2.31 (por `--path-format`). El suelo de Compose lo fijan tres cosas y manda la mayor: 2.24 por el tag `!reset` de `docker-compose.worktree.yml`, 2.24.4 por el tag `!override` del overlay que genera `make up PORT_OFFSET=<n>`, y 2.35.0 por la bandera `--no-env-resolution` que usa `make check-compose-ports` (`specs/local-environment.md`).
 
