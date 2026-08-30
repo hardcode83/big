@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository: 
-base_branch: 
-head_branch: 
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/guest-portal-messaging
 implementation_sha: f26da2333eba23f2918527cab0caee6d67dd1b93
 pr_number: 
 pr_url: 
