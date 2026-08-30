@@ -15,21 +15,24 @@ import type { components } from "@/lib/api/generated/openapi";
  * complete would go stale in silence the moment the backend adds a permission;
  * one that says what it covers only ever lies about what it enumerates.
  *
- * Role-to-permission grants **must mirror `backend/app/auth/domain/policy.py`**:
- * - `messaging-ai` D17 says reading conversations is the owner's and the
- *   manager's, but **operating** the inbox is the manager's alone. The owner
- *   reads but does not write. Granting `MANAGE_CONVERSATIONS` to `TENANT_OWNER`
- *   here would surface a composer that the backend immediately refuses with
- *   403 on every submission — a defect that the automated suite cannot catch
- *   because it mocks this hook instead of round-tripping through the policy.
- *   This rule is the source of truth; this map is a UX hint of it.
+ * Since `blocked-transitions-web` R2.4 the mirror also covers
+ * `EXECUTE_INCIDENTS`, used by the dashboard card's resolve-incident action.
+ * The card never paints a button that would `403`: a row whose `ActionKind`
+ * resolves to `resolve-incident` shows the button only when this mirror says
+ * `true`.
+ *
+ * `messaging-ai` D17 mirrors `MANAGE_CONVERSATIONS` here too: the manager
+ * operates the inbox while the owner reads it, and granting the owner the
+ * composer that the backend would then 403 is exactly the failure mode the
+ * partial mirror exists to prevent.
  */
 type UserRole = components["schemas"]["UserRole"];
 
 export type Permission =
   | "MANAGE_CLEANING_TASKS"
-  | "MANAGE_CONVERSATIONS"
-  | "MANAGE_PRICE_RECOMMENDATIONS";
+  | "MANAGE_PRICE_RECOMMENDATIONS"
+  | "EXECUTE_INCIDENTS"
+  | "MANAGE_CONVERSATIONS";
 
 export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   SUPER_ADMIN: [],
@@ -46,8 +49,9 @@ export const ROLE_UI_PERMISSIONS: Record<UserRole, readonly Permission[]> = {
   TENANT_OWNER: ["MANAGE_PRICE_RECOMMENDATIONS"],
   PROPERTY_MANAGER: [
     "MANAGE_CLEANING_TASKS",
-    "MANAGE_CONVERSATIONS",
     "MANAGE_PRICE_RECOMMENDATIONS",
+    "EXECUTE_INCIDENTS",
+    "MANAGE_CONVERSATIONS",
   ],
   CLEANER: [],
   TECHNICIAN: [],

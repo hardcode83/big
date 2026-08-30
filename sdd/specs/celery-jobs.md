@@ -201,6 +201,12 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL no escribir en esa petición, ni siquiera la fila de configuración del tenant:
   `TenantConfigRepository.checkin_window_hours` lee una columna con su default en vez de pasar por
   `get_or_create`, que es lo que haría un `GET` escribir.
+- **Quién consume esa colección**: desde `blocked-transitions-web`, la card de cada vivienda en
+  `/dashboard`. Es el único consumidor, y es lo que cierra el «que no me entere por un huésped» que
+  motivó la detección: la propietaria ve el aviso con su `READ_PROPERTIES` y el `PROPERTY_MANAGER`
+  ve además la acción que lo desatasca. Los literales viajan sin prosa precisamente porque esa
+  pantalla los pinta tal cual; el contrato de la pantalla vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### Idempotencia y no solapamiento
 

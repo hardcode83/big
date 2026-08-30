@@ -9,7 +9,7 @@ import { ApiError } from "@/lib/api";
 import {
   conflictReason,
   useIncidentCycleAction,
-  useResolveIncident,
+  useCloseIncident,
   type IncidentCycleAction,
   type IncidentDetailDto,
 } from "@/features/incidents";
@@ -39,7 +39,7 @@ export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) 
   const cycle = useIncidentCycleAction({
     onRejected: () => router.replace("/tech"),
   });
-  const resolve = useResolveIncident();
+  const resolve = useCloseIncident();
 
   const actions = techActions(incident.status);
   const cycleActions = actions.filter(

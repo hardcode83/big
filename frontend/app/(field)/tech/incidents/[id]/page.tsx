@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 import { TechIncidentDetailView } from "@/features/tech";
 
 export function generateMetadata(): Promise<Metadata> {

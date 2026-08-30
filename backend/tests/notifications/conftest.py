@@ -73,6 +73,7 @@ async def insert_notification(
     last_error: str | None = None,
     notification_type: str = "CLEANING_TASK_ASSIGNED",
     created_at: datetime | None = None,
+    read_at: datetime | None = None,
 ) -> NotificationLogModel:
     """`created_at` is explicit whenever a test asserts an order.
 
@@ -90,6 +91,7 @@ async def insert_notification(
         body=body,
         status=status,
         last_error=last_error,
+        read_at=read_at,
     )
     if created_at is not None:
         model.created_at = created_at

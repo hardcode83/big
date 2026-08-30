@@ -223,6 +223,11 @@ hasta que el calendario la liberase, y la única puerta abierta era perversa: de
 - THE SYSTEM SHALL NOT relajar ninguna precondición existente por el hecho de que esta salida
   exista: el `409` de cerrar una limpieza con un huésped dentro sigue en pie, y la matriz no gana
   filas de conveniencia desde `CLEANING_*` hacia estados de check-in.
+- **Quién la llama desde la web**: además de `/cleaning` (`cleaning-manager-view.md`), la sección de
+  desajustes de la card del dashboard ofrece esta cancelación al `PROPERTY_MANAGER` cuando el reloj
+  exigió un check-in que la limpieza está bloqueando; el comportamiento de esa pantalla —qué fila
+  ofrece el botón, con qué permiso y qué invalida al terminar— vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### Checklist
 

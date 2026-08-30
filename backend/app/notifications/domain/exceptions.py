@@ -18,3 +18,23 @@ class NotificationLogNotFoundError(NotificationDomainError):
     def __init__(self, log_id) -> None:
         super().__init__(f"No notification log {log_id} within the acting tenant")
         self.log_id = log_id
+
+
+class NotificationNotFoundError(NotificationDomainError):
+    """A reader addressed a notification that is not theirs to address (R1.4).
+
+    Sibling of `NotificationLogNotFoundError` and NOT the same case: that one covers a
+    write of the dispatcher or the SLA job that found no row, which is a broken invariant
+    and names the id it could not reach. This one covers a request from the outside, where
+    naming anything is the failure.
+
+    **The message is a constant, and that is the requirement, not tidiness.** R1.4 says the
+    body must not distinguish "does not exist" from "another user's" from "another tenant's"
+    — a `403`, or a message carrying the id, would confirm that a row exists and turn the
+    endpoint into an existence oracle. The three cases already collapse upstream, in the
+    single `UPDATE` of design D3 whose `rowcount == 0` cannot tell them apart; this class is
+    what keeps them collapsed on the way out.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("No such notification")

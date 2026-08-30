@@ -948,7 +948,7 @@ async def test_the_pricing_module_does_not_import_the_pms_at_all() -> None:
 # session-level machinery those guarantees rest on was never exercised at all.
 
 
-def a_generator(flow, *, uow=None, recommendations=None, timeline=None):
+def a_generator(flow, *, uow=None, recommendations=None, timeline=None, notifications=None):
     """The generator rewired, so a test can substitute exactly one collaborator."""
     from app.core.unit_of_work import SqlAlchemyUnitOfWork
     from app.pricing.application.use_cases import GeneratePriceRecommendationsUseCase
@@ -961,6 +961,8 @@ def a_generator(flow, *, uow=None, recommendations=None, timeline=None):
         reservations=SqlAlchemyReservationRepository(flow.session),
         timeline=timeline or flow.timeline,
         audit=flow.audit,
+        users=flow.users,
+        notifications=notifications or flow.notifications,
         uow=uow or SqlAlchemyUnitOfWork(flow.session),
     )
 
@@ -1445,3 +1447,252 @@ async def test_the_left_edge_of_the_horizon_is_repriced_without_a_cap_every_run(
     # is not in this horizon, so R3.3 says there is no base to measure against.
     assert edge.recommended_price == Decimal("100.00")
     assert "max_daily_change_pct" not in edge.explanation
+
+
+# --- R4: the recommendation reaches whoever approves it --------------------------------
+
+
+async def _price_rows(db_session, tenant_id) -> list:
+    from sqlalchemy import select
+
+    from app.notifications.infrastructure.models import NotificationLogModel
+
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == tenant_id,
+            NotificationLogModel.notification_type == "PRICE_RECOMMENDATION",
+        )
+    )
+    return list(rows.scalars())
+
+
+async def test_a_run_that_creates_sixty_recommendations_writes_one_row_per_recipient(
+    flow, world, db_session
+) -> None:
+    """R4.1/R4.2 — the cifra the requirement is built on.
+
+    A property's first run creates the whole sixty-day horizon. One row per recommendation
+    would be sixty notifications for one fact; R4.2 says count only what the statement
+    declared inserted, and write per property and execution.
+    """
+    await a_rule(flow, world, property_id=world.property.id)
+
+    outcome = await flow.generate.execute(
+        world.tenant.id, now=NOW, property_id=world.property.id
+    )
+
+    assert outcome.created == 60
+    rows = await _price_rows(db_session, world.tenant.id)
+    # One per recipient (manager + owner), not one per recommendation.
+    assert len(rows) == 2
+    assert {row.related_id for row in rows} == {world.property.id}
+    assert all(row.related_type == "property" for row in rows)
+    assert all(row.sla_deadline_at is None for row in rows)
+
+
+async def test_the_recipients_are_the_union_of_managers_and_owners(
+    flow, world, db_session
+) -> None:
+    """R4.4 — **not** R5.1's fallback, and this is the one writer where that differs.
+
+    Everywhere else the owner hears only when there is no manager. Here she approves the
+    price, so dropping her because a manager exists would take the decision away from the
+    person whose money it is. Both roles hold `MANAGE_PRICE_RECOMMENDATIONS`.
+    """
+    await a_rule(flow, world, property_id=world.property.id)
+
+    await flow.generate.execute(world.tenant.id, now=NOW, property_id=world.property.id)
+
+    rows = await _price_rows(db_session, world.tenant.id)
+    assert {row.recipient_user_id for row in rows} == {world.manager.id, world.owner.id}
+
+
+async def test_a_second_run_that_only_updates_announces_nothing(
+    flow, world, db_session
+) -> None:
+    """R4.2/R4.3 — `written.inserted` is empty, so there is nothing new to announce.
+
+    This is the steady state on the day after a property's first run over an unchanged
+    horizon: sixty updates, zero creations. A notification here would be a daily ping about
+    prices nobody changed.
+    """
+    await a_rule(flow, world, property_id=world.property.id)
+    await flow.generate.execute(world.tenant.id, now=NOW, property_id=world.property.id)
+    before = len(await _price_rows(db_session, world.tenant.id))
+
+    outcome = await flow.generate.execute(
+        world.tenant.id, now=NOW, property_id=world.property.id
+    )
+
+    assert outcome.created == 0
+    assert len(await _price_rows(db_session, world.tenant.id)) == before
+
+
+async def test_the_roster_is_resolved_once_per_execution_not_once_per_property(
+    flow, world, db_session
+) -> None:
+    """Design D7's whole reason for the lazy memo, asserted by counting statements.
+
+    With N properties creating rows, resolving per property would be 2N queries for an answer
+    that cannot change inside one sweep. Counted rather than reasoned about, because a `for`
+    that re-resolves looks exactly like one that does not.
+    """
+    from tests.sql_counter import count_statements
+
+    await a_rule(flow, world, property_id=world.property.id)
+    await a_rule(flow, world, property_id=world.second_property.id)
+
+    with count_statements(db_session.bind) as log:
+        outcome = await flow.generate.execute(world.tenant.id, now=NOW)
+
+    assert outcome.created == 120  # both properties created their horizons
+    roster_queries = [
+        statement
+        for statement in log.matching("FROM users")
+        if "count" not in statement.lower()
+    ]
+    # Exactly two: one for PROPERTY_MANAGER, one for TENANT_OWNER, for the whole sweep.
+    assert len(roster_queries) == 2, roster_queries
+    assert len(await _price_rows(db_session, world.tenant.id)) == 4  # 2 properties x 2 people
+
+
+async def test_a_run_that_creates_nothing_never_asks_for_the_roster(
+    flow, world, db_session
+) -> None:
+    """The other half of D7's laziness: a tenant with no rules pays nothing.
+
+    Resolving the roster on entry to `execute` would spend two queries on every tick of
+    every tenant, including the ones that skip every property for want of a rule.
+    """
+    from tests.sql_counter import count_statements
+
+    with count_statements(db_session.bind) as log:
+        outcome = await flow.generate.execute(world.tenant.id, now=NOW)
+
+    assert outcome.created == 0
+    assert log.matching("FROM users") == []
+    assert await _price_rows(db_session, world.tenant.id) == []
+
+
+async def test_a_neighbours_owner_is_never_told_about_this_tenants_prices(
+    flow, world, db_session
+) -> None:
+    """Rule 1 of `steering/security.md` on a row addressed to a named person."""
+    await a_rule(flow, world, property_id=world.property.id)
+
+    await flow.generate.execute(world.tenant.id, now=NOW, property_id=world.property.id)
+
+    mine = await _price_rows(db_session, world.tenant.id)
+    assert {row.recipient_user_id for row in mine} == {world.manager.id, world.owner.id}
+    assert await _price_rows(db_session, world.other_tenant.id) == []
+
+
+async def test_a_mixed_sweep_only_announces_the_properties_that_created(
+    flow, world, db_session
+) -> None:
+    """R4.1/R4.3 in one execution: the gate is per property, not per sweep.
+
+    The existing tests cover "one property creates" and "one property only updates" as
+    separate runs. The section-6/7 QA panel pointed out the permutation that actually
+    exercises the gate's placement — a creator and an updater **in the same `execute`** — and
+    it was missing. A gate hoisted out of `_price_one_property` to the sweep would pass both
+    of the older tests and fail this one.
+    """
+    await a_rule(flow, world, property_id=world.property.id)
+    # Give the first property a full horizon already, so the next sweep only updates it.
+    await flow.generate.execute(world.tenant.id, now=NOW, property_id=world.property.id)
+    before = await _price_rows(db_session, world.tenant.id)
+    assert {row.related_id for row in before} == {world.property.id}
+
+    # Now the second property gains a rule and creates for the first time, in a sweep that
+    # also revisits the first property.
+    await a_rule(flow, world, property_id=world.second_property.id)
+    await flow.generate.execute(world.tenant.id, now=NOW)
+
+    after = await _price_rows(db_session, world.tenant.id)
+    fresh = [row for row in after if row not in before]
+    # Only the property that actually created anything is announced.
+    assert {row.related_id for row in fresh} == {world.second_property.id}
+
+
+async def test_a_notification_does_not_survive_the_rollback_of_its_own_property(
+    flow, world, db_session
+) -> None:
+    """R4.1's row lives in the property's transaction, so an abandoned property announces nothing.
+
+    The two existing failure-injection tests both raise *before* `_notify_new_recommendations`
+    is reached, so neither covered this window — the section-6/7 QA panel called it out.
+
+    The failure is placed **between the two recipients**: the manager's row is written and
+    flushed by the real adapter, then the owner's raises. So a notification row genuinely
+    exists inside the transaction at the moment it is abandoned, which is the only way to show
+    that the rollback takes it with the horizon rather than leaving an orphan announcement for
+    a property whose prices were discarded.
+
+    The explicit `rollback()` before the assertions is not ceremony: the adapter's `add`
+    flushes, so the failure lands with a real statement already on the connection, and the
+    session has to be brought back to a usable state before it can be queried. Two earlier
+    attempts at this test skipped that and died on `MissingGreenlet` — which looked like a
+    product problem and was not.
+    """
+
+    class _FailsOnTheSecondRecipient(_Delegating):
+        """Fails the second row of whichever property the sweep reaches first.
+
+        Not keyed to a named property on purpose: `_candidates`' ordering is not part of what
+        this test is about, and pinning the failure to a specific one made the sweep end on
+        the abandoned property, leaving the session unusable for the assertions.
+        """
+
+        def __init__(self, inner) -> None:
+            super().__init__(inner)
+            self.added = 0
+            self.failed_property = None
+
+        async def add(self, tenant_id, log):
+            self.added += 1
+            if self.added == 2:
+                self.failed_property = log.related_id
+                raise RuntimeError("the second notification write failed")
+            return await self._inner.add(tenant_id, log)
+
+    # Ids captured as plain UUIDs **before** the sweep. This is the whole reason three
+    # earlier attempts at this test died on `MissingGreenlet`: the abandoned property's
+    # rollback expires the `world` fixture's ORM instances, so a later `world.property.id`
+    # is not a field read but a lazy refresh — IO in a place the assertions never expected
+    # it. The session was fine all along; reading the fixture was not.
+    first_id, second_id = world.property.id, world.second_property.id
+
+    await a_rule(flow, world, property_id=first_id)
+    # The second property needs a rule too, so the sweep ends on a **successful** commit
+    # after the first one is abandoned. Without it the second property is merely skipped for
+    # want of a rule, the run ends on the rollback, and the session is left in a state where
+    # the assertions below raise `MissingGreenlet` — which is what defeated two earlier
+    # attempts at this test and looked like a product problem. It is the same shape
+    # `test_a_failure_after_the_upsert_discards_that_propertys_rows_too` relies on.
+    await a_rule(flow, world, property_id=second_id)
+    await db_session.commit()
+    notifications = _FailsOnTheSecondRecipient(flow.notifications)
+    generator = a_generator(flow, notifications=notifications)
+
+    tenant_id = world.tenant.id
+    outcome = await generator.execute(tenant_id, now=NOW)
+
+    assert outcome.failed == 1
+    # The failure landed where it was meant to: on a property's **second** recipient, so its
+    # first recipient's row had already been written inside that transaction. Without that,
+    # this test would prove only that a property with no rows keeps no rows.
+    assert notifications.failed_property is not None
+    assert notifications.added >= 2
+    abandoned = notifications.failed_property
+    healthy = {first_id, second_id} - {abandoned}
+    assert len(healthy) == 1
+    survivor = healthy.pop()
+
+    # The abandoned property kept neither its horizon nor its announcement...
+    assert await horizon_rows(db_session, abandoned) == []
+    announced = {row.related_id for row in await _price_rows(db_session, tenant_id)}
+    assert abandoned not in announced
+    # ...while its sibling in the same sweep kept both (D9: the loop carries on).
+    assert len(await horizon_rows(db_session, survivor)) == 60
+    assert announced == {survivor}

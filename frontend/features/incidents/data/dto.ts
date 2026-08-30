@@ -89,7 +89,7 @@ export interface IncidentPhotoDto {
 }
 
 /** Input of the close form (R4.1). `finalCost` travels as a string (D12). */
-export interface ResolveIncidentInput {
+export interface CloseIncidentInput {
   finalCost: string;
   materials?: string;
 }

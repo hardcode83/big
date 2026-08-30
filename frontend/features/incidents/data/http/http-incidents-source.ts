@@ -9,7 +9,7 @@ import type {
   IncidentPhotoDto,
   IncidentPhotoStage,
   IncidentSummaryDto,
-  ResolveIncidentInput,
+  CloseIncidentInput,
 } from "../dto";
 
 type IncidentResponse = components["schemas"]["IncidentResponse"];
@@ -271,7 +271,7 @@ export class HttpIncidentsSource {
   async resolve(
     _tenantId: string,
     incidentId: string,
-    input: ResolveIncidentInput,
+    input: CloseIncidentInput,
   ): Promise<IncidentDetailDto> {
     const materials = input.materials?.trim();
     const response = await this.client.request(
@@ -312,5 +312,34 @@ export class HttpIncidentsSource {
       },
     );
     return mapIncidentPhoto(response as IncidentPhotoResponse);
+  }
+
+  /**
+   * Resolves one incident from the dashboard card (proposal
+   * `blocked-transitions-web` R2.3, R3.1). The wire body is `{ final_cost }`,
+   * matching `openapi.d.ts:6383`; `materials` is omitted on purpose from the
+   * dashboard's call site (D7) — it is the manager's, but on `/incidents/{id}`,
+   * not here.
+   *
+   * Distinct from `resolve` above, which is the technician's close and carries
+   * `materials` (tech-app R4.1). The two call sites send different bodies, so
+   * the base-sync of `tech-app` kept both rather than folding one into the
+   * other: collapsing them would have silently changed what one of the two
+   * screens sends.
+   */
+  async resolveIncident(
+    _tenantId: string,
+    incidentId: string,
+    finalCost: number | string,
+  ): Promise<IncidentDetailDto> {
+    const response = await this.client.request(
+      "/api/v1/incidents/{incident_id}/resolve",
+      {
+        method: "POST",
+        pathParams: { incident_id: incidentId },
+        body: { final_cost: finalCost },
+      },
+    );
+    return mapIncidentDetail(response as IncidentResponse);
   }
 }

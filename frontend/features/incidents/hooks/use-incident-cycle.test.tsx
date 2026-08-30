@@ -9,7 +9,7 @@ import * as dataModule from "../data";
 import { incidentsKeys } from "./query-keys";
 import {
   useIncidentCycleAction,
-  useResolveIncident,
+  useCloseIncident,
   useUploadIncidentPhoto,
 } from "./use-incident-cycle";
 
@@ -224,7 +224,7 @@ describe("useIncidentCycleAction (D8)", () => {
   });
 });
 
-describe("useResolveIncident (R4.1, D12)", () => {
+describe("useCloseIncident (R4.1, D12)", () => {
   beforeEach(() => {
     resolveMock.mockReset();
     resolveMock.mockResolvedValue(INCIDENT);
@@ -232,7 +232,7 @@ describe("useResolveIncident (R4.1, D12)", () => {
 
   it("invalidates detail, context and the list prefix", async () => {
     const { wrapper, invalidated, removed } = trackedClient();
-    const { result } = renderHook(() => useResolveIncident(), { wrapper });
+    const { result } = renderHook(() => useCloseIncident(), { wrapper });
 
     result.current.mutate({ incidentId: "i1", finalCost: "120.50" });
 
@@ -249,7 +249,7 @@ describe("useResolveIncident (R4.1, D12)", () => {
       new ApiError({ status: 422, code: "VALIDATION_ERROR", message: "x" }),
     );
     const { wrapper } = trackedClient();
-    const { result } = renderHook(() => useResolveIncident(), { wrapper });
+    const { result } = renderHook(() => useCloseIncident(), { wrapper });
 
     result.current.mutate({ incidentId: "i1", finalCost: "-1" });
 

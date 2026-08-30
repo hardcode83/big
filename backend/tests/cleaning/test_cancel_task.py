@@ -21,6 +21,7 @@ from app.auth.domain.enums import UserRole
 from app.audit.infrastructure.models import AuditLogModel
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.cleaning.application.use_cases import CancelCleaningTaskUseCase, CleaningActor
+from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.cleaning.domain.exceptions import (
     CleaningTaskNotFoundError,
@@ -80,6 +81,9 @@ def _use_case(session) -> CancelCleaningTaskUseCase:
         reservations=SqlAlchemyReservationRepository(session),
         audit=SqlAlchemyAuditLogRepository(session),
         notifications=SqlAlchemyNotificationLogRepository(session),
+        # `users` since `notification-writers-gap` R2: every lifecycle use case holds the
+        # roster port now, because completing and validating resolve recipients of their own.
+        users=SqlAlchemyUserRepository(session),
         uow=SqlAlchemyUnitOfWork(session),
     )
 

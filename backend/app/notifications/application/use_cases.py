@@ -36,25 +36,24 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from app.auth.domain.entities import User
-from app.auth.domain.enums import UserRole, UserStatus
+from app.auth.domain.enums import UserRole
 from app.auth.domain.ports import UserRepository
-from app.auth.domain.repositories import UserFilters
+from app.auth.domain.recipients import RoleRecipients
 from app.core.unit_of_work import UnitOfWork
 from app.notifications.domain.entities import NotificationLog
 from app.notifications.domain.enums import NotificationChannel, NotificationStatus
 from app.notifications.domain.escalation import Escalation, escalation_for
+from app.notifications.domain.exceptions import NotificationNotFoundError
 from app.notifications.domain.ports import NotificationAdapter
 from app.notifications.domain.repositories import NotificationLogRepository
 from app.notifications.domain.results import NotificationErrorCode, NotificationResult
 
 logger = logging.getLogger(__name__)
 
-#: A tenant's roster is small (PRD §1: two flats, a handful of people) and the roles that
-#: receive escalations are the two administrative ones, so one page is the whole answer.
-#: Should a tenant ever exceed this, `EscalationReport.recipients_truncated` says so — a
-#: silent partial notification is the failure mode worth surfacing in the return value and
-#: not only in a log nobody reads.
-_MAX_RECIPIENTS = 100
+#: The page bound and the reason for it now live on `RoleRecipients` (design D1), which is
+#: the one place the roster question is answered since this change absorbed the second copy
+#: of it. What stays here is what is local: the *counter* this job folds truncation into
+#: (`EscalationReport.recipients_truncated`) and the log key that names this site.
 
 
 @dataclass
@@ -86,7 +85,13 @@ class EscalateBreachedSlasUseCase:
         uow: UnitOfWork,
     ) -> None:
         self._notifications = notifications
-        self._users = users
+        # The port is kept only to build the roster service, and is deliberately not held as
+        # a second attribute: nothing in this class queries users directly any more, so a
+        # spare handle would be an open door back to the inline query this change removed.
+        # Built here rather than injected because it is a pure domain service over a port the
+        # constructor already receives — widening the signature would make every wiring site
+        # name a collaborator that carries no state and no configuration.
+        self._recipients = RoleRecipients(users=users)
         self._uow = uow
 
     async def execute(self, *, tenant_id: uuid.UUID, now: datetime) -> EscalationReport:
@@ -190,26 +195,26 @@ class EscalateBreachedSlasUseCase:
         one page of owners and no manager would have notified a subset with
         `recipients_truncated` still at zero — the silent partial notification that counter
         exists to prevent. Caught by the section-4 QA re-review.
+
+        **The query itself now belongs to `RoleRecipients`** (design D1): this was one of the
+        two places that had written the roster question out by hand, and leaving it here
+        while five new writers asked the same question elsewhere is what R5.1 forbids. What
+        does not move is the pair of things that are this job's own — the counter it folds
+        the truncation into, and the log key that names *this* site rather than the helper.
         """
-        page = await self._users.list(
-            tenant_id,
-            UserFilters(role=role, status=UserStatus.ACTIVE),
-            page=1,
-            per_page=_MAX_RECIPIENTS,
-        )
-        dropped = page.total - len(page.items)
-        if dropped > 0:
-            report.recipients_truncated += dropped
+        resolved = await self._recipients.active_holders(tenant_id, role)
+        if resolved.dropped > 0:
+            report.recipients_truncated += resolved.dropped
             logger.warning(
                 "scheduler.escalation_recipients_truncated",
                 extra={
                     "tenant_id": str(tenant_id),
                     "role": role.value,
-                    "total": page.total,
-                    "notified": len(page.items),
+                    "total": len(resolved.users) + resolved.dropped,
+                    "notified": len(resolved.users),
                 },
             )
-        return list(page.items)
+        return list(resolved.users)
 
 
 def _escalation_row(
@@ -497,11 +502,77 @@ class ListOwnNotificationsUseCase:
         self._notifications = notifications
 
     async def execute(
-        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, page: int, per_page: int
+        self,
+        *,
+        tenant_id: uuid.UUID,
+        user_id: uuid.UUID,
+        page: int,
+        per_page: int,
+        unread: bool | None = None,
     ) -> NotificationPage:
         found = await self._notifications.list_for_recipient(
-            tenant_id, user_id, page=page, per_page=per_page
+            tenant_id, user_id, page=page, per_page=per_page, unread=unread
         )
         return NotificationPage(
             items=list(found.items), total=found.total, page=page, per_page=per_page
         )
+
+
+class MarkNotificationReadUseCase:
+    """The acknowledgement of R1.2, and the place the `404` of R1.4 is decided.
+
+    One call to `mark_read`, whose `False` means "no row with that id is visible to this
+    user of this tenant" and nothing more precise (design D3). Turning that into
+    `NotificationNotFoundError` here — rather than letting the repository raise — is what
+    keeps the three cases of R1.4 indistinguishable: this use case never learns which one it
+    was, so it cannot leak it.
+
+    **It writes no `AuditLog`** (design D8, confirming the proposal's A2): rule 9 of
+    `steering/security.md` enumerates Reservation, property states, Guest documents,
+    AccessRecord, PricingRule/PriceRecommendation, OwnerApproval, User roles and Incident.
+    Reading one's own notice is none of those, is not an operation on somebody else's data
+    and grants no permission.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, uow: UnitOfWork) -> None:
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(
+        self, *, tenant_id: uuid.UUID, user_id: uuid.UUID, notification_id: uuid.UUID
+    ) -> None:
+        acknowledged = await self._notifications.mark_read(
+            tenant_id, user_id, notification_id
+        )
+        if not acknowledged:
+            raise NotificationNotFoundError()
+        await self._uow.commit()
+
+
+class CountUnreadNotificationsUseCase:
+    """The bell's counter (R2.2, design D4). One `count(*)`, no page of rows."""
+
+    def __init__(self, *, notifications: NotificationLogRepository) -> None:
+        self._notifications = notifications
+
+    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        return await self._notifications.count_unread(tenant_id, user_id)
+
+
+class MarkAllNotificationsReadUseCase:
+    """"Mark all as read" (R5.2, design D6); returns how many rows it moved.
+
+    Zero is the normal case of an inbox already up to date, so it raises nothing — the
+    opposite of `MarkNotificationReadUseCase`, where zero means the caller named a row it
+    cannot see. Scope is every unread row of the token's user, never the page or filter the
+    client is looking at.
+    """
+
+    def __init__(self, *, notifications: NotificationLogRepository, uow: UnitOfWork) -> None:
+        self._notifications = notifications
+        self._uow = uow
+
+    async def execute(self, *, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        updated = await self._notifications.mark_all_read(tenant_id, user_id)
+        await self._uow.commit()
+        return updated

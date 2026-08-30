@@ -25,9 +25,8 @@ from app.audit.domain import actions as audit_actions
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
-from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
-from app.auth.domain.repositories import UserFilters
+from app.auth.domain.recipients import RoleRecipients
 from app.core.crypto import decrypt, encrypt
 from app.core.encrypted_secret import EncryptedSecret
 from app.core.unit_of_work import UnitOfWork
@@ -65,11 +64,6 @@ RELATED_TYPE_RESERVATION = "reservation"
 
 #: Outside PRD §14's sixteen, on purpose — see `_failure_notification`.
 LEGAL_REGISTRATION_FAILED_NOTIFICATION = "LEGAL_REGISTRATION_FAILED"
-
-#: A tenant's roster is small (PRD §1), and the roles that receive this are the two
-#: administrative ones. Same bound and same reasoning as `EscalateBreachedSlasUseCase`.
-_MAX_RECIPIENTS = 100
-
 
 @dataclass(frozen=True)
 class GuestActor:
@@ -391,7 +385,10 @@ class SubmitLegalRegistrationUseCase:
         self._guests = guests
         self._stays = stays
         self._provider = provider
-        self._users = users
+        # The port is kept only to build the roster service: nothing in this class queries
+        # users directly any more, so holding a second reference to it would be a spare
+        # handle on a query surface this use case has no business reaching for.
+        self._recipients = RoleRecipients(users=users)
         self._timeline = timeline
         self._notifications = notifications
         self._audit = GuestAuditWriter(audit)
@@ -457,7 +454,53 @@ class SubmitLegalRegistrationUseCase:
         await self._stays.set_status(
             tenant_id, reservation_id, LegalRegistrationStatus.FAILED
         )
-        for recipient in await self._managers(tenant_id):
+        # R6.5 says "alertar al manager", not "alert whoever pressed the button": the person
+        # who submitted may not be the one who has to chase it, and in a tenant with no
+        # manager the owner still has to hear about a failed filing with the police. That
+        # rule is `RoleRecipients.managers_or_owners` since `notification-writers-gap` (its
+        # R5.1, design D1) — this module used to spell the two queries out and the escalation
+        # job spelt the same two out again, which is the duplication R5.1 forbids.
+        recipients = await self._recipients.managers_or_owners(tenant_id)
+        if not recipients.users:
+            # R5.2's "SHALL registrarlo": writing no rows is the correct outcome, but doing
+            # it in silence is not. The operation still does not fail — the `FAILED` status
+            # and the audit row are the record.
+            #
+            # **Defensive at this call site**, and the reason is worth stating precisely
+            # because an earlier version of this comment got it wrong in the safe direction.
+            # `SUBMIT_LEGAL_REGISTRATION` reaches `PROPERTY_MANAGER` **alone**
+            # (`auth/domain/policy.py`: the owner gets `_LEGAL_READ`, and the note there says
+            # outright she does NOT get `_LEGAL_MANAGE`), and every authenticated request
+            # reloads the actor through `get_active_by_id`, which requires both the user and
+            # the tenant to be ACTIVE. So whoever reaches this line is an active
+            # `PROPERTY_MANAGER`, which is exactly what the primary query of
+            # `managers_or_owners` selects — so the set is not empty through this route,
+            # absent a demotion or suspension landing between the auth reload and this
+            # query. That race is a further reason to keep the branch, not to call it dead.
+            # Reaching it would take a second, actor-less driver (a job), which is what the
+            # six writers of this change have and this one does not. The branch is kept, and
+            # tested through the port rather than the route, because the guarantee lives in
+            # the permission table and not here: a later job — or a grant of `_LEGAL_MANAGE`
+            # to a third role — would otherwise reintroduce the silence unnoticed.
+            logger.error(
+                "guests.legal_registration_failure_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "reservation_id": str(reservation_id),
+                },
+            )
+        if recipients.dropped > 0:
+            # Design D1 puts the truncation log at the caller, under the caller's own key.
+            logger.warning(
+                "guests.legal_registration_recipients_truncated",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "reservation_id": str(reservation_id),
+                    "total": len(recipients.users) + recipients.dropped,
+                    "notified": len(recipients.users),
+                },
+            )
+        for recipient in recipients.users:
             await self._notifications.add(
                 tenant_id, self._failure_notification(tenant_id, stay, recipient, now)
             )
@@ -550,29 +593,6 @@ class SubmitLegalRegistrationUseCase:
             ),
             now=now,
         )
-
-    async def _managers(self, tenant_id: uuid.UUID) -> list:
-        """Active managers, falling back to the owner — the pattern `celery-jobs` set.
-
-        R6.5 says "alertar al manager", not "alert whoever pressed the button": the person who
-        submitted may not be the one who has to chase it, and in a tenant with no manager the
-        owner still has to hear about a failed filing with the police.
-        """
-        page = await self._users.list(
-            tenant_id,
-            UserFilters(role=UserRole.PROPERTY_MANAGER, status=UserStatus.ACTIVE),
-            page=1,
-            per_page=_MAX_RECIPIENTS,
-        )
-        if page.items:
-            return list(page.items)
-        owners = await self._users.list(
-            tenant_id,
-            UserFilters(role=UserRole.TENANT_OWNER, status=UserStatus.ACTIVE),
-            page=1,
-            per_page=_MAX_RECIPIENTS,
-        )
-        return list(owners.items)
 
     def _failure_notification(
         self, tenant_id: uuid.UUID, stay, recipient, now: datetime

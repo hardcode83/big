@@ -6,6 +6,11 @@ import { useTranslation } from "react-i18next";
 import { PropertyStateBadge } from "@/components/property-state-badge";
 import { cn } from "@/lib/utils";
 
+import {
+  BlockedTransitionsSection,
+  type BlockedTransitionSummary,
+} from "../stalls";
+
 import type { PropertyDashboardCard } from "../data";
 import { formatDate, formatDateTime } from "../lib/format";
 
@@ -15,6 +20,11 @@ import { formatDate, formatDateTime } from "../lib/format";
  * color comes from the shared `PropertyStateBadge`, which owns the only copy of
  * the PRD §9.1 color table since `properties-web` needed the same badge (design
  * D2); its label and all chrome come from the `dashboard` i18n namespace.
+ *
+ * The blocked-transitions section is mounted **after** the incident count and
+ * **before** the next action — `dashboard-web-frontend.md` §9.1 reserves the
+ * slot. The card renders unchanged when `stalls` is undefined or empty
+ * (proposal `blocked-transitions-web` R1.3).
  */
 
 function Field({
@@ -41,12 +51,26 @@ function Field({
   );
 }
 
-export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
+export function PropertyCard({
+  card,
+  stalls,
+  stallsHaveError = false,
+}: {
+  card: PropertyDashboardCard;
+  stalls?: BlockedTransitionSummary[];
+  /**
+   * `true` when the dashboard's stalls query failed. The card keeps rendering
+   * every other region and the stalls section carries the error (R5.3), so a
+   * backend failure never hides the property itself.
+   */
+  stallsHaveError?: boolean;
+}) {
   const { t, i18n } = useTranslation("dashboard");
   const locale = i18n.language;
   const reservation = card.currentOrNextReservation;
   const headingId = `property-card-${card.propertyId}`;
   const incidentsHeadingId = `${headingId}-incidents`;
+  const stallsHeadingId = `${headingId}-stalls`;
   const actionHeadingId = `${headingId}-action`;
   const lastEventHeadingId = `${headingId}-last-event`;
 
@@ -80,6 +104,14 @@ export function PropertyCard({ card }: { card: PropertyDashboardCard }) {
             {card.openIncidentsCount}
           </span>
         </section>
+
+        {stallsHaveError || (stalls && stalls.length > 0) ? (
+          <BlockedTransitionsSection
+            stalls={stalls ?? []}
+            headingId={stallsHeadingId}
+            hasError={stallsHaveError}
+          />
+        ) : null}
 
         {card.nextAction ? (
           <section

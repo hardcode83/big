@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { PropertyDetailView } from "@/features/dashboard";
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 
 export function generateMetadata(): Promise<Metadata> {
   // Generic localized metadata — never interpolates the id (frontend-foundation).

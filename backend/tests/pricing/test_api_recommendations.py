@@ -590,3 +590,41 @@ async def test_the_pms_guard_would_notice_a_function_local_import(tmp_path) -> N
     assert [name for name in named if name.split(".")[:2] == ["app", "integrations"]] == [
         "app.integrations.domain.ports"
     ]
+
+
+async def test_the_route_writes_the_same_notification_the_nightly_job_does(
+    api, world, db_session
+) -> None:
+    """R4.5 — «tanto en la ejecución del job nocturno (sin actor) como en `POST /generate`».
+
+    Task 6.7 asked for this and it was missing: every other R4 test drives the use case
+    directly with no `actor`, so the authenticated path was wired but unverified. The section
+    6/7 QA panel named the exact regression that would have gone unnoticed — someone adding
+    `if actor is None:` around the notify call, by analogy with the real `if actor is not
+    None:` audit branch three lines below it, breaking the human path while every
+    `tests/pricing` test stayed green.
+    """
+    from sqlalchemy import select
+
+    from app.notifications.infrastructure.models import NotificationLogModel
+
+    await _rule(api, world)
+
+    response = await _generate(api, world, property_id=str(world.property.id))
+    assert response.status_code == 200, response.text
+    assert response.json()["created"] == HORIZON_DAYS
+
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == world.tenant.id,
+            NotificationLogModel.notification_type == "PRICE_RECOMMENDATION",
+        )
+    )
+    written = list(rows.scalars())
+
+    # The same row the job writes: one per recipient (manager + owner), on the property,
+    # with no deadline — and emphatically not one per created recommendation.
+    assert {row.recipient_user_id for row in written} == {world.manager.id, world.owner.id}
+    assert {row.related_id for row in written} == {world.property.id}
+    assert all(row.related_type == "property" for row in written)
+    assert all(row.sla_deadline_at is None for row in written)

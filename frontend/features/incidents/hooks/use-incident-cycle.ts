@@ -15,7 +15,7 @@ import {
   type IncidentDetailDto,
   type IncidentPhotoDto,
   type IncidentPhotoStage,
-  type ResolveIncidentInput,
+  type CloseIncidentInput,
 } from "../data";
 import { incidentsKeys } from "./query-keys";
 
@@ -35,7 +35,7 @@ import { incidentsKeys } from "./query-keys";
 
 /**
  * The five cycle actions of this hook. `resolve` is not one of them — closing
- * carries a body and its own gate, and lives in `useResolveIncident`.
+ * carries a body and its own gate, and lives in `useCloseIncident`.
  */
 export type IncidentCycleAction =
   | "accept"
@@ -145,20 +145,20 @@ export function useIncidentCycleAction({
   });
 }
 
-export interface ResolveIncidentVariables extends ResolveIncidentInput {
+export interface CloseIncidentVariables extends CloseIncidentInput {
   incidentId: string;
 }
 
-export function useResolveIncident(): UseMutationResult<
+export function useCloseIncident(): UseMutationResult<
   IncidentDetailDto,
   Error,
-  ResolveIncidentVariables
+  CloseIncidentVariables
 > {
   const tenantId = useTenantId();
   const queryClient = useQueryClient();
 
   return useMutation({
-    mutationFn: ({ incidentId, ...input }: ResolveIncidentVariables) => {
+    mutationFn: ({ incidentId, ...input }: CloseIncidentVariables) => {
       if (!tenantId) {
         throw new Error("Closing an incident requires a tenant context");
       }

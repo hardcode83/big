@@ -7,17 +7,18 @@ is the mitigation, and it is driven from `ResolveIncidentUseCase` rather than fr
 resolver, because the bug being guarded against is in the assembling, not in the deciding.
 """
 
+import logging
 import uuid
 from datetime import timedelta
 from decimal import Decimal
 
 import pytest
 import pytest_asyncio
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
 
 from app.audit.domain import actions as audit_actions
 from app.audit.infrastructure.models import AuditLogModel
-from app.auth.domain.enums import UserRole
+from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.cleaning.domain.enums import CleaningTaskStatus
 from app.maintenance.application.use_cases import (
@@ -42,8 +43,9 @@ from app.maintenance.domain.exceptions import (
 )
 from app.maintenance.domain.repositories import IncidentFilters
 from app.maintenance.infrastructure.models import IncidentModel, OwnerApprovalModel
-from app.notifications.domain.enums import NotificationType
+from app.notifications.domain.enums import NotificationStatus, NotificationType
 from app.notifications.infrastructure.models import NotificationLogModel
+from app.tenants.infrastructure.models import TenantModel
 from app.properties.domain.enums import PropertyOperationalState
 from app.properties.domain.transition_enums import PropertyStateTrigger
 from app.properties.infrastructure.models import (
@@ -54,6 +56,7 @@ from app.timeline.domain.enums import TimelineActorType, TimelineEventType
 from app.timeline.infrastructure.models import TimelineEventModel
 from tests.maintenance.conftest import (
     NOW,
+    _user,
     make_approval,
     make_cleaning_task,
     make_incident,
@@ -2185,3 +2188,324 @@ async def test_no_timeline_event_carries_the_reported_text(flow, world, db_sessi
         assert leaked not in event.title
         assert leaked not in str(event.metadata_)
         assert leaked not in str(event.description)
+
+
+# --- R1: the severity alert (`notification-writers-gap`, D3/D4/D5) ----------------------
+
+SAFETY_FAULT = "Hay humo y ha saltado la alarma de incendio."
+
+
+async def _severity_alerts(db_session, tenant_id, notification_type: str) -> list:
+    """Rows of one severity type for one tenant, newest last."""
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == tenant_id,
+            NotificationLogModel.notification_type == notification_type,
+        )
+    )
+    return list(rows.scalars())
+
+
+async def test_a_critical_classification_tells_the_manager(flow, world, db_session) -> None:
+    """R1.1 — the hole this change exists to close: a critical incident nobody was told about."""
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+
+    result = await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    assert result.severity is IncidentSeverity.CRITICAL
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.manager.id]
+    assert rows[0].related_id == incident.id
+    assert rows[0].related_type == "incident"
+    assert rows[0].status is NotificationStatus.PENDING
+    # R5.5 — no deadline, so `dispatch_notifications` cannot manufacture a breach candidate
+    # against a type `escalation_for` has no rule for.
+    assert rows[0].sla_deadline_at is None
+
+
+async def test_a_high_classification_writes_the_high_alert(flow, world, db_session) -> None:
+    """R1.2 — the same shape, a different type; `WATER` is HIGH in the classifier's table."""
+    incident = await make_incident(db_session, world, description=WATER_FAULT)
+
+    result = await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    assert result.severity is IncidentSeverity.HIGH
+    high = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_HIGH.value
+    )
+    critical = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert [row.recipient_user_id for row in high] == [world.manager.id]
+    assert critical == []
+
+
+async def test_a_triage_confirming_the_same_severity_does_not_tell_the_manager_twice(
+    flow, world, db_session
+) -> None:
+    """R1.3 — the case that makes `exists_for` necessary rather than decorative.
+
+    A classification sets HIGH and announces it; a manager then triages the incident and
+    confirms HIGH. Nothing changed, and `TriageIncidentUseCase` admits being called
+    repeatedly, so a comparison of previous-vs-current severity would announce it again.
+    """
+    incident = await make_incident(db_session, world, description=WATER_FAULT)
+    await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        severity=IncidentSeverity.HIGH,
+    )
+
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_HIGH.value
+    )
+    assert len(rows) == 1
+
+
+async def test_a_triage_raising_high_to_critical_writes_the_critical_alert_too(
+    flow, world, db_session
+) -> None:
+    """R1.4 — two distinct facts, and the second is the urgent one.
+
+    The HIGH row stays: it was true when written and the timeline is not rewritten. The
+    CRITICAL row is added because the deduplication is per type, not per incident.
+    """
+    incident = await make_incident(db_session, world, description=WATER_FAULT)
+    await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    await flow.triage.execute(
+        tenant_id=world.tenant.id,
+        incident_id=incident.id,
+        actor=manager(world),
+        now=LATER,
+        severity=IncidentSeverity.CRITICAL,
+    )
+
+    high = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_HIGH.value
+    )
+    critical = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert len(high) == 1
+    assert len(critical) == 1
+
+
+async def test_a_low_confidence_classification_announces_nothing(
+    flow, world, db_session
+) -> None:
+    """R1.5 — there is no severity to announce.
+
+    Below the threshold the entity never touches `severity`: the incident stays `OPEN` with
+    its default `MEDIUM`, and announcing that default would report a verdict nobody reached.
+    The gate is `status is CLASSIFIED`, which is exactly this condition.
+    """
+    incident = await make_incident(
+        db_session, world, title="Consulta", description=UNRECOGNISED
+    )
+
+    result = await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    assert result.status is IncidentStatus.OPEN
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == world.tenant.id
+        )
+    )
+    assert list(rows.scalars()) == []
+
+
+async def test_without_an_active_manager_the_alert_goes_to_the_owner(
+    flow, world, db_session
+) -> None:
+    """R5.1 — the fallback, at the one place a critical incident could otherwise be lost."""
+    await db_session.execute(
+        update(UserModel)
+        .where(UserModel.id == world.manager.id)
+        .values(status=UserStatus.INACTIVE)
+    )
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+
+    await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.owner.id]
+
+
+async def test_with_nobody_active_the_classification_still_succeeds(
+    flow, world, db_session, caplog
+) -> None:
+    """R5.2 — no rows, logged, and the classification is not failed over it.
+
+    The verdict is worth keeping even when it cannot be delivered: the incident is still
+    CRITICAL, the property still transitions, and an operator has a log telling them the
+    roster is the reason nobody heard.
+    """
+    await db_session.execute(
+        update(UserModel)
+        .where(UserModel.tenant_id == world.tenant.id)
+        .values(status=UserStatus.INACTIVE)
+    )
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+
+    with caplog.at_level(logging.ERROR):
+        result = await flow.classify.execute(
+            tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+        )
+
+    assert result.severity is IncidentSeverity.CRITICAL
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert rows == []
+    assert any(
+        record.message == "maintenance.severity_alert_without_recipient"
+        for record in caplog.records
+    )
+
+
+async def test_a_neighbours_manager_is_never_told_about_this_tenants_incident(
+    flow, world, db_session
+) -> None:
+    """Rule 1 of `steering/security.md` on the write path that addresses a person.
+
+    A leak here would not expose data by reading it — it would put this tenant's incident
+    ids in a neighbour's inbox.
+    """
+    neighbour = TenantModel(name="TenantB", billing_email="b@example.com")
+    db_session.add(neighbour)
+    await db_session.flush()
+    await _user(db_session, neighbour, "PROPERTY_MANAGER")
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+
+    await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert [row.recipient_user_id for row in rows] == [world.manager.id]
+    theirs = await _severity_alerts(
+        db_session, neighbour.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert theirs == []
+
+
+async def test_the_alert_and_the_verdict_reach_the_same_commit(
+    flow, world, db_session
+) -> None:
+    """R1.6 — no window in which the incident is critical and the alert does not exist.
+
+    Asserted by observing the transaction rather than the outcome, because the outcome looks
+    identical either way once both writes have happened: this wraps the use case's unit of
+    work and, at the moment `commit()` is called, asks whether the alert row is already
+    visible in the session. If the notification were written after the commit — or by a
+    separate use case with its own transaction, the alternative design D5 rejects — the
+    answer would be `False` and a crash in between would leave a critical incident nobody
+    was ever told about.
+    """
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+    real_uow = flow.classify._uow
+    seen: list[bool] = []
+
+    class _WatchesTheCommit:
+        async def commit(self) -> None:
+            rows = await db_session.execute(
+                select(func.count())
+                .select_from(NotificationLogModel)
+                .where(
+                    NotificationLogModel.tenant_id == world.tenant.id,
+                    NotificationLogModel.related_id == incident.id,
+                    NotificationLogModel.notification_type
+                    == NotificationType.INCIDENT_CREATED_CRITICAL.value,
+                )
+            )
+            seen.append(rows.scalar_one() == 1)
+            await real_uow.commit()
+
+        async def rollback(self) -> None:  # pragma: no cover - not reached here
+            await real_uow.rollback()
+
+    flow.classify._uow = _WatchesTheCommit()
+    try:
+        await flow.classify.execute(
+            tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+        )
+    finally:
+        flow.classify._uow = real_uow
+
+    assert seen == [True]
+
+
+async def test_every_active_manager_is_told_not_just_the_first(
+    flow, world, db_session
+) -> None:
+    """R1.1/R5.1 say "por cada destinatario", plural — and nothing pinned the plural.
+
+    Added after the section-4 QA panel found the gap: the `world` fixture has exactly one
+    manager, so a regression that notified only `recipients.users[0]` — a stray `[:1]`, or an
+    early `return` inside the loop — would have left the whole `tests/maintenance` suite
+    green. The panel proved the code correct with a throwaway probe; this locks it in.
+    """
+    second = await _user(db_session, world.tenant, "PROPERTY_MANAGER")
+    incident = await make_incident(db_session, world, description=SAFETY_FAULT)
+
+    await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    rows = await _severity_alerts(
+        db_session, world.tenant.id, NotificationType.INCIDENT_CREATED_CRITICAL.value
+    )
+    assert {row.recipient_user_id for row in rows} == {world.manager.id, second.id}
+
+
+async def test_a_confident_medium_verdict_announces_nothing(
+    flow, world, db_session
+) -> None:
+    """R1.5's other half: `CLASSIFIED`, above the threshold, and still silent.
+
+    The existing R1.5 test covers the *below*-threshold path, where the incident stays `OPEN`.
+    This one covers the branch the section-4 QA panel found uncovered: a text the classifier
+    resolves confidently to a category whose severity is `MEDIUM` (or `LOW`), which reaches
+    `_notify_severity` with `status is CLASSIFIED` and must still write nothing — only
+    CRITICAL and HIGH are announced. The guard is one `dict.get` returning `None`, and this is
+    what stops a later edit from turning it into a default.
+    """
+    incident = await make_incident(
+        db_session, world, title="Electrodoméstico", description="La lavadora no centrifuga."
+    )
+
+    result = await flow.classify.execute(
+        tenant_id=world.tenant.id, incident_id=incident.id, actor=None, now=LATER
+    )
+
+    assert result.status is IncidentStatus.CLASSIFIED
+    assert result.severity is IncidentSeverity.MEDIUM
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(
+            NotificationLogModel.tenant_id == world.tenant.id
+        )
+    )
+    assert list(rows.scalars()) == []

@@ -114,9 +114,13 @@ def get_incident_context_use_case(session: SessionDep) -> GetIncidentContextUseC
 
 
 def get_classify_incident_use_case(session: SessionDep) -> ClassifyIncidentUseCase:
+    # `users` and `notifications` since `notification-writers-gap` R1: a classification that
+    # lands on CRITICAL or HIGH tells the manager, inside the same transaction (R1.6).
     return ClassifyIncidentUseCase(
         classifier=RuleBasedIncidentClassifier(),
         configs=SqlAlchemyTenantConfigRepository(session),
+        users=SqlAlchemyUserRepository(session),
+        notifications=SqlAlchemyNotificationLogRepository(session),
         **_flow_kwargs(session),
     )
 

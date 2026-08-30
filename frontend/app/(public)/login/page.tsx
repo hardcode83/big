@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 import { LoginForm } from "@/features/auth";
 
 export function generateMetadata(): Promise<Metadata> {
