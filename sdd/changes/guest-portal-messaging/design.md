@@ -556,35 +556,40 @@ a `sdd/roadmap.md`; aquí sólo quedan enunciados.
   `readErrorText` ya existe y es el sitio— y el coste de no hacerlo es que un huésped que agote el
   presupuesto compartido al abrir la página lea que no sabemos si se recibió algo que nunca envió.
 
-- **El guardián de propiedad de la regla 11 tiene vocabulario sólo en castellano, y por eso falla
-  en las dos direcciones.** `backend/tests/test_rule11_ownership.py` decide si un texto reafirma
-  quién escribe una columna del censo con un eje de propiedad en español
-  (`(?:ya\s+)?tienen?\s+escritor` y compañía). De ahí salen los dos defectos que este change se
-  encontró de frente:
+- **El eje de propiedad del guardián de la regla 11 enumera redacciones concretas, y por eso se
+  sortea solo.** `backend/tests/test_rule11_ownership.py` marca un bloque cuando encuentra a la
+  vez un eje de censo y un eje de propiedad; el segundo es `OWNERSHIP_PATTERNS`, **13 patrones
+  literales** —8 en castellano y 5 en inglés (`is the writer`, `first writer`, `writes here`,
+  `nothing writes here yet`, `inherits that contract`)—. Es una lista de frases prohibidas, no
+  una descripción de la forma que quiere prohibir, y ahí está el defecto. Medido el 2026-08-30
+  ejecutando el propio eje contra los textos, no leyéndolo:
 
-  **Falso positivo**: la frase «sus tres tipos no tienen escritor» de la entrada
-  `guest-scheduled-comms` en `sdd/roadmap.md` disparaba el guardián sin ser una afirmación de
-  censo — es una entrada de roadmap describiendo trabajo pendiente. Llegó roja a este change desde
-  `0537b69` (2026-08-28), verificado inherited antes de tocar nada, y la tarea 8.3 la reescribió a
-  «siguen sin implementar» **para desbloquear una puerta de merge que fallaba por un defecto
-  ajeno**. El panel de review de 2026-08-30 lo levantó cuatro veces como violación de la regla 1
-  compartida, y la decisión registrada fue mantener la edición declarada: es visible en el diff,
-  no toca ninguna casilla ni ningún enlace de archivo, y revertirla vuelve a romper el gate.
+  **Falso positivo, y ya resuelto aguas arriba.** «sus tres tipos no tienen escritor», en la
+  entrada `guest-scheduled-comms` de `sdd/roadmap.md`, dispara `(?:ya\s+)?tienen?\s+escritor`
+  sin ser una afirmación de censo: es una entrada de roadmap describiendo trabajo pendiente.
+  Llegó roja a este change desde `0537b69` y la tarea 8.3 la reescribió a «siguen sin
+  implementar» para desbloquear una puerta de merge que fallaba por un defecto ajeno — lo que el
+  panel de review levantó cuatro veces como violación de la regla 1. **Esa edición ha quedado
+  redundante**: el archivado de `notification-writers-gap` reescribió la misma frase en `main` a
+  «no los escribe nadie», que tampoco dispara. Comprobado contra `origin/main` el 2026-08-30. La
+  línea conflictará al sincronizar la base, y la resolución correcta es **quedarse con la de
+  `main` y descartar la nuestra**: con eso el hallazgo de la regla 1 se cierra sin discusión.
 
-  **Falso negativo**, que es el peor de los dos: el comentario que este change añadió en
-  `backend/app/messaging/application/portal.py:95-97` —«the rule-11 census counts use cases that
-  write `messages.content` … it is still the two in …»— es exactamente la clase de prosa que el
-  guardián existe para cazar, está en inglés, y casi con seguridad no dispara. La afirmación es
-  cierta hoy (el panel de seguridad la verificó contra el AST), así que no hay nada roto; el
-  agujero de cobertura sí lo está.
+  **Falso negativo, y sigue abierto.** El comentario que este change añadió en
+  `backend/app/messaging/application/portal.py:95-97` —«the rule-11 census counts *use cases that
+  write `messages.content`*, and that number **does not move** — it is still the two in …»— es
+  exactamente la clase de prosa que el guardián existe para cazar, y **no dispara**: medido, no
+  supuesto. No es porque falte vocabulario inglés —lo hay— sino porque el eje enumera
+  redacciones y ésta no está en la lista. La afirmación es cierta hoy (el panel de seguridad la
+  verificó contra el AST), así que no hay nada roto; el agujero de cobertura sí lo está.
 
-  El arreglo no es ampliar la lista de frases prohibidas —un guardián por nombres prohibidos se
-  sortea sin querer, y este ya se sorteó solo cambiando de idioma— sino **fijar la forma exacta y
-  los ficheros en alcance**: qué documentos son censo (`sdd/steering/security.md` y poco más),
-  cuáles son prosa que puede citar la regla sin reafirmarla, y hacer el eje de propiedad
-  bilingüe. Levantado por el panel de seguridad de review (2026-08-30) como observación sin
-  referente, y por el de arquitectura, i18n y documentación como el hallazgo de `roadmap.md`: son
-  el mismo defecto visto desde los dos lados.
+  El arreglo **no** es alargar la lista: una guardia por nombres prohibidos se sortea sin querer,
+  y ésta ya se sorteó sola con una paráfrasis. Es fijar la **forma exacta y los ficheros en
+  alcance**: qué documentos son censo (`sdd/steering/security.md` y poco más), cuáles son prosa
+  que puede citar la regla sin reafirmarla, y que el roadmap no sea ninguno de los dos. Levantado
+  por el panel de seguridad de review (2026-08-30) como observación sin referente, y por
+  arquitectura, i18n y documentación como el hallazgo de `roadmap.md`: son el mismo defecto
+  visto desde los dos lados.
 
 - **El gate ejecutable del panel de revisión no tiene canal de resultados para el runtime de
   Claude.** `skills/reviewer-panel/reviewer_plan.py` (sdd-toolkit 0.40.0) valida un envelope JSON
