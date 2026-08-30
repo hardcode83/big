@@ -80,3 +80,4 @@
 | tech-app | new, design, tasks, run, review, ship, archive | 862707 | 2053252 | 395618497 | 307.6922 | 2026-08-19 | 2026-08-30 |
 | notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
+| reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
