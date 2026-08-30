@@ -32,6 +32,62 @@ consecuencias que conviene tener presentes al desplegar:
 | `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y la bandeja web es lo que la hace legible — y desde `notifications-inbox-web`, acusable |
 | `PUSH` | — | Sin adapter a propósito: una fila `PUSH` pasa a `SKIPPED` |
 
+### Qué llega a la bandeja hoy, y qué no
+
+De los diecisiete `NotificationType`, **trece los escribe alguien y cuatro no los escribe nadie**.
+Vale la pena tenerlo a mano al mirar una bandeja vacía: puede que no haya pasado nada, o puede que
+el tipo que esperabas sea de los cuatro.
+
+| Qué ocurre | Tipo | A quién |
+|---|---|---|
+| Se asigna una limpieza | `CLEANING_TASK_ASSIGNED` | A la limpiadora (con plazo de SLA) |
+| No hay limpiadora a la que asignar | `CLEANING_NO_RESPONSE` | Managers, o el owner si no hay |
+| Se cierra una limpieza | `CLEANING_COMPLETED` | Managers, o el owner si no hay |
+| Una validación sale `FAILED` | `CLEANING_FAILED` | **A la limpiadora**, no al manager |
+| Una incidencia queda `CRITICAL` | `INCIDENT_CREATED_CRITICAL` | Managers, o el owner si no hay |
+| Una incidencia queda `HIGH` | `INCIDENT_CREATED_HIGH` | Managers, o el owner si no hay |
+| Se asigna una incidencia a un técnico | `TECHNICIAN_ASSIGNED` | Al técnico (con plazo de SLA) |
+| El técnico no responde a tiempo | `TECHNICIAN_NO_RESPONSE` | Managers, o el owner si no hay |
+| Una limpieza asignada no se responde a tiempo | `SLA_BREACH` | Managers, o el owner si no hay |
+| Hace falta que la propietaria apruebe un gasto | `OWNER_APPROVAL_REQUIRED` | A la propietaria |
+| La IA escala una conversación de huésped | `GUEST_ESCALATION` | Managers, o el owner si no hay |
+| Una ejecución crea recomendaciones de precio | `PRICE_RECOMMENDATION` | Managers **y** owners |
+| Alguien pide recuperar su contraseña | `PASSWORD_RESET_REQUESTED` | A quien lo pidió, por email |
+
+**Los cuatro que nadie escribe**: `LOCK_ALERT` —espera una superficie de importación de cerraduras
+que no existe— y los tres recordatorios al huésped, `CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`
+y `CHECKOUT_REMINDER`, que son de `guest-scheduled-comms` y no tienen canal al huésped todavía.
+
+Hay además dos tipos de **texto libre** que no son miembros del enum y sí se escriben:
+`INCIDENT_REJECTED` (el técnico rechaza) y `LEGAL_REGISTRATION_FAILED`. La columna es un
+`String(100)` libre, así que caben.
+
+**Esta tabla no se mantiene a mano.** `backend/tests/notifications/test_writer_census.py` recorre
+el AST de `backend/app/` y falla si el conjunto medido difiere de sus dos listas literales, en
+cualquier dirección — incluido un miembro nuevo del enum que no aparezca en ninguna. Se hizo así
+porque el censo escrito a mano ya se pudrió una vez: la nota de roadmap que abrió este trabajo
+decía nueve huérfanos y eran diez. Si añades un tipo o un escritor, el test te dirá qué actualizar.
+
+**Dos avisos que sorprenden si no se saben de antemano:**
+
+- **`CLEANING_FAILED` va a la limpiadora, no al manager.** El manager es quien acaba de emitir el
+  veredicto; avisarle de su propia decisión sería ruido. Si la tarea no tiene limpiadora asignada,
+  o la que tenía ya no está `ACTIVE`, **no se escribe la fila** y queda una línea de log
+  (`cleaning.validation_failure_without_cleaner`, con `reason` `unassigned` o `inactive`). La
+  validación responde normal en los dos casos.
+- **`PRICE_RECOMMENDATION` va a managers *y* owners**, y es el único que no usa la caída
+  manager→owner del resto: los dos roles tienen `MANAGE_PRICE_RECOMMENDATIONS`, y dejar fuera a la
+  propietaria porque existe un manager le quitaría una decisión que es suya. Se escribe **una fila
+  por vivienda y ejecución**, no una por recomendación: la ejecución diaria crea 60 el primer día.
+
+**Cuando no hay a quién avisar.** Si el tenant no tiene ningún manager ni owner activo, ningún
+escritor falla la operación que lo produjo: no se escriben filas y queda un log de error
+(`maintenance.severity_alert_without_recipient`, `cleaning.completion_without_recipient`,
+`pricing.recommendations_without_recipient`). La excepción es el escalado de SLA, que deja el
+incumplimiento **sin marcar** a propósito para reintentarlo cada minuto hasta que alguien arregle
+el roster. Y si hay más de 100 destinatarios, se avisa a los 100 primeros y queda un
+`*_recipients_truncated` con el total y los notificados — alguien no recibió el aviso.
+
 ### Leer la bandeja, y acusarla
 
 El ciclo in-app se cierra con cuatro rutas. **Todas derivan el destinatario del JWT** y ninguna

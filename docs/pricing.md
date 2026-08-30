@@ -135,6 +135,28 @@ Diferencia que importa entre las dos vías: **la generación por el reloj no esc
 quinta excepción nombrada de la regla 9 de `sdd/steering/security.md`, y está acotada
 exactamente a eso.
 
+**Y desde `notification-writers-gap` la cola avisa en vez de esperar a que entres.** Cuando una
+ejecución **crea** al menos una recomendación para una vivienda, deja un `PRICE_RECOMMENDATION`
+en la bandeja. Cuatro cosas que conviene saber:
+
+- **Una fila por vivienda y ejecución, no una por recomendación.** La primera pasada sobre una
+  vivienda crea 60 fechas; una notificación por cada una serían sesenta avisos el primer día. En
+  régimen la ejecución diaria crea **una** fecha por vivienda —la que entra al final del
+  horizonte— y actualiza las otras 59.
+- **Sólo cuentan las creaciones**, las que la propia sentencia declara insertadas. Una ejecución
+  que sólo actualiza no avisa de nada, y una vivienda sin creaciones no genera fila.
+- **Va a los managers *y* a los owners**, y es el único aviso del sistema que no usa la caída
+  «managers, o el owner si no hay ninguno»: los dos roles tienen `MANAGE_PRICE_RECOMMENDATIONS`, y
+  la propietaria es quien aprueba un precio, así que no puede quedarse fuera porque exista un
+  manager.
+- **Avisan las dos vías**, el reloj y el botón: la diferencia entre ellas es quién lo pidió, no
+  qué ocurre. Y no lleva plazo de SLA — nadie ha definido en cuánto tiempo hay que decidir un
+  precio.
+
+Si el tenant no tiene ningún manager ni owner activo no se escribe nada, queda un
+`pricing.recommendations_without_recipient` en el log y **el barrido no falla**: los precios se
+generan igual, simplemente no hay quien los apruebe.
+
 ```bash
 # ver el despacho y el informe de cada ejecución
 docker compose logs -f beat

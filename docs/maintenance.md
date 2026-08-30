@@ -18,12 +18,15 @@ incidencia OPEN, sin categoría ni severidad
         │
         ├── sí ──► CLASSIFIED, con categoría y severidad
         │            │  si severidad HIGH/CRITICAL:
-        │            └─► propiedad → MAINTENANCE_REQUIRED | CRITICAL_INCIDENT
+        │            ├─► propiedad → MAINTENANCE_REQUIRED | CRITICAL_INCIDENT
+        │            └─► notificación a los managers (INCIDENT_CREATED_CRITICAL | _HIGH)
         │
         └── no ──► sigue OPEN, con `ai_classification` escrita
                      (queda para triaje humano, y el job ya no vuelve a preguntar)
         ▼
 el manager tría          PATCH /incidents/{id}     categoría, severidad, coste estimado
+        │                                        si la deja HIGH/CRITICAL y aún no se avisó:
+        │                                        + notificación a los managers
         │
         ├── coste ≤ umbral del tenant ──────────► sigue el flujo
         └── coste > umbral ─────────────────────► AWAITING_OWNER_APPROVAL
@@ -38,6 +41,8 @@ el manager asigna        POST /incidents/{id}/assign   → ASSIGNED
                                                         + notificación al técnico
                                                         + plazo de SLA según la severidad
         ▼
+                                                        (si vence: TECHNICIAN_NO_RESPONSE
+                                                         a los managers)
 el técnico acepta        POST /incidents/{id}/accept   → ACCEPTED  (cancela el plazo)
                                                        { "eta_at": … } opcional
 el técnico rechaza       POST /incidents/{id}/reject   → CLASSIFIED (cancela el plazo)
@@ -350,6 +355,35 @@ a la espera de la propietaria, conserva visible el coste que devolvió la respue
 una fecha de resolución que llega a `null`. El umbral `owner_approval_threshold_eur` **no se
 calcula, no se muestra y no se anticipa**: el rol no puede leer la configuración del tenant, y la
 puerta la resuelve el backend al recibir el cierre. La app lo muestra; no lo predice ni lo evita.
+
+## Enterarse de una incidencia grave sin abrir la pantalla
+
+Hasta `notification-writers-gap` una incidencia crítica no avisaba a nadie: se escribía la
+incidencia, su `AuditLog` y su `TimelineEvent`, y el manager sólo se enteraba si abría la
+pantalla. Un huésped podía reportar una fuga desde el portal y nadie lo sabía. Ahora:
+
+- Cuando una incidencia queda en `CRITICAL` o en `HIGH` —la clasifique el job automático o la
+  corrija un humano en el triaje— se escribe un `INCIDENT_CREATED_CRITICAL` o un
+  `INCIDENT_CREATED_HIGH` a cada manager activo, o a los owners si no hay ningún manager.
+- **Una vez por incidencia y severidad.** Un triaje que confirma lo que ya dijo el clasificador no
+  avisa dos veces. Pero una incidencia que **sube** de `HIGH` a `CRITICAL` sí manda el aviso
+  crítico, aunque el de `HIGH` ya esté: son dos hechos distintos y el segundo es el urgente.
+- **Una clasificación por debajo del umbral de confianza no avisa.** Ahí la incidencia se queda
+  `OPEN` con su `MEDIUM` por defecto y sólo se escribe `ai_classification`: no hay severidad que
+  anunciar, y el aviso llegará —si llega— cuando alguien la tríe.
+- `MEDIUM` y `LOW` no avisan nunca. Avisar de cada incidencia convertiría la bandeja en ruido.
+- El aviso se escribe en la misma transacción que la clasificación o el triaje, así que no hay
+  ningún instante en el que la incidencia sea crítica y el aviso no exista.
+
+**El plazo del técnico ya se llama por su nombre.** Cuando vence el SLA de un `TECHNICIAN_ASSIGNED`
+sin respuesta, el escalado al manager llega como `TECHNICIAN_NO_RESPONSE` y no como el
+`SLA_BREACH` genérico de antes, así que en la bandeja se distingue de una limpieza sin responder
+sin abrir la fila que lo originó. Es un cambio de etiqueta: el destinatario y el motivo son los
+mismos, y la llamada telefónica de PRD §14 sigue sin existir porque no hay `PhoneAdapter`. Las
+filas `SLA_BREACH` escritas antes se quedan como están — no hubo migración.
+
+**Efecto en el seed de demo**: `make seed-demo` ahora deja notificaciones escritas —una incidencia
+grave y una limpieza cerrada—, de modo que la bandeja tenga algo que enseñar. Es deliberado.
 
 ## Rastro
 
