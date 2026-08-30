@@ -49,9 +49,13 @@ export function TechCycleActions({ incident }: { incident: IncidentDetailDto }) 
   const offersEta = cycleActions.some((action) => ETA_ACTIONS.includes(action));
 
   /**
-   * `conflictReason` reads the status the query already refreshed — the
-   * mutation invalidates in `onSettled`, so by the time this renders the
-   * `incident` prop is the one the server just confirmed.
+   * `conflictReason` reads the status the query already refreshed (D7). What
+   * makes that true is that `useIncidentCycleAction` **awaits** its
+   * invalidation inside `onSettled`: React Query holds the mutation open until
+   * that promise resolves, so the render that first shows the error is the one
+   * after the refetch. It was a `void`-discarded invalidation until the
+   * feature-scale panel caught it, and the difference is visible — the wrong
+   * one of R3.7's three reasons for a full round trip.
    */
   const messageFor = (
     error: Error | null,

@@ -99,7 +99,17 @@ export function useIncidentCycleAction({
       }
     },
     retry: false,
-    onSettled: (_data, error, variables) => {
+    // **Awaited, not fire-and-forget.** React Query waits for a promise
+    // returned from `onSettled` before the mutation settles, so awaiting the
+    // invalidation is what makes D7 true rather than merely intended: the
+    // consumer reads `incident.status` to pick one of the three `409` reasons
+    // (R3.7), and with a `void`-discarded invalidation that read happened on
+    // the render *before* the refetch landed — an incident the backend had
+    // already closed showed «ya no encaja» for a full round trip before
+    // correcting itself to «ya está cerrada», which is the wrong one of the
+    // three. The await costs one refetch of latency on the error path and buys
+    // the invariant the copy depends on.
+    onSettled: async (_data, error, variables) => {
       if (!tenantId) return;
       // `reject` is the case apart (R3.5, D8). Once it succeeds the assignment
       // is gone and `GET /incidents/{id}` answers 404 to whoever refused, so
@@ -114,20 +124,23 @@ export function useIncidentCycleAction({
         queryClient.removeQueries({
           queryKey: incidentsKeys.context(tenantId, variables.incidentId),
         });
-      } else {
-        void queryClient.invalidateQueries({
-          queryKey: incidentsKeys.detail(tenantId, variables.incidentId),
+        await queryClient.invalidateQueries({
+          queryKey: incidentsKeys.listPrefix(tenantId),
         });
-        void queryClient.invalidateQueries({
-          queryKey: incidentsKeys.context(tenantId, variables.incidentId),
-        });
-      }
-      void queryClient.invalidateQueries({
-        queryKey: incidentsKeys.listPrefix(tenantId),
-      });
-      if (refused) {
         onRejected?.();
+        return;
       }
+      await Promise.all([
+        queryClient.invalidateQueries({
+          queryKey: incidentsKeys.detail(tenantId, variables.incidentId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: incidentsKeys.context(tenantId, variables.incidentId),
+        }),
+        queryClient.invalidateQueries({
+          queryKey: incidentsKeys.listPrefix(tenantId),
+        }),
+      ]);
     },
   });
 }

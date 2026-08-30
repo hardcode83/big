@@ -8,6 +8,7 @@ import esTech from "@/locales/es/tech.json";
 import esIncidents from "@/locales/es/incidents.json";
 
 import { TechIncidentRow } from "./tech-incident-row";
+import { EMPTY_FIELD } from "../../lib/format";
 
 const INCIDENT = {
   id: "i1",
@@ -70,6 +71,6 @@ describe("TechIncidentRow (R1.2, R6.3, R6.4)", () => {
   it("renders a missing property as the em-dash rather than an empty string (R2.4)", () => {
     renderRow(null, null);
 
-    expect(screen.getAllByText(esTech.common.empty)).toHaveLength(2);
+    expect(screen.getAllByText(EMPTY_FIELD)).toHaveLength(2);
   });
 });

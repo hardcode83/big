@@ -1,4 +1,17 @@
 /**
+ * The typographic placeholder for a nullable scalar rendered inline in a
+ * populated row (R2.4).
+ *
+ * It lives here as a literal rather than in `locales/{es,en}/tech.json`
+ * because `frontend-foundation.md` is explicit about it: "The em-dash is a
+ * literal character in JSX, never a new i18n key (it is not language text and
+ * is the same glyph in `es` and `en`)". The sibling features render the same
+ * glyph inline; naming it once keeps the two screens from drifting apart
+ * without turning it back into translatable text.
+ */
+export const EMPTY_FIELD = "\u2014";
+
+/**
  * The date formatter these two screens need (design D17).
  *
  * `locale` is a **parameter**, not the `undefined` of the runtime: `undefined`

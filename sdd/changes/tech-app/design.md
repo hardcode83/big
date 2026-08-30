@@ -130,6 +130,27 @@ existe («a qué piso voy»).
 
 Coste asumido, no escondido: hasta `per_page` peticiones extra por página renderizada. Ver *Risks*.
 
+> **Enmienda (2026-08-30, gate de `/sdd:review`, panel de seguridad).** El coste anterior contaba
+> *peticiones*; faltaba contar **lo que traen**. `IncidentContextResponse` incluye `access_notes`,
+> y la fila 11 del censo de `sdd/steering/security.md` (excepción 6) fija como precio de esa
+> excepción que las notas de acceso queden **fuera del listado paginado**. Montar una consulta de
+> contexto por fila las devuelve a un listado paginado por la puerta de atrás: hasta `per_page`
+> bloques de instrucciones de acceso —un código de portal es su contenido esperado— acaban en la
+> caché del dispositivo de campo por incidencias que el técnico sólo está hojeando, aunque la fila
+> pinte únicamente `property_name` y `property_internal_code`.
+>
+> **Por qué se asume igualmente:** R1.2 exige la vivienda en cada fila y la única proyección que el
+> rol puede leer es ésta, que es coarse. Ninguna de las salidas está en alcance: recortar en
+> cliente (`select`) no cambia lo que se cachea, que es el artefacto; diferir el contexto a abrir
+> la fila incumple R1.3 y R1.2; y una proyección estrecha para el listado es un cambio de backend,
+> que este change declara fuera de alcance. Cada llamada está autorizada —el backend acota por
+> `restrict_to_technician_id`— así que no se cruza ninguna frontera de confianza: lo que se gasta
+> es la *forma* del remedio que el steering eligió.
+>
+> **Queda abierto, no cerrado:** `/sdd:archive` debe llevar esto a la fila de la excepción 6 y
+> abrir una entrada `[BE]` para una proyección de listado sin `access_notes`. Mientras tanto el
+> precio queda dicho aquí en vez de gastado en silencio, que es la diferencia que el panel pedía.
+
 ### D5 — Los chips de estado son un valor único y se apagan al segundo clic
 
 **Chosen:** `status` viaja como **un** valor (el contrato no admite varios) dentro del objeto
@@ -415,6 +436,8 @@ Rejected: crear `lib/format/` y migrar sólo esta feature — dejaría cinco cop
 | i18n | `frontend/locales/{es,en}/tech.json` *(nuevos)*, `frontend/lib/i18n/resources.ts` | Namespace `tech` registrado (D13) |
 | Docs | `docs/maintenance.md` | Sección «La app del técnico»: las dos pantallas, el ciclo desde el móvil y la puerta de aprobación tal como se muestra (`steering/documentation.md`) |
 | Docs | `README.md` (raíz) | Sólo si el recuento de carpetas de `frontend/features/` que describe queda desfasado al añadir `tech/` |
+| Docs | `docs/demo-tenant.md` | La cuenta `TECHNICIAN` deja de ser una credencial sin pantalla: se documenta el camino de punta a punta que ahora existe |
+| Docs | `sdd/project.md` | Corrige la sección `PORT_OFFSET`/hidratación y la receta de `next start`. Añadido en el gate de `/sdd:review` (2026-08-30): la afirmación anterior era falsa y había bloqueado dos tareas de verificación de este mismo change, así que la corrección se hace donde se descubrió en vez de dejar la trampa puesta para el siguiente |
 
 **Lo que NO cambia, dicho para el panel de review:** ni `backend/`, ni `backend/openapi.json`, ni
 `frontend/lib/api/generated/openapi.d.ts`. Este change no toca el contrato, así que no corre

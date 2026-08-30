@@ -50,15 +50,33 @@ describe("validateFinalCost (R4.1)", () => {
   );
 
   /**
-   * `"5."` and `".5"` are **accepted**, because the published contract accepts
-   * them: the `final_cost` pattern of `ResolveIncidentRequest` in
-   * `backend/openapi.json` matches both, and R4.1 asks only for a number ≥ 0
-   * with at most two decimals. An earlier revision of this review rejected them
-   * on the belief that the backend answered 422 — it does not, and refusing
-   * locally what the server would take is what D12 forbids.
+   * `"5."` and `".5"` are **accepted**, and this is the case that pins R4.5:
+   * local validation only prevents emitting, so it may not refuse a value the
+   * server would take. `Decimal("5.")` is `5` and `Decimal(".5")` is `0.5`,
+   * both inside `ge=0` with two decimals, so an earlier revision that rejected
+   * them as malformed was inventing a mistake the technician had not made.
    */
-  it.each(["5.", ".5"])("accepts %j, which the contract accepts", (raw) => {
+  it.each(["5.", ".5"])("accepts %j, which the server accepts", (raw) => {
     expect(validateFinalCost(raw)).toBeNull();
+  });
+
+  /**
+   * The one place the local rule is knowingly stricter than the *published
+   * pattern* — recorded so it stays a decision instead of drifting into a
+   * contradiction. `^(?!^[-+.]*$)[+-]?0*\d*\.?\d{0,2}0*$` admits a leading `+`
+   * and the server's `Decimal("+5")` passes `ge=0`, so `"+5"` would round-trip
+   * fine. It is refused here because the control is an `<input type="number">`,
+   * which never produces one: accepting it would widen the contract of this
+   * form for a value no technician can type. The inverse case is the reason the
+   * pattern is not the referent at all — it also admits `"5.100"`, which the
+   * schema's `decimal_places=2` rejects.
+   */
+  it("refuses a leading + although the published pattern admits it", () => {
+    expect(validateFinalCost("+5")).toBe("format");
+  });
+
+  it("refuses a third decimal although the published pattern admits it", () => {
+    expect(validateFinalCost("5.100")).toBe("decimals");
   });
 
   it("keeps precision apart from shape", () => {

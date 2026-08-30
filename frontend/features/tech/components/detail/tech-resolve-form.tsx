@@ -25,12 +25,22 @@ export function validateFinalCost(
   // A sign is a value problem, so it keeps its own message.
   if (/^-\d/.test(trimmed)) return "negative";
 
-  // The shape the published contract accepts, minus the sign: see the
-  // `final_cost` pattern of `ResolveIncidentRequest` in `backend/openapi.json`.
-  // Mirrored rather than tightened. An earlier revision of this function
-  // rejected `"5."` and `".5"`, which that pattern accepts and R4.1 permits —
-  // refusing locally what the server would take is the one thing D12 says local
-  // validation must not do.
+  // The rule mirrored here is **R4.1** — "número >= 0, <= 99 999 999,99, como
+  // mucho dos decimales" — which is also the server's own rule: `final_cost` is
+  // `Annotated[Decimal, Field(ge=0, le=MAX_COST, decimal_places=2)]` in
+  // `backend/app/maintenance/api/schemas.py`.
+  //
+  // It is deliberately **not** the `final_cost` string pattern published in
+  // `backend/openapi.json`, which is lossier than the schema it describes in
+  // both directions: it admits `"5.100"`, which `decimal_places=2` rejects, and
+  // it admits a leading `+`, which this form never produces because the control
+  // is an `<input type="number">`. Mirroring the pattern instead of the rule
+  // would therefore let a value through to a guaranteed 422.
+  //
+  // What local validation may not do is refuse a value the server would take
+  // and call it the technician's mistake (R4.5 — it only prevents emitting).
+  // `"5."` and `".5"` are the cases that matters for: an earlier revision
+  // rejected them as malformed although `Decimal("5.")` is `5`.
   if (!/^(?!\.?$)\d*\.?\d*$/.test(trimmed)) return "format";
 
   if (Number(trimmed) > MAX_FINAL_COST) return "tooLarge";

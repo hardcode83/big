@@ -48,6 +48,7 @@ vi.spyOn(incidentsData, "getIncidentsDataSource").mockImplementation(
 );
 
 import { TechIncidentDetailView } from "./tech-incident-detail-view";
+import { EMPTY_FIELD, formatDateTime } from "../../lib/format";
 
 function incident(overrides: Record<string, unknown> = {}) {
   return {
@@ -144,7 +145,7 @@ describe("TechIncidentDetailView (R2–R5)", () => {
 
     await screen.findByText("Fuga en el baño");
     // etaAt, estimatedCost, approvedCost, finalCost, materials, resolvedAt.
-    expect(screen.getAllByText(esTech.common.empty)).toHaveLength(6);
+    expect(screen.getAllByText(EMPTY_FIELD)).toHaveLength(6);
   });
 
   it("(i) a 404 on the detail renders `not available` with the way back to /tech (R2.6)", async () => {
@@ -313,7 +314,13 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     expect(
       await screen.findByText(esTech.resolve.resolved.title),
     ).toBeInTheDocument();
+    // R4.2 names three things a closed incident must show. The test used to
+    // assert only `materials`, leaving the other two unverified.
     expect(screen.getByText("Junta de 12 mm")).toBeInTheDocument();
+    expect(screen.getByText("120,50")).toBeInTheDocument();
+    expect(
+      screen.getByText(formatDateTime("2026-08-12T12:00:00Z", "es")),
+    ).toBeInTheDocument();
     expect(
       screen.queryByText(esTech.resolve.awaitingOwner.title),
     ).toBeNull();
@@ -335,7 +342,7 @@ describe("TechIncidentDetailView (R2–R5)", () => {
     expect(screen.queryByText(esTech.resolve.resolved.title)).toBeNull();
     expect(screen.getByText("980,00")).toBeInTheDocument();
     // `resolvedAt` arrives null and is painted as the em-dash, never invented.
-    expect(screen.getAllByText(esTech.common.empty).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(EMPTY_FIELD).length).toBeGreaterThan(0);
   });
 
   it("(e) never shows or anticipates the owner-approval threshold (R4.4)", async () => {

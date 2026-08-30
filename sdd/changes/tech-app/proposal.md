@@ -209,6 +209,18 @@ Criterios de aceptación:
 4. THE SYSTEM SHALL reutilizar la paleta existente (`features/incidents/lib/severity-tone.ts` sobre
    `lib/ui/status-tone.ts`) para severidad y estado, y SHALL NOT introducir una segunda tabla de
    colores.
+
+   > **Enmienda (2026-08-30, gate de `/sdd:review`).** La mitad «y estado» es **insatisfacible tal
+   > como está escrita**: no existe ninguna tabla estado-de-incidencia→`Tone` en el árbol —
+   > `severity-tone.ts` sólo mapea `IncidentSeverity`, y las únicas hermanas
+   > (`features/cleaning/lib/task-status.ts`, `features/pricing/lib/recommendation-status.ts`)
+   > mapean otros enums. No había nada que reutilizar, así que el estado se pinta como un chip
+   > neutro (`text-muted-foreground`). La mitad prohibitiva —no introducir una segunda tabla de
+   > colores— sí se cumple, y es la que protege la regla de
+   > `frontend-foundation.md` («keep the badge colour palette in exactly one place»).
+   > Crear la tabla que falta habría sido alcance que nadie pidió y una decisión de vocabulario
+   > (qué significa cada color para un estado) que no es de este change. Queda como candidato de
+   > roadmap para `/sdd:archive`: `incident-status-tone`.
 5. THE SYSTEM SHALL confiar la autorización al backend: el `AuthGuard allow={["TECHNICIAN"]}` que
    ya monta el layout es un escudo de UX, y ninguna decisión de negocio SHALL derivarse del rol en
    el cliente.

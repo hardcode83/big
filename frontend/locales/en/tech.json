@@ -141,8 +141,5 @@
       "storage": "We couldn't store the photo. Please try again in a few seconds.",
       "generic": "We couldn't upload the photo. Please try again."
     }
-  },
-  "common": {
-    "empty": "—"
   }
 }

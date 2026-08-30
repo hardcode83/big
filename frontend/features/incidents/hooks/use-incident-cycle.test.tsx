@@ -148,6 +148,54 @@ describe("useIncidentCycleAction (D8)", () => {
     expect(invalidated).toEqual([DETAIL_KEY, CONTEXT_KEY, LIST_PREFIX]);
   });
 
+  /**
+   * The ordering D7 rests on, pinned directly.
+   *
+   * `TechCycleActions` picks one of R3.7's three `409` reasons by reading
+   * `incident.status`, so that read is only correct if the refresh has already
+   * landed when the mutation reports the error. The `it.each` over the three
+   * reasons in `tech-incident-detail-view.test.tsx` cannot see this: it uses
+   * `findByText`, which polls until the *eventual* copy appears and is
+   * therefore blind to a wrong one rendered first. This test holds the
+   * invalidation open and asserts the mutation has not yet surfaced the error
+   * — with a `void`-discarded invalidation it surfaces immediately and this
+   * fails, which is exactly the regression it exists to catch.
+   */
+  it("holds the error until the refresh lands, so the 409 reason is read from the refreshed status (R3.7, D7)", async () => {
+    acceptMock.mockRejectedValue(
+      new ApiError({ status: 409, code: "CONFLICT", message: "nope" }),
+    );
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    });
+    let release!: () => void;
+    const landed = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    let invalidateCalls = 0;
+    vi.spyOn(client, "invalidateQueries").mockImplementation(() => {
+      invalidateCalls += 1;
+      return landed;
+    });
+    const wrapper = ({ children }: { children: ReactNode }) => (
+      <QueryClientProvider client={client}>{children}</QueryClientProvider>
+    );
+    const { result } = renderHook(
+      () => useIncidentCycleAction({ onRejected }),
+      { wrapper },
+    );
+
+    result.current.mutate({ incidentId: "i1", action: "accept" });
+
+    // `onSettled` has run and asked for the refresh, which is still in flight.
+    await waitFor(() => expect(invalidateCalls).toBe(3));
+    expect(acceptMock).toHaveBeenCalledTimes(1);
+    expect(result.current.isError).toBe(false);
+
+    release();
+    await waitFor(() => expect(result.current.isError).toBe(true));
+  });
+
   it("reject removes detail and context, invalidates the list and calls onRejected (R3.5)", async () => {
     const { wrapper, invalidated, removed } = trackedClient();
     const { result } = renderHook(() => useIncidentCycleAction({ onRejected }), { wrapper });
