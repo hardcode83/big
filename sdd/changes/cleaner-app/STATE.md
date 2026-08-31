@@ -1,14 +1,14 @@
 ---
 schema: 1
-state: READY_FOR_PR
+state: PR_OPEN
 local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/cleaner-app
 implementation_sha: ed3bf5f044970e5502e53e05165d04760efc606a
-pr_number:
-pr_url:
-pr_state:
+pr_number: 140
+pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/140
+pr_state: OPEN
 merge_evidence:
 merge_sha:
 ---
