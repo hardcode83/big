@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { CleaningView } from "@/features/cleaning";
 import { PropertyDetailView } from "@/features/dashboard";
 import { GuestPortalView } from "@/features/guest-portal";
+import { CleanerTaskDetailView, CleanerTaskListView } from "@/features/cleaner";
 import { ApiError } from "@/lib/api/errors";
 
 const redirectMock = vi.hoisted(() =>
@@ -107,8 +108,18 @@ describe("route wiring (tasks 7.2–7.6)", () => {
     expect(element.type).toBe(CleaningView);
   });
 
-  it("wires the cleaner task page to the cleaner-task placeholder", async () => {
+  it("wires /cleaner to CleanerTaskListView and not to a placeholder (R1.1)", async () => {
+    const Page = (await import("@/app/(field)/cleaner/page")).default;
+    const element = Page();
+    expect(element.type).toBe(CleanerTaskListView);
+  });
+
+  it("wires /cleaner/tasks/{id} to CleanerTaskDetailView with the awaited id (R2.1)", async () => {
     const Page = (await import("@/app/(field)/cleaner/tasks/[id]/page")).default;
-    expect(Page().props.routeId).toBe("cleaner-task");
+    const element = await Page({
+      params: Promise.resolve({ id: "task-1" }),
+    });
+    expect(element.type).toBe(CleanerTaskDetailView);
+    expect(element.props.taskId).toBe("task-1");
   });
 });

@@ -1,12 +1,16 @@
 import type { Metadata } from "next";
 
 import { routeMetadata } from "@/features/shell/server";
-import { RoutePlaceholder } from "@/features/shell/components/route-placeholder";
+import { CleanerTaskDetailView } from "@/features/cleaner";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("cleaner-task");
 }
 
-export default function Page() {
-  return <RoutePlaceholder routeId="cleaner-task" />;
+interface PageProps {
+  params: { id: string };
+}
+
+export default function Page({ params }: PageProps) {
+  return <CleanerTaskDetailView taskId={params.id} />;
 }
