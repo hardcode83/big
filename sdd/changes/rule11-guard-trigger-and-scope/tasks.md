@@ -286,7 +286,7 @@ obligación de R5.3 prohíbe.
   propio: es la convención que esta misma spec sigue para la nota de `compose-ports-guard`, y
   metida dentro obligaba a leer la historia del error para encontrar la afirmación normativa.
 
-## 5. La autoridad, la spec y las docs <!-- panel: pendiente -->
+## 5. La autoridad, la spec y las docs <!-- panel: PASS 2026-08-31 -->
 
 - [x] 5.1 `sdd/steering/security.md`, § «Sumideros de texto en claro (regla 11)»: reescribir contra
   `SCOPE` la línea 126 (qué recorre el guardián y desde dónde se ejecuta) y la 128 (qué excluye y
