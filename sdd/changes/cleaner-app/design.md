@@ -60,15 +60,15 @@ por re-importación — duplicaría `CleaningTask → CleaningTaskListItem` y ob
 las dos fábricas de claves acordaran la del contexto, que es exactamente lo que R1.3 del
 proposal prohíbe dejar al azar.
 
-### D2 — `HttpCleanerSource` con once métodos, sobre el transporte compartido tal cual
+### D2 — `HttpCleanerSource` con trece métodos, sobre el transporte compartido tal cual
 
-**Chosen:** `features/cleaner/data/http/http-cleaner-source.ts` añade once métodos sobre
+**Chosen:** `features/cleaner/data/http/http-cleaner-source.ts` añade trece métodos sobre
 la `ApiClient` que ya inyecta `lib/api/createAuthenticatedClients`:
 
-- LECTURAS (cinco): `listTasks(tenantId, filters, page)`, `getTask(tenantId, id)`,
+- LECTURAS (seis): `listTasks(tenantId, filters, page)`, `getTask(tenantId, id)`,
   `getTaskContext(tenantId, id)`, `getTaskChecklist(tenantId, id)`,
   `getTaskPhotoRequirements(tenantId, id)`, `getTaskPhotos(tenantId, id)`.
-- ESCRITURAS (seis): `acceptTask`, `rejectTask`, `startTask`, `completeTask`,
+- ESCRITURAS (siete): `acceptTask`, `rejectTask`, `startTask`, `completeTask`,
   `completeChecklistItem`, `uploadPhoto`, `reportIncident`.
 
 `uploadPhoto` envía `multipart/form-data` por el campo `formData?: FormData` que
