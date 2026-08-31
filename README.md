@@ -410,11 +410,36 @@ cd frontend
 npm run dev         # servidor de desarrollo (http://localhost:3000)
 npm run typecheck   # TypeScript strict, sin emitir
 npm run lint        # ESLint (incluye las fronteras app → features → components/lib)
-npm test            # Vitest + Testing Library
+npm test            # Vitest + Testing Library (jsdom)
+npm run test:layout # guarda de desbordamiento a 360px en Chromium — requiere binario, ver abajo
 npm run build       # build de producción
 npm run test:public-artifacts # escanea .next/static, server/standalone y rutas públicas
 npm run test:entrypoint  # test del entrypoint de dev (sincronización de node_modules)
 ```
+
+`npm test` y `npm run test:layout` son **dos proyectos de Vitest**, no dos formas de correr lo
+mismo. El primero es la suite de siempre sobre jsdom, que no hace *layout*: ahí `scrollWidth`
+es siempre 0 y una medición de anchos no mediría nada. El segundo abre un Chromium real con
+Playwright, renderiza las composiciones del `Topbar` a 360, 420, 520 y 640 px y comprueba que
+ninguna desborda horizontalmente; compila antes `app/globals.css` con la CLI de Tailwind, porque
+un DOM sin estilos tampoco desborda nunca.
+
+Por eso `test:layout` pide algo que el resto de la suite no: **el binario del navegador**, que se
+instala una vez por máquina (y en cada job de CI) con
+
+```bash
+cd frontend && npm exec --no -- playwright install --with-deps chromium
+```
+
+Sin él, `npm run test:layout` falla al lanzar el navegador. `npm test` no lo necesita y no lo
+arrastra.
+
+Es `npm exec --no --` y no `npx` a propósito, y es el mismo comando que corre CI: `npx` se descarga
+el paquete del registro cuando no está en `node_modules`, mientras que `--no` usa el binario que
+`npm ci` dejó desde el lockfile o falla. En tu portátil la diferencia es que no te instala a la
+espalda una versión distinta de la fijada; en CI, donde el manifiesto lo controla el Pull Request y
+el paso instala paquetes de sistema, es lo que impide que ese `install` acabe ejecutando código sin
+fijar (razonado en `.github/workflows/frontend-tests.yml`).
 
 > Al añadir o actualizar una dependencia del frontend basta con `docker compose up` (o `make up SERVICE=frontend`): el contenedor de dev sincroniza `node_modules` con `package-lock.json` en el arranque, sin `npm install` manual ni reconstruir la imagen.
 
