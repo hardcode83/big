@@ -11,7 +11,7 @@ the port. It is cited, never restated — `models.py` says why.
 
 import uuid
 from collections.abc import Sequence
-from datetime import datetime
+from datetime import UTC, datetime
 
 from sqlalchemy import func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -84,11 +84,21 @@ class SqlAlchemyNotificationLogRepository:
         return [_to_log(model) for model in rows.scalars()]
 
     async def list_for_recipient(
-        self, tenant_id: uuid.UUID, recipient_user_id: uuid.UUID, *, page: int, per_page: int
+        self,
+        tenant_id: uuid.UUID,
+        recipient_user_id: uuid.UUID,
+        *,
+        page: int,
+        per_page: int,
+        unread: bool | None = None,
     ) -> NotificationLogPage:
         conditions = (
             NotificationLogModel.tenant_id == tenant_id,
             NotificationLogModel.recipient_user_id == recipient_user_id,
+            # D5: the filter is an extra condition on the query that already exists, so the
+            # envelope, the ordering and the page ceilings are the same ones with or without
+            # it. `unread is None` (the default) and `unread is False` both mean "all".
+            *((NotificationLogModel.read_at.is_(None),) if unread else ()),
         )
         total = await self._session.scalar(
             select(func.count()).select_from(NotificationLogModel).where(*conditions)
@@ -105,6 +115,75 @@ class SqlAlchemyNotificationLogRepository:
             items=tuple(_to_log(model) for model in rows.scalars()),
             total=total or 0,
         )
+
+    async def mark_read(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, log_id: uuid.UUID
+    ) -> bool:
+        """One statement, and that is the whole design (D3).
+
+        `COALESCE(read_at, :now)` keeps the first read, so a second acknowledgement matches
+        the row, reports success and moves nothing (R1.3). The three `WHERE` terms make
+        `rowcount == 0` mean exactly "no such row is visible to this user of this tenant" —
+        the three cases R1.4 collapses into one `404` — without this code ever being in a
+        position to tell them apart.
+
+        `UPDATE ... WHERE read_at IS NULL` was rejected for the opposite reason: it would
+        make zero rows ambiguous between "already read" (a success) and "not yours" (a 404).
+
+        **The instant is Python's, not the database's**, and that is not incidental: Postgres
+        `now()` is the *transaction* timestamp, so a test that acknowledges twice inside one
+        session would get the same value whether `COALESCE` worked or not — the idempotency
+        R1.3 asks for would be untestable. This repository is the exception to the injected
+        `get_now` pattern of `app/auth/api/dependencies.py` because design D3 fixes the port
+        signature without a clock: the acknowledgement is one statement and takes no time
+        from its caller.
+        """
+        result = await self._session.execute(
+            update(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.recipient_user_id == user_id,
+                NotificationLogModel.id == log_id,
+            )
+            .values(
+                read_at=func.coalesce(
+                    NotificationLogModel.read_at, datetime.now(UTC)
+                )
+            )
+        )
+        return result.rowcount > 0
+
+    async def count_unread(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """The counter of D4: a `count(*)` over the partial index, never a page of rows."""
+        total = await self._session.scalar(
+            select(func.count())
+            .select_from(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.recipient_user_id == user_id,
+                NotificationLogModel.read_at.is_(None),
+            )
+        )
+        return total or 0
+
+    async def mark_all_read(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """Every unread row of this user, and how many there were (D6).
+
+        No `NotificationLogNotFoundError`, unlike `mark_breached`: an inbox already up to
+        date has nothing to move, which is the normal case and not a failure. The
+        `read_at IS NULL` term is what makes it idempotent — a second call finds nothing and
+        cannot overwrite the timestamps the first one wrote.
+        """
+        result = await self._session.execute(
+            update(NotificationLogModel)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.recipient_user_id == user_id,
+                NotificationLogModel.read_at.is_(None),
+            )
+            .values(read_at=datetime.now(UTC))
+        )
+        return result.rowcount
 
     async def record_attempt(
         self,
@@ -135,6 +214,39 @@ class SqlAlchemyNotificationLogRepository:
         # counter exists to bound.
         if result.rowcount == 0:
             raise NotificationLogNotFoundError(log_id)
+
+    async def exists_for(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> bool:
+        if related_type is None or related_id is None:
+            # `== None` compiles to `IS NULL`, which would match every row of this type that
+            # points at nothing — and because the caller writes no notification when this
+            # returns True, that widening silences alerts rather than surfacing them. The
+            # annotations do not stop it: this backend runs neither mypy nor ruff, in the
+            # tree or in CI. Section 2's security panel raised it before the first caller
+            # existed, which is the only cheap moment to close it.
+            raise ValueError(
+                "exists_for needs a related_type and a related_id: a null would widen the "
+                "check from one entity to every row of that type without one."
+            )
+        result = await self._session.execute(
+            select(NotificationLogModel.id)
+            .where(
+                NotificationLogModel.tenant_id == tenant_id,
+                NotificationLogModel.related_type == related_type,
+                NotificationLogModel.related_id == related_id,
+                NotificationLogModel.notification_type == notification_type,
+            )
+            # Existence, not a count: the caller only asks whether to write, and a `COUNT`
+            # over a duplicated pair would scan rows to answer a question `LIMIT 1` settles.
+            .limit(1)
+        )
+        return result.scalar_one_or_none() is not None
 
     async def cancel_sla_deadline(
         self,
@@ -185,6 +297,7 @@ class SqlAlchemyNotificationLogRepository:
                 related_id=log.related_id,
                 sla_deadline_at=log.sla_deadline_at,
                 sla_breached=log.sla_breached,
+                read_at=log.read_at,
             )
         )
         await self._session.flush()
@@ -210,4 +323,5 @@ def _to_log(model: NotificationLogModel) -> NotificationLog:
         related_id=model.related_id,
         sla_deadline_at=model.sla_deadline_at,
         sla_breached=model.sla_breached,
+        read_at=model.read_at,
     )

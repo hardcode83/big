@@ -1,0 +1,145 @@
+{
+  "list": {
+    "title": "My incidents",
+    "includesClosed": "This list also includes incidents that are already closed.",
+    "loadMore": "Load more",
+    "moreError": {
+      "title": "We could not load more incidents",
+      "description": "The ones already listed are still here. Try again.",
+      "retry": "Retry"
+    },
+    "empty": {
+      "title": "You have no incidents",
+      "description": "When a job is assigned to you, it will show up here."
+    },
+    "error": {
+      "title": "We couldn't load your incidents",
+      "description": "Please try again in a few seconds.",
+      "retry": "Try again"
+    },
+    "loading": "Loading your incidents…"
+  },
+  "filters": {
+    "label": "Filter by status"
+  },
+  "detail": {
+    "back": "Back to my incidents",
+    "loading": "Loading the incident…",
+    "unavailable": {
+      "title": "Incident not available",
+      "description": "It may no longer be assigned to you."
+    },
+    "error": {
+      "title": "We couldn't load the incident",
+      "description": "Please try again in a few seconds.",
+      "retry": "Try again"
+    }
+  },
+  "fields": {
+    "category": "Category",
+    "source": "Source",
+    "etaAt": "Expected arrival time",
+    "estimatedCost": "Estimated cost",
+    "approvedCost": "Approved cost",
+    "finalCost": "Final cost",
+    "materials": "Materials",
+    "ownerApprovalRequired": "Needs the owner's approval",
+    "resolvedAt": "Resolved on",
+    "createdAt": "Created on",
+    "yes": "Yes",
+    "no": "No"
+  },
+  "context": {
+    "title": "Where it is and how to get in",
+    "propertyName": "Property",
+    "propertyInternalCode": "Code",
+    "address": "Address",
+    "timezone": "Property time zone",
+    "accessNotes": "Access instructions",
+    "assignmentNote": "Note from the manager",
+    "unavailable": {
+      "title": "We could not load the context",
+      "description": "The address and the access instructions are not available right now."
+    }
+  },
+  "actions": {
+    "title": "What you can do",
+    "accept": "Accept",
+    "reject": "Turn down",
+    "en-route": "On my way",
+    "wait-parts": "Waiting for parts",
+    "resume": "Resume",
+    "resolve": "Close the incident",
+    "none": {
+      "awaiting-owner": "There is nothing to do right now: the close is waiting for the owner to approve it.",
+      "closed": "This incident is closed.",
+      "not-actionable": "This incident is not assigned yet, so there is nothing to do from here."
+    },
+    "conflict": {
+      "closed": "The incident is already closed, so this action can't be done.",
+      "awaiting-owner": "The incident is waiting for the owner, so this action can't be done.",
+      "out-of-order": "The incident's status has changed and this action no longer fits. The current status is shown above."
+    },
+    "error": "We couldn't complete the action. Please try again."
+  },
+  "eta": {
+    "label": "Expected arrival time (optional)",
+    "help": "Leave it blank and no time is sent.",
+    "invalid": "The server didn't accept that time. Check it and send it again."
+  },
+  "resolve": {
+    "title": "Close the incident",
+    "finalCost": "Final cost (€)",
+    "materials": "Materials used (optional)",
+    "submit": "Close the incident",
+    "errors": {
+      "required": "Enter the final cost.",
+      "negative": "The cost can't be negative.",
+      "tooLarge": "The cost can't be more than 99,999,999.99.",
+      "decimals": "Two decimals at most.",
+      "format": "Write the cost in digits, with at most two decimals. For example: 42.50",
+      "server": "The server didn't accept the close. Check what you entered."
+    },
+    "resolved": {
+      "title": "Incident closed",
+      "description": "The close has been recorded."
+    },
+    "awaitingOwner": {
+      "title": "The close has not been accepted",
+      "description": "It is waiting for the owner to approve the spend. There is nothing else for you to do."
+    }
+  },
+  "photos": {
+    "title": "Photos",
+    "loading": "Loading the photos…",
+    "empty": {
+      "title": "No photos yet",
+      "description": "The photos you upload will appear here."
+    },
+    "error": {
+      "title": "We could not load the photos",
+      "description": "Try again in a few seconds.",
+      "retry": "Retry"
+    },
+    "stage": {
+      "BEFORE": "Before",
+      "AFTER": "After"
+    },
+    "alt": "Incident photo"
+  },
+  "upload": {
+    "title": "Upload a photo",
+    "file": "Choose or take a photo",
+    "stage": "Is it a before or an after?",
+    "submit": "Upload",
+    "uploading": "Uploading…",
+    "optional": "Uploading photos is optional: none is required to close.",
+    "errors": {
+      "conflict": "The incident changed state and no longer accepts photos. Its current state is shown above.",
+      "tooLarge": "The photo is too large. Take a lighter one or lower the quality.",
+      "unsupportedFormat": "That file isn't a photo in a supported format. JPEG, PNG and WebP are accepted.",
+      "storage": "We couldn't store the photo. Please try again in a few seconds.",
+      "generic": "We couldn't upload the photo. Please try again."
+    }
+  }
+}

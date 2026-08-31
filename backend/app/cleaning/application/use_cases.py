@@ -19,6 +19,7 @@ from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
+from app.auth.domain.recipients import RoleRecipients
 from app.auth.domain.repositories import UserFilters
 from app.cleaning.application.evidence import CompletionEvidenceGatherer
 from app.cleaning.domain.assignment import assignment_blocker, resolve_auto_assignee
@@ -34,6 +35,8 @@ from app.cleaning.domain.enums import (
     CleaningValidationStatus,
 )
 from app.cleaning.domain.notifications import (
+    completion_notification,
+    validation_failed_notification,
     RELATED_TYPE_CLEANING_TASK,
     assignment_notification,
     no_cleaner_available_notification,
@@ -631,7 +634,24 @@ class _TaskTransitionMixin:
 
 
 class _TaskLifecycleBase(_TaskTransitionMixin):
-    """Constructor shared by the six operations of the task lifecycle."""
+    """Constructor shared by every task-lifecycle use case.
+
+    `notifications` and `users` live here since `notification-writers-gap` (its R2), because
+    completing and validating now write rows too — see `_AnswersAnAssignmentBase` for what
+    that changed about the older reasoning.
+
+    **What actually writes a notification is not this list, and must not be inferred from
+    it.** Holding the port is now ambient: every subclass has it, including
+    `CreateCleaningTaskUseCase` and `CompleteChecklistItemUseCase`, which write nothing and
+    which no prose used to acknowledge. Before R2 the port was itself the census — only the
+    operations that answer an assignment held it — and that stopped being true here, so a
+    reader auditing "who can write a `notification_logs` row from `cleaning`" cannot answer
+    it from this class. The authority is the guardian of R6
+    (`backend/tests/notifications/test_writer_census.py`), which measures writers from the
+    AST instead of trusting a sentence. Raised by the section-5 security panel, which found
+    an earlier version of this docstring claiming "the six operations" when nine classes
+    subclass it.
+    """
 
     def __init__(
         self,
@@ -642,6 +662,8 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
         timeline: TimelineEventRepository,
         reservations: ReservationRepository,
         audit: AuditLogRepository,
+        notifications: NotificationLogRepository,
+        users: UserRepository,
         uow: UnitOfWork,
     ) -> None:
         self._tasks = tasks
@@ -650,6 +672,9 @@ class _TaskLifecycleBase(_TaskTransitionMixin):
         self._timeline = timeline
         self._reservations = reservations
         self._audit = _AuditWriter(audit)
+        self._notifications = notifications
+        self._users = users
+        self._recipients = RoleRecipients(users=users)
         self._uow = uow
 
 
@@ -666,19 +691,32 @@ class _AnswersAnAssignmentBase(_TaskLifecycleBase):
     a cleaner who accepts in ten seconds has a live candidate whose deadline will pass in
     four hours and escalate to the manager for a task that was answered immediately.
 
-    Three use cases inherit this, not the six of `_TaskLifecycleBase`: starting, completing
-    and validating happen *after* an answer, so the deadline is already closed by then, and
-    giving them the port would be handing out a write nobody needs.
+    Three use cases inherit this — accepting, rejecting and cancelling — and the other
+    lifecycle use cases do not. Starting, completing and validating happen *after* an answer,
+    so the deadline is already closed by then, and **closing it again is a write none of them
+    needs**; creating a task and ticking a checklist item never touch an assignment's
+    deadline at all.
+
+    (No count here, deliberately. This paragraph used to say "not the six of
+    `_TaskLifecycleBase`" and the six was wrong — nine classes subclass it — which is the same
+    trap the base's own docstring carried until the section-5 security panel measured it. The
+    census of who may write is `backend/tests/notifications/test_writer_census.py`, not a
+    number in prose.)
+
+    That last clause used to read "giving them the port would be handing out a write nobody
+    needs", and `notification-writers-gap` (its R2) made the second half false while leaving
+    the first half true. Completing and validating now write notifications of their own —
+    `CLEANING_COMPLETED` to the manager, `CLEANING_FAILED` to the cleaner — so
+    `notifications` and `users` moved up to `_TaskLifecycleBase` and every subclass holds
+    them. What did **not** change is why this class exists: these three still close no SLA,
+    and `_close_assignment_sla` still belongs only to the operations that answer an
+    assignment. The port is no longer what distinguishes them; the deadline is.
 
     Accepting and rejecting *are* answers. Cancelling is not — it is a manager withdrawing the
     task (`cleaning-stall-blocks-next-stay`, design D8) — and it inherits anyway because it can
     fire from `ASSIGNED`, where that assignment's deadline is still live: without closing it,
     `check_sla_breaches` would escalate a task that no longer exists.
     """
-
-    def __init__(self, *, notifications: NotificationLogRepository, **kwargs) -> None:
-        super().__init__(**kwargs)
-        self._notifications = notifications
 
     async def _close_assignment_sla(
         self, tenant_id: uuid.UUID, task: CleaningTask
@@ -977,19 +1015,16 @@ class StartCleaningTaskUseCase(_TaskLifecycleBase):
 
 
 class AssignCleaningTaskUseCase(_TaskLifecycleBase):
-    """R3.3 — the manager hands a task to a cleaner (or moves it to another one)."""
+    """R3.3 — the manager hands a task to a cleaner (or moves it to another one).
 
-    def __init__(
-        self,
-        *,
-        users: UserRepository,
-        notifications: NotificationLogRepository,
-        configs: TenantConfigRepository,
-        **kwargs,
-    ) -> None:
+    It used to declare `users` and `notifications` itself; both moved up to
+    `_TaskLifecycleBase` in `notification-writers-gap` (its R2), so redeclaring them here
+    would shadow the base's and — worse — swallow them before `super().__init__`, leaving the
+    base without the ports it now requires.
+    """
+
+    def __init__(self, *, configs: TenantConfigRepository, **kwargs) -> None:
         super().__init__(**kwargs)
-        self._users = users
-        self._notifications = notifications
         self._configs = configs
 
     async def execute(
@@ -1079,9 +1114,13 @@ class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
     `CleaningTask.complete()` and nowhere else (R4.3, design D4/D8); the four reads that feed it
     — the template, the checklist completions, the uploaded photo types and the blocking-incident
     flag — belong to `CompletionEvidenceGatherer` since `cleaning-completion-evidence-gatherer`
-    (its R1.1), which is what took this class from eleven collaborators to eight. What is left
+    (its R1.1), which is what took this class from eleven collaborators down to eight at the
+    time. It is **ten** today: `notification-writers-gap` (its R2) added `notifications` and
+    `users` to the lifecycle base so the close can tell the manager there is something to
+    validate. Measured, not remembered — the section-4 and section-5 panels each caught a
+    collaborator count in this codebase that had quietly stopped being true. What is left
     here is the close itself: load, ask for the evidence, let the entity decide, then save,
-    transition, audit and commit.
+    transition, audit, notify and commit.
 
     Moving any of the four comparisons up here would still split an invariant `cleaning` spent a
     whole change concentrating in one method — and so would moving them into the gatherer, which
@@ -1125,8 +1164,51 @@ class CompleteCleaningTaskUseCase(_TaskLifecycleBase):
             .diff("validation_status", None, task.validation_status.value),
             now=now,
         )
+        # R2.1 — before the commit this use case already makes (R2.5), so the completion and
+        # the notice of it are one write or neither.
+        await self._notify_completion(tenant_id, task, now)
         await self._uow.commit()
         return task
+
+    async def _notify_completion(
+        self, tenant_id: uuid.UUID, task: CleaningTask, now: datetime
+    ) -> None:
+        """Tell the managers there is something to validate (R2.1).
+
+        Recipients are R5.1's pattern — active managers, falling back to active owners —
+        resolved through the one helper `RoleRecipients` that R5.1 forbids deriving a second
+        time.
+        """
+        recipients = await self._recipients.managers_or_owners(tenant_id)
+        if not recipients.users:
+            # R5.2: no rows, logged, and the completion is not failed over it.
+            logger.error(
+                "cleaning.completion_without_recipient",
+                extra={"tenant_id": str(tenant_id), "cleaning_task_id": str(task.id)},
+            )
+            return
+        if recipients.dropped > 0:
+            logger.warning(
+                "cleaning.completion_recipients_truncated",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "total": len(recipients.users) + recipients.dropped,
+                    "notified": len(recipients.users),
+                },
+            )
+        for recipient in recipients.users:
+            await self._notifications.add(
+                tenant_id,
+                completion_notification(
+                    tenant_id=tenant_id,
+                    task_id=task.id,
+                    property_id=task.property_id,
+                    recipient_id=recipient.id,
+                    recipient_contact=recipient.email,
+                    now=now,
+                ),
+            )
 
 
 class ValidateCleaningTaskUseCase(_TaskLifecycleBase):
@@ -1160,8 +1242,59 @@ class ValidateCleaningTaskUseCase(_TaskLifecycleBase):
             .diff("validated_at", None, now.isoformat()),
             now=now,
         )
+        # R2.2 — only a FAILED verdict is announced, and only to the cleaner (R2.4).
+        if status is CleaningValidationStatus.FAILED:
+            await self._notify_validation_failure(tenant_id, task, now)
         await self._uow.commit()
         return task
+
+    async def _notify_validation_failure(
+        self, tenant_id: uuid.UUID, task: CleaningTask, now: datetime
+    ) -> None:
+        """Tell the assigned cleaner their cleaning did not pass (R2.2, R2.3).
+
+        **To the cleaner, not the manager**: the manager is who just issued the verdict, and
+        the `CLEANER` role already holds `READ_OWN_NOTIFICATIONS`.
+
+        Resolved with `get_active_by_id` rather than `get` (design D6): a cleaner who has
+        been deactivated is not a recipient, and that case is treated exactly like R2.3's
+        unassigned one — no row, a log, and the validation still returns normally. For the
+        manager the effect is identical either way, because nobody is going to read it.
+        """
+        if task.assigned_cleaner_id is None:
+            logger.info(
+                "cleaning.validation_failure_without_cleaner",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "reason": "unassigned",
+                },
+            )
+            return
+
+        cleaner = await self._users.get_active_by_id(tenant_id, task.assigned_cleaner_id)
+        if cleaner is None:
+            logger.info(
+                "cleaning.validation_failure_without_cleaner",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "cleaning_task_id": str(task.id),
+                    "reason": "inactive",
+                },
+            )
+            return
+
+        await self._notifications.add(
+            tenant_id,
+            validation_failed_notification(
+                tenant_id=tenant_id,
+                task_id=task.id,
+                property_id=task.property_id,
+                recipient_id=cleaner.id,
+                recipient_contact=cleaner.email,
+                now=now,
+            ),
+        )
 
 
 @dataclass(frozen=True)

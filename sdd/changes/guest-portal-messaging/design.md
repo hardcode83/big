@@ -618,6 +618,46 @@ a `sdd/roadmap.md`; aquí sólo quedan enunciados.
   hay en este árbol. **No se arregla tocando `.claude/agents/`**: son ficheros compartidos con
   otras sesiones vivas y quitarles `description` rompe cómo los lanza Claude Code.
 
+- **El guardián de la regla 11 se dispara por `backend/**` y mira `sdd/**` y `docs/**`: su entrada
+  y su gatillo son conjuntos disjuntos.** Medido el 2026-08-31, no inferido. El workflow
+  `backend-tests.yml` tiene un job `backend-tests-detect` que decide si corre la suite mirando los
+  paths tocados:
+
+  ```
+  case "$f" in
+    backend/* | .github/workflows/backend-tests.yml)
+      backend=true
+  ```
+
+  Y `test_rule11_ownership.py` **no lee nada de `backend/`**: escanea `sdd/**` y `docs/**`. Así que
+  un commit que sólo toca prosa —que es **exactamente** la forma de todo commit de `/sdd:archive`—
+  no ejecuta el guardián que existe para vigilar esa prosa.
+
+  **La consecuencia ya ocurrió.** El archivado de `notification-writers-gap` (`f86a83f`,
+  2026-08-30) introdujo tres bloques infractores en `sdd/specs/access-notifications.md` (líneas
+  372, 525 y 689). En el run 33409418091 de `main`: `backend-tests-detect` success,
+  `backend-tests` success, **`backend-tests-suite` skipped**. `main` quedó verde en CI y **rojo en
+  local**, comprobado extrayendo `origin/main` con `git archive` y corriendo sobre él la propia
+  detección del guardián: 3 infractores en `main` puro, los mismos 3 que en esta rama.
+
+  **Y muerde a quien no lo rompió**, que es lo que lo convierte en urgente: esta feature sí toca
+  `backend/**`, así que su PR **sí** ejecutaría la suite y saldría roja por tres bloques que no ha
+  escrito. Un guardián que no se dispara en el commit que introduce el defecto y sí en el
+  siguiente que pase por allí no protege: reparte el coste al azar.
+
+  **Es la segunda vez que este proyecto comete este error exacto, y la primera está escrita.** El
+  roadmap de `compose-ports-guard` ya dice, sobre otra guardia: «**no puede vivir en
+  `backend/tests/`**: `backend-tests.yml:137` decide el área con `case "$f" in backend/* …`, así
+  que un PR que solo toque `docker-compose.yml` **no ejecutaría la suite** — justo el PR donde la
+  guardia tendría que hablar». La salida que allí se eligió es la que sirve aquí: **workflow
+  propio invocando un target de `make`, sin `paths:` en `on:`**, el patrón de `api-contract.yml`.
+
+  Junto con los otros dos defectos del mismo guardián anotados arriba —el falso positivo que
+  disparó sobre una entrada de roadmap y el falso negativo que esquiva una paráfrasis en inglés—
+  son tres, y los tres apuntan al mismo sitio: el guardián no tiene fijada ni su forma ni su
+  alcance ni su gatillo. Levantados los tres durante `/sdd:review` y `/sdd:ship` de
+  `guest-portal-messaging`, 2026-08-30/31.
+
 ## Open questions
 
 Ninguna abierta. Las dos que este diseño levantó se resolvieron con el usuario el **2026-08-29** y las dos

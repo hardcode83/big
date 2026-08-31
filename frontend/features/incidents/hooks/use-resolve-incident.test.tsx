@@ -39,6 +39,11 @@ const resolved: IncidentDetailDto = {
   estimatedCost: null,
   approvedCost: null,
   finalCost: "12.50",
+  // `etaAt` and `materials` joined IncidentDetailDto in `tech-app`, whose
+  // proposal declares that widening in scope. The dashboard's close does not
+  // send `materials` (its D7), so the resolved fixture carries it null.
+  etaAt: null,
+  materials: null,
   resolvedAt: "2026-08-22T18:00:00Z",
   createdAt: "2026-08-22T17:00:00Z",
   updatedAt: "2026-08-22T18:00:00Z",

@@ -379,6 +379,16 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/access-records/{record_id}/external",
         "/api/v1/access-records/{record_id}/manual-code",
         "/api/v1/notifications",
+        # `notifications-inbox-web` R1.2/R2.2/R5.2: the three routes that close the in-app
+        # cycle. All three declare `READ_OWN_NOTIFICATIONS` and **no new permission** —
+        # acknowledging one's own notice is not a capability distinct from reading it (that
+        # change's design D2) — and all three derive the recipient from the token, which is
+        # the restriction this snapshot cannot see. Asserted per role in
+        # `tests/notifications/test_api.py`, and across tenants in
+        # `tests/notifications/test_read_isolation.py`.
+        "/api/v1/notifications/unread-count",
+        "/api/v1/notifications/read-all",
+        "/api/v1/notifications/{notification_id}/read",
         "/api/v1/guests/{guest_id}/document",
         "/api/v1/reservations/{reservation_id}/legal-registration/submit",
         "/api/v1/auth/logout",

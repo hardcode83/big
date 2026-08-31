@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity compose-stacks check-compose-ports db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
@@ -296,6 +296,29 @@ openapi:
 
 check-version-parity:
 	python3 scripts/check-version-parity.py
+
+# Corre el build de producción del frontend, que es lo ÚNICO que valida las fronteras
+# Server/Client de React. Ni `tsc` ni Vitest ni ESLint las ven: un Client Component que
+# importa `server-only` type-checkea, pasa sus tests y rompe el build. Eso llegó a `main`
+# en `notifications-inbox-web` (PR #136) porque el build vivía sólo en el job
+# `provenance-contract` de CI y no había forma de invocarlo aquí — el defecto se descubrió
+# después de abrir el PR, no antes.
+#
+# Los cuatro APP_PROVENANCE_* son centinelas de relleno, los mismos que exporta ese job: el
+# build los exige presentes, y sus valores no importan porque este target no comprueba la
+# divulgación de procedencia, sólo que la aplicación compila. Para eso está
+# `npm run test:public-artifacts` dentro del propio job.
+#
+# `exec` y no `run`: el servicio de frontend usa `target: dev` en todos los compose, así que
+# el build se hace dentro del contenedor ya levantado, contra el mismo node_modules que usa
+# el desarrollo. Requiere el stack arriba (`make up`).
+check-frontend-build:
+	$(COMPOSE) exec -T \
+		-e APP_PROVENANCE_REPOSITORY_URL=https://github.com/local/check \
+		-e APP_PROVENANCE_PULL_REQUEST_NUMBER=0 \
+		-e APP_PROVENANCE_COMMIT_SHA=0000000000000000000000000000000000000000 \
+		-e APP_PROVENANCE_ACTIONS_RUN_ID=0 \
+		frontend npm run build
 
 # Lista los stacks de Compose vivos en la máquina y marca los huérfanos (su directorio de
 # origen ya no está registrado en `git worktree list`). Informa; no baja nada.

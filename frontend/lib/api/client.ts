@@ -81,6 +81,15 @@ export interface UnauthorizedContext {
 export interface RequestOptions<Body, Method extends string> {
   method?: Method;
   body?: Body;
+  /**
+   * Multipart body, mutually exclusive with `body`. When present the client
+   * sends the `FormData` as-is and does NOT set a default `Content-Type`: the
+   * browser has to write it itself so the header carries the `boundary`
+   * (design D2). A separate field and not `body` because `RequestBodyFor<…>`
+   * only extracts `content["application/json"]`, which is `never` for a
+   * multipart-only route.
+   */
+  formData?: FormData;
   headers?: HeadersInit;
   pathParams?: Record<string, string | number>;
   /**
@@ -170,7 +179,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
     path: Path,
     ...requestArguments: RequestArguments<Path, Method>
   ): Promise<ResponseFor<OperationFor<Path, Method>>> {
-    const { method, body, headers, pathParams, query, signal } =
+    const { method, body, formData, headers, pathParams, query, signal } =
       requestArguments[0] ?? {};
     let retryCount = 0;
 
@@ -183,7 +192,7 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       }
 
       const hasBody = body !== undefined;
-      if (hasBody && !finalHeaders.has("Content-Type")) {
+      if (hasBody && !formData && !finalHeaders.has("Content-Type")) {
         finalHeaders.set("Content-Type", "application/json");
       }
 
@@ -191,7 +200,9 @@ export function createApiClient(options: ApiClientOptions): ApiClient {
       const response = await doFetch(joinUrl(options.baseUrl, resolvedPath), {
         method: method ?? "GET",
         headers: finalHeaders,
-        body: hasBody ? JSON.stringify(body) : undefined,
+        // The same `FormData` instance is reused when the loop re-enters after
+        // a recovered 401 — it is replayable, unlike a stream.
+        body: formData ?? (hasBody ? JSON.stringify(body) : undefined),
         signal,
       });
 

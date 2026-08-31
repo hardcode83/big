@@ -3364,6 +3364,20 @@
         "title": "LoginRequest",
         "type": "object"
       },
+      "MarkAllReadResponse": {
+        "description": "How many rows \"mark all as read\" moved (R5.2, design D6). Zero is a normal answer.",
+        "properties": {
+          "updated": {
+            "title": "Updated",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "updated"
+        ],
+        "title": "MarkAllReadResponse",
+        "type": "object"
+      },
       "MarkExternalRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3632,8 +3646,27 @@
             "type": "string"
           },
           "notification_type": {
-            "title": "Notification Type",
-            "type": "string"
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/NotificationType"
+              },
+              {
+                "type": "string"
+              }
+            ],
+            "title": "Notification Type"
+          },
+          "read_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Read At"
           },
           "related_id": {
             "anyOf": [
@@ -3695,7 +3728,8 @@
           "related_type",
           "related_id",
           "sent_at",
-          "created_at"
+          "created_at",
+          "read_at"
         ],
         "title": "NotificationResponse",
         "type": "object"
@@ -3709,6 +3743,30 @@
           "SKIPPED"
         ],
         "title": "NotificationStatus",
+        "type": "string"
+      },
+      "NotificationType": {
+        "description": "The sixteen types of PRD §14, with its exact names.\n\nA Python enum over a `String(100)` column, deliberately: `notification_logs\n.notification_type` was created as free text by `domain-foundation-financial` and\nstays that way, so this needs **no migration** and cannot reject a row written before\nit existed. What it buys is an exhaustive escalation policy — `escalation_for` can be\ntested against every member, which a string could not be.\n\nAdded by `celery-jobs`, whose SLA job (PRD §14) is the first code that has to decide\nwhat a `notification_type` *means*. `access-notifications` owns the sending side and\ninherits these names.",
+        "enum": [
+          "CLEANING_TASK_ASSIGNED",
+          "CLEANING_NO_RESPONSE",
+          "CLEANING_COMPLETED",
+          "CLEANING_FAILED",
+          "INCIDENT_CREATED_CRITICAL",
+          "INCIDENT_CREATED_HIGH",
+          "OWNER_APPROVAL_REQUIRED",
+          "TECHNICIAN_ASSIGNED",
+          "TECHNICIAN_NO_RESPONSE",
+          "GUEST_ESCALATION",
+          "LOCK_ALERT",
+          "CHECKIN_REMINDER_24H",
+          "CHECKIN_REMINDER_2H",
+          "CHECKOUT_REMINDER",
+          "PRICE_RECOMMENDATION",
+          "SLA_BREACH",
+          "PASSWORD_RESET_REQUESTED"
+        ],
+        "title": "NotificationType",
         "type": "string"
       },
       "OwnerApprovalStatus": {
@@ -6591,6 +6649,20 @@
           }
         },
         "title": "TriageIncidentRequest",
+        "type": "object"
+      },
+      "UnreadCountResponse": {
+        "description": "The bell's counter (R2.2, design D4). Its own shape, not a field of the envelope.",
+        "properties": {
+          "unread": {
+            "title": "Unread",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "unread"
+        ],
+        "title": "UnreadCountResponse",
         "type": "object"
       },
       "UpdatePricingRuleRequest": {
@@ -12925,6 +12997,22 @@
               "title": "Per Page",
               "type": "integer"
             }
+          },
+          {
+            "in": "query",
+            "name": "unread",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "boolean"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Unread"
+            }
           }
         ],
         "responses": {
@@ -12975,6 +13063,162 @@
           }
         ],
         "summary": "List the caller's own notifications",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/read-all": {
+      "post": {
+        "description": "Marks all of the caller's unread notifications as read and answers how many it moved. Its scope is **all** of them, deliberately not the page or filter the client happens to be showing (design D6). Zero is the normal answer of an inbox already up to date, never an error.",
+        "operationId": "mark_all_notifications_read_api_v1_notifications_read_all_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MarkAllReadResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge every unread notification of the caller",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/unread-count": {
+      "get": {
+        "description": "The bell's counter (design D4). One query, independent of any `per_page` the caller may be using on the listing, and consistent with listing and counting `read_at IS NULL`. Its own route rather than a field of the paginated envelope, so the bell can refresh without dragging a page of rows across the wire.",
+        "operationId": "count_unread_notifications_api_v1_notifications_unread_count_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/UnreadCountResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "How many of the caller's own notifications are unread",
+        "tags": [
+          "notifications"
+        ]
+      }
+    },
+    "/api/v1/notifications/{notification_id}/read": {
+      "post": {
+        "description": "Records that the caller has read this notification. **Idempotent**: acknowledging one already read succeeds and does not move the recorded instant — `read_at` is the first read, not the last visit. A notification that does not exist, belongs to another user or belongs to another tenant answers the same `404` with the same body: a `403` would confirm the existence of somebody else's row.",
+        "operationId": "mark_notification_read_api_v1_notifications__notification_id__read_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "notification_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Notification Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Acknowledge one of the caller's own notifications",
         "tags": [
           "notifications"
         ]

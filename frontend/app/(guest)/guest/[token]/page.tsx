@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 import { GuestPortalView } from "@/features/guest-portal";
 
 export function generateMetadata(): Promise<Metadata> {

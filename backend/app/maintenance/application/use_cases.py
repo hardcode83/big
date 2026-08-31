@@ -32,6 +32,7 @@ from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import ChangeSet
 from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.domain.ports import UserRepository
+from app.auth.domain.recipients import RoleRecipients
 from app.auth.domain.repositories import UserFilters
 # `maintenance` supplies the implementer of a port `cleaning` declares, so the import runs
 # that way round: `application/` here depends on another module's `domain/`, never on its use
@@ -74,6 +75,8 @@ from app.maintenance.domain.exceptions import (
     OwnerApprovalNotFoundError,
 )
 from app.maintenance.domain.notifications import (
+    incident_critical_notification,
+    incident_high_notification,
     RELATED_TYPE_INCIDENT,
     incident_rejection_notification,
     owner_approval_notification,
@@ -1083,18 +1086,140 @@ class _IncidentFlowBase(_IncidentTransitionMixin):
         self._uow = uow
 
 
-class ClassifyIncidentUseCase(_IncidentFlowBase):
+#: The `NotificationType` each announced severity writes, kept beside the builders that write
+#: them so the `exists_for` key and the row can never name different types (R1.3).
+_SEVERITY_NOTIFICATION_TYPES = {
+    IncidentSeverity.CRITICAL: NotificationType.INCIDENT_CREATED_CRITICAL,
+    IncidentSeverity.HIGH: NotificationType.INCIDENT_CREATED_HIGH,
+}
+
+
+class _NotifiesSeverity:
+    """Telling the manager an incident is CRITICAL or HIGH — R1, shared by two use cases.
+
+    A mixin rather than a base class, and for the same reason `_ApprovalGateMixin` is one:
+    only two of this module's use cases reach a severity verdict. `ClassifyIncidentUseCase`
+    reaches it from the classifier, `TriageIncidentUseCase` from a human correcting it, and
+    R1.1/R1.2 make no distinction between the two — the difference is who decided, not what
+    is now true.
+
+    **Deduplicated by `exists_for`, not by comparing severities** (design D3). A triage that
+    *confirms* the severity a classification already set does not change it, and yet must not
+    notify twice; and `TriageIncidentUseCase` admits being called repeatedly. Asking whether
+    the row exists answers both, where a `previous != current` comparison answers neither.
+    R1.4 then falls out for free: the check is per type, so an incident raised from HIGH to
+    CRITICAL gets its CRITICAL row even though the HIGH one is already there.
+    """
+
+    _users: UserRepository
+    _notifications: NotificationLogRepository
+
+    #: Which builder announces which severity. A mapping rather than an `if`, so a severity
+    #: added to `IncidentSeverity` later is a `KeyError` here rather than a silent omission —
+    #: and each builder still writes its own literal, which is what R6's census reads (D4).
+    _SEVERITY_BUILDERS = {
+        IncidentSeverity.CRITICAL: incident_critical_notification,
+        IncidentSeverity.HIGH: incident_high_notification,
+    }
+
+    async def _notify_severity(
+        self, tenant_id: uuid.UUID, incident: Incident, now: datetime
+    ) -> None:
+        """Write one row per recipient, once per incident and severity (R1.1-R1.4).
+
+        Called **before** the commit the caller already makes, which is all R1.6 asks: there
+        is no window in which the incident is critical and the alert does not exist.
+
+        Silent on a severity nobody announces (MEDIUM, LOW): those are not urgent and R1.5's
+        below-threshold case never reaches here at all, because the caller gates on status.
+        """
+        builder = self._SEVERITY_BUILDERS.get(incident.severity)
+        if builder is None:
+            return
+
+        notification_type = _SEVERITY_NOTIFICATION_TYPES[incident.severity]
+        # R1.3 — one row set per incident and severity. Checked before resolving recipients
+        # so a repeated triage costs one indexed read and no roster query.
+        if await self._notifications.exists_for(
+            tenant_id,
+            related_type=RELATED_TYPE_INCIDENT,
+            related_id=incident.id,
+            notification_type=notification_type.value,
+        ):
+            return
+
+        recipients = await RoleRecipients(users=self._users).managers_or_owners(tenant_id)
+        if not recipients.users:
+            # R5.2 — no rows, but never in silence, and never failing the classification that
+            # produced the verdict. A tenant in this state has a critical incident nobody is
+            # going to see, which is worth an operator's attention.
+            logger.error(
+                "maintenance.severity_alert_without_recipient",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident.id),
+                    "severity": incident.severity.value,
+                },
+            )
+            return
+        if recipients.dropped > 0:
+            # Design D1 leaves the truncation log to the caller, under the caller's own key.
+            logger.warning(
+                "maintenance.severity_alert_recipients_truncated",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "incident_id": str(incident.id),
+                    "total": len(recipients.users) + recipients.dropped,
+                    "notified": len(recipients.users),
+                },
+            )
+
+        for recipient in recipients.users:
+            await self._notifications.add(
+                tenant_id,
+                builder(
+                    tenant_id=tenant_id,
+                    incident_id=incident.id,
+                    property_id=incident.property_id,
+                    manager_id=recipient.id,
+                    recipient_contact=recipient.email,
+                    now=now,
+                ),
+            )
+
+
+class ClassifyIncidentUseCase(_NotifiesSeverity, _IncidentFlowBase):
     """R1.2, R1.3, R1.6 — put an `OPEN` incident through the classifier.
 
     Driven by the job of D2 (with `actor=None`) and by `POST /incidents/{id}/classify` (with
     the manager who forced it). One use case for both, because the difference is who asked,
     not what happens.
+
+    **Thirteen collaborators since `notification-writers-gap`**, up from eleven, and that is a
+    cost its design accepted rather than overlooked: R1.6 wants the alert inside the
+    transaction this class already commits, and a separate "notify severity" use case would
+    need its own — which is exactly the window R1.6 exists to close. If this grows again the
+    thing to extract is the incident+audit+timeline trio, not the notification.
+
+    (Nine is what `_IncidentFlowBase` takes; this class already added `classifier` and
+    `configs` on top of it. The design said "nine to eleven" and was corrected to the measured
+    figures when its section-4 panel counted them.)
     """
 
-    def __init__(self, *, classifier: IncidentClassifier, configs: TenantConfigRepository, **kwargs) -> None:
+    def __init__(
+        self,
+        *,
+        classifier: IncidentClassifier,
+        configs: TenantConfigRepository,
+        users: UserRepository,
+        notifications: NotificationLogRepository,
+        **kwargs,
+    ) -> None:
         super().__init__(**kwargs)
         self._classifier = classifier
         self._configs = configs
+        self._users = users
+        self._notifications = notifications
 
     async def execute(
         self,
@@ -1180,7 +1305,14 @@ class ClassifyIncidentUseCase(_IncidentFlowBase):
                     actor=actor,
                     now=now,
                 )
+            # R1.1/R1.2, gated on `CLASSIFIED` because that is precisely R1.5's condition:
+            # below the confidence threshold `classify` leaves the incident `OPEN` and never
+            # touches `severity` (`domain/entities.py`), so there is no verdict to announce
+            # and the default `MEDIUM` must not be mistaken for one.
+            await self._notify_severity(tenant_id, incident, now)
 
+        # R1.6 — inside the transaction this use case already commits, so the incident and
+        # its alert are one write or neither.
         await self._uow.commit()
         return incident
 
@@ -1365,7 +1497,7 @@ class ClassifyPendingIncidentsUseCase:
         return report
 
 
-class TriageIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
+class TriageIncidentUseCase(_NotifiesSeverity, _ApprovalGateMixin, _IncidentFlowBase):
     """R1.4, R2.1 — a human fixes the classification, and may put a price on the job.
 
     This is where D11's **first** gate lives: an `estimated_cost` above
@@ -1436,6 +1568,13 @@ class TriageIncidentUseCase(_ApprovalGateMixin, _IncidentFlowBase):
                 actor=actor,
                 now=now,
             )
+
+        # R1.1/R1.2 on the human path. No status gate here, unlike the classification path:
+        # `set_triage` is a manager stating the severity outright, so there is no confidence
+        # threshold and no below-threshold case. `exists_for` is what stops a triage that
+        # merely confirms the classifier's verdict from announcing it twice (R1.3), and what
+        # still lets a HIGH→CRITICAL correction through (R1.4).
+        await self._notify_severity(tenant_id, incident, now)
 
         await self._uow.commit()
         return incident

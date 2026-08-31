@@ -1,6 +1,12 @@
 # notifications-inbox-web
 
-[FE] **la bandeja in-app, que es la única entrega real que el producto tiene hoy y no la lee nadie**.
+[BE+FE] **la bandeja in-app, que es la única entrega real que el producto tiene hoy y no la lee nadie**.
+
+> **Entregada el 2026-08-29** (PR #136, archivo en
+> `sdd/changes/archive/2026-08-29-notifications-inbox-web/`). Todo lo que esta nota mide en presente
+> describe el estado **anterior** a esa entrega y se conserva como el argumento que la motivó. El
+> comportamiento vigente vive en `sdd/specs/notifications-inbox-web.md` (la superficie web) y en
+> `sdd/specs/access-notifications.md` §«La bandeja in-app» (las cuatro rutas y `read_at`).
 
 **El hecho medido (2026-08-28)**: `GET /api/v1/notifications` existe desde `access-notifications`
 (`backend/app/notifications/api/router.py`, una sola ruta) y **cero ficheros del frontend la llaman** —
@@ -34,6 +40,17 @@ no compra nada. (3) `subject`/`body` de esas filas llevan ids y un tipo, nunca c
 (regla 11 de `steering/security.md`), así que la pantalla tiene que **renderizar** el `notification_type`
 a texto i18n ES/EN y no limitarse a pintar el `body`, que está escrito en inglés y para un operador.
 
+**Resuelto el 2026-08-28, al abrir su `/sdd:new`**: de las dos salidas que el punto (1) dejaba
+abiertas se toma la primera —«marcar como leído» de verdad—, y **en Postgres, no en el cliente**:
+una lectura guardada en el navegador no cruza dispositivos, y quien opera desde el móvil y desde
+el portátil vería dos bandejas distintas. Eso cierra el OQ2 que el design D6 de `access-notifications`
+aparcó, y con él la afirmación de `specs/access-notifications.md` de que «el frontend lleva su propio
+estado hasta que una entrada de roadmap decida lo contrario» — esta es esa entrada. Consecuencia
+asumida: la entrada deja de ser `[FE]`/`S` y pasa a `[BE+FE]`/`M`. No espera a nadie por ello,
+porque su `needs` no cambia y `access-notifications` está archivado.
+
 **Por qué va primera de todo el bloque de comunicación**: es la única de las nueve que no necesita ni un
-proveedor externo, ni una decisión de dominio, ni una migración — y sin ella no hay forma de **observar**
-que ninguna de las otras ocho funciona.
+proveedor externo ni una decisión de dominio — y sin ella no hay forma de **observar** que ninguna de
+las otras ocho funciona. Migración sí lleva, desde que el párrafo anterior resolvió el punto (1) a
+favor de `read_at` en Postgres: una columna aditiva y sus dos índices. Esta frase decía «ni una
+migración» y era de antes de esa resolución.

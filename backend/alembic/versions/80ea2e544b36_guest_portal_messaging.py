@@ -59,9 +59,28 @@ nothing, and `alembic downgrade base` (which CI runs) drops the whole type in th
 created it anyway. The index *is* dropped, and re-upgrading only fails if two portal threads
 for one stay were created while it was down.
 
-Revision ID: f3c7a2b81d54
-Revises: d4a7e18c6b93
+Revision ID: 80ea2e544b36
+Revises: e5c9b1f47a28
 Create Date: 2026-08-29 00:00:00.000000
+
+**Re-encadenada al sincronizar la base (2026-08-31).** Nació colgando de `d4a7e18c6b93`, pero
+`main` colgó de ese mismo padre `e5c9b1f47a28` (`notification_logs.read_at`) mientras esta rama
+estaba en revisión, y dos cabezas rompen `tests/test_migrations.py`. Se re-encadenó ésta detrás de
+aquélla; son ortogonales —`conversations` y el enum aquí, `notification_logs` allí— así que el
+orden no cambia el resultado.
+
+**Y por eso el `revision` cambió de `f3c7a2b81d54` a `80ea2e544b36` en la misma operación.** El panel de QA
+del 2026-08-31 midió lo que pasa si se re-encadena conservando el id: una BD ya sellada con el id
+viejo le parece a Alembic que está en cabeza, `upgrade head` **no hace nada** y se salta para
+siempre el DDL de `e5c9b1f47a28` —la tabla se queda sin `read_at` ni sus dos índices y
+`downgrade base` revienta con `UndefinedObjectError`—. Comprobado sobre la BD de dev de un
+worktree, que quedó exactamente así.
+
+Ese modo de fallo es **silencio**, y documentarlo no lo arregla para quien no lea esto. Con el id
+nuevo, la misma BD falla **en alto** —`Can't locate revision identified by 'f3c7a2b81d54'`— y obliga a
+recrearla, que es lo que hay que hacer: `make down` borrando volúmenes, `make up`,
+`make bootstrap`, `make seed-demo`. Ni `main` ni `dev` se ven afectados en ninguno de los dos
+casos: nunca tuvieron esta revisión sellada, y sobre BD limpia el ciclo completo pasa.
 
 """
 from typing import Sequence, Union
@@ -71,8 +90,8 @@ import sqlalchemy as sa
 
 
 # revision identifiers, used by Alembic.
-revision: str = 'f3c7a2b81d54'
-down_revision: Union[str, Sequence[str], None] = 'd4a7e18c6b93'
+revision: str = '80ea2e544b36'
+down_revision: Union[str, Sequence[str], None] = 'e5c9b1f47a28'
 branch_labels: Union[str, Sequence[str], None] = None
 depends_on: Union[str, Sequence[str], None] = None
 

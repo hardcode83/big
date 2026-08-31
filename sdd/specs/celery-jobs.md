@@ -223,7 +223,14 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 - WHEN un `NotificationLog` cumple `status = SENT`, `sla_deadline_at` no nulo y vencido, y
   `sla_breached = FALSE`, THE SYSTEM SHALL marcarlo incumplido y crear la notificación de
-  escalado que corresponda a su tipo.
+  escalado que corresponda a su tipo. Los dos tipos con política definida escalan a tipos
+  **distintos**: `CLEANING_TASK_ASSIGNED` produce `SLA_BREACH` y `TECHNICIAN_ASSIGNED` produce
+  `TECHNICIAN_NO_RESPONSE` desde `notification-writers-gap`, de modo que quien lee la bandeja
+  distingue un técnico que calla de cualquier otro plazo incumplido sin abrir la fila que lo
+  originó. La política sigue teniendo **dos** entradas: cambió lo que una produce, no cuántas hay.
+- THE SYSTEM SHALL mantener el `subject` de la fila de escalado como la constante `"SLA breach"`
+  en ambas ramas: es un hecho cierto de la fila —el plazo se incumplió— y lo que distingue el caso
+  es el `notification_type`, que es donde lo lee la bandeja.
 - THE SYSTEM SHALL crear el escalado en estado `PENDING` y no SHALL intentar entregarlo por
   ningún canal: la entrega es de `dispatch_notifications`, que drena las filas `PENDING` cada
   minuto. La costura entre encolar y entregar es deliberada.
@@ -237,6 +244,18 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   ese incumplimiento.
 - THE SYSTEM SHALL dirigir el escalado a cada `PROPERTY_MANAGER` activo del tenant, con una
   fila por cada uno, y WHERE no haya ninguno SHALL recurrir al `TENANT_OWNER`.
+- THE SYSTEM SHALL resolver esos destinatarios a través del servicio de dominio común
+  `RoleRecipients` y no con una consulta propia en línea. Este job fijó el patrón y desde
+  `notification-writers-gap` lo **comparte** en vez de encabezar copias de sí mismo
+  ([`access-notifications.md`](access-notifications.md) §El censo de escritores). Lo que **no**
+  se movió es lo que es suyo: el contador `recipients_truncated` del informe y la clave de log
+  `scheduler.escalation_recipients_truncated`, que nombra este sitio y no el helper. Es una
+  refactorización sin cambio observable —la caída al owner y el recuento de truncación ya
+  funcionaban así—, y su valor es que la pregunta deje de estar escrita dos veces.
+- THE SYSTEM SHALL conservar aquí la caída al `TENANT_OWNER` en vez de usar
+  `managers_or_owners`: el rol primario lo dicta la política del escalado y no está fijado a
+  `PROPERTY_MANAGER`, así que este job pide `active_holders` del rol que la política nombre y
+  recurre al owner sólo si ese rol no era ya el owner.
 - IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL dejar el incumplimiento **sin
   marcar** y registrarlo, de modo que se reintente hasta que alguien arregle el roster. Marcarlo
   lo volvería inescalable para siempre mientras la fila afirmaba haberse atendido.
