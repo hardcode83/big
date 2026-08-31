@@ -31,6 +31,7 @@ make openapi           # regenera el contrato de API (ver abajo)
 make check-version-parity # comprueba VERSION, backend y frontend
 make compose-stacks    # lista los stacks de Compose de la máquina y marca los huérfanos (ver abajo)
 make check-compose-ports # comprueba la postura de red del compose local (ver abajo)
+make check-rule11-ownership # comprueba que la propiedad de un sumidero de la regla 11 se declara en un solo sitio
 make down              # para y elimina los contenedores del stack
 make logs               # sigue los logs de todos los servicios
 make ps                  # estado de los contenedores

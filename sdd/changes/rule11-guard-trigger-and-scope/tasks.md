@@ -286,20 +286,20 @@ obligación de R5.3 prohíbe.
   propio: es la convención que esta misma spec sigue para la nota de `compose-ports-guard`, y
   metida dentro obligaba a leer la historia del error para encontrar la afirmación normativa.
 
-## 5. La autoridad, la spec y las docs
+## 5. La autoridad, la spec y las docs <!-- panel: pendiente -->
 
-- [ ] 5.1 `sdd/steering/security.md`, § «Sumideros de texto en claro (regla 11)»: reescribir contra
+- [x] 5.1 `sdd/steering/security.md`, § «Sumideros de texto en claro (regla 11)»: reescribir contra
   `SCOPE` la línea 126 (qué recorre el guardián y desde dónde se ejecuta) y la 128 (qué excluye y
   cuáles son sus excepciones declaradas, de las que la del roadmap desaparece). Nombrar el check run
   `rule11-ownership` y la vía local `make check-rule11-ownership`, y citar la spec nueva. La frase de
   alcance queda en la forma exacta que el ancla de 2.5 lee, con su marcador estable. [R5.1, R5.2]
 
-- [ ] 5.2 En esa misma sección, **recontar contra la tabla y no incrementar** sus recuentos —
+- [x] 5.2 En esa misma sección, **recontar contra la tabla y no incrementar** sus recuentos —
   columnas del censo, filas, ejes del guardián y excepciones declaradas — y corregir los que hayan
   quedado desviados. Es obligación que la propia sección se impone, y ya envejeció cuatro veces.
   [R5.3]
 
-- [ ] 5.3 Crear `sdd/specs/rule11-ownership-guard.md` (D8), con requisitos EARS: propósito, gatillo
+- [x] 5.3 Crear `sdd/specs/rule11-ownership-guard.md` (D8), con requisitos EARS: propósito, gatillo
   sin `paths:` y sin gate de área, check run propio y su **estado** (se ejecuta y reporta **sin** ser
   obligatorio para fusionar mientras el repositorio no tenga protección de rama compatible, igual
   que `api-contract`, `compose-ports` y `frontend-tests` y por el mismo motivo de plan de GitHub),
@@ -310,19 +310,39 @@ obligación de R5.3 prohíbe.
   comprueba al terminar: **la spec no contiene ninguna lista que `SCOPE` o la tabla de la regla 11 ya
   contengan**. [R1.1, R3.4, R5.2]
 
-- [ ] 5.4 `sdd/project.md` § Commands: añadir la vía local `make check-rule11-ownership` (host,
+- [x] 5.4 `sdd/project.md` § Commands: añadir la vía local `make check-rule11-ownership` (host,
   `python3`, sin Docker y sin stack levantado) y el **coste declarado de D1** — el `pytest` del
   backend ya no ejecuta el guardián, así que un docstring infractor en `backend/app/**` se ve en CI
   y no en la suite local. [R1.3]
 
-- [ ] 5.5 `README.md`: añadir `make check-rule11-ownership` al bloque de comandos (hoy líneas 29-35,
+- [x] 5.5 `README.md`: añadir `make check-rule11-ownership` al bloque de comandos (hoy líneas 29-35,
   junto a `check-version-parity` y `check-compose-ports`), con una línea de qué comprueba. Lo exige
   `sdd/steering/documentation.md`: un comando de Makefile nuevo actualiza el README raíz. [R1.3]
 
-- [ ] 5.6 Confirmar por escrito que `sdd/specs/access-notifications.md` **no se toca**: las líneas
+- [x] 5.6 Confirmar por escrito que `sdd/specs/access-notifications.md` **no se toca**: las líneas
   372, 525 y 689 se quedan exactamente como están (D6), no se reubica ningún hecho porque ya está en
   su sitio, y **R3.3 no se ejerce** — el fichero no se declara excepción. Verificar con la guardia
   nueva que ninguna de las tres se reporta. [R3.1, R3.2, R3.3]
+
+  **5.2, recontado contra la tabla el 2026-08-31 y no incrementado.** Dos cifras estaban
+  desviadas y las dos se corrigen: la tabla tiene **veintinueve** filas y decía «veintiocho», y
+  `messages.content` ocupa **cuatro** filas y no tres. Es el mismo hecho por dos sitios — el cuarto
+  escritor de esa columna es el seed de demostración, que entró después de que `messaging-ai`
+  escribiera «el primer caso de una columna con tres escritores» y no tocó ninguna de las dos
+  frases. Las otras dos cifras **sí** cuadran: veintiuna columnas distintas (parseando la primera
+  celda de cada fila y descontando los tres cualificadores de escritor, que no son columnas) y las
+  veintiuna vivas.
+
+  **5.6 verificado, no afirmado.** `git diff origin/main -- sdd/specs/access-notifications.md` sale
+  vacío; la guardia nueva reporta **0** bloques en ese fichero; y el fichero **no** figura en
+  `SCOPE`, así que R3.3 no se ejerce por ninguna vía. Las líneas 372, 525 y 689 siguen literalmente
+  donde estaban.
+
+  **5.3 cumple el criterio operativo de D8, comprobado y no supuesto**: la spec nueva no cita **ni
+  uno** de los términos del censo (verificado contra `SINK_TERMS`) y no reproduce la enumeración de
+  alcance —para el contrato remite a la regla 11, y para el alcance a `SCOPE`—. La guardia la
+  recorre como a cualquier otro documento y reporta cero. Y resuelve la referencia colgante que el
+  panel de la sección 3 levantó: `sdd/specs/local-environment.md` ya la citaba.
 
 ## 6. Demostración en rojo de la superficie nueva (R4)
 
