@@ -121,11 +121,11 @@ SINK_TERMS = (
     "messages.content",
     "messages.intent",
     "messages.metadata",
-    "regla 11",
-    "rule 11",
-    "sumidero de texto en claro",
-    "cleartext sink",
-    "censo",
+    # The five meta-vocabulary terms (`regla 11`, `rule 11`, `censo`, `sumidero de texto en
+    # claro`, `cleartext sink`) came out in `rule11-guard-trigger-and-scope` (D3). They named the
+    # mechanism rather than anything the table governs, and measured on 2026-08-31 they
+    # contributed zero true positives in scope and the three false ones that had `main` red. The
+    # full measurement lives in `scripts/rule11-ownership.py`, which replaces this file.
 )
 
 #: Saying who writes it, or who will. Same provenance as the sink axis: `is the writer` and
@@ -172,13 +172,11 @@ EXCLUDED_DIRECTORIES = {
 
 #: Files that legitimately carry both axes. Each entry states WHY, and the list starts with one.
 DECLARED_EXCEPTIONS = {
-    # This change's own roadmap note. It states the pathology — "la propiedad … está reafirmada
-    # en seis artefactos", "y su primer escritor será X" — in order to refute it and to record
-    # the criterion that was asked for. R2.4 keeps what enunciates the false belief to deny it,
-    # and this is the only place the request itself is on record.
-    "sdd/roadmap/rule11-ownership-single-source.md": (
-        "states the pathology in order to refute it; the only record of why this guard exists"
-    ),
+    # The roadmap note of `rule11-ownership-single-source` used to be exempted by name here. It
+    # stopped producing any block when `rule11-guard-trigger-and-scope` took the meta-vocabulary
+    # out of the sink axis (D3), so the entry was dead — and its successor excludes the whole
+    # roadmap tree instead, for a reason that does not depend on the axis: a roadmap entry
+    # declares work not done.
     # This file. Its two axes ARE the vocabulary, so every phrase it hunts appears in it by
     # construction — including in the meta-tests that prove the scan works. Exempting the
     # detector from itself is not a hole: there is no column here whose ownership a reader
