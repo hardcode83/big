@@ -104,7 +104,10 @@ def test_the_meta_vocabulary_alone_is_no_longer_a_sink() -> None:
 
 
 def test_what_this_guard_does_not_catch() -> None:
-    """R3.4: say what the green does not cover, so it is not read as completeness.
+    """R2.3: say what the green does not cover, so it is not read as completeness.
+
+    (The requirement that governs this test is R2.3, which is what asks for the measured cost of
+    an exclusion to be registered here. R3.4 governs item 8 alone — the enum-member decision.)
 
     Every item is a shape that exists in the tree today or that defeated an earlier version of
     a sibling guard — not a list of good intentions. **Every count below was recounted against
@@ -164,14 +167,23 @@ def test_what_this_guard_does_not_catch() -> None:
        convention as the thing that holds the line would be the exact move the first paragraph of
        this module rejects — prose cannot be made to stay true; a failing test can.
     5d. **The floors are aggregates, and the anchor is kind-blind. What each one actually
-       catches is worth stating exactly, because an earlier version of this item credited the
-       wrong mechanism.** Removing a whole census tree from the walk is caught by
-       `assert_no_dead_entry`, which requires every census entry to contribute a file to the
-       scan **after** exclusions. Removing a large part of one is caught by the floors:
+       catches is worth stating exactly, because two earlier versions of this item credited the
+       wrong mechanism.** There are two ways to take a census tree out of the walk, and they are
+       not covered by the same thing. Removing it **by excluding it** is caught by
+       `assert_no_dead_entry`, which requires every census entry to contribute a file to the scan
+       **after** exclusions. Removing it **by deleting its entry** is invisible to that check —
+       it iterates the entries that are *in* `SCOPE`, and a deleted one is not — so the only
+       defence is the path-set anchor, which is in the suite, and which stops defending the
+       moment `SCOPE` and the prose of rule 11 are edited in the same commit. Measured: dropping
+       the `backend/alembic/versions` entry removes 17 files, exits **0**, and prints a census
+       list of five trees where there were six. Removing a large part of a tree is caught by the
+       floors:
        `sdd/specs` alone is 53 of the 94 walked Markdown files, so excluding it lands at 41,
        under the floor of 80. What is caught by **neither** is a subtree small enough to stay
-       above both floors — excluding one directory of `backend/app` costs a few dozen files and
-       passes. And `test_the_authority_names_exactly_the_paths_in_scope` does **not** close that:
+       above both floors — excluding `backend/app/integrations` costs 45 files and passes, and
+       `backend/app/audit` costs 11. That second one is worth naming rather than leaving to the
+       class: it holds `AuditLogModel`, one of the two docstrings whose drift is this guard's
+       stated motive. And `test_the_authority_names_exactly_the_paths_in_scope` does **not** close that:
        it compares a set of paths, kind-blind, so a path listed in the prose under the wrong
        heading — named as census while `SCOPE` excludes it — keeps the anchor green while telling
        a reader of rule 11 the opposite of the truth. That is by design (D11 anchors routes, not

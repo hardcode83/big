@@ -115,6 +115,15 @@ class ScopeEntry:
         validates and is never scanned. Coercing here means a kind that is not a `Kind` is red at
         import, and the comparisons below are all `==`.
         """
+        # A trailing slash is the natural way to write a directory and it excluded NOTHING:
+        # `_is_excluded` compares against `path` and `path + "/"`, so `backend/app/` matched
+        # neither, while the decorative-exclusion check saw a path inside a census tree and
+        # passed it. The hygiene check failed open. Normalising here is the fix, and it is the
+        # right place because it makes every later comparison work on one form.
+        normalised = self.path.rstrip("/")
+        if not normalised:
+            raise GuardError("a scope entry has an empty path, so it names nothing")
+        object.__setattr__(self, "path", normalised)
         try:
             object.__setattr__(self, "kind", Kind(self.kind))
         except ValueError as exc:

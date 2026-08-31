@@ -6,7 +6,7 @@ fichero de `backend/tests/` (4.1). Las secciones 1-3 dejan el sistema con guardi
 suite propia; la 4 retira la superficie vieja; la 5 alinea autoridad y documentación; la 6 es la
 demostración en rojo que R4 exige y no puede hacerse antes de que exista el check run.
 
-## 1. La guardia se muda a `scripts/`, con su alcance como dato
+## 1. La guardia se muda a `scripts/`, con su alcance como dato <!-- panel: PASS 2026-08-31 -->
 
 - [x] 1.1 Crear `scripts/rule11-ownership.py` portando la lógica de
   `backend/tests/test_rule11_ownership.py` **sin tocar todavía ningún eje**: `_markdown_blocks`,
@@ -125,7 +125,7 @@ demostración en rojo que R4 exige y no puede hacerse antes de que exista el che
   `skip` se lee como «no aplica», que es lo peor que puede decir un control de seguridad cuando su
   entrada ha desaparecido. [R1.4, R4.3]
 
-## 2. Las meta-pruebas de la guardia
+## 2. Las meta-pruebas de la guardia <!-- panel: PASS 2026-08-31 -->
 
 - [x] 2.1 Crear `scripts/test_rule11_ownership.py` cargando el módulo con
   `importlib.util.spec_from_file_location` (la forma exacta de `scripts/test_compose_ports.py`,
@@ -165,6 +165,32 @@ demostración en rojo que R4 exige y no puede hacerse antes de que exista el che
   nombrada en la frase. Ancla **rutas**, no cifras y no motivos, y sólo esa frase, no la sección
   entera. Si el marcador no aparece, la prueba falla **en alto nombrándolo** — nunca pasa en vacío.
   [R5.1, R5.2]
+
+**Panel de las secciones 1-2** (se revisaron juntas: la guardia y sus meta-pruebas son un solo
+par y ninguna es evaluable sin la otra). Arquitecto, seguridad, QA y documentación; tenencia e
+i18n no se lanzaron por no tener superficie en el diff —ni consultas por tenant ni cadenas de
+UI— y CI/CD entra en la sección 3, que es donde llega el workflow.
+
+Dos rondas de arreglo. La primera cerró seis hallazgos de seguridad y uno de documentación; la
+segunda, el que abrió la primera: `assert_no_dead_entry` se había quedado en un subconjunto de
+lo que comprobaba la suite, y con `backend/app` declarado `OUT_OF_CENSUS` el escaneo pasaba de
+801 ficheros python a 408 y seguía diciendo «cero infractores» con código 0. Está en `b395416`,
+con las tres comprobaciones por árbol y `MINIMUM_PYTHON_FILES`.
+
+**Dos hallazgos rechazados, con la evidencia por la que se rechazan**, para que no vuelvan a
+levantarse: el revisor de documentación afirmó que `scripts/` no se escanea —citando el
+`_code_files()` del fichero **viejo**, que en efecto sólo recorre los tres árboles del backend—
+y que los dos ficheros de `scripts/` no existen. El guardián nuevo deriva su recorrido de
+`SCOPE`: recorre 801 ficheros de código, doce de ellos `scripts/*.py`, y los dos ficheros están
+en `d05cca6` (712 y 471 líneas). Lo midió también QA por su cuenta.
+
+**Un hallazgo aplicado fuera del tope de dos rondas y sin revisión posterior**, y consta porque
+el tope existe por algo: F7, que el revisor levantó al verificar la segunda ronda. Era una frase
+del residual 5d que atribuía a `assert_no_dead_entry` un caso que no puede ver —borrar la
+*entrada* de un árbol de censo, en vez de excluirlo—, con el arreglo ya dictado por el propio
+revisor. Se verificó ejecutándolo antes de escribirlo: quitar la entrada de
+`backend/alembic/versions` retira 17 ficheros y sale en verde. Es corrección de prosa sobre un
+residual, no de conducta.
 
 ## 3. El gatillo: la guardia se ejecuta donde tiene que hablar
 
