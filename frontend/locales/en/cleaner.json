@@ -86,6 +86,7 @@
       "completed": "This cleaning is closed.",
       "rejected": "This cleaning was turned down.",
       "cancelled": "This cleaning was cancelled.",
+      "failed": "This cleaning did not pass validation: the review is the manager's.",
       "notActionable": "There is nothing to do on this task right now."
     },
     "errors": {

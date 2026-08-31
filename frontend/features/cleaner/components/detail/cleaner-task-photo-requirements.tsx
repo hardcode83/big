@@ -95,8 +95,8 @@ export function CleanerTaskPhotoRequirements({
                 <span
                   className={
                     covered
-                      ? "text-xs text-emerald-700"
-                      : "text-xs text-amber-700"
+                      ? "text-xs text-state-success-text"
+                      : "text-xs text-state-warning-text"
                   }
                 >
                   {covered

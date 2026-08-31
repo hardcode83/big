@@ -112,9 +112,14 @@ aprovechamiento de caché entre lista y detalle.
 
 ### D4 — Contexto por fila con `useQueries`, bajo la clave del detalle
 
-**Chosen:** la lista emite `GET /cleaning-tasks` con `useCleanerTaskPages(filters,
-pageCount, perPage)` (gemelo del `useIncidentsPages` de `tech-app` D4) y, sobre las filas
-que devuelve, monta `useCleanerTaskContexts(taskIds)`, que es un `useQueries` (TanStack
+**Chosen:** la lista emite `GET /cleaning-tasks` con `useCleanerTaskPages(filters, page,
+perPage)` — **una sola página actual**, sustituida al paginar (prev/next «página X de
+Y», el mismo patrón de `cleaning-pagination.tsx` que D15 cita para
+`cleaner-task-pagination.tsx`), no el acumulador de `useIncidentsPages` de `tech-app` D4:
+esta pantalla no tiene «cargar más», tiene paginador. La corrección se dice aquí porque
+la primera implementación copió el gemelo equivocado y dejó una petición por página
+acumulada sin nunca avanzar el número de página real. Y, sobre las filas que devuelve,
+monta `useCleanerTaskContexts(taskIds)`, que es un `useQueries` (TanStack
 v5) con una entrada por fila cuya `queryKey` es
 `cleanerKeys.context(tenantId, row.id)` — **la misma** que `useCleanerTaskContext` en el
 detalle. Abrir una fila no vuelve a pedir su contexto (R1.3). Un contexto que falle

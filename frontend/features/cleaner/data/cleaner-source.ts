@@ -1,5 +1,6 @@
 import type {
   CleaningChecklist,
+  CleaningChecklistItem,
   CleaningFilters,
   CleaningIncidentReportAck,
   CleaningIncidentReportInput,

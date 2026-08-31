@@ -48,12 +48,19 @@ export interface CleanerTaskActionBarProps {
   task: CleaningTask;
   checklist: CleaningChecklist;
   requirements: PhotoRequirementsResponse;
+  /**
+   * Called once the close succeeds — the view renders the reversible
+   * completion panel (R7.2, D8). The navigation to `/cleaner` is the panel's
+   * own button, not this callback's: closing does not redirect by itself.
+   */
+  onTaskCompleted?: () => void;
 }
 
 export function CleanerTaskActionBar({
   task,
   checklist,
   requirements,
+  onTaskCompleted,
 }: CleanerTaskActionBarProps) {
   const { t } = useTranslation(["cleaner", "cleaning"]);
   const router = useRouter();
@@ -67,23 +74,17 @@ export function CleanerTaskActionBar({
     onRejected: () => router.replace("/cleaner"),
   });
   const complete = useCompleteCleaningTask({
-    onCompleted: () => router.replace("/cleaner"),
+    onCompleted: () => onTaskCompleted?.(),
   });
 
   const actions = cleanerActions(task.status);
   const isInProgress = task.status === "IN_PROGRESS";
 
+  /** Generic mapping for accept/reject/start; complete's 409 is handled inline
+   * at its own call site — see the comment there for why. */
   function messageFor(error: Error | null): string | null {
     if (!error) return null;
     if (error instanceof ApiError && error.status === 409) {
-      // The three-clause refusal of the close — read from the refreshed state
-      // (D7, R7.3).
-      if (error === complete.error) {
-        const reason = conflictReason(checklist, requirements);
-        setHighlightItems(hasMissingRequiredItems(checklist));
-        setHighlightPhotos(hasMissingRequiredPhotos(requirements));
-        return t(`cleaner:complete.errors.${reason}`);
-      }
       return t("cleaner:actions.errors.conflict");
     }
     return t("cleaner:actions.errors.generic");
@@ -201,6 +202,20 @@ export function CleanerTaskActionBar({
                 { taskId: task.id },
                 {
                   onError: (error) => {
+                    // The three-clause refusal of the close is read from the
+                    // props' refreshed checklist/requirements (D7, R7.3), not
+                    // from `complete.error` — that hook snapshot is still the
+                    // pre-click render's closure when this callback runs and
+                    // is never the same reference as the error just thrown.
+                    if (error instanceof ApiError && error.status === 409) {
+                      const reason = conflictReason(checklist, requirements);
+                      setHighlightItems(hasMissingRequiredItems(checklist));
+                      setHighlightPhotos(
+                        hasMissingRequiredPhotos(requirements),
+                      );
+                      setLocalError(t(`cleaner:complete.errors.${reason}`));
+                      return;
+                    }
                     setLocalError(messageFor(error));
                   },
                 },

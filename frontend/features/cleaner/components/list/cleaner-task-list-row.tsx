@@ -8,7 +8,7 @@ import { cn } from "@/lib/utils";
 
 import type { CleaningTaskContext, CleaningTaskListItem } from "../../data";
 import { formatDateTime } from "../../lib/format";
-import { STATUS_BADGE_CLASS, statusColorGroup } from "@/features/cleaning/lib/task-status";
+import { STATUS_BADGE_CLASS, statusColorGroup } from "@/features/cleaning";
 
 /**
  * One cleaning task, as a card (D15). Each field carries its own label so the

@@ -176,20 +176,9 @@ export function CleanerTaskDetailView({ taskId }: CleanerTaskDetailViewProps) {
         task={taskData}
         checklist={checklist.data}
         requirements={requirements.data}
+        onTaskCompleted={() => setHasClosed(true)}
       />
       {hasClosed ? <CleanerCompletionPanel /> : null}
-      {/* Test affordance for the orchestrator test: the action bar fires
-          `useCompleteCleaningTask.onCompleted`, and the only way the view
-          knows the close succeeded is via this setter. Hooked off a hidden
-          button so the production UI does not show it. */}
-      <button
-        type="button"
-        data-testid="cleaner-completion-trigger"
-        className="hidden"
-        onClick={() => setHasClosed(true)}
-      >
-        hidden
-      </button>
     </div>
   );
 }

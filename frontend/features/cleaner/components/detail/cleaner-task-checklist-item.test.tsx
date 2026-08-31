@@ -69,7 +69,7 @@ const item: CleaningChecklistItem = {
   completedBy: null,
 };
 
-function renderItem() {
+function renderItem(itemOverride: CleaningChecklistItem = item) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   });
@@ -80,9 +80,10 @@ function renderItem() {
       </QueryClientProvider>
     );
   }
-  return render(<CleanerTaskChecklistItem taskId="task-1" item={item} />, {
-    wrapper: Wrapper,
-  });
+  return render(
+    <CleanerTaskChecklistItem taskId="task-1" item={itemOverride} />,
+    { wrapper: Wrapper },
+  );
 }
 
 beforeEach(() => {
@@ -99,12 +100,7 @@ describe("CleanerTaskChecklistItem (R4.1, R4.3, R4.4)", () => {
   });
 
   it("does not render the button for a completed item (R4.2)", () => {
-    render(
-      <CleanerTaskChecklistItem
-        taskId="task-1"
-        item={{ ...item, completed: true }}
-      />,
-    );
+    renderItem({ ...item, completed: true });
     expect(
       screen.queryByRole("button", { name: "Marcar como hecho" }),
     ).toBeNull();

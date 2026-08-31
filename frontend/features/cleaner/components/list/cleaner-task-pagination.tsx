@@ -21,6 +21,7 @@ export interface CleanerTaskPaginationProps {
 export function CleanerTaskPagination({
   page,
   totalPages,
+  total,
   onPageChange,
 }: CleanerTaskPaginationProps) {
   const { t } = useTranslation("cleaner");

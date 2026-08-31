@@ -45,40 +45,27 @@ function useTenantId(): string {
   return user.tenant_id;
 }
 
-/** What `useCleanerTaskPages` reports to a caller that accumulates pages. */
+/** What `useCleanerTaskPages` reports to a caller navigating one page at a time. */
 export interface CleanerTaskPagesResult {
-  /** Every row of every page requested so far, in the order the backend served them. */
+  /** The rows of the current page, in the order the backend served them. */
   rows: CleaningTaskListItem[];
   total: number;
   page: number;
   perPage: number;
   totalPages: number;
-  hasMore: boolean;
   isPending: boolean;
   isError: boolean;
   error: Error | null;
   data: PaginatedResponse<CleaningTaskListItem> | undefined;
   refetch: () => void;
-  /**
-   * A page **after the first** failed (D4). Kept apart from `isError` on
-   * purpose: the first page failing means the list is unavailable (R1.7,
-   * whole-screen `ErrorState` without retry on `4xx`); a later page failing
-   * must not throw away the rows already on screen — but it must not be
-   * silent either, or a refresh on page 2 strands page 3 silently.
-   */
-  hasPageError: boolean;
-  /** Retries the failed page. */
-  retryPage: () => void;
-  /** A page request is in flight. */
-  isFetchingMore: boolean;
 }
 
 /**
- * The list as an accumulation of pages (R1.1, design D4 + D5).
+ * The list as a single current page (R1.1, design D4 + D5, D15).
  *
- * Every page is its own cache entry under `cleanerKeys.list`, so paging
- * forward never refetches what is already held and an invalidation of
- * `listPrefix` reaches all of them.
+ * Prev/next replaces the page rather than accumulating it — `CleanerTaskPagination`
+ * is the same "página X de Y" shape as `cleaning-pagination.tsx` (D15, task 4.3),
+ * not a "load more" list, so there is exactly one query in flight per render.
  *
  * `status` is spread conditionally so a filterless request carries **no**
  * `status` key at all: the key must be identical to the one a first render
@@ -86,53 +73,34 @@ export interface CleanerTaskPagesResult {
  */
 export function useCleanerTaskPages(
   filters: CleaningFilters,
-  pageCount: number,
+  page: number,
   perPage: number,
 ): CleanerTaskPagesResult {
   const tenantId = useTenantId();
 
-  const pages = useQueries({
-    queries: Array.from({ length: pageCount }, (_, index) => {
-      const pageFilters: CleaningFilters = {
-        ...(filters.status !== undefined ? { status: filters.status } : {}),
-        page: index + 1,
-        perPage,
-      };
-      return {
-        queryKey: cleanerKeys.list(tenantId, pageFilters),
-        queryFn: () =>
-          getCleanerDataSource().listTasks(tenantId, pageFilters),
-        retry: retryPolicy,
-      };
-    }),
+  const pageFilters: CleaningFilters = {
+    ...(filters.status !== undefined ? { status: filters.status } : {}),
+  };
+
+  const query = useQuery({
+    queryKey: cleanerKeys.list(tenantId, pageFilters, page),
+    queryFn: () => getCleanerDataSource().listTasks(tenantId, pageFilters, page),
+    retry: retryPolicy,
   });
 
-  const first = pages[0];
-  const rows = pages.flatMap((page) => page.data?.data ?? []);
-  const total = first?.data?.total ?? 0;
-  const failed = pages.slice(1).find((page) => page.isError);
-
   return {
-    rows,
-    total,
-    page: first?.data?.page ?? 1,
-    perPage: first?.data?.perPage ?? perPage,
-    totalPages: first?.data?.totalPages ?? 1,
-    // A failed page leaves a hole in `rows`, so the row count no longer tells
-    // us where the list ends: offering «next page» here would skip the hole.
-    hasMore: rows.length < total && !failed,
-    isPending: first?.isPending ?? true,
-    isError: first?.isError ?? false,
-    error: first?.error ?? null,
-    data: first?.data,
+    rows: query.data?.data ?? [],
+    total: query.data?.total ?? 0,
+    page: query.data?.page ?? page,
+    perPage: query.data?.perPage ?? perPage,
+    totalPages: query.data?.totalPages ?? 1,
+    isPending: query.isPending,
+    isError: query.isError,
+    error: query.error,
+    data: query.data,
     refetch: () => {
-      void first?.refetch();
+      void query.refetch();
     },
-    hasPageError: Boolean(failed),
-    retryPage: () => {
-      void failed?.refetch();
-    },
-    isFetchingMore: pages.some((page) => page.isFetching),
   };
 }
 

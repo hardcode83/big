@@ -78,7 +78,11 @@ export function useCleanerTaskCycleAction(
   const queryClient = useQueryClient();
   const { onCompleted } = options;
 
-  return useMutation({
+  return useMutation<
+    CleaningTask | CleaningChecklistItem | CleaningIncidentReportAck,
+    Error,
+    Omit<CleanerTaskCycleInput, "action">
+  >({
     mutationFn: ({ taskId, itemId, input }: Omit<CleanerTaskCycleInput, "action">) => {
       if (!tenantId) {
         throw new Error(`The ${kind} cycle action requires a tenant context`);
@@ -251,7 +255,12 @@ export function useCompleteCleaningTask(
           queryKey: cleanerKeys.listPrefix(tenantId),
         }),
       ]);
-      onCompleted?.();
+      // Only on success (R7.2): a 409 leaves the task open for the view to
+      // read the refreshed clause via `conflictReason`, not to render the
+      // reversible completion panel over an action that did not succeed.
+      if (!_error) {
+        onCompleted?.();
+      }
     },
   });
 }

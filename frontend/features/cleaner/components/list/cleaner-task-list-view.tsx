@@ -29,12 +29,19 @@ import { CleanerTaskStatusChips } from "./cleaner-task-status-chips";
 export function CleanerTaskListView() {
   const { t } = useTranslation(["cleaner", "states"]);
   const [filters, setFilters] = useState<CleaningFilters>({});
-  const [page, setPageCount] = useState(1);
-  const pageCount = 1;
+  const [page, setPage] = useState(1);
   const perPage = 20;
 
-  const pages = useCleanerTaskPages(filters, pageCount, perPage);
+  const pages = useCleanerTaskPages(filters, page, perPage);
   const contexts = useCleanerTaskContexts(pages.rows.map((row) => row.id));
+
+  function handleFiltersChange(next: CleaningFilters) {
+    setFilters(next);
+    // Changing the filter returns to page 1 (docs/cleaning.md §Filtrar y
+    // paginar): otherwise a narrower filter can strand the view on a page
+    // number the new result set no longer has.
+    setPage(1);
+  }
 
   // Map the list-level error once — used by the whole-screen branch.
   const errorMap =
@@ -89,7 +96,7 @@ export function CleanerTaskListView() {
           page={pages.page}
           totalPages={pages.totalPages}
           total={pages.total}
-          onPageChange={setPageCount}
+          onPageChange={setPage}
         />
       </>
     );
@@ -97,7 +104,7 @@ export function CleanerTaskListView() {
 
   return (
     <div className="mx-auto w-full max-w-md p-4">
-      <CleanerTaskStatusChips value={filters} onChange={setFilters} />
+      <CleanerTaskStatusChips value={filters} onChange={handleFiltersChange} />
       {body()}
     </div>
   );

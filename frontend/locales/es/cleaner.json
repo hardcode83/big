@@ -86,6 +86,7 @@
       "completed": "Esta limpieza ya está cerrada.",
       "rejected": "Esta limpieza fue rechazada.",
       "cancelled": "Esta limpieza fue cancelada.",
+      "failed": "Esta limpieza no superó la validación: la revisión la hace el manager.",
       "notActionable": "Ahora mismo no hay nada que hacer en esta tarea."
     },
     "errors": {

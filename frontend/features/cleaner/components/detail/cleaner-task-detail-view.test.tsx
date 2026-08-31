@@ -31,6 +31,11 @@ const uploadPhoto = vi.hoisted(() => vi.fn());
 const reportIncident = vi.hoisted(() => vi.fn());
 
 const tenantId = vi.hoisted(() => ({ current: "tenant-1" }));
+const routerReplace = vi.hoisted(() => vi.fn());
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ replace: routerReplace }),
+}));
 
 vi.mock("@/lib/auth", async (importOriginal) => ({
   ...(await importOriginal<typeof import("@/lib/auth")>()),
@@ -142,6 +147,7 @@ function renderView() {
 
 beforeEach(() => {
   tenantId.current = "tenant-1";
+  routerReplace.mockReset();
   getTask.mockReset().mockResolvedValue(task);
   getTaskContext.mockReset().mockResolvedValue(context);
   getTaskChecklist.mockReset().mockResolvedValue(checklist);
@@ -214,18 +220,17 @@ describe("CleanerTaskDetailView (R2.1, R2.8)", () => {
 
   it("renders the completion panel after the close fires (R7.2)", async () => {
     getTask.mockResolvedValue({ ...task, status: "IN_PROGRESS" });
+    completeTask.mockResolvedValueOnce({ ...task, status: "PENDING_REVIEW" });
     renderView();
     await waitFor(() =>
       expect(screen.getByText("REDES11")).toBeInTheDocument(),
     );
-    // The orchestrator exposes a hidden trigger for testing the completion
-    // overlay; the action bar wires `useCompleteCleaningTask.onCompleted`
-    // through this in production.
-    fireEvent.click(
-      screen.getByTestId("cleaner-completion-trigger"),
-    );
+    fireEvent.click(screen.getByRole("button", { name: "Cerrar limpieza" }));
     await waitFor(() =>
       expect(screen.getByText("Limpieza cerrada")).toBeInTheDocument(),
     );
+    // Reversible, not a redirect: the panel's own button navigates, the close
+    // itself does not (R7.2, D8).
+    expect(routerReplace).not.toHaveBeenCalled();
   });
 });

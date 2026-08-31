@@ -68,6 +68,7 @@ export type CleanerNoActionReason =
   | "completed"
   | "rejected"
   | "cancelled"
+  | "failed"
   | "notActionable";
 
 const NO_ACTION_REASON: Record<CleaningTaskStatus, CleanerNoActionReason> = {
@@ -75,11 +76,12 @@ const NO_ACTION_REASON: Record<CleaningTaskStatus, CleanerNoActionReason> = {
   COMPLETED: "completed",
   REJECTED: "rejected",
   CANCELLED: "cancelled",
+  // The validation is the manager's, not the cleaner's — design D6's table.
+  FAILED: "failed",
   CREATED: "notActionable",
   ASSIGNED: "notActionable",
   ACCEPTED: "notActionable",
   IN_PROGRESS: "notActionable",
-  FAILED: "notActionable",
 };
 
 /**

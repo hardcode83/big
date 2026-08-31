@@ -7,10 +7,11 @@ export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("cleaner-task");
 }
 
-interface PageProps {
-  params: { id: string };
-}
-
-export default function Page({ params }: PageProps) {
-  return <CleanerTaskDetailView taskId={params.id} />;
+export default async function Page({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
+  const { id } = await params;
+  return <CleanerTaskDetailView taskId={id} />;
 }

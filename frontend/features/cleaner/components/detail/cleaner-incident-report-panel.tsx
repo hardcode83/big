@@ -15,11 +15,12 @@ const MAX_TITLE = 300;
 const MAX_DESCRIPTION = 5000;
 
 /** Statuses where reporting an incident is on offer (R6.1). */
-const INCIDENT_REPORTABLE_STATUSES = new Set([
+type ReportableStatus = "ASSIGNED" | "ACCEPTED" | "IN_PROGRESS";
+const INCIDENT_REPORTABLE_STATUSES = new Set<ReportableStatus>([
   "ASSIGNED",
   "ACCEPTED",
   "IN_PROGRESS",
-] as const);
+]);
 
 /**
  * The inline two-field incident report panel (R6.1, R6.2, R6.3, R6.5, D11).
@@ -59,8 +60,7 @@ export function CleanerIncidentReportPanel({
   const [ack, setAck] = useState<CleaningIncidentReportAck | null>(null);
   const mutation = useCleanerTaskCycleAction("reportIncident");
 
-  const statusKey = status as keyof typeof INCIDENT_REPORTABLE_STATUSES;
-  if (!INCIDENT_REPORTABLE_STATUSES.has(statusKey)) {
+  if (!INCIDENT_REPORTABLE_STATUSES.has(status as ReportableStatus)) {
     return null;
   }
 
