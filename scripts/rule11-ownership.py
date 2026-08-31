@@ -237,9 +237,14 @@ TABLE_HEADER = "| Columna | Forma | Quién la escribe"
 #: raised from 40 — a figure inherited from a tree of 180 that had become loose enough to admit
 #: losing more than half the corpus — to 80. It is a floor and not a census: it catches a
 #: truncated checkout, not a scope that quietly stops covering one tree. What catches THAT is the
-#: anchor test, which makes every entry of `SCOPE` nameable in the rule's own prose, so an
-#: exclusion cannot be added without saying so where a reader of rule 11 will see it.
+#: anchor test, which makes every entry of `SCOPE` nameable in the rule's own prose.
 MINIMUM_MARKDOWN_FILES = 80
+
+#: The same floor for the code corpus, and it was missing: there was no Python equivalent at all,
+#: so the half of the scan that lives under `backend/` and `scripts/` had no aggregate check
+#: whatsoever. Measured 801 walked `.py` files on 2026-08-31, with the same deliberate headroom —
+#: and note that task 4.1 removes one of them, which is inside it.
+MINIMUM_PYTHON_FILES = 700
 
 
 # --- the two axes ---------------------------------------------------------------------
@@ -270,9 +275,10 @@ MINIMUM_MARKDOWN_FILES = 80
 #:
 #: The total is given loosely on purpose. It counts the excluded trees, and `sdd/changes/` holds
 #: the documents of every change in flight — including this one, whose own proposal and tasks
-#: discuss the guard and therefore match the meta-vocabulary. It moved from 20 to 21 while this
-#: change was being written, by its own writing. A number that its own recording changes is a
-#: number to state as a magnitude, not as a census. What comes out with them
+#: discuss the guard and therefore match the meta-vocabulary. It moved **twice while this change
+#: was being written**, by its own writing. A number that its own recording changes is a number to
+#: state as a magnitude, not as a census — so this one is stated as one, and the three in scope
+#: above are the figure to hold it to. What comes out with them
 #: is stated as residual 5c of `test_what_this_guard_does_not_catch`, and it costs zero blocks in
 #: scope today. **Re-measure against the tree before trusting any of these numbers**: they depend
 #: on the tree, which is the property that made the previous version of this comment go stale.
@@ -432,6 +438,36 @@ def assert_no_dead_entry(scope: tuple[ScopeEntry, ...], root: Path) -> None:
         if entry.kind in (Kind.CENSUS_PROSE, Kind.CENSUS_CODE)
     )
 
+    # Three checks per census tree, in order of cause, because collapsing them would report the
+    # wrong diagnosis: the tree is missing (checked above), the tree holds none of the files its
+    # kind is about (a wrong path, or a checkout that brought the directory and not its
+    # contents), or the tree holds them and an exclusion is swallowing them.
+    for kind, suffix in ((Kind.CENSUS_PROSE, ".md"), (Kind.CENSUS_CODE, ".py")):
+        for entry in entries(scope, kind):
+            if not any((root / entry.path).glob(f"**/*{suffix}")):
+                raise GuardError(
+                    f"the census tree `{entry.path}` ({entry.kind}) holds no `{suffix}` file at "
+                    "all, so its whole subtree would go unscanned while the guard stayed green"
+                )
+
+    # A census tree that contributes nothing **after exclusions** is as dead as one that does
+    # not exist, and it is the dangerous direction: an `OUT_OF_CENSUS` entry naming a whole
+    # census tree removes it from the scan while the tree is still on disk, so every existence
+    # check passes and the summary still NAMES it as census. Measured: excluding `backend/app`
+    # takes the walk from 801 Python files to 408 and reports zero offenders — half the code
+    # corpus, including the two model docstrings whose drift is why this guard exists. The
+    # emptiness check below cannot see it, because it globs the raw tree without applying
+    # exclusions; only the walked set can.
+    for entry in scope:
+        if entry.kind not in (Kind.CENSUS_PROSE, Kind.CENSUS_CODE):
+            continue
+        if not any(relative.startswith(entry.path + "/") for relative in walked):
+            raise GuardError(
+                f"the census tree `{entry.path}` ({entry.kind}) contributes no file to the "
+                "scan, so everything it was meant to cover is unwatched. It exists on disk, so "
+                "this is an exclusion swallowing it whole rather than a missing checkout"
+            )
+
     for entry in entries(scope, Kind.OUT_OF_CENSUS):
         if not (root / entry.path).exists():
             raise GuardError(
@@ -480,18 +516,14 @@ def check_tree_is_visible(scope: tuple[ScopeEntry, ...], root: Path) -> int:
             "tree should have. An incomplete checkout looks exactly like this — the scan is "
             "walking something, just not everything"
         )
+    code = len(code_files(scope, root))
+    if code < MINIMUM_PYTHON_FILES:
+        raise GuardError(
+            f"only {code} Python files are visible, below the {MINIMUM_PYTHON_FILES} this tree "
+            "should have. Same failure as the Markdown floor above, on the half of the corpus "
+            "that had no floor at all until it was measured"
+        )
 
-    # Per tree and not in aggregate, and per KIND: the floor above is a sum, so a tree that
-    # contributes nothing hides behind the ones that do. A `CENSUS_CODE` tree holding no `.py`
-    # is the same failure as a `CENSUS_PROSE` tree holding no `.md`, and checking only the
-    # second was a hole of exactly the shape this guard exists to close.
-    for kind, suffix in ((Kind.CENSUS_PROSE, ".md"), (Kind.CENSUS_CODE, ".py")):
-        for entry in entries(scope, kind):
-            if not any((root / entry.path).glob(f"**/*{suffix}")):
-                raise GuardError(
-                    f"the census tree `{entry.path}` ({entry.kind}) holds no `{suffix}` file at "
-                    "all, so its whole subtree would go unscanned while the guard stayed green"
-                )
     return scanned
 
 

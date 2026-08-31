@@ -158,14 +158,26 @@ def test_what_this_guard_does_not_catch() -> None:
        including after that writer becomes real, which is exactly the "quién heredará" case rule
        11 exists to redden. The exclusion is required by R2.2 and was resolved with the change's
        owner (OQ3); this is its price, recorded here because the green must not imply it away.
-       What holds the line meanwhile is `/sdd:archive`, which rewrites the living spec when an
-       entry ships — and the spec is in census.
-    5d. **The visibility floor is an aggregate, not a per-tree census.**
-       `MINIMUM_MARKDOWN_FILES` catches a truncated checkout; it does not catch a `SCOPE` that
-       quietly stops covering one tree while the others keep the sum above the floor. What
-       catches that is not this floor but `test_the_authority_names_exactly_the_paths_in_scope`:
-       every entry of `SCOPE` has to be named in the rule's own prose, so a tree cannot be
-       excluded without saying so where a reader of rule 11 will see it.
+       And the price is not mitigated, which is the honest way to put it: when an entry ships,
+       the living spec it updates **is** in census and stays covered, but the roadmap note keeps
+       whatever it said, unscanned, and **nothing mechanical corrects it**. Naming a workflow
+       convention as the thing that holds the line would be the exact move the first paragraph of
+       this module rejects — prose cannot be made to stay true; a failing test can.
+    5d. **The floors are aggregates, and the anchor is kind-blind. What each one actually
+       catches is worth stating exactly, because an earlier version of this item credited the
+       wrong mechanism.** Removing a whole census tree from the walk is caught by
+       `assert_no_dead_entry`, which requires every census entry to contribute a file to the
+       scan **after** exclusions. Removing a large part of one is caught by the floors:
+       `sdd/specs` alone is 53 of the 94 walked Markdown files, so excluding it lands at 41,
+       under the floor of 80. What is caught by **neither** is a subtree small enough to stay
+       above both floors — excluding one directory of `backend/app` costs a few dozen files and
+       passes. And `test_the_authority_names_exactly_the_paths_in_scope` does **not** close that:
+       it compares a set of paths, kind-blind, so a path listed in the prose under the wrong
+       heading — named as census while `SCOPE` excludes it — keeps the anchor green while telling
+       a reader of rule 11 the opposite of the truth. That is by design (D11 anchors routes, not
+       kinds or motives), and it means the anchor is a defence against a silent scope, not
+       against a mislabelled one. It also lives in the suite and not in the binary, unlike the
+       dead-entry checks.
     5c. **An attribution that names its column by reference instead of naming it** — "la única
        columna que este change hereda como primer escritor". This is the residual that dropping
        the meta-vocabulary from the sink axis opens: such a block used to be reported through
@@ -380,6 +392,33 @@ def test_a_dead_exception_is_red_in_the_guard_itself() -> None:
             + (ScopeEntry("scripts/gone.py", Kind.EXCEPTION, "a file that is not there"),),
             ROOT,
         )
+
+
+def test_an_exclusion_that_swallows_a_census_tree_is_red() -> None:
+    """N1: the dangerous direction, because every existence check passes.
+
+    An `OUT_OF_CENSUS` entry naming a whole census tree removes it from the walk while the tree
+    is still on disk, so the tree resolves, the exclusion resolves, and the green summary still
+    NAMES it as census. Measured when this was open: excluding `backend/app` took the scan from
+    801 Python files to 408 and reported zero offenders — half the code corpus, including the two
+    model docstrings whose drift is the reason this guard exists.
+    """
+    with pytest.raises(GuardError, match="contributes no file to the scan"):
+        module.check_tree_is_visible(
+            SCOPE + (ScopeEntry("backend/app", Kind.OUT_OF_CENSUS, "swallow it whole"),),
+            ROOT,
+        )
+    with pytest.raises(GuardError, match="contributes no file to the scan"):
+        module.check_tree_is_visible(
+            SCOPE + (ScopeEntry("scripts", Kind.OUT_OF_CENSUS, "swallow it whole"),),
+            ROOT,
+        )
+
+
+def test_the_code_corpus_has_a_floor_of_its_own() -> None:
+    """Until this was measured, only the Markdown half of the scan had an aggregate floor."""
+    assert module.MINIMUM_PYTHON_FILES > 0
+    assert len(module.code_files(SCOPE, ROOT)) >= module.MINIMUM_PYTHON_FILES
 
 
 def test_a_census_code_tree_without_python_is_red() -> None:
