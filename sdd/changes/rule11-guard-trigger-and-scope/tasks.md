@@ -265,8 +265,13 @@ esos tres recuentos, así que recontarlos en la sección 4 habría dejado el ár
 dos commits. Recontados contra el `Makefile` y contra la propia frase, no incrementados: los
 targets host-side fuera de `$(COMPOSE)` pasan de cuatro a **cinco**, `check-compose-ports` sigue
 siendo el tercero y `ports` el cuarto, y los que quedan fuera **por decisión** pasan de tres a
-**cuatro**, con su bullet propio en `sdd/specs/local-environment.md`. La cuenta de los **diez**
-targets que invocan `docker compose` desde el `Makefile` no se mueve: éste no invoca Compose.
+**cuatro**, con su bullet propio en `sdd/specs/local-environment.md`. La cuenta de los targets que invocan `docker compose`
+desde el `Makefile` no se mueve por este change —`check-rule11-ownership` no invoca Compose— pero
+**estaba mal, y se vio al recontarla en vez de arrastrarla**: eran once y no diez. El que faltaba
+es `check-frontend-build`, que invoca `$(COMPOSE) exec -T` en su receta y no aparecía ni en esa
+enumeración ni en la de los host-side. Lo levantó el panel de la sección 3, y con razón: 4.4 se
+presentaba como un recuento, así que dar «diez» por bueno sin contarlo era exactamente lo que la
+obligación de R5.3 prohíbe.
 
 ## 5. La autoridad, la spec y las docs
 
