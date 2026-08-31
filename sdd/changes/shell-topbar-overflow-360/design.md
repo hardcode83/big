@@ -381,6 +381,42 @@ Rechazado: `md` (768 px) — barra estrecha en tabletas que tienen sitio de sobr
 Rechazado: un breakpoint a medida (p. ej. `min-[560px]`) — ajusta más fino a costa de introducir
 un valor mágico donde el resto del shell usa los tokens de Tailwind.
 
+#### Medición real (tarea 7.5, 2026-09-01) — la cifra son 664 px, no ~547; el breakpoint se queda en `sm`
+
+Chromium contra el stack de este worktree (`PORT_OFFSET=60`), sobre `/tech` autenticada, leyendo el
+`<header>` a siete anchos y barriendo además 360→640 de 4 en 4 px (71 anchos) y 360→700 de 1 en 1
+(341 anchos). Ningún ancho desborda la raíz: `scrollWidth <= clientWidth` en todos.
+
+**El traspaso de rama cae exactamente donde `sm` lo pone**, y las dos ramas nunca coexisten en el
+árbol de accesibilidad: disparador del `Sheet` visible en 360..639, disposición ancha desde 640;
+cero anchos con las dos, cero anchos con ninguna.
+
+**Lo que la disposición ancha necesita de verdad son 664 px**, medidos donde nada la comprime
+(ventana a 1200 px): `px-4` 32 + slot `start` 215 + slot `end` 417. La predicción de ~547 px de
+arriba **era falsa por 117 px**, y por dos motivos que la aritmética no tenía: el slot `end` ancho
+mide 417 y no 265 (el `UserMenu` se queda en 152 px, pero el grupo de tema son 136 y el `Separator`
+con su `mx-1` suma 17), y el `start` mide 215 y no 102 porque el `PageTitle` de `TechnicianShell`
+ocupa sus 112 px cuando puede.
+
+**Y aun así el breakpoint se queda en `sm`**, porque los 664 px no son un suelo duro: a 640 px
+—el primer ancho de la rama ancha— la composición cumple R1.1 (`rootOverflow` 0) y **los seis
+controles están a su tamaño completo**, ninguno por debajo de 44×44. Lo que cede son 12 px de
+**texto que ya trunca por diseño**: el `PageTitle` («Mis incidencias», 112 px de contenido en 100
+de caja) y el email del `UserMenu` (140 en 128). A 664 px el recorte es de 4 px y desde 700 px es
+cero. Eso no es «la disposición completa no cabe» en el sentido que OQ-2 vigila —que era una barra
+rota o controles encogidos—, así que la condición para subir a `md` no se cumple y **no se sube**.
+
+Registrado en vez de silenciado, que es lo que OQ-2 pide: `md` (768 px) **eliminaría** ese recorte
+de 12 px, porque 664 ≤ 768. El precio sigue siendo el que D7 rechazó — la barra estrecha en
+tabletas enteras en vertical — y el recorte que compra es de 12 px sobre un texto que a 360 px
+recorta 71. Si algún día se juzga inaceptable, subir el breakpoint sigue siendo un cambio de una
+clase en un fichero.
+
+Un dato para que nadie lo lea como compresión: `NotificationBell` reporta 4 px de desbordamiento de
+tinta **a todos los anchos, incluido 1200**. No depende del ancho: es el badge de no leídas, que
+está posicionado en absoluto y sobresale de la caja de 44×44 del botón. Preexistente a este change.
+
+
 ### D8 — Etiquetas nuevas: dos claves en `navigation`, añadidas al final y sin reordenar
 
 **Elegido:** `navigation:topbarPreferences.trigger` (nombre accesible del disparador, «Preferencias»
@@ -622,6 +658,14 @@ Los ~547 px son predicción: la verificación de R1.3 barre el rango 360→640 y
 medición dijera que la disposición completa no cabe a 640, el breakpoint sube a `md` — una clase en
 un fichero, y en ese caso hay que decirlo en el registro en vez de cambiarlo en silencio.
 
+**Medido en la tarea 7.5 (2026-09-01): eran 664 px, no ~547 — y `sm` se mantiene igual.** La
+predicción se quedó corta por 117 px (el detalle, en §D7 → «Medición real»). Pero la condición que
+esta OQ puso para subir a `md` era «la disposición completa no cabe a 640», y a 640 px sí cabe:
+la raíz no desborda y los seis controles están a su tamaño completo, ninguno por debajo de 44×44.
+Lo único que cede son 12 px de texto que ya trunca por diseño, cero desde 700 px. Así que la
+respuesta no cambia, y queda dicho en el registro en vez de en silencio, que es lo que esta OQ
+exigía en cualquiera de los dos sentidos.
+
 ### OQ-3 — El botón de tema desfasado al ensanchar la ventana → **se arregla aquí**
 
 **Resuelta: arreglarlo en este change**, contra la recomendación de aceptarlo y documentarlo. El
@@ -651,3 +695,35 @@ composición más apretada.
 
 Rechazado: **los cinco al desplegable** — daba 132 px de suelo en vez de 148, a cambio de que el
 badge de no leídas dejara de verse en la app de campo.
+
+## Roadmap candidates found on the way
+
+Tres cosas que este change midió, decidió no arreglar y deja escritas para que no se pierdan al
+archivar. Ninguna es alcance suyo, y las tres tienen su razón.
+
+1. **El `Sheet` abierto sobrevive a su propia media query.** Si se ensancha la ventana por encima de
+   640 px con el desplegable de preferencias abierto, en pantalla quedan **dos** juegos visibles de
+   los controles de tema e idioma (el del cajón y el de la barra ancha, que acaba de aparecer), y al
+   cerrarlo el foco se va a `<body>` porque su disparador es ya `display:none`. Medido en la tarea
+   7.7. **R4.2 se cumple igualmente** —el árbol de accesibilidad enseña una sola instancia, porque
+   Radix marca `aria-hidden="true"` los hermanos de `document.body`—, así que es un defecto
+   cosmético y de gestión de foco, no de accesibilidad.
+
+   Por qué no se arregla aquí: cerrar el `Sheet` cuando la media query deja de aplicar exige
+   observar el viewport desde JavaScript (`matchMedia`), y **R4.1 prohíbe exactamente eso** a este
+   change («mediante media queries de CSS, nunca mediante detección de viewport en JavaScript»).
+   Levantar esa prohibición es una decisión de diseño que merece su propio proposal.
+
+2. **El botón de cierre del `Sheet` mide 16×16.** La `X` de `components/ui/sheet.tsx` es una
+   superficie táctil de 16 px en las **seis** superficies que montan un `Sheet`, y lo era desde
+   antes de este change. La sección 6 la midió, decidió que es chrome de la primitiva y no «un
+   control que pasa al desplegable» (R3.1), y la exentó de la guarda medida por
+   `data-slot="sheet-close"` — una exención acotada a ese slot para que no se contagie. Darle un
+   objetivo táctil real es un cambio en la primitiva que toca esas seis superficies, no esta.
+
+3. **La marca aplastada en `/`.** `Brand` se comprime a 37 px de caja con 89 px de contenido en la
+   landing a 360 px, solapándose con `MarketingNav`. Lo levantó la tarea 1.1 y está en §D0: es
+   desbordamiento de tinta dentro de un slot con `min-w-0`, no desbordamiento horizontal de la
+   página, así que **no es lo que R1.1 mide** y el proposal lo manda anotar y no arreglar («Tocar el
+   contenido de las pantallas», Out of scope). Este change lo mejora de lado —libera los 205 px que
+   el slot `end` le robaba— pero no lo resuelve.

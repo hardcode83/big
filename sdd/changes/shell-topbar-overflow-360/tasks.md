@@ -323,9 +323,14 @@ producto — están escritas con su razón en el propio fichero de test:
 - [x] 6.4 Cubrir el rango, no el punto: el mismo fichero mide además 640 px (donde vuelve la
   disposición completa) y al menos dos anchos intermedios del tramo 360→640. [R1.3]
 
-  360, **420**, **520** y 640 × 7 composiciones = 28 casos. Los dos intermedios caen a cada lado de
-  los ~547 px que D7 predice para la disposición completa, así que el tramo queda cubierto por sus
-  dos extremos y por su parte cara.
+  360, **420**, **520** y 640 × 7 composiciones = 28 casos, que cubren el tramo por sus dos
+  extremos y por dos puntos intermedios.
+
+  Cuando se escribió esto, los dos intermedios se eligieron «a cada lado de los ~547 px que D7
+  predice». **La tarea 7.5 midió 664 px**, así que 420 y 520 quedan los dos por debajo, en la rama
+  estrecha. No cambia lo que estos casos valen —lo que cazan es un ancho donde no cabe ninguna de
+  las dos ramas, y el 640 sigue siendo el primero de la ancha— pero la justificación de su elección
+  ya no se sostiene, y se deja dicho en vez de corregida hacia atrás.
 - [x] 6.5 **Validar la guarda al revés antes de darla por buena**: comprobar que falla contra la
   composición de hoy (revirtiendo temporalmente 4.3/4.4 en el árbol de trabajo, sin commitear) y
   que el mensaje del fallo identifica la composición. Sin esta demostración la tarea no está hecha
@@ -515,28 +520,105 @@ bandera.
 
 ## 7. Verification
 
-- [ ] 7.1 Suite frontend completa en verde: `docker compose exec -T frontend npm test`, con los
+- [x] 7.1 Suite frontend completa en verde: `docker compose exec -T frontend npm test`, con los
   `docker compose cp` que `sdd/project.md` documenta para los dos `ENOENT` de worktree
   (`features/provenance/workflow-contract.test.ts`, `lib/config/build-identity-contract.test.ts`).
   Comparar contra la cifra de ficheros/tests **medida al empezar**, no contra ningún número
   escrito en documentación.
-- [ ] 7.2 `docker compose exec -T frontend npm run lint` y `docker compose exec -T frontend npm run typecheck`
+
+  **Verde el 2026-09-01 dentro del contenedor**: **190 ficheros, 1985 pruebas, 0 en rojo**, con los
+  nueve `docker compose cp` puestos antes (el stack llevaba levantado desde §6, así que los dos
+  `ENOENT` de worktree estaban de vuelta). Contra la cifra de partida que midió 1.1 —**187 ficheros,
+  1942 tests**— este change suma 3 ficheros y 43 pruebas. Y confirma el diagnóstico que §6 dejó
+  abierto: el único rojo del host
+  (`features/dashboard/state/use-timeline-property-store.test.ts`) **desaparece aquí**, que es la
+  prueba de que era artefacto del Node v25 del host y no un defecto.
+- [x] 7.2 `docker compose exec -T frontend npm run lint` y `docker compose exec -T frontend npm run typecheck`
   en verde.
-- [ ] 7.3 `docker compose exec -T frontend npm run test:layout` en verde, y con 6.5 ya demostrado.
-- [ ] 7.4 Pasada en navegador real a 360×780 sobre las **seis** composiciones, repitiendo la
+
+  Los dos limpios el 2026-09-01, sin una sola línea de salida más allá del banner de npm.
+- [x] 7.3 `docker compose exec -T frontend npm run test:layout` en verde, y con 6.5 ya demostrado.
+
+  **77 pruebas en verde en Chromium dentro del contenedor** el 2026-09-01. Chromium instalado ahí
+  con `npm exec --no -- playwright install --with-deps chromium` —el comando que D6 fija tras la
+  corrección del panel de seguridad— y `node:22-slim` lo instaló limpio, como D6 predecía. La
+  validación al revés de 6.5 ya estaba hecha en su sección; esta tarea solo pedía el verde.
+- [x] 7.4 Pasada en navegador real a 360×780 sobre las **seis** composiciones, repitiendo la
   medición de 1.1: `scrollWidth <= clientWidth` en todas, y ninguna que estuviera sana antes ha
   empeorado. Sin avisos de hidratación en consola (el `getServerSnapshot` de 2.2 es lo que podría
   producirlos). Los únicos errores tolerados son el handshake del WebSocket de HMR y el
   `favicon.ico` 404. [R1.1, R1.2, R1.4, R4.4]
-- [ ] 7.5 Barrido 360→640 en el navegador, confirmando o corrigiendo los ~547 px que D7 predice
+
+  **Medido el 2026-09-01**, Chromium a 360×780 dentro del contenedor contra `http://localhost:3000`
+  (desde dentro es el propio origen de `next dev`, así que el bloqueo de origen cruzado que
+  `sdd/project.md` documenta no aparece; la app hidrata y se entra por clic con los tres roles).
+  Las **siete** composiciones dan `scrollWidth == clientWidth == 360`:
+
+  | Composición | Ruta | antes (1.1) | ahora | Veredicto |
+  |---|---|---|---|---|
+  | `PublicShell` + `MarketingNav` | `/` | 345/345 cabe | 360/360 | sigue cumpliendo |
+  | `PublicShell` | `/login` | 360/360 cabe | 360/360 | sigue cumpliendo |
+  | `GuestShell` | `/guest/[token]` | 360/360 cabe | 360/360 | sigue cumpliendo |
+  | `(authenticated)` | `/welcome` | 360/360 cabe | 360/360 | sigue cumpliendo |
+  | `WorkspaceShell` | `/dashboard` | **457**/345 desborda | 360/360 | **arreglada** (−97) |
+  | `TechnicianShell` | `/tech` | **445**/345 desborda | 360/360 | **arreglada** (−85) |
+  | `CleanerShell` | `/cleaner` | **465**/345 desborda | 360/360 | **arreglada** (−105) |
+
+  Las tres arregladas pasan de `clientWidth` 345 a 360 porque su barra de desplazamiento vertical de
+  15 px desaparece: liberar el `end` acorta la página lo suficiente. R1.4 queda cumplido — ninguna
+  de las cuatro que ya cumplían R1.1 ha empeorado.
+
+  **Consola**: cero menciones de hidratación en las siete (buscadas por `hydrat|did not match`), así
+  que el `getServerSnapshot` de 2.2 no produce ninguna. Lo único que sale es (a) un aviso de
+  `next dev` sobre `scroll-behavior: smooth` en `<html>`, preexistente y ajeno a este change, y
+  (b) un 404 a `/api/v1/guest/info/<token>`, que es **mi** token inventado para alcanzar la
+  `GuestShell`, no un defecto de la app. Ni handshake de HMR ni `favicon.ico` esta vez.
+- [x] 7.5 Barrido 360→640 en el navegador, confirmando o corrigiendo los ~547 px que D7 predice
   para la composición más cara (`/tech`). Si la disposición completa no cabe a 640, subir el
   breakpoint a `md` y **decirlo en el registro del change**, no cambiarlo en silencio (OQ-2).
   [R1.3]
-- [ ] 7.6 Comprobación manual de R2 y R3 en el navegador a 360 px: los cinco controles siguen
+
+  **Barrido hecho el 2026-09-01, y la predicción de D7 se corrige: son 664 px, no ~547.** La tabla y
+  el razonamiento completos están en `design.md` §D7 → «Medición real (tarea 7.5)». En resumen:
+
+  - **Ningún ancho desborda.** 360→640 de 4 en 4 px sobre las **siete** composiciones (71 anchos
+    cada una) y 360→700 de 1 en 1 sobre `/tech` (341 anchos): `scrollWidth <= clientWidth` en todos.
+    R1.3 cumplido.
+  - **El traspaso cae en 640 exactamente**: disparador del `Sheet` en 360..639, disposición ancha
+    desde 640. Cero anchos con las dos ramas a la vez y cero con ninguna.
+  - **`md` no se sube, y por qué**: la disposición ancha necesita 664 px sin comprimir, pero a
+    640 px cumple R1.1 y los seis controles están a su tamaño completo (ninguno bajo 44×44). Lo
+    único que cede son 12 px de texto que **ya trunca por diseño** (`PageTitle` y el email del
+    `UserMenu`); a 664 px son 4 px y desde 700 px cero. La condición de OQ-2 —«la disposición
+    completa no cabe»— no se cumple, así que el breakpoint se queda en `sm` y la alternativa `md`
+    queda escrita en D7 con su precio, en vez de aplicada en silencio.
+- [x] 7.6 Comprobación manual de R2 y R3 en el navegador a 360 px: los cinco controles siguen
   alcanzables (tema e idioma dentro del desplegable), el `UserMenu` conserva su confirmación de
   cierre de sesión, ninguna superficie táctil baja de 44×44 px medidos, y el `Sheet` inferior no
   tapa el contenido. [R2.1, R2.2, R2.3, R3.1, R3.2, R3.3]
-- [ ] 7.7 Comprobación manual de R4.4 en el navegador: cambiar el tema desde el desplegable a
+
+  **Comprobado el 2026-09-01 sobre `/tech` a 360×780.** Los cinco controles están y son
+  alcanzables: en la barra, `Preferencias` 44×44, `Notificaciones, 1 sin leer` 44×44 y
+  `Menú de usuario` 68×44; dentro del `Sheet`, los tres botones de tema (`Claro`, `Oscuro`,
+  `Seguir al sistema`) a 44×44 y `Cambiar idioma a English` a 44×44, con el `role="group"`
+  «Tema» completo. Ninguna superficie táctil por debajo de 44×44 (R3.1, R3.2) ni con el
+  desplegable cerrado ni abierto.
+
+  El `Sheet` inferior ocupa **137 px de los 780** del viewport (`y` 643→780): es un cajón, no una
+  pantalla completa, y con él abierto sigue sin haber desbordamiento horizontal (360/360). R3.3
+  cumplido.
+
+  **Una excepción, ya conocida y no de este change**: el botón de cierre del propio `Sheet`
+  (`Cerrar menú`) mide 16×16. Es la `X` de `components/ui/sheet.tsx`, presente en las seis
+  superficies que montan un `Sheet` desde antes de este change; §6 ya la midió, decidió que no es
+  «un control que pasa al desplegable» sino chrome de la primitiva, y la exentó por
+  `data-slot="sheet-close"` en la guarda medida, dejándola anotada como candidata a change futuro.
+  Ese razonamiento está escrito en el propio `sheet.tsx`. Esta tarea lo confirma, no lo reabre.
+
+  R2.3: el `UserMenu` no se toca en este change y conserva su disparador propio en la barra a
+  360 px, con su nombre accesible «Menú de usuario» y su confirmación de cierre de sesión intacta
+  (`user-menu.tsx` no aparece en el diff).
+- [x] 7.7 Comprobación manual de R4.4 en el navegador: cambiar el tema desde el desplegable a
   360 px, ensanchar la ventana por encima de 640 px **sin navegar ni recargar**, y ver que el
   botón `aria-pressed` de la barra ancha es el que corresponde. [R4.4]
 
@@ -546,6 +628,53 @@ bandera.
   `aria-hidden` del diálogo modal—, (2) qué se ve en pantalla, y (3) dónde acaba el foco al cerrar,
   porque el disparador es `display:none` a ese ancho. Si (2) o (3) resultan feos, se anota como
   candidato a change futuro: R4.2 se cumple, así que no es alcance de este. [R4.2, R4.4]
-- [ ] 7.8 Comprobación manual de R4.2 con la tecnología asistiva del navegador (árbol de
+
+  **El gesto normal, verificado el 2026-09-01**: a 360 px, `data-theme` sin fijar; se abre el
+  desplegable, se pulsa `Oscuro` → `data-theme="dark"`; se cierra con `Escape`; se ensancha a
+  800 px **sin navegar ni recargar** → la barra ancha muestra exactamente **un** botón con
+  `aria-pressed="true"`, y es `Oscuro`. `data-theme` sobrevive al cambio de ancho. R4.4 cumplido:
+  el hook de 2.2 hace que las instancias coincidan por construcción.
+
+  **El caso límite del panel, con el desplegable abierto**, las tres cosas que pedía:
+
+  1. **Árbol de accesibilidad: una sola instancia**, sí. Con el `Sheet` abierto a 360 px el árbol
+     enseña un único `role="group"` «Tema» (el del cajón) y **cero** disparadores `Preferencias`;
+     al ensanchar a 800 px sigue enseñando uno de cada. El mecanismo medido no es `aria-modal`
+     —Radix no lo pone en este contenido— sino el `aria-hidden="true"` que el diálogo escribe en
+     **los hermanos** de `document.body`, y ahí queda la barra entera. R4.2 se cumple a los dos
+     anchos y en la transición.
+  2. **En pantalla sí se pintan dos.** A 800 px con el cajón abierto hay dos grupos «Tema»
+     visibles: el de la barra ancha (`y` 6, 136×44, con un ancestro `aria-hidden="true"`) y el del
+     cajón (`y` 712, 136×44). Es duplicación **visual**, no de accesibilidad. Sin desbordamiento
+     (800/800). Anotado como candidato a change futuro, que es lo que esta tarea manda: R4.2 se
+     cumple, así que no es alcance de este.
+  3. **El foco se va a `<body>` al cerrar.** Con el disparador en `display:none` a 800 px, Radix no
+     tiene dónde devolverlo. Es el punto feo que el arquitecto anticipó; mismo trato que (2):
+     anotado como candidato a change futuro, no arreglado aquí.
+
+  Los dos candidatos se cierran con lo mismo —cerrar el `Sheet` cuando la media query deja de
+  aplicar—, y eso es un `useSyncExternalStore` sobre `matchMedia`, o sea detección de viewport en
+  JavaScript, que es exactamente lo que **R4.1 prohíbe** a este change. Por eso son un change
+  aparte y no una ronda de arreglo de este.
+- [x] 7.8 Comprobación manual de R4.2 con la tecnología asistiva del navegador (árbol de
   accesibilidad): en 360 px y en 800 px hay **una sola** instancia de cada control, sin nombres
   accesibles duplicados ni paradas de tabulación repetidas. [R4.2]
+
+  **Verificado el 2026-09-01** sobre `/tech`, contando por rol y nombre accesible (que es lo que
+  respeta `display:none` y `aria-hidden`, no el DOM):
+
+  | Nombre accesible | @360 px | @800 px |
+  |---|---|---|
+  | `Preferencias` (disparador) | 1 | 0 |
+  | `role="group"` «Tema» | 0 | 1 |
+  | `Claro` / `Oscuro` / `Seguir al sistema` | 0 / 0 / 0 | 1 / 1 / 1 |
+  | `Cambiar idioma a English` | 0 | 1 |
+
+  Ni un solo nombre duplicado, y ninguna rama presente en los dos sitios: es el `display:none` de
+  `hidden` / `sm:hidden` haciendo lo que D3 dice que hace.
+
+  **Paradas de tabulación**, recorridas con `Tab`: 12 a 360 px (`Saltar al contenido`,
+  `Preferencias`, `Notificaciones, 1 sin leer`, `Menú de usuario`, y de ahí al contenido) y 15 a
+  800 px (`Saltar al contenido`, `Claro`, `Oscuro`, `Seguir al sistema`,
+  `Cambiar idioma a English`, `Notificaciones…`, `Menú de usuario`, …). Cero paradas repetidas para
+  un control de la cabecera a cualquiera de los dos anchos.

@@ -341,11 +341,15 @@ describe("no shell composition overflows at 360px (R1.1, R1.2, R5.1, R5.3)", () 
  * R1.3: the range, not the point.
  *
  * 360 is where the bug was reported and 640 is the `sm` breakpoint where the
- * full layout comes back (design D7) — the two ends. The two intermediates sit
- * either side of the ~547px that D7 predicts the full layout needs, so if that
- * prediction is wrong the narrow branch is still what renders at both and this
- * stays green; what it catches is the opposite failure, a width where neither
- * branch fits.
+ * full layout comes back (design D7) — the two ends. The two intermediates are
+ * below the breakpoint, so the narrow branch is what renders at both; what they
+ * catch is a width where neither branch fits.
+ *
+ * 420 and 520 were originally picked to bracket the ~547px D7 predicted the full
+ * layout needed. Task 7.5 measured 664px in a real browser, so they no longer
+ * bracket anything — but the cases keep their value, because what they assert is
+ * that SOME branch fits at each width, and below 640 that is always the narrow
+ * one. D7 records the corrected figure and the breakpoint stayed at `sm`.
  *
  * 640 itself is the interesting one: it is the first width where the wide branch
  * is displayed, so it is where too low a breakpoint would show up as overflow.
