@@ -194,13 +194,13 @@ residual, no de conducta.
 
 ## 3. El gatillo: la guardia se ejecuta donde tiene que hablar
 
-- [ ] 3.1 `Makefile`: target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a
+- [x] 3.1 `Makefile`: target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a
   `check-compose-ports` y `check-version-parity`, **fuera de `$(COMPOSE)`** y añadido a `.PHONY`.
   Con su comentario diciendo por qué queda fuera (es una herramienta host-side de stdlib: no
   necesita el stack, y meterla en `$(COMPOSE)` la ataría a un contenedor que ya no monta el árbol de
   prosa). [R1.3]
 
-- [ ] 3.2 Crear `.github/workflows/rule11-ownership.yml`: `on: pull_request: {}` +
+- [x] 3.2 Crear `.github/workflows/rule11-ownership.yml`: `on: pull_request: {}` +
   `push: branches: [main]` + `workflow_dispatch: {}`, **sin `paths:`** y **sin detección de área
   dentro** (D2 — un gate de área sería un segundo sitio donde equivocarse sobre el alcance, que es
   el defecto que este change arregla); `permissions: contents: read`; `concurrency` por `github.ref`
@@ -213,15 +213,24 @@ residual, no de conducta.
   Cabecera explicando el gatillo, la prohibición de `paths:` de `sdd/specs/backend-ci.md` y por qué
   no hay gate de área. [R1.1, R1.2, R1.3]
 
-- [ ] 3.3 Dejar `.github/workflows/compose-ports.yml` **sin cambios** y comprobar que su paso
+- [x] 3.3 Dejar `.github/workflows/compose-ports.yml` **sin cambios** y comprobar que su paso
   `pytest scripts/ -q` recoge también `scripts/test_rule11_ownership.py`. Se deja el glob ancho a
   propósito: estrecharlo crearía una lista que el próximo script hay que acordarse de ampliar.
   [R1.1]
 
-- [ ] 3.4 Comprobar que el check nuevo es **distinto** del de `backend-tests`: nombre de job propio,
+- [x] 3.4 Comprobar que el check nuevo es **distinto** del de `backend-tests`: nombre de job propio,
   workflow propio, y que un PR de sola prosa lo ejecuta mientras `backend-tests-suite` sigue
   saliendo `skipped` — que es exactamente la forma del run 33409418091 que dejó pasar el defecto.
   [R1.1]
+
+  **Verificado estructuralmente el 2026-08-31**, que es lo que se puede probar sin push; los ids
+  de run son 6.1 y 6.2. El gate de `backend-tests.yml:186` es
+  `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así que un diff de sola prosa
+  deja `backend=false` y `backend-tests-suite` en `skipped`. El workflow nuevo no tiene `paths:`
+  en `on:` ni puerta de área ninguna —comprobado parseando el YAML— así que corre igual. Y el
+  nombre del job, `rule11-ownership`, no colisiona con ninguno de los diez workflows del
+  repositorio: los de `backend-tests.yml` son `backend-tests-detect`, `backend-tests-suite` y
+  `backend-tests`.
 
 ## 4. Retirar la superficie vieja
 
@@ -243,13 +252,21 @@ residual, no de conducta.
   change elimina — hay que reescribir la frase o apuntar al ejemplo que siga siendo cierto. Los
   registros bajo `sdd/changes/archive/` **no se tocan**: son inmutables. [R5.2]
 
-- [ ] 4.4 Recontar los recuentos que el target nuevo falsea, **contra el `Makefile` y sin
+- [x] 4.4 Recontar los recuentos que el target nuevo falsea, **contra el `Makefile` y sin
   incrementar el número anterior**: `Makefile:344` («es el tercero de los **cuatro** targets
   host-side que no lo usan», enumerándolos), `Makefile:401` («es el **cuarto** target host-side») y
   el `SHALL` de `sdd/specs/local-environment.md:458`, que enumera «los **cuatro** targets que
   delegan en un script host-side —`check-version-parity`, `compose-stacks`, `check-compose-ports` y
   `ports`—» y ahora tiene uno más. La cuenta de los **diez** targets que invocan `docker compose`
   desde el `Makefile` no cambia: `check-rule11-ownership` no invoca Compose. [R5.3]
+
+**4.4 se adelantó a la sección 3**, y consta el motivo: es 3.1 —el target nuevo— lo que falsea
+esos tres recuentos, así que recontarlos en la sección 4 habría dejado el árbol mintiendo entre
+dos commits. Recontados contra el `Makefile` y contra la propia frase, no incrementados: los
+targets host-side fuera de `$(COMPOSE)` pasan de cuatro a **cinco**, `check-compose-ports` sigue
+siendo el tercero y `ports` el cuarto, y los que quedan fuera **por decisión** pasan de tres a
+**cuatro**, con su bullet propio en `sdd/specs/local-environment.md`. La cuenta de los **diez**
+targets que invocan `docker compose` desde el `Makefile` no se mueve: éste no invoca Compose.
 
 ## 5. La autoridad, la spec y las docs
 

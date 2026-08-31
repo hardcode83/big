@@ -122,7 +122,7 @@ COMPOSE_ARGS := $(if $(OFFSET),-f docker-compose.yml -f $(OFFSET_FILE),$(if $(IS
 COMPOSE := $(strip docker compose $(COMPOSE_ARGS))
 
 
-.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports db-clean-test
+.PHONY: up down logs ps sh ports bootstrap seed-demo demo-reset openapi check-version-parity check-frontend-build compose-stacks check-compose-ports check-rule11-ownership db-clean-test
 
 # El guard del overlay de worktree queda acotado a la rama SIN desplazamiento, y no por higiene:
 # con desplazamiento ese fichero no se carga (lo sustituye el overlay generado, ver COMPOSE_ARGS),
@@ -341,8 +341,8 @@ compose-stacks:
 # guardia que sostiene la exención de POSTGRES_PASSWORD de steering/security.md regla 8, y corre
 # también en CI (.github/workflows/compose-ports.yml).
 #
-# Deliberadamente **fuera de $(COMPOSE)**, y es el tercero de los cuatro targets host-side que no
-# lo usan (`check-version-parity`, `compose-stacks`, éste y `ports`) — pero
+# Deliberadamente **fuera de $(COMPOSE)**, y es el tercero de los cinco targets host-side que no
+# lo usan (`check-version-parity`, `compose-stacks`, éste, `ports` y `check-rule11-ownership`) — pero
 # por un motivo distinto del de compose-stacks, así que no se lee del de arriba. Aquí no es que
 # el ámbito sea la máquina: es que pasar por $(COMPOSE) añadiría docker-compose.worktree.yml en
 # un worktree enlazado, que retira los cuatro mapeos, y entonces la guardia vería CERO claves
@@ -355,6 +355,21 @@ compose-stacks:
 # contiene ningún valor del `.env` (medido), así que no hace falta `.env` ni lo hay que crear.
 check-compose-ports:
 	python3 scripts/compose-ports.py
+
+# Comprueba que la propiedad de un sumidero de la regla 11 se declara en la tabla de
+# steering/security.md y en ningún otro sitio: recorre la prosa y los docstrings del alcance que
+# declara `SCOPE` y se pone en rojo nombrando fichero, línea y frase. Corre también en CI
+# (.github/workflows/rule11-ownership.yml), y ahí está el motivo de que exista este target: hasta
+# `rule11-guard-trigger-and-scope` la guardia vivía en `backend/tests/`, así que un commit de sola
+# prosa —la forma de todo commit de `/sdd:archive`— no la ejecutaba.
+#
+# Fuera de $(COMPOSE), y es el **quinto** target host-side que no lo usa (`check-version-parity`,
+# `compose-stacks`, `check-compose-ports`, `ports` y éste). El motivo es el suyo propio y no se lee
+# de los otros cuatro: es una herramienta de stdlib que sólo lee ficheros del árbol, así que no
+# necesita el stack — y meterla en $(COMPOSE) la ataría a un contenedor que ya no monta el árbol de
+# prosa, porque este mismo change retira esos dos bind mounts.
+check-rule11-ownership:
+	python3 scripts/rule11-ownership.py
 
 # Cada ejecución de pytest crea su propia base (`<db>_test_<pid>`, o
 # `<db>_test_<pid>_gw0` por worker si se corre con `-n`; ver backend/tests/db_names.py) y
@@ -398,7 +413,8 @@ db-clean-test:
 # verde. Un stack con desplazamientos incoherentes entre servicios se informa como tal, sin
 # inventar un número que lo describa.
 #
-# Es el **cuarto** target host-side fuera de `$(COMPOSE)`, y aquí el motivo es otro más: pasar por
+# Es el **cuarto** de los cinco targets host-side fuera de `$(COMPOSE)`, y aquí el motivo es otro
+# más: pasar por
 # `$(COMPOSE)` no cambiaría la respuesta —`ps` direcciona el proyecto por su nombre— pero ataría
 # la consulta al conjunto de ficheros de la invocación, y entonces preguntar por el desplazamiento
 # exigiría saberlo ya.
