@@ -192,7 +192,7 @@ revisor. Se verificó ejecutándolo antes de escribirlo: quitar la entrada de
 `backend/alembic/versions` retira 17 ficheros y sale en verde. Es corrección de prosa sobre un
 residual, no de conducta.
 
-## 3. El gatillo: la guardia se ejecuta donde tiene que hablar
+## 3. El gatillo: la guardia se ejecuta donde tiene que hablar <!-- panel: PASS 2026-08-31 -->
 
 - [x] 3.1 `Makefile`: target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a
   `check-compose-ports` y `check-version-parity`, **fuera de `$(COMPOSE)`** y añadido a `.PHONY`.
@@ -272,6 +272,19 @@ es `check-frontend-build`, que invoca `$(COMPOSE) exec -T` en su receta y no apa
 enumeración ni en la de los host-side. Lo levantó el panel de la sección 3, y con razón: 4.4 se
 presentaba como un recuento, así que dar «diez» por bueno sin contarlo era exactamente lo que la
 obligación de R5.3 prohíbe.
+
+  **Y preguntar por los hermanos encontró otro**, fuera del alcance de este change y corregido
+  igualmente porque estaba en un fichero que este change ya abre y era falso de forma
+  comprobable: `sdd/specs/local-environment.md` decía que el worker ejecuta «las **ocho** tareas
+  periódicas … las **cuatro** nombradas por PRD §8.3». Son **nueve** y **cinco**: `revenue-pricing`
+  añadió `generate_price_recommendations` y no actualizó esta frase, mientras que
+  `sdd/specs/celery-jobs.md` —la autoridad, citada en la misma frase— sí lo dice bien. Contado
+  contra `backend/app/scheduler/tasks.py`: nueve `@celery_app.task`. Se corrige aquí y consta que
+  es una corrección ajena a este change, no un recuento suyo.
+
+  La prosa de procedencia del recuento salió además **fuera del bullet `SHALL`**, a un párrafo
+  propio: es la convención que esta misma spec sigue para la nota de `compose-ports-guard`, y
+  metida dentro obligaba a leer la historia del error para encontrar la afirmación normativa.
 
 ## 5. La autoridad, la spec y las docs
 
