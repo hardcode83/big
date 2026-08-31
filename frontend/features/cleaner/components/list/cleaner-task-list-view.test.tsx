@@ -118,7 +118,12 @@ function page(
 
 function renderView() {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    // `retry: false` is the default for the list query; the per-row context
+    // query overrides it with the shared `retryPolicy` (a 5xx does retry), so
+    // `retryDelay` needs to be fast here or the default exponential backoff
+    // outlasts `waitFor`'s timeout on the retry-then-recover assertions below
+    // (same pattern as `use-incidents.test.tsx`, `use-properties.test.tsx`).
+    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
   });
   function Wrapper({ children }: { children: ReactNode }) {
     return (
@@ -158,7 +163,9 @@ describe("CleanerTaskListView (R1)", () => {
     await waitFor(() =>
       expect(screen.getByText("REDES11 · Redes 11")).toBeInTheDocument(),
     );
-    expect(screen.getByText("Asignada")).toBeInTheDocument();
+    // The row's status badge, not the filter chip of the same name — both
+    // render the text "Asignada", so this must be scoped to the row.
+    expect(screen.getByRole("listitem").textContent).toContain("Asignada");
     // All seven chips from D5.
     for (const label of [
       "Asignada",
@@ -261,8 +268,12 @@ describe("CleanerTaskListView — degraded row context (R1.4)", () => {
     renderView();
 
     await waitFor(() => expect(screen.getAllByRole("listitem")).toHaveLength(2));
-    // The other row still renders the resolved property name.
-    expect(screen.getAllByText("REDES11 · Redes 11")).toHaveLength(2);
+    // The other row still renders the resolved property name; task-b's
+    // context is a permanent failure (not transient), so it stays degraded
+    // to the em-dash rather than ever resolving (R1.4).
+    await waitFor(() =>
+      expect(screen.getAllByText("REDES11 · Redes 11")).toHaveLength(1),
+    );
   });
 });
 
