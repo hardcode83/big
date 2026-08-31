@@ -5,7 +5,7 @@ local_review: APPROVED
 repository: autohostai-labs/AutoHostAI
 base_branch: main
 head_branch: sdd/cleaner-app
-implementation_sha: ed3bf5f044970e5502e53e05165d04760efc606a
+implementation_sha: b0f78fb54e512dc29684839f05f4406b8cd55111
 pr_number: 140
 pr_url: https://github.com/autohostai-labs/AutoHostAI/pull/140
 pr_state: OPEN
