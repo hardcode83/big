@@ -15,9 +15,10 @@ el módulo `revenue-statements`.
 
 El entorno Docker de desarrollo del backend tendrá Pyright declarado como dependencia
 de desarrollo, su lockfile actualizado y la librería de sistema mínima necesaria para
-ejecutarlo. El workflow de backend documentará y ejecutará el mismo comando canónico
-que el entorno local, de forma que el gate sea reproducible y no dependa de `uvx` ni de
-estado instalado fuera del proyecto.
+ejecutarlo. El proyecto documentará un único comando canónico compartido por el entorno
+local y Docker, de forma que la verificación estática sea reproducible y no dependa de
+`uvx` ni de estado instalado fuera del proyecto. El workflow de CI no se modifica:
+convertir ese comando en gate obligatorio queda como decisión de política aparte (D5).
 
 ## Requirements
 
@@ -110,4 +111,3 @@ Acceptance criteria:
 - `sdd/specs/local-environment.md` (comando soportado y dependencia del entorno Docker).
 - `sdd/specs/ci-backend-tests.md` (gate reproducible de calidad estática, si la spec
   existente es la que gobierna el workflow).
-

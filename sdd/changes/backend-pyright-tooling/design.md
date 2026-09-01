@@ -173,4 +173,3 @@ findings y código de salida distinto de cero.
 Ninguna para pasar a tareas. La eventual corrección de findings de tipos y la decisión
 de convertir Pyright en check obligatorio de CI quedan explícitamente fuera de este
 change y requieren changes/decisiones separados.
-
