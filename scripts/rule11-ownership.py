@@ -227,14 +227,6 @@ SCOPE: tuple[ScopeEntry, ...] = (
         "the detector's meta-tests, which must contain every phrase it hunts in order to prove "
         "the scan works; not an attribution of any column",
     ),
-    ScopeEntry(
-        "backend/tests/test_rule11_ownership.py",
-        Kind.EXCEPTION,
-        "the guard this file replaces, exempt for the same reason as this one and only while "
-        "the two coexist. R1.5 compares the two censuses over the same tree, and that "
-        "comparison is only an equality if each path exempts the other's detector; the entry "
-        "and the file it names are deleted together (task 4.1)",
-    ),
 )
 
 #: Proof the scan is looking at the real tree, kept from the container era for a different

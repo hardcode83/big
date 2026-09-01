@@ -108,18 +108,6 @@ services:
       # `tests/auth/test_bootstrap.py` warned about when it declined to write a test it could not
       # run where the suite runs.
       - ./.github/workflows/demo-reset.yml:/workspace/demo-reset.yml:ro
-      # Same reason, one change later: `tests/test_rule11_ownership.py` walks the prose tree to
-      # stop the ownership of a rule 11 sink being restated outside its table, and most of the
-      # sites it guards are Markdown under `sdd/` and `docs/`. The container only mounts
-      # `./backend`, so without these it would walk nothing. Read-only: the suite reads this
-      # tree, never writes it. In CI the checkout is complete and the test resolves the root by
-      # its second and last candidate, the repository layout, so these lines are the local half
-      # of the same contract. Dev-only for a second reason worth stating: this makes the
-      # internal threat model readable from the container that publishes 8000 on every
-      # interface, which is acceptable on a developer's machine and not somewhere else.
-      # `docker-compose.deploy.yml` deliberately does not get them: it does not run the suite.
-      - ./sdd:/workspace/sdd:ro
-      - ./docs:/workspace/docs:ro
       # Third instance of the same contract, one change later (`demo-user`): R2.1 says the
       # demo password has no default anywhere in the tree, and half of that claim is that
       # `.env.example` declares DEMO_ACCOUNT_PASSWORD by name with no value. Asserting it needs

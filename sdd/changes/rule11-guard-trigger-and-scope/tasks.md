@@ -234,18 +234,18 @@ residual, no de conducta.
 
 ## 4. Retirar la superficie vieja
 
-- [ ] 4.1 Borrar `backend/tests/test_rule11_ownership.py`, **una vez registradas las dos
+- [x] 4.1 Borrar `backend/tests/test_rule11_ownership.py`, **una vez registradas las dos
   comparaciones de 1.4 y 1.5**. Comprobar que nada más lo importa y correr la suite del backend:
   misma cifra de partida menos ese fichero, sin fallos nuevos. Medir la cifra de partida **antes** de
   borrar. [R1.5]
 
-- [ ] 4.2 `docker-compose.yml`: retirar `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con
+- [x] 4.2 `docker-compose.yml`: retirar `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con
   el comentario que las justifica (hoy líneas 111-122). **No tocar** los otros cuatro montajes de
   `/workspace/` (`deploy-dev.yml`, `demo-reset.yml`, `.env.example`), que tienen consumidores vivos.
   Verificar antes de borrar que ningún otro fichero bajo `backend/` lee `/workspace/sdd` ni
   `/workspace/docs`. [R1.3]
 
-- [ ] 4.3 Actualizar las **cuatro citas vivas** de la ruta vieja, ninguna funcional:
+- [x] 4.3 Actualizar las **cuatro citas vivas** de la ruta vieja, ninguna funcional:
   `sdd/specs/incident-photos.md:396`, `backend/tests/cli/test_demo_reset.py:292` y `:2774`, y
   `backend/tests/notifications/test_writer_census.py:113`. Ojo con las dos de `test_demo_reset.py`:
   no basta con repathear, porque citan la **forma de dos candidatos** de `_prose_roots()`, que este
@@ -285,6 +285,35 @@ obligación de R5.3 prohíbe.
   La prosa de procedencia del recuento salió además **fuera del bullet `SHALL`**, a un párrafo
   propio: es la convención que esta misma spec sigue para la nota de `compose-ports-guard`, y
   metida dentro obligaba a leer la historia del error para encontrar la afirmación normativa.
+
+  **Medido el 2026-08-31, las dos pasadas completas y con marcador de fin** (los intentos previos
+  murieron por memoria y hubo que distinguir «terminó» de «la mataron»):
+
+  ```
+  antes:    9218 passed, 41 skipped in 750.58s   EXIT=0
+  después:  9213 passed, 41 skipped in 737.50s   EXIT=0
+  ```
+
+  **9218 − 5 = 9213**, que son exactamente los cinco tests del fichero borrado. Ni un fallo nuevo
+  y los `skipped` no se mueven. Antes de borrar se comprobó con python —no con `grep`, que en este
+  repo esconde coincidencias— que **ningún fichero lo importa**: el único acierto era una frase de
+  docstring en `scripts/test_rule11_ownership.py`.
+
+  Con el fichero se fueron **a la vez** su entrada transitoria de `SCOPE` y su mención en la frase
+  de alcance de `sdd/steering/security.md`. No es limpieza opcional: el ancla de D11 verifica las
+  rutas en las dos direcciones, así que borrar sólo el fichero habría puesto la prueba en rojo
+  nombrando la entrada muerta — que es exactamente para lo que se escribió.
+
+  **4.3, y por qué dos de las cuatro no se repathearon.** `test_writer_census.py:113` e
+  `incident-photos.md:396` sí apuntan ya al camino nuevo. Las dos de `test_demo_reset.py` (292 y
+  2774) **no citaban la ruta sino la forma de dos candidatos** de `_prose_roots()`, que este change
+  elimina: repathearlas habría dejado una frase describiendo algo inexistente. Se reescriben para
+  decir lo que sigue siendo cierto — esa forma sobrevive ahí porque **esa** suite sigue corriendo
+  dentro del contenedor, y el guardián dejó de necesitarla al salir de él.
+
+  Comprobado después: no queda ninguna cita viva de la ruta vieja ni de los dos montajes. Los tres
+  aciertos restantes son legítimos —una frase histórica en el docstring del fichero nuevo y dos
+  entradas de `sdd/roadmap.md`, que está fuera de censo y sólo escribe `/sdd:archive`.
 
 ## 5. La autoridad, la spec y las docs <!-- panel: PASS 2026-08-31 -->
 
