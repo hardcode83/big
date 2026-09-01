@@ -290,8 +290,13 @@ MINIMUM_PYTHON_FILES = 700
 #: the documents of every change in flight — including this one, whose own proposal and tasks
 #: discuss the guard and therefore match the meta-vocabulary. It moved **twice while this change
 #: was being written**, by its own writing. A number that its own recording changes is a number to
-#: state as a magnitude, not as a census — so this one is stated as one, and the three in scope
-#: above are the figure to hold it to. What comes out with them
+#: state as a magnitude, not as a census — so this one is stated as one, and the in-scope figure
+#: **enumerated above** is what to hold it to. No numeral is repeated here on purpose: this very
+#: sentence carried a stale one through two review rounds, because whoever recounted the paragraph
+#: above did not think to recount its neighbour. The figure that binds is asserted by
+#: `test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_prose_says`, which
+#: pins the exact `file:line` set and not just the total — read that if this prose and the tree
+#: ever disagree. What comes out with them
 #: is stated as residual 5c of `test_what_this_guard_does_not_catch`, and it costs zero blocks in
 #: scope today. **Re-measure against the tree before trusting any of these numbers**: they depend
 #: on the tree, which is the property that made the previous version of this comment go stale.

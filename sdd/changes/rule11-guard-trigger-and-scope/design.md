@@ -142,8 +142,12 @@ meta-vocabulario (`regla 11`, `rule 11`, `censo`, `sumidero de texto en claro`, 
 sink`) salen del eje. Con eso, un bloque se reporta sólo si nombra **algo que la tabla de la
 regla 11 gobierna**, que es lo que el eje decía ser.
 
-La medición del § anterior es el argumento entero: cero verdaderos positivos en alcance, tres
-falsos positivos, y `main` pasa de 3 infractores a 0. Cumple R2.6 por su primera rama («SHALL no
+La medición del § anterior es el argumento entero: **cero verdaderos positivos en alcance** y sólo
+falsos —cuántos, lo dice esa medición con su fecha y lo afirma
+`test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_prose_says`; aquí no se
+repite el numeral a propósito, porque es así como esta cifra se quedó obsoleta dos veces—, y `main`
+pasa de 3 infractores a 0 (ése sí es firme: son los tres bloques que el eje viejo reportaba de
+verdad). Cumple R2.6 por su primera rama («SHALL no
 reportarlo») en vez de por la segunda («declarar por qué ese encaje cuenta»), porque la segunda
 no se puede defender: un texto *sobre* el guardián resultando infractor por hablar de él no es
 una atribución duplicada de nada.
