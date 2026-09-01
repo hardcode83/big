@@ -82,4 +82,5 @@
 | notification-writers-gap | new, design, tasks, run, review, ship, archive | 347258 | 1298780 | 286206103 | 183.4083 | 2026-08-29 | 2026-08-30 |
 | notifications-inbox-web | new, design, tasks, run, review, ship, archive | 462522 | 1377686 | 284998420 | 181.8444 | 2026-08-28 | 2026-08-29 |
 | reservation-property-identity | new, design, tasks, run, review, ship, archive | 2597769 | 332557 | 72084496 | 61.6039 | 2026-08-24 | 2026-08-30 |
+| shell-topbar-overflow-360 | new, design, tasks, run, review | 621053 | 1267586 | 263176041 | 178.6531 | 2026-08-30 | — |
 | cleaner-app | new, tasks, run, review, ship, archive | 1913125 | 420916 | 113055583 | 70.1061 | 2026-08-18 | 2026-08-31 |

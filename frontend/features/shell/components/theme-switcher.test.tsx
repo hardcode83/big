@@ -1,14 +1,18 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it } from "vitest";
+import { renderToString } from "react-dom/server";
 
 import {
+  act,
   fireEvent,
   getA11yViolations,
   render,
   screen,
   waitFor,
+  within,
 } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { THEME_COOKIE } from "@/lib/config/constants";
+import { THEME_ATTRIBUTE } from "@/lib/theme/theme";
 import { ThemeSwitcher } from "@/features/shell/components/theme-switcher";
 
 /**
@@ -24,6 +28,17 @@ import { ThemeSwitcher } from "@/features/shell/components/theme-switcher";
  */
 
 function setup(initial: Parameters<typeof ThemeSwitcher>[0]["initial"]) {
+  /*
+   * The attribute goes on alongside the prop because that is the pair the server
+   * emits: `app/layout.tsx` writes `data-theme={theme ?? undefined}` from the
+   * same `getServerTheme()` that produces `initial`. Since
+   * `shell-topbar-overflow-360` (D9/R4.4) `aria-pressed` is read from the
+   * attribute so that two mounted instances cannot disagree, so a test that set
+   * only the prop would be asserting against a state the app never renders.
+   */
+  if (initial !== null) {
+    document.documentElement.setAttribute(THEME_ATTRIBUTE, initial);
+  }
   return render(
     <I18nProvider locale="es">
       <ThemeSwitcher initial={initial} />
@@ -43,7 +58,15 @@ function cookieValue(): string | undefined {
   return match?.[1];
 }
 
-afterEach(() => {
+/*
+ * `beforeEach` for the attribute, not `afterEach`: since D9 the switcher
+ * subscribes to it, and clearing it after a test runs while the tree is still
+ * mounted (Testing Library's cleanup is a separate hook), so the observer fires
+ * outside `act` and React warns. Clearing it before the next render mutates a
+ * document nothing is subscribed to. The cookie has no observer, so it can be
+ * cleared on either side; both are done here to keep the pair in one place.
+ */
+beforeEach(() => {
   document.cookie = `${THEME_COOKIE}=; path=/; max-age=0`;
   delete document.documentElement.dataset.theme;
 });
@@ -149,11 +172,19 @@ describe("ThemeSwitcher — aria-pressed tracks the PREFERENCE (R3.5, D5)", () =
     ["light", "Claro"],
     ["dark", "Oscuro"],
   ] as const)(
-    "presses %s from the server-provided value on the first paint",
+    "presses %s from the server-rendered state on mount",
     (initial, label) => {
-      // From a prop, not from reading the cookie on mount: the colours would be
-      // right either way (the server put the attribute in the HTML) but the
-      // pressed button would flip a tick after hydration.
+      /*
+       * Not from reading the cookie on mount: the colours would be right either
+       * way (the server put the attribute in the HTML) but the pressed button
+       * would flip a tick after hydration.
+       *
+       * Precise about what this pins, since D9: `setup` supplies the prop AND
+       * the attribute, as the server does, and a MOUNTED instance reads the
+       * attribute — so this case cannot tell the two apart. That the `initial`
+       * prop is really the server snapshot is pinned by the `renderToString`
+       * block above, which is the only place `getServerSnapshot` runs.
+       */
       setup(initial);
       expect(screen.getByRole("button", { name: label })).toHaveAttribute(
         "aria-pressed",
@@ -198,6 +229,154 @@ describe("ThemeSwitcher — aria-pressed tracks the PREFERENCE (R3.5, D5)", () =
         "aria-pressed",
         "false",
       );
+    });
+  });
+});
+
+describe("ThemeSwitcher — the server render presses the server's button (D9)", () => {
+  /**
+   * Added after the QA panel found this unreachable by any test.
+   *
+   * Every other case in this file mounts on the client, and a client mount never
+   * calls the hook's `getServerSnapshot` — so since D9 they all pass by reading
+   * the `data-theme` attribute, and `useThemePreference(initial)` could have been
+   * written `useThemePreference(null)` with the whole file still green. On a real
+   * server render that regression would seed «system» for a visitor whose cookie
+   * says otherwise, and the pressed button would jump one tick after hydration:
+   * the flash `design-system-tokens.md` resolves the theme on the server to
+   * avoid, reintroduced in the control rather than in the colours.
+   *
+   * `renderToString` is what calls `getServerSnapshot`, so it is what can tell a
+   * correct wiring from a dropped prop.
+   */
+
+  /** `aria-pressed` per accessible name, parsed out of server-rendered HTML. */
+  function pressedInHtml(html: string): string[] {
+    const host = document.createElement("div");
+    host.innerHTML = html;
+    return [...host.querySelectorAll("button")]
+      .filter((button) => button.getAttribute("aria-pressed") === "true")
+      .map((button) => button.getAttribute("aria-label") ?? "");
+  }
+
+  it.each([
+    ["light", "Claro"],
+    ["dark", "Oscuro"],
+  ] as const)(
+    "presses %s from the `initial` prop with no DOM to read",
+    (initial, label) => {
+      // The attribute is deliberately set to disagree: on the server it is not a
+      // source, so only the prop can make this pass.
+      document.documentElement.setAttribute(
+        THEME_ATTRIBUTE,
+        initial === "dark" ? "light" : "dark",
+      );
+      const html = renderToString(
+        <I18nProvider locale="es">
+          <ThemeSwitcher initial={initial} />
+        </I18nProvider>,
+      );
+      expect(pressedInHtml(html)).toEqual([label]);
+    },
+  );
+
+  it("presses «Sistema» when the visitor has no persisted preference", () => {
+    const html = renderToString(
+      <I18nProvider locale="es">
+        <ThemeSwitcher initial={null} />
+      </I18nProvider>,
+    );
+    expect(pressedInHtml(html)).toEqual(["Seguir al sistema"]);
+  });
+});
+
+describe("ThemeSwitcher — two mounted instances agree (R4.4, D9)", () => {
+  /**
+   * The requirement `shell-topbar-overflow-360` added, tested where it lives.
+   *
+   * R4.4: «después de un cambio de preferencia hecho en cualquiera de ellas, la
+   * otra SHALL reflejar la preferencia nueva sin requerir navegación ni recarga».
+   * The narrow layout mounts this control twice — the wide topbar branch and the
+   * overflow sheet — and before D9 each held its own `useState`, so the one that
+   * did not receive the click kept showing the button the server had rendered.
+   */
+  function setupPair(initial: Parameters<typeof ThemeSwitcher>[0]["initial"]) {
+    if (initial !== null) {
+      document.documentElement.setAttribute(THEME_ATTRIBUTE, initial);
+    }
+    return render(
+      <I18nProvider locale="es">
+        <div data-testid="wide">
+          <ThemeSwitcher initial={initial} />
+        </div>
+        <div data-testid="sheet">
+          <ThemeSwitcher initial={initial} />
+        </div>
+      </I18nProvider>,
+    );
+  }
+
+  /** `aria-pressed` of the named button, per branch. */
+  function pressedIn(branch: string, name: string): string | null {
+    return within(screen.getByTestId(branch))
+      .getByRole("button", { name })
+      .getAttribute("aria-pressed");
+  }
+
+  it("moves aria-pressed in BOTH instances when one of them is clicked", async () => {
+    setupPair(null);
+    expect(pressedIn("wide", "Seguir al sistema")).toBe("true");
+    expect(pressedIn("sheet", "Seguir al sistema")).toBe("true");
+
+    // The click happens in the sheet — the instance the user can reach at 360px.
+    fireEvent.click(
+      within(screen.getByTestId("sheet")).getByRole("button", {
+        name: "Oscuro",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(pressedIn("sheet", "Oscuro")).toBe("true");
+      // This is the assertion that failed before D9: the wide branch never saw
+      // the click and had no reason to re-render.
+      expect(pressedIn("wide", "Oscuro")).toBe("true");
+    });
+    expect(pressedIn("wide", "Seguir al sistema")).toBe("false");
+  });
+
+  it("agrees on «system» too, where the state is the ABSENCE of the attribute", async () => {
+    // The delete branch of the effect, which is the half that is easy to get
+    // wrong: an instance reading a cached value rather than the attribute would
+    // keep showing «Oscuro» because nothing told it the attribute went away.
+    setupPair("dark");
+    expect(pressedIn("wide", "Oscuro")).toBe("true");
+
+    fireEvent.click(
+      within(screen.getByTestId("sheet")).getByRole("button", {
+        name: "Seguir al sistema",
+      }),
+    );
+
+    await waitFor(() => {
+      expect(pressedIn("wide", "Seguir al sistema")).toBe("true");
+      expect(pressedIn("sheet", "Seguir al sistema")).toBe("true");
+    });
+    expect(pressedIn("wide", "Oscuro")).toBe("false");
+  });
+
+  it("keeps exactly one button pressed per instance", async () => {
+    setupPair(null);
+    fireEvent.click(
+      within(screen.getByTestId("wide")).getByRole("button", { name: "Claro" }),
+    );
+
+    const names = ["Claro", "Oscuro", "Seguir al sistema"];
+    await waitFor(() => {
+      for (const branch of ["wide", "sheet"]) {
+        expect(
+          names.filter((name) => pressedIn(branch, name) === "true"),
+        ).toEqual(["Claro"]);
+      }
     });
   });
 });
@@ -305,7 +484,43 @@ describe("ThemeSwitcher — the three selections (R3.4, R3.6)", () => {
      */
     setup("dark");
     expect(document.cookie).toBe("");
-    expect(attribute()).toBeUndefined();
+    // `setup` puts the attribute there, as the server does. What this pins is
+    // that mounting neither wrote the cookie nor moved the attribute — since D9
+    // the component reads that attribute, so «untouched» is now «still exactly
+    // the server's value» rather than «absent».
+    expect(attribute()).toBe("dark");
+  });
+
+  it("re-selecting a value this instance already requested still writes it", async () => {
+    /*
+     * The defect that decoupling `aria-pressed` from `requested` introduced, and
+     * the reason `requested` is an object rather than a bare `Choice` (D9).
+     *
+     * Reachable with the two instances section 4 mounts: pick «dark» in one,
+     * pick «light» in the other, pick «dark» in the first again. With the bare
+     * value, that third click found `requested` already `"dark"`, changed no
+     * state, ran no effect — and left the document on «light» after a click that
+     * said «dark». Simulated here with one instance plus an outside write, which
+     * is exactly what the other instance is from this one's point of view.
+     */
+    setup(null);
+    const dark = screen.getByRole("button", { name: "Oscuro" });
+
+    fireEvent.click(dark);
+    await waitFor(() => expect(attribute()).toBe("dark"));
+
+    // The other instance's click, as this one experiences it.
+    await act(async () => {
+      document.documentElement.setAttribute(THEME_ATTRIBUTE, "light");
+    });
+    expect(screen.getByRole("button", { name: "Claro" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
+    );
+
+    fireEvent.click(dark);
+    await waitFor(() => expect(attribute()).toBe("dark"));
+    expect(cookieValue()).toBe("dark");
   });
 
   it("applies the change without reloading the page", () => {
