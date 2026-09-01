@@ -5,8 +5,8 @@ hasta que las dos comparaciones de R1.5 estén registradas (1.4 y 1.5); sólo en
 fichero de `backend/tests/` (4.1). Las secciones 1-3 dejan el sistema con guardia nueva, gatillo y
 suite propia; la 4 retira la superficie vieja; la 5 alinea autoridad y documentación; la 6 es la
 mitad de la demostración en rojo de R4 que se puede hacer sin una Pull Request — la otra mitad, la
-del check run, es obligación sobre la PR abierta declarada en la spec, con su acta en el § final
-de este fichero, y no una tarea de aquí.
+del check run, es obligación sobre la PR abierta declarada en la spec, con su acta en el §
+«Registro de evidencia sobre la PR», y no una tarea de aquí.
 
 ## 1. La guardia se muda a `scripts/`, con su alcance como dato <!-- panel: PASS 2026-08-31 -->
 
@@ -398,7 +398,7 @@ Esa mitad **ya no vive aquí**. Se intentó como tareas y chocó con dos gates i
 ship rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es
 lo que acabó de probar que una lista pre-PR no es su sitio. Ahora es una **obligación declarada de la capacidad, sobre la PR abierta y antes del merge**, en
 [`sdd/specs/rule11-ownership-guard.md` § Obligaciones sobre la Pull Request abierta, antes del merge](../../specs/rule11-ownership-guard.md), y su acta
-es el § «Registro de evidencia sobre la PR» al final de este fichero:
+es el § «Registro de evidencia sobre la PR», que va justo antes de la § 7:
 los dos ids de run por vía de diff (R4.1), el check en rojo por bloque inyectado y su verde al
 revertir (R4.2), y el cero sobre la rama fusionada con `main` (R3.1). Quien abra la PR de este change
 las registra allí y ancla con `mark-recertified`.
@@ -448,14 +448,19 @@ No lleva casillas a propósito. Una casilla sin marcar bloquea `mark-local-verif
 no puede existir antes de que ese comando ya haya corrido — es la lección que costó dos gates. Se
 rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertified`.
 
-| Obligación | Requisito | Id de run | Resultado |
-|---|---|---|---|
-| Diff de sola prosa (`sdd/**` o `docs/**`) | R4.1 | *pendiente* | — |
-| Diff de sólo `backend/**` | R4.1 | *pendiente* | — |
-| Check en rojo por bloque en markdown | R4.2 | *pendiente* | — |
-| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | *pendiente* | — |
-| Verde al revertir el bloque inyectado | R4.2 | *pendiente* | — |
-| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | *pendiente* | — |
+| Obligación | Requisito | Id de run | Base medida | Resultado |
+|---|---|---|---|---|
+| Diff de sola prosa (`sdd/**` o `docs/**`) | R4.1 | *pendiente* | — | — |
+| Diff de sólo `backend/**` | R4.1 | *pendiente* | — | — |
+| Check en rojo por bloque en markdown | R4.2 | *pendiente* | — | — |
+| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | *pendiente* | — | — |
+| Verde al revertir el bloque inyectado | R4.2 | *pendiente* | — | — |
+| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | *pendiente* | *pendiente* | — |
+
+La columna **Base medida** lleva el SHA del commit de fusión de `main` sobre el que corrió ese
+run, y existe porque sin ella un id honesto y un id caducado son indistinguibles: GitHub no
+re-dispara `pull_request` cuando la base avanza, así que el id sólo vale si es posterior a la
+última fusión. En las filas que no miden la base fusionada va `—`.
 
 Anotar además, en el run de sola prosa, que `backend-tests-suite` sale `skipped` y este check **no**:
 es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido.
@@ -481,7 +486,7 @@ dan la misma cifra, así que retirar los montajes no cambió el resultado de nin
 
 **Lo que la sección 7 NO puede cerrar** y no se disimula: nada de aquí demuestra que el *check run*
 se ponga rojo y verde donde debe. Eso son las obligaciones sobre la PR abierta —§ «Registro de
-evidencia sobre la PR» de abajo—, y sus ids no existen hasta que `/sdd:ship` abra la PR.
+evidencia sobre la PR», arriba—, y sus ids no existen hasta que `/sdd:ship` abra la PR.
 
 
 - [x] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.

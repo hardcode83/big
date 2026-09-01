@@ -332,7 +332,8 @@ lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
    > ramas para que la evidencia naciera antes; se descarta porque añadiría un run por cada push
    > de cualquier rama y porque el evento que R1.1 nombra es la Pull Request, así que el
    > `pull_request` es además la evidencia **mejor**, no sólo la disponible. Consecuencia
-   > aceptada: **la sección 6 se ejecuta después de `/sdd:ship`**, no durante `/sdd:run`.
+   > aceptada: **la evidencia sobre el check run se registra después de `/sdd:ship`, en el § «Registro de
+  evidencia sobre la PR» del `tasks.md`**, no durante `/sdd:run`.
 
 2. **R4.2 — rojo por cada forma.** Dos mitades, y conviene no confundirlas porque una no descarga
    la otra:
