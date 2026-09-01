@@ -291,8 +291,10 @@ Rejected:
 **Chosen:** se borran las líneas 121-122 y su comentario. Verificado que el guardián es su único
 consumidor (los dos únicos aciertos de `/workspace/sdd` en `backend/` están en el propio
 fichero que D1 borra), así que dejarlas sería alcance muerto con un comentario que nombra un
-fichero inexistente. Los otros cuatro montajes de `/workspace/` (`deploy-dev.yml`,
-`demo-reset.yml`, `.env.example`) tienen consumidores vivos y **no se tocan**.
+fichero inexistente. Los otros **tres** montajes de `/workspace/` (`deploy-dev.yml`,
+`demo-reset.yml`, `.env.example`) tienen consumidores vivos y **no se tocan**. *(Decía «cuatro» y
+son tres: contados en `docker-compose.yml` al implementar, había cinco montajes de `/workspace/` y
+quedan tres. Lo levantó el panel de la sección 4.)*
 
 Beneficio lateral que conviene decir porque el comentario que se borra lo planteaba como coste
 aceptado: el contenedor `backend` —que publica 8000 en todas las interfaces en dev— deja de

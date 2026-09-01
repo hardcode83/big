@@ -232,7 +232,7 @@ residual, no de conducta.
   repositorio: los de `backend-tests.yml` son `backend-tests-detect`, `backend-tests-suite` y
   `backend-tests`.
 
-## 4. Retirar la superficie vieja
+## 4. Retirar la superficie vieja <!-- panel: PASS 2026-08-31 -->
 
 - [x] 4.1 Borrar `backend/tests/test_rule11_ownership.py`, **una vez registradas las dos
   comparaciones de 1.4 y 1.5**. Comprobar que nada más lo importa y correr la suite del backend:
@@ -240,8 +240,11 @@ residual, no de conducta.
   borrar. [R1.5]
 
 - [x] 4.2 `docker-compose.yml`: retirar `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con
-  el comentario que las justifica (hoy líneas 111-122). **No tocar** los otros cuatro montajes de
+  el comentario que las justifica (hoy líneas 111-122). **No tocar** los otros **tres** montajes de
   `/workspace/` (`deploy-dev.yml`, `demo-reset.yml`, `.env.example`), que tienen consumidores vivos.
+  *(La tarea decía «cuatro» y son **tres** en `docker-compose.yml`, contados en el fichero: eran
+  cinco y quedan tres. «Cuatro» sólo se sostiene contando además el `deploy-dev.yml` que declara
+  `docker-compose.worktree.yml`, que es un fichero distinto del que la tarea nombra.)*
   Verificar antes de borrar que ningún otro fichero bajo `backend/` lee `/workspace/sdd` ni
   `/workspace/docs`. [R1.3]
 
@@ -407,4 +410,11 @@ obligación de R5.3 prohíbe.
   entero. Requiere los `docker compose cp` que documenta `sdd/project.md` § Worktree bootstrap.
 - [ ] 7.7 Repasar que ningún documento vivo cita ya `backend/tests/test_rule11_ownership.py`
   (grepeando el árbol completo, `sdd/changes/archive/` aparte) ni describe un guardián que no
-  existe.
+  existe. **Medido ya, y queda una que este change no puede arreglar**: la entrada
+  `template-label-sink-census` de `sdd/roadmap.md` dice que `tests/test_rule11_ownership.py`
+  vigila el censo, y es un documento **vivo** apuntando a un fichero borrado. No se toca aquí
+  porque la regla 1 del toolkit reserva la escritura del roadmap a `/sdd:archive`: **queda
+  encargado a `/sdd:archive`**, que debe repathear esa entrada a `scripts/rule11-ownership.py`
+  al archivar este change. Las demás coincidencias del árbol son legítimas: una frase
+  histórica en el docstring del fichero nuevo, los registros de este change, y
+  `sdd/changes/archive/`, que es inmutable.
