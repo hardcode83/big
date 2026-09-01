@@ -8,14 +8,27 @@ import {
   waitFor,
   within,
 } from "@/test/render";
+import { QueryProvider } from "@/lib/query/query-provider";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { WorkspaceShell } from "@/features/shell/components/workspace-shell";
 import { useShellUiStore } from "@/features/shell/state/use-shell-ui-store";
 
 const nav = vi.hoisted(() => ({ pathname: "/dashboard" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  // `LocaleSwitcher` calls `router.refresh()` after writing the locale cookie
+  // (public-zone-hardening R1 + design D1). The shell tests never trigger the
+  // switcher, so a no-op spy is enough to keep the import graph intact.
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+// `NotificationBell` (`notifications-inbox-web` R3.1) reads `status` AND `user`, and returns
+// null without both (design D16), so the stub carries a user for the bell to mount on.
 vi.mock("@/lib/auth", () => ({
-  useAuth: () => ({ status: "authenticated" }),
+  useAuth: () => ({
+    status: "authenticated",
+    user: { tenant_id: "t1", id: "u1", email: "manager@example.com" },
+  }),
+  getSessionGeneration: () => 1,
 }));
 vi.mock("@/lib/auth/session-store", () => ({
   getSessionTokens: () => ({ accessToken: "test" }),
@@ -44,9 +57,11 @@ vi.mock("next/link", () => ({
 
 async function renderShell() {
   return render(
-    <I18nProvider locale="es">
-      {await WorkspaceShell({ children: <div>contenido</div> })}
-    </I18nProvider>,
+    <QueryProvider>
+      <I18nProvider locale="es">
+        {await WorkspaceShell({ children: <div>contenido</div> })}
+      </I18nProvider>
+    </QueryProvider>,
   );
 }
 
@@ -57,6 +72,7 @@ beforeEach(() => {
     sidebarCollapsedByProfile: {},
     tabletNavOpen: false,
     mobileMoreOpen: false,
+    notificationsOpen: false,
   });
 });
 
@@ -178,5 +194,27 @@ describe("WorkspaceShell (D3/D6/D9)", () => {
   it("keeps the locale out of the UI store (D7)", async () => {
     await renderShell();
     expect(Object.keys(useShellUiStore.getState())).not.toContain("locale");
+  });
+});
+
+describe("WorkspaceShell notification bell (`notifications-inbox-web` R3.1)", () => {
+  it("mounts the bell in the topbar's end slot", async () => {
+    await renderShell();
+
+    const banner = screen.getByRole("banner");
+    expect(
+      within(banner).getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("keeps it beside the user menu rather than replacing anything", async () => {
+    // D10: the slot goes from four elements to five. The switchers and the user menu are
+    // what a regression here would silently drop.
+    const banner = (await renderShell()) && screen.getByRole("banner");
+
+    expect(
+      within(banner).getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+    expect(within(banner).getByRole("button", { name: /Idioma|Language/i })).toBeInTheDocument();
   });
 });

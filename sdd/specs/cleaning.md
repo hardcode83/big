@@ -223,6 +223,11 @@ hasta que el calendario la liberase, y la única puerta abierta era perversa: de
 - THE SYSTEM SHALL NOT relajar ninguna precondición existente por el hecho de que esta salida
   exista: el `409` de cerrar una limpieza con un huésped dentro sigue en pie, y la matriz no gana
   filas de conveniencia desde `CLEANING_*` hacia estados de check-in.
+- **Quién la llama desde la web**: además de `/cleaning` (`cleaning-manager-view.md`), la sección de
+  desajustes de la card del dashboard ofrece esta cancelación al `PROPERTY_MANAGER` cuando el reloj
+  exigió un check-in que la limpieza está bloqueando; el comportamiento de esa pantalla —qué fila
+  ofrece el botón, con qué permiso y qué invalida al terminar— vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### Checklist
 
@@ -428,10 +433,38 @@ Su comportamiento completo —el orden de la plantilla, la distinción entre *ad
   escritura o ninguna: una aceptación comiteada con el plazo vivo es exactamente el escalado que
   esto evita.
 - THE SYSTEM SHALL conceder esa escritura únicamente a los dos casos de uso que **responden** a
-  una asignación, y no a iniciar, cerrar ni validar: para entonces el plazo ya está cerrado.
+  una asignación, y no a iniciar, cerrar ni validar: para entonces el plazo ya está cerrado. Que
+  cerrar y validar sí tengan hoy el puerto de notificaciones no contradice esto: lo tienen para
+  **escribir** los avisos de abajo, no para anular plazos, y la razón por la que no anulan ninguno
+  sigue siendo la misma.
 - IF la tarea no tiene fila de asignación o su plazo ya está cerrado, THEN THE SYSTEM SHALL
   completar la respuesta sin error y sin modificar nada: una tarea creada antes de
   `access-notifications` no tiene plazo que anular, así que cero filas es el caso normal.
+
+**El lazo se cierra en las dos direcciones.** Hasta `notification-writers-gap` sólo se avisaba al
+*abrir* el trabajo —la asignación—, y la validación de PRD §11 dependía de que alguien mirase la
+lista. Ahora también se avisa al cerrarlo, y en cada dirección al lado que puede hacer algo.
+
+- WHEN una tarea se cierra, THE SYSTEM SHALL escribir `CLEANING_COMPLETED` a cada destinatario de
+  `RoleRecipients.managers_or_owners` —managers activos, con caída al owner—, con
+  `related_type = "cleaning_task"` y `related_id` la tarea: hay algo que validar.
+- WHEN una validación manual registra `validation_status = FAILED`, THE SYSTEM SHALL escribir
+  `CLEANING_FAILED` **a la limpiadora asignada**, no al manager: el manager es quien acaba de
+  emitir el veredicto, y el rol `CLEANER` ya tiene `READ_OWN_NOTIFICATIONS`.
+- WHEN la validación registra `PASSED` o `WAIVED`, THE SYSTEM SHALL no escribir ninguna
+  notificación: `complete()` ya deja `validation_status = PASSED` por sí solo, y avisar de cada
+  veredicto favorable sería ruido sobre el mismo hecho que ya anunció `CLEANING_COMPLETED`.
+- IF la tarea no tiene limpiadora asignada al fallar la validación, o la asignada ya no está
+  `ACTIVE`, THEN THE SYSTEM SHALL no escribir la fila y SHALL registrarlo, sin fallar la respuesta
+  de validación. El destinatario se resuelve con `get_active_by_id` y no con `get` a propósito:
+  una limpiadora dada de baja no es destinataria, y para la manager el efecto de los dos casos es
+  idéntico porque nadie va a leer el aviso.
+- IF no hay ni manager ni owner activo al cerrar, THEN THE SYSTEM SHALL no escribir filas y SHALL
+  registrarlo, sin fallar el cierre.
+- THE SYSTEM SHALL escribir ambas filas **dentro de la transacción única** que esos casos de uso ya
+  comitean, y SHALL darles `status = PENDING`, `channel = IN_APP` y **ningún** `sla_deadline_at`:
+  ni `CLEANING_COMPLETED` ni `CLEANING_FAILED` tienen política de escalado, así que un plazo
+  produciría un incumplimiento que no avisa a nadie.
 
 **El escalado está vivo desde `access-notifications`.** El escalado de
 `CLEANING_TASK_ASSIGNED` a `SLA_BREACH` para el `PROPERTY_MANAGER` está definido desde

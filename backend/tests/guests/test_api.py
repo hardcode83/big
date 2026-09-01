@@ -5,6 +5,7 @@ happens when they do**: rule 4 of `steering/security.md` keeps it out of every o
 and rule 9 requires a row every time somebody looks.
 """
 
+import logging
 import uuid
 from datetime import UTC, date, datetime
 
@@ -16,7 +17,7 @@ from sqlalchemy import select
 from app.audit.infrastructure.models import AuditLogModel
 from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
 from app.auth.api.dependencies import get_password_hasher, get_token_codec
-from app.auth.domain.enums import UserRole
+from app.auth.domain.enums import UserRole, UserStatus
 from app.auth.infrastructure.models import UserModel
 from app.auth.infrastructure.password_hasher import BcryptPasswordHasher
 from app.auth.infrastructure.repositories import SqlAlchemyUserRepository
@@ -426,6 +427,103 @@ async def _submit_with_a_failing_provider(api, db_session, tenant, manager, rese
     return await api.post(
         f"/api/v1/reservations/{reservation.id}/legal-registration/submit",
         headers=auth_header(api, manager),
+    )
+
+
+class _EmptyRoster:
+    """A `UserRepository` whose roster is empty, for the one branch the route cannot reach.
+
+    Substituted **only into the use case**, never into authentication: the endpoint keeps the
+    real repository, so the acting manager still authenticates normally. That separation is
+    what makes this branch testable at all — deactivating the roles for real returns `401`
+    before the use case runs, because `SUBMIT_LEGAL_REGISTRATION` reaches `PROPERTY_MANAGER`
+    alone and every request revalidates that its actor is ACTIVE.
+
+    Only `list` is implemented, because `RoleRecipients` calls nothing else; anything the use
+    case might reach for later fails loudly rather than silently answering `None`.
+    """
+
+    def __init__(self) -> None:
+        self.calls: list = []
+
+    async def list(self, tenant_id, filters, *, page, per_page):
+        from app.auth.domain.repositories import UserPage
+
+        self.calls.append((tenant_id, filters.role, filters.status))
+        return UserPage(items=(), total=0)
+
+
+@pytest.mark.asyncio
+async def test_a_failed_filing_with_nobody_to_tell_is_logged_not_swallowed(
+    api, db_session, tenant_a, users_by_role_a, caplog
+) -> None:
+    """R5.2 of `notification-writers-gap`: no rows, but never in silence.
+
+    The "SHALL registrarlo" half of R5.2 was unpinned anywhere in the tree — the section-1
+    security panel found this call site discarding the resolved recipient set, and its
+    re-review pointed out that the dependency-override seam below reaches the branch without
+    faking the auth state that made an API-level attempt return `401`.
+
+    Asserts all three halves at once: the operation does not fail, no row is written, and the
+    fact that nobody could be addressed reaches the log.
+    """
+    guest = await _guest(db_session, tenant_a)
+    reservation = await _stay(db_session, tenant_a, guest)
+    manager = users_by_role_a[UserRole.PROPERTY_MANAGER]
+    roster = _EmptyRoster()
+
+    await api.patch(
+        f"/api/v1/guests/{guest.id}/document",
+        json=DOCUMENT | {"reservation_id": str(reservation.id)},
+        headers=auth_header(api, manager),
+    )
+
+    def _use_case_with_no_recipients():
+        return SubmitLegalRegistrationUseCase(
+            guests=SqlAlchemyGuestRepository(db_session),
+            stays=SqlAlchemyLegalRegistrationStayStore(db_session),
+            provider=MockSESHospedajesAdapter(fail=True),
+            users=roster,
+            timeline=SqlAlchemyTimelineEventRepository(db_session),
+            notifications=SqlAlchemyNotificationLogRepository(db_session),
+            audit=SqlAlchemyAuditLogRepository(db_session),
+            uow=_FlushOnlyUow(db_session),
+        )
+
+    api._transport.app.dependency_overrides[  # type: ignore[attr-defined]
+        get_submit_legal_registration_use_case
+    ] = _use_case_with_no_recipients
+
+    with caplog.at_level(logging.ERROR):
+        response = await api.post(
+            f"/api/v1/reservations/{reservation.id}/legal-registration/submit",
+            headers=auth_header(api, manager),
+        )
+
+    # R5.2: the operation does not fail over having nobody to tell.
+    assert response.status_code == 200
+    assert response.json()["legal_registration_status"] == "FAILED"
+    await db_session.refresh(reservation)
+    assert reservation.legal_registration_status is LegalRegistrationStatus.FAILED
+
+    # Both roles were actually asked before concluding there was nobody — otherwise this
+    # test would pass against an implementation that never consulted the owner fallback.
+    assert roster.calls == [
+        (tenant_a.id, UserRole.PROPERTY_MANAGER, UserStatus.ACTIVE),
+        (tenant_a.id, UserRole.TENANT_OWNER, UserStatus.ACTIVE),
+    ]
+
+    # No rows, because there was nobody to address.
+    rows = await db_session.execute(
+        select(NotificationLogModel).where(NotificationLogModel.tenant_id == tenant_a.id)
+    )
+    assert list(rows.scalars()) == []
+
+    # And the silence is broken. Without this the failed police filing is recorded with
+    # nobody told and no trace that nobody was told.
+    assert any(
+        record.message == "guests.legal_registration_failure_without_recipient"
+        for record in caplog.records
     )
 
 

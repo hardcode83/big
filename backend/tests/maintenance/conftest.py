@@ -101,8 +101,14 @@ class Flow:
         users = SqlAlchemyUserRepository(session)
         configs = SqlAlchemyTenantConfigRepository(session)
 
+        # `users` + `notifications` since `notification-writers-gap` R1: classification is
+        # now one of the two paths that tell the manager a severity is CRITICAL or HIGH.
         self.classify = ClassifyIncidentUseCase(
-            classifier=self.classifier, configs=configs, **common
+            classifier=self.classifier,
+            configs=configs,
+            users=users,
+            notifications=self.notifications,
+            **common,
         )
         self.triage = TriageIncidentUseCase(
             approvals=self.approvals,

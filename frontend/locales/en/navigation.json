@@ -105,6 +105,10 @@
     "landing": {
       "title": "AutoHostAI",
       "description": "Public product page, on one operational console."
+    },
+    "welcome": {
+      "title": "Welcome",
+      "description": "Intermediate screen between login and the role-specific shell."
     }
   },
   "more": "More",
@@ -125,5 +129,10 @@
     "light": "Light",
     "dark": "Dark",
     "system": "Follow the system"
+  },
+  "userMenu": {
+    "triggerLabel": "User menu",
+    "logout": "Sign out",
+    "anonymous": "User"
   }
 }

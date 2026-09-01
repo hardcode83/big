@@ -10,8 +10,17 @@ las pantallas —; aquí va el *cómo se trabaja con ello*.
 > change `dashboard-api` entregó los cuatro endpoints de lectura (abajo) y el runtime
 > del dashboard los utiliza desde el único punto de composición,
 > `frontend/features/dashboard/data/index.ts`. `MockDashboardSource` y sus fixtures
-> quedan únicamente como soporte de tests. No hay acciones de escritura por ninguna
-> de las dos vías: los cuatro endpoints son de lectura pura.
+> quedan únicamente como soporte de tests. **Los cuatro endpoints de esta tabla siguen
+> siendo de lectura pura**: ninguno de ellos escribe.
+>
+> Lo que sí escribe, desde `blocked-transitions-web`, es la **sección de desajustes de
+> la card** — y lo hace contra endpoints de *otros* dominios, no contra los de aquí:
+> `POST /api/v1/cleaning-tasks/{id}/cancel` (`sdd/specs/cleaning.md`) y
+> `POST /api/v1/incidents/{id}/resolve` (`sdd/specs/maintenance.md`). Sólo los ve el
+> `PROPERTY_MANAGER`, que es quien tiene `MANAGE_CLEANING_TASKS` y `EXECUTE_INCIDENTS`;
+> la propietaria ve el aviso con su `READ_PROPERTIES` y ningún botón. La operación está
+> descrita en [`docs/properties.md`](properties.md) §«Aviso de desajustes en la card del
+> dashboard».
 
 ## La API (`dashboard-api`)
 
@@ -63,7 +72,13 @@ Lo que conviene saber al operarlas:
 - **`/dashboard`** — property cards (PRD §9.1): una tarjeta por vivienda con su
   estado operacional y color, reserva actual/próxima, huésped, check-in/out,
   estado de limpieza, incidencias abiertas, próxima acción + responsable y último
-  evento. "Ver detalle" lleva a la propiedad.
+  evento. "Ver detalle" lleva a la propiedad. Debajo de las incidencias abiertas
+  aparece la **sección de desajustes** cuando la vivienda tiene alguno: el
+  `trigger` y el `blocking_state` como literales canónicos, la fecha en tu idioma
+  y, para el `PROPERTY_MANAGER`, el botón que lo desatasca. Si la consulta de
+  desajustes falla, la sección lo dice en vez de desaparecer — una card sin
+  sección significa «esta vivienda no tiene desajustes», nunca «no pude
+  preguntarlo».
 - **`/properties/[id]`** — detalle (PRD §9.2): reserva, huésped, acceso, limpieza,
   incidencias, financiero, notas, aprobaciones pendientes, fotos de la última
   limpieza, y la **cronología** de la propiedad.

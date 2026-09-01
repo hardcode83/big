@@ -25,3 +25,4 @@ class NotificationLog:
     related_id: uuid.UUID | None = None
     sla_deadline_at: datetime | None = None
     sla_breached: bool = False
+    read_at: datetime | None = None

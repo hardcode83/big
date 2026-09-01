@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
 import { getA11yViolations, render, screen } from "@/test/render";
+import { QueryProvider } from "@/lib/query/query-provider";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { CleanerShell } from "@/features/shell/components/cleaner-shell";
 import { TechnicianShell } from "@/features/shell/components/technician-shell";
@@ -8,7 +9,33 @@ import { PublicShell } from "@/features/shell/components/public-shell";
 import { GuestShell } from "@/features/shell/components/guest-shell";
 
 const nav = vi.hoisted(() => ({ pathname: "/cleaner" }));
-vi.mock("next/navigation", () => ({ usePathname: () => nav.pathname }));
+vi.mock("next/navigation", () => ({
+  usePathname: () => nav.pathname,
+  // The cleaner/technician tops include the LocaleSwitcher (which now calls
+  // router.refresh() after writing the cookie). The tests never trigger the
+  // switcher, so a stable no-op spy is enough.
+  useRouter: () => ({ refresh: vi.fn() }),
+}));
+// Cleaner/technician tops now include the UserMenu (public-zone-hardening
+// R3/D2), which calls `useAuth()` to render the email trigger. The shell
+// tests do not exercise the menu itself, so a stub user is enough.
+// `NotificationBell` (`notifications-inbox-web` R3.1) needs `status` and `user` both resolved
+// (design D16), so the stub gained them. `PublicShell` and `GuestShell` do not mount the bell
+// at all, which is what the tests below pin — not that the stub happens to be empty.
+vi.mock("@/lib/auth", () => ({
+  useAuth: () => ({
+    status: "authenticated",
+    user: { tenant_id: "t1", id: "u1", email: "field@example.com" },
+    logout: vi.fn(),
+  }),
+  getSessionGeneration: () => 1,
+}));
+// UserMenu now consumes useLogoutMutation, which calls useRuntimeConfig for
+// the API base URL. The shell tests don't exercise the menu, so a stub
+// config keeps the import graph intact.
+vi.mock("@/lib/config/runtime-config-provider", () => ({
+  useRuntimeConfig: () => ({ apiBaseUrl: "" }),
+}));
 vi.mock("next/headers", () => ({
   cookies: async () => ({ get: () => undefined }),
 }));
@@ -28,7 +55,11 @@ vi.mock("next/link", () => ({
 }));
 
 async function renderShell(node: React.ReactNode) {
-  return render(<I18nProvider locale="es">{node}</I18nProvider>);
+  return render(
+    <QueryProvider>
+      <I18nProvider locale="es">{node}</I18nProvider>
+    </QueryProvider>,
+  );
 }
 
 beforeEach(() => {
@@ -138,5 +169,39 @@ describe("GuestShell (D3/D9, task 6.7)", () => {
       await GuestShell({ children: <div>portal</div> }),
     );
     expect(await getA11yViolations(container)).toEqual([]);
+  });
+});
+
+describe("the bell is in the authenticated shells and nowhere else (`notifications-inbox-web` R3.1)", () => {
+  it("mounts it in CleanerShell", async () => {
+    await renderShell(await CleanerShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("mounts it in TechnicianShell", async () => {
+    await renderShell(await TechnicianShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.getByRole("button", { name: /Notificaciones/ }),
+    ).toBeInTheDocument();
+  });
+
+  it("never mounts it in PublicShell, which carries no JWT (R3.1)", async () => {
+    await renderShell(await PublicShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.queryByRole("button", { name: /Notificaciones/ }),
+    ).not.toBeInTheDocument();
+  });
+
+  it("never mounts it in GuestShell, whose credential is a path token (R3.1)", async () => {
+    await renderShell(await GuestShell({ children: <div>contenido</div> }));
+
+    expect(
+      screen.queryByRole("button", { name: /Notificaciones/ }),
+    ).not.toBeInTheDocument();
   });
 });

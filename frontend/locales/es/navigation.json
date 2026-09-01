@@ -105,6 +105,10 @@
     "landing": {
       "title": "AutoHostAI",
       "description": "Página pública del producto, en una sola consola operativa."
+    },
+    "welcome": {
+      "title": "Bienvenida",
+      "description": "Pantalla intermedia entre el login y el shell del rol."
     }
   },
   "more": "Más",
@@ -125,5 +129,10 @@
     "light": "Claro",
     "dark": "Oscuro",
     "system": "Seguir al sistema"
+  },
+  "userMenu": {
+    "triggerLabel": "Menú de usuario",
+    "logout": "Cerrar sesión",
+    "anonymous": "Usuario"
   }
 }

@@ -14,7 +14,8 @@ export type ShellProfile =
   | "cleaner"
   | "technician"
   | "public"
-  | "guest";
+  | "guest"
+  | "authenticated";
 
 export type NavigationGroup =
   | "operation"
@@ -355,6 +356,19 @@ export const routeRegistry: readonly ShellRouteDescriptor[] = [
     icon: "DoorOpen",
     profile: "guest",
     match: "prefix",
+  },
+  // ---- Authenticated intermediate (post-login). Not in any menu; reached by
+  // LoginForm's role-based redirect for CLEANER / TECHNICIAN (R2 #1). No href
+  // because no menu exposes it. `profile: "authenticated"` is its own value
+  // so the route does not bleed into the public/guest navigation sets. ----
+  {
+    id: "welcome",
+    pattern: "/welcome",
+    ...keysFor("welcome"),
+    breadcrumbKeys: crumbs("welcome"),
+    icon: "LogIn",
+    profile: "authenticated",
+    match: "exact",
   },
 ];
 

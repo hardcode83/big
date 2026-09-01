@@ -96,7 +96,13 @@ class NotificationLogRepository(Protocol):
         ...
 
     async def list_for_recipient(
-        self, tenant_id: uuid.UUID, recipient_user_id: uuid.UUID, *, page: int, per_page: int
+        self,
+        tenant_id: uuid.UUID,
+        recipient_user_id: uuid.UUID,
+        *,
+        page: int,
+        per_page: int,
+        unread: bool | None = None,
     ) -> NotificationLogPage:
         """One page of the notifications addressed to **one user** (design D6).
 
@@ -108,6 +114,56 @@ class NotificationLogRepository(Protocol):
 
         Newest first — the opposite of `list_pending`, and on purpose: a queue is drained
         oldest-first, an inbox is read newest-first.
+
+        `unread=True` narrows the page to `read_at IS NULL` (`notifications-inbox-web` D5).
+        Default `None` means "all of them", which is what every caller before that change
+        asked for; the envelope, the order and the page ceilings are untouched by the
+        filter, because a filtered inbox is still the inbox of PRD §23.
+        """
+        ...
+
+    async def mark_read(
+        self, tenant_id: uuid.UUID, user_id: uuid.UUID, log_id: uuid.UUID
+    ) -> bool:
+        """Acknowledge one notification of this user, and say whether there was one.
+
+        Narrow like `mark_breached` and `record_attempt`, and for the reason this port has
+        repeated since `celery-jobs`: a reader has no business rewriting a notification's
+        body, recipient or status, and a port that allowed it would be the open door for the
+        change that comes next. `notifications-inbox-web` D2 rejected a `PATCH` on the whole
+        resource for exactly that.
+
+        **Idempotent, and it returns a fact rather than raising** (D3). The write keeps the
+        FIRST read (`COALESCE`), because `read_at` records when the user read it, not the
+        last time they looked at the inbox — so a second acknowledgement is a success that
+        moves nothing (R1.3). `False` means one single thing: **no row with that id is
+        visible to this user of this tenant**. It deliberately does not distinguish
+        "missing" from "somebody else's" from "another tenant's" — R1.4 answers all three
+        with the same `404`, and a repository that could tell them apart is a repository a
+        careless caller could leak them from.
+        """
+        ...
+
+    async def count_unread(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """How many of this user's notifications are unread (R2.2, design D4).
+
+        Its own query rather than a field of the page envelope: this is the one question
+        every connected client asks every 60 s, so it must not carry a page of rows it will
+        not read. `ix_notification_logs_unread` — partial on `read_at IS NULL` — is the
+        index that keeps its cost bounded as read rows accumulate.
+        """
+        ...
+
+    async def mark_all_read(self, tenant_id: uuid.UUID, user_id: uuid.UUID) -> int:
+        """Acknowledge every unread notification of this user; returns how many moved.
+
+        **Zero is the normal case, not an error** — same criterion as `cancel_sla_deadline`
+        and the opposite of `mark_breached`: an inbox already up to date has nothing to move,
+        and nothing has happened that a missing row would contradict (D6).
+
+        Scope is fixed at **all** of the user's unread rows (R5.2), never the page or filter
+        the client happens to be looking at: a button that says "all" and marks twenty is
+        worse than no button.
         """
         ...
 
@@ -137,6 +193,54 @@ class NotificationLogRepository(Protocol):
         Takes an id rather than the entity: the dispatcher re-reads nothing between the
         attempt and the record, so handing a stale entity back would invite a caller to
         write the rest of its fields too.
+        """
+        ...
+
+    async def exists_for(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        related_type: str,
+        related_id: uuid.UUID,
+        notification_type: str,
+    ) -> bool:
+        """Whether this tenant already has a row of this type about this entity (R1.3).
+
+        The deduplication behind "escribir el aviso una sola vez por incidencia y severidad".
+        A classification that raises an incident to `CRITICAL` and a triage that afterwards
+        *confirms* that same severity are two legitimate calls about one fact, and
+        `TriageIncidentUseCase` admits being called repeatedly — so without this the manager
+        is told twice.
+
+        **A read, deliberately, and not a partial unique index** (design D2). An index would
+        need a migration, which this change does not have, and it would turn a second
+        classification from a no-op into a `500`. The cost of that choice is stated rather
+        than hidden: this is check-then-write, not a constraint, so two concurrent writers
+        could both pass it. The window is narrow by construction — the classification job
+        runs under `_locked` (one execution per tenant) and triage is a human action on a row
+        that job is not touching — and closing it for real is the migration this change
+        declined.
+
+        Same argument shape as `cancel_sla_deadline`. `ix_notification_logs_related_type_related_id`
+        covers the polymorphic pair and the remaining two predicates filter what it returns —
+        the same index-then-filter shape `cancel_sla_deadline` already relies on, not a
+        covering index.
+
+        **A row written earlier in the same transaction is already visible here**, so
+        deduplication works within one transaction exactly as it does between two. Two
+        mechanisms give that, and it is worth naming both rather than the wrong one: the
+        session runs with `autoflush` on, so any ORM `select` flushes what is pending before
+        it reads — and `add` additionally flushes explicitly. The guarantee therefore does
+        **not** rest on `add`'s flush alone; deleting that line would not break this. Said
+        precisely because the QA panel of section 2 measured it: a test that claims to pin
+        the explicit flush passes without it, and an earlier version of this paragraph
+        credited the explicit flush as the reason.
+
+        `related_type` and `related_id` must not be `None`. The method rejects them rather
+        than letting SQLAlchemy compile `== None` into `IS NULL`, which would silently widen
+        a **suppression** predicate from one entity to every row of that type with no related
+        entity — and a widened suppression is a notification nobody is told about. Raised by
+        the security panel of section 2, while this method still had no callers.
         """
         ...
 

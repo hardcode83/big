@@ -234,7 +234,7 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 89 de las 101 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 92 de las 104 operaciones lo
   referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,
@@ -269,7 +269,14 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   con que `dashboard` sirve sus dos prefijos. La cancelación declara `200/401/403/409/422` y no
   declara el `404` cross-tenant que sí emite, igual que sus cinco rutas hermanas del ciclo de la
   tarea: es convención del módulo y no una regresión de esta capacidad, y lo que la enumeración de
-  arriba prohíbe es justamente ese catálogo plausible por endpoint.
+  arriba prohíbe es justamente ese catálogo plausible por endpoint. La colección devolvía los seis
+  campos originales (`property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state`,
+  `due_since`) y el 2026-08-27, con `blocked-transition-response-ids`, se le sumaron
+  `cleaning_task_id` e `incident_id` (ambos `uuid | null`, opcionales, `null` cuando no apliquen),
+  sin breaking change: los seis originales siguen siendo los únicos campos `required` en
+  `openapi.json`. La regla de `extra="forbid"` del modelo de query
+  `BlockedTransitionListQuery` rechaza `?tenant_id=…` con `422` antes de llegar al lookup,
+  y los dos ids se resuelven tenant-scoped en una sola llamada batch por tabla y página.
 - **La ruta de `cleaner-photo-requirements` entró autenticada y con permiso declarado**
   (2026-08-24): `GET /api/v1/cleaning-tasks/{task_id}/photo-requirements` con
   `READ_CLEANING_TASKS`, la cuarta proyección de solo lectura del router de tareas. No tocó el

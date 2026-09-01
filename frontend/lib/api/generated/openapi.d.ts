@@ -560,6 +560,27 @@ export interface paths {
      */
     get: operations["list_own_notifications_api_v1_notifications_get"];
   };
+  "/api/v1/notifications/{notification_id}/read": {
+    /**
+     * Acknowledge one of the caller's own notifications
+     * @description Records that the caller has read this notification. **Idempotent**: acknowledging one already read succeeds and does not move the recorded instant — `read_at` is the first read, not the last visit. A notification that does not exist, belongs to another user or belongs to another tenant answers the same `404` with the same body: a `403` would confirm the existence of somebody else's row.
+     */
+    post: operations["mark_notification_read_api_v1_notifications__notification_id__read_post"];
+  };
+  "/api/v1/notifications/read-all": {
+    /**
+     * Acknowledge every unread notification of the caller
+     * @description Marks all of the caller's unread notifications as read and answers how many it moved. Its scope is **all** of them, deliberately not the page or filter the client happens to be showing (design D6). Zero is the normal answer of an inbox already up to date, never an error.
+     */
+    post: operations["mark_all_notifications_read_api_v1_notifications_read_all_post"];
+  };
+  "/api/v1/notifications/unread-count": {
+    /**
+     * How many of the caller's own notifications are unread
+     * @description The bell's counter (design D4). One query, independent of any `per_page` the caller may be using on the listing, and consistent with listing and counting `read_at IS NULL`. Its own route rather than a field of the paginated envelope, so the bell can refresh without dragging a page of rows across the wire.
+     */
+    get: operations["count_unread_notifications_api_v1_notifications_unread_count_get"];
+  };
   "/api/v1/owner-approvals/{approval_id}/respond": {
     /**
      * The owner answers a pending approval
@@ -1108,11 +1129,15 @@ export interface components {
     BlockedTransitionResponse: {
       /** Blocking State */
       blocking_state: string;
+      /** Cleaning Task Id */
+      cleaning_task_id?: string | null;
       /**
        * Due Since
        * Format: date-time
        */
       due_since: string;
+      /** Incident Id */
+      incident_id?: string | null;
       /** Property Code */
       property_code: string;
       /**
@@ -2559,6 +2584,14 @@ export interface components {
       /** Password */
       password: string;
     };
+    /**
+     * MarkAllReadResponse
+     * @description How many rows "mark all as read" moved (R5.2, design D6). Zero is a normal answer.
+     */
+    MarkAllReadResponse: {
+      /** Updated */
+      updated: number;
+    };
     /** MarkExternalRequest */
     MarkExternalRequest: {
       /** Notes */
@@ -2668,7 +2701,9 @@ export interface components {
        */
       id: string;
       /** Notification Type */
-      notification_type: string;
+      notification_type: components["schemas"]["NotificationType"] | string;
+      /** Read At */
+      read_at: string | null;
       /** Related Id */
       related_id: string | null;
       /** Related Type */
@@ -2686,6 +2721,22 @@ export interface components {
      * @enum {string}
      */
     NotificationStatus: "PENDING" | "SENT" | "FAILED" | "SKIPPED";
+    /**
+     * NotificationType
+     * @description The sixteen types of PRD §14, with its exact names.
+     *
+     * A Python enum over a `String(100)` column, deliberately: `notification_logs
+     * .notification_type` was created as free text by `domain-foundation-financial` and
+     * stays that way, so this needs **no migration** and cannot reject a row written before
+     * it existed. What it buys is an exhaustive escalation policy — `escalation_for` can be
+     * tested against every member, which a string could not be.
+     *
+     * Added by `celery-jobs`, whose SLA job (PRD §14) is the first code that has to decide
+     * what a `notification_type` *means*. `access-notifications` owns the sending side and
+     * inherits these names.
+     * @enum {string}
+     */
+    NotificationType: "CLEANING_TASK_ASSIGNED" | "CLEANING_NO_RESPONSE" | "CLEANING_COMPLETED" | "CLEANING_FAILED" | "INCIDENT_CREATED_CRITICAL" | "INCIDENT_CREATED_HIGH" | "OWNER_APPROVAL_REQUIRED" | "TECHNICIAN_ASSIGNED" | "TECHNICIAN_NO_RESPONSE" | "GUEST_ESCALATION" | "LOCK_ALERT" | "CHECKIN_REMINDER_24H" | "CHECKIN_REMINDER_2H" | "CHECKOUT_REMINDER" | "PRICE_RECOMMENDATION" | "SLA_BREACH" | "PASSWORD_RESET_REQUESTED";
     /**
      * OwnerApprovalStatus
      * @description ASSUMPTION: name invented — the PRD declares this enum inline
@@ -4018,6 +4069,14 @@ export interface components {
       /** Estimated Cost */
       estimated_cost?: number | string | null;
       severity?: components["schemas"]["IncidentSeverity"] | null;
+    };
+    /**
+     * UnreadCountResponse
+     * @description The bell's counter (R2.2, design D4). Its own shape, not a field of the envelope.
+     */
+    UnreadCountResponse: {
+      /** Unread */
+      unread: number;
     };
     /**
      * UpdatePricingRuleRequest
@@ -7192,6 +7251,7 @@ export interface operations {
       query?: {
         page?: number;
         per_page?: number;
+        unread?: boolean | null;
       };
     };
     responses: {
@@ -7215,6 +7275,93 @@ export interface operations {
       };
       /** @description Validation Error */
       422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Acknowledge one of the caller's own notifications
+   * @description Records that the caller has read this notification. **Idempotent**: acknowledging one already read succeeds and does not move the recorded instant — `read_at` is the first read, not the last visit. A notification that does not exist, belongs to another user or belongs to another tenant answers the same `404` with the same body: a `403` would confirm the existence of somebody else's row.
+   */
+  mark_notification_read_api_v1_notifications__notification_id__read_post: {
+    parameters: {
+      path: {
+        notification_id: string;
+      };
+    };
+    responses: {
+      /** @description Successful Response */
+      204: {
+        content: never;
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Validation Error */
+      422: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * Acknowledge every unread notification of the caller
+   * @description Marks all of the caller's unread notifications as read and answers how many it moved. Its scope is **all** of them, deliberately not the page or filter the client happens to be showing (design D6). Zero is the normal answer of an inbox already up to date, never an error.
+   */
+  mark_all_notifications_read_api_v1_notifications_read_all_post: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["MarkAllReadResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+    };
+  };
+  /**
+   * How many of the caller's own notifications are unread
+   * @description The bell's counter (design D4). One query, independent of any `per_page` the caller may be using on the listing, and consistent with listing and counting `read_at IS NULL`. Its own route rather than a field of the paginated envelope, so the bell can refresh without dragging a page of rows across the wire.
+   */
+  count_unread_notifications_api_v1_notifications_unread_count_get: {
+    responses: {
+      /** @description Successful Response */
+      200: {
+        content: {
+          "application/json": components["schemas"]["UnreadCountResponse"];
+        };
+      };
+      /** @description Missing, malformed or expired credentials. */
+      401: {
+        content: {
+          "application/json": components["schemas"]["ErrorEnvelope"];
+        };
+      };
+      /** @description Authenticated, but the role lacks the required permission. */
+      403: {
         content: {
           "application/json": components["schemas"]["ErrorEnvelope"];
         };

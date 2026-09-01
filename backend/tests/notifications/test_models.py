@@ -39,6 +39,8 @@ async def test_notification_log_roundtrip_applies_the_prd_defaults(db_session) -
     assert fetched.attempts == 0
     assert fetched.sla_breached is False
     assert fetched.recipient_user_id is None
+    # R1.1: no server default, so a fresh row is unread rather than read-on-creation.
+    assert fetched.read_at is None
 
 
 @pytest.mark.asyncio
@@ -108,3 +110,22 @@ async def test_notification_log_declares_both_prd_indexes(db_session) -> None:
         "related_type",
         "related_id",
     ]
+
+
+@pytest.mark.asyncio
+async def test_notification_log_declares_the_inbox_indexes(db_session) -> None:
+    """`notifications-inbox-web` D1: one index by recipient, one partial for the counter."""
+    indexes = await db_session.run_sync(
+        lambda sync_session: inspect(sync_session.get_bind()).get_indexes("notification_logs")
+    )
+    by_name = {index["name"]: index for index in indexes}
+
+    recipient = by_name["ix_notification_logs_tenant_id_recipient_user_id_created_at"]
+    assert recipient["column_names"] == ["tenant_id", "recipient_user_id", "created_at"]
+    assert recipient["column_sorting"] == {"created_at": ("desc",)}
+
+    unread = by_name["ix_notification_logs_unread"]
+    assert unread["column_names"] == ["tenant_id", "recipient_user_id"]
+    # Partial (D1): the counter's index holds only the unread rows, which is what keeps its
+    # cost from growing with the read backlog.
+    assert unread["dialect_options"]["postgresql_where"] == "(read_at IS NULL)"

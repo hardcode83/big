@@ -1,7 +1,7 @@
 import type { Metadata } from "next";
 
 import { ReservationsView } from "@/features/reservations";
-import { routeMetadata } from "@/features/shell";
+import { routeMetadata } from "@/features/shell/server";
 
 export function generateMetadata(): Promise<Metadata> {
   return routeMetadata("reservations");

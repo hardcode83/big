@@ -1,0 +1,158 @@
+{
+  "list": {
+    "label": "Mis tareas de limpieza",
+    "empty": {
+      "title": "Ahora mismo no tienes tareas",
+      "description": "Cuando te asignen una limpieza, aparecerá aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar tus tareas",
+      "description": "Vuelve a intentarlo en unos segundos."
+    },
+    "loading": "Cargando tus tareas…"
+  },
+  "detail": {
+    "back": "Volver a mis tareas",
+    "loading": "Cargando la tarea…",
+    "unavailable": {
+      "title": "Tarea no disponible",
+      "description": "Puede que ya no esté asignada a ti."
+    },
+    "error": {
+      "title": "No hemos podido cargar la tarea",
+      "description": "Vuelve a intentarlo en unos segundos."
+    }
+  },
+  "context": {
+    "title": "Dónde y cuándo",
+    "propertyName": "Vivienda",
+    "propertyInternalCode": "Código",
+    "address": "Dirección",
+    "timezone": "Zona horaria de la vivienda",
+    "checkoutAt": "Salida de la estancia",
+    "nextCheckinDeadline": "Próxima entrada",
+    "unavailable": {
+      "title": "No hemos podido cargar la dirección",
+      "description": "La vivienda no se ha podido resolver ahora mismo."
+    }
+  },
+  "checklist": {
+    "title": "Checklist",
+    "complete": "Marcar como hecho",
+    "completing": "Marcando…",
+    "completed": "Hecho",
+    "completedBy": "por",
+    "required": "Obligatorio",
+    "pending": "Pendiente",
+    "empty": {
+      "title": "Esta tarea no tiene checklist",
+      "description": "La plantilla no declara ningún ítem para esta vivienda."
+    },
+    "errors": {
+      "notFound": "Este ítem ya no pertenece a la plantilla. Lo hemos refrescado.",
+      "conflict": "La tarea ha cambiado de estado y este ítem ya no se puede marcar. Arriba tienes el estado actual.",
+      "generic": "No hemos podido marcar el ítem. Vuelve a intentarlo."
+    }
+  },
+  "photoRequirements": {
+    "title": "Fotos que pide la plantilla",
+    "covered": "Cubierta",
+    "pending": "Pendiente",
+    "required": "Obligatoria",
+    "upload": "Subir foto",
+    "empty": {
+      "title": "Esta tarea no pide fotos",
+      "description": "La plantilla no declara categorías de foto."
+    }
+  },
+  "gallery": {
+    "title": "Fotos subidas",
+    "loading": "Cargando las fotos…",
+    "empty": {
+      "title": "Todavía no hay fotos",
+      "description": "Las fotos que subas aparecerán aquí."
+    },
+    "alt": "Foto de la limpieza"
+  },
+  "actions": {
+    "title": "Qué puedes hacer",
+    "accept": "Aceptar",
+    "reject": "Rechazar",
+    "start": "Iniciar",
+    "complete": "Cerrar limpieza",
+    "reportIncident": "Reportar incidencia",
+    "none": {
+      "pendingReview": "Esta limpieza está a la espera de validación.",
+      "completed": "Esta limpieza ya está cerrada.",
+      "rejected": "Esta limpieza fue rechazada.",
+      "cancelled": "Esta limpieza fue cancelada.",
+      "failed": "Esta limpieza no superó la validación: la revisión la hace el manager.",
+      "notActionable": "Ahora mismo no hay nada que hacer en esta tarea."
+    },
+    "errors": {
+      "conflict": "La tarea ha cambiado de estado y esta acción ya no encaja. Arriba tienes el estado actual.",
+      "generic": "No hemos podido completar la acción. Vuelve a intentarlo."
+    }
+  },
+  "complete": {
+    "title": "Cerrar limpieza",
+    "success": {
+      "title": "Limpieza cerrada",
+      "description": "El cierre se ha registrado.",
+      "back": "Volver a mis tareas"
+    },
+    "errors": {
+      "missing-required-items": "Faltan ítems obligatorios del checklist. Arriba verás cuáles.",
+      "missing-required-photos": "Faltan fotos obligatorias. Arriba verás cuáles.",
+      "critical-incident": "Hay una incidencia crítica sin resolver en la vivienda y no se puede cerrar la limpieza.",
+      "generic": "No hemos podido cerrar la limpieza. Vuelve a intentarlo."
+    }
+  },
+  "incidentReport": {
+    "title": "Reportar una incidencia",
+    "titleField": "Título",
+    "descriptionField": "Descripción",
+    "submit": "Enviar incidencia",
+    "submitting": "Enviando…",
+    "errors": {
+      "titleRequired": "Indica un título.",
+      "titleTooLong": "El título no puede pasar de 300 caracteres.",
+      "descriptionRequired": "Indica una descripción.",
+      "descriptionTooLong": "La descripción no puede pasar de 5000 caracteres.",
+      "conflict": "La tarea ha cambiado de estado y ya no admite una incidencia. Arriba tienes el estado actual.",
+      "generic": "No hemos podido enviar la incidencia. Vuelve a intentarlo."
+    },
+    "ack": {
+      "title": "Incidencia registrada",
+      "id": "Identificador",
+      "status": "Estado",
+      "createdAt": "Registrada el"
+    }
+  },
+  "upload": {
+    "title": "Subir una foto",
+    "file": "Elige o haz una foto",
+    "uploading": "Subiendo…",
+    "optional": "Subir fotos no es obligatorio para todas las categorías.",
+    "errors": {
+      "conflict": "La tarea ha cambiado de estado y ya no admite fotos. Arriba tienes el estado actual.",
+      "tooLarge": "La foto pesa demasiado. Haz una más ligera o reduce la calidad.",
+      "unsupportedFormat": "Ese archivo no es una foto en un formato admitido. Se admiten JPEG, PNG y WebP.",
+      "storage": "No hemos podido guardar la foto. Vuelve a intentarlo en unos segundos.",
+      "generic": "No hemos podido subir la foto. Vuelve a intentarlo."
+    }
+  },
+  "filters": {
+    "label": "Filtrar por estado",
+    "all": "Todos los estados",
+    "clear": "Quitar filtro"
+  },
+  "pagination": {
+    "label": "Paginación de mis tareas",
+    "previous": "Página anterior",
+    "next": "Página siguiente",
+    "pageOfTotal": "Página {{page}} de {{totalPages}}",
+    "totalTasks": "{{total}} tareas en total"
+  },
+  "noRowContext": "—"
+}

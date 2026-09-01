@@ -142,6 +142,46 @@ class SqlAlchemyIncidentReader:
             for row in rows.all()
         ]
 
+    async def list_open_for_properties(
+        self, tenant_id: uuid.UUID, property_ids: Sequence[uuid.UUID]
+    ) -> dict[uuid.UUID, uuid.UUID]:
+        """The **newest** open incident id per property, ONE query (R3.4).
+
+        Returns `dict[property_id, incident_id]` — only the id is fetched and returned,
+        matching the port's narrow contract. The free-text and identifier columns of
+        `IncidentSummary` (category / severity / opened_at) are not read at all: they
+        would be read into memory only to be dropped by the resolver, the same cost the
+        per-property sibling avoids at `repositories.py:118-122`.
+
+        Mirrors `count_open_for_properties` shape: a property with no open incident is
+        **absent** from the dict, not mapped to `None`. Sorts by `property_id` first so the
+        dict-construction loop iterates within a property, then `created_at DESC, id DESC`
+        to keep the newest first; the loop keeps only the first occurrence per property.
+        """
+        if not property_ids:
+            return {}
+        rows = await self._session.execute(
+            select(
+                IncidentModel.id,
+                IncidentModel.property_id,
+            )
+            .where(
+                IncidentModel.tenant_id == tenant_id,
+                IncidentModel.property_id.in_(list(property_ids)),
+                IncidentModel.status.in_(_OPEN_STATUSES),
+            )
+            .order_by(
+                IncidentModel.property_id,
+                IncidentModel.created_at.desc(),
+                IncidentModel.id.desc(),
+            )
+        )
+        by_property: dict[uuid.UUID, uuid.UUID] = {}
+        for row in rows.all():
+            if row.property_id not in by_property:
+                by_property[row.property_id] = row.id
+        return by_property
+
     async def list(
         self,
         tenant_id: uuid.UUID,

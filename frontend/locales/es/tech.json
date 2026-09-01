@@ -1,0 +1,145 @@
+{
+  "list": {
+    "title": "Mis incidencias",
+    "includesClosed": "La lista incluye también incidencias ya cerradas.",
+    "loadMore": "Cargar más",
+    "moreError": {
+      "title": "No hemos podido cargar más incidencias",
+      "description": "Las que ya ves siguen aquí. Vuelve a intentarlo.",
+      "retry": "Reintentar"
+    },
+    "empty": {
+      "title": "No tienes incidencias",
+      "description": "Cuando te asignen una avería, aparecerá aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar tus incidencias",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    },
+    "loading": "Cargando tus incidencias…"
+  },
+  "filters": {
+    "label": "Filtrar por estado"
+  },
+  "detail": {
+    "back": "Volver a mis incidencias",
+    "loading": "Cargando la incidencia…",
+    "unavailable": {
+      "title": "Incidencia no disponible",
+      "description": "Puede que ya no esté asignada a ti."
+    },
+    "error": {
+      "title": "No hemos podido cargar la incidencia",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    }
+  },
+  "fields": {
+    "category": "Categoría",
+    "source": "Origen",
+    "etaAt": "Hora prevista de llegada",
+    "estimatedCost": "Coste estimado",
+    "approvedCost": "Coste aprobado",
+    "finalCost": "Coste final",
+    "materials": "Materiales",
+    "ownerApprovalRequired": "Necesita aprobación de la propietaria",
+    "resolvedAt": "Resuelta el",
+    "createdAt": "Creada el",
+    "yes": "Sí",
+    "no": "No"
+  },
+  "context": {
+    "title": "Dónde y cómo entrar",
+    "propertyName": "Vivienda",
+    "propertyInternalCode": "Código",
+    "address": "Dirección",
+    "timezone": "Zona horaria de la vivienda",
+    "accessNotes": "Instrucciones de acceso",
+    "assignmentNote": "Nota del manager",
+    "unavailable": {
+      "title": "No hemos podido cargar el contexto",
+      "description": "La dirección y las instrucciones de acceso no están disponibles ahora mismo."
+    }
+  },
+  "actions": {
+    "title": "Qué puedes hacer",
+    "accept": "Aceptar",
+    "reject": "Rechazar",
+    "en-route": "En ruta",
+    "wait-parts": "Esperando piezas",
+    "resume": "Reanudar",
+    "resolve": "Cerrar la incidencia",
+    "none": {
+      "awaiting-owner": "No hay nada que hacer ahora: el cierre está a la espera de que la propietaria lo apruebe.",
+      "closed": "Esta incidencia está cerrada.",
+      "not-actionable": "Esta incidencia todavía no está asignada, así que no hay nada que hacer desde aquí."
+    },
+    "conflict": {
+      "closed": "La incidencia ya está cerrada, así que esta acción no se puede hacer.",
+      "awaiting-owner": "La incidencia está a la espera de la propietaria, así que esta acción no se puede hacer.",
+      "out-of-order": "El estado de la incidencia ha cambiado y esta acción ya no encaja. Arriba tienes el estado actual."
+    },
+    "error": "No hemos podido completar la acción. Vuelve a intentarlo."
+  },
+  "eta": {
+    "label": "Hora prevista de llegada (opcional)",
+    "help": "Si la dejas en blanco, no se envía ninguna hora.",
+    "invalid": "El servidor no ha aceptado esa hora. Revísala y vuelve a enviarla."
+  },
+  "resolve": {
+    "title": "Cerrar la incidencia",
+    "finalCost": "Coste final (€)",
+    "materials": "Materiales usados (opcional)",
+    "submit": "Cerrar la incidencia",
+    "errors": {
+      "required": "Indica el coste final.",
+      "negative": "El coste no puede ser negativo.",
+      "tooLarge": "El coste no puede pasar de 99.999.999,99.",
+      "decimals": "Como mucho dos decimales.",
+      "format": "Escribe el coste con cifras y, como mucho, dos decimales. Por ejemplo: 42.50",
+      "server": "El servidor no ha aceptado el cierre. Revisa lo que has escrito."
+    },
+    "resolved": {
+      "title": "Incidencia cerrada",
+      "description": "El cierre se ha registrado."
+    },
+    "awaitingOwner": {
+      "title": "El cierre no se ha aceptado",
+      "description": "Queda a la espera de que la propietaria apruebe el gasto. No hace falta que hagas nada más."
+    }
+  },
+  "photos": {
+    "title": "Fotos",
+    "loading": "Cargando las fotos…",
+    "empty": {
+      "title": "Todavía no hay fotos",
+      "description": "Las fotos que subas aparecerán aquí."
+    },
+    "error": {
+      "title": "No hemos podido cargar las fotos",
+      "description": "Vuelve a intentarlo en unos segundos.",
+      "retry": "Reintentar"
+    },
+    "stage": {
+      "BEFORE": "Antes",
+      "AFTER": "Después"
+    },
+    "alt": "Foto de la incidencia"
+  },
+  "upload": {
+    "title": "Subir una foto",
+    "file": "Elige o haz una foto",
+    "stage": "¿Es de antes o de después?",
+    "submit": "Subir",
+    "uploading": "Subiendo…",
+    "optional": "Subir fotos es opcional: no hace falta ninguna para cerrar.",
+    "errors": {
+      "conflict": "La incidencia ha cambiado de estado y ya no admite fotos. Arriba tienes el estado actual.",
+      "tooLarge": "La foto pesa demasiado. Haz una más ligera o reduce la calidad.",
+      "unsupportedFormat": "Ese archivo no es una foto en un formato admitido. Se admiten JPEG, PNG y WebP.",
+      "storage": "No hemos podido guardar la foto. Vuelve a intentarlo en unos segundos.",
+      "generic": "No hemos podido subir la foto. Vuelve a intentarlo."
+    }
+  }
+}

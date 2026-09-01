@@ -6,9 +6,11 @@ import { AuthProvider, useAuth } from "@/lib/auth";
 import { notifySessionExpired } from "@/lib/api/authenticated-client";
 import {
   clearSessionTokens,
+  getSessionGeneration,
   getSessionTokens,
   setSessionTokens,
 } from "@/lib/auth/session-store";
+import { markSessionPresent } from "@/lib/auth/session-presence-cookie";
 import { SESSION_PRESENT_COOKIE } from "@/lib/config/constants";
 import { RuntimeConfigProvider } from "@/lib/config/runtime-config-provider";
 import { makeQueryClient } from "@/lib/query/query-client";
@@ -258,14 +260,12 @@ describe("AuthProvider", () => {
   });
 
   it("logs out locally even when the backend logout is unavailable", async () => {
+    // `useAuth().logout()` runs the local-state purge only (F5 / review);
+    // the server round-trip is owned by `useLogoutMutation`. The "backend
+    // unavailable" path that was previously asserted on this test now
+    // belongs to `useLogoutMutation`'s own tests.
     setSessionTokens({ accessToken: "access", refreshToken: "refresh" });
-    const fetchImpl = vi.fn().mockResolvedValue(
-      new Response(
-        JSON.stringify({ error: { code: "UNAUTHENTICATED", message: "expired" } }),
-        { status: 401 },
-      ),
-    );
-    vi.stubGlobal("fetch", fetchImpl);
+    markSessionPresent();
 
     function LogoutProbe() {
       const { logout } = useAuth();
@@ -296,7 +296,6 @@ describe("AuthProvider", () => {
     expect(await screen.findByTestId("status")).toHaveTextContent("anonymous");
     expect(getSessionTokens()).toBeNull();
     expect(readPresenceCookie()).toBeNull();
-    expect(fetchImpl).toHaveBeenCalledOnce();
   });
 
   it("invalidates an in-flight refresh when logout clears the session", async () => {
@@ -691,5 +690,32 @@ describe("AuthProvider — query cache purge on identity transitions", () => {
     act(() => notifySessionExpired());
 
     expect(cache.getQueryCache().getAll()).toHaveLength(0);
+  });
+
+  it("drops the in-memory tokens too, so an expired session keeps no credentials", () => {
+    // Two paths reach this listener without `refreshSession` having cleared them: the
+    // `SessionInvalidatedError` branch, which skips `clearSessionTokens` when the generation
+    // moved underneath it, and the "No refresh token available" early reject, which never had
+    // one. Both used to leave the store holding credentials for a session just declared over.
+    setSessionTokens({ accessToken: "a", refreshToken: "r" });
+    renderAuthWithCache(freshCache());
+
+    act(() => notifySessionExpired());
+
+    expect(getSessionTokens()).toBeNull();
+  });
+
+  it("moves the session generation on every purge, which is what invalidates in-flight optimistic snapshots", () => {
+    // `notifications-inbox-web` R3.4 depends on this: an optimistic mutation compares the
+    // generation in `onError` to decide whether its snapshot still belongs to this session.
+    // If a purge left the number where it was, the departing user's cached rows would be
+    // written back into the cache that was just emptied to keep them from the next person.
+    setSessionTokens({ accessToken: "a", refreshToken: "r" });
+    renderAuthWithCache(freshCache());
+    const before = getSessionGeneration();
+
+    act(() => notifySessionExpired());
+
+    expect(getSessionGeneration()).not.toBe(before);
   });
 });

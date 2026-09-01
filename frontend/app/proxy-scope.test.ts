@@ -90,8 +90,16 @@ describe("API proxy scope (R2.1, R2.3)", () => {
       .map((file) => file.slice(packageRoot.length + 1))
       .sort();
 
-    // `lib/config/server.ts` is the boundary that owns the value, so it is expected here.
-    expect(readers).toEqual(["app/api/[...path]/route.ts", "lib/config/server.ts"]);
+    // `lib/config/server.ts` is the boundary that owns the value, so it is expected
+    // here. `lib/api/server-client.ts` is also a legitimate server-only consumer
+    // (it imports `server-only` and runs only inside Server Components to call
+    // `/auth/me` from `app/page.tsx`); adding it does not reopen the
+    // public-origin → private-network hole the test was written to catch.
+    expect(readers).toEqual([
+      "app/api/[...path]/route.ts",
+      "lib/api/server-client.ts",
+      "lib/config/server.ts",
+    ]);
   });
 
   it("has no root-level proxy that could route around the handler", () => {

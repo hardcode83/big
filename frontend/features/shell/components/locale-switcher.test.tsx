@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { useTranslation } from "react-i18next";
 
 import {
@@ -10,6 +10,17 @@ import {
 } from "@/test/render";
 import { I18nProvider } from "@/lib/i18n/client-provider";
 import { LocaleSwitcher } from "@/features/shell/components/locale-switcher";
+
+const refresh = vi.hoisted(() => vi.fn());
+const router = vi.hoisted(() => ({ refresh }));
+
+vi.mock("next/navigation", () => ({
+  // Returning the SAME object on every render — a fresh `{ refresh }`
+  // literal would change identity each render, putting `router` in the
+  // LocaleSwitcher's useEffect deps and re-firing the effect on every
+  // render until i18n settles.
+  useRouter: () => router,
+}));
 
 /**
  * Rewritten 2026-08-24 when the control went from two buttons to one.
@@ -46,6 +57,9 @@ afterEach(() => {
 });
 
 describe("LocaleSwitcher (D13)", () => {
+  afterEach(() => {
+    refresh.mockReset();
+  });
   it("names the destination, not the current locale, because pressing it acts", () => {
     // On `es`, the button switches TO English. Naming it «Español» would tell a
     // screen-reader user the opposite of what the press does.
@@ -90,6 +104,19 @@ describe("LocaleSwitcher (D13)", () => {
       expect(screen.getByTestId("probe")).toHaveTextContent("Dashboard"),
     );
     expect(document.documentElement.lang).toBe("en");
+    expect(document.cookie).toContain("autohostai.locale=en");
+  });
+
+  it("calls router.refresh() exactly once after writing the locale cookie", async () => {
+    // R1 + D1: the cookie write and the refresh must be paired in the same
+    // effect, so the refresh's request carries the new cookie header. A second
+    // click would be a separate user gesture, not a re-fire.
+    setup("es");
+    fireEvent.click(
+      screen.getByRole("button", { name: "Cambiar idioma a English" }),
+    );
+
+    await waitFor(() => expect(refresh).toHaveBeenCalledTimes(1));
     expect(document.cookie).toContain("autohostai.locale=en");
   });
 

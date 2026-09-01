@@ -20,15 +20,22 @@ Añadida el **2026-08-23** a petición del usuario; no está en el plan original
 
 ## 2. La premisa que hay que acotar: 8 de las 12 rutas del workspace son `RoutePlaceholder`
 
-Superficies **reales** hoy: login, dashboard, timeline, properties (+detalle), reservations (+detalle), cleaning, incidents (+detalle) y el portal de huésped `/guest/[token]`.
+> **Censo fechado el 2026-08-19, cuando se escribió esta entrada.** `demo-user` ya está entregada,
+> así que lo que sigue se conserva como el registro de la premisa que la justificó, no como el
+> estado actual del árbol. El censo vivo es `sdd/specs/frontend-foundation.md`, que a 2026-08-30
+> cuenta **8 placeholder y 18 funcionales** sobre 26 descriptores del registro de rutas.
+> Desde entonces han aterrizado, entre otras, `conversations-inbox` (`/conversations`),
+> `revenue-pricing` (`/pricing`) y `tech-app` (`/tech` + detalle).
 
-Superficies **placeholder**: conversations, reviews, pricing, statements, approvals, settings, settings/integrations, forgot-password, `/cleaner` (+detalle) y `/tech` (+detalle).
+Superficies **reales** entonces: login, dashboard, timeline, properties (+detalle), reservations (+detalle), cleaning, incidents (+detalle) y el portal de huésped `/guest/[token]`.
+
+Superficies **placeholder** entonces: conversations, reviews, pricing, statements, approvals, settings, settings/integrations, forgot-password, `/cleaner` (+detalle) y `/tech` (+detalle).
 
 Consecuencias directas sobre lo que la demo puede enseñar:
 
 - **Valoraciones: no existen.** `backend/app/reviews/` tiene sólo `domain/entities.py`, `domain/enums.py` e `infrastructure/models.py` — cero capa de aplicación, cero router, cero frontend. `revenue-reviews` [BE] sigue sin empezar. **Sembrar filas de `reviews` sería sembrar datos que ningún endpoint ni pantalla lee**, así que quedan fuera de alcance y la entrada lo dice en vez de prometerlo.
 - **Mensajes: backend sí, pantalla no todavía.** `messaging-ai` está archivada y el `MockAIAdapter` es determinista y **offline** (sin claves de proveedor), así que el dataset se puede sembrar y ejercita el pipeline entero — clasificación, política de escalado y respuesta automática. La bandeja `/conversations` es `conversations-inbox` [FE], hoy `READY_FOR_PR`. Se siembra igualmente: el dato es correcto y la pantalla llega detrás.
-- **Limpiadora y técnico entran, pero no tienen a dónde ir.** `AuthGuard` comprueba autenticación y **no rol**; `/` redirige a `/dashboard`, y `CLEANER` es `_SELF_SERVICE | _CLEANING_EXECUTE` (sin `READ_PROPERTIES`). Un visitante que entre con esas cuentas ve errores. Las cuentas se crean —el seed ya lo hace— pero **no se publican como recorrido** hasta que aterricen `cleaner-app` y `tech-app`, ambas [FE] sin empezar.
+- **Limpiadora y técnico entran, pero no tienen a dónde ir.** *(Cierto la mitad a 2026-08-30: `tech-app` aterrizó el 2026-08-30 y el técnico ya tiene recorrido propio —`/tech` y `/tech/incidents/[id]`, ver `sdd/specs/tech-app.md`—, así que **su** cuenta ya se puede publicar como recorrido. La limpiadora sigue sin superficie: `cleaner-app` [FE] sigue sin empezar.)* `AuthGuard` comprueba autenticación y **no rol**; `/` redirige a `/dashboard`, y `CLEANER` es `_SELF_SERVICE | _CLEANING_EXECUTE` (sin `READ_PROPERTIES`). Un visitante que entre con esas cuentas ve errores. Las cuentas se crean —el seed ya lo hace— pero **no se publican como recorrido** hasta que aterricen `cleaner-app` y `tech-app`, ambas [FE] sin empezar.
 
 ## 3. El cron: Actions sí, cron de máquina no, y la razón es dura
 

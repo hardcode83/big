@@ -155,6 +155,46 @@ class Harness:
 
 
 @pytest.mark.asyncio
+async def test_a_breached_technician_assignment_writes_a_technician_no_response_row() -> None:
+    """R3.1 end to end: the row the job actually writes, not just what `_POLICY` returns.
+
+    Added because the section-3 QA panel found R3.1's headline clause covered only at the
+    pure-policy layer (`escalation_for`), one level above where `_escalation_row` composes
+    the row — so a regression between the policy and the write would have passed the suite.
+    QA proved the behaviour with a throwaway probe; this is that probe made permanent.
+
+    `escalations` filters on `SLA_BREACH`, so it deliberately does **not** collect this row:
+    reading the log store directly is the point, since the whole change is that this row is
+    no longer an `SLA_BREACH`.
+    """
+    harness = Harness()
+    manager = harness.users.add_user(role=UserRole.PROPERTY_MANAGER)
+    breached = harness.notifications.seed(
+        _breached(
+            notification_type=NotificationType.TECHNICIAN_ASSIGNED.value,
+            subject="Incident assigned",
+        )
+    )
+
+    report = await harness.run()
+
+    assert report.escalated == 1
+    written = [
+        log
+        for log in harness.notifications.logs.values()
+        if log.id != breached.id
+    ]
+    assert [log.notification_type for log in written] == [
+        NotificationType.TECHNICIAN_NO_RESPONSE.value
+    ]
+    # R3.1 keeps recipient and reason: only the type moved (design D8).
+    assert written[0].recipient_user_id == manager.id
+    assert written[0].related_id == breached.id
+    # R3.2's other half, asserted here rather than assumed: no `SLA_BREACH` was written.
+    assert harness.notifications.escalations == []
+
+
+@pytest.mark.asyncio
 async def test_a_breached_assignment_is_marked_and_escalated_to_the_manager() -> None:
     harness = Harness()
     manager = harness.users.add_user(role=UserRole.PROPERTY_MANAGER)
@@ -437,30 +477,30 @@ class TestRecipientTruncation:
     @pytest.mark.asyncio
     async def test_more_recipients_than_one_page_is_reported_not_only_logged(self) -> None:
         """A partial notification that only a log-scraper can detect is a silent drop."""
-        from app.notifications.application import use_cases as module
+        from app.auth.domain.recipients import RoleRecipients
 
         harness = Harness()
-        for index in range(module._MAX_RECIPIENTS + 3):
+        for index in range(RoleRecipients.MAX_RECIPIENTS + 3):
             harness.users.add_user(role=UserRole.PROPERTY_MANAGER, name=f"Mgr{index:03d}")
         harness.notifications.seed(_breached())
 
         report = await harness.run()
 
-        assert report.rows_written == module._MAX_RECIPIENTS
+        assert report.rows_written == RoleRecipients.MAX_RECIPIENTS
         assert report.recipients_truncated == 3
 
     @pytest.mark.asyncio
     async def test_the_owner_fallback_counts_its_truncation_too(self) -> None:
         """The fallback used to skip the check, so it reintroduced the silent partial
         notification the counter exists to prevent. Found by the section-4 QA re-review."""
-        from app.notifications.application import use_cases as module
+        from app.auth.domain.recipients import RoleRecipients
 
         harness = Harness()
-        for index in range(module._MAX_RECIPIENTS + 2):
+        for index in range(RoleRecipients.MAX_RECIPIENTS + 2):
             harness.users.add_user(role=UserRole.TENANT_OWNER, name=f"Own{index:03d}")
         harness.notifications.seed(_breached())
 
         report = await harness.run()
 
-        assert report.rows_written == module._MAX_RECIPIENTS
+        assert report.rows_written == RoleRecipients.MAX_RECIPIENTS
         assert report.recipients_truncated == 2

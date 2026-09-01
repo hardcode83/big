@@ -57,6 +57,10 @@ dependencies = [
 
 [dependency-groups]
 dev = [
+    # Node runtime for pyright, pinned via the lockfile (not fetched by nodeenv at
+    # first run). pyright uses `node` from PATH when present (see dev stage env).
+    "nodejs-wheel>=22.13.0",
+    "pyright>=1.1.390",
     "pytest>=9.1.1",
     "pytest-asyncio>=1.4.0",
     "pytest-cov>=7.0.0",

@@ -1246,8 +1246,6 @@ async def _seed_incidents(
         **_incident_flow_kwargs(session),
     )
     assign = AssignIncidentUseCase(
-        users=SqlAlchemyUserRepository(session),
-        notifications=SqlAlchemyNotificationLogRepository(session),
         configs=SqlAlchemyTenantConfigRepository(session),
         **_incident_flow_kwargs(session),
     )
@@ -1352,12 +1350,21 @@ async def _incidents_of_the_tenant(
 
 
 def _incident_flow_kwargs(session: AsyncSession) -> dict:
-    """The nine collaborators every incident-flow use case takes, as `maintenance` wires them.
+    """The collaborators every incident-flow use case takes, as `maintenance` wires them.
 
     Same shape `maintenance/api/dependencies.py` builds for its routes, with D11's one
     difference: the unit of work is the caller's, so nothing here commits on its own.
+
+    `users` and `notifications` moved in here from the individual call sites in
+    `notification-writers-gap` (R1): both use cases built from this helper now need them —
+    `assign` to tell the technician, `classify` to tell the manager a severity is CRITICAL or
+    HIGH — so repeating them at each site was duplication waiting to diverge. A consequence
+    worth stating, because it is deliberate (design D12): the demo seed now **writes
+    notifications**, so the inbox `notifications-inbox-web` is building has something to show.
     """
     return {
+        "users": SqlAlchemyUserRepository(session),
+        "notifications": SqlAlchemyNotificationLogRepository(session),
         "incidents": SqlAlchemyIncidentRepository(session),
         "reader": SqlAlchemyIncidentReader(session),
         "properties": SqlAlchemyPropertyRepository(session),
@@ -1445,9 +1452,9 @@ async def _run_the_cleaning(
     actor = CleaningActor(user_id=cleaner.id, role=UserRole.CLEANER)
     lifecycle = _cleaning_lifecycle_kwargs(session)
 
-    await AcceptCleaningTaskUseCase(
-        notifications=SqlAlchemyNotificationLogRepository(session), **lifecycle
-    ).execute(tenant_id=tenant_id, task_id=task.id, actor=actor, now=now)
+    await AcceptCleaningTaskUseCase(**lifecycle).execute(
+        tenant_id=tenant_id, task_id=task.id, actor=actor, now=now
+    )
     await StartCleaningTaskUseCase(**lifecycle).execute(
         tenant_id=tenant_id, task_id=task.id, actor=actor, now=now
     )
@@ -1504,10 +1511,14 @@ async def _run_the_cleaning(
 
 
 def _cleaning_lifecycle_kwargs(session: AsyncSession) -> dict:
-    """The seven collaborators every task-lifecycle use case takes, as `cleaning` wires them.
+    """The collaborators every task-lifecycle use case takes, as `cleaning` wires them.
 
     Same helper `cleaning/api/dependencies.py` keeps for its routes, with one difference that
     is the whole of D11: the unit of work is the caller's, so nothing here commits on its own.
+
+    `notifications` and `users` joined them in `notification-writers-gap` (its R2), which is
+    why the demo seed now leaves a `CLEANING_COMPLETED` row behind — deliberate, per design
+    D12: the inbox `notifications-inbox-web` is building needs something to show.
     """
     return {
         "tasks": SqlAlchemyCleaningTaskRepository(session),
@@ -1516,6 +1527,8 @@ def _cleaning_lifecycle_kwargs(session: AsyncSession) -> dict:
         "timeline": SqlAlchemyTimelineEventRepository(session),
         "reservations": SqlAlchemyReservationRepository(session),
         "audit": SqlAlchemyAuditLogRepository(session),
+        "notifications": SqlAlchemyNotificationLogRepository(session),
+        "users": SqlAlchemyUserRepository(session),
         "uow": CallerOwnedUnitOfWork(),
     }
 

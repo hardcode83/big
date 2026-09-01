@@ -171,9 +171,24 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   está mal no lo decide un barrido.
 - THE SYSTEM SHALL servir esos mismos desajustes por `GET /api/v1/blocked-transitions` a todo rol
   con `READ_PROPERTIES` —incluida la propietaria—, con el envelope paginado de PRD §23 y cada
-  entrada llevando `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state` y
-  `due_since`. `trigger` y `blocking_state` viajan como los literales canónicos, sin prosa: la
-  traducción es del cliente, el mismo trato que `dashboard-api` da a `operational_state`.
+  entrada llevando `property_id`, `property_code`, `reservation_id`, `trigger`, `blocking_state`,
+  `due_since`, `cleaning_task_id` e `incident_id`. `trigger` y `blocking_state` viajan como los
+  literales canónicos, sin prosa: la traducción es del cliente, el mismo trato que `dashboard-api`
+  da a `operational_state`.
+- WHEN el `blocking_state` está en `{AWAITING_CLEANING, CLEANING_IN_PROGRESS, CLEANING_SCHEDULED}`,
+  THE SYSTEM SHALL poblar `cleaning_task_id` con el id de la tarea de limpieza **abierta** de esa
+  vivienda dentro del `tenant_id` del token verificado, y SHALL dejar `incident_id = null`; si la
+  vivienda no tiene tarea de limpieza abierta, SHALL dejar ambos ids en `null`. La ausencia de la
+  tarea es un dato, no un error, así que la fila sigue listándose aunque no haya acción posible.
+- WHEN el `blocking_state` no es de limpieza, THE SYSTEM SHALL poblar `incident_id` con el id de
+  la incidencia **abierta** de esa vivienda dentro del mismo `tenant_id`, y SHALL dejar
+  `cleaning_task_id = null`; sin incidencia abierta, SHALL dejar ambos ids en `null`.
+- THE SYSTEM SHALL no poblar ambos ids para una misma fila: una vivienda no se queda con tarea de
+  limpieza **y** incidencia abierta bajo el mismo `blocking_state`, y si las reglas se solapanan
+  en el futuro la prioridad la da el `blocking_state` actual, no «la primera que se encuentre».
+- THE SYSTEM SHALL resolver cada id como **una sola** llamada batch por tabla y página: nunca N+1
+  sobre el listado paginado, y el camino SQL filtra por `tenant_id` antes de tocar la fila, igual
+  que el resto del módulo (`steering/security.md` regla 1).
 - THE SYSTEM SHALL derivar esa colección de la misma función que el job (`stalls.detect`) y de la
   misma ventana, de modo que el cubo y la colección no puedan discrepar; la diferencia es que el
   job pregunta por un trigger por ejecución y la colección por los tres.
@@ -186,6 +201,12 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 - THE SYSTEM SHALL no escribir en esa petición, ni siquiera la fila de configuración del tenant:
   `TenantConfigRepository.checkin_window_hours` lee una columna con su default en vez de pasar por
   `get_or_create`, que es lo que haría un `GET` escribir.
+- **Quién consume esa colección**: desde `blocked-transitions-web`, la card de cada vivienda en
+  `/dashboard`. Es el único consumidor, y es lo que cierra el «que no me entere por un huésped» que
+  motivó la detección: la propietaria ve el aviso con su `READ_PROPERTIES` y el `PROPERTY_MANAGER`
+  ve además la acción que lo desatasca. Los literales viajan sin prosa precisamente porque esa
+  pantalla los pinta tal cual; el contrato de la pantalla vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### Idempotencia y no solapamiento
 
@@ -202,7 +223,14 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
 
 - WHEN un `NotificationLog` cumple `status = SENT`, `sla_deadline_at` no nulo y vencido, y
   `sla_breached = FALSE`, THE SYSTEM SHALL marcarlo incumplido y crear la notificación de
-  escalado que corresponda a su tipo.
+  escalado que corresponda a su tipo. Los dos tipos con política definida escalan a tipos
+  **distintos**: `CLEANING_TASK_ASSIGNED` produce `SLA_BREACH` y `TECHNICIAN_ASSIGNED` produce
+  `TECHNICIAN_NO_RESPONSE` desde `notification-writers-gap`, de modo que quien lee la bandeja
+  distingue un técnico que calla de cualquier otro plazo incumplido sin abrir la fila que lo
+  originó. La política sigue teniendo **dos** entradas: cambió lo que una produce, no cuántas hay.
+- THE SYSTEM SHALL mantener el `subject` de la fila de escalado como la constante `"SLA breach"`
+  en ambas ramas: es un hecho cierto de la fila —el plazo se incumplió— y lo que distingue el caso
+  es el `notification_type`, que es donde lo lee la bandeja.
 - THE SYSTEM SHALL crear el escalado en estado `PENDING` y no SHALL intentar entregarlo por
   ningún canal: la entrega es de `dispatch_notifications`, que drena las filas `PENDING` cada
   minuto. La costura entre encolar y entregar es deliberada.
@@ -216,6 +244,18 @@ Cómo se opera, cómo se lee su informe y qué límites tiene: [`docs/celery-job
   ese incumplimiento.
 - THE SYSTEM SHALL dirigir el escalado a cada `PROPERTY_MANAGER` activo del tenant, con una
   fila por cada uno, y WHERE no haya ninguno SHALL recurrir al `TENANT_OWNER`.
+- THE SYSTEM SHALL resolver esos destinatarios a través del servicio de dominio común
+  `RoleRecipients` y no con una consulta propia en línea. Este job fijó el patrón y desde
+  `notification-writers-gap` lo **comparte** en vez de encabezar copias de sí mismo
+  ([`access-notifications.md`](access-notifications.md) §El censo de escritores). Lo que **no**
+  se movió es lo que es suyo: el contador `recipients_truncated` del informe y la clave de log
+  `scheduler.escalation_recipients_truncated`, que nombra este sitio y no el helper. Es una
+  refactorización sin cambio observable —la caída al owner y el recuento de truncación ya
+  funcionaban así—, y su valor es que la pregunta deje de estar escrita dos veces.
+- THE SYSTEM SHALL conservar aquí la caída al `TENANT_OWNER` en vez de usar
+  `managers_or_owners`: el rol primario lo dicta la política del escalado y no está fijado a
+  `PROPERTY_MANAGER`, así que este job pide `active_holders` del rol que la política nombre y
+  recurre al owner sólo si ese rol no era ya el owner.
 - IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL dejar el incumplimiento **sin
   marcar** y registrarlo, de modo que se reintente hasta que alguien arregle el roster. Marcarlo
   lo volvería inescalable para siempre mientras la fila afirmaba haberse atendido.
