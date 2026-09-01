@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/shell-topbar-overflow-360
 implementation_sha: 7d5c6626ceaa3567324fc5d4f45788ee74110235
 pr_number:
 pr_url:
