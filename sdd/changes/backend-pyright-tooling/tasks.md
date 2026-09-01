@@ -30,7 +30,7 @@
 
 ## 3. Documentación operativa y límites de CI
 
-- [ ] 3.1 Documentar en el spec/documentación canónica que corresponda al archivar (`sdd/specs/backend-tooling.md` y, si procede, `sdd/specs/local-environment.md` o `sdd/specs/ci-backend-tests.md`) el cwd `backend`, `uv sync --frozen`, el preflight y el comando soportado `uv run pyright .`; dejar `uvx pyright` como camino no soportado. [R3, R4]
+- [x] 3.1 Documentar en documentación project-owned el cwd `backend`, `uv sync --frozen`, el preflight (`command -v pyright`, `uv run pyright --version`) y el comando soportado `uv run pyright .`, dejando `uvx pyright` como camino no soportado (entregado en `sdd/project.md` + nota de alcance CI en `sdd/specs/backend-ci.md`). La consolidación en el spec canónico dedicado (`sdd/specs/backend-tooling.md`, que no existe aún) se realiza al archivar vía `/sdd:archive` (fusión living-spec post-merge), per proposal Affected specs. [R3, R4]
 - [x] 3.2 Verificar que el change no modifica `.github/workflows/`, no crea un workflow nuevo y conserva intactos los comandos existentes de Pytest (Ruff no existe en el proyecto). [R3]
 - [x] 3.3 Verificar que el diff no contiene cambios bajo `backend/app/statements/`, `backend/tests/statements/` ni otros ficheros funcionales de `revenue-statements`. [R4]
 
