@@ -2,6 +2,49 @@
 
 ## Activo
 
+### 2026-09-01 — Re-review final: QA FAIL (2 hallazgos nuevos, no de H1-H7)
+
+Panel de certificación sobre `0ef4c05..abf8bec`: **architect PASS · security PASS · documentation
+PASS · qa FAIL**. i18n (H5) ya re-PASS esta sesión y tenancy/cicd sin cambios en su dominio desde su
+PASS. Los siete H1-H7 quedan **confirmados resueltos** por los cuatro reviewers (app arranca; 685
+passed; 29 test_api; H2/H7 verificados). QA, ahora que la capa API **sí** ejecuta, destapó dos cosas
+que el PASS de sección (revisado sobre un estado anterior que arrancaba) nunca ejercitó:
+
+- **QA-1 — [RESUELTO 2026-09-01, decisión del usuario: opción (i) — mantener contadores, enmendar
+  R2.1/R2.3]**: sin cambio de código en el endpoint (los contadores siguen, por R2.6 y el precedente
+  `price-recommendations`). Reconciliado: **R2.1** y **R2.3** en `proposal.md` reescritos para describir
+  el informe de barrido (batch: R2.2 admite `property_id` omitido → varias viviendas) en vez del "sobre
+  de `GET /{id}`", con nota de la decisión; docstring del router POST corregido (afirmaba "returns the
+  existing statement", ahora dice que la respuesta es el informe y el detalle se consulta con `GET`);
+  `openapi.json` + tipos frontend regenerados (diff de 1 línea). Verificado: `test_api.py` +
+  `test_use_cases.py` + `test_openapi_contract.py` = **67 passed**. Detalle original de QA-1:
+  ~~DECISIÓN (bloquea READY_FOR_PR)~~ `POST
+  /api/v1/owner-statements/generate` devuelve **sólo contadores** (`GenerationReportResponse` =
+  `{created, skipped, failed, consolidated_count, currency_mismatch}`, `schemas.py:162-175`,
+  `router.py:157-208`), no el statement. Pero **R2.1** exige "devolverla con el mismo sobre que
+  `GET /{id}`" y **R2.3** "responde con el statement existente y un mensaje que lo distingue". Tensión
+  real con **R2.6** (contadores, "igual que `POST /price-recommendations/generate`") y **R2.2**
+  (`property_id` opcional → varios statements). La implementación satisface R2.2/R2.6 pero no R2.1/R2.3,
+  y la tensión **nunca se reconcilió** en design/tasks/BLOCKED (QA lo buscó; 0 hits). Incluso el
+  docstring del router afirma "returns the existing statement", que el `response_model` contradice.
+  **Requiere decisión del usuario** — no se resuelve unilateralmente porque cambia el contrato del
+  endpoint. Opciones:
+  - **(i)** aceptar contadores-only y **enmendar R2.1/R2.3** (o waiver documentado) reconociendo que
+    el endpoint batch devuelve el reporte, no el sobre — sin cambio de código.
+  - **(ii)** añadir `statements: list[OwnerStatementResponse]` a `GenerationReportResponse` (los
+    generados/replay), cumpliendo R2.1+R2.3+R2.6 a la vez — cambio de schema+router+regenerar
+    openapi/tipos+tests. **(Recomendada.)**
+  - **(iii)** single-property devuelve el sobre, multi-property devuelve contadores (respuesta
+    condicional/unión) — más complejo, probablemente no vale la pena.
+- **QA-2 — [RESUELTO 2026-09-01] · gap de cobertura D6.3 en PATCH**: el guard de período cerrado del
+  PATCH (`use_cases.py:534-546`) estaba correcto pero sin test — el test `test_rejects_a_date_in_a_closed_period`
+  (en `TestUpdateAndDeleteExpense`) ejercitaba `create_expense`, no `update_expense`. **Fix aplicado**:
+  añadido `test_rejects_moving_a_date_into_a_closed_period` que crea en período abierto y hace PATCH
+  moviendo la `date` a julio cerrado → `NamedExpenseInClosedPeriodError`. Verificado: **5 passed**.
+
+**No se marca READY_FOR_PR**: QA FAIL. Reanudar tras la decisión de QA-1: aplicar (ii) o (i), re-correr
+QA focalizado, y si PASS seguir con `mark-local-verified` → `mark-ready --base main` → `validate-ship`.
+
 ### 2026-09-01 — /sdd:review veredicto FAIL (7 hallazgos)
 
 - **Tipo**: `decision` (bloquea `READY_FOR_PR`; requiere corregir código, steering, docs

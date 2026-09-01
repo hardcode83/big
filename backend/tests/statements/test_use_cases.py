@@ -380,6 +380,41 @@ class TestUpdateAndDeleteExpense:
                 date_=date(2026, 7, 12),  # inside the closed period
             )
 
+    async def test_rejects_moving_a_date_into_a_closed_period(
+        self, flow: Flow, world: World
+    ) -> None:
+        # D6.3 on the PATCH path (H2: 409 on both create and update). The expense is
+        # created in an open period, then a PATCH tries to move its `date` into a period
+        # that already has an OwnerStatement — the update must reject it too.
+        expense, _ = await flow.create_expense.execute(
+            tenant_id=world.tenant.id,
+            actor=actor_of(world),
+            now=NOW,
+            property_id=world.property.id,
+            category=ExpenseCategory.CLEANING,
+            description="August turnover",
+            amount=Decimal("20.00"),
+            date_=date(2026, 8, 12),  # open period, no statement
+        )
+        stmt = OwnerStatementModel(
+            id=uuid.uuid4(),
+            tenant_id=world.tenant.id,
+            property_id=world.property.id,
+            period_start=PERIOD_START,
+            period_end=PERIOD_END,
+            status=OwnerStatementStatus.DRAFT,
+        )
+        flow.session.add(stmt)
+        await flow.session.flush()
+        with pytest.raises(NamedExpenseInClosedPeriodError):
+            await flow.update_expense.execute(
+                tenant_id=world.tenant.id,
+                actor=actor_of(world),
+                now=NOW,
+                expense_id=expense.id,
+                date_=date(2026, 7, 12),  # move into the closed July period
+            )
+
     async def test_delete_succeeds_for_unconsolidated(self, flow: Flow, world: World) -> None:
         expense, _ = await flow.create_expense.execute(
             tenant_id=world.tenant.id,

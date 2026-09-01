@@ -72,14 +72,22 @@ Acceptance criteria:
 
 1. WHEN el manager invoca `POST /api/v1/owner-statements/generate` con un cuerpo
    `{property_id?, period_start, period_end}`, THE SYSTEM SHALL generar la liquidación
-   síncronamente y devolverla con el mismo sobre que `GET /{id}`.
+   síncronamente y devolver el **informe del barrido** (`created`, `skipped`, `failed`,
+   `consolidated_count`, `currency_mismatch`), igual que `POST /price-recommendations/generate`
+   (ver R2.6). El endpoint es un **batch** —R2.2 admite `property_id` omitido y genera varias
+   viviendas—, así que la respuesta son contadores, no el sobre de una única liquidación; el
+   detalle se consulta con `GET /owner-statements` o `GET /{id}`.
+   *(Reconciliado en review — decisión QA-1 opción (i), 2026-09-01: la implementación siguió el
+   precedente de `price-recommendations` y R2.6; la redacción original pedía "el mismo sobre que
+   `GET /{id}`" y esa tensión con R2.6 no se reconcilió en `/sdd:design`.)*
 2. WHERE el cuerpo nombra un `property_id`, THE SYSTEM SHALL limitarse a esa vivienda
    del tenant de la sesión; WHERE se omite, THE SYSTEM SHALL recorrer todas las
    propiedades `ACTIVE` del tenant.
 3. THE SYSTEM SHALL ser **idempotente** sobre la clave UNIQUE
    `(tenant_id, property_id, period_start, period_end)`: una segunda llamada
-   sobre el mismo período y vivienda responde con el statement existente y un
-   mensaje que lo distingue de la creación; `status` no muta.
+   sobre el mismo período y vivienda **la cuenta en `skipped`** (no en `created`) y no vuelve
+   a generar; `status` no muta. La idempotencia se observa por el contador del informe, no por
+   un cuerpo de statement. *(Reconciliado en review — QA-1 opción (i), 2026-09-01; ver R2.1.)*
 4. IF `property_id` nombra una vivienda de otro tenant, inactiva, o inexistente, THEN
    THE SYSTEM SHALL responder `422` con cuerpo constante por cada causa (análoga a
    `revenue-pricing` R2.5), y `404` queda reservado al recurso ausente por id.

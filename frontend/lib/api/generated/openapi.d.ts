@@ -640,7 +640,7 @@ export interface paths {
      * Generate owner statements now
      * @description The manual door of the monthly cron: the same generator, over the same period, so a manager who wants to close the month early does not wait for 02:00 UTC on day 1 (R2.1).
      *
-     * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` returns the existing statement and counts it in `skipped`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
+     * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` counts it in `skipped` and does not regenerate. The response is this batch report — counters, not a statement body; fetch the statement itself via `GET /owner-statements` or `GET /{id}`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
      *
      * **`currency_mismatch`** reports the `(property_id, period_start, period_end)` triples D3 aborted for non-EUR rows, with the offending `(row_id, currency, table)` list per triple (D3). No statement is partial — a single non-EUR row aborts the whole `(tenant, property, period)` (D3, R2).
      *
@@ -7623,7 +7623,7 @@ export interface operations {
    * Generate owner statements now
    * @description The manual door of the monthly cron: the same generator, over the same period, so a manager who wants to close the month early does not wait for 02:00 UTC on day 1 (R2.1).
    *
-   * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` returns the existing statement and counts it in `skipped`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
+   * **Idempotent on the unique key** `(tenant_id, property_id, period_start, period_end)` (R2.3, D6.1): a second call with the same `property_id` and `period_end` counts it in `skipped` and does not regenerate. The response is this batch report — counters, not a statement body; fetch the statement itself via `GET /owner-statements` or `GET /{id}`. The manual path is the **non-exempt** end of the rule-9 carve-out (D5/D12): it writes `OWNER_STATEMENT_GENERATED` to `AuditLog` with the caller as the actor, in addition to the `TimelineEvent` the cron path emits.
    *
    * **`currency_mismatch`** reports the `(property_id, period_start, period_end)` triples D3 aborted for non-EUR rows, with the offending `(row_id, currency, table)` list per triple (D3). No statement is partial — a single non-EUR row aborts the whole `(tenant, property, period)` (D3, R2).
    *
