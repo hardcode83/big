@@ -115,6 +115,11 @@ class TenantConfig:
     storage_type: StorageType = StorageType.LOCAL
     notification_email_enabled: bool = True
     notification_whatsapp_enabled: bool = False
+    # `revenue-reviews` R5.5: top-N bound for `GET /properties/{id}/reviews/summary`.
+    # Bounded `1..50` in the migration's CHECK constraint and re-validated through
+    # `TenantConfigPatch.ge=1, le=50` at the API. The default of 5 matches the design
+    # (D11) and what the spec documents as the visible cardinality.
+    review_recurring_issues_top_n: int = 5
 
     @classmethod
     def with_defaults(cls, *, tenant_id: uuid.UUID, now: datetime) -> "TenantConfig":
@@ -140,6 +145,7 @@ class TenantConfig:
         cleaning_photo_required: bool | object = _UNSET,
         notification_email_enabled: bool | object = _UNSET,
         notification_whatsapp_enabled: bool | object = _UNSET,
+        review_recurring_issues_top_n: int | object = _UNSET,
     ) -> dict[str, object]:
         candidates: dict[str, object] = {}
 
@@ -173,6 +179,12 @@ class TenantConfig:
         ):
             if value is not _UNSET:
                 candidates[field] = bool(value)
+        if review_recurring_issues_top_n is not _UNSET:
+            # Same ceiling the migration's CHECK enforces (`BETWEEN 1 AND 50`): the
+            # domain guard catches a wrong value before it reaches the driver.
+            candidates["review_recurring_issues_top_n"] = _require_top_n(
+                review_recurring_issues_top_n
+            )
 
         changed = {
             field: value
@@ -248,6 +260,24 @@ def _require_non_negative_int(value: object, field: str) -> int:
     number = _require_int(value, field)
     if number < 0:
         raise TenantValidationError(f"{field} cannot be negative")
+    return number
+
+
+#: Bounds on `review_recurring_issues_top_n` (R5.5). Mirrors the `CHECK` in
+#: `r3v1ew5a02_revenue_reviews_tenant_config.py` — `1` because zero issues is not "no
+#: issues, just an unhelpful summary"; `50` because a summary that asks for the top
+#: fifty tags is no longer a summary.
+_MIN_REVIEW_TOP_N = 1
+_MAX_REVIEW_TOP_N = 50
+
+
+def _require_top_n(value: object) -> int:
+    number = _require_int(value, "review_recurring_issues_top_n")
+    if not (_MIN_REVIEW_TOP_N <= number <= _MAX_REVIEW_TOP_N):
+        raise TenantValidationError(
+            f"review_recurring_issues_top_n must be between {_MIN_REVIEW_TOP_N} "
+            f"and {_MAX_REVIEW_TOP_N}, got {number}"
+        )
     return number
 
 

@@ -3,7 +3,16 @@ from datetime import datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import Boolean, DateTime, Enum, ForeignKey, Numeric, String, Uuid
+from sqlalchemy import (
+    Boolean,
+    DateTime,
+    Enum,
+    ForeignKey,
+    Integer,
+    Numeric,
+    String,
+    Uuid,
+)
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import Mapped, mapped_column
 
@@ -13,6 +22,11 @@ from app.reviews.domain.enums import ReviewChannel, ReviewSentiment, ReviewStatu
 
 class ReviewModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     __tablename__ = "reviews"
+    __table_args__ = (
+        # R5.3 listing: filter by `property_id` and order by `status`. The composite
+        # index speeds both the listing and the per-property summary (R5.5).
+        # Migration: `r3v1ew5a01_revenue_reviews.py`.
+    )
 
     property_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("properties.id", ondelete="RESTRICT")
@@ -26,7 +40,7 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     )
     reviewer_name: Mapped[str | None] = mapped_column(String(200), default=None)
     # No CHECK on the 1.0-5.0 range: §7.20 documents it in a comment but declares no
-    # constraint, and range validation belongs to the domain layer of `revenue` (D12).
+    # constraint, and range validation belongs to the domain layer of `reviews` (D15).
     rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), default=None)
     content: Mapped[str | None] = mapped_column(default=None)
     language: Mapped[str | None] = mapped_column(String(5), default=None)
@@ -41,6 +55,12 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
         server_default=ReviewStatus.NEW.value,
     )
     published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    #: R2.4 / D5 / OQ4: the counter that sustains "three attempts and park for manual
+    #: triage". The classifier increments it on each failure; the pipeline stops at
+    #: `MAX_CLASSIFICATION_ATTEMPTS` (in `app.reviews.domain.entities`).
+    classification_attempts: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
 
 
 class ReviewResponseDraftModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
@@ -48,11 +68,15 @@ class ReviewResponseDraftModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
 
     Scoped transitively through the mandatory, unique `review_id`. The global tenant
     filter matches on column presence, so it does NOT cover this table — any
-    repository touching it must join `reviews` explicitly (see the fifth limit in the
-    docstring of `_scope_statement_to_tenant`).
+    repository touching it must join `reviews` explicitly (see D10 and the
+    docstring of `infrastructure/repositories.py`).
     """
 
     __tablename__ = "review_response_drafts"
+    __table_args__ = (
+        # Migration: `r3v1ew5a01_revenue_reviews.py` declares the
+        # `uq_review_response_drafts_review_id` UNIQUE constraint on `review_id`.
+    )
 
     review_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("reviews.id", ondelete="RESTRICT"), unique=True
@@ -60,6 +84,11 @@ class ReviewResponseDraftModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     draft_content: Mapped[str] = mapped_column()
     language: Mapped[str] = mapped_column(String(5))
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
+    #: R3.5 / D5 / OQ4: bitácora de iteraciones del borrador. The entity mutates it on
+    #: every `edit()`. Provenance of "how many times a manager rewrote this", not state.
+    edits_count: Mapped[int] = mapped_column(
+        Integer, default=0, server_default="0", nullable=False
+    )
     approved_by: Mapped[uuid.UUID | None] = mapped_column(
         Uuid, ForeignKey("users.id", ondelete="SET NULL"), default=None
     )

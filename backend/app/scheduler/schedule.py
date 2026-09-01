@@ -61,6 +61,12 @@ CADENCES: dict[str, timedelta] = {
     # a call to whatever sits behind `IncidentClassifier` — and the day that is a real AI
     # provider, the cadence is the ceiling on what it is asked.
     "classify_incidents": timedelta(minutes=5),
+    # `revenue-reviews` (design D2). Same cadence and same reasoning as
+    # `classify_incidents`: PRD §18 declares the pipeline and says nothing about what
+    # triggers it. Five minutes is the ceiling on what the analyser is asked, and the
+    # lock that prevents two workers from classifying the same row is the same one
+    # `run_for_every_tenant` already holds (D16).
+    "classify_reviews": timedelta(minutes=5),
 }
 
 

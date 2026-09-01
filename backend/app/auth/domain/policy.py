@@ -145,6 +145,23 @@ class Permission(str, enum.Enum):
     READ_PRICE_RECOMMENDATIONS = "READ_PRICE_RECOMMENDATIONS"
     MANAGE_PRICE_RECOMMENDATIONS = "MANAGE_PRICE_RECOMMENDATIONS"
 
+    # Added by `revenue-reviews` (design D3). Five, in the same one-per-action shape
+    # `messaging-ai` and `cleaning` use: each verb the flow exposes gets its own
+    # permission rather than a generic `MANAGE_REVIEWS`, because R4.2 has different
+    # RBAC for `APPROVE`/`IGNORE`/`MARK_POSTED` and a single permission would force a
+    # caller to widen the gate when they wanted to keep it narrow.
+    #
+    # **`CREATE_REVIEW` is the manager's alone.** Reading is shared (`READ_REVIEWS`),
+    # the three terminal actions are shared too (`APPROVE_REVIEW`, `IGNORE_REVIEW`,
+    # `MARK_REVIEW_POSTED`), and the create is a manager operation — same pattern
+    # `_CONVERSATION_MANAGE` documents. `CLEANER` and `TECHNICIAN` get none of the
+    # five: a review response is not part of doing a cleaning or a repair.
+    READ_REVIEWS = "READ_REVIEWS"
+    CREATE_REVIEW = "CREATE_REVIEW"
+    APPROVE_REVIEW = "APPROVE_REVIEW"
+    IGNORE_REVIEW = "IGNORE_REVIEW"
+    MARK_REVIEW_POSTED = "MARK_REVIEW_POSTED"
+
 
 _SELF_SERVICE = frozenset(
     {
@@ -233,6 +250,28 @@ _PRICING_RULE_MANAGE = frozenset(
 _PRICE_RECOMMENDATION_MANAGE = frozenset(
     {Permission.READ_PRICE_RECOMMENDATIONS, Permission.MANAGE_PRICE_RECOMMENDATIONS}
 )
+# `revenue-reviews` D3. Approving, ignoring and marking-as-posted are shared with
+# the owner — she is the one who has the right to decide what goes out under her own
+# name, even when no manager is around. Only `CREATE_REVIEW` is the manager's alone,
+# mirroring `_CONVERSATION_MANAGE` (the inbox operation is the manager's, the owner's
+# role is to ratify or shelve).
+_REVIEW_OPERATE = frozenset(
+    {
+        Permission.READ_REVIEWS,
+        Permission.APPROVE_REVIEW,
+        Permission.IGNORE_REVIEW,
+        Permission.MARK_REVIEW_POSTED,
+    }
+)
+_REVIEW_MANAGE = frozenset(
+    {
+        Permission.READ_REVIEWS,
+        Permission.CREATE_REVIEW,
+        Permission.APPROVE_REVIEW,
+        Permission.IGNORE_REVIEW,
+        Permission.MARK_REVIEW_POSTED,
+    }
+)
 
 # Every role that can authenticate may read its own profile and end its own
 # session (PRD §6). Role-differentiated permissions belong to the modules that
@@ -292,6 +331,11 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # Mode 1 and from whose money the guardrails bound.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Sees what her guests write, and decides what goes out under her own name
+        # (approve, ignore, mark posted). `CREATE_REVIEW` stays with the manager, the
+        # same shape `_CONVERSATION_MANAGE` documents — operating the inbox is the
+        # manager's, the owner's role is to ratify or shelve.
+        | _REVIEW_OPERATE
     ),
     UserRole.PROPERTY_MANAGER: (
         _SELF_SERVICE
@@ -323,6 +367,9 @@ ROLE_PERMISSIONS: Mapping[UserRole, frozenset[Permission]] = {
         # changing one. Same bundles as the owner, which is the divergence D11 records.
         | _PRICING_RULE_MANAGE
         | _PRICE_RECOMMENDATION_MANAGE
+        # Operates the review band: creates rows, approves drafts, ignores noise, marks
+        # posted manually. PRD §18 and R4.2 give every action of the flow to the manager.
+        | _REVIEW_MANAGE
     ),
     UserRole.CLEANER: _SELF_SERVICE | _CLEANING_EXECUTE,
     # Until `maintenance` this role held `_SELF_SERVICE` and nothing else: it existed and

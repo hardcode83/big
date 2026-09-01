@@ -292,6 +292,12 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   ([`messaging-ai.md`](messaging-ai.md)). Tampoco tocaron el allowlist anónimo: una conversación
   con un huésped se lee y se escribe siempre desde una sesión autenticada, porque el huésped no
   es quien llama — llama el panel, o la API, con una persona detrás.
+- **Las siete rutas de `revenue-reviews` entran igual** (2026-09-01): seis bajo
+  `/api/v1/reviews` y una bajo `/api/v1/properties/{id}/reviews/summary`, repartidas entre
+  `READ_REVIEWS`, `CREATE_REVIEW`, `APPROVE_REVIEW`, `IGNORE_REVIEW` y `MARK_REVIEW_POSTED`
+  ([`revenue-reviews.md`](../sdd/changes/revenue-reviews/proposal.md)). Tampoco tocan el
+  allowlist anónimo: una reseña la da de alta un manager, la lee un manager o la propietaria,
+  y la publica una persona — el flujo no tiene superficie sin token.
 
 ## Key files
 

@@ -34,6 +34,8 @@ CONFIG_WRITABLE = frozenset(
         "cleaning_photo_required",
         "notification_email_enabled",
         "notification_whatsapp_enabled",
+        # `revenue-reviews` R5.5: bound for the per-property recurring-issues summary.
+        "review_recurring_issues_top_n",
     }
 )
 
@@ -112,6 +114,7 @@ class SqlAlchemyTenantConfigRepository:
                 storage_type=created.storage_type,
                 notification_email_enabled=created.notification_email_enabled,
                 notification_whatsapp_enabled=created.notification_whatsapp_enabled,
+                review_recurring_issues_top_n=created.review_recurring_issues_top_n,
             )
         )
         await self._session.flush()
@@ -173,4 +176,5 @@ def _to_config(model: TenantConfigModel) -> TenantConfig:
         storage_type=model.storage_type,
         notification_email_enabled=model.notification_email_enabled,
         notification_whatsapp_enabled=model.notification_whatsapp_enabled,
+        review_recurring_issues_top_n=model.review_recurring_issues_top_n,
     )
