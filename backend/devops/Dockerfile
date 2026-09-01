@@ -13,6 +13,18 @@ COPY pyproject.toml uv.lock ./
 # --- dev: used by docker-compose (target: dev), hot reload via bind mount ---
 FROM base AS dev
 
+# libatomic1 is the native runtime dependency of the Node.js binary pyright drives.
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y libatomic1 \
+    && rm -rf /var/lib/apt/lists/*
+
+# Pyright's Node runtime comes from the `nodejs-wheel` dev dependency (pinned in
+# uv.lock), installed into /app/.venv/bin and on PATH. pyright uses the nodejs-wheel
+# package directly when it is importable (its default strategy), so it never fetches
+# Node via nodeenv. PYRIGHT_PYTHON_GLOBAL_NODE=1 is an explicit belt-and-suspenders
+# that also pins it to the PATH `node` should that strategy ever change.
+ENV PYRIGHT_PYTHON_GLOBAL_NODE=1
+
 RUN uv sync --frozen
 COPY . .
 
