@@ -2165,6 +2165,91 @@
         "title": "CreateReservationRequest",
         "type": "object"
       },
+      "CreateReviewRequest": {
+        "additionalProperties": false,
+        "description": "R5.1 — what the manager posts to `POST /reviews`.",
+        "properties": {
+          "channel": {
+            "$ref": "#/components/schemas/ReviewChannel"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 5,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "maximum": 5.0,
+                "minimum": 1.0,
+                "type": "number"
+              },
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "reviewer_name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Name"
+          }
+        },
+        "required": [
+          "property_id",
+          "channel"
+        ],
+        "title": "CreateReviewRequest",
+        "type": "object"
+      },
       "CreateUserRequest": {
         "additionalProperties": false,
         "properties": {
@@ -3697,6 +3782,7 @@
           "CHECKOUT_REMINDER",
           "PRICE_RECOMMENDATION",
           "SLA_BREACH",
+          "REVIEW_RESPONSE_APPROVED",
           "PASSWORD_RESET_REQUESTED"
         ],
         "title": "NotificationType",
@@ -4851,6 +4937,22 @@
         "title": "PropertyStatus",
         "type": "string"
       },
+      "RecurringIssueTag": {
+        "description": "The closed set of labels `reviews.recurring_issues` may carry (R2.2, design D7).\n\nNine members and not a `str` because the column is the only thing the manager uses to\ndecide what to fix, and an invented label cannot reach it. PRD §18 names them in prose;\nthis enum is the spelling the table accepts, and the test\n`tests/reviews/test_recurring_issues_vocabulary.py` walks `backend/app/reviews/infrastructure/`\nto ensure no adapter smuggles an unknown value past the constructor.\n\n`OTHER` is the degradation sink: an adapter that invents a tag is dropped to `OTHER`\nby `Review.__post_init__` with a `logger.warning`, so the catalogue can be widened\ndeliberately rather than silently accumulating synonyms.",
+        "enum": [
+          "WIFI",
+          "NOISE",
+          "CLEANLINESS",
+          "ACCESS",
+          "COMMUNICATION",
+          "LOCATION",
+          "VALUE",
+          "AMENITIES",
+          "OTHER"
+        ],
+        "title": "RecurringIssueTag",
+        "type": "string"
+      },
       "RefreshRequest": {
         "additionalProperties": false,
         "properties": {
@@ -4864,6 +4966,26 @@
           "refresh_token"
         ],
         "title": "RefreshRequest",
+        "type": "object"
+      },
+      "RegenerateReviewDraftRequest": {
+        "additionalProperties": false,
+        "description": "R3.5 — the body of `POST /reviews/{id}/response` (regenerate the draft).",
+        "properties": {
+          "language": {
+            "anyOf": [
+              {
+                "maxLength": 5,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          }
+        },
+        "title": "RegenerateReviewDraftRequest",
         "type": "object"
       },
       "RegisterCodeRequest": {
@@ -5699,6 +5821,377 @@
         "title": "RespondOwnerApprovalRequest",
         "type": "object"
       },
+      "ReviewChannel": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Review.channel) without a named block (§7.20). Not the same enum as\nConversationChannel or NotificationChannel — different values.",
+        "enum": [
+          "AIRBNB",
+          "BOOKING",
+          "GOOGLE",
+          "MANUAL",
+          "OTHER"
+        ],
+        "title": "ReviewChannel",
+        "type": "string"
+      },
+      "ReviewDraftResponse": {
+        "description": "The draft of one review (R5.4).",
+        "properties": {
+          "ai_generated": {
+            "title": "Ai Generated",
+            "type": "boolean"
+          },
+          "approved_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved At"
+          },
+          "approved_by": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Approved By"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "draft_content": {
+            "title": "Draft Content",
+            "type": "string"
+          },
+          "edits_count": {
+            "title": "Edits Count",
+            "type": "integer"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "title": "Language",
+            "type": "string"
+          },
+          "review_id": {
+            "format": "uuid",
+            "title": "Review Id",
+            "type": "string"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "review_id",
+          "draft_content",
+          "language",
+          "ai_generated",
+          "edits_count",
+          "approved_by",
+          "approved_at",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ReviewDraftResponse",
+        "type": "object"
+      },
+      "ReviewPageResponse": {
+        "description": "PRD §23 envelope for the listing endpoint.",
+        "properties": {
+          "items": {
+            "items": {
+              "$ref": "#/components/schemas/ReviewResponse"
+            },
+            "title": "Items",
+            "type": "array"
+          },
+          "page": {
+            "title": "Page",
+            "type": "integer"
+          },
+          "per_page": {
+            "title": "Per Page",
+            "type": "integer"
+          },
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "items",
+          "total",
+          "page",
+          "per_page"
+        ],
+        "title": "ReviewPageResponse",
+        "type": "object"
+      },
+      "ReviewResponse": {
+        "description": "What an authenticated operator may see about one review.\n\nFields are enumerated rather than dumped from the entity, so a `from_attributes`\ndump would never publish whatever `Review` grows next.",
+        "properties": {
+          "ai_summary": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Ai Summary"
+          },
+          "channel": {
+            "$ref": "#/components/schemas/ReviewChannel"
+          },
+          "classification_attempts": {
+            "title": "Classification Attempts",
+            "type": "integer"
+          },
+          "content": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Content"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "language": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Language"
+          },
+          "property_id": {
+            "format": "uuid",
+            "title": "Property Id",
+            "type": "string"
+          },
+          "published_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Published At"
+          },
+          "rating": {
+            "anyOf": [
+              {
+                "pattern": "^(?!^[-+.]*$)[+-]?0*\\d*\\.?\\d*$",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Rating"
+          },
+          "recurring_issues": {
+            "items": {
+              "$ref": "#/components/schemas/RecurringIssueTag"
+            },
+            "title": "Recurring Issues",
+            "type": "array"
+          },
+          "reservation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reservation Id"
+          },
+          "reviewer_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reviewer Name"
+          },
+          "sentiment": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReviewSentiment"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "status": {
+            "$ref": "#/components/schemas/ReviewStatus"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "property_id",
+          "channel",
+          "reviewer_name",
+          "rating",
+          "content",
+          "language",
+          "sentiment",
+          "ai_summary",
+          "recurring_issues",
+          "status",
+          "published_at",
+          "created_at",
+          "updated_at",
+          "classification_attempts",
+          "reservation_id"
+        ],
+        "title": "ReviewResponse",
+        "type": "object"
+      },
+      "ReviewResponseActionRequest": {
+        "additionalProperties": false,
+        "description": "R3.5 / R4.2 — the body of `PATCH /reviews/{id}/response`.\n\n`action = EDIT` carries a `draft_content`; the other three do not.",
+        "properties": {
+          "action": {
+            "enum": [
+              "APPROVE",
+              "IGNORE",
+              "MARK_POSTED",
+              "EDIT"
+            ],
+            "title": "Action",
+            "type": "string"
+          },
+          "draft_content": {
+            "anyOf": [
+              {
+                "maxLength": 4000,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Draft Content"
+          }
+        },
+        "required": [
+          "action"
+        ],
+        "title": "ReviewResponseActionRequest",
+        "type": "object"
+      },
+      "ReviewSentiment": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Review.sentiment) without a named block (§7.20).",
+        "enum": [
+          "POSITIVE",
+          "NEUTRAL",
+          "NEGATIVE"
+        ],
+        "title": "ReviewSentiment",
+        "type": "string"
+      },
+      "ReviewStatus": {
+        "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(Review.status) without a named block (§7.20).",
+        "enum": [
+          "NEW",
+          "DRAFTED",
+          "APPROVED",
+          "POSTED_MANUALLY",
+          "IGNORED"
+        ],
+        "title": "ReviewStatus",
+        "type": "string"
+      },
+      "ReviewSummaryResponse": {
+        "description": "R5.5 — the per-property card the dashboard renders.",
+        "properties": {
+          "by_recurring_issue": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/RecurringIssueTag"
+            },
+            "title": "By Recurring Issue",
+            "type": "object"
+          },
+          "by_sentiment": {
+            "additionalProperties": {
+              "type": "integer"
+            },
+            "propertyNames": {
+              "$ref": "#/components/schemas/ReviewSentiment"
+            },
+            "title": "By Sentiment",
+            "type": "object"
+          },
+          "top_n": {
+            "title": "Top N",
+            "type": "integer"
+          },
+          "window_days": {
+            "title": "Window Days",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "window_days",
+          "top_n",
+          "by_sentiment",
+          "by_recurring_issue"
+        ],
+        "title": "ReviewSummaryResponse",
+        "type": "object"
+      },
       "RowErrorResponse": {
         "description": "One row the import could not take, with what a person needs to fix it.",
         "properties": {
@@ -6123,6 +6616,19 @@
             ],
             "title": "Owner Approval Threshold Eur"
           },
+          "review_recurring_issues_top_n": {
+            "anyOf": [
+              {
+                "maximum": 50.0,
+                "minimum": 1.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Review Recurring Issues Top N"
+          },
           "sla_critical_minutes": {
             "anyOf": [
               {
@@ -6207,6 +6713,10 @@
             "title": "Owner Approval Threshold Eur",
             "type": "string"
           },
+          "review_recurring_issues_top_n": {
+            "title": "Review Recurring Issues Top N",
+            "type": "integer"
+          },
           "sla_critical_minutes": {
             "title": "Sla Critical Minutes",
             "type": "integer"
@@ -6240,7 +6750,8 @@
           "cleaning_photo_required",
           "storage_type",
           "notification_email_enabled",
-          "notification_whatsapp_enabled"
+          "notification_whatsapp_enabled",
+          "review_recurring_issues_top_n"
         ],
         "title": "TenantConfigResponse",
         "type": "object"
@@ -6420,6 +6931,11 @@
           "REVIEW_IMPORTED",
           "REVIEW_RESPONSE_DRAFTED",
           "REVIEW_RESPONSE_APPROVED",
+          "REVIEW_CREATED",
+          "REVIEW_DRAFT_EDITED",
+          "REVIEW_CLASSIFIED_LOW_CONFIDENCE",
+          "REVIEW_IGNORED",
+          "REVIEW_POSTED_MANUALLY",
           "SLA_BREACH_WARNING",
           "NOTIFICATION_SENT",
           "NOTIFICATION_FAILED",
@@ -14035,6 +14551,87 @@
         ]
       }
     },
+    "/api/v1/properties/{property_id}/reviews/summary": {
+      "get": {
+        "description": "R5.5 — sentiment histogram and top-N recurring-issue counts of the property's reviews in the last 90 days. `top_n` defaults to the tenant's `review_recurring_issues_top_n`.",
+        "operationId": "list_reviews_summary_for_property_api_v1_properties__property_id__reviews_summary_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "property_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Property Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "query",
+            "name": "window_days",
+            "required": false,
+            "schema": {
+              "default": 90,
+              "maximum": 365,
+              "minimum": 1,
+              "title": "Window Days",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewSummaryResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Per-property review summary",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
     "/api/v1/properties/{property_id}/state": {
       "get": {
         "description": "The light endpoint of PRD §23:1942, for refreshing an indicator without fetching the aggregate. Returns the canonical `PropertyOperationalState` literal — never translated — and the ISO-8601 UTC instant of the last transition, both **read** and neither recomputed: the state is whatever `PropertyStateMachine` last wrote. `last_transition_at` is `null` for a property that has never moved, because creation is not a transition. A property of another tenant answers `404`, indistinguishable from one that does not exist.",
@@ -14767,6 +15364,582 @@
         "summary": "Report a stay to SES.Hospedajes",
         "tags": [
           "legal"
+        ]
+      }
+    },
+    "/api/v1/reviews": {
+      "get": {
+        "description": "The inbox. Filtered by `property_id`, `channel`, `sentiment`, `status`, `rating_min`/`rating_max` and `date_from`/`date_to`, paginated with `page`/`per_page` (PRD §23). Ordered by `published_at` descending with **nulls last** — a review without a publication date must not sit above the ones that do.",
+        "operationId": "list_reviews_api_v1_reviews_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "page",
+            "required": false,
+            "schema": {
+              "default": 1,
+              "maximum": 100000,
+              "minimum": 1,
+              "title": "Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "per_page",
+            "required": false,
+            "schema": {
+              "default": 20,
+              "maximum": 100,
+              "minimum": 1,
+              "title": "Per Page",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "property_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Property Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "channel",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewChannel"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Channel"
+            }
+          },
+          {
+            "in": "query",
+            "name": "sentiment",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewSentiment"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Sentiment"
+            }
+          },
+          {
+            "in": "query",
+            "name": "status",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/ReviewStatus"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Status"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rating_min",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rating Min"
+            }
+          },
+          {
+            "in": "query",
+            "name": "rating_max",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "number"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Rating Max"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_from",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date From"
+            }
+          },
+          {
+            "in": "query",
+            "name": "date_to",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Date To"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewPageResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "List reviews",
+        "tags": [
+          "reviews"
+        ]
+      },
+      "post": {
+        "description": "R5.1 — the manager creates a review manually (no PMS adapter in this change). The pipeline runs asynchronously; the row is born `NEW` with `sentiment = NEUTRAL`, `ai_summary = NULL` and `recurring_issues = []`.",
+        "operationId": "create_review_api_v1_reviews_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateReviewRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Create a review",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}": {
+      "get": {
+        "description": "R5.4 — one review, with the `404` indistinguishability of R1.3.",
+        "operationId": "get_review_api_v1_reviews__review_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get a review",
+        "tags": [
+          "reviews"
+        ]
+      }
+    },
+    "/api/v1/reviews/{review_id}/response": {
+      "get": {
+        "description": "R5.4 — the draft of one review, or `404` indistinguishably (the same response is the answer for 'no review', 'another tenant' and 'role cannot read').",
+        "operationId": "get_review_draft_api_v1_reviews__review_id__response_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Get the draft of a review",
+        "tags": [
+          "reviews"
+        ]
+      },
+      "patch": {
+        "description": "R3.5 / R4.2 — `action` picks the verb. `EDIT` requires `draft_content`; the others do not.",
+        "operationId": "act_on_review_response_api_v1_reviews__review_id__response_patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ReviewResponseActionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Act on the review response (approve / ignore / mark posted / edit)",
+        "tags": [
+          "reviews"
+        ]
+      },
+      "post": {
+        "description": "R3.5 / D5 — replace the existing draft with a new one in a single transaction. `ai_generated` stays `TRUE`.",
+        "operationId": "regenerate_review_draft_api_v1_reviews__review_id__response_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "review_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Review Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/RegenerateReviewDraftRequest"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ],
+                "title": "Body"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ReviewDraftResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Regenerate the draft of a review",
+        "tags": [
+          "reviews"
         ]
       }
     },

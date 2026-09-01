@@ -133,14 +133,21 @@ def test_mark_drafted_moves_new_to_drafted() -> None:
 
 
 @pytest.mark.parametrize(
-    ("method", "expected_target"),
+    ("method", "start_status", "expected_target"),
     [
-        ("approve", ReviewStatus.APPROVED),
-        ("ignore", ReviewStatus.IGNORED),
+        # Each transition starts from its legal origin (R4.1, D4): a draft must exist
+        # before approval, and `ignore` is legal from both NEW and DRAFTED — only the
+        # NEW origin is exercised here; the DRAFTED origin has its own test below.
+        ("approve", ReviewStatus.DRAFTED, ReviewStatus.APPROVED),
+        ("ignore", ReviewStatus.NEW, ReviewStatus.IGNORED),
     ],
 )
-def test_legal_transitions_pass(method: str, expected_target: ReviewStatus) -> None:
-    review = _review()
+def test_legal_transitions_pass(
+    method: str,
+    start_status: ReviewStatus,
+    expected_target: ReviewStatus,
+) -> None:
+    review = _review(status=start_status)
     now = datetime.now(timezone.utc)
     getattr(review, method)(now=now)
     assert review.status is expected_target

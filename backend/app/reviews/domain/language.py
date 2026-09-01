@@ -75,11 +75,17 @@ def fold(text: str) -> str:
     return " ".join(_WORD.findall(stripped))
 
 
-def _score(content: str, words: set[str]) -> int:
-    spanish = len(words & _SPANISH_WORDS) + sum(
-        1 for char in _SPANISH_CHARACTERS if char in content.lower()
-    )
-    return spanish
+def _spanish_score(content: str, words: set[str]) -> int:
+    """Count Spanish markers, character-set first then word-set.
+
+    The character set (`ñ`, `á`, `¿`, `¡`, …) is the strongest signal: `¿` and `¡` appear
+    in no English text and stay visible after the accent fold strips everything else.
+    Counting them on the raw content (before `fold`) is what makes `detect("¿?")` return
+    `"es"` — `fold` strips them because they are not `[a-z0-9]`, and bailing on an empty
+    fold would lose them.
+    """
+    characters = sum(1 for char in _SPANISH_CHARACTERS if char in content.lower())
+    return characters + len(words & _SPANISH_WORDS)
 
 
 def detect(content: str | None) -> str | None:
@@ -93,10 +99,8 @@ def detect(content: str | None) -> str | None:
     if content is None:
         return None
     folded = fold(content)
-    if not folded:
-        return None
-    words = set(folded.split())
-    spanish = _score(content, words)
+    words = set(folded.split()) if folded else set()
+    spanish = _spanish_score(content, words)
     english = len(words & _ENGLISH_WORDS)
 
     if spanish == 0 and english == 0:

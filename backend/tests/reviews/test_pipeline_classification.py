@@ -29,6 +29,7 @@ from app.reviews.infrastructure.repositories import (
     SqlAlchemyReviewResponseDraftRepository,
 )
 from app.tenants.infrastructure.models import TenantConfigModel
+from app.timeline.domain.repositories import TimelineFilters
 from tests.reviews.conftest import (
     seed_draft,
     seed_property,
@@ -61,9 +62,11 @@ async def _seed_tenant_with_config(db_session, *, threshold: Decimal):
 async def _setup(db_session, *, threshold=Decimal("0.75")):
     from app.core.unit_of_work import SqlAlchemyUnitOfWork
 
-    from app.audit.infrastructure.repositories import SqlAlchemyAuditLogRepository
     from app.tenants.infrastructure.repositories import SqlAlchemyTenantConfigRepository
-    from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
+    from app.timeline.infrastructure.repositories import (
+        SqlAlchemyTimelineEventRepository,
+        SqlAlchemyTimelineEventReader,
+    )
 
     tenant = await _seed_tenant_with_config(db_session, threshold=threshold)
     prop = await seed_property(db_session, tenant, "REDES11")
@@ -73,7 +76,7 @@ async def _setup(db_session, *, threshold=Decimal("0.75")):
         analyzer=MockReviewAnalyzer(),
         draft_generator=MockReviewDraftGenerator(),
         configs=SqlAlchemyTenantConfigRepository(db_session),
-        audit=SqlAlchemyAuditLogRepository(db_session),
+        audit_factory=None,  # R1.7 audit deferred to a follow-up (matches dependencies.py)
         timeline=SqlAlchemyTimelineEventRepository(db_session),
         uow=SqlAlchemyUnitOfWork(db_session),
     )
@@ -118,7 +121,7 @@ async def test_low_confidence_clears_the_three_ai_fields_and_emits_low_confidenc
 ) -> None:
     """R2.3: below the tenant's threshold the row carries `sentiment`, `ai_summary=None`,
     `recurring_issues=[]`, and a `REVIEW_CLASSIFIED_LOW_CONFIDENCE` event exists."""
-    from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventRepository
+    from app.timeline.infrastructure.repositories import SqlAlchemyTimelineEventReader
 
     # A threshold of `0.99` means every mock verdict (max 0.95) lands below it.
     tenant, prop, use_case = await _setup(db_session, threshold=Decimal("0.99"))
@@ -138,11 +141,15 @@ async def test_low_confidence_clears_the_three_ai_fields_and_emits_low_confidenc
     assert refreshed.ai_summary is None
     assert refreshed.recurring_issues == ()
 
-    timeline_repo = SqlAlchemyTimelineEventRepository(db_session)
-    events = await timeline_repo.list_for_property(
-        tenant_id=tenant.id, property_id=prop.id, page=1, per_page=20
+    timeline_repo = SqlAlchemyTimelineEventReader(db_session)
+    page = await timeline_repo.list_for_property(
+        tenant_id=tenant.id,
+        property_id=prop.id,
+        filters=TimelineFilters(),
+        page=1,
+        per_page=20,
     )
-    event_types = [e.event_type.value for e in events]
+    event_types = [e.event_type.value for e in page.items]
     assert "REVIEW_CLASSIFIED_LOW_CONFIDENCE" in event_types
 
 

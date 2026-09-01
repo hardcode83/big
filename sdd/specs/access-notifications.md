@@ -305,9 +305,9 @@ status = 'PENDING' AND sla_deadline_at < now()`.
 
 ### El censo de escritores, y la forma común de todos ellos
 
-Diecisiete miembros de `NotificationType`, **trece con escritor de producción y cuatro sin él**.
 Es el hogar del censo porque es el hogar del emisor; quién escribe qué lo atribuye la tabla de la
-regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué forma.
+regla 11 de `steering/security.md` —este módulo no cuenta aquí para no duplicar la lista, y el
+test `test_writer_census.py` la mide sobre el AST completo, no sobre esta prosa.
 
 - THE SYSTEM SHALL escribir toda fila de `notification_logs` que nazca en el emisor con
   `status = PENDING` y `channel = IN_APP`, y SHALL no intentar entregarla: la entrega es de
@@ -370,16 +370,12 @@ escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
 `test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
 escribiendo el nombre en un comentario.
 
-**Los trece con escritor**: `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`, `CLEANING_COMPLETED`,
-`CLEANING_FAILED`, `INCIDENT_CREATED_CRITICAL`, `INCIDENT_CREATED_HIGH`, `OWNER_APPROVAL_REQUIRED`,
-`TECHNICIAN_ASSIGNED`, `TECHNICIAN_NO_RESPONSE`, `GUEST_ESCALATION`, `PRICE_RECOMMENDATION`,
-`SLA_BREACH` y `PASSWORD_RESET_REQUESTED`. **Los cuatro sin escritor**, cada uno con su dueño
-declarado: `LOCK_ALERT`, que espera una superficie de importación de cerraduras que no existe, y
-los tres recordatorios al huésped —`CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`,
-`CHECKOUT_REMINDER`—, que son de `guest-scheduled-comms` y no tienen canal al huésped hasta que lo
-haya. Los dos tipos de texto libre que **no** son miembros del enum —`INCIDENT_REJECTED` y
-`LEGAL_REGISTRATION_FAILED`, sobre la columna `String(100)`— quedan fuera del censo por
-construcción: no hay `NotificationType.<X>` que casar.
+**Los catorce con escritor y los cuatro sin él** viven en la tabla de la regla 11 de
+`steering/security.md` — este módulo no los enumera aquí para no duplicar el censo; la única
+excepción nominal a PRD §14 que añade `revenue-reviews` es `REVIEW_RESPONSE_APPROVED`, con
+escritor declarado en `reviews/domain/notifications.py`. Los dos tipos de texto libre que **no**
+son miembros del enum —`INCIDENT_REJECTED` y `LEGAL_REGISTRATION_FAILED`, sobre la columna
+`String(100)`— quedan fuera del censo por construcción: no hay `NotificationType.<X>` que casar.
 
 ### La bandeja in-app
 
@@ -523,12 +519,13 @@ sobre datos de registro policial, y llegan con la integración real.
 resuelve a nada: una presentación fallida avisa a los managers y no escala a nadie. Es deliberado
 —inventar un tipo del PRD sería peor— y queda anotado como deuda.
 
-El enum `NotificationType` ya no tiene dieciséis miembros sino **diecisiete**:
-`auth-account-recovery` añadió `PASSWORD_RESET_REQUESTED`, declarándolo como divergencia
-explícita de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de
-PRD §8.3. Ese decimoséptimo tampoco tiene escalado, y en su caso **no es deuda**: una
-recuperación de contraseña no tiene plazo que incumplir, así que su fila se escribe sin
-`sla_deadline_at` a propósito. Cuántos de los diecisiete tienen escritor —y qué guardián lo
+El enum `NotificationType` ya no tiene dieciséis miembros sino **dieciocho**: `auth-account-recovery`
+añadió `PASSWORD_RESET_REQUESTED` y `revenue-reviews` añadió `REVIEW_RESPONSE_APPROVED`,
+ambos declarados como divergencia explícita de PRD §14 igual que esta capacidad declaró sus dos
+jobs frente a los cuatro de PRD §8.3. Ninguno de los dos tiene escalado, y en ambos casos **no es
+deuda** — una recuperación de contraseña y una aprobación de respuesta son eventos sin plazo
+que incumplir —, así que sus filas se escriben sin `sla_deadline_at` a propósito. Qué guardián
+mide el conjunto de escritores y cómo lo hace
 mide— vive en «El censo de escritores», más arriba.
 
 ### Protección del dato de documento
@@ -684,13 +681,9 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   `notification-writers-gap`: `_POLICY` sigue teniendo las mismas dos entradas —lo que cambió es
   el tipo que **produce** una de ellas—, y `TECHNICIAN_NO_RESPONSE` ya era miembro sin escalado
   antes de tener escritor. Cada uno recibe el suyo en el change que le da un `sla_deadline_at`, no
-  aquí. El decimoséptimo miembro del enum (`PASSWORD_RESET_REQUESTED`, de
-  `auth-account-recovery`) no cuenta entre ellos: no tener plazo es su comportamiento correcto, no
-  una pieza pendiente.
-- **Cuatro tipos siguen sin escritor**, y ninguno es deuda de esta capacidad: `LOCK_ALERT` espera
-  una superficie de importación de cerraduras, y los tres recordatorios al huésped son de
-  `guest-scheduled-comms`. El test de censo los fija por nombre, así que la lista no puede
-  pudrirse en silencio como se pudrió antes de medirse.
+  aquí. Los dos miembros añadidos al enum como divergencia de PRD §14 —`PASSWORD_RESET_REQUESTED`
+  de `auth-account-recovery` y `REVIEW_RESPONSE_APPROVED` de `revenue-reviews`— no cuentan entre
+  los pendientes: no tener plazo es su comportamiento correcto, no una pieza pendiente.
 - **Valores de enum que nadie escribe todavía**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.

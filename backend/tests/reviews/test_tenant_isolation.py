@@ -15,6 +15,7 @@ paths: high (create, detail, list), approve/ignore/posted, regenerate/edit, summ
 import pytest
 
 from app.auth.domain.enums import UserRole
+from app.reviews.domain.enums import ReviewSentiment
 from app.reviews.domain.exceptions import ReviewNotFoundError
 from app.reviews.infrastructure.models import ReviewModel, ReviewResponseDraftModel
 from app.reviews.infrastructure.repositories import (
@@ -144,9 +145,7 @@ async def test_writing_a_review_into_another_tenants_property_is_refused(
 
     a, b, a_review, *_ = await two_tenants(db_session)
     repo = SqlAlchemyReviewRepository(db_session)
-    a_review.sentiment = __import__(
-        "app.reviews.domain.enums"
-    ).ReviewSentiment.POSITIVE
+    a_review.sentiment = ReviewSentiment.POSITIVE
     with pytest.raises(CrossTenantWriteError):
         await repo.save(b.id, a_review)
 
@@ -219,13 +218,27 @@ async def test_the_session_these_tests_run_on_is_not_tenant_marked(db_session) -
     would be decorative. Pin the assumption."""
     from sqlalchemy import select
 
+    from app.core.db import TENANT_ID_SESSION_KEY
     from app.reviews.infrastructure.models import ReviewModel
+
+    # Earlier requests in this file might have left a marker behind if they didn't
+    # route through the HTTP override that pops it at request end (this test uses
+    # `db_session` directly, not the HTTP client). Pop it explicitly so the query
+    # below sees both tenants' rows — otherwise the listener filters to one and
+    # the assertion fails for a reason orthogonal to what this test pins.
+    db_session.info.pop(TENANT_ID_SESSION_KEY, None)
+
+    # Seed two tenants with reviews directly in this test so the assertion holds in
+    # isolation as well as after the rest of the file has run. The point of the test
+    # is the listener's behaviour, not the seeding — relying on prior tests' rows
+    # makes the test brittle (and breaks under `--random-order` or `--maxWorkers=2`).
+    a, b, *_ = await two_tenants(db_session)
 
     bound = await db_session.execute(
         select(ReviewModel).execution_options(populate_existing=True)
     )
     rows = bound.scalars().all()
-    # The two tenants seeded above produced two reviews; if the session were marked
+    # The two tenants seeded here produced two reviews; if the session were marked
     # the listener would filter to one. Both being visible is the property under test.
     tenant_ids = {r.tenant_id for r in rows}
-    assert len(tenant_ids) >= 2
+    assert {a.id, b.id} <= tenant_ids

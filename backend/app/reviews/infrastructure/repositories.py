@@ -19,7 +19,7 @@ import uuid
 from datetime import datetime, timedelta, timezone
 
 from sqlalchemy import Select, func, select, update
-from sqlalchemy.dialects.postgresql import JSONB
+from sqlalchemy.dialects.postgresql import JSONB  # noqa: F401  (kept for future JSONB column ops)
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.core.tenancy import CrossTenantWriteError
@@ -72,7 +72,11 @@ def _to_review(model: ReviewModel) -> Review:
     is what gates the closed tag list. Re-running the coercer at the boundary is the
     read-side half of the rule-11 guarantee (D7).
     """
-    recurring: list | None = model.recurring_issues
+    recurring: list[RecurringIssueTag] | None = (
+        [RecurringIssueTag(value) for value in model.recurring_issues]
+        if model.recurring_issues is not None
+        else None
+    )
     return Review(
         id=model.id,
         tenant_id=model.tenant_id,
@@ -338,9 +342,16 @@ class SqlAlchemyReviewRepository:
         tenant config's bounds check.
         """
         cutoff = datetime.now(timezone.utc) - timedelta(days=window_days)
+        # `recurring_issues` is a JSONB array of tag strings; unnest with
+        # `jsonb_array_elements_text` so the count is computed in SQL, where the data
+        # lives, instead of fetching the whole table to Python. `.op("UNNEST")(JSONB)`
+        # would emit `$1::JSONB AS anon_1` and bind the type object as a parameter,
+        # which is the wrong shape — the function call has no bound arg.
         rows = await self._session.execute(
             select(
-                ReviewModel.recurring_issues.op("UNNEST")(JSONB),
+                func.jsonb_array_elements_text(ReviewModel.recurring_issues).label(
+                    "tag"
+                ),
                 func.count(),
             )
             .where(
@@ -349,7 +360,7 @@ class SqlAlchemyReviewRepository:
                 ReviewModel.published_at >= cutoff,
                 ReviewModel.recurring_issues.is_not(None),
             )
-            .group_by(ReviewModel.recurring_issues.op("UNNEST")(JSONB))
+            .group_by("tag")
             .order_by(func.count().desc())
             .limit(top_n)
         )
@@ -460,15 +471,23 @@ class SqlAlchemyReviewResponseDraftRepository:
 
     async def get(
         self, tenant_id: uuid.UUID, draft_id: uuid.UUID
-    ) -> ReviewResponseDraft | None:
-        """The draft, joined to `reviews` for the tenant filter, or `None`."""
+    ) -> ReviewResponseDraft:
+        """The draft, joined to `reviews` for the tenant filter; raises on miss.
+
+        `R1.3 / D10`: an unknown parent and a parent of another tenant are
+        indistinguishable from the caller's seat — the same `ReviewNotFoundError`,
+        never a `None` the use case would have to remember to translate.
+        """
         rows = await self._session.execute(
             self._joined(select(ReviewResponseDraftModel)).where(
                 *self._scoped(tenant_id, draft_id)
             )
         )
         model = rows.scalar_one_or_none()
-        return _to_draft(model) if model is not None else None
+        if model is None:
+            # Same error, fixed message, for unknown id and another-tenant id (R1.3).
+            raise ReviewNotFoundError()
+        return _to_draft(model)
 
     async def save(self, tenant_id: uuid.UUID, draft: ReviewResponseDraft) -> None:
         """Persist the edits and the approval. The unique constraint on `review_id`

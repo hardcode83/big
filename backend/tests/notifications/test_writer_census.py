@@ -76,6 +76,10 @@ WITH_WRITER = frozenset(
         "PRICE_RECOMMENDATION",
         "SLA_BREACH",
         "PASSWORD_RESET_REQUESTED",
+        # `revenue-reviews` R6.2 — `ApproveReviewUseCase` writes one row per
+        # manager+owner recipient via `build_review_response_approved_log` in
+        # `app/reviews/domain/notifications.py`.
+        "REVIEW_RESPONSE_APPROVED",
     }
 )
 
@@ -280,6 +284,12 @@ CONSTRUCTION_SITES = {
     "maintenance/domain/notifications.py",
     "messaging/domain/notifications.py",
     "pricing/domain/notifications.py",
+    # `revenue-reviews` R6.2 — `ApproveReviewUseCase` calls
+    # `build_review_response_approved_log` once per manager/owner recipient; the builder
+    # lives next to the rule (rule 11 of `sdd/steering/security.md`) for the same reason
+    # the other modules' builders do — the **content** of what gets written is testable
+    # without a session and lives next to the rule that shapes it.
+    "reviews/domain/notifications.py",
     # Two writers that predate the builder convention and compose their row inline.
     "auth/application/recovery.py",
     "guests/application/use_cases.py",

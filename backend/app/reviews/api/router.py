@@ -18,7 +18,7 @@ indistinguishable `404` of R1.3 is the use case's, not the router's — see
 import uuid
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Query, Request
 
 from app.auth.api.dependencies import (
     AuthenticatedRequest,
@@ -147,6 +147,7 @@ async def list_reviews(
 )
 async def create_review(
     authenticated: CreateDep,
+    request: Request,
     use_case: Annotated[CreateReviewUseCase, Depends(get_create_review_use_case)],
     body: CreateReviewRequest,
 ) -> ReviewResponse:
@@ -155,7 +156,7 @@ async def create_review(
         actor_user_id=authenticated.context.user_id,
         property_id=body.property_id,
         channel=body.channel,
-        actor_ip=get_client_ip(),
+        actor_ip=get_client_ip(request),
         reviewer_name=body.reviewer_name,
         rating=body.rating,
         content=body.content,
@@ -263,6 +264,7 @@ async def act_on_review_response(
     ],
     review_id: uuid.UUID,
     body: ReviewResponseActionRequest,
+    request: Request,
 ) -> ReviewResponse:
     """One route, four verbs. The `require(...)` chain is wide by construction.
 
@@ -279,7 +281,7 @@ async def act_on_review_response(
         review = await use_case_approve.execute(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
-            actor_ip=get_client_ip(),
+            actor_ip=get_client_ip(request),
             review_id=review_id,
             now=now,
         )
@@ -287,7 +289,7 @@ async def act_on_review_response(
         review = await use_case_ignore.execute(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
-            actor_ip=get_client_ip(),
+            actor_ip=get_client_ip(request),
             review_id=review_id,
             now=now,
         )
@@ -295,7 +297,7 @@ async def act_on_review_response(
         review = await use_case_posted.execute(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
-            actor_ip=get_client_ip(),
+            actor_ip=get_client_ip(request),
             review_id=review_id,
             now=now,
         )
@@ -309,7 +311,7 @@ async def act_on_review_response(
         await use_case_edit.execute(
             tenant_id=tenant_id,
             actor_user_id=actor_user_id,
-            actor_ip=get_client_ip(),
+            actor_ip=get_client_ip(request),
             review_id=review_id,
             new_content=body.draft_content,
             now=now,

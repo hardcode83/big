@@ -475,6 +475,16 @@ def test_the_protected_endpoints_are_the_ones_expected() -> None:
         "/api/v1/timeline/{property_id}",
         "/api/v1/dashboard/properties",
         "/api/v1/properties/{property_id}/dashboard",
+        # `revenue-reviews` R5: the seven routes of PRD §18 over five paths. Every one is
+        # authenticated; the narrowest gate (`APPROVE_REVIEW`) is what `require(...)`
+        # declares for the response PATCH route — `IGNORE_REVIEW` and `MARK_REVIEW_POSTED`
+        # are also required at the router (asserted per role in
+        # `tests/reviews/test_review_endpoints.py`), and the cross-tenant `404`
+        # indistinguishability is asserted in `tests/reviews/test_tenant_isolation.py`.
+        "/api/v1/reviews",
+        "/api/v1/reviews/{review_id}",
+        "/api/v1/reviews/{review_id}/response",
+        "/api/v1/properties/{property_id}/reviews/summary",
         # `revenue-pricing`: the seven routes of PRD §23 over five paths, on two routers
         # because they are two aggregates (design D1). Every one is authenticated — the
         # module has no anonymous door, and the nightly generator reaches the same use case

@@ -91,6 +91,11 @@ def test_the_route_guard_actually_sees_the_api() -> None:
         # completing the twelve.
         "cleaning-checklist-templates",
         "cleaning-tasks",
+        # `revenue-reviews` R5: the seven routes of PRD §18 over five paths. All live under
+        # one prefix because `GET /properties/{id}/reviews/summary` shares the property path
+        # with `dashboard-api` and is the only exception; the four `/reviews` paths and the
+        # summary share the same router (`reviews_router`) registered with the same prefix.
+        "reviews",
         # The same change's third route, and the first of the two anonymous ones that serve
         # tenant data — `incident-photos` below is the second:
         # `GET /cleaning-photos/{photo_id}` (design D7). A prefix of its own because the path

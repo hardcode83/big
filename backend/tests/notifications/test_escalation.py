@@ -33,6 +33,11 @@ PRD_14_TYPES = (
 # Types this product has that PRD §14 does not, each with the change that added it and why.
 # A divergence is allowed to exist; being unnamed is what is not.
 DECLARED_DIVERGENCES = (
+    # `revenue-reviews` R6.2: notification fires when an owner/manager approves a draft
+    # response to a guest review. Same PRD §14 outside-the-catalogue reason — review
+    # approval is operational but PRD §14 pre-dates the reviews capability, so the type
+    # is added as a divergence and named here rather than silently slipped in.
+    "REVIEW_RESPONSE_APPROVED",
     # `auth-account-recovery` R6.1: password recovery is not an operational event, so §14's
     # catalogue — cleanings, incidents, technicians, guests, prices, SLA — has no slot for it.
     "PASSWORD_RESET_REQUESTED",

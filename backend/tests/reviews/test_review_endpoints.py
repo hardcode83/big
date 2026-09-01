@@ -80,11 +80,12 @@ async def test_get_review_for_another_tenant_is_404(api, db_session) -> None:
     b = await seed_tenant(db_session, "TenantB")
     a_prop = await seed_property(db_session, a, "REDES11")
     a_review = await seed_review(db_session, a, a_prop)
-    a_manager = await seed_user(db_session, a, "manager@example.com")
+    # Tenant B's manager queries tenant A's review — must be 404, not 200, not 403.
+    b_manager = await seed_user(db_session, b, "b_manager@example.com")
 
     response = await api.get(
         f"/api/v1/reviews/{a_review.id}",
-        headers=auth_header(api, a_manager),
+        headers=auth_header(api, b_manager),
     )
     assert response.status_code == 404
 

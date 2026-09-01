@@ -8,9 +8,11 @@ from sqlalchemy import (
     DateTime,
     Enum,
     ForeignKey,
+    Index,
     Integer,
     Numeric,
     String,
+    Text,
     Uuid,
 )
 from sqlalchemy.dialects.postgresql import JSONB
@@ -26,6 +28,9 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
         # R5.3 listing: filter by `property_id` and order by `status`. The composite
         # index speeds both the listing and the per-property summary (R5.5).
         # Migration: `r3v1ew5a01_revenue_reviews.py`.
+        Index("ix_reviews_property_id_status", "property_id", "status"),
+        # R5.3 listing / R6 inbox ordering: tenant-scoped `published_at DESC NULLS LAST`.
+        Index("ix_reviews_tenant_id_published_at", "tenant_id", "published_at"),
     )
 
     property_id: Mapped[uuid.UUID] = mapped_column(
@@ -42,12 +47,12 @@ class ReviewModel(Base, UUIDPrimaryKeyMixin, TenantScopedMixin, TimestampMixin):
     # No CHECK on the 1.0-5.0 range: §7.20 documents it in a comment but declares no
     # constraint, and range validation belongs to the domain layer of `reviews` (D15).
     rating: Mapped[Decimal | None] = mapped_column(Numeric(3, 1), default=None)
-    content: Mapped[str | None] = mapped_column(default=None)
+    content: Mapped[str | None] = mapped_column(Text, default=None)
     language: Mapped[str | None] = mapped_column(String(5), default=None)
     sentiment: Mapped[ReviewSentiment | None] = mapped_column(
         Enum(ReviewSentiment, name="review_sentiment", native_enum=True), default=None
     )
-    ai_summary: Mapped[str | None] = mapped_column(default=None)
+    ai_summary: Mapped[str | None] = mapped_column(Text, default=None)
     recurring_issues: Mapped[list[Any] | None] = mapped_column(JSONB, default=None)
     status: Mapped[ReviewStatus] = mapped_column(
         Enum(ReviewStatus, name="review_status", native_enum=True),
@@ -81,7 +86,7 @@ class ReviewResponseDraftModel(Base, UUIDPrimaryKeyMixin, TimestampMixin):
     review_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("reviews.id", ondelete="RESTRICT"), unique=True
     )
-    draft_content: Mapped[str] = mapped_column()
+    draft_content: Mapped[str] = mapped_column(Text)
     language: Mapped[str] = mapped_column(String(5))
     ai_generated: Mapped[bool] = mapped_column(Boolean, default=True, server_default="true")
     #: R3.5 / D5 / OQ4: bitácora de iteraciones del borrador. The entity mutates it on
