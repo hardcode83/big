@@ -352,6 +352,17 @@ lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
 Rejected: **darlo por demostrado con las meta-pruebas** — probaría la función y no la
 superficie, que es justo la distinción que este change existe para no volver a confundir.
 
+> **Dónde vive cada mitad, resuelto en review el 2026-09-01 y esta vez por un gate, no por lectura.**
+> Los pasos 1 y 2-check-run se escribieron como tareas de `tasks.md` y chocaron con **dos** gates
+> independientes: el de ship rechaza un `BLOCKED.md` no vacío, y `mark-local-verified` rechaza
+> cualquier tarea sin marcar. Como su evidencia no puede existir antes de que haya PR, una lista
+> pre-PR nunca podría completarse y el change quedaba incertificable por construcción. Así que se
+> reparte: lo que se demuestra en local —el binario en rojo por las tres formas— es la tarea 6.2a y
+> está cerrada; lo del **check run** pasa a `sdd/specs/rule11-ownership-guard.md` § Obligaciones
+> post-merge, como obligación declarada de la capacidad, y se ancla con `mark-recertified` sobre la
+> PR abierta. D10 no cambia de criterio —la superficie sigue teniendo que demostrarse y las
+> meta-pruebas siguen sin bastar—, cambia de dónde se registra.
+
 ### D11 — La prosa de la regla 11 queda anclada a `SCOPE` por una prueba
 
 **Chosen:** una prueba mínima en `scripts/test_rule11_ownership.py` que lee la sección

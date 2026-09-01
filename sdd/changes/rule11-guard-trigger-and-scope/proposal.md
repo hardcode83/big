@@ -165,16 +165,26 @@ Acceptance criteria:
 **As a** revisor, **I want** ver la guardia fallar por cada vía que dice cubrir, **so that** un verde
 no signifique «no se ejecutó».
 
+**Dónde se registra cada mitad, precisado en review el 2026-09-01.** R4 no se rebaja, pero su
+evidencia se parte en dos por una razón mecánica: la que necesita un **check run** no puede existir
+antes de que haya una Pull Request, y una lista de tareas pre-PR nunca podría contenerla —lo probaron
+dos gates, el de ship y `mark-local-verified`—. Lo que se demuestra en local se cierra en este change
+(tarea 6.2a); lo que exige la PR es **obligación post-merge declarada** en
+`sdd/specs/rule11-ownership-guard.md` § Obligaciones post-merge, y se ancla con `mark-recertified`.
+Ningún criterio desaparece: cambia el sitio donde queda su registro, no si hay que cumplirlo.
+
 Acceptance criteria:
 
 1. WHEN se verifica este change, THE SYSTEM SHALL demostrar la ejecución del guardián por **las dos**
    vías, con evidencia registrada: un diff que sólo toca prosa (`sdd/**` o `docs/**`) y un diff que
-   sólo toca `backend/**`.
+   sólo toca `backend/**`. *(Post-PR: se registra sobre la Pull Request, no en `tasks.md`.)*
 2. WHEN se introduce deliberadamente un bloque infractor de cada forma que el guardián dice cazar
    —atribución en markdown y atribución en un docstring o run de `#` de un `.py`—, THE SYSTEM SHALL
-   ponerse en rojo en ambas, y la demostración SHALL quedar registrada en el change.
+   ponerse en rojo en ambas, y la demostración SHALL quedar registrada en el change. *(Cumplido en
+   local para el **binario** por las tres formas, tarea 6.2a; la mitad del **check run** es post-PR.
+   No la descarga el fallo cerrado: las vías de `GuardError` son R1.4 y R4.3, otro camino de código.)*
 3. IF el guardián se ejecutara con su lista de rutas de alcance vacía o su árbol de prosa ausente,
-   THEN THE SYSTEM SHALL fallar en alto y no reportar «cero infractores».
+   THEN THE SYSTEM SHALL fallar en alto y no reportar «cero infractores». *(Cumplido: meta-pruebas.)*
 
 ### R5 — La autoridad describe el guardián que existe
 

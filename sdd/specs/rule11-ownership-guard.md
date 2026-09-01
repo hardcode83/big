@@ -160,3 +160,33 @@ antes**, porque ya no exige contenedor ni stack.
   el ancla entre la frase de alcance de la regla 11 y `SCOPE`.
 - El check `rule11-ownership` se ejecuta sobre un Pull Request cuyo diff sea **sólo prosa** y sobre
   otro cuyo diff sea **sólo `backend/**`**, y reporta en los dos.
+
+### Obligaciones post-merge
+
+Esto vive aquí, y no en el `tasks.md` de un change, por una razón que costó dos gates descubrir: es
+verificación que **sólo puede existir cuando hay una Pull Request abierta**, y una lista de tareas
+pre-PR no puede contenerla. El workflow dispara en `pull_request` y en `push: branches: [main]`, así
+que empujar la rama de una feature no produce ningún run: los ids no existen hasta que hay PR. El
+change que creó esta capacidad lo intentó como sección de tareas y chocó dos veces — el gate de ship
+rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es la
+prueba de que el sitio era éste.
+
+Quien abra una Pull Request que altere el gatillo, el alcance o el eje de este guardián **debe**
+dejar registrada esta evidencia sobre la PR, y anclarla con `mark-recertified`:
+
+- **Las dos vías de diff.** El id de run del check sobre un evento `pull_request` cuyo diff sea sólo
+  prosa, y otro cuyo diff sea sólo `backend/**`. En el de sola prosa, `backend-tests-suite` sale
+  `skipped` y este check **no** — que es exactamente el defecto que esta capacidad corrige, así que
+  conviene anotarlo junto a los ids y no darlo por sabido.
+- **El check en rojo por cada forma que dice cazar.** Un commit temporal con un bloque infractor en
+  markdown y otro en un docstring o tirada de `#`, el id de run con el check en rojo, y el verde al
+  revertirlo. Que la *función* y el *binario* los cazan se prueba en local con las meta-pruebas y con
+  `make check-rule11-ownership`; lo que sólo la PR puede probar es que el **check run** se pone rojo.
+- **Verde sobre la base fusionada.** Cero infractores sobre la rama con `main` ya fusionado, no sobre
+  la rama sola: `origin/main` se mueve mientras una PR está en vuelo, y fue justamente un commit de
+  archivado aterrizando en `main` lo que dejó la base en rojo la primera vez.
+
+Y una distinción que no conviene perder, porque confundirla ya descargó un requisito por el camino
+equivocado: las vías de **fallo cerrado** del binario (alcance vacío, árbol ausente, fichero
+ilegible, entrada muerta…) son evidencia de que el guardián no da falsos verdes, **no** de que
+detecte un bloque infractor. Son caminos de código distintos y se demuestran por separado.

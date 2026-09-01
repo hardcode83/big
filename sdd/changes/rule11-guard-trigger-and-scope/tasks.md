@@ -4,7 +4,8 @@ Orden elegido para que el árbol quede sano en cada corte: la guardia nueva **co
 hasta que las dos comparaciones de R1.5 estén registradas (1.4 y 1.5); sólo entonces se borra el
 fichero de `backend/tests/` (4.1). Las secciones 1-3 dejan el sistema con guardia nueva, gatillo y
 suite propia; la 4 retira la superficie vieja; la 5 alinea autoridad y documentación; la 6 es la
-demostración en rojo que R4 exige y no puede hacerse antes de que exista el check run.
+mitad de la demostración en rojo de R4 que se puede hacer sin una Pull Request — la otra mitad, la
+del check run, es obligación post-merge declarada en la spec y no una tarea de aquí.
 
 ## 1. La guardia se muda a `scripts/`, con su alcance como dato <!-- panel: PASS 2026-08-31 -->
 
@@ -384,25 +385,26 @@ obligación de R5.3 prohíbe.
   recorre como a cualquier otro documento y reporta cero. Y resuelve la referencia colgante que el
   panel de la sección 3 levantó: `sdd/specs/local-environment.md` ya la citaba.
 
-## 6. Demostración en rojo de la superficie nueva (R4)
+## 6. Demostración en rojo, en la mitad que no necesita una Pull Request (R4)
 
-**Esta sección se ejecuta después de `/sdd:ship`, y eso es diseño y no retraso.** El workflow
-dispara en `pull_request` y en `push: branches: [main]`, así que un push a la rama de la feature no
-produce ningún run: los ids no existen hasta que hay PR. La premisa contraria que traían D10 y la
-tarea 6.1 —«la rama produce los dos de forma natural»— era falsa y quedó corregida en review el
-2026-09-01; el detalle y por qué no se ensancha el `push:` están en D10.
+**Lo que esta sección puede cerrar y lo que no, y por qué la frontera está donde está.** R4 pide dos
+cosas distintas: que la *guardia* se ponga en rojo por cada forma que dice cazar, y que el *check
+run* lo haga. La primera se demuestra en local y está cerrada abajo. La segunda **no puede existir
+antes de que haya una Pull Request**: el workflow dispara en `pull_request` y en `push: branches:
+[main]`, así que empujar la rama de la feature no produce ningún run.
 
-**Cómo se retoma**, que es lo único que hay que saber para cerrarla: `/sdd:ship
-rule11-guard-trigger-and-scope` abre la PR, y con ella nacen los runs. Después, sobre la PR abierta,
-se registran 6.1, 6.2b y 6.3 y se vuelve por `/sdd:review rule11-guard-trigger-and-scope`, que en
-`PR_OPEN` recertifica con `mark-recertified`. Esta sección es la única de las siete que queda
-abierta; las demás llevan panel PASS o están verificadas en la 7.
+Esa mitad **ya no vive aquí**. Se intentó como tareas y chocó con dos gates independientes —el de
+ship rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es
+lo que acabó de probar que una lista pre-PR no es su sitio. Ahora es una **obligación post-merge
+declarada de la capacidad**, en
+[`sdd/specs/rule11-ownership-guard.md` § Obligaciones post-merge](../../specs/rule11-ownership-guard.md):
+los dos ids de run por vía de diff (R4.1), el check en rojo por bloque inyectado y su verde al
+revertir (R4.2), y el cero sobre la rama fusionada con `main` (R3.1). Quien abra la PR de este change
+las registra allí y ancla con `mark-recertified`.
 
-- [ ] 6.1 **Las dos vías de diff.** Registrar aquí el id de run del check `rule11-ownership` para
-  **dos eventos `pull_request` de la PR ya abierta**: uno cuyo diff sea **sólo prosa** (`sdd/**` o
-  `docs/**`) y otro cuyo diff sea **sólo `backend/**`**. Anotar además que en el de sola prosa
-  `backend-tests-suite` sale `skipped` y el check nuevo **no** — que es exactamente el defecto que
-  este change existe para cerrar. [R4.1]
+La premisa contraria que traían D10 y la antigua tarea 6.1 —«la rama produce los dos de forma
+natural»— era falsa; quedó corregida en review el 2026-09-01, y en D10 está por qué no se ensancha
+el `push:`.
 
 - [x] 6.2a **El binario en rojo por cada una de las tres formas.** No necesita PR, así que se cierra
   aquí. Medido el 2026-09-01 en este worktree: tres sondas creadas dentro del alcance —una `.md` en
@@ -432,14 +434,6 @@ abierta; las demás llevan panel PASS o están verificadas en la 7.
   python. Lo que esto **no** prueba, y por eso 6.2b sigue abierta: que el *check run* se ponga rojo.
   Y no lo descargan las ocho vías de fallo cerrado de la sección 5 — ésas son cadena rota (R1.4,
   R4.3), no un bloque infractor: otro camino de código. [R4.2]
-
-- [ ] 6.2b **El check run en rojo, sobre la PR.** Commit temporal que meta un bloque infractor de las
-  formas de 6.2a; registrar el id de run con el check **en rojo**; revertir acto seguido y comprobar
-  que el check vuelve a verde. [R4.2]
-
-- [ ] 6.3 **Verde sobre la base.** Tras el merge de `main` en la rama que hace `/sdd:ship`, el check
-  `rule11-ownership` reporta **cero** infractores. Se mide sobre la rama fusionada, no sobre la rama
-  sola, porque `origin/main` se mueve mientras esto está en vuelo. [R3.1]
 
 ## 7. Verification
 **Ejecutado el 2026-08-31, cifras reales y no recordadas.** Las salidas largas se escribieron a
