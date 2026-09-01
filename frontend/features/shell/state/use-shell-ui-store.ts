@@ -22,10 +22,22 @@ export interface ShellUiState {
   sidebarCollapsedByProfile: Partial<Record<ShellProfile, boolean>>;
   tabletNavOpen: boolean;
   mobileMoreOpen: boolean;
+  /**
+   * The notifications panel, opened from the bell in the topbar
+   * (`notifications-inbox-web` design D9). Ephemeral like the other two overlays and never
+   * persisted: a panel that reopened itself on the next visit would be showing yesterday's
+   * inbox. It lives here rather than in the bell's own state so `OverlayAutoCloser` closes it
+   * when a row navigates away — which is what makes R6's links cost no code of their own.
+   *
+   * It is UI state and only UI state: the counter and the rows are server state and live in
+   * the `QueryClient` (`steering/frontend.md`, "No duplicar server state en stores").
+   */
+  notificationsOpen: boolean;
   toggleSidebar: (profile: ShellProfile) => void;
   setSidebarCollapsed: (profile: ShellProfile, collapsed: boolean) => void;
   setTabletNavOpen: (open: boolean) => void;
   setMobileMoreOpen: (open: boolean) => void;
+  setNotificationsOpen: (open: boolean) => void;
   closeOverlays: () => void;
 }
 
@@ -44,6 +56,7 @@ export const useShellUiStore = create<ShellUiState>()(
       sidebarCollapsedByProfile: {},
       tabletNavOpen: false,
       mobileMoreOpen: false,
+      notificationsOpen: false,
       toggleSidebar: (profile) =>
         set((state) => ({
           sidebarCollapsedByProfile: {
@@ -60,7 +73,9 @@ export const useShellUiStore = create<ShellUiState>()(
         })),
       setTabletNavOpen: (open) => set({ tabletNavOpen: open }),
       setMobileMoreOpen: (open) => set({ mobileMoreOpen: open }),
-      closeOverlays: () => set({ tabletNavOpen: false, mobileMoreOpen: false }),
+      setNotificationsOpen: (open) => set({ notificationsOpen: open }),
+      closeOverlays: () =>
+        set({ tabletNavOpen: false, mobileMoreOpen: false, notificationsOpen: false }),
     }),
     {
       name: SHELL_UI_STORAGE_KEY,

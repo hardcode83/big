@@ -24,6 +24,11 @@ from decimal import Decimal
 from typing import Any, Mapping, Sequence
 
 from app.audit.domain import actions as audit_actions
+from app.auth.domain.enums import UserRole
+from app.auth.domain.ports import UserRepository
+from app.auth.domain.recipients import RoleRecipients
+from app.notifications.domain.repositories import NotificationLogRepository
+from app.pricing.domain.notifications import price_recommendation_notification
 from app.audit.domain.repositories import AuditLogRepository
 from app.audit.domain.services import AuditLogFactory
 from app.audit.domain.value_objects import REDACT_ONLY_FIELDS, ChangeSet
@@ -420,6 +425,8 @@ class GeneratePriceRecommendationsUseCase:
         reservations: ReservationRepository,
         timeline: TimelineEventRepository,
         audit: AuditLogRepository,
+        users: UserRepository,
+        notifications: NotificationLogRepository,
         uow: UnitOfWork,
     ) -> None:
         # This generator's correctness depends on abandoning its own failed unit (D9), so a
@@ -444,6 +451,8 @@ class GeneratePriceRecommendationsUseCase:
         self._reservations = reservations
         self._timeline = timeline
         self._audit = _AuditWriter(audit)
+        self._notifications = notifications
+        self._recipients = RoleRecipients(users=users)
         self._uow = uow
 
     async def execute(
@@ -461,6 +470,11 @@ class GeneratePriceRecommendationsUseCase:
         active_rules = await self._rules.list_active(tenant_id)
 
         outcome = GenerationOutcome()
+        # R4.4's recipients, resolved **lazily and once per execution** (design D7). A list
+        # holding at most one resolved tuple: `None` means "not asked yet". Local rather than
+        # an attribute, so two `execute` calls on one instance cannot share a roster — and so
+        # nothing survives the sweep that outlives it.
+        recipients_cache: list[tuple] = []
         for index, property in enumerate(candidates):
             rule = resolve_rule(active_rules, property.id)
             if rule is None:
@@ -478,6 +492,7 @@ class GeneratePriceRecommendationsUseCase:
                         execution_date=execution_date,
                         now=now,
                         actor=actor,
+                        recipients_cache=recipients_cache,
                     ),
                 )
             except CrossTenantWriteError:
@@ -603,6 +618,7 @@ class GeneratePriceRecommendationsUseCase:
         execution_date: date,
         now: datetime,
         actor: PricingActor | None,
+        recipients_cache: list[tuple],
     ) -> dict[str, int]:
         """One property's 60-day horizon, in one transaction (design D9).
 
@@ -735,6 +751,16 @@ class GeneratePriceRecommendationsUseCase:
                 now=now,
             )
 
+        # R4.1/R4.2 — one row per recipient **per property and execution**, and only when
+        # this run actually created something. `written.inserted` is the set the statement
+        # declared inserted (`RETURNING xmax = 0`), which is the same set the timeline loop
+        # above walks: in the steady state that is one date a day, and the sixty of a
+        # property's first run still produce one notification, not sixty (R4.2).
+        if written.inserted:
+            await self._notify_new_recommendations(
+                tenant_id, property=property, now=now, recipients_cache=recipients_cache
+            )
+
         await self._uow.commit()
         # Every count is the statement's (`RETURNING xmax = 0`) or this walk's, and none is
         # the pre-read's, so `created + updated + preserved == HORIZON_DAYS` holds however
@@ -749,6 +775,74 @@ class GeneratePriceRecommendationsUseCase:
             "updated": written.updated,
             "preserved": preserved + written.preserved,
         }
+
+    async def _notify_new_recommendations(
+        self,
+        tenant_id: uuid.UUID,
+        *,
+        property: Property,
+        now: datetime,
+        recipients_cache: list[tuple],
+    ) -> None:
+        """Tell whoever approves prices that this property has new ones waiting (R4.1, R4.4).
+
+        **The recipients are the union of active managers and active owners, not R5.1's
+        fallback** (R4.4). Everywhere else in this change the owner hears only when there is
+        no manager; here she must hear regardless, because she is the one who approves a
+        price — `MANAGE_PRICE_RECOMMENDATIONS` is held by both roles, and dropping her
+        because a manager exists would take the decision away from the person whose money it
+        is. No de-duplication is needed between the two groups: `User.role` is a single
+        value, so nobody is in both.
+
+        **Resolved lazily and memoised for the whole execution** (design D7). Two queries the
+        first time any property creates something, then nothing. Resolving per property would
+        be 2N queries for an answer that does not change across the sweep; resolving up front
+        would spend two on every tick of every tenant, including the ones that create
+        nothing. There is no cross-transaction hazard in holding them: the port returns
+        domain entities, not ORM models, so a `rollback()` on a failed property does not
+        invalidate them.
+        """
+        if not recipients_cache:
+            managers = await self._recipients.active_holders(
+                tenant_id, UserRole.PROPERTY_MANAGER
+            )
+            owners = await self._recipients.active_holders(tenant_id, UserRole.TENANT_OWNER)
+            recipients_cache.append(
+                (managers.users + owners.users, managers.dropped + owners.dropped)
+            )
+        users, dropped = recipients_cache[0]
+
+        if not users:
+            # R5.2 — no rows, logged, and the sweep is not failed over it. A tenant in this
+            # state generates prices nobody will ever approve.
+            logger.error(
+                "pricing.recommendations_without_recipient",
+                extra={"tenant_id": str(tenant_id), "property_id": str(property.id)},
+            )
+            return
+        if dropped:
+            # Design D1 leaves the truncation log to the caller, under the caller's own key.
+            logger.warning(
+                "pricing.recommendation_recipients_truncated",
+                extra={
+                    "tenant_id": str(tenant_id),
+                    "property_id": str(property.id),
+                    "total": len(users) + dropped,
+                    "notified": len(users),
+                },
+            )
+
+        for recipient in users:
+            await self._notifications.add(
+                tenant_id,
+                price_recommendation_notification(
+                    tenant_id=tenant_id,
+                    property_id=property.id,
+                    recipient_id=recipient.id,
+                    recipient_contact=recipient.email,
+                    now=now,
+                ),
+            )
 
     async def _occupancy_of(
         self, tenant_id: uuid.UUID, property_id: uuid.UUID, execution_date: date

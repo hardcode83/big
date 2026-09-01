@@ -84,8 +84,19 @@ class FakeNotificationLogRepository:
     async def cancel_sla_deadline(self, tenant_id, **kwargs):  # pragma: no cover
         return 0
 
-    async def list_for_recipient(self, tenant_id, recipient_user_id, *, page, per_page):
+    async def list_for_recipient(
+        self, tenant_id, recipient_user_id, *, page, per_page, unread=None
+    ):
         return NotificationLogPage(items=(), total=0)  # pragma: no cover
+
+    async def mark_read(self, tenant_id, user_id, log_id):
+        return False  # pragma: no cover
+
+    async def count_unread(self, tenant_id, user_id):
+        return 0  # pragma: no cover
+
+    async def mark_all_read(self, tenant_id, user_id):
+        return 0  # pragma: no cover
 
 
 class RecordingAdapter:

@@ -154,9 +154,11 @@ no las dispara; aporta el dato del que cuelgan.
   `backend/alembic/versions/e7a3c419d82b_guest_portal_api.py:98`, así que el
   comportamiento equivalente se reduce a `guest_id IS NULL` o `guest_id` que no
   resuelve dentro del tenant — sin tests propios para el caso imposible, porque no se
-  puede ejercitar sin violar la constraint; ver
-  `sdd/changes/reservation-property-identity/BLOCKED.md` para la resolución de esa
-  asimetría.
+  puede ejercitar sin violar la constraint. La asimetría es deliberada y la fecha la nota al
+  pie de `backend/app/reservations/infrastructure/models.py`: `guest_id` es PII del tenant y
+  `property_id` un recurso del tenant, así que sólo el primero se blindó con una FK compuesta.
+  `backend/tests/reservations/test_identity_isolation.py` documenta la asimetría y cubre el
+  lado que sí es ejercitable (el cruce por `property_id`).
 - THE SYSTEM SHALL fijar el conjunto de campos derivados con un test de pin
   (`backend/tests/reservations/test_response_identity_fields.py`, decisión D6), de modo
   que añadir uno (dirección de la propiedad, email del huésped, etc.) sea un acto
@@ -375,6 +377,14 @@ definitiva. Abrir esas dos operaciones es trabajo de esta capacidad y está pend
   cross-tenant está diferida a `saas-cross-tenant`.
 - THE SYSTEM SHALL filtrar `tenant_id` explícitamente en cada consulta y comprobarlo en
   cada escritura, porque el filtro global de sesión no cubre los INSERT.
+- THE SYSTEM SHALL permitir leer `property_name`, `property_internal_code` y
+  `guest_full_name` a quien ya tiene `READ_RESERVATIONS`, y SHALL NOT añadir
+  `READ_PROPERTIES` ni `READ_GUESTS` al conjunto de permisos que estas rutas exigen: la
+  única dependencia de lectura sigue siendo `require(Permission.READ_RESERVATIONS)`
+  (`backend/app/reservations/api/router.py`). **Una proyección puede estrechar, nunca
+  unir** (decisión D10 de [`dashboard-api.md`](dashboard-api.md)): añadir un campo que otro
+  permiso guarda como un todo —la dirección de la propiedad, el email del huésped— es una
+  decisión de steering, no una derivación. `backend/app/auth/domain/policy.py` no se toca.
 - THE SYSTEM SHALL exigir que las referencias de un evento de timeline
   (`property_id`, `reservation_id`, `actor_user_id`, `guest_id`) se hayan resuelto dentro
   del tenant antes de escribirlo: las claves ajenas de `timeline_events` no son compuestas

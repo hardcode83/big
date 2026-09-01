@@ -5,10 +5,11 @@ of a notification whose SLA deadline has passed, what notification should exist 
 who should get it — and the use case does the writing.
 
 **Deliberately sparse, and that is the design.** PRD §14 spells out two escalations and
-then writes "etc."; this map implements those two and returns `None` for the other
-fourteen. Filling the gap would be inventing product policy in a change whose job is the
-scheduler, and R5.6 already says what `None` means: mark the log as breached, record it,
-and do not invent a recipient. A type that needs an escalation gets it in the change that
+then writes "etc."; this map implements those two and returns `None` for every other
+member — including `TECHNICIAN_NO_RESPONSE`, which one of them now produces. Filling the
+gap would be inventing product policy in a change whose job is the scheduler, and R5.6
+already says what `None` means: mark the log as breached, record it, and do not invent a
+recipient. A type that needs an escalation gets it in the change that
 gives it an SLA deadline in the first place.
 """
 
@@ -43,6 +44,15 @@ class Escalation:
 # implementation). It escalates to the manager instead, and the reason says so rather than
 # pretending a call was placed. `access-notifications` owns the adapters and can revisit it.
 #
+# **What the technician branch produces changed in `notification-writers-gap` (its R3).** It
+# used to write `SLA_BREACH`, the same type the cleaning branch writes, so a manager reading
+# the row could not tell an unanswered technician assignment from any other missed deadline
+# without opening the breached row it points at. It now writes `TECHNICIAN_NO_RESPONSE`,
+# which is the name PRD §14 already had for this and which nothing was writing. Only the
+# type moved: the recipient, the reason and the `subject` of the row `_escalation_row`
+# composes are untouched (R3.1, R3.3, design D8), and the cleaning branch stays `SLA_BREACH`
+# because `sdd/specs/cleaning.md` fixes it that way (R3.2).
+#
 # The CRITICAL qualifier of PRD §14 is not evaluated either, and the precise reason
 # matters for whoever revisits this: `notification_logs` records a type and no severity,
 # so it is unavailable **at this layer** — not unavailable full stop. A later layer can
@@ -56,7 +66,18 @@ _POLICY: dict[NotificationType, Escalation] = {
         reason="cleaning_assignment_unanswered",
     ),
     NotificationType.TECHNICIAN_ASSIGNED: Escalation(
-        notification_type=NotificationType.SLA_BREACH,
+        # R3.4 holds by construction and not by an omission somebody could later fill in:
+        # there is no `_POLICY` entry for `TECHNICIAN_NO_RESPONSE`, so `escalation_for`
+        # returns `None` for what this produces and an escalation cannot escalate itself.
+        #
+        # And it survives someone adding that entry, which is the stronger guarantee and
+        # the one worth writing down (found by the section-3 security panel): the row
+        # `_escalation_row` composes is `PENDING` with **no** `sla_deadline_at`, while
+        # `list_sla_breach_candidates` requires `SENT` *and* a deadline already past. An
+        # escalation therefore cannot become a candidate for its own escalation, so the
+        # per-minute job cannot write rows off its own output without someone also giving
+        # this row a deadline and a delivery.
+        notification_type=NotificationType.TECHNICIAN_NO_RESPONSE,
         recipient_role=UserRole.PROPERTY_MANAGER,
         reason="technician_assignment_unanswered_no_phone_adapter",
     ),

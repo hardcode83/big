@@ -132,7 +132,8 @@ consumidor y no hay ninguno.
 `steering/security.md`. La comprobación de arriba cierra el caso del operador descuidado dentro de
 la propia petición; el caso general —escribir *otro* código más tarde— no lo puede cerrar ninguna
 comprobación intra-petición, y ampliar el contrato de un sumidero es una decisión de steering.
-Anotado en la entrada de roadmap de `cleaner-app`, que es quien ampliará la superficie de `notes`.
+Anotado en `sdd/roadmap/cleaner-app.md` §4: el disparador original no se cumple, y la decisión
+queda sin change asignado. Su mitad de cifrado en reposo sigue en `plaintext-sink-encryption-at-rest`.
 
 ### El puerto del proveedor de acceso
 
@@ -267,6 +268,14 @@ y por el mismo motivo: la regla 11 documenta que la disciplina repetida falló t
   toca `status`, `sla_breached`, `subject`, `body` ni `recipient_contact`. Devuelve el número de
   filas y **nunca** falla por no encontrar ninguna, a diferencia de las otras dos escrituras del
   repositorio.
+- THE SYSTEM SHALL exponer `exists_for(tenant_id, *, related_type, related_id, notification_type)
+  -> bool`, la única lectura de existencia del repositorio, con la misma tripleta con nombre que
+  `cancel_sla_deadline` y cubierta por el mismo `ix_notification_logs_related_type_related_id`. Es
+  el mecanismo con el que un escritor se deduplica a sí mismo, y funciona igual **dentro** de una
+  transacción que entre dos porque `add` hace `flush()` inmediato: una fila escrita antes en la
+  misma transacción ya es visible para esta consulta.
+- THE SYSTEM SHALL no imponer esa unicidad con un índice único parcial: exigiría migración y
+  convertiría una segunda escritura legítima en un error del servidor en vez de en un no-op.
 - WHEN una limpiadora acepta o rechaza una tarea de limpieza, THE SYSTEM SHALL invocarlo con
   `related_type = "cleaning_task"`, `related_id = task.id` y
   `notification_type = CLEANING_TASK_ASSIGNED`, **antes del único `commit`** del caso de uso, de
@@ -294,25 +303,157 @@ filtrarlos sería mentir sobre el pasado; el volumen del entorno real se sabe an
 `SELECT count(*) FROM notification_logs WHERE notification_type = 'CLEANING_TASK_ASSIGNED' AND
 status = 'PENDING' AND sla_deadline_at < now()`.
 
+### El censo de escritores, y la forma común de todos ellos
+
+Diecisiete miembros de `NotificationType`, **trece con escritor de producción y cuatro sin él**.
+Es el hogar del censo porque es el hogar del emisor; quién escribe qué lo atribuye la tabla de la
+regla 11 de `steering/security.md`, y esta sección cuenta cuántos y con qué forma.
+
+- THE SYSTEM SHALL escribir toda fila de `notification_logs` que nazca en el emisor con
+  `status = PENDING` y `channel = IN_APP`, y SHALL no intentar entregarla: la entrega es de
+  `dispatch_notifications`. La única excepción declarada sigue siendo `auth-account-recovery`,
+  que entrega síncronamente y nunca pasa por `PENDING`.
+- THE SYSTEM SHALL resolver los destinatarios de un aviso operativo con **un solo** servicio de
+  dominio, `RoleRecipients` (`backend/app/auth/domain/recipients.py`), que recibe el puerto
+  `UserRepository` y expone `managers_or_owners(tenant_id)` y `active_holders(tenant_id, role)`,
+  devolviendo un `Recipients(users, dropped)` congelado. Vive en `auth` porque la pregunta que
+  contesta es sobre el censo de usuarios del tenant, y así ningún dominio gana una arista nueva:
+  `cleaning`, `maintenance`, `pricing`, `guests` y `notifications` lo importan y él no importa a
+  nadie.
+- THE SYSTEM SHALL hacer que `managers_or_owners` devuelva cada `PROPERTY_MANAGER` activo del
+  tenant y, WHERE no haya ninguno, cada `TENANT_OWNER` activo. La caída **es una regla de
+  negocio** —por eso vive en `domain/` y no en `application/`— y no es relleno defensivo: el
+  invariante de `user-management` garantiza que siempre queda un `TENANT_OWNER` activo, así que
+  un tenant que no ha contratado manager sigue enterándose en vez de perder el aviso.
+- THE SYSTEM SHALL acotar cada consulta de destinatarios a una página de `MAX_RECIPIENTS = 100` y
+  SHALL devolver en `dropped` cuántos quedaron fuera, contando la truncación **de las dos**
+  consultas cuando se recurre a la caída. THE SYSTEM SHALL no emitir el log de truncamiento
+  dentro del servicio: cada llamante conserva su propia clave, porque el nombre de un log es del
+  sitio que lo emite.
+- IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL no escribir filas y SHALL
+  registrarlo, sin fallar la operación que las habría producido — salvo el escalado de SLA, que
+  deja el incumplimiento **sin marcar** a propósito para que se reintente (`celery-jobs.md`).
+  Qué significa una lista vacía es del llamante, y por eso el servicio devuelve en vez de lanzar.
+- THE SYSTEM SHALL componer `subject` y `body` de cada aviso con una plantilla fija más
+  identificadores, y SHALL no leer `title`, `description`, `ai_summary`, `assignment_note` ni
+  ningún otro texto libre de la entidad notificada: es el contrato de la regla 11 que
+  `celery-jobs` fijó para esas dos columnas.
+- THE SYSTEM SHALL construir cada fila en un **builder puro** del dominio correspondiente,
+  testeable sin sesión, y SHALL darle a cada tipo su propio builder con el literal
+  `NotificationType.<X>.value` escrito a mano. No es preferencia estética: es lo que hace medible
+  el censo, porque un builder parametrizado por un mapa deja al guardián sin literal que leer.
+- THE SYSTEM SHALL escribir sin `sla_deadline_at` toda fila cuyo tipo no tenga escalado definido.
+  Motivo medido: `dispatch_notifications` mueve `PENDING → SENT` cada minuto y
+  `list_sla_breach_candidates` exige `SENT`, así que un plazo sobre un tipo para el que
+  `escalation_for` devuelve `None` produciría escalaciones reales desde el primer minuto — la
+  fila quedaría marcada incumplida sin avisar a nadie.
+- THE SYSTEM SHALL incluir un test que enumere **todos** los miembros de `NotificationType` y
+  afirme, contra dos listas literales declaradas en el propio test, cuáles tienen escritor de
+  producción y cuáles no, fallando si el conjunto medido difiere en cualquier dirección o si un
+  miembro nuevo no aparece en ninguna de las dos.
+- THE SYSTEM SHALL medir ese conjunto sobre el **AST** de `backend/app/`, excluyendo
+  `notifications/domain/enums.py` —una declaración no es un escritor—, y SHALL contar exactamente
+  dos formas, con el *callee* fijado en ambas:
+  1. una llamada cuyo callee es literalmente `NotificationLog` con
+     `notification_type=NotificationType.<X>.value`; y
+  2. una llamada cuyo callee es literalmente `Escalation` con
+     `notification_type=NotificationType.<X>` (sin `.value`), **sólo** en
+     `notifications/domain/escalation.py`.
+
+**Por qué hacen falta las dos formas, y por qué se fija el callee.** Sin fijarlo, la primera casa
+también con las cuatro llamadas a `cancel_sla_deadline` que **borran** un plazo y no escriben
+nada, de modo que `CLEANING_TASK_ASSIGNED` y `TECHNICIAN_ASSIGNED` seguirían contando como
+escritos aunque desapareciesen sus builders. Y sin la segunda, `SLA_BREACH` y
+`TECHNICIAN_NO_RESPONSE` saldrían como huérfanos: su fila la compone `_escalation_row` desde
+`escalation.notification_type.value`, y el único sitio donde el tipo aparece escrito es el
+`_POLICY` de `escalation.py`. Se mide por AST y no por `grep` por la razón que
+`test_free_text_sink_contract.py` documenta sobre el suyo: un guardián que lee texto se sortea
+escribiendo el nombre en un comentario.
+
+**Los trece con escritor**: `CLEANING_TASK_ASSIGNED`, `CLEANING_NO_RESPONSE`, `CLEANING_COMPLETED`,
+`CLEANING_FAILED`, `INCIDENT_CREATED_CRITICAL`, `INCIDENT_CREATED_HIGH`, `OWNER_APPROVAL_REQUIRED`,
+`TECHNICIAN_ASSIGNED`, `TECHNICIAN_NO_RESPONSE`, `GUEST_ESCALATION`, `PRICE_RECOMMENDATION`,
+`SLA_BREACH` y `PASSWORD_RESET_REQUESTED`. **Los cuatro sin escritor**, cada uno con su dueño
+declarado: `LOCK_ALERT`, que espera una superficie de importación de cerraduras que no existe, y
+los tres recordatorios al huésped —`CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`,
+`CHECKOUT_REMINDER`—, que son de `guest-scheduled-comms` y no tienen canal al huésped hasta que lo
+haya. Los dos tipos de texto libre que **no** son miembros del enum —`INCIDENT_REJECTED` y
+`LEGAL_REGISTRATION_FAILED`, sobre la columna `String(100)`— quedan fuera del censo por
+construcción: no hay `NotificationType.<X>` que casar.
+
 ### La bandeja in-app
 
 - THE SYSTEM SHALL exponer `GET /api/v1/notifications` con el envelope paginado de PRD §23,
   devolviendo **solo** las filas dirigidas al usuario del token, de más nueva a más vieja —es una
   bandeja, no una cola. El identificador de usuario sale del JWT y no hay parámetro de ruta ni de
-  consulta que ensanche el alcance.
+  consulta que ensanche el alcance. `page` acota en `100.000` y `per_page` en `100`, por la misma
+  razón que `cleaning` y `reservations`: `page` se convierte en un `OFFSET` de SQL y un número de
+  veinte dígitos desbordaría `int8` como error de driver en vez de como `422`.
+- THE SYSTEM SHALL aceptar `unread` como parámetro de consulta opcional que estrecha la página a
+  `read_at IS NULL`, sin romper el envelope (`data`, `total`, `page`, `per_page`, `total_pages`) ni
+  el orden. Ausente, la bandeja devuelve leídas y no leídas.
 - THE SYSTEM SHALL publicar en cada fila `id`, `notification_type`, `channel`, `status`, `subject`,
-  `body`, `related_type`, `related_id`, `sent_at` y `created_at`, y SHALL retener
+  `body`, `related_type`, `related_id`, `sent_at`, `created_at` y `read_at`, y SHALL retener
   `recipient_contact`, `last_error`, `sla_deadline_at` y `sla_breached`: el primero convertiría la
   bandeja en un directorio y los otros son diagnóstico de operación.
-- THE SYSTEM SHALL **no** ofrecer «marcar como leída» ni añadir una columna `read_at`: PRD §7.24 no
-  la declara y este change no inventa esquema para cerrar el ciclo. El frontend lleva su propio
-  estado hasta que una entrada de roadmap decida lo contrario.
+- THE SYSTEM SHALL persistir el acuse de lectura en la columna `notification_logs.read_at`
+  (`TIMESTAMPTZ`, nullable, sin default, migración `e5c9b1f47a28`), dejando en `NULL` toda fila
+  preexistente: una notificación escrita antes de esta entrega no la ha leído nadie. «Leída» es un
+  hecho del sistema y no una preferencia de un navegador, así que el móvil y el escritorio ven la
+  misma bandeja.
+- THE SYSTEM SHALL exponer `POST /api/v1/notifications/{notification_id}/read` (`204 No Content`),
+  `POST /api/v1/notifications/read-all` (que responde **cuántas** movió) y
+  `GET /api/v1/notifications/unread-count` (que responde `{"unread": <int>}`). Las cuatro rutas
+  exigen `READ_OWN_NOTIFICATIONS` y **todas** derivan el destinatario del JWT, sin ningún parámetro
+  que ensanche el alcance.
+- THE SYSTEM SHALL hacer el acuse **idempotente**: el `UPDATE` fija
+  `read_at = COALESCE(read_at, <ahora>)`, así que un segundo acuse casa con la fila, reporta éxito y
+  **no mueve** el instante — `read_at` registra la primera lectura, no la última visita.
+- IF la notificación no existe, pertenece a otro usuario o pertenece a otro tenant, THEN THE SYSTEM
+  SHALL responder `404` con cuerpo constante y SHALL NOT distinguir los tres casos: un `403`
+  confirmaría la existencia de una fila ajena. La indistinguibilidad es **estructural**, no una
+  intención: las tres condiciones son términos del mismo `WHERE`, así que `rowcount == 0` es todo lo
+  que el código llega a saber. `UPDATE ... WHERE read_at IS NULL` se rechazó por lo contrario —
+  volvería «cero filas» ambiguo entre «ya leída» (un éxito) y «no es tuya» (un `404`).
+- THE SYSTEM SHALL contar las no leídas con un `count(*)` sobre el índice parcial
+  `ix_notification_logs_unread` (`tenant_id`, `recipient_user_id`, `WHERE read_at IS NULL`), nunca
+  paginando la bandeja: es la única consulta que **todo** usuario conectado emite cada 60 s y la
+  única cuyo coste crecería sin tope según se acumulan filas leídas.
+- THE SYSTEM SHALL hacer que «marcar todas» abarque **todas** las no leídas del usuario del token, y
+  deliberadamente no la página ni el filtro que el cliente esté mostrando. Cero es la respuesta
+  normal de una bandeja al día, nunca un error, y el término `read_at IS NULL` la hace idempotente:
+  una segunda llamada no encuentra nada y no puede pisar los instantes que escribió la primera.
+- THE SYSTEM SHALL NOT escribir `AuditLog` por un acuse: la regla 9 de `steering/security.md`
+  enumera Reservation, estados de propiedad, documentos de Guest, `AccessRecord`,
+  `PricingRule`/`PriceRecommendation`, `OwnerApproval`, roles de User e Incident. Leer el aviso
+  propio no es ninguno de ésos, no opera sobre datos ajenos y no concede permiso alguno.
+- THE SYSTEM SHALL dejar `read_at` **fuera** de todo criterio de `check_sla_breaches` y del emisor:
+  leer un aviso no es responder a él, y el plazo de SLA lo cierra la acción de dominio. La columna
+  solo aparece en `list_for_recipient`, `mark_read`, `count_unread`, `mark_all_read` y el mapeo de
+  la entidad.
+- THE SYSTEM SHALL cubrir el acuse con test de aislamiento de tenant (regla 1 de
+  `steering/security.md`), demostrando que un usuario de otro tenant no puede acusar una fila de
+  éste.
 
 `subject` y `body` sí viajan: la máscara `****XX` es la excepción que la regla 11 concede
-precisamente para que el destinatario pueda leer su aviso. El ciclo in-app queda a medias **a
-propósito** —se listan, no se acusan—, y se deja dicho aquí para que el siguiente no lo lea como
-olvido. Polling y no SSE: SSE es infraestructura de tiempo real que ninguna pantalla consume
-todavía y que complica el despliegue detrás del ingress.
+precisamente para que el destinatario pueda leer su aviso. **El ciclo in-app está cerrado desde
+`notifications-inbox-web`**: se listan, se cuentan y se acusan, y con ello
+`InAppNotificationAdapter` —que declara por escrito que «la fila *es* la entrega»— es cierto también
+en el producto y no solo en el contrato. La OQ2 que `access-notifications` design D6 aparcó por no
+declarar PRD §7.24 la columna quedó decidida por esa entrada de roadmap; el criterio anterior de
+esta spec («no ofrecer marcar como leída, el frontend lleva su propio estado hasta que una entrada
+de roadmap decida lo contrario») queda **sustituido**, no matizado.
+
+Polling y no SSE, heredado explícitamente y no vuelto a decidir: PRD §14 ofrece ambos, SSE es una
+conexión larga a través del ingress con su propia forma operativa, y ninguna pantalla la consume.
+La cadencia mínima del cliente es de 60 s porque `dispatch_notifications` corre cada minuto
+(`scheduler/schedule.py`), así que pedir más a menudo no puede descubrir nada nuevo.
+
+**El `404` del acuse es comportamiento real y el documento publicado no lo enumera**: el contrato de
+`POST /notifications/{id}/read` declara `204`, `401`, `403` y `422`. No es una deuda de esta entrega
+sino el estado general del artefacto —13 de 104 operaciones declaran `404`—; se deja dicho aquí para
+que un consumidor del contrato no lea la ausencia como que la ruta no puede fallar así.
+
 
 ### La capa operativa de SES.Hospedajes
 
@@ -387,7 +528,8 @@ El enum `NotificationType` ya no tiene dieciséis miembros sino **diecisiete**:
 explícita de PRD §14 igual que esta capacidad declaró sus dos jobs frente a los cuatro de
 PRD §8.3. Ese decimoséptimo tampoco tiene escalado, y en su caso **no es deuda**: una
 recuperación de contraseña no tiene plazo que incumplir, así que su fila se escribe sin
-`sla_deadline_at` a propósito.
+`sla_deadline_at` a propósito. Cuántos de los diecisiete tienen escritor —y qué guardián lo
+mide— vive en «El censo de escritores», más arriba.
 
 ### Protección del dato de documento
 
@@ -531,11 +673,24 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
 - **Un fallo de presentación legal no escala a nadie**, porque su tipo de notificación queda fuera
   de los dieciséis de PRD §14 y no tiene escalado definido. Avisa a los managers y ahí acaba.
 - **No hay `PhoneAdapter`** ni la rama `TECHNICIAN_ASSIGNED + CRITICAL` de PRD §14: no existe puerto
-  ni implementación, `escalation.py:44` deja constancia, y sigue escalando al manager.
-- **Catorce tipos de notificación siguen sin escalado definido**. Cada uno recibe el suyo en el
-  change que le da un `sla_deadline_at`, no aquí. El decimoséptimo miembro del enum
-  (`PASSWORD_RESET_REQUESTED`, de `auth-account-recovery`) no cuenta entre ellos: no tener plazo
-  es su comportamiento correcto, no una pieza pendiente.
+  ni implementación, `escalation.py` deja constancia, y sigue escalando al manager. Desde
+  `notification-writers-gap` ese escalado se llama por su nombre —`TECHNICIAN_NO_RESPONSE` y ya no
+  `SLA_BREACH`—, que es un cambio de etiqueta y no de mecanismo: la llamada telefónica sigue sin
+  existir. El cualificador `CRITICAL` tampoco se evalúa, y el motivo importa para quien lo
+  retome: `notification_logs` guarda un tipo y ninguna severidad, así que no está disponible **en
+  esa capa** —no que sea imposible—, porque una capa posterior alcanza `incidents.severity` por el
+  par `related_type`/`related_id`.
+- **Catorce tipos de notificación siguen sin escalado definido**, y el recuento no lo movió
+  `notification-writers-gap`: `_POLICY` sigue teniendo las mismas dos entradas —lo que cambió es
+  el tipo que **produce** una de ellas—, y `TECHNICIAN_NO_RESPONSE` ya era miembro sin escalado
+  antes de tener escritor. Cada uno recibe el suyo en el change que le da un `sla_deadline_at`, no
+  aquí. El decimoséptimo miembro del enum (`PASSWORD_RESET_REQUESTED`, de
+  `auth-account-recovery`) no cuenta entre ellos: no tener plazo es su comportamiento correcto, no
+  una pieza pendiente.
+- **Cuatro tipos siguen sin escritor**, y ninguno es deuda de esta capacidad: `LOCK_ALERT` espera
+  una superficie de importación de cerraduras, y los tres recordatorios al huésped son de
+  `guest-scheduled-comms`. El test de censo los fija por nombre, así que la lista no puede
+  pudrirse en silencio como se pudrió antes de medirse.
 - **Valores de enum que nadie escribe todavía**: `LegalRegistrationStatus.MANUAL_REVIEW` no lo escribe nadie, y
   de `GuestDocumentStatus` solo se alcanza `PROVIDED` —`PENDING`, `VERIFIED` y `REJECTED` no tienen
   camino. `MockSESHospedajesAdapter.get_submission_status` solo devuelve `ACCEPTED` o `UNKNOWN`.
@@ -566,7 +721,11 @@ y no una contradicción. Los nombres de los cuatro originales no se tocan.
   `reservations.access_status`), `adapters.py` (`ManualAccessAdapter`, `MockAccessAdapter`)
 - `backend/app/access/api/` — `router.py`, `schemas.py`, `dependencies.py`, `errors.py`
 - `backend/app/notifications/domain/` — `ports.py` (`NotificationAdapter`), `results.py`
-  (`NotificationResult`, `NotificationErrorCode`), `repositories.py` (`cancel_sla_deadline`)
+  (`NotificationResult`, `NotificationErrorCode`), `repositories.py` (`cancel_sla_deadline`,
+  `exists_for`), `escalation.py` (el `_POLICY` de dos entradas)
+- `backend/app/auth/domain/recipients.py` — `Recipients` y `RoleRecipients`, el único resolvedor
+  de destinatarios de un aviso operativo
+- `backend/tests/notifications/test_writer_census.py` — el guardián del censo por AST
 - `backend/app/notifications/infrastructure/adapters.py` — registro de canales
 - `backend/app/notifications/application/use_cases.py` — `DispatchPendingNotificationsUseCase` y la
   lectura in-app

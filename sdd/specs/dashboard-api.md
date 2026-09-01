@@ -39,6 +39,11 @@ de estados en un hub que importa a los otros siete.
   moverse; las dos de §23:1942-1943 se quedan literales.
 - THE SYSTEM SHALL NOT exponer el timeline global `GET /api/v1/timeline` de PRD §23:1951: esta
   capacidad acota a la variante por propiedad, que es la que consume el detalle.
+- **La pantalla no se alimenta sólo de aquí, y estas cuatro rutas siguen siendo de lectura**: desde
+  `blocked-transitions-web` la card del dashboard lee además
+  `GET /api/v1/blocked-transitions` (`celery-jobs.md`) y, con permisos de escritura, llama a
+  `cleaning` y `maintenance`. Ninguna de esas rutas es de esta capacidad y ninguna se añade aquí; se
+  nombra para que «el dashboard es de sólo lectura» no se lea como una promesa de la pantalla.
 
 ### Forma del contrato
 

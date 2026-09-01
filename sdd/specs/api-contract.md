@@ -234,7 +234,7 @@ la única forma de que un recuento en prosa vuelva a ser cierto.
   Inerte mientras nada instale uvloop y la generación sea síncrona.
 - **Sin protección de rama**: como el resto de checks del repositorio, `api-contract` se
   ejecuta y reporta pero no puede marcarse obligatorio (`specs/backend-ci.md` §Estado).
-- El contrato declara `HTTPBearer` como esquema de seguridad, y 89 de las 101 operaciones lo
+- El contrato declara `HTTPBearer` como esquema de seguridad, y 92 de las 104 operaciones lo
   referencian. Las doce restantes son `GET /health`, `POST /api/v1/auth/login`,
   `POST /api/v1/auth/refresh`, `POST /api/v1/auth/forgot-password`,
   `POST /api/v1/auth/reset-password`, `GET /api/v1/cleaning-photos/{photo_id}`,

@@ -361,6 +361,29 @@ se niega una entrega que sí ocurrió—, de modo que una limpiadora que acepta 
 genera un escalado cuatro horas después. Esta parte era la deuda que `cleaning` recortó en su
 `/sdd:review` del 2026-08-06 por no existir todavía el emisor.
 
+**Y desde `notification-writers-gap` el lazo se cierra también al final, no sólo al principio.**
+Antes sólo se avisaba al *abrir* el trabajo —la asignación—, así que la validación de PRD §11
+dependía de que el manager mirase la lista:
+
+- **Al cerrar una tarea** se escribe `CLEANING_COMPLETED` a cada manager activo (o a los owners si
+  no hay ninguno): hay algo que validar.
+- **Si la validación sale `FAILED`** se escribe `CLEANING_FAILED` **a la limpiadora asignada**, no
+  al manager — el manager es quien acaba de emitir el veredicto, y el rol `CLEANER` ya puede leer
+  sus propias notificaciones.
+- **`PASSED` y `WAIVED` no avisan de nada.** Cerrar una tarea ya la deja en `PASSED` por sí solo,
+  así que avisar de cada veredicto favorable sería ruido sobre el hecho que ya anunció
+  `CLEANING_COMPLETED`.
+- **Si la tarea no tiene limpiadora asignada al fallar la validación, o la que tenía ya no está
+  `ACTIVE`, no se escribe nada** y queda una línea de log
+  (`cleaning.validation_failure_without_cleaner`, con `reason` `unassigned` o `inactive`). La
+  validación responde igual: nadie iba a leer ese aviso.
+- Ninguna de las dos lleva plazo de SLA, y las dos se escriben en la misma transacción que el
+  cierre o la validación: no hay un estado en el que la tarea esté cerrada y el aviso no exista.
+
+Lo que **no** cambió es `CLEANING_NO_RESPONSE`, que sigue significando «el auto-asignador no
+encontró limpiadora» y no «una limpiadora no contestó». La asimetría con el aviso del técnico se
+conoce y se deja: reinterpretarla cambiaría un comportamiento vivo que nadie ha pedido cambiar.
+
 **Ese límite ya no existe, y conviene leer lo que ocupó su sitio.** Esta página decía que las
 incidencias no se podían crear todavía, que `maintenance` no tenía capa de aplicación y que la
 precondición de cierre respondía siempre «ninguna abierta». Las tres cosas eran ciertas y ya no lo

@@ -76,10 +76,17 @@ SessionDep = Annotated[AsyncSession, Depends(get_db_session)]
 
 
 def _lifecycle_kwargs(session: AsyncSession) -> dict:
-    """The seven collaborators every task-lifecycle use case takes.
+    """The collaborators every task-lifecycle use case takes.
 
-    One helper rather than seven repeated literals: a use case added later that forgets, say,
-    the audit repository would silently stop honouring rule 9.
+    One helper rather than repeated literals: a use case added later that forgets, say, the
+    audit repository would silently stop honouring rule 9.
+
+    `notifications` and `users` joined them in `notification-writers-gap` (its R2). They used
+    to be passed only to the three operations that answer an assignment, because closing an
+    SLA deadline was the only reason to hold them; completing and validating now write
+    notifications of their own, so **every** lifecycle use case takes them and the per-route
+    literals they replaced are gone. No count here on purpose — an earlier draft of this
+    sentence said "all six" and nine classes subclass `_TaskLifecycleBase`.
     """
     return {
         "tasks": SqlAlchemyCleaningTaskRepository(session),
@@ -88,6 +95,8 @@ def _lifecycle_kwargs(session: AsyncSession) -> dict:
         "timeline": SqlAlchemyTimelineEventRepository(session),
         "reservations": SqlAlchemyReservationRepository(session),
         "audit": SqlAlchemyAuditLogRepository(session),
+        "notifications": SqlAlchemyNotificationLogRepository(session),
+        "users": SqlAlchemyUserRepository(session),
         "uow": SqlAlchemyUnitOfWork(session),
     }
 
@@ -119,39 +128,32 @@ def get_create_cleaning_task_use_case(session: SessionDep) -> CreateCleaningTask
 
 def get_assign_cleaning_task_use_case(session: SessionDep) -> AssignCleaningTaskUseCase:
     return AssignCleaningTaskUseCase(
-        users=SqlAlchemyUserRepository(session),
-        notifications=SqlAlchemyNotificationLogRepository(session),
         configs=SqlAlchemyTenantConfigRepository(session),
         **_lifecycle_kwargs(session),
     )
 
 
 def get_accept_cleaning_task_use_case(session: SessionDep) -> AcceptCleaningTaskUseCase:
-    # The notification repository is the eighth collaborator only for the two operations
-    # that ANSWER an assignment (`access-notifications` R5): answering closes the SLA
-    # deadline the assignment opened. Starting, completing and validating happen after an
-    # answer, so their deadline is already closed and they do not get the port.
-    return AcceptCleaningTaskUseCase(
-        notifications=SqlAlchemyNotificationLogRepository(session),
-        **_lifecycle_kwargs(session),
-    )
+    # The notification port is no longer what distinguishes these operations: since
+    # `notification-writers-gap` R2 every lifecycle use case holds it, because completing and
+    # validating write rows of their own. What still separates accept/reject/cancel is the
+    # **deadline** — they answer an assignment, so they close the SLA it opened.
+    return AcceptCleaningTaskUseCase(**_lifecycle_kwargs(session))
 
 
 def get_reject_cleaning_task_use_case(session: SessionDep) -> RejectCleaningTaskUseCase:
-    return RejectCleaningTaskUseCase(
-        notifications=SqlAlchemyNotificationLogRepository(session),
-        **_lifecycle_kwargs(session),
-    )
+    return RejectCleaningTaskUseCase(**_lifecycle_kwargs(session))
 
 
 def get_cancel_cleaning_task_use_case(session: SessionDep) -> CancelCleaningTaskUseCase:
-    """Takes the notification port for the same reason `reject` does: cancelling a task that was
-    only `ASSIGNED` has to close its assignment SLA, or the manager is escalated about a task that
-    no longer exists (design D8, corrected in section 5)."""
-    return CancelCleaningTaskUseCase(
-        notifications=SqlAlchemyNotificationLogRepository(session),
-        **_lifecycle_kwargs(session),
-    )
+    """Closes the assignment SLA for the same reason `reject` does: cancelling a task that was
+    only `ASSIGNED` has to close its deadline, or the manager is escalated about a task that no
+    longer exists (design D8, corrected in section 5).
+
+    It no longer names the notification port to say so — every lifecycle use case holds it
+    since `notification-writers-gap` R2 — but the reason it inherits `_AnswersAnAssignmentBase`
+    is unchanged."""
+    return CancelCleaningTaskUseCase(**_lifecycle_kwargs(session))
 
 
 def get_start_cleaning_task_use_case(session: SessionDep) -> StartCleaningTaskUseCase:

@@ -183,6 +183,19 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   `sla_medium_minutes`, `sla_low_minutes` de `TenantConfig`— y SHALL registrarlo como
   `sla_deadline_at` **sobre la maquinaria de SLA que ya existe** en `notifications`
   (`list_sla_breach_candidates`, `mark_breached`, `cancel_sla_deadline`), sin construir una segunda.
+- WHEN vence ese plazo sin respuesta, THE SYSTEM SHALL escalar al `PROPERTY_MANAGER` con
+  `notification_type = TECHNICIAN_NO_RESPONSE` —y no con el `SLA_BREACH` genérico que escribía
+  antes de `notification-writers-gap`—, de modo que el manager distinga un técnico que calla de
+  cualquier otro plazo incumplido sin abrir la fila que lo originó. Sólo cambia el tipo: el
+  destinatario, el motivo (`technician_assignment_unanswered_no_phone_adapter`) y el `subject`
+  constante de la fila de escalado siguen igual, y la rama de limpieza sigue siendo `SLA_BREACH`
+  ([`cleaning.md`](cleaning.md)). Las filas `SLA_BREACH` escritas antes SHALL quedarse como están:
+  no hay migración ni reescritura de histórico.
+- THE SYSTEM SHALL no dar plazo propio ni escalado al `TECHNICIAN_NO_RESPONSE` que produce: no hay
+  entrada de política para él, así que `escalation_for` devuelve `None` y un escalado no escala.
+  Y no depende sólo de esa omisión: la fila del escalado nace `PENDING` y sin `sla_deadline_at`,
+  mientras la consulta de candidatos exige `SENT` **y** un plazo ya vencido, así que no puede
+  llegar a ser candidata de su propio escalado ni aunque alguien añadiese la entrada.
 - WHEN el técnico acepta, THE SYSTEM SHALL cancelar el plazo pendiente.
 - WHEN el técnico rechaza, THE SYSTEM SHALL cancelar igualmente el plazo pendiente de la
   notificación `TECHNICIAN_ASSIGNED` de esa incidencia: un rechazo **es** una respuesta, así que
@@ -247,6 +260,11 @@ una conversación cuyo intent es `MAINTENANCE_ISSUE` o `ACCESS_PROBLEM`
   desatascar; es la única diferencia con limpieza, donde ejecutar es sólo de la limpiadora.
 - THE SYSTEM NEVER SHALL permitir conducirlas a un técnico que no sea el asignado, y esa negativa
   SHALL ser indistinguible de «no existe» (ver R8).
+- **Quién llama a `resolve` desde la web**: la sección de desajustes de la card del dashboard lo
+  ofrece al `PROPERTY_MANAGER` cuando la incidencia es lo que bloquea el check-in; esa pantalla no
+  asume que la incidencia acabe en `RESOLVED`, porque la segunda puerta de R4 puede llevarla a
+  `AWAITING_OWNER_APPROVAL`. Su comportamiento vive en
+  [`dashboard-web-frontend.md`](dashboard-web-frontend.md) §Blocked transitions on the card.
 
 ### R7 — Recomposición del estado de la propiedad
 
@@ -471,6 +489,53 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   un olvido; el coste asumido es que el timeline no explica por sí solo por qué una incidencia lleva
   días abierta.
 
+### R10 — El aviso de severidad grave llega al manager
+
+Una incidencia que resulta grave deja de depender de que alguien abra la pantalla. Vale para las
+**dos** vías por las que una incidencia adquiere severidad, porque `severity` tiene exactamente
+dos escritores en todo `backend/app` —`classify` y `set_triage`— y ninguna vía de alta la fija: el
+campo nace en `IncidentSeverity.MEDIUM` y ni `ReportIncidentUseCase` ni
+`ReportGuestIncidentUseCase` lo aceptan. Una incidencia no puede llegar a `HIGH` o `CRITICAL` sin
+pasar por uno de los dos sitios que avisan.
+
+- WHEN una incidencia queda con `severity = CRITICAL` —por la clasificación automática por encima
+  del umbral de confianza, o por el triaje cuando un humano la corrige—, THE SYSTEM SHALL escribir
+  una fila `NotificationLog` de tipo `INCIDENT_CREATED_CRITICAL` por cada destinatario, con
+  `related_type = "incident"` y `related_id` la incidencia.
+- WHEN queda con `severity = HIGH` por cualquiera de esas dos vías, THE SYSTEM SHALL escribir
+  `INCIDENT_CREATED_HIGH` con la misma forma.
+- THE SYSTEM SHALL resolver los destinatarios con `RoleRecipients.managers_or_owners` —cada
+  `PROPERTY_MANAGER` activo y, WHERE no haya ninguno, cada `TENANT_OWNER` activo— y no con un
+  bucle propio ([`access-notifications.md`](access-notifications.md) §El censo de escritores).
+- THE SYSTEM SHALL escribir el aviso **una sola vez por incidencia y severidad**: IF ya existe una
+  fila de ese tipo para esa incidencia, THEN THE SYSTEM SHALL no escribir otra. Lo comprueba con
+  `exists_for` y no comparando severidades, porque un triaje que **confirma** el veredicto del
+  clasificador no la cambia y aun así no debe avisar dos veces, y el triaje admite ser llamado
+  repetidamente. La comprobación va **antes** de resolver el roster, de modo que un triaje repetido
+  cuesta una lectura indexada y ninguna consulta de usuarios.
+- IF una incidencia sube de `HIGH` a `CRITICAL`, THEN THE SYSTEM SHALL escribir el aviso `CRITICAL`
+  aunque el `HIGH` ya exista: son dos hechos distintos y el segundo es el urgente. Sale gratis de
+  que la deduplicación sea por tipo.
+- IF la clasificación queda **por debajo** del umbral de confianza, THEN THE SYSTEM SHALL no
+  escribir ningún aviso: la incidencia sigue `OPEN` con su `MEDIUM` por defecto y sólo se escribe
+  `ai_classification`, así que no hay severidad que anunciar. La puerta es el `status = CLASSIFIED`
+  de la vía automática; la vía del triaje no la tiene, porque un manager que fija la severidad la
+  está afirmando sin umbral.
+- THE SYSTEM SHALL no avisar de `MEDIUM` ni de `LOW`: no son urgentes, y avisar de cada incidencia
+  convertiría la bandeja en ruido.
+- THE SYSTEM SHALL escribir el aviso **dentro de la misma transacción** que esos dos casos de uso
+  ya comitean, de modo que no exista un estado en el que la incidencia es crítica y el aviso no
+  está.
+- IF no hay ni manager ni owner activo, THEN THE SYSTEM SHALL no escribir filas, SHALL registrarlo
+  a nivel de error —un tenant en ese estado tiene una incidencia crítica que nadie va a ver— y
+  SHALL no fallar la clasificación ni el triaje que produjeron el veredicto.
+- THE SYSTEM SHALL escribir estas filas sin `sla_deadline_at`, como toda fila cuyo tipo no tiene
+  escalado definido.
+
+**Consecuencia buscada en el seed de demo**: al ganar los puertos, `make seed-demo` empieza a
+escribir estas filas —una incidencia clasificada como grave deja su aviso—, de modo que la bandeja
+in-app tenga algo que enseñar. No es un efecto colateral.
+
 ## Estado
 
 - **Sin `AuditLog` para la transición de estado de la propiedad.** Las transiciones que dispara este
@@ -523,7 +588,9 @@ porque el que existía **no puede** crear cualquier incidencia: fija `source=GUE
   [`tech-incident-context`](tech-incident-context.md).
 - `backend/app/maintenance/domain/ports.py` — `IncidentClassifier` y `LiveCleaningTaskQuery`.
 - `backend/app/maintenance/domain/value_objects.py` — `IncidentClassification` y sus invariantes.
-- `backend/app/maintenance/domain/notifications.py` — plazos de SLA y las dos notificaciones.
+- `backend/app/maintenance/domain/notifications.py` — plazos de SLA y los **cinco** builders del
+  módulo: asignación al técnico, rechazo, aprobación de la propietaria y los dos avisos de
+  severidad (`incident_critical_notification`, `incident_high_notification`).
 - `backend/app/maintenance/domain/exceptions.py` — la jerarquía plana del módulo.
 - `backend/app/maintenance/infrastructure/classifier.py` — `RuleBasedIncidentClassifier`.
 - `backend/app/maintenance/application/use_cases.py` — los casos de uso y los mixins compartidos.

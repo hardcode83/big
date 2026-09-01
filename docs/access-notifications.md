@@ -29,22 +29,123 @@ consecuencias que conviene tener presentes al desplegar:
 |---|---|---|
 | `EMAIL` / `CONSOLE` | `ConsoleEmailAdapter` | Registra la entrega en el log. SMTP real llega con `hardening-release` |
 | `WHATSAPP` | `MockWhatsAppAdapter` | Mock (PRD §14) |
-| `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y `GET /api/v1/notifications` es lo que la hace legible |
+| `IN_APP` | `InAppNotificationAdapter` | No envía nada: **la fila es la entrega**, y la bandeja web es lo que la hace legible — y desde `notifications-inbox-web`, acusable |
 | `PUSH` | — | Sin adapter a propósito: una fila `PUSH` pasa a `SKIPPED` |
 
-### Leer la bandeja
+### Qué llega a la bandeja hoy, y qué no
+
+De los diecisiete `NotificationType`, **trece los escribe alguien y cuatro no los escribe nadie**.
+Vale la pena tenerlo a mano al mirar una bandeja vacía: puede que no haya pasado nada, o puede que
+el tipo que esperabas sea de los cuatro.
+
+| Qué ocurre | Tipo | A quién |
+|---|---|---|
+| Se asigna una limpieza | `CLEANING_TASK_ASSIGNED` | A la limpiadora (con plazo de SLA) |
+| No hay limpiadora a la que asignar | `CLEANING_NO_RESPONSE` | Managers, o el owner si no hay |
+| Se cierra una limpieza | `CLEANING_COMPLETED` | Managers, o el owner si no hay |
+| Una validación sale `FAILED` | `CLEANING_FAILED` | **A la limpiadora**, no al manager |
+| Una incidencia queda `CRITICAL` | `INCIDENT_CREATED_CRITICAL` | Managers, o el owner si no hay |
+| Una incidencia queda `HIGH` | `INCIDENT_CREATED_HIGH` | Managers, o el owner si no hay |
+| Se asigna una incidencia a un técnico | `TECHNICIAN_ASSIGNED` | Al técnico (con plazo de SLA) |
+| El técnico no responde a tiempo | `TECHNICIAN_NO_RESPONSE` | Managers, o el owner si no hay |
+| Una limpieza asignada no se responde a tiempo | `SLA_BREACH` | Managers, o el owner si no hay |
+| Hace falta que la propietaria apruebe un gasto | `OWNER_APPROVAL_REQUIRED` | A la propietaria |
+| La IA escala una conversación de huésped | `GUEST_ESCALATION` | Managers, o el owner si no hay |
+| Una ejecución crea recomendaciones de precio | `PRICE_RECOMMENDATION` | Managers **y** owners |
+| Alguien pide recuperar su contraseña | `PASSWORD_RESET_REQUESTED` | A quien lo pidió, por email |
+
+**Los cuatro que nadie escribe**: `LOCK_ALERT` —espera una superficie de importación de cerraduras
+que no existe— y los tres recordatorios al huésped, `CHECKIN_REMINDER_24H`, `CHECKIN_REMINDER_2H`
+y `CHECKOUT_REMINDER`, que son de `guest-scheduled-comms` y no tienen canal al huésped todavía.
+
+Hay además dos tipos de **texto libre** que no son miembros del enum y sí se escriben:
+`INCIDENT_REJECTED` (el técnico rechaza) y `LEGAL_REGISTRATION_FAILED`. La columna es un
+`String(100)` libre, así que caben.
+
+**Esta tabla no se mantiene a mano.** `backend/tests/notifications/test_writer_census.py` recorre
+el AST de `backend/app/` y falla si el conjunto medido difiere de sus dos listas literales, en
+cualquier dirección — incluido un miembro nuevo del enum que no aparezca en ninguna. Se hizo así
+porque el censo escrito a mano ya se pudrió una vez: la nota de roadmap que abrió este trabajo
+decía nueve huérfanos y eran diez. Si añades un tipo o un escritor, el test te dirá qué actualizar.
+
+**Dos avisos que sorprenden si no se saben de antemano:**
+
+- **`CLEANING_FAILED` va a la limpiadora, no al manager.** El manager es quien acaba de emitir el
+  veredicto; avisarle de su propia decisión sería ruido. Si la tarea no tiene limpiadora asignada,
+  o la que tenía ya no está `ACTIVE`, **no se escribe la fila** y queda una línea de log
+  (`cleaning.validation_failure_without_cleaner`, con `reason` `unassigned` o `inactive`). La
+  validación responde normal en los dos casos.
+- **`PRICE_RECOMMENDATION` va a managers *y* owners**, y es el único que no usa la caída
+  manager→owner del resto: los dos roles tienen `MANAGE_PRICE_RECOMMENDATIONS`, y dejar fuera a la
+  propietaria porque existe un manager le quitaría una decisión que es suya. Se escribe **una fila
+  por vivienda y ejecución**, no una por recomendación: la ejecución diaria crea 60 el primer día.
+
+**Cuando no hay a quién avisar.** Si el tenant no tiene ningún manager ni owner activo, ningún
+escritor falla la operación que lo produjo: no se escriben filas y queda un log de error
+(`maintenance.severity_alert_without_recipient`, `cleaning.completion_without_recipient`,
+`pricing.recommendations_without_recipient`). La excepción es el escalado de SLA, que deja el
+incumplimiento **sin marcar** a propósito para reintentarlo cada minuto hasta que alguien arregle
+el roster. Y si hay más de 100 destinatarios, se avisa a los 100 primeros y queda un
+`*_recipients_truncated` con el total y los notificados — alguien no recibió el aviso.
+
+### Leer la bandeja, y acusarla
+
+El ciclo in-app se cierra con cuatro rutas. **Todas derivan el destinatario del JWT** y ninguna
+acepta un parámetro que ensanche ese alcance.
 
 ```
-GET /api/v1/notifications?page=1&per_page=20
+GET  /api/v1/notifications?page=1&per_page=20[&unread=true]
+GET  /api/v1/notifications/unread-count          -> {"unread": 3}
+POST /api/v1/notifications/{id}/read             -> 204
+POST /api/v1/notifications/read-all              -> {"updated": 7}
 ```
 
-Devuelve **solo las del usuario del token** — la restricción se deriva del JWT y no hay
-parámetro que la ensanche. Ordenadas de más nueva a más vieja. No hay «marcar como leída»:
-haría falta una columna `read_at` que PRD §7.24 no declara.
+Ordenadas de más nueva a más vieja. `?unread=true` acota a las no leídas sin tocar el envelope
+de PRD §23; ausente y `false` significan lo mismo.
 
-La respuesta lleva `subject`, `body`, `status` y los identificadores. **No** lleva
+**El acuse es idempotente y guarda la PRIMERA lectura**, no la última visita: la escritura es
+`SET read_at = COALESCE(read_at, now)`, así que acusar dos veces responde `204` las dos y no
+mueve el valor. Una notificación que no existe, que es de otro usuario o que es de otro tenant
+responde el **mismo `404` con el mismo cuerpo** — un `403` confirmaría que existe una fila
+ajena, y el mensaje del error es constante para que dos ids distintos no den dos cuerpos
+distintos.
+
+`read-all` nunca da `404`: cero filas es el caso normal de una bandeja al día.
+
+El contador es ruta propia y no un campo del envelope, para que la campana pueda refrescarse
+cada 60 s sin arrastrar una página de filas. Lo sostiene un índice **parcial**
+(`ix_notification_logs_unread`, `WHERE read_at IS NULL`), que es la única forma de que su coste
+no crezca con las ya leídas.
+
+**Acusar no toca el SLA.** `read_at` queda fuera de `check_sla_breaches`, de
+`list_sla_breach_candidates` y de `escalation_for`: leer un aviso no es responder a él, y el
+plazo lo cierra la acción de dominio.
+
+La respuesta lleva `subject`, `body`, `status`, `read_at` y los identificadores. **No** lleva
 `recipient_contact` ni `last_error`: el primero convertiría la bandeja en un directorio, el
 segundo es diagnóstico de operación.
+
+`notification_type` viaja como `NotificationType | str` — unión, no enum a secas: la columna es
+`String(100)` libre y admite valores anteriores al enum, y estrecharla convertiría ese caso en
+un `500`. Publicar la unión es además lo que pone los diecisiete nombres en el contrato
+generado, y con ellos el catálogo tipado del frontend.
+
+### La bandeja en la web
+
+Campana con contador en el `Topbar` de las tres shells autenticadas —`WorkspaceShell`,
+`CleanerShell` y `TechnicianShell`—, nunca en `PublicShell` ni en `GuestShell`, que no llevan
+JWT. Abre un panel `Sheet` mobile-first: listado paginado, los tres estados explícitos, acuse
+al abrir una fila y «marcar todas como leídas». **No es una ruta**, y por eso la campana cuesta
+un componente y no tres — cada grupo de rutas admite un juego de roles distinto.
+
+Las filas se pintan desde `notification_type` traducido a ES/EN, **nunca desde
+`subject`/`body`**, que están escritos en inglés, para un operador, y llevan UUID en crudo. Un
+tipo que la interfaz no conozca cae en un texto genérico traducido.
+
+Una fila enlaza sólo donde hay página viva: en `workspace`, `incident`, `conversation` y
+`reservation`. `cleaning_task` no enlaza —no hay detalle de manager— y en las shells de campo
+no enlaza nada hasta que `cleaner-app` y `tech-app` entreguen sus detalles. Sin destino, la fila
+se pinta sin enlace y **sin enseñar el identificador**.
 
 ### Cuando algo no llega
 

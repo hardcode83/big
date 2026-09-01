@@ -1,0 +1,52 @@
+{
+  "types": {
+    "CLEANING_TASK_ASSIGNED": "Se te ha asignado una limpieza",
+    "CLEANING_NO_RESPONSE": "Una limpieza asignada sigue sin respuesta",
+    "CLEANING_COMPLETED": "Limpieza terminada",
+    "CLEANING_FAILED": "Una limpieza no ha podido completarse",
+    "INCIDENT_CREATED_CRITICAL": "Incidencia crítica abierta",
+    "INCIDENT_CREATED_HIGH": "Incidencia de prioridad alta abierta",
+    "OWNER_APPROVAL_REQUIRED": "Hay un gasto esperando tu aprobación",
+    "TECHNICIAN_ASSIGNED": "Se te ha asignado una incidencia",
+    "TECHNICIAN_NO_RESPONSE": "Una incidencia asignada sigue sin respuesta",
+    "GUEST_ESCALATION": "Un huésped necesita atención humana",
+    "LOCK_ALERT": "Aviso de la cerradura",
+    "CHECKIN_REMINDER_24H": "Entrada mañana",
+    "CHECKIN_REMINDER_2H": "Entrada en unas horas",
+    "CHECKOUT_REMINDER": "Salida próxima",
+    "PRICE_RECOMMENDATION": "Nueva recomendación de precio",
+    "SLA_BREACH": "Un aviso ha superado su plazo",
+    "PASSWORD_RESET_REQUESTED": "Se ha pedido restablecer tu contraseña",
+    "unknown": "Aviso del sistema"
+  },
+  "bell": {
+    "label": "Notificaciones",
+    "unreadCount_one": "{{count}} sin leer",
+    "unreadCount_other": "{{count}} sin leer",
+    "noUnread": "Sin notificaciones nuevas",
+    "overflowCount": "{{max}}+"
+  },
+  "panel": {
+    "title": "Notificaciones",
+    "close": "Cerrar notificaciones",
+    "markAllRead": "Marcar todas como leídas",
+    "unreadBadge": "Sin leer",
+    "previousPage": "Anterior",
+    "nextPage": "Siguiente",
+    "pageStatus": "Página {{page}} de {{totalPages}}"
+  },
+  "states": {
+    "loading": "Cargando notificaciones…",
+    "errorTitle": "No hemos podido cargar tus notificaciones",
+    "errorDescription": "Vuelve a intentarlo en un momento.",
+    "retry": "Reintentar",
+    "emptyTitle": "No tienes notificaciones",
+    "emptyDescription": "Aquí aparecerán los avisos de limpiezas, incidencias y reservas."
+  },
+  "errors": {
+    "notFound": "Esa notificación ya no está disponible.",
+    "forbidden": "No tienes permiso para hacer eso.",
+    "session": "Tu sesión ha caducado.",
+    "generic": "No hemos podido completar la acción. Inténtalo de nuevo."
+  }
+}
