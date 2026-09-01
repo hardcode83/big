@@ -63,3 +63,23 @@ es implementable.
 una persona en varios tenants se resuelve con **identidad global más memberships** y nunca repitiendo el
 email. El corte (a) de arriba es el primero que toca ese terreno, así que conviene leer esa nota antes de
 decidir, no después.
+
+## Split ejecutado el 2026-08-31
+
+Al abrir `/sdd:new super-admin-console`, se volvió a medir el censo de arriba contra el código
+actual — los seis hallazgos siguen exactamente igual dos días después (mismos ficheros, mismas líneas) —
+y se confirmó lo que esta nota ya anticipaba: la entrada se partió en tres, sin escribir `proposal.md` para
+`super-admin-console` en este paso, mismo criterio que `tech-app` el 2026-08-19 (su `/sdd:new` se abrió y
+se cerró sin proposal, y de ahí salieron sus tres entradas `[BE]`).
+
+- **`super-admin-identity`** `[BE]` — corte (a): el modelo de identidad (tenant nulo o de plataforma) y la
+  excepción a la regla 1 de `steering/security.md` que necesita, más la decisión sobre si `GRANTABLE_ROLES`
+  se abre para dar de alta a otro `SUPER_ADMIN`.
+- **`platform-admin-api`** `[BE]` — corte (b): `POST /tenants` y el alta de personal en un tenant nombrado,
+  con auditoría. Depende de `super-admin-identity`.
+- **`super-admin-console`** queda como `[FE]` únicamente — corte (c) — y pasa a depender de las dos
+  entradas anteriores en vez de arrastrar el trabajo de backend bajo su propio nombre.
+
+Las dos entradas `¿?` que `sdd_roadmap.py suggest` señaló al abrir este `/sdd:new` **no eran relaciones
+reales** y no se declararon: «no es `saas-cross-tenant`» es una frontera, no una dependencia, y la mención
+de `cleaner-app`/`tech-app` es un precedente citado, no algo de lo que esta entrada dependa.

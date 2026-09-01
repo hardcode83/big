@@ -19,6 +19,7 @@ Fuente de verdad funcional: `docs/AutoHostAI_PRD_v5_Claude.md` (PRD técnico v5,
 
 - Arranque completo local: `make up` (copiar `.env.example` a `.env` antes). Por componente: `make up SERVICE=backend|frontend`.
 - Backend tests: `docker compose exec backend uv run pytest` (el backend corre en Docker; `uv` no está instalado en el host). Con el stack parado: `docker compose run --rm backend uv run pytest`.
+- Backend static tooling: desde `backend`, `uv sync --frozen`, `command -v pyright`, `uv run pyright --version` y `uv run pyright .`; los findings se reportan aparte de los fallos de arranque. `uvx pyright` no es el camino soportado (descarga fuera del lockfile, no reproducible): usa siempre `uv run pyright .` con el entorno preparado por `uv sync --frozen`.
 - Frontend: `cd frontend && npm run dev` / `npm test`
 - E2E: `npx playwright test` (previsto — llega con `hardening-release`)
 
