@@ -103,6 +103,76 @@ def test_the_meta_vocabulary_alone_is_no_longer_a_sink() -> None:
     assert offending("`audit_logs` es un sumidero de la regla 11 y su escritor vivo es éste.")
 
 
+#: The five terms D3 removed from the sink axis. They live here and not in the guard because the
+#: guard no longer knows them — this is the only place that still needs to, in order to keep
+#: measuring what dropping them costs.
+META_TERMS_DROPPED_BY_D3 = (
+    "regla 11",
+    "rule 11",
+    "censo",
+    "sumidero de texto en claro",
+    "cleartext sink",
+)
+
+
+def _meta_only_offenders() -> list[str]:
+    """`file:line` of every in-scope block that fired both axes ONLY through meta-vocabulary."""
+    exempt = set(module.exception_paths(SCOPE))
+    authority = module.authority_path(SCOPE)
+    found = []
+    for relative, path in module.prose_files(SCOPE, ROOT) + module.code_files(SCOPE, ROOT):
+        if relative in exempt or relative == authority:
+            continue
+        python = relative.endswith(".py")
+        text = path.read_text(encoding="utf-8")
+        blocks = (
+            module._python_blocks(text, source=relative) if python
+            else module._markdown_blocks(text)
+        )
+        for line, block in blocks:
+            lowered = block.lower()
+            if any(term.lower() in lowered for term in module.SINK_TERMS):
+                continue  # a real column is present: this is not a meta-only match
+            if not any(term in lowered for term in META_TERMS_DROPPED_BY_D3):
+                continue
+            if module._OWNERSHIP.search(block):
+                found.append(f"{relative}:{line}")
+    return sorted(found)
+
+
+def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_prose_says() -> None:
+    """R5.3, and the reason this is a test and not a sentence.
+
+    D3's cost is a **measured** figure, and it was written into prose in six places: two comments
+    in the guard, the residual below, the spec's WHERE bullet, and a dated note in each of the
+    change's `design.md` and `tasks.md`. It went stale twice in two review rounds — first because
+    the change's own new spec added a case nobody recounted, then because the sentence written to
+    *report* the new number quoted an ownership redaction and thereby became a member of the set it
+    was counting. Both times the number was chased and both times the chase lost, which is the
+    lesson: a figure with six prose homes and no assertion drifts by construction.
+
+    So the figure gets one executable home. This asserts the exact `file:line` set, not just the
+    count, because the count alone would stay green while the membership moved. If it reddens, do
+    **not** edit the number first — read the set, find out which block joined or left, and only
+    then decide whether the prose or the tree is what should change.
+
+    Why this file is the right home: it is a declared `EXCEPTION` in `SCOPE`, so naming the five
+    terms and the ownership redactions here cannot itself become an offender. That is exactly the
+    trap the spec's bullet fell into, and the reason the spec now describes the match by reference
+    instead of quoting it.
+    """
+    assert _meta_only_offenders() == [
+        "sdd/specs/access-notifications.md:372",
+        "sdd/specs/access-notifications.md:525",
+        "sdd/specs/access-notifications.md:689",
+        "sdd/specs/rule11-ownership-guard.md:11",
+    ]
+    # Zero true positives in scope is the half that decided D3, and it is the half worth pinning:
+    # every one of the four attributes an enum member or says where the contract lives, never a
+    # column of the census.
+    assert len(_meta_only_offenders()) == 4
+
+
 def test_what_this_guard_does_not_catch() -> None:
     """R2.3: say what the green does not cover, so it is not read as completeness.
 

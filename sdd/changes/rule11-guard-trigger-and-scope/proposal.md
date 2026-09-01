@@ -219,12 +219,25 @@ Acceptance criteria:
 
 ## Affected specs
 
-- `sdd/specs/access-notifications.md` — los tres bloques infractores (372, 525 y 689) que hoy ponen
-  `main` en rojo.
-- `sdd/specs/backend-ci.md` — hoy es donde vive la prohibición de `paths:` y el contrato del gate de
-  área; el workflow nuevo y su check propio se declaran aquí **o** en un home propio, y cuál de los dos
-  lo decide `/sdd:design` (precedente: `compose-ports` se declaró en `sdd/specs/local-environment.md`,
-  porque su asunto era la postura del compose y no el CI).
+**Actualizado tras el design y la review: de las dos specs que este apartado anticipaba, ninguna se
+toca, y la que sí cambia es una nueva.** Se conserva el razonamiento original de cada una porque
+explica por qué se esperaba tocarlas.
+
+- `sdd/specs/rule11-ownership-guard.md` — **nueva, y el único cambio real en `sdd/specs/`**: es el
+  home propio que D8 eligió para el mecanismo (gatillo, check run, fallo cerrado, vía local con su
+  suelo de intérprete, y qué no cubre). Cita a `steering/security.md` y no reproduce el censo.
+- `sdd/specs/access-notifications.md` — **citada, no modificada.** Se anticipaba «los tres bloques
+  infractores (372, 525 y 689) que hoy ponen `main` en rojo», y la medición de OQ2 lo desmintió:
+  nunca fueron infractores, encajaban por el meta-vocabulario y por ninguna columna del censo. R3.2
+  quedó enmendado en consecuencia y el fichero **no aparece en el diff de este change**.
+- `sdd/specs/backend-ci.md` — **citada, no modificada.** Aquí vive la prohibición de `paths:` que R1.2
+  invoca, y este apartado dejaba abierto si el workflow nuevo se declaraba en ella o en un home
+  propio. D8 resolvió lo segundo (precedente: `compose-ports` se declaró en
+  `sdd/specs/local-environment.md`, porque su asunto era la postura del compose y no el CI), así que
+  `backend-ci.md` se lee pero no se escribe.
+- `sdd/specs/local-environment.md` — dos recuentos que el target nuevo falsea, y un tercero corregido
+  al pasar, fuera de alcance y anotado como tal en el design.
+- `sdd/specs/incident-photos.md` — una cita de la ruta vieja del guardián, en prosa y no funcional.
 
 Fuera de `sdd/specs/`, este change modifica:
 

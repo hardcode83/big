@@ -131,11 +131,24 @@ antes**, porque ya no exige contenedor ni stack.
   `:689`—, atribuciones de miembros de `NotificationType` cazadas por accidente a través de una
   palabra que habla del mecanismo; por eso esos tres bloques **no se reescribieron**: nunca fueron
   infractores. El cuarto es la línea 11 **de esta misma spec**, el párrafo que declara que el
-  contrato no vive aquí: encaja por `censo` y por `quién la escribe` sin atribuir nada. Eran tres
+  contrato no vive aquí: encaja por `censo` y por una de las trece redacciones del eje de propiedad,
+  sin atribuir nada. Eran tres
   cuando se decidió D3, antes de que esta spec existiera, y conviene no disimular la mitad
   incómoda: **esta spec da verde gracias al estrechamiento que hace el mismo change**, que es la
   misma autorreferencia que obligó a reescribir la entrada de roadmap de este change y la razón
   concreta de que el meta-vocabulario tuviera que salir.
+
+  > **Este párrafo no cita literalmente ninguna de las trece redacciones del eje de propiedad, y es
+  > deliberado — no es estilo.** La primera versión de esta frase sí lo hacía: escribía la redacción
+  > entre comillas para explicar por qué encaja la línea 11, y con eso **la propia oración que
+  > cuenta pasó a ser el quinto miembro de lo que cuenta**. Lo levantó el panel de review el
+  > 2026-09-01, midiendo cinco donde el texto decía cuatro. Subir la cifra a cinco no lo arregla:
+  > cualquier frase futura que necesite nombrar la redacción vuelve a moverla, así que la grafía
+  > pierde la carrera y el recuento no converge nunca. Lo que sí cierra es que la oración deje de
+  > ser miembro del conjunto: se describe el encaje **por referencia** («una de las trece
+  > redacciones») en vez de transcribirlo. Si alguien reintroduce la cita literal aquí, el coste
+  > declarado deja de ser cuatro y esta sección vuelve a contarse a sí misma.
+
 - THE SYSTEM SHALL declarar por escrito, junto al propio guardián, lo que su verde **no** cubre, y
   SHALL acompañar cada exclusión declarada de su **coste medido** en bloques.
 
