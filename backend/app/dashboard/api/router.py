@@ -29,16 +29,19 @@ from app.auth.domain.policy import Permission
 from app.core.openapi import AUTHENTICATED_RESPONSES
 from app.dashboard.api.dependencies import (
     get_dashboard_cards_use_case,
+    get_operational_kpis_use_case,
     get_property_dashboard_use_case,
 )
 from app.dashboard.api.schemas import (
     MAX_PAGE,
     MAX_PER_PAGE,
+    OperationalKpisResponse,
     PropertyDashboardPageResponse,
     PropertyDetailResponse,
 )
 from app.dashboard.application.use_cases import (
     GetDashboardCardsUseCase,
+    GetOperationalKpisUseCase,
     GetPropertyDashboardUseCase,
 )
 
@@ -134,3 +137,31 @@ async def get_property_dashboard(
         today=today,
     )
     return PropertyDetailResponse.from_domain(detail)
+
+
+@router.get(
+    "/dashboard/operational-kpis",
+    response_model=OperationalKpisResponse,
+    summary="Tenant-wide operational counts",
+    description=(
+        "Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live "
+        "cleaning tasks, check-ins in the next 7 days, and open incidents with their "
+        "urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` "
+        "included: a field comes back `null` when the caller's role lacks the permission "
+        "that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, "
+        "`READ_INCIDENTS` respectively), indistinguishable from having nothing to count — "
+        "the same 'agregar no concede' rule the other two dashboard routes apply. "
+        "`open_incidents` is one nested object, redacted as a whole."
+    ),
+)
+async def get_operational_kpis(
+    authenticated: ReadDep,
+    today: TodayDep,
+    use_case: Annotated[GetOperationalKpisUseCase, Depends(get_operational_kpis_use_case)],
+) -> OperationalKpisResponse:
+    kpis = await use_case.execute(
+        tenant_id=authenticated.context.tenant_id,
+        role=authenticated.context.role,
+        today=today,
+    )
+    return OperationalKpisResponse.from_domain(kpis)

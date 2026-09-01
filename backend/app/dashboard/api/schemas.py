@@ -27,6 +27,8 @@ from app.dashboard.domain.read_models import (
     GuestBlock,
     IncidentBlock,
     NextActionBlock,
+    OpenIncidentCountsBlock,
+    OperationalKpis,
     PropertyDashboardCard,
     PropertyDetail,
     ReservationBlock,
@@ -41,6 +43,8 @@ from app.properties.api.schemas import MAX_PAGE, MAX_PER_PAGE
 __all__ = [
     "MAX_PAGE",
     "MAX_PER_PAGE",
+    "OpenIncidentCountsResponse",
+    "OperationalKpisResponse",
     "PropertyDashboardCardResponse",
     "PropertyDashboardPageResponse",
     "PropertyDetailResponse",
@@ -222,6 +226,41 @@ class PropertyDashboardPageResponse(BaseModel):
             page=page,
             per_page=per_page,
             total_pages=(total + per_page - 1) // per_page if per_page else 0,
+        )
+
+
+class OpenIncidentCountsResponse(BaseModel):
+    """The `open_incidents` block of `GET /dashboard/operational-kpis` (R3)."""
+
+    total: int
+    urgent: int
+
+    @classmethod
+    def from_domain(cls, block: OpenIncidentCountsBlock) -> "OpenIncidentCountsResponse":
+        return cls(total=block.total, urgent=block.urgent)
+
+
+class OperationalKpisResponse(BaseModel):
+    """`GET /api/v1/dashboard/operational-kpis` (`dashboard-operational-kpis` R1, R2, R3).
+
+    All three top-level keys are always present, `null` included: `null` marks a role that
+    may not read the source domain (R4.3), never omission.
+    """
+
+    cleanings_today: int | None
+    upcoming_checkins: int | None
+    open_incidents: OpenIncidentCountsResponse | None
+
+    @classmethod
+    def from_domain(cls, kpis: OperationalKpis) -> "OperationalKpisResponse":
+        return cls(
+            cleanings_today=kpis.cleanings_today,
+            upcoming_checkins=kpis.upcoming_checkins,
+            open_incidents=(
+                OpenIncidentCountsResponse.from_domain(kpis.open_incidents)
+                if kpis.open_incidents is not None
+                else None
+            ),
         )
 
 

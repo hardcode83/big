@@ -3702,6 +3702,69 @@
         "title": "NotificationType",
         "type": "string"
       },
+      "OpenIncidentCountsResponse": {
+        "description": "The `open_incidents` block of `GET /dashboard/operational-kpis` (R3).",
+        "properties": {
+          "total": {
+            "title": "Total",
+            "type": "integer"
+          },
+          "urgent": {
+            "title": "Urgent",
+            "type": "integer"
+          }
+        },
+        "required": [
+          "total",
+          "urgent"
+        ],
+        "title": "OpenIncidentCountsResponse",
+        "type": "object"
+      },
+      "OperationalKpisResponse": {
+        "description": "`GET /api/v1/dashboard/operational-kpis` (`dashboard-operational-kpis` R1, R2, R3).\n\nAll three top-level keys are always present, `null` included: `null` marks a role that\nmay not read the source domain (R4.3), never omission.",
+        "properties": {
+          "cleanings_today": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cleanings Today"
+          },
+          "open_incidents": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/OpenIncidentCountsResponse"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "upcoming_checkins": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Upcoming Checkins"
+          }
+        },
+        "required": [
+          "cleanings_today",
+          "upcoming_checkins",
+          "open_incidents"
+        ],
+        "title": "OperationalKpisResponse",
+        "type": "object"
+      },
       "OwnerApprovalStatus": {
         "description": "ASSUMPTION: name invented — the PRD declares this enum inline\n(OwnerApproval.status) without a named block (§7.19).",
         "enum": [
@@ -10637,6 +10700,53 @@
         "summary": "Resolve a conversation",
         "tags": [
           "messaging"
+        ]
+      }
+    },
+    "/api/v1/dashboard/operational-kpis": {
+      "get": {
+        "description": "Three tenant-wide counts (`dashboard-operational-kpis` R1, R2, R3): today's live cleaning tasks, check-ins in the next 7 days, and open incidents with their urgent (HIGH/CRITICAL) breakdown. All three keys are always present, `null` included: a field comes back `null` when the caller's role lacks the permission that guards its source domain (`READ_CLEANING_TASKS`, `READ_RESERVATIONS`, `READ_INCIDENTS` respectively), indistinguishable from having nothing to count — the same 'agregar no concede' rule the other two dashboard routes apply. `open_incidents` is one nested object, redacted as a whole.",
+        "operationId": "get_operational_kpis_api_v1_dashboard_operational_kpis_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OperationalKpisResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "401": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Missing, malformed or expired credentials."
+          },
+          "403": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorEnvelope"
+                }
+              }
+            },
+            "description": "Authenticated, but the role lacks the required permission."
+          }
+        },
+        "security": [
+          {
+            "HTTPBearer": []
+          }
+        ],
+        "summary": "Tenant-wide operational counts",
+        "tags": [
+          "dashboard"
         ]
       }
     },

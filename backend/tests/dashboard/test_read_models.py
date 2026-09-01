@@ -18,6 +18,8 @@ from app.dashboard.domain.read_models import (
     GuestBlock,
     IncidentBlock,
     NextActionBlock,
+    OpenIncidentCountsBlock,
+    OperationalKpis,
     PropertyDashboardCard,
     PropertyDetail,
     ReservationBlock,
@@ -33,6 +35,8 @@ ALL_BLOCKS = [
     FinancialBlock,
     ApprovalBlock,
     CleaningPhotoBlock,
+    OpenIncidentCountsBlock,
+    OperationalKpis,
     PropertyDashboardCard,
     PropertyDetail,
 ]
@@ -110,6 +114,20 @@ def test_the_card_carries_exactly_the_contract_fields() -> None:
         "last_event_label",
         "last_event_at",
     }
+
+
+def test_the_operational_kpis_carry_exactly_the_contract_fields() -> None:
+    """`OperationalKpis` (`dashboard-operational-kpis` design, R1, R2, R3)."""
+    assert _fields(OperationalKpis) == {
+        "cleanings_today",
+        "upcoming_checkins",
+        "open_incidents",
+    }
+
+
+def test_the_open_incident_counts_block_carries_total_and_urgent_only() -> None:
+    """R3.2/R3.3 and design D5 — redacted as one unit, never a third field to redact."""
+    assert _fields(OpenIncidentCountsBlock) == {"total", "urgent"}
 
 
 def test_the_detail_carries_exactly_the_contract_fields() -> None:

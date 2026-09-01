@@ -12,7 +12,7 @@ the join rather than assume it.
 """
 
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 import pytest
 
@@ -292,6 +292,94 @@ async def test_list_filters_by_assigned_cleaner(
     )
 
     assert [task.id for task in page.items] == [mine.id]
+
+
+# --- operational KPI counts (`dashboard-operational-kpis` R1) ---------------------
+
+
+@pytest.mark.asyncio
+async def test_count_live_for_day_counts_only_live_statuses_scheduled_today(
+    db_session, tenant_a, property_a, template_a
+):
+    today = datetime.now(UTC).date()
+    for status in (
+        CleaningTaskStatus.CREATED,
+        CleaningTaskStatus.ASSIGNED,
+        CleaningTaskStatus.ACCEPTED,
+        CleaningTaskStatus.IN_PROGRESS,
+    ):
+        await insert_task(
+            db_session,
+            tenant_a,
+            property_a,
+            template_a,
+            status=status,
+            scheduled_start=datetime.combine(today, datetime.min.time(), tzinfo=UTC),
+        )
+    for status in (
+        CleaningTaskStatus.COMPLETED,
+        CleaningTaskStatus.CANCELLED,
+        CleaningTaskStatus.REJECTED,
+        CleaningTaskStatus.FAILED,
+    ):
+        await insert_task(
+            db_session,
+            tenant_a,
+            property_a,
+            template_a,
+            status=status,
+            scheduled_start=datetime.combine(today, datetime.min.time(), tzinfo=UTC),
+        )
+
+    repo = SqlAlchemyCleaningTaskRepository(db_session)
+    assert await repo.count_live_for_day(tenant_a.id, today) == 4
+
+
+@pytest.mark.asyncio
+async def test_count_live_for_day_excludes_other_days_and_returns_zero_when_none(
+    db_session, tenant_a, property_a, template_a
+):
+    today = datetime.now(UTC).date()
+    repo = SqlAlchemyCleaningTaskRepository(db_session)
+    assert await repo.count_live_for_day(tenant_a.id, today) == 0
+
+    await insert_task(
+        db_session,
+        tenant_a,
+        property_a,
+        template_a,
+        scheduled_start=datetime.combine(
+            today - timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        ),
+    )
+    await insert_task(
+        db_session,
+        tenant_a,
+        property_a,
+        template_a,
+        scheduled_start=datetime.combine(
+            today + timedelta(days=1), datetime.min.time(), tzinfo=UTC
+        ),
+    )
+
+    assert await repo.count_live_for_day(tenant_a.id, today) == 0
+
+
+@pytest.mark.asyncio
+async def test_count_live_for_day_never_counts_another_tenant(
+    db_session, tenant_a, tenant_b, property_b, template_b
+):
+    today = datetime.now(UTC).date()
+    await insert_task(
+        db_session,
+        tenant_b,
+        property_b,
+        template_b,
+        scheduled_start=datetime.combine(today, datetime.min.time(), tzinfo=UTC),
+    )
+
+    repo = SqlAlchemyCleaningTaskRepository(db_session)
+    assert await repo.count_live_for_day(tenant_a.id, today) == 0
 
 
 # --- templates --------------------------------------------------------------------
