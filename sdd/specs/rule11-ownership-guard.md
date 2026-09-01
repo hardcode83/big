@@ -71,6 +71,12 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
 - WHEN alguien lo ejecute en local, THE SYSTEM SHALL ofrecer `make check-rule11-ownership`, que
   corre con el `python3` del host **sin Docker y sin el stack levantado**, y SHALL dar el mismo
   veredicto que en CI sobre el mismo árbol.
+- WHERE se ejecute con el `python3` del host, THE SYSTEM SHALL requerir **Python ≥ 3.11**: el
+  guardián usa `enum.StrEnum`, que no existe antes de esa versión, y es el único script de
+  `scripts/` que lo hace. El suelo se declara aquí porque abajo de él la vía local no da veredicto
+  —muere con un `ImportError` antes de llegar a `main()`—, así que la equivalencia con CI que pide
+  el punto anterior sólo se sostiene por encima de él. CI no está afectado: `ubuntu-latest` trae
+  3.12.
 
 **El coste declarado de vivir fuera de la suite.** El `pytest` del backend ya **no** ejecuta este
 guardián. Quien escriba una atribución en un docstring de `backend/app/**` la ve en CI y en
@@ -119,11 +125,17 @@ antes**, porque ya no exige contenedor ni stack.
   spec fija es que **este mecanismo no la detecta**, y que su verde no debe leerse como que la
   cubre.
 - WHERE un bloque encaje únicamente por el **meta-vocabulario** del censo —las palabras que nombran
-  el mecanismo, no ninguna columna—, THE SYSTEM SHALL no reportarlo. Medido al decidirlo: dentro
-  del alcance no aportaba ni un verdadero positivo, y aportaba los tres falsos que tenían `main` en
-  rojo, que eran atribuciones de miembros de `NotificationType` cazadas por accidente a través de
-  una palabra que habla del mecanismo. Por eso esos tres bloques **no se reescribieron**: nunca
-  fueron infractores.
+  el mecanismo, no ninguna columna—, THE SYSTEM SHALL no reportarlo. Recontado contra el árbol que
+  se entrega (2026-09-01): dentro del alcance no aporta ni un verdadero positivo, y aporta **cuatro**
+  falsos. Tres son los que tenían `main` en rojo —`sdd/specs/access-notifications.md:372`, `:525` y
+  `:689`—, atribuciones de miembros de `NotificationType` cazadas por accidente a través de una
+  palabra que habla del mecanismo; por eso esos tres bloques **no se reescribieron**: nunca fueron
+  infractores. El cuarto es la línea 11 **de esta misma spec**, el párrafo que declara que el
+  contrato no vive aquí: encaja por `censo` y por `quién la escribe` sin atribuir nada. Eran tres
+  cuando se decidió D3, antes de que esta spec existiera, y conviene no disimular la mitad
+  incómoda: **esta spec da verde gracias al estrechamiento que hace el mismo change**, que es la
+  misma autorreferencia que obligó a reescribir la entrada de roadmap de este change y la razón
+  concreta de que el meta-vocabulario tuviera que salir.
 - THE SYSTEM SHALL declarar por escrito, junto al propio guardián, lo que su verde **no** cubre, y
   SHALL acompañar cada exclusión declarada de su **coste medido** en bloques.
 

@@ -66,6 +66,13 @@ bloques no atribuyen ninguna columna del censo de la regla 11 — atribuyen **mi
 que el propio bloque 689 cita). El guardián los cazaba por hablar de *un censo*, no por
 duplicar *el* censo. Eso es exactamente la patología que R2.6 describe.
 
+> **Esta medición es del 2026-08-31 y son tres porque entonces eran tres.** Recontada sobre el
+> árbol que se entrega (2026-09-01) son **cuatro**: el que se ha sumado es
+> `sdd/specs/rule11-ownership-guard.md:11`, el párrafo de la spec que D8 crea y que declara que el
+> contrato no vive allí. Es falso positivo como los otros tres y no mueve ninguna conclusión de
+> este diseño, pero deja claro que la spec nueva da verde gracias al estrechamiento que hace este
+> mismo change. La cifra viva vive en `scripts/rule11-ownership.py` y en la spec, no aquí.
+
 Y la consecuencia es la que ordena el resto del diseño: **R2.6 hecho bien resuelve R3.1 sin
 editar una sola línea de `sdd/specs/access-notifications.md`.** Verificado: con el eje de
 sumideros reducido a columnas y tablas, los infractores en alcance pasan de 3 a **0**, y los
@@ -307,13 +314,33 @@ reducción pequeña y real de su superficie de lectura.
 (`test_the_scan_catches_what_it_claims_to` cubre markdown, docstring y tirada de `#`), así que
 lo que R4 aporta de nuevo es probar que **el check run** se pone rojo. El plan:
 
-1. **R4.1 — las dos formas de diff.** El workflow no tiene gate (D2), así que basta un push a la
-   rama cuyo diff sea **sólo prosa** y otro cuyo diff sea **sólo `backend/**`**, y registrar los
-   dos ids de run en `tasks.md`. La rama de este change produce los dos de forma natural.
-2. **R4.2 — rojo por cada forma.** Un commit temporal que meta un bloque infractor en un `.md`
-   y otro en un docstring de `.py`, con el check en rojo registrado por su id de run, y
-   revertido acto seguido. La salida local de `make check-rule11-ownership` se pega en
-   `tasks.md` junto a los ids.
+1. **R4.1 — las dos formas de diff.** Los dos runs se toman de **eventos `pull_request` sobre la
+   PR ya abierta**, uno por cada forma de diff (sólo prosa y sólo `backend/**`), y se registran
+   sus ids en `tasks.md`.
+
+   > **Corregido en review (2026-09-01), y era un error de este design y no del `tasks.md`.**
+   > Este paso decía «basta un push a la rama … la rama de este change produce los dos de forma
+   > natural». Es falso, y lo contradice el propio D2: con `on: pull_request: {}` + `push:
+   > branches: [main]`, un push a la rama de la feature **no produce ningún run** —no hay PR y la
+   > rama no es `main`—, así que los ids no existen hasta que `/sdd:ship` abre la PR. Tampoco lo
+   > salva `workflow_dispatch`: GitHub sólo ofrece despachar un workflow que ya existe en la rama
+   > por defecto, y éste todavía no está en `main`. Se consideró ensanchar el `push:` a todas las
+   > ramas para que la evidencia naciera antes; se descarta porque añadiría un run por cada push
+   > de cualquier rama y porque el evento que R1.1 nombra es la Pull Request, así que el
+   > `pull_request` es además la evidencia **mejor**, no sólo la disponible. Consecuencia
+   > aceptada: **la sección 6 se ejecuta después de `/sdd:ship`**, no durante `/sdd:run`.
+
+2. **R4.2 — rojo por cada forma.** Dos mitades, y conviene no confundirlas porque una no descarga
+   la otra:
+   - **El binario**, en local, sobre un bloque infractor inyectado de cada forma que la guardia
+     dice cazar (markdown, docstring y tirada de `#`). No necesita PR: se hace con
+     `make check-rule11-ownership` y se pega su salida en `tasks.md`.
+   - **El check run**, en rojo sobre la PR, con su id, mediante un commit temporal revertido acto
+     seguido.
+
+   Y ninguna de las dos se descarga con el fallo cerrado: las ocho vías de `GuardError` son
+   evidencia de **R1.4 y R4.3** —cadena rota—, no de R4.2, que es un bloque infractor recorriendo
+   `offenders()` → `render()` → salida 1. Son caminos de código distintos.
 3. **R4.3 — alcance vacío.** Meta-prueba: se construye una `SCOPE` vacía y se afirma que la
    guardia levanta `GuardError` en vez de reportar cero infractores; igual con un árbol de prosa
    ausente.
@@ -367,7 +394,8 @@ Rejected:
 | Autoridad | `sdd/steering/security.md` | § regla 11: la línea 126 (qué recorre) y la 128 (qué excluye, sus excepciones) se reescriben contra `SCOPE`; se nombra el check run y se cita la spec nueva. **Los cuatro recuentos de la cabecera se recuentan contra la tabla** (R5.3) |
 | Docs | `sdd/project.md` | La vía local `make check-rule11-ownership` en § Commands |
 | Refs | `sdd/specs/incident-photos.md`, `backend/tests/cli/test_demo_reset.py` (×2), `backend/tests/notifications/test_writer_census.py` | Cuatro citas de la ruta vieja, todas en prosa y ninguna funcional: apuntan al nuevo camino. Los archivos bajo `sdd/changes/archive/` **no se tocan** (inmutables) |
-| Roadmap | `sdd/roadmap.md` | **No lo toca este change.** Sólo `/sdd:archive` escribe el roadmap (regla 1 del toolkit) |
+| Specs | `sdd/specs/local-environment.md` | Dos recuentos que el target nuevo falsea (tarea 4.4). **Y un tercero fuera de alcance**, aceptado: la frase de las tareas periódicas decía ocho y son nueve. No lo pide ningún R# ni D# —el change no falsea ese número—, se corrigió al pasar por allí y se recontó contra `backend/app/scheduler/schedule.py` (`CADENCES` 8 + `DAILY_JOBS` 1); queda anotado aquí para que ningún fichero del diff quede sin referente |
+| Roadmap | `sdd/roadmap.md` | **Sólo la entrada de registro de `/sdd:new`** (la del propio change y el `needs:` que declara que `guest-portal-messaging` lo necesita). Ningún estado derivado: la regla 1 del toolkit reserva a `/sdd:archive` el tick y todo lo que `/sdd:status` deduce. **Corregido en review (2026-09-01)**: esta fila decía «no lo toca este change», y el diff lo toca — el registro entró dentro del commit de implementación `d05cca6` en vez de quedarse en el de bootstrap, que es lo que hizo la afirmación falsa |
 
 ## Data & interfaces
 

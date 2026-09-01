@@ -166,6 +166,22 @@ def test_what_this_guard_does_not_catch() -> None:
        whatever it said, unscanned, and **nothing mechanical corrects it**. Naming a workflow
        convention as the thing that holds the line would be the exact move the first paragraph of
        this module rejects — prose cannot be made to stay true; a failing test can.
+    5e. **Prose that is in no `SCOPE` tree at all — neither census nor declared out-of-census.**
+       `SCOPE`'s census-prose roots are `sdd` and `docs`, so every Markdown document outside those
+       two is unscanned without any entry saying so, which is a different thing from the declared
+       exclusions above: those are decisions, this is silence. Measured 2026-09-01: **14 tracked
+       `.md` files**, and **0** of them fire both axes today — `README.md` and `CLAUDE.md` at the
+       root, `frontend/README.md`, the four `.claude/agents/sdd-review-*.md`, `infra/README.md`,
+       `infra/environments/{dev,staging,prod}/README.md`, and
+       `infra/environments/dev/{RUNBOOK.md,RUNBOOK-seed-demo.md,iam-policy.md}`. The gap predates
+       this change and is not what it set out to close, so it is recorded rather than fixed here.
+       Two of the fourteen deserve naming because they are the plausible ones: a dev RUNBOOK is a
+       natural place to write who fills a column while walking an operator through a recovery, and
+       the root `README.md` is edited by this very change (task 5.5). R2.1 asks the scope to say,
+       entry by entry, which trees are census and which are out-of-census prose; today it answers
+       that for everything under `sdd/` and `docs/` and says nothing about the rest, and the fix is
+       an `OUT_OF_CENSUS` entry per root — cheap, but a scope decision rather than a recount, so it
+       belongs to whoever widens the census next and not to a review round.
     5d. **The floors are aggregates, and the anchor is kind-blind. What each one actually
        catches is worth stating exactly, because two earlier versions of this item credited the
        wrong mechanism.** There are two ways to take a census tree out of the walk, and they are
@@ -178,7 +194,7 @@ def test_what_this_guard_does_not_catch() -> None:
        the `backend/alembic/versions` entry removes 17 files, exits **0**, and prints a census
        list of five trees where there were six. Removing a large part of a tree is caught by the
        floors:
-       `sdd/specs` alone is 53 of the 94 walked Markdown files, so excluding it lands at 41,
+       `sdd/specs` alone is 54 of the 95 walked Markdown files, so excluding it lands at 41,
        under the floor of 80. What is caught by **neither** is a subtree small enough to stay
        above both floors — excluding `backend/app/integrations` costs 45 files and passes, and
        `backend/app/audit` costs 11. That second one is worth naming rather than leaving to the
@@ -196,7 +212,11 @@ def test_what_this_guard_does_not_catch() -> None:
        `regla 11`, and now carries no sink term at all. The shape exists —
        `sdd/changes/archive/2026-08-08-access-notifications/design.md:169` is the measured
        example — but it lives in an out-of-census tree, so the cost **in scope today is zero
-       blocks**. What was bought for it is the three false positives that had `main` red.
+       blocks**. What was bought for it is four false positives: the three that had `main` red
+       (`sdd/specs/access-notifications.md:372`, `:525`, `:689`) and
+       `sdd/specs/rule11-ownership-guard.md:11`, the paragraph of this change's own spec that
+       says where the contract lives. Recounted against the shipped tree on 2026-09-01; it was
+       three when D3 was decided, before that spec existed.
     7. **A census column named bare, without its table** — `payload` and `error` rather than
        `webhook_events.payload`. The sink axis matches the qualified column or the table name,
        so an unqualified mention of an ambiguous word like `payload` is invisible. This is the

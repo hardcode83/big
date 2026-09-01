@@ -368,6 +368,10 @@ check-compose-ports:
 # de los otros cuatro: es una herramienta de stdlib que sólo lee ficheros del árbol, así que no
 # necesita el stack — y meterla en $(COMPOSE) la ataría a un contenedor que ya no monta el árbol de
 # prosa, porque este mismo change retira esos dos bind mounts.
+#
+# **Requiere Python >= 3.11** en el `python3` del host: la guardia usa `enum.StrEnum`. Por debajo de
+# eso este target no da veredicto, muere con un `ImportError` — el suelo está declarado en
+# specs/rule11-ownership-guard.md § Independencia del entorno. En CI da igual: ubuntu-latest trae 3.12.
 check-rule11-ownership:
 	python3 scripts/rule11-ownership.py
 

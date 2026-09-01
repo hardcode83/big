@@ -99,6 +99,14 @@ demostración en rojo que R4 exige y no puede hacerse antes de que exista el che
   `sdd/specs/access-notifications.md:372`, `:525` y `:689`. Cero verdaderos positivos en alcance,
   tres falsos.
 
+  **Recontado el 2026-09-01 sobre el árbol que se entrega: son cuatro, no tres.** El añadido es
+  `sdd/specs/rule11-ownership-guard.md:11`, el párrafo que la spec de la tarea 5.3 crea para decir
+  que el contrato no vive allí (encaja por `censo` + `quién la escribe` sin atribuir nada). Sigue
+  siendo cero verdaderos positivos, así que no mueve la decisión; lo que sí deja escrito es que la
+  spec nueva da verde gracias a este mismo estrechamiento. Las dos cifras de arriba —94 markdown y
+  801 python— también son de aquel día y cuadran con las de hoy (95/800): entró la spec nueva y
+  salió el fichero viejo que 4.1 borra.
+
   Vía nueva — `python3 scripts/rule11-ownership.py`:
 
   ```
@@ -378,15 +386,56 @@ obligación de R5.3 prohíbe.
 
 ## 6. Demostración en rojo de la superficie nueva (R4)
 
-- [ ] 6.1 **Las dos vías de diff.** Registrar aquí el id de run del check `rule11-ownership` sobre un
-  push cuyo diff sea **sólo prosa** (`sdd/**` o `docs/**`) y otro cuyo diff sea **sólo `backend/**`**.
-  La rama de este change produce los dos de forma natural; anotar además que en el de sola prosa
-  `backend-tests-suite` sale `skipped` y el check nuevo no. [R4.1]
+**Esta sección se ejecuta después de `/sdd:ship`, y eso es diseño y no retraso.** El workflow
+dispara en `pull_request` y en `push: branches: [main]`, así que un push a la rama de la feature no
+produce ningún run: los ids no existen hasta que hay PR. La premisa contraria que traían D10 y la
+tarea 6.1 —«la rama produce los dos de forma natural»— era falsa y quedó corregida en review el
+2026-09-01; el detalle y por qué no se ensancha el `push:` están en D10.
 
-- [ ] 6.2 **Rojo por cada forma que la guardia dice cazar.** Commit temporal que meta un bloque
-  infractor en un `.md` y otro en un docstring (o tirada de `#`) de un `.py`; registrar el id de run
-  con el check **en rojo** y pegar aquí la salida local de `make check-rule11-ownership`; revertir
-  el commit acto seguido y comprobar que el check vuelve a verde. [R4.2]
+**Cómo se retoma**, que es lo único que hay que saber para cerrarla: `/sdd:ship
+rule11-guard-trigger-and-scope` abre la PR, y con ella nacen los runs. Después, sobre la PR abierta,
+se registran 6.1, 6.2b y 6.3 y se vuelve por `/sdd:review rule11-guard-trigger-and-scope`, que en
+`PR_OPEN` recertifica con `mark-recertified`. Esta sección es la única de las siete que queda
+abierta; las demás llevan panel PASS o están verificadas en la 7.
+
+- [ ] 6.1 **Las dos vías de diff.** Registrar aquí el id de run del check `rule11-ownership` para
+  **dos eventos `pull_request` de la PR ya abierta**: uno cuyo diff sea **sólo prosa** (`sdd/**` o
+  `docs/**`) y otro cuyo diff sea **sólo `backend/**`**. Anotar además que en el de sola prosa
+  `backend-tests-suite` sale `skipped` y el check nuevo **no** — que es exactamente el defecto que
+  este change existe para cerrar. [R4.1]
+
+- [x] 6.2a **El binario en rojo por cada una de las tres formas.** No necesita PR, así que se cierra
+  aquí. Medido el 2026-09-01 en este worktree: tres sondas creadas dentro del alcance —una `.md` en
+  `sdd/specs/`, un docstring y una tirada de `#` en `backend/app/`— y borradas acto seguido. El
+  binario las caza **las tres** y nombra fichero, línea y frase de cada eje:
+
+  ```
+  these blocks name a rule 11 sink AND say who writes it:
+
+  fichero: sdd/specs/__r4_probe.md:3
+  frase: 'sin escritor'
+  bloque: La columna `audit_logs.changes` sigue sin escritor: nadie la rellena todavía.
+
+  fichero: backend/app/__r4_probe_doc.py:1
+  frase: 'sin escritor'
+  bloque: Sonda R4.2 en docstring. `webhook_events.payload` sigue sin escritor en esta capa.
+
+  fichero: backend/app/__r4_probe_hash.py:1
+  frase: 'primer escritor'
+  bloque: Sonda R4.2 en tirada de almohadillas. `messages.content` tiene su primer escritor en esta capability.
+
+  infractores: 3
+  ```
+
+  Salida del script **1**, y del `make` **2** (que es como `make` propaga el fallo de la receta).
+  Retiradas las tres sondas, `make check-rule11-ownership` vuelve a **0** con 95 markdown y 800
+  python. Lo que esto **no** prueba, y por eso 6.2b sigue abierta: que el *check run* se ponga rojo.
+  Y no lo descargan las ocho vías de fallo cerrado de la sección 5 — ésas son cadena rota (R1.4,
+  R4.3), no un bloque infractor: otro camino de código. [R4.2]
+
+- [ ] 6.2b **El check run en rojo, sobre la PR.** Commit temporal que meta un bloque infractor de las
+  formas de 6.2a; registrar el id de run con el check **en rojo**; revertir acto seguido y comprobar
+  que el check vuelve a verde. [R4.2]
 
 - [ ] 6.3 **Verde sobre la base.** Tras el merge de `main` en la rama que hace `/sdd:ship`, el check
   `rule11-ownership` reporta **cero** infractores. Se mide sobre la rama fusionada, no sobre la rama

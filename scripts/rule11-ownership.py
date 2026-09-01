@@ -234,7 +234,9 @@ SCOPE: tuple[ScopeEntry, ...] = (
 TABLE_HEADER = "| Columna | Forma | Quién la escribe"
 
 #: Below this, something is wrong with the checkout rather than with the tree. **Measured, with
-#: deliberate headroom**: the scan walks 94 Markdown files on 2026-08-31, and this floor was
+#: deliberate headroom**: the scan walks 95 Markdown files on 2026-09-01 — it was 94 when this
+#: floor was set on 2026-08-31, and the one that arrived since is this change's own
+#: `sdd/specs/rule11-ownership-guard.md`, written in a later section than this line. The floor was
 #: raised from 40 — a figure inherited from a tree of 180 that had become loose enough to admit
 #: losing more than half the corpus — to 80. It is a floor and not a census: it catches a
 #: truncated checkout, not a scope that quietly stops covering one tree. What catches THAT is the
@@ -268,11 +270,21 @@ MINIMUM_PYTHON_FILES = 700
 #: was not the recut one: **50 blocks fire both axes through a column or a table of the census**,
 #: and about twenty more matched the sink axis through meta-vocabulary alone.
 #:
-#: **The load-bearing figure is the in-scope one, and it is three.** Every meta-only match but
-#: three lies in an out-of-census tree or in one of the detector files; the three that remain are
+#: **The load-bearing figure is the in-scope one, and it is four** — recounted against the tree
+#: this change ships, not against the one it started from. Every meta-only match but four lies in
+#: an out-of-census tree or in one of the detector files. Three are
 #: `sdd/specs/access-notifications.md:372`, `:525` and `:689` — the three that had `main` red, all
-#: of them attributions of `NotificationType` members and of no column this table governs. **Zero
-#: true positives in scope, three false ones.** That is what decided D3.
+#: of them attributions of `NotificationType` members and of no column this table governs. The
+#: fourth is `sdd/specs/rule11-ownership-guard.md:11`, the paragraph of this change's own new spec
+#: that says the contract does **not** live there: it fires `censo` plus `quién la escribe` while
+#: attributing nothing. **Zero true positives in scope, four false ones.** That is what decided D3.
+#:
+#: The fourth one is worth stating plainly rather than folding into the count, because it is the
+#: uncomfortable half: **the spec this change adds is green only because of the narrowing this
+#: change makes.** Under the old term set, writing a spec that declares where the contract lives
+#: would have reddened the guard — which is the same self-reference that forced the roadmap entry
+#: of this change to be reworded before D3 existed, and the concrete reason the meta-vocabulary
+#: had to go rather than merely being a tidy-up.
 #:
 #: The total is given loosely on purpose. It counts the excluded trees, and `sdd/changes/` holds
 #: the documents of every change in flight — including this one, whose own proposal and tasks

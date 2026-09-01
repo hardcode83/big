@@ -69,8 +69,10 @@ toque algo de lo que escanea**, desde un workflow propio de un solo job —sin `
 Postgres, sin Redis y sin `.env`—, con su propio check run; su **alcance de ficheros es un dato
 declarado** que dice, entrada por entrada, qué árbol es censo y cuál es prosa que puede citar la regla
 sin reafirmarla, con `sdd/roadmap.md` y `sdd/roadmap/**` fuera y con el coste de esa exclusión medido y
-escrito; y los tres bloques infractores que hoy tiene `main` quedan corregidos, así que el guardián da
-verde sobre la base sin que ninguna de las tres afirmaciones se pierda. No se redefine el eje de
+escrito; y los tres bloques que hoy ponen `main` en rojo dejan de serlo **sin tocarlos** —nunca
+fueron infractores: encajaban por el meta-vocabulario del censo y por ninguna columna, así que lo que
+se corrige es el detector y no la prosa (enmienda OQ2, ver `design.md` § Open questions)—, así que el
+guardián da verde sobre la base sin que ninguna de las tres afirmaciones se pierda ni se mueva. No se redefine el eje de
 propiedad: sigue siendo la lista de trece redacciones que es hoy, y su hueco por paráfrasis sigue
 declarado como residual.
 
@@ -140,11 +142,19 @@ Acceptance criteria:
 
 1. WHEN el guardián se ejecuta sobre la rama de este change fusionada con `main`, THE SYSTEM SHALL
    reportar **cero** infractores.
-2. WHEN se corrigen los tres bloques de `sdd/specs/access-notifications.md` (372, 525 y 689), THE
-   SYSTEM SHALL conservar el hecho que cada uno transmite —qué miembros de `NotificationType` tienen
-   escritor hoy y cuáles no—, reubicándolo si su home correcto es otro, y no limitarse a borrarlo.
-3. IF la corrección exigiera declarar ese fichero como excepción en lugar de reescribirlo, THEN THE
-   SYSTEM SHALL registrar el motivo en la entrada de la excepción, y no dejarlo implícito en el verde.
+2. **Enmendado por OQ2 en el gate del 2026-08-31** (redacción original abajo). Los tres bloques de
+   `sdd/specs/access-notifications.md` (372, 525 y 689) **no se corrigen, porque nunca fueron
+   infractores**: encajan el eje de sumideros por el meta-vocabulario del censo (`censo`) y no por
+   ninguna columna que la tabla gobierne — lo que atribuyen son miembros del enum
+   `NotificationType`, cuya autoridad es otra. Así que THE SYSTEM SHALL dejarlos **intactos** y
+   SHALL corregir el detector (R2.6), y no hay hecho que reubicar. *Redacción original, conservada
+   para que la enmienda sea legible: «WHEN se corrigen los tres bloques …, THE SYSTEM SHALL
+   conservar el hecho que cada uno transmite …, reubicándolo si su home correcto es otro, y no
+   limitarse a borrarlo.» Suponía una reescritura que la medición volvió innecesaria.*
+3. **No se ejerce** (OQ2). Se conserva porque su condición sigue siendo la correcta si alguna vez se
+   cumple: IF la corrección exigiera declarar ese fichero como excepción en lugar de reescribirlo,
+   THEN THE SYSTEM SHALL registrar el motivo en la entrada de la excepción, y no dejarlo implícito
+   en el verde. Aquí no se declaró excepción alguna para ese fichero: se estrechó el eje.
 4. WHERE el criterio en disputa sea la atribución de un **miembro de enum** frente a la de una
    **columna** —`R1.3` de `rule11-ownership-single-source` la puso en alcance a propósito, y el
    residual 8 del propio guardián dice que su eje de sumideros no puede verla—, THE SYSTEM SHALL dejar

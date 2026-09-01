@@ -52,8 +52,12 @@ jobs:
     timeout-minutes: 10
 
     steps:
-      # Checkout **completo** y no superficial: la guardia mide el árbol, y un checkout
-      # incompleto es precisamente lo que su centinela de suelo mínimo existe para cazar.
+      # Checkout por defecto, es decir `fetch-depth: 1`: **el árbol de trabajo llega completo** y
+      # la profundidad del historial es irrelevante para esta guardia, que lee ficheros y no
+      # commits. No se pone `fetch-depth: 0` a propósito: no compraría nada y clonaría el
+      # historial entero en cada PR. Lo que un checkout truncado provocaría —menos ficheros de los
+      # que hay— lo caza el centinela de suelo mínimo (`MINIMUM_MARKDOWN_FILES`,
+      # `MINIMUM_PYTHON_FILES`), que es su motivo de existir.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Sólo para el paso de la suite. Misma acción y mismo SHA que `compose-ports.yml`,
