@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/notification-channel-routing
 implementation_sha: 4cbf12349a8b9ec4ad4aad11bc5af8330309738e
 pr_number:
 pr_url:
