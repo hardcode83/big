@@ -393,22 +393,44 @@ obligación de R5.3 prohíbe.
   sola, porque `origin/main` se mueve mientras esto está en vuelo. [R3.1]
 
 ## 7. Verification
+**Ejecutado el 2026-08-31, cifras reales y no recordadas.** Las salidas largas se escribieron a
+fichero con marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pytest a un falso
+«PASS (0) FAIL (0)».
 
-- [ ] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.
-- [ ] 7.2 `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q` en verde —
+| | resultado |
+|---|---|
+| 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores |
+| 7.2 `pytest scripts/ -q` | **246 passed** |
+| 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
+| 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
+| 7.5 `make down && make up` | los seis servicios arriba sin los dos bind mounts, y la suite **verde dentro del contenedor recreado**: los mismos 9213/41 en 21:47 |
+| 7.6 los dos tests de frontend que leen por encima de `/app` | **2 ficheros, 17 tests, todos verdes**, incluido `build-identity-contract.test.ts`, que lee `docker-compose.yml` entero |
+| 7.7 barrido de citas | sin citas vivas de la ruta vieja; la del roadmap queda encargada a `/sdd:archive` |
+
+**7.3 y 7.5 se midieron dos veces a propósito**, y la segunda es la que vale: la primera pasada
+corrió en el contenedor que aún tenía los montajes, y la segunda en uno recreado sin ellos. Las dos
+dan la misma cifra, así que retirar los montajes no cambió el resultado de ninguna prueba.
+
+**Lo que la sección 7 NO puede cerrar** y no se disimula: nada de aquí demuestra que el *check run*
+se ponga rojo y verde donde debe. Eso es la sección 6, y sus ids no existen hasta que `/sdd:ship`
+abra la PR.
+
+
+- [x] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.
+- [x] 7.2 `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/ -q` en verde —
   recoge las meta-pruebas nuevas y las de los otros cuatro scripts, que es lo mismo que hará
   `compose-ports.yml`.
-- [ ] 7.3 Suite del backend: `docker compose exec backend uv run pytest` (o
+- [x] 7.3 Suite del backend: `docker compose exec backend uv run pytest` (o
   `docker compose run --rm backend uv run pytest` con el stack parado). Comparar contra la cifra de
   partida medida en 4.1: un fichero menos, ningún fallo nuevo.
-- [ ] 7.4 `make check-compose-ports` y `make check-version-parity` en verde — `docker-compose.yml` se
+- [x] 7.4 `make check-compose-ports` y `make check-version-parity` en verde — `docker-compose.yml` se
   ha tocado en 4.2.
-- [ ] 7.5 `make down && make up` en este worktree: el stack levanta sin los dos bind mounts
+- [x] 7.5 `make down && make up` en este worktree: el stack levanta sin los dos bind mounts
   retirados, y la suite del backend sigue verde dentro del contenedor.
-- [ ] 7.6 Los dos tests de frontend que leen el árbol por encima de `/app` siguen verdes tras tocar
+- [x] 7.6 Los dos tests de frontend que leen el árbol por encima de `/app` siguen verdes tras tocar
   `docker-compose.yml` — en particular `lib/config/build-identity-contract.test.ts`, que lo lee
   entero. Requiere los `docker compose cp` que documenta `sdd/project.md` § Worktree bootstrap.
-- [ ] 7.7 Repasar que ningún documento vivo cita ya `backend/tests/test_rule11_ownership.py`
+- [x] 7.7 Repasar que ningún documento vivo cita ya `backend/tests/test_rule11_ownership.py`
   (grepeando el árbol completo, `sdd/changes/archive/` aparte) ni describe un guardián que no
   existe. **Medido ya, y queda una que este change no puede arreglar**: la entrada
   `template-label-sink-census` de `sdd/roadmap.md` dice que `tests/test_rule11_ownership.py`
