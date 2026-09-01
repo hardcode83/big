@@ -5,7 +5,8 @@ hasta que las dos comparaciones de R1.5 estén registradas (1.4 y 1.5); sólo en
 fichero de `backend/tests/` (4.1). Las secciones 1-3 dejan el sistema con guardia nueva, gatillo y
 suite propia; la 4 retira la superficie vieja; la 5 alinea autoridad y documentación; la 6 es la
 mitad de la demostración en rojo de R4 que se puede hacer sin una Pull Request — la otra mitad, la
-del check run, es obligación post-merge declarada en la spec y no una tarea de aquí.
+del check run, es obligación sobre la PR abierta declarada en la spec, con su acta en el § final
+de este fichero, y no una tarea de aquí.
 
 ## 1. La guardia se muda a `scripts/`, con su alcance como dato <!-- panel: PASS 2026-08-31 -->
 
@@ -232,8 +233,8 @@ residual, no de conducta.
   saliendo `skipped` — que es exactamente la forma del run 33409418091 que dejó pasar el defecto.
   [R1.1]
 
-  **Verificado estructuralmente el 2026-08-31**, que es lo que se puede probar sin push; los ids
-  de run son 6.1 y 6.2. El gate de `backend-tests.yml:186` es
+  **Verificado estructuralmente el 2026-08-31**, que es lo que se puede probar sin push; los ids de
+  run se registran en el § «Registro de evidencia sobre la PR» de abajo. El gate de `backend-tests.yml:186` es
   `case "$f" in backend/* | .github/workflows/backend-tests.yml)`, así que un diff de sola prosa
   deja `backend=false` y `backend-tests-suite` en `skipped`. El workflow nuevo no tiene `paths:`
   en `on:` ni puerta de área ninguna —comprobado parseando el YAML— así que corre igual. Y el
@@ -395,9 +396,9 @@ antes de que haya una Pull Request**: el workflow dispara en `pull_request` y en
 
 Esa mitad **ya no vive aquí**. Se intentó como tareas y chocó con dos gates independientes —el de
 ship rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es
-lo que acabó de probar que una lista pre-PR no es su sitio. Ahora es una **obligación post-merge
-declarada de la capacidad**, en
-[`sdd/specs/rule11-ownership-guard.md` § Obligaciones post-merge](../../specs/rule11-ownership-guard.md):
+lo que acabó de probar que una lista pre-PR no es su sitio. Ahora es una **obligación declarada de la capacidad, sobre la PR abierta y antes del merge**, en
+[`sdd/specs/rule11-ownership-guard.md` § Obligaciones sobre la Pull Request abierta, antes del merge](../../specs/rule11-ownership-guard.md), y su acta
+es el § «Registro de evidencia sobre la PR» al final de este fichero:
 los dos ids de run por vía de diff (R4.1), el check en rojo por bloque inyectado y su verde al
 revertir (R4.2), y el cero sobre la rama fusionada con `main` (R3.1). Quien abra la PR de este change
 las registra allí y ancla con `mark-recertified`.
@@ -431,9 +432,33 @@ el `push:`.
 
   Salida del script **1**, y del `make` **2** (que es como `make` propaga el fallo de la receta).
   Retiradas las tres sondas, `make check-rule11-ownership` vuelve a **0** con 95 markdown y 800
-  python. Lo que esto **no** prueba, y por eso 6.2b sigue abierta: que el *check run* se ponga rojo.
+  python. Lo que esto **no** prueba, y por eso sigue siendo obligación sobre la PR (ver el § de abajo): que el *check run* se ponga rojo.
   Y no lo descargan las ocho vías de fallo cerrado de la sección 5 — ésas son cadena rota (R1.4,
   R4.3), no un bloque infractor: otro camino de código. [R4.2]
+
+## Registro de evidencia sobre la PR
+
+**Este § es el destino único** que `sdd/specs/rule11-ownership-guard.md` § «Obligaciones sobre la
+Pull Request abierta, antes del merge» nombra para la evidencia que sólo puede existir con la PR
+abierta. Está aquí, y no en un comentario de la Pull Request, porque R4.2 exige que la demostración
+quede registrada **en el change**: un comentario no está en el árbol, no se puede grepear y
+desaparece con la PR.
+
+No lleva casillas a propósito. Una casilla sin marcar bloquea `mark-local-verified`, y esta evidencia
+no puede existir antes de que ese comando ya haya corrido — es la lección que costó dos gates. Se
+rellena tras `/sdd:ship`, y luego `/sdd:review` recertifica con `mark-recertified`.
+
+| Obligación | Requisito | Id de run | Resultado |
+|---|---|---|---|
+| Diff de sola prosa (`sdd/**` o `docs/**`) | R4.1 | *pendiente* | — |
+| Diff de sólo `backend/**` | R4.1 | *pendiente* | — |
+| Check en rojo por bloque en markdown | R4.2 | *pendiente* | — |
+| Check en rojo por bloque en docstring o tirada de `#` | R4.2 | *pendiente* | — |
+| Verde al revertir el bloque inyectado | R4.2 | *pendiente* | — |
+| Cero infractores sobre la base fusionada, en un run **posterior** a la última fusión de `main` | R3.1 | *pendiente* | — |
+
+Anotar además, en el run de sola prosa, que `backend-tests-suite` sale `skipped` y este check **no**:
+es el defecto que este change corrige y conviene verlo escrito, no darlo por sabido.
 
 ## 7. Verification
 **Ejecutado el 2026-08-31, cifras reales y no recordadas.** Las salidas largas se escribieron a
@@ -443,7 +468,7 @@ fichero con marcador de fin: los pipes truncan y el filtro de `rtk` colapsa pyte
 | | resultado |
 |---|---|
 | 7.1 `make check-rule11-ownership` | salida **0**, 95 markdown + 800 python, cero infractores |
-| 7.2 `pytest scripts/ -q` | **246 passed** |
+| 7.2 `pytest scripts/ -q` | **248 passed** (2026-09-01) — eran 246 en la pasada de run; la review añadió dos pruebas: la que ancla el coste declarado de D3 y la que fija la forma del gatillo del workflow. Esta cifra se mueve con cada prueba nueva, así que va fechada |
 | 7.3 suite del backend | **9213 passed, 41 skipped** — contra la partida de **9218/41**, exactamente los 5 tests del fichero borrado |
 | 7.4 `check-compose-ports` · `check-version-parity` | **0** y **0** |
 | 7.5 `make down && make up` | los seis servicios arriba sin los dos bind mounts, y la suite **verde dentro del contenedor recreado**: los mismos 9213/41 en 21:47 |
@@ -455,8 +480,8 @@ corrió en el contenedor que aún tenía los montajes, y la segunda en uno recre
 dan la misma cifra, así que retirar los montajes no cambió el resultado de ninguna prueba.
 
 **Lo que la sección 7 NO puede cerrar** y no se disimula: nada de aquí demuestra que el *check run*
-se ponga rojo y verde donde debe. Eso es la sección 6, y sus ids no existen hasta que `/sdd:ship`
-abra la PR.
+se ponga rojo y verde donde debe. Eso son las obligaciones sobre la PR abierta —§ «Registro de
+evidencia sobre la PR» de abajo—, y sus ids no existen hasta que `/sdd:ship` abra la PR.
 
 
 - [x] 7.1 `make check-rule11-ownership` → cero infractores y salida 0.

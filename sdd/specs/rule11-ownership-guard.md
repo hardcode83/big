@@ -158,10 +158,12 @@ antes**, porque ya no exige contenedor ni stack.
 - `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q`
   — las meta-pruebas del guardián, que incluyen un caso en rojo por cada forma de fallo cerrado y
   el ancla entre la frase de alcance de la regla 11 y `SCOPE`.
-- El check `rule11-ownership` se ejecuta sobre un Pull Request cuyo diff sea **sólo prosa** y sobre
-  otro cuyo diff sea **sólo `backend/**`**, y reporta en los dos.
+- Que el check `rule11-ownership` se ejecuta y reporta por las dos vías de diff —una de sola prosa y
+  otra de sólo `backend/**`— no se comprueba en local, porque no hay run sin Pull Request: es la
+  primera de las obligaciones de la subsección siguiente, y allí está su forma exacta. No se repite
+  aquí para que no haya dos redacciones de la misma exigencia que puedan separarse.
 
-### Obligaciones post-merge
+### Obligaciones sobre la Pull Request abierta, antes del merge
 
 Esto vive aquí, y no en el `tasks.md` de un change, por una razón que costó dos gates descubrir: es
 verificación que **sólo puede existir cuando hay una Pull Request abierta**, y una lista de tareas
@@ -171,8 +173,17 @@ change que creó esta capacidad lo intentó como sección de tareas y chocó dos
 rechaza un `BLOCKED.md` no vacío, y el de ciclo de vida rechaza una tarea sin marcar—, que es la
 prueba de que el sitio era éste.
 
+**Todas son anteriores al merge**, y el título lo dice porque confundirlo tiene consecuencia: hacer
+la comprobación de la base fusionada *después* de fusionar es medirla cuando el rojo ya está en
+`main`, que es exactamente lo que esta capacidad existe para evitar.
+
 Quien abra una Pull Request que altere el gatillo, el alcance o el eje de este guardián **debe**
-dejar registrada esta evidencia sobre la PR, y anclarla con `mark-recertified`:
+dejar registrada esta evidencia **en el propio change**, en
+`sdd/changes/<feature>/tasks.md` § «Registro de evidencia sobre la PR» —un fichero del árbol, que se
+puede grepear y que sobrevive al cierre de la PR—, y anclarla con `mark-recertified`. **No vale
+dejarla sólo en un comentario de la Pull Request**: no está en el repositorio, no lo lee nadie
+después y desaparece con la PR, así que una obligación registrada ahí es una obligación que nadie
+podrá comprobar que se cumplió.
 
 - **Las dos vías de diff.** El id de run del check sobre un evento `pull_request` cuyo diff sea sólo
   prosa, y otro cuyo diff sea sólo `backend/**`. En el de sola prosa, `backend-tests-suite` sale
@@ -182,9 +193,22 @@ dejar registrada esta evidencia sobre la PR, y anclarla con `mark-recertified`:
   markdown y otro en un docstring o tirada de `#`, el id de run con el check en rojo, y el verde al
   revertirlo. Que la *función* y el *binario* los cazan se prueba en local con las meta-pruebas y con
   `make check-rule11-ownership`; lo que sólo la PR puede probar es que el **check run** se pone rojo.
-- **Verde sobre la base fusionada.** Cero infractores sobre la rama con `main` ya fusionado, no sobre
-  la rama sola: `origin/main` se mueve mientras una PR está en vuelo, y fue justamente un commit de
-  archivado aterrizando en `main` lo que dejó la base en rojo la primera vez.
+- **Verde sobre la base fusionada.** El id de run del check `rule11-ownership` reportando **cero
+  infractores** sobre la rama con `main` ya fusionado, y no sobre la rama sola: `origin/main` se mueve
+  mientras una PR está en vuelo, y fue justamente un commit de archivado aterrizando en `main` lo que
+  dejó la base en rojo la primera vez. **Tiene que ser el id de un run del check, no una salida local
+  de `make check-rule11-ownership`**: lo que se comprueba aquí es la base fusionada tal como CI la
+  ve, y una ejecución local no la ve.
+
+  **Y hay cobertura automática parcial que conviene conocer, porque acota lo que queda a tu cargo.**
+  `actions/checkout@v4` sobre un evento `pull_request` no hace checkout de la rama, sino del **merge
+  ref** que GitHub calcula (rama ∪ base), así que **cada evento de la PR ya mide la base fusionada**
+  sin que nadie lo pida; y `push: branches: [main]` vuelve a medirla después del merge. Lo que **no**
+  cubre, y es el motivo de que este punto siga siendo obligación de una persona: GitHub **no**
+  re-dispara `pull_request` cuando se mueve la **base**, así que una PR cuyo último evento precede a
+  un avance de `main` arrastra un verde caducado. De ahí que el id que se registra deba ser de un run
+  **posterior** a la última fusión de `main` en la rama — es decir, del que provoca `/sdd:ship` al
+  sincronizar la base, o de uno forzado después a propósito.
 
 Y una distinción que no conviene perder, porque confundirla ya descargó un requisito por el camino
 equivocado: las vías de **fallo cerrado** del binario (alcance vacío, árbol ausente, fichero

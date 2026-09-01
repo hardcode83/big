@@ -141,7 +141,11 @@ la base, **so that** el rojo que vea sea mío.
 Acceptance criteria:
 
 1. WHEN el guardián se ejecuta sobre la rama de este change fusionada con `main`, THE SYSTEM SHALL
-   reportar **cero** infractores.
+   reportar **cero** infractores. *(Post-PR: su único rastreador era la tarea 6.3, y pasó al § de
+   obligaciones de `sdd/specs/rule11-ownership-guard.md`, con su acta en el § «Registro de evidencia
+   sobre la PR» del `tasks.md`. Medido ya sobre la rama sola —cero infractores, 95/800—; lo que falta
+   es sobre la base fusionada, y en un run **posterior** a la última fusión de `main`, porque GitHub
+   no re-dispara `pull_request` cuando la base se mueve.)*
 2. **Enmendado por OQ2 en el gate del 2026-08-31** (redacción original abajo). Los tres bloques de
    `sdd/specs/access-notifications.md` (372, 525 y 689) **no se corrigen, porque nunca fueron
    infractores**: encajan el eje de sumideros por el meta-vocabulario del censo (`censo`) y no por
@@ -169,8 +173,10 @@ no signifique «no se ejecutó».
 evidencia se parte en dos por una razón mecánica: la que necesita un **check run** no puede existir
 antes de que haya una Pull Request, y una lista de tareas pre-PR nunca podría contenerla —lo probaron
 dos gates, el de ship y `mark-local-verified`—. Lo que se demuestra en local se cierra en este change
-(tarea 6.2a); lo que exige la PR es **obligación post-merge declarada** en
-`sdd/specs/rule11-ownership-guard.md` § Obligaciones post-merge, y se ancla con `mark-recertified`.
+(tarea 6.2a); lo que exige la PR es **obligación declarada de la capacidad, antes del merge**, en
+`sdd/specs/rule11-ownership-guard.md` § Obligaciones sobre la Pull Request abierta, antes del merge, con su
+acta en el § «Registro de evidencia sobre la PR» del `tasks.md` —un fichero del change, como R4.2
+exige— y se ancla con `mark-recertified`.
 Ningún criterio desaparece: cambia el sitio donde queda su registro, no si hay que cumplirlo.
 
 Acceptance criteria:

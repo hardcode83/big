@@ -358,9 +358,10 @@ superficie, que es justo la distinción que este change existe para no volver a 
 > cualquier tarea sin marcar. Como su evidencia no puede existir antes de que haya PR, una lista
 > pre-PR nunca podría completarse y el change quedaba incertificable por construcción. Así que se
 > reparte: lo que se demuestra en local —el binario en rojo por las tres formas— es la tarea 6.2a y
-> está cerrada; lo del **check run** pasa a `sdd/specs/rule11-ownership-guard.md` § Obligaciones
-> post-merge, como obligación declarada de la capacidad, y se ancla con `mark-recertified` sobre la
-> PR abierta. D10 no cambia de criterio —la superficie sigue teniendo que demostrarse y las
+> está cerrada; lo del **check run** pasa a `sdd/specs/rule11-ownership-guard.md`
+> § Obligaciones sobre la Pull Request abierta, antes del merge, como obligación declarada de la
+> capacidad —**toda ella anterior al merge**—, con su acta en el § «Registro de evidencia sobre la
+> PR» del `tasks.md`, y se ancla con `mark-recertified` sobre la PR abierta. D10 no cambia de criterio —la superficie sigue teniendo que demostrarse y las
 > meta-pruebas siguen sin bastar—, cambia de dónde se registra.
 
 ### D11 — La prosa de la regla 11 queda anclada a `SCOPE` por una prueba

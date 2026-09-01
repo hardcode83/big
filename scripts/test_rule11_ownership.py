@@ -173,6 +173,95 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
     assert len(_meta_only_offenders()) == 4
 
 
+#: The workflow that makes this guard speak where it has to. Pinned by path because the whole
+#: defect this capability exists to close was a trigger, not a detector: the guard was correct and
+#: simply never ran on the commit that broke the census.
+WORKFLOW = ROOT / ".github" / "workflows" / "rule11-ownership.yml"
+
+#: The exact `on:` shape R1.1/R1.2 and D2 require. Pinned as a SET, not as a list of forbidden
+#: words: a guard that merely greps for `paths:` is sidestepped by any equivalent construct, so
+#: what is fixed here is the shape — these three triggers and no fourth, `pull_request` with no
+#: qualifiers at all.
+EXPECTED_TRIGGERS = {"pull_request", "push", "workflow_dispatch"}
+
+
+def _on_block() -> list[str]:
+    """The lines of the top-level `on:` mapping, comments and blanks dropped."""
+    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    try:
+        start = next(i for i, line in enumerate(lines) if line.rstrip() == "on:")
+    except StopIteration:  # pragma: no cover - the assertion below reports it
+        return []
+    block = []
+    for line in lines[start + 1:]:
+        if line.strip().startswith("#") or not line.strip():
+            continue
+        if not line.startswith(" "):  # dedented back to a top-level key
+            break
+        block.append(line)
+    return block
+
+
+def test_the_workflow_trigger_has_no_path_filter_and_no_area_gate() -> None:
+    """R1.1, R1.2 and D2 — the half of R4.1 that does not need a Pull Request.
+
+    Until this test existed, nothing in the tree asserted the property the whole capability rests
+    on. `/sdd:review` measured it by hand once (task 3.4, "comprobado parseando el YAML") and the
+    panel found that walking every `.py`/`.ts`/`.tsx`, the only file mentioning this workflow was
+    the guard's own docstring. A one-off human parse does not re-run: someone could add a
+    `paths:` filter or an area gate after the merge and reintroduce the original defect with
+    nothing going red — the defect being that the guard's input and its trigger were disjoint
+    sets.
+
+    What this pins, and why by shape rather than by forbidden name: `paths:`/`paths-ignore:` are
+    only the *spellings* of a path filter. An `if:` on a changed-file step, a `dorny/paths-filter`
+    job, or `backend-tests.yml`'s own `case "$f" in backend/*` are all the same mistake wearing a
+    different name, and a test that banned the words would pass while any of them shipped. So the
+    trigger is asserted as an exact set and `pull_request` as unqualified — anything added, removed
+    or narrowed reddens this, whatever it is called.
+    """
+    assert WORKFLOW.is_file(), f"the workflow moved or was deleted: {WORKFLOW}"
+    block = _on_block()
+    assert block, "no top-level `on:` block in the workflow"
+
+    triggers = {
+        line.strip().split(":", 1)[0]
+        for line in block
+        if len(line) - len(line.lstrip()) == 2
+    }
+    assert triggers == EXPECTED_TRIGGERS, (
+        f"the trigger set changed: {sorted(triggers)} != {sorted(EXPECTED_TRIGGERS)}. "
+        "R1.1 needs every Pull Request to produce this check; read D2 before widening or "
+        "narrowing it."
+    )
+
+    rendered = "\n".join(block)
+    for spelling in ("paths:", "paths-ignore:", "types:", "branches-ignore:"):
+        assert spelling not in rendered, (
+            f"`{spelling}` appeared under `on:`. R1.2, quoting sdd/specs/backend-ci.md: "
+            "«un filtro de rutas a nivel de disparador no produce check alguno en los PR que no "
+            "tocan esas rutas»."
+        )
+    # `pull_request` carries no qualifiers: it is `pull_request: {}` and nothing nested under it.
+    assert any(line.strip() == "pull_request: {}" for line in block), (
+        "`pull_request` is no longer unqualified. Every PR must produce this check (R1.1)."
+    )
+
+    body = WORKFLOW.read_text(encoding="utf-8")
+    _, _, jobs = body.partition("\njobs:")
+    assert jobs, "no `jobs:` block in the workflow"
+    # An area gate is a decision about *which files changed*, however it is spelled.
+    for shape in ('case "$f"', "paths-filter", "changed-files", "git diff --name-only"):
+        assert shape not in jobs, (
+            f"an area gate appeared in the job (`{shape}`). D2: a gate would be a second place to "
+            "be wrong about the scope, which is the defect this workflow closes."
+        )
+    assert "make check-rule11-ownership" in jobs, (
+        "the job no longer invokes the same target the local path uses, so CI and local could "
+        "diverge (sdd/specs/rule11-ownership-guard.md § Independencia del entorno)."
+    )
+
+
 def test_what_this_guard_does_not_catch() -> None:
     """R2.3: say what the green does not cover, so it is not read as completeness.
 
