@@ -178,39 +178,61 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
 #: simply never ran on the commit that broke the census.
 WORKFLOW = ROOT / ".github" / "workflows" / "rule11-ownership.yml"
 
-#: The exact `on:` shape R1.1/R1.2 and D2 require: these three triggers and no fourth,
-#: `pull_request` with no qualifiers at all.
+#: A GitHub Actions workflow has exactly three levels where a gate can hide — the workflow root,
+#: the job, and the step — so all three are pinned as **closed key sets**. Two earlier versions of
+#: this test pinned one level each and the panel walked past both through the level below; what
+#: closes it is not a longer blacklist but the observation that the levels are enumerable and few.
+EXPECTED_TOP_LEVEL = {"name", "on", "concurrency", "permissions", "jobs"}
 EXPECTED_TRIGGERS = {"pull_request", "push", "workflow_dispatch"}
-
-#: The job's exact shape. Asserted **positively** — the whole step list, not a list of forbidden
-#: spellings — for the reason three reviewers demonstrated by mutation: a blacklist of gate
-#: spellings passes every gate written a fifth way.
+EXPECTED_PERMISSIONS = {"contents: read"}
 EXPECTED_JOB = "rule11-ownership"
 EXPECTED_JOB_KEYS = {"runs-on", "timeout-minutes", "steps"}
-EXPECTED_USES = {
-    "actions/checkout@11d5960a326750d5838078e36cf38b85af677262",
-    "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9",
-}
-EXPECTED_RUNS = {
-    "make check-rule11-ownership",
-    "uv run --no-project --with 'pytest==9.1.1' python -m pytest "
-    "scripts/test_rule11_ownership.py -q",
-}
+EXPECTED_RUNS_ON = "ubuntu-latest"
+EXPECTED_TIMEOUT = "10"
 
-#: The only two keys with which GitHub Actions can skip or neutralise a step or a job. Banning
-#: these is structural and not orthographic: unlike `case "$f"`, they have no synonyms — any
-#: conditional skip must be spelled with one of them.
-SKIP_KEYS = ("if:", "continue-on-error:")
+#: The step list **in order**, not as a set: a set collapses a duplicated step, and a second
+#: checkout carrying `with: ref: <base>` is a green check over the wrong tree.
+EXPECTED_STEPS = [
+    ("uses", "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"),
+    ("uses", "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9"),
+    ("run", "make check-rule11-ownership"),
+    (
+        "run",
+        "uv run --no-project --with 'pytest==9.1.1' python -m pytest "
+        "scripts/test_rule11_ownership.py -q",
+    ),
+]
+
+#: Everything a step of this workflow is allowed to carry. Closed, because the interesting keys
+#: are the ones nobody lists: `with:` redirects the checkout, `env:` shadows `PATH` or sets
+#: `MAKEFLAGS=--dry-run`, `shell:` replaces the interpreter, `working-directory:` moves the root,
+#: and each leaves every `uses:` SHA and every `run:` string exactly as asserted.
+ALLOWED_STEP_KEYS = {"name", "uses", "run"}
+
+
+def _strip_comment(value: str) -> str:
+    """Drop a trailing ` # …`. Only for values that cannot legitimately contain one."""
+    return value.split(" #", 1)[0].strip()
+
+
+def _keys_at(lines: list[str], indent: int) -> set[str]:
+    return {
+        line.strip().split(":", 1)[0].lstrip("- ")
+        for line in lines
+        if len(line) - len(line.lstrip()) == indent
+        and ":" in line
+        and not line.strip().startswith("#")
+    }
 
 
 def _block(lines: list[str], header: str) -> list[str]:
-    """The lines under a top-level `header:`, comments and blanks dropped."""
+    """The lines under a top-level `header:`, full-line comments and blanks dropped."""
     try:
-        start = next(i for i, line in enumerate(lines) if line.rstrip() == header)
+        first = next(i for i, line in enumerate(lines) if line.rstrip() == header)
     except StopIteration:
         return []
     out = []
-    for line in lines[start + 1:]:
+    for line in lines[first + 1:]:
         if line.strip().startswith("#") or not line.strip():
             continue
         if not line.startswith(" "):
@@ -219,111 +241,146 @@ def _block(lines: list[str], header: str) -> list[str]:
     return out
 
 
+def _steps(job_block: list[str]) -> list[dict[str, str]]:
+    """Each step as {key: value}, in file order."""
+    steps: list[dict[str, str]] = []
+    for line in job_block:
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if stripped.startswith("- ") and indent == 6:
+            steps.append({})
+            stripped = stripped[2:]
+        elif indent != 8 or not steps:
+            continue
+        if ":" not in stripped:
+            continue
+        key, _, value = stripped.partition(":")
+        steps[-1][key.strip()] = value.strip()
+    return steps
+
+
 def test_the_workflow_trigger_has_no_path_filter_and_no_area_gate() -> None:
     """R1.1, R1.2 and D2 — the half of R4.1 that does not need a Pull Request.
 
-    Until this existed, nothing in the tree asserted the property the whole capability rests on:
-    walking every `.py`/`.ts`/`.tsx`, the only file naming this workflow was the guard's own
-    docstring, so task 3.4's "comprobado parseando el YAML" was a one-off human parse that does
-    not re-run. Someone could add a filter or a gate after the merge and reintroduce the original
-    defect — input and trigger being disjoint sets — with nothing going red.
+    Nothing in the tree asserted the property the whole capability rests on until this existed:
+    the only file naming this workflow was the guard's own docstring, so task 3.4's "comprobado
+    parseando el YAML" was a one-off human parse that does not re-run. Someone could add a filter
+    or a gate after the merge and reintroduce the original defect — input and trigger being
+    disjoint sets — with nothing going red.
 
-    **Everything here is asserted as shape, and the first version of this test was not.** It
-    banned four gate spellings (`case "$f"`, `paths-filter`, `changed-files`,
-    `git diff --name-only`) while its own docstring argued that banning spellings cannot work.
-    Three reviewers proved the point by mutation and between them walked past it thirteen ways —
-    `case "$file"` with the variable renamed, `git diff --name-status`, a labels check, a
-    `get-diff-action`, an `if:` on the step, a `continue-on-error:`, a `make` left in a comment
-    while the step ran the script directly, the suite step deleted, `push` narrowed to a branch
-    that does not exist. Each one produced a green check with the detector never evaluating its
-    input, which is precisely the defect this workflow closes.
+    **Two earlier versions of this test were defeated, and the reason both failed is the same.**
+    The first banned four gate spellings (`case "$f"`, `paths-filter`, `changed-files`,
+    `git diff --name-only`); the panel walked past it thirteen ways. The second pinned the `on:`
+    block and the job's key set positively, and the panel walked past *that* eleven ways through
+    the level below — `with: ref: <base>` on the checkout so the guard scans the base instead of
+    the PR head, `env: MAKEFLAGS=--dry-run` so `make` prints instead of running, `env: PATH:`
+    shadowing what `make` resolves to, `shell:` replacing the interpreter, a duplicated step
+    collapsing into a set comparison. Each left every asserted `uses:` SHA and every asserted
+    `run:` string untouched, and each produced a green check with the detector never evaluating
+    the Pull Request's tree — the exact defect this workflow exists to close.
 
-    So the job is pinned by its whole shape instead: one job, its exact key set, its exact step
-    list by `uses:` SHA and by literal `run:` value, and no `if:`/`continue-on-error:` anywhere.
-    That last pair is the load-bearing part and it *is* structural rather than orthographic:
-    GitHub Actions has no other way to skip a step, so unlike a shell gate it has no synonyms.
-    Requiring the `run:` values to match exactly closes the remaining route, an early `exit 0`
-    inside the script line.
+    What was wrong both times was the method, not the diligence: each version pinned the level its
+    author had thought of. A workflow has **three** levels where a gate can live — the root, the
+    job, the step — and that list is short and complete, so this version pins all three as closed
+    key sets. A key nobody anticipated reddens the test because it is *not in the allowed set*,
+    which is the property a blacklist can never have.
 
-    A legitimate change to this workflow reddens this test. That is the intent: the constants
-    above are the contract, and moving them is a decision to be read against D2, not a rename.
+    Consequences worth knowing before editing: a legitimate change to this workflow reddens this
+    test, including a bump of either action SHA (both are pinned here as well as in the workflow).
+    That is the intended cost — the constants below are the contract, to be read against D2 rather
+    than updated mechanically. And the test does not claim to cover what lives outside the file:
+    branch protection, runner availability, and whether the check is *required* are repository
+    configuration, unasserted here and named in the spec instead.
     """
     assert WORKFLOW.is_file(), f"the workflow moved or was deleted: {WORKFLOW}"
     lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
 
-    # ── the trigger ────────────────────────────────────────────────────────────────────────
+    # ── level 1: the workflow root ─────────────────────────────────────────────────────────
+    top = _keys_at(lines, 0)
+    assert top == EXPECTED_TOP_LEVEL, (
+        f"the workflow's top-level keys changed: {sorted(top)} != {sorted(EXPECTED_TOP_LEVEL)}. "
+        "`defaults:` here can replace the shell every `run:` uses, and `env:` here reaches every "
+        "step — both leave the asserted commands looking untouched."
+    )
+    permissions = {line.strip() for line in _block(lines, "permissions:")}
+    assert permissions == EXPECTED_PERMISSIONS, (
+        f"`permissions:` changed: {sorted(permissions)} != {sorted(EXPECTED_PERMISSIONS)}. R1.3 "
+        "and the workflow's own header sell the token grant as verifiable by reading the file."
+    )
+
+    # ── level 2: the trigger ───────────────────────────────────────────────────────────────
     on_block = _block(lines, "on:")
     assert on_block, (
         "no top-level `on:` block — the trigger was restructured (flow style, or the quoted "
         '`"on":` spelling). Fail closed rather than guess.'
     )
-    triggers = {
-        line.strip().split(":", 1)[0]
-        for line in on_block
-        if len(line) - len(line.lstrip()) == 2
-    }
+    triggers = _keys_at(on_block, 2)
     assert triggers == EXPECTED_TRIGGERS, (
         f"the trigger set changed: {sorted(triggers)} != {sorted(EXPECTED_TRIGGERS)}. R1.1 needs "
         "every Pull Request to produce this check; read D2 before widening or narrowing it."
     )
-    rendered_on = "\n".join(on_block)
     for spelling in ("paths:", "paths-ignore:", "types:", "branches-ignore:"):
-        assert spelling not in rendered_on, (
+        assert not any(spelling in _strip_comment(line) for line in on_block), (
             f"`{spelling}` appeared under `on:`. R1.2, quoting sdd/specs/backend-ci.md: «un "
             "filtro de rutas a nivel de disparador no produce check alguno en los PR que no "
             "tocan esas rutas»."
         )
-    assert any(line.strip() == "pull_request: {}" for line in on_block), (
+    assert any(_strip_comment(line) == "pull_request: {}" for line in on_block), (
         "`pull_request` is no longer unqualified. Every PR must produce this check (R1.1)."
     )
-    # `push: branches: [main]` is not decorative: it is the post-merge measurement the spec's
-    # § Obligaciones leans on, and narrowing it leaves the trigger set intact.
-    assert any("branches: [main]" in line for line in on_block), (
+    assert any(_strip_comment(line) == "branches: [main]" for line in on_block), (
         "`push` no longer carries `branches: [main]`. That run is the only automatic measurement "
-        "of `main` after a merge, and sdd/specs/rule11-ownership-guard.md relies on it."
+        "of `main` after a merge, and sdd/specs/rule11-ownership-guard.md relies on it. (Compared "
+        "after stripping a trailing comment, so a commented-out claim does not satisfy it.)"
     )
 
-    # ── the job, by its whole shape ────────────────────────────────────────────────────────
+    # ── level 3: the job ───────────────────────────────────────────────────────────────────
     job_block = _block(lines, "jobs:")
     assert job_block, "no top-level `jobs:` block in the workflow"
-    jobs = {
-        line.strip().rstrip(":")
-        for line in job_block
-        if len(line) - len(line.lstrip()) == 2
-    }
+    jobs = _keys_at(job_block, 2)
     assert jobs == {EXPECTED_JOB}, (
         f"the job set changed: {sorted(jobs)} != [{EXPECTED_JOB!r}]. The check run takes its name "
         "from the job, and R1.1 requires exactly one, distinct from backend-tests'."
     )
-    job_keys = {
-        line.strip().split(":", 1)[0]
-        for line in job_block
-        if len(line) - len(line.lstrip()) == 4
-    }
+    job_keys = _keys_at(job_block, 4)
     assert job_keys == EXPECTED_JOB_KEYS, (
         f"the job's keys changed: {sorted(job_keys)} != {sorted(EXPECTED_JOB_KEYS)}. An added key "
-        "is how a gate arrives (`if:`, `strategy:`, `continue-on-error:`); read D2."
+        "is how a gate arrives (`if:`, `strategy:`, `continue-on-error:`, `container:`, `env:`, "
+        "`defaults:`); read D2."
+    )
+    runs_on = [line.split(":", 1)[1].strip() for line in job_block
+               if line.strip().startswith("runs-on:")]
+    assert runs_on == [EXPECTED_RUNS_ON], (
+        f"`runs-on` changed: {runs_on} != [{EXPECTED_RUNS_ON!r}]. A label no runner answers leaves "
+        "the check pending forever, which blocks a merge while reporting nothing."
+    )
+    timeout = [line.split(":", 1)[1].strip() for line in job_block
+               if line.strip().startswith("timeout-minutes:")]
+    assert timeout == [EXPECTED_TIMEOUT], (
+        f"`timeout-minutes` changed: {timeout} != [{EXPECTED_TIMEOUT!r}]. Pinned by value and not "
+        "just by key: a zero or near-zero budget kills the run before the guard finishes, and the "
+        "scan takes about a second, so there is nothing to tune here."
     )
 
-    rendered_job = "\n".join(job_block)
-    for key in SKIP_KEYS:
-        assert key not in rendered_job, (
-            f"`{key}` appeared in the job. D2: a gate is a second place to be wrong about the "
-            "scope, which is the defect this workflow closes — and a skipped or soft-failed step "
-            "produces a GREEN check with the guard never evaluating its input."
+    # ── level 4: the steps ─────────────────────────────────────────────────────────────────
+    steps = _steps(job_block)
+    for i, step in enumerate(steps):
+        extra = set(step) - ALLOWED_STEP_KEYS
+        assert not extra, (
+            f"step {i} carries {sorted(extra)}, which is outside {sorted(ALLOWED_STEP_KEYS)}. "
+            "`with:` redirects the checkout to another ref, `env:` shadows PATH or sets "
+            "MAKEFLAGS=--dry-run, `shell:` replaces the interpreter, `working-directory:` moves "
+            "the root — each leaves the asserted commands intact while the guard stops reading "
+            "the Pull Request's tree."
         )
-
-    uses = {line.split("uses:", 1)[1].split("#", 1)[0].strip()
-            for line in job_block if "uses:" in line}
-    assert uses == EXPECTED_USES, (
-        f"the action set changed: {sorted(uses)} != {sorted(EXPECTED_USES)}. Actions are pinned by "
-        "commit SHA, and an added one is how an area-gate action arrives."
-    )
-    runs = {line.split("run:", 1)[1].strip() for line in job_block if "run:" in line}
-    assert runs == EXPECTED_RUNS, (
-        f"the run steps changed: {sorted(runs)} != {sorted(EXPECTED_RUNS)}. Asserted literally so "
-        "no shell gate (`... || exit 0`) can hide inside, and so CI keeps invoking the same target "
-        "as the local path."
+    actual = [
+        ("uses", _strip_comment(step["uses"])) if "uses" in step else ("run", step["run"])
+        for step in steps
+    ]
+    assert actual == EXPECTED_STEPS, (
+        f"the step list changed:\n  {actual}\n!=\n  {EXPECTED_STEPS}\nCompared in order, so a "
+        "duplicated or reordered step is visible. Actions are pinned by commit SHA and the "
+        "commands literally, so CI runs the same target as the local path."
     )
 
 

@@ -39,7 +39,10 @@ en CI y rojo en local, y el rojo le habría caído a la siguiente Pull Request q
   [`specs/backend-ci.md`](backend-ci.md) fija para todo el repositorio: un filtro de rutas a nivel
   de disparador no produce check alguno en los PR que no tocan esas rutas.
 - THE SYSTEM SHALL ejecutarlo **sin puerta de área de ninguna clase**, ni en el disparador ni
-  dentro del workflow. No es comodidad: una puerta de área sería **un segundo sitio donde
+  dentro del workflow. Lo impone una prueba y no la buena voluntad —igual que el alcance, más
+  abajo—: `test_the_workflow_trigger_has_no_path_filter_and_no_area_gate` fija los tres niveles
+  del workflow (raíz, job y paso) como conjuntos cerrados de claves, de modo que una puerta
+  nueva se pone en rojo por no estar en el conjunto permitido, sin depender de cómo se escriba. No es comodidad: una puerta de área sería **un segundo sitio donde
   equivocarse sobre el alcance**, que es exactamente el defecto que esta capacidad corrige.
   Ejecutar siempre satisface el requisito por construcción y no por acierto, y el escaneo cuesta
   alrededor de un segundo sobre el árbol entero.

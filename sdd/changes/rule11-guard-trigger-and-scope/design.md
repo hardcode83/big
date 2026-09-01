@@ -121,6 +121,20 @@ y en `sdd/project.md`.
 `workflow_dispatch: {}`, **sin `paths:`** (R1.2), un solo job llamado `rule11-ownership` — el
 nombre del check run sale del *job*, no del workflow — y **ninguna detección de área dentro**.
 
+> **D2 dejó de ser prosa: lo impone una prueba** (añadida en review el 2026-09-01,
+> `test_the_workflow_trigger_has_no_path_filter_and_no_area_gate`). Fija los **tres** niveles
+> en los que un workflow de Actions puede alojar una puerta —raíz, job y paso— como conjuntos
+> **cerrados** de claves, más los valores de `permissions`, `runs-on`, `timeout-minutes` y la
+> lista de pasos en orden. Hizo falta llegar a eso: las dos versiones anteriores fijaban un
+> nivel cada una y el panel las sorteó por el de debajo, veinticuatro veces entre ambas.
+>
+> Consecuencia práctica para quien edite el workflow: **cualquier cambio legítimo pone la
+> prueba en rojo**, incluido subir el SHA de `actions/checkout` o de `setup-uv`, que están
+> fijados también en la prueba. Es el coste buscado —las constantes son el contrato y se leen
+> contra esta decisión—, no un falso positivo. Lo que la prueba **no** cubre, porque vive
+> fuera del fichero: la protección de rama, si el check es obligatorio, y que exista un runner
+> que responda.
+
 R1.1 pide que el guardián corra cuando el diff toque cualquier ruta que escanea; correr siempre
 lo satisface trivialmente y por construcción. Y es lo correcto aquí por un motivo que no es
 sólo comodidad: un gate de área es **un segundo sitio donde equivocarse sobre el alcance**, que
@@ -401,7 +415,7 @@ Rejected:
 | Area | Files | Change |
 |---|---|---|
 | Guardia | `scripts/rule11-ownership.py` | **Nuevo.** La lógica de `backend/tests/test_rule11_ownership.py` con `SCOPE` (D4), `SINK_TERMS` sin meta-vocabulario (D3), `GuardError` + `main() -> int` (D7) y `_prose_roots()` con un único origen (D1) |
-| Guardia | `scripts/test_rule11_ownership.py` | **Nuevo.** Las cuatro pruebas de hoy más las de `SCOPE` (R2.4), la de alcance vacío (R4.3), el ancla prosa↔`SCOPE` (D11) y las cifras re-medidas de `test_what_this_guard_does_not_catch` |
+| Guardia | `scripts/test_rule11_ownership.py` | **Nuevo.** Las cuatro pruebas de hoy más las de `SCOPE` (R2.4), la de alcance vacío (R4.3), el ancla prosa↔`SCOPE` (D11) y las cifras re-medidas de `test_what_this_guard_does_not_catch`. **Añadidas en review (2026-09-01)**: el ancla del coste declarado de D3 —que fija el conjunto exacto de `file:line`, no el total— y el guardián del gatillo, que es quien impone D2 |
 | Guardia | `backend/tests/test_rule11_ownership.py` | **Se borra** (D1) |
 | CI | `.github/workflows/rule11-ownership.yml` | **Nuevo.** Un job `rule11-ownership`, sin `paths:`, `contents: read`, `concurrency` con `cancel-in-progress`, `timeout-minutes: 10`; pasos: checkout, `setup-uv`, `make check-rule11-ownership`, `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q` |
 | CI | `.github/workflows/compose-ports.yml` | **Sin cambios**, y consta: su paso `pytest scripts/ -q` recogerá también las meta-pruebas nuevas. Se deja así porque ya es el statu quo para los otros cuatro `scripts/test_*.py`, y estrechar el glob crearía una lista que el próximo script hay que acordarse de ampliar |
@@ -452,6 +466,35 @@ Sin esquema, sin migración, sin endpoint, sin variable de entorno, sin string d
 | R5.1 | § Changes by area — `steering/security.md` líneas 126 y 128; **anclado por prueba** (D11) |
 | R5.2 | D8 — el criterio operativo: la spec nueva no contiene ninguna lista que `SCOPE` o la tabla ya contengan |
 | R5.3 | § Changes by area; y el hallazgo del § Riesgos sobre el «36» del residual 5. D11 ancla las rutas; los recuentos siguen siendo obligación de recuento y no de test |
+
+## Roadmap candidates
+
+Cuatro seguimientos levantados por el panel de review el 2026-09-01, ninguno bloqueante y ninguno
+en alcance de este change. Se registran aquí para que `/sdd:archive` los promueva.
+
+- **Generalizar el guardián del gatillo a los workflows hermanos.** `compose-ports.yml` y
+  `api-contract.yml` declaran el mismo invariante en sus propias cabeceras y su bloque `on:` es
+  **idéntico carácter por carácter** al de `rule11-ownership.yml`, pero nada fija su forma: un
+  `paths:` añadido a cualquiera de los dos reintroduce esta misma clase de defecto sin que nada se
+  ponga en rojo. La forma natural es una tabla de `(ruta, forma esperada)` recorrida por la prueba
+  que ya existe. *(Se aplazó primero con el motivo de que los disparadores de `api-contract.yml`
+  podían diferir; el panel leyó el fichero y no difieren, así que ese motivo era falso y el
+  candidato cubre a los dos hermanos por igual.)*
+- **Dar mecanismo a la comprobación de la base fusionada (R3.1).** Hoy es obligación declarada con
+  su acta en el registro de evidencia. Cubre parcialmente el automatismo —`actions/checkout` mide
+  el *merge ref* en cada evento de la PR, y `push: branches: [main]` mide después del merge—, pero
+  GitHub no re-dispara `pull_request` cuando la base avanza, así que queda una ventana de verde
+  caducado. Su sitio natural es un paso de `/sdd:ship` o de `/sdd:archive` del toolkit, no este
+  árbol.
+- **Atar `SINK_TERMS` a la tabla del censo.** Una columna que la tabla gobierna y la tupla no
+  recoge es invisible, y ya pasó una vez con `revenue-pricing`. Está declarado como residual 3;
+  al irse el meta-vocabulario ese punto ciego perdió su red accidental, así que el paso mecánico
+  siguiente es una prueba que difunda las columnas de la tabla contra la tupla.
+- **Comentario recíproco en `compose-ports.yml`.** Su paso `pytest scripts/ -q` sin filtrar es hoy
+  el respaldo que mantiene vivo al guardián del gatillo si alguien estrecha el disparador de
+  `rule11-ownership.yml`. Esa dependencia sólo está escrita en un sentido, así que quien acote esa
+  invocación por velocidad —una limpieza local perfectamente razonable— no vería que retira el
+  único camino redundante.
 
 ## Risks & mitigations
 
