@@ -1,10 +1,10 @@
 ---
 schema: 1
-state: LOCAL_VERIFIED
+state: READY_FOR_PR
 local_review: APPROVED
-repository:
-base_branch:
-head_branch:
+repository: autohostai-labs/AutoHostAI
+base_branch: main
+head_branch: sdd/backend-pyright-tooling
 implementation_sha: c513ec7a5a77600a1962aa73d7eb185a9eb59e2f
 pr_number:
 pr_url:
