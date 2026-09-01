@@ -58,6 +58,10 @@ jobs:
       # historial entero en cada PR. Lo que un checkout truncado provocaría —menos ficheros de los
       # que hay— lo caza el centinela de suelo mínimo (`MINIMUM_MARKDOWN_FILES`,
       # `MINIMUM_PYTHON_FILES`), que es su motivo de existir.
+      # **Estos dos SHA están fijados también en `scripts/test_rule11_ownership.py`**
+      # (`EXPECTED_STEPS`), que impone D2. Subirlos aquí y no allí pone la suite en rojo: es
+      # deliberado, para que un barrido mecánico de SHA por el repositorio pase por esta
+      # decisión en vez de rodearla.
       - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
 
       # Sólo para el paso de la suite. Misma acción y mismo SHA que `compose-ports.yml`,
@@ -78,4 +82,4 @@ jobs:
         # `--no-project` porque no hay `pyproject.toml` en la raíz y no queremos sincronizar el
         # árbol de dependencias del backend para probar un script de la stdlib; el `pytest` va
         # **pinneado** y alineado con el `pytest>=9.1.1` de `backend/pyproject.toml`.
-        run: uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q
+        run: uv run --no-project --with 'pytest==9.1.1' --with 'pyyaml==6.0.2' python -m pytest scripts/test_rule11_ownership.py -q

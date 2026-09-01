@@ -15,6 +15,7 @@ import re
 from pathlib import Path
 
 import pytest
+import yaml
 
 
 SPEC = importlib.util.spec_from_file_location(
@@ -30,6 +31,12 @@ Kind = module.Kind
 ScopeEntry = module.ScopeEntry
 SCOPE = module.SCOPE
 ROOT = module.REPO_ROOT
+
+#: The suite command, in one place: the workflow runs it, and this test pins it.
+SUITE_COMMAND = (
+    "uv run --no-project --with 'pytest==9.1.1' --with 'pyyaml==6.0.2' "
+    "python -m pytest scripts/test_rule11_ownership.py -q"
+)
 
 
 def offending(text, *, python=False):
@@ -178,85 +185,80 @@ def test_the_declared_cost_of_dropping_the_meta_vocabulary_is_still_what_the_pro
 #: simply never ran on the commit that broke the census.
 WORKFLOW = ROOT / ".github" / "workflows" / "rule11-ownership.yml"
 
-#: A GitHub Actions workflow has exactly three levels where a gate can hide — the workflow root,
-#: the job, and the step — so all three are pinned as **closed key sets**. Two earlier versions of
-#: this test pinned one level each and the panel walked past both through the level below; what
-#: closes it is not a longer blacklist but the observation that the levels are enumerable and few.
+#: The workflow's exact shape, asserted against a **parsed** document rather than against text.
+#: Three hand-written parsers preceded this one and the panel defeated all three — by a gate
+#: spelling, then by a key one level down, then by one extra space after a dash. The lesson is in
+#: `test_the_workflow_trigger_has_no_path_filter_and_no_area_gate`: modelling YAML loses to YAML.
 EXPECTED_TOP_LEVEL = {"name", "on", "concurrency", "permissions", "jobs"}
-EXPECTED_TRIGGERS = {"pull_request", "push", "workflow_dispatch"}
-EXPECTED_PERMISSIONS = {"contents: read"}
+EXPECTED_ON = {
+    "pull_request": {},
+    "push": {"branches": ["main"]},
+    "workflow_dispatch": {},
+}
+EXPECTED_PERMISSIONS = {"contents": "read"}
+EXPECTED_CONCURRENCY = {
+    "group": "rule11-ownership-${{ github.ref }}",
+    "cancel-in-progress": True,
+}
 EXPECTED_JOB = "rule11-ownership"
 EXPECTED_JOB_KEYS = {"runs-on", "timeout-minutes", "steps"}
 EXPECTED_RUNS_ON = "ubuntu-latest"
-EXPECTED_TIMEOUT = "10"
+EXPECTED_TIMEOUT = 10
 
-#: The step list **in order**, not as a set: a set collapses a duplicated step, and a second
-#: checkout carrying `with: ref: <base>` is a green check over the wrong tree.
+#: The step list in order, by the only two keys a step of this workflow may carry a value for.
 EXPECTED_STEPS = [
     ("uses", "actions/checkout@11d5960a326750d5838078e36cf38b85af677262"),
     ("uses", "astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9"),
     ("run", "make check-rule11-ownership"),
-    (
-        "run",
-        "uv run --no-project --with 'pytest==9.1.1' python -m pytest "
-        "scripts/test_rule11_ownership.py -q",
-    ),
+    ("run", SUITE_COMMAND),
 ]
 
-#: Everything a step of this workflow is allowed to carry. Closed, because the interesting keys
-#: are the ones nobody lists: `with:` redirects the checkout, `env:` shadows `PATH` or sets
-#: `MAKEFLAGS=--dry-run`, `shell:` replaces the interpreter, `working-directory:` moves the root,
-#: and each leaves every `uses:` SHA and every `run:` string exactly as asserted.
+#: Everything a step is allowed to carry. Closed, because the dangerous keys are the ones nobody
+#: lists: `with:` redirects the checkout to another ref, `env:` shadows `PATH` or sets
+#: `MAKEFLAGS=--dry-run`, `shell:` replaces the interpreter, `working-directory:` moves the root —
+#: and each leaves every pinned SHA and every pinned command byte-identical.
 ALLOWED_STEP_KEYS = {"name", "uses", "run"}
 
 
-def _strip_comment(value: str) -> str:
-    """Drop a trailing ` # …`. Only for values that cannot legitimately contain one."""
-    return value.split(" #", 1)[0].strip()
+class _StrictLoader(yaml.SafeLoader):
+    """A loader that refuses duplicate mapping keys instead of letting the last one win."""
 
 
-def _keys_at(lines: list[str], indent: int) -> set[str]:
-    return {
-        line.strip().split(":", 1)[0].lstrip("- ")
-        for line in lines
-        if len(line) - len(line.lstrip()) == indent
-        and ":" in line
-        and not line.strip().startswith("#")
-    }
+def _no_duplicate_keys(loader, node):
+    mapping = {}
+    for key_node, value_node in node.value:
+        key = loader.construct_object(key_node, deep=True)
+        if key in mapping:
+            raise yaml.constructor.ConstructorError(
+                None, None, f"duplicate key {key!r}", key_node.start_mark
+            )
+        mapping[key] = loader.construct_object(value_node, deep=True)
+    return mapping
 
 
-def _block(lines: list[str], header: str) -> list[str]:
-    """The lines under a top-level `header:`, full-line comments and blanks dropped."""
+_StrictLoader.add_constructor(
+    yaml.resolver.BaseResolver.DEFAULT_MAPPING_TAG, _no_duplicate_keys
+)
+
+
+def _load_workflow() -> dict:
+    """The workflow as one strictly-parsed document, or a loud failure."""
+    text = WORKFLOW.read_text(encoding="utf-8")
     try:
-        first = next(i for i, line in enumerate(lines) if line.rstrip() == header)
-    except StopIteration:
-        return []
-    out = []
-    for line in lines[first + 1:]:
-        if line.strip().startswith("#") or not line.strip():
-            continue
-        if not line.startswith(" "):
-            break
-        out.append(line)
-    return out
-
-
-def _steps(job_block: list[str]) -> list[dict[str, str]]:
-    """Each step as {key: value}, in file order."""
-    steps: list[dict[str, str]] = []
-    for line in job_block:
-        stripped = line.strip()
-        indent = len(line) - len(line.lstrip())
-        if stripped.startswith("- ") and indent == 6:
-            steps.append({})
-            stripped = stripped[2:]
-        elif indent != 8 or not steps:
-            continue
-        if ":" not in stripped:
-            continue
-        key, _, value = stripped.partition(":")
-        steps[-1][key.strip()] = value.strip()
-    return steps
+        documents = list(yaml.load_all(text, Loader=_StrictLoader))
+    except yaml.YAMLError as error:
+        raise AssertionError(
+            f"the workflow does not parse, so GitHub would reject it and publish no check at "
+            f"all — which R1.1 forbids as surely as a green one: {error}"
+        ) from error
+    assert len(documents) == 1, (
+        f"the workflow holds {len(documents)} YAML documents. GitHub reads one; a second is "
+        "invisible to a reader and can carry anything."
+    )
+    document = documents[0]
+    assert isinstance(document, dict), f"the workflow is not a mapping: {type(document).__name__}"
+    # YAML 1.1 resolves a bare `on` to the boolean True, so the key arrives as True and not "on".
+    return {("on" if key is True else key): value for key, value in document.items()}
 
 
 def test_the_workflow_trigger_has_no_path_filter_and_no_area_gate() -> None:
@@ -268,119 +270,103 @@ def test_the_workflow_trigger_has_no_path_filter_and_no_area_gate() -> None:
     or a gate after the merge and reintroduce the original defect — input and trigger being
     disjoint sets — with nothing going red.
 
-    **Two earlier versions of this test were defeated, and the reason both failed is the same.**
-    The first banned four gate spellings (`case "$f"`, `paths-filter`, `changed-files`,
-    `git diff --name-only`); the panel walked past it thirteen ways. The second pinned the `on:`
-    block and the job's key set positively, and the panel walked past *that* eleven ways through
-    the level below — `with: ref: <base>` on the checkout so the guard scans the base instead of
-    the PR head, `env: MAKEFLAGS=--dry-run` so `make` prints instead of running, `env: PATH:`
-    shadowing what `make` resolves to, `shell:` replacing the interpreter, a duplicated step
-    collapsing into a set comparison. Each left every asserted `uses:` SHA and every asserted
-    `run:` string untouched, and each produced a green check with the detector never evaluating
-    the Pull Request's tree — the exact defect this workflow exists to close.
+    **Three hand-written parsers preceded this one and the panel defeated all three.** The first
+    banned four gate spellings and was walked past thirteen ways. The second pinned the `on:` block
+    and the job's keys, and was walked past through the level below. The third pinned all three
+    levels by indentation — and fell to one extra space after a dash, which moves a step's mapping
+    column while the dash stays put, and to a bare `-` on its own line, which it did not recognise
+    as a step at all. Both produced a green check with `with: ref: <base>` or
+    `env: MAKEFLAGS=--dry-run` in force, i.e. the detector never reading the Pull Request's tree.
 
-    What was wrong both times was the method, not the diligence: each version pinned the level its
-    author had thought of. A workflow has **three** levels where a gate can live — the root, the
-    job, the step — and that list is short and complete, so this version pins all three as closed
-    key sets. A key nobody anticipated reddens the test because it is *not in the allowed set*,
-    which is the property a blacklist can never have.
+    Each version pinned a **proxy** for the mechanism: a spelling, then a level, then an indent.
+    The mechanism is the parsed document, so this version reads it — `yaml.load_all` with a loader
+    that rejects duplicate keys, one document required, and every assertion made against the
+    resulting structure. Whole classes of attack disappear rather than being enumerated: flow
+    style, block scalars, quoted or oddly-cased keys, anchors and aliases, an extra space, a bare
+    dash, a duplicated key, a second document. A file that does not parse fails loudly, because
+    GitHub would reject it and publish no check at all — which R1.1 forbids as surely as a green
+    one.
 
-    Consequences worth knowing before editing: a legitimate change to this workflow reddens this
-    test, including a bump of either action SHA (both are pinned here as well as in the workflow).
-    That is the intended cost — the constants below are the contract, to be read against D2 rather
-    than updated mechanically. And the test does not claim to cover what lives outside the file:
-    branch protection, runner availability, and whether the check is *required* are repository
-    configuration, unasserted here and named in the spec instead.
+    Consequences before editing: any legitimate change to this workflow reddens this test,
+    including a bump of either action SHA, since both are pinned here as well as in the workflow.
+    That is the intended cost — the constants above are the contract, to be read against D2. If a
+    future action genuinely needs an input, widening `ALLOWED_STEP_KEYS` **and** pinning that
+    input's value in `EXPECTED_STEPS` is the supported move; widening the set alone reopens the
+    hole this test exists to close.
+
+    What is not covered, because it lives outside the file: branch protection, whether the check is
+    a required context, whether a runner answers `runs-on`, and whether the workflow is disabled in
+    the repository UI.
     """
     assert WORKFLOW.is_file(), f"the workflow moved or was deleted: {WORKFLOW}"
-    lines = WORKFLOW.read_text(encoding="utf-8").splitlines()
+    workflow = _load_workflow()
 
-    # ── level 1: the workflow root ─────────────────────────────────────────────────────────
-    top = _keys_at(lines, 0)
-    assert top == EXPECTED_TOP_LEVEL, (
-        f"the workflow's top-level keys changed: {sorted(top)} != {sorted(EXPECTED_TOP_LEVEL)}. "
-        "`defaults:` here can replace the shell every `run:` uses, and `env:` here reaches every "
-        "step — both leave the asserted commands looking untouched."
+    assert set(workflow) == EXPECTED_TOP_LEVEL, (
+        f"the workflow's top-level keys changed: {sorted(map(str, workflow))} != "
+        f"{sorted(EXPECTED_TOP_LEVEL)}. `defaults:` here replaces the shell every `run:` uses and "
+        "`env:` here reaches every step, so an added key is how a gate arrives; read D2."
     )
-    permissions = {line.strip() for line in _block(lines, "permissions:")}
-    assert permissions == EXPECTED_PERMISSIONS, (
-        f"`permissions:` changed: {sorted(permissions)} != {sorted(EXPECTED_PERMISSIONS)}. R1.3 "
-        "and the workflow's own header sell the token grant as verifiable by reading the file."
+    assert workflow["permissions"] == EXPECTED_PERMISSIONS, (
+        f"`permissions:` changed: {workflow['permissions']} != {EXPECTED_PERMISSIONS}. R1.3 and "
+        "the workflow's own header sell the token grant as verifiable by reading the file."
     )
-
-    # ── level 2: the trigger ───────────────────────────────────────────────────────────────
-    on_block = _block(lines, "on:")
-    assert on_block, (
-        "no top-level `on:` block — the trigger was restructured (flow style, or the quoted "
-        '`"on":` spelling). Fail closed rather than guess.'
-    )
-    triggers = _keys_at(on_block, 2)
-    assert triggers == EXPECTED_TRIGGERS, (
-        f"the trigger set changed: {sorted(triggers)} != {sorted(EXPECTED_TRIGGERS)}. R1.1 needs "
-        "every Pull Request to produce this check; read D2 before widening or narrowing it."
-    )
-    for spelling in ("paths:", "paths-ignore:", "types:", "branches-ignore:"):
-        assert not any(spelling in _strip_comment(line) for line in on_block), (
-            f"`{spelling}` appeared under `on:`. R1.2, quoting sdd/specs/backend-ci.md: «un "
-            "filtro de rutas a nivel de disparador no produce check alguno en los PR que no "
-            "tocan esas rutas»."
-        )
-    assert any(_strip_comment(line) == "pull_request: {}" for line in on_block), (
-        "`pull_request` is no longer unqualified. Every PR must produce this check (R1.1)."
-    )
-    assert any(_strip_comment(line) == "branches: [main]" for line in on_block), (
-        "`push` no longer carries `branches: [main]`. That run is the only automatic measurement "
-        "of `main` after a merge, and sdd/specs/rule11-ownership-guard.md relies on it. (Compared "
-        "after stripping a trailing comment, so a commented-out claim does not satisfy it.)"
+    assert workflow["concurrency"] == EXPECTED_CONCURRENCY, (
+        f"`concurrency:` changed: {workflow['concurrency']} != {EXPECTED_CONCURRENCY}. Pinned by "
+        "value: drop the `${{ github.ref }}` suffix and every run cancels every other one "
+        "repo-wide, including the `push: main` run that measures the base — and a cancelled check "
+        "publishes no verdict. Read D2."
     )
 
-    # ── level 3: the job ───────────────────────────────────────────────────────────────────
-    job_block = _block(lines, "jobs:")
-    assert job_block, "no top-level `jobs:` block in the workflow"
-    jobs = _keys_at(job_block, 2)
-    assert jobs == {EXPECTED_JOB}, (
-        f"the job set changed: {sorted(jobs)} != [{EXPECTED_JOB!r}]. The check run takes its name "
-        "from the job, and R1.1 requires exactly one, distinct from backend-tests'."
-    )
-    job_keys = _keys_at(job_block, 4)
-    assert job_keys == EXPECTED_JOB_KEYS, (
-        f"the job's keys changed: {sorted(job_keys)} != {sorted(EXPECTED_JOB_KEYS)}. An added key "
-        "is how a gate arrives (`if:`, `strategy:`, `continue-on-error:`, `container:`, `env:`, "
-        "`defaults:`); read D2."
-    )
-    runs_on = [line.split(":", 1)[1].strip() for line in job_block
-               if line.strip().startswith("runs-on:")]
-    assert runs_on == [EXPECTED_RUNS_ON], (
-        f"`runs-on` changed: {runs_on} != [{EXPECTED_RUNS_ON!r}]. A label no runner answers leaves "
-        "the check pending forever, which blocks a merge while reporting nothing."
-    )
-    timeout = [line.split(":", 1)[1].strip() for line in job_block
-               if line.strip().startswith("timeout-minutes:")]
-    assert timeout == [EXPECTED_TIMEOUT], (
-        f"`timeout-minutes` changed: {timeout} != [{EXPECTED_TIMEOUT!r}]. Pinned by value and not "
-        "just by key: a zero or near-zero budget kills the run before the guard finishes, and the "
-        "scan takes about a second, so there is nothing to tune here."
+    assert workflow["on"] == EXPECTED_ON, (
+        f"the trigger changed: {workflow['on']} != {EXPECTED_ON}. R1.1 needs every Pull Request to "
+        "produce this check, and R1.2 forbids a path filter at the trigger, quoting "
+        "sdd/specs/backend-ci.md: «un filtro de rutas a nivel de disparador no produce check "
+        "alguno en los PR que no tocan esas rutas». Compared as a whole parsed mapping, so a "
+        "`paths:` under any spelling — quoted, spaced, upper-cased — is simply a different value. "
+        "Read D2 before widening or narrowing it."
     )
 
-    # ── level 4: the steps ─────────────────────────────────────────────────────────────────
-    steps = _steps(job_block)
-    for i, step in enumerate(steps):
+    assert set(workflow["jobs"]) == {EXPECTED_JOB}, (
+        f"the job set changed: {sorted(workflow['jobs'])} != [{EXPECTED_JOB!r}]. The check run "
+        "takes its name from the job, and R1.1 requires exactly one, distinct from backend-tests'."
+    )
+    job = workflow["jobs"][EXPECTED_JOB]
+    assert set(job) == EXPECTED_JOB_KEYS, (
+        f"the job's keys changed: {sorted(job)} != {sorted(EXPECTED_JOB_KEYS)}. An added key is how "
+        "a gate arrives (`if:`, `strategy:`, `continue-on-error:`, `container:`, `env:`, "
+        "`defaults:`, `permissions:`); read D2."
+    )
+    assert job["runs-on"] == EXPECTED_RUNS_ON, (
+        f"`runs-on` changed: {job['runs-on']!r} != {EXPECTED_RUNS_ON!r}. A label no runner answers "
+        "leaves the check pending forever, which blocks a merge while reporting nothing. Read D2."
+    )
+    assert job["timeout-minutes"] == EXPECTED_TIMEOUT, (
+        f"`timeout-minutes` changed: {job['timeout-minutes']!r} != {EXPECTED_TIMEOUT!r}. Pinned by "
+        "value: a near-zero budget kills the run before the guard finishes, and the scan takes "
+        "about a second, so there is nothing to tune. Read D2."
+    )
+
+    steps = job["steps"]
+    for index, step in enumerate(steps):
+        assert isinstance(step, dict), f"step {index} is not a mapping: {step!r}"
         extra = set(step) - ALLOWED_STEP_KEYS
         assert not extra, (
-            f"step {i} carries {sorted(extra)}, which is outside {sorted(ALLOWED_STEP_KEYS)}. "
-            "`with:` redirects the checkout to another ref, `env:` shadows PATH or sets "
+            f"step {index} carries {sorted(extra)}, outside {sorted(ALLOWED_STEP_KEYS)}. `with:` "
+            "redirects the checkout to another ref, `env:` shadows PATH or sets "
             "MAKEFLAGS=--dry-run, `shell:` replaces the interpreter, `working-directory:` moves "
-            "the root — each leaves the asserted commands intact while the guard stops reading "
-            "the Pull Request's tree."
+            "the root — each leaves the pinned commands intact while the guard stops reading the "
+            "Pull Request's tree. If an action genuinely needs an input, read D2: widen this set "
+            "AND pin the input's value in EXPECTED_STEPS, never the set alone."
         )
     actual = [
-        ("uses", _strip_comment(step["uses"])) if "uses" in step else ("run", step["run"])
+        ("uses", step["uses"]) if "uses" in step else ("run", step.get("run"))
         for step in steps
     ]
     assert actual == EXPECTED_STEPS, (
         f"the step list changed:\n  {actual}\n!=\n  {EXPECTED_STEPS}\nCompared in order, so a "
-        "duplicated or reordered step is visible. Actions are pinned by commit SHA and the "
-        "commands literally, so CI runs the same target as the local path."
+        "duplicated or reordered step is visible, and by value, so no shell gate can hide inside "
+        "a command. Actions are pinned by commit SHA; the commands must stay identical to the "
+        "local path's. Read D2."
     )
 
 

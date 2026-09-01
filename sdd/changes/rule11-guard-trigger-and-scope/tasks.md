@@ -505,11 +505,17 @@ evidencia sobre la PR», arriba—, y sus ids no existen hasta que `/sdd:ship` a
   entero. Requiere los `docker compose cp` que documenta `sdd/project.md` § Worktree bootstrap.
 - [x] 7.7 Repasar que ningún documento vivo cita ya `backend/tests/test_rule11_ownership.py`
   (grepeando el árbol completo, `sdd/changes/archive/` aparte) ni describe un guardián que no
-  existe. **Medido ya, y queda una que este change no puede arreglar**: la entrada
-  `template-label-sink-census` de `sdd/roadmap.md` dice que `tests/test_rule11_ownership.py`
-  vigila el censo, y es un documento **vivo** apuntando a un fichero borrado. No se toca aquí
-  porque la regla 1 del toolkit reserva la escritura del roadmap a `/sdd:archive`: **queda
-  encargado a `/sdd:archive`**, que debe repathear esa entrada a `scripts/rule11-ownership.py`
-  al archivar este change. Las demás coincidencias del árbol son legítimas: una frase
-  histórica en el docstring del fichero nuevo, los registros de este change, y
-  `sdd/changes/archive/`, que es inmutable.
+  existe. **Medido ya, y quedan dos que este change no puede arreglar**, las dos en
+  `sdd/roadmap.md` y las dos por el mismo motivo: la regla 1 del toolkit reserva la escritura del
+  roadmap a `/sdd:archive`. **Quedan las dos encargadas a `/sdd:archive`**, que al archivar este
+  change debe repathearlas a `scripts/rule11-ownership.py`:
+
+  - **línea 219**, la entrada `template-label-sink-census`, que dice que
+    `tests/test_rule11_ownership.py` vigila el censo;
+  - **línea 177**, la entrada de registro de *este* change, que describe en presente lo que
+    `backend/tests/test_rule11_ownership.py` escanea. La levantó el panel de review el 2026-09-01
+    y aquí sólo se contaba una; que sea nuestra propia entrada no la hace menos viva ni menos
+    apuntada a un fichero borrado.
+
+  Las demás coincidencias del árbol son legítimas: una frase histórica en el docstring del fichero
+  nuevo, los registros de este change, y `sdd/changes/archive/`, que es inmutable.

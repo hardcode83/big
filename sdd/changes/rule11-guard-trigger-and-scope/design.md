@@ -128,12 +128,26 @@ nombre del check run sale del *job*, no del workflow — y **ninguna detección 
 > lista de pasos en orden. Hizo falta llegar a eso: las dos versiones anteriores fijaban un
 > nivel cada una y el panel las sorteó por el de debajo, veinticuatro veces entre ambas.
 >
-> Consecuencia práctica para quien edite el workflow: **cualquier cambio legítimo pone la
-> prueba en rojo**, incluido subir el SHA de `actions/checkout` o de `setup-uv`, que están
-> fijados también en la prueba. Es el coste buscado —las constantes son el contrato y se leen
-> contra esta decisión—, no un falso positivo. Lo que la prueba **no** cubre, porque vive
-> fuera del fichero: la protección de rama, si el check es obligatorio, y que exista un runner
-> que responda.
+> Consecuencia práctica para quien edite el workflow: **cualquier cambio de lo que la prueba
+> fija la pone en rojo** —el disparador entero, las claves de los tres niveles, y por valor
+> `permissions`, `concurrency`, `runs-on`, `timeout-minutes` y los cuatro pasos, incluidos los
+> dos SHA de acción—. Es el coste buscado, no un falso positivo: las constantes son el contrato
+> y se leen contra esta decisión.
+>
+> **Lo que la prueba no cubre**, dicho sin el atajo de «vive fuera del fichero», que era falso:
+> fuera del fichero quedan la protección de rama, si el check es obligatorio, si el workflow
+> está deshabilitado en la interfaz, y que exista un runner que responda a `runs-on`. Dentro
+> del fichero queda sin fijar el **valor** de los `name:` de cada paso, que no puede desviar lo
+> que se ejecuta.
+>
+> **Y cómo lo comprueba, que es lo que costó llegar:** lee el workflow con `yaml.load_all` y un
+> loader que rechaza claves duplicadas, y afirma sobre la estructura cargada. Las tres versiones
+> anteriores modelaban YAML a mano —por nombres prohibidos, por niveles, por indentación— y el
+> panel las derrotó las tres; la última con un espacio de más detrás de un guion, que mueve la
+> columna del mapa de un paso mientras el guion se queda donde está. Leer el documento en vez de
+> modelarlo retira la clase entera en lugar de enumerarla: estilo de flujo, escalares en bloque,
+> claves entrecomilladas o en mayúsculas, anclas, duplicados y un segundo documento dejan de ser
+> casos y pasan a ser, simplemente, otra estructura.
 
 R1.1 pide que el guardián corra cuando el diff toque cualquier ruta que escanea; correr siempre
 lo satisface trivialmente y por construcción. Y es lo correcto aquí por un motivo que no es
@@ -418,7 +432,7 @@ Rejected:
 | Guardia | `scripts/test_rule11_ownership.py` | **Nuevo.** Las cuatro pruebas de hoy más las de `SCOPE` (R2.4), la de alcance vacío (R4.3), el ancla prosa↔`SCOPE` (D11) y las cifras re-medidas de `test_what_this_guard_does_not_catch`. **Añadidas en review (2026-09-01)**: el ancla del coste declarado de D3 —que fija el conjunto exacto de `file:line`, no el total— y el guardián del gatillo, que es quien impone D2 |
 | Guardia | `backend/tests/test_rule11_ownership.py` | **Se borra** (D1) |
 | CI | `.github/workflows/rule11-ownership.yml` | **Nuevo.** Un job `rule11-ownership`, sin `paths:`, `contents: read`, `concurrency` con `cancel-in-progress`, `timeout-minutes: 10`; pasos: checkout, `setup-uv`, `make check-rule11-ownership`, `uv run --no-project --with 'pytest==9.1.1' python -m pytest scripts/test_rule11_ownership.py -q` |
-| CI | `.github/workflows/compose-ports.yml` | **Sin cambios**, y consta: su paso `pytest scripts/ -q` recogerá también las meta-pruebas nuevas. Se deja así porque ya es el statu quo para los otros cuatro `scripts/test_*.py`, y estrechar el glob crearía una lista que el próximo script hay que acordarse de ampliar |
+| CI | `.github/workflows/compose-ports.yml` | **Una línea**, decidida en review (2026-09-01): su paso `pytest scripts/ -q` recoge las meta-pruebas de esta guardia, así que necesita el mismo `--with 'pyyaml==6.0.2'` desde que el test lee YAML de verdad. Sin esa línea, ese workflow se pondría en rojo por un `ImportError` ajeno a lo suyo. Es el único fichero que este change toca fuera de su alcance declarado, y se toca porque la alternativa —que un workflow hermano falle por nuestra dependencia— es peor. Lo demás sigue igual: Se deja así porque ya es el statu quo para los otros cuatro `scripts/test_*.py`, y estrechar el glob crearía una lista que el próximo script hay que acordarse de ampliar |
 | Local | `Makefile` | Target `check-rule11-ownership: python3 scripts/rule11-ownership.py`, junto a `check-compose-ports` y `check-version-parity`. **Fuera de `$(COMPOSE)`**, como sus dos hermanos |
 | Local | `docker-compose.yml` | Se retiran `./sdd:/workspace/sdd:ro` y `./docs:/workspace/docs:ro` con su comentario (D9) |
 | Spec | `sdd/specs/rule11-ownership-guard.md` | **Nueva** (D8): gatillo, check run, fallo cerrado, vía local, estado del check, y la decisión de D6 sobre miembro de enum vs columna |
